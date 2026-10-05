@@ -9,6 +9,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachwatch"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -115,6 +116,9 @@ func (m *Module) messageDevice(w http.ResponseWriter, r *http.Request, p tenant.
 	}
 	var out attachedmsg.Capability
 	e := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		if authz.RequireTx(r.Context(), tx, p, "harness.worker", authz.Scope{}) != nil {
+			return attachedmsg.Fail(403, "daemon_authority_lost")
+		}
 		a, e := attachedmsg.LoadAttachment(r.Context(), tx, in.RequestID)
 		if e != nil {
 			return e
@@ -178,6 +182,9 @@ func (m *Module) messageDelivery(w http.ResponseWriter, r *http.Request, p tenan
 	var offer *attachedmsg.Offer
 	out := attachedmsg.Exchange{State: "empty"}
 	e := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+		if authz.RequireTx(r.Context(), tx, p, "harness.worker", authz.Scope{}) != nil {
+			return attachedmsg.Fail(403, "daemon_authority_lost")
+		}
 		// Unlike live validation, this association also works for a revoked/offline
 		// attachment so a genuine late receipt can terminalize an in-flight offer.
 		var principal string
@@ -196,6 +203,9 @@ func (m *Module) messageDelivery(w http.ResponseWriter, r *http.Request, p tenan
 	})
 	if e == nil && offer != nil {
 		e = m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+			if authz.RequireTx(r.Context(), tx, p, "harness.worker", authz.Scope{}) != nil {
+				return attachedmsg.Fail(403, "daemon_authority_lost")
+			}
 			var err error
 			out, err = m.messages.Release(r.Context(), tx, offer)
 			return err

@@ -4022,7 +4022,11 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestDarwinHookCLIIsSignedAndRehearsedBeforeAssembly","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDisclosureRechecksConsentAfterRelease","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachedReplyCannotBypassVolatilePolicyThroughDeskBridge","tier":"ESSENTIAL"},
-    {"kind":"go","package":"internal/agentd","name":"TestHookNotePortRechecksRemoteAuthorityBeforeDisclosure","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/agentd","name":"TestHookNotePortRechecksRemoteAuthorityBeforeDisclosure","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDaemonAuthorityRecheckedInEveryTransaction","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/cli","name":"TestAttachedAcceptanceRejectsUndeliverableHookOutput","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/cli","name":"TestAttachedAcceptanceAndHookOutputBoundaries","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedOversizeHookOutputRejectedBeforeAcceptance","tier":"ESSENTIAL"}
   ],
   "timingWeights": {
     "runId": "37341114152",

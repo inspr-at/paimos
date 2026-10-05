@@ -47,6 +47,10 @@ type notesFixture struct {
 func readyNotes(t *testing.T) notesFixture {
 	s := qualifiedNotes()
 	f, key, in := watchFixture(t, s)
+	return activateNotes(t, s, f, key, in)
+}
+func activateNotes(t *testing.T, s *attachedmsg.Service, f *fixture, key string, in attachwatch.DeviceRequest) notesFixture {
+	t.Helper()
 	// Status-only privacy remains unchanged when independently enabling messages.
 	in.Snapshot.Mode = attachwatch.ModeLease
 	in.Snapshot.Transcript = ""

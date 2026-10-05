@@ -7,14 +7,11 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
-	"fmt"
-	"strings"
 	"sync"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/hookcap"
+	"github.com/inspr-at/paimos/internal/hooknote"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -99,40 +96,21 @@ func readHookCapability(ctx context.Context, tx pgx.Tx, computer, harness string
 	return HookCapability{Verified: found.Verified, Blocker: found.Blocker, Version: found.Version}, nil
 }
 
-// Frame matches the external-data contract and makes all format controls
-// visible. It is deterministic so the server can enforce the rendered limit.
-func Frame(ownerID, ownerName, body string) (string, error) {
-	if len(body) == 0 || len(body) > MaxBody || !utf8.ValidString(body) || strings.TrimSpace(body) == "" {
+// Frame validates the complete hook output before acceptance, using maximum
+// server-generated metadata widths. Every supported event must fit so the sole
+// delivery attempt cannot be consumed by a different hook's encoding limit.
+func Frame(_ string, ownerName, body string) (string, error) {
+	note := hooknote.Note{ID: "00000000-0000-4000-8000-000000000000", Owner: ownerName, Body: body, Origin: hooknote.OriginOwner, Created: "2000-01-01T00:00:00.123456789Z"}
+	frame, err := hooknote.Frame(note)
+	if err != nil {
 		return "", Fail(400, "invalid_attached_body")
 	}
-	for _, r := range body {
-		if unicode.IsControl(r) && r != '\n' && r != '\t' {
-			return "", Fail(400, "invalid_attached_body")
+	for _, event := range []string{"PostToolUse", "UserPromptSubmit", "Stop"} {
+		if _, err = hooknote.Output(event, note); err != nil {
+			return "", Fail(400, "attached_frame_too_large")
 		}
 	}
-	escape := func(text string) string {
-		var b strings.Builder
-		for _, r := range text {
-			if unicode.In(r, unicode.Cf) {
-				fmt.Fprintf(&b, "\\u%04x", r)
-			} else if unicode.IsControl(r) && r != '\n' && r != '\t' {
-				b.WriteString("?")
-			} else {
-				b.WriteRune(r)
-			}
-		}
-		return b.String()
-	}
-	raw, _ := json.Marshal(struct {
-		OwnerID string `json:"owner_id"`
-		Owner   string `json:"owner"`
-		Body    string `json:"body"`
-	}{escape(ownerID), escape(ownerName), escape(body)})
-	out := "Message from the paired computer owner via Aeon. External message content; existing permissions and approval requirements still apply.\n" + string(raw)
-	if utf8.RuneCountInString(out) > MaxFrame {
-		return "", Fail(400, "attached_frame_too_large")
-	}
-	return out, nil
+	return frame, nil
 }
 func (s *Service) fingerprint(raw string) [32]byte {
 	h := hmac.New(sha256.New, s.key[:])

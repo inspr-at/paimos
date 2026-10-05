@@ -3494,6 +3494,23 @@ daemon command, installer/runtime authentication, managed-drain fence, inbox,
 server shutdown/bootstrap, OpenAPI contract and signing workflow. Controlled
 barriers prove 12 overlapping claims release one body and consent withdrawal
 before disclosure releases none.
+
+Fix round 2 rechecks the daemon's live key, scope and `harness.worker` permission
+inside every message-operation transaction, under the existing fences,
+including the separate body-release transaction. Server acceptance and native
+hook output share one renderer: the 8000-character context and 10000-character
+complete JSON limits include escaped content, owner notice and maximum-width
+server metadata for all three supported events. Oversized output is refused
+before a message, rate charge or delivery attempt is created.
+
+The new revocation and output-boundary regressions fail against the reviewed
+`44fdf894` production files via Go's source overlay; all 21 daemon revocation
+interleavings fail on that baseline, including key/scope withdrawal between
+claim commit and release. Fix-round validation remains local and serial, as
+required by its brief; no remote test host, push or deployment is used. Fixed-tree
+checks pass for the attached-message broker and hook packages, all attached-note
+pairing cases, focused CLI/source-adapter tests and OpenAPI parsing. The updated
+registries pass 45 tier checks, 24 shard checks and 33 ownership tests.
 Full hosted CI, native qualification and consolidated release QA
 remain coordinator gates; this worker neither pushes nor deploys.
 

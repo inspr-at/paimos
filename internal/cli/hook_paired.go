@@ -14,13 +14,12 @@ import (
 	goruntime "runtime"
 	"strconv"
 	"time"
-	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/hooknote"
 )
 
-const attachedPreamble = "Message from the paired computer owner via Aeon. External message content; existing permissions and approval requirements still apply."
+const attachedPreamble = hooknote.Preamble
 
 // hookPeerExchange is the local daemon from the hook's side. Tests supply a
 // fake. Production dials the paired socket and never falls back to HTTP.
@@ -185,129 +184,8 @@ func (rt *runtime) finishPaired(ctx context.Context, event string, claim hooknot
 }
 
 func attachedHookOutput(event string, note hooknote.Note) ([]byte, error) {
-	frame, err := attachedNoteFrame(note)
-	if err != nil {
-		return nil, err
-	}
-	if utf8.RuneCountInString(frame) > hooknote.MaxContextRunes {
+	if hooknote.Expired(note, time.Now()) {
 		return nil, hooknote.ErrLimit
 	}
-	notice := "Aeon: a note from " + note.Owner + " was passed to this session."
-	var payload any
-	if event == "Stop" {
-		payload = struct {
-			Decision      string `json:"decision"`
-			Reason        string `json:"reason"`
-			SystemMessage string `json:"systemMessage"`
-		}{"block", frame, notice}
-	} else if event == "PostToolUse" || event == "UserPromptSubmit" {
-		payload = struct {
-			SystemMessage string `json:"systemMessage"`
-			Output        any    `json:"hookSpecificOutput"`
-		}{notice, struct {
-			Event   string `json:"hookEventName"`
-			Context string `json:"additionalContext"`
-		}{event, frame}}
-	} else {
-		return nil, errors.New("unsupported hook event")
-	}
-	var buf bytes.Buffer
-	enc := json.NewEncoder(&buf)
-	enc.SetEscapeHTML(false)
-	if err := enc.Encode(payload); err != nil {
-		return nil, err
-	}
-	if utf8.RuneCount(buf.Bytes()) > hooknote.MaxOutputRunes {
-		return nil, hooknote.ErrLimit
-	}
-	return buf.Bytes(), nil
-}
-
-func attachedNoteFrame(note hooknote.Note) (string, error) {
-	if note.Origin != hooknote.OriginOwner || !hooknote.ValidID(note.ID) || !validAttachedOwner(note.Owner) || !validAttachedBody(note.Body) || !plainAttached(note.Created) || hooknote.Expired(note, time.Now()) {
-		return "", hooknote.ErrLimit
-	}
-	body := escapeBidi(note.Body)
-	owner := escapeBidi(note.Owner)
-	raw, err := json.Marshal(struct {
-		ID    string `json:"id"`
-		Owner string `json:"owner"`
-		Time  string `json:"time"`
-		Body  string `json:"body"`
-	}{note.ID, owner, note.Created, body})
-	if err != nil {
-		return "", err
-	}
-	frame := attachedPreamble + "\n" + string(raw) + "\n"
-	if utf8.RuneCountInString(frame) > hooknote.MaxContextRunes {
-		return "", hooknote.ErrLimit
-	}
-	return frame, nil
-}
-
-func validAttachedOwner(s string) bool {
-	if s == "" || len(s) > 80 || !utf8.ValidString(s) {
-		return false
-	}
-	n := 0
-	for _, r := range s {
-		n++
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) || isBidi(r) {
-			return false
-		}
-	}
-	return n <= hooknote.MaxOwnerRunes
-}
-
-func validAttachedBody(s string) bool {
-	if s == "" || len(s) > hooknote.MaxBodyBytes || !utf8.ValidString(s) {
-		return false
-	}
-	for _, r := range s {
-		if r == '\n' || r == '\t' {
-			continue
-		}
-		if r < 0x20 || r == 0x7f || (r >= 0x80 && r <= 0x9f) {
-			return false
-		}
-	}
-	return true
-}
-
-func plainAttached(s string) bool {
-	if s == "" || len(s) > 40 || !utf8.ValidString(s) {
-		return false
-	}
-	for _, r := range s {
-		if r < 0x20 || r == 0x7f || isBidi(r) {
-			return false
-		}
-	}
-	return true
-}
-
-func escapeBidi(s string) string {
-	var b bytes.Buffer
-	for _, r := range s {
-		if isBidi(r) {
-			const hex = "0123456789ABCDEF"
-			b.WriteString(`\u`)
-			b.WriteByte(hex[(r>>12)&0xF])
-			b.WriteByte(hex[(r>>8)&0xF])
-			b.WriteByte(hex[(r>>4)&0xF])
-			b.WriteByte(hex[r&0xF])
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
-}
-
-func isBidi(r rune) bool {
-	switch r {
-	case 0x061C, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069:
-		return true
-	default:
-		return false
-	}
+	return hooknote.Output(event, note)
 }

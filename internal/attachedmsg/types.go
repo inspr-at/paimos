@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/attachwatch"
+	"github.com/inspr-at/paimos/internal/hooknote"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -23,8 +24,8 @@ const Protocol = "attached_messages_v1"
 const Placeholder = "Attached-session note; text not retained"
 const Volatile = "attached_volatile"
 const Notification = "attached_notification"
-const MaxBody = 4096
-const MaxFrame = 8000
+const MaxBody = hooknote.MaxBodyBytes
+const MaxFrame = hooknote.MaxContextRunes
 const MaxWait = 5 * time.Minute
 
 // Binding is also the nonce-binding tuple prefix for S2-3. No client-supplied

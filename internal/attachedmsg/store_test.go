@@ -110,7 +110,7 @@ func TestFrameLimitsAndEscaping(t *testing.T) {
 		}
 	}
 	frame, e := Frame("owner", "Owner", "quoted \"line\"\n\t bidi\u202eend")
-	if e != nil || strings.ContainsRune(frame, '\u202e') || !strings.Contains(frame, "u202e") {
+	if e != nil || strings.ContainsRune(frame, '\u202e') || !strings.Contains(frame, "u202E") {
 		t.Fatal("frame escaping failed")
 	}
 }

@@ -67,7 +67,10 @@ func watchFixtureWithKey(t *testing.T, publicKey string) (*fixture, string, atta
 }
 func watchFixtureWithHarness(t *testing.T, publicKey, harness string, messages ...*attachedmsg.Service) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
-	f := newFixture(t, messages...)
+	return watchFixtureFromFixture(t, newFixture(t, messages...), publicKey, harness)
+}
+func watchFixtureFromFixture(t *testing.T, f *fixture, publicKey, harness string) (*fixture, string, attachwatch.DeviceRequest) {
+	t.Helper()
 	p := f.proposePlatformKey("darwin", "arm64", publicKey, harness)
 	f.approve(p, "connect_only")
 	v := f.redeem(p)

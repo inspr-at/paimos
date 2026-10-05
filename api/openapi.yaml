@@ -12471,7 +12471,7 @@ components:
         epoch: {type: string}
         owner: {type: string, description: Server-authenticated owner label}
         created_at: {type: string, format: date-time}
-        body: {type: string, maxLength: 4096, description: 'Volatile UTF-8, 4096 bytes maximum; full escaped frame at most 8000 characters. Never logged or persisted.'}
+        body: {type: string, maxLength: 4096, description: 'Volatile UTF-8, 4096 bytes maximum; full escaped frame at most 8000 characters and complete encoded hook output at most 10000 characters for every supported event, checked before acceptance. Never logged or persisted.'}
     AttachedMessageReceipt:
       type: object
       additionalProperties: false

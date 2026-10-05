@@ -16,6 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/hooknote"
 )
 
@@ -106,6 +107,11 @@ func TestPairedHookFrameNoticeLimitsAndAgentSilence(t *testing.T) {
 	if _, err = attachedHookOutput("PostToolUse", ownerHookNote(strings.Repeat("a", hooknote.MaxBodyBytes+1))); err == nil {
 		t.Fatal("over-long body was framed")
 	}
+	metadata := ownerHookNote("plain body")
+	metadata.Created = "2026-09-30T02:00:00Z\u202e"
+	if _, err = attachedHookOutput("PostToolUse", metadata); !errors.Is(err, hooknote.ErrLimit) {
+		t.Fatal("bidi creation metadata was framed")
+	}
 	wide := strings.Repeat("\u202e", 1300)
 	if _, err = attachedHookOutput("UserPromptSubmit", ownerHookNote(wide)); err == nil {
 		t.Fatal("over-long escaped frame was delivered")
@@ -152,8 +158,8 @@ func TestPairedHookContextLimitIsIndependentOfTheOutputCeiling(t *testing.T) {
 }
 
 func contextFrame(note hooknote.Note) string {
-	body := escapeBidi(note.Body)
-	owner := escapeBidi(note.Owner)
+	body := testEscapeBidi(note.Body)
+	owner := testEscapeBidi(note.Owner)
 	raw, err := json.Marshal(struct {
 		ID    string `json:"id"`
 		Owner string `json:"owner"`
@@ -371,5 +377,95 @@ func TestFinishPairedRefusesSubagentWithoutOffer(t *testing.T) {
 	err := rt.finishPaired(context.Background(), "PostToolUse", hooknote.Claim{Event: "PostToolUse", Subagent: true}, peer)
 	if err != nil || out.Len() != 0 || strings.Contains(strings.Join(log, ","), "offer") {
 		t.Fatal(err, log, out.String())
+	}
+}
+
+// Acceptance must account for both JSON encodings, including the notice and
+// metadata. These contents fit the former server frame but not hook output.
+func TestAttachedAcceptanceRejectsUndeliverableHookOutput(t *testing.T) {
+	for _, body := range []string{strings.Repeat("\t", 3400), strings.Repeat("\\", 3200), strings.Repeat("\u202e", 1100), strings.Repeat("\"", 3200)} {
+		body += "x"
+		note := ownerHookNote(body)
+		for _, event := range []string{"PostToolUse", "UserPromptSubmit", "Stop"} {
+			if _, err := attachedHookOutput(event, note); !errors.Is(err, hooknote.ErrLimit) {
+				t.Fatalf("fixture must exceed the hook limit for %s: %v", event, err)
+			}
+		}
+		if _, err := attachedmsg.Frame(note.ID, note.Owner, body); err == nil {
+			t.Fatal("server accepted content that the hook cannot deliver")
+		}
+	}
+}
+
+func testEscapeBidi(s string) string {
+	var b bytes.Buffer
+	for _, r := range s {
+		if testIsBidi(r) {
+			const hex = "0123456789ABCDEF"
+			b.WriteString(`\u`)
+			b.WriteByte(hex[(r>>12)&0xF])
+			b.WriteByte(hex[(r>>8)&0xF])
+			b.WriteByte(hex[(r>>4)&0xF])
+			b.WriteByte(hex[r&0xF])
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+func testIsBidi(r rune) bool {
+	switch r {
+	case 0x061C, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069:
+		return true
+	default:
+		return false
+	}
+}
+
+func TestAttachedAcceptanceAndHookOutputBoundaries(t *testing.T) {
+	for _, owner := range []string{"Owner", strings.Repeat("Q", 80), strings.Repeat("\"", 80), strings.Repeat("<", 80), strings.Repeat("Ö", 40)} {
+		for _, token := range []string{"x", "\t", "\n", "\\", "\"", "\u202e", "<", "界"} {
+			note := ownerHookNote("x")
+			note.Owner = owner
+			note.Created = "2000-01-01T00:00:00.123456789Z"
+			fits := func(body string) bool {
+				note.Body = body
+				for _, event := range []string{"PostToolUse", "UserPromptSubmit", "Stop"} {
+					if _, err := attachedHookOutput(event, note); err != nil {
+						return false
+					}
+				}
+				return true
+			}
+			lo, hi := 0, hooknote.MaxBodyBytes/len(token)+1
+			for lo+1 < hi {
+				mid := (lo + hi) / 2
+				if fits(strings.Repeat(token, mid) + "x") {
+					lo = mid
+				} else {
+					hi = mid
+				}
+			}
+			body := strings.Repeat(token, lo) + "x"
+			if !fits(body) {
+				t.Fatalf("no valid boundary for owner %q and token %q", owner, token)
+			}
+			if _, err := attachedmsg.Frame(note.ID, owner, body); err != nil {
+				t.Fatalf("deliverable boundary rejected: %v", err)
+			}
+			for _, created := range []string{"2000-01-01T00:00:00Z", "2000-01-01T00:00:00.123456Z", "2000-01-01T00:00:00.123456789Z"} {
+				note.Created = created
+				for _, event := range []string{"PostToolUse", "UserPromptSubmit", "Stop"} {
+					out, err := attachedHookOutput(event, note)
+					if err != nil || utf8.RuneCount(out) > hooknote.MaxOutputRunes {
+						t.Fatalf("accepted boundary cannot be delivered at %s: %v", event, err)
+					}
+				}
+			}
+			if _, err := attachedmsg.Frame(note.ID, owner, strings.Repeat(token, hi)+"x"); err == nil {
+				t.Fatalf("server accepted the first oversized boundary for token %q", token)
+			}
+		}
 	}
 }

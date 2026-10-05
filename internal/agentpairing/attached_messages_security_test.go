@@ -3,8 +3,10 @@ package agentpairing_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/attachedmsg"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/inbox"
@@ -397,5 +400,224 @@ func TestAttachedReplyCannotBypassVolatilePolicyThroughDeskBridge(t *testing.T) 
 			}
 			assertNoCanary(t, n.f, body["body"].(string))
 		})
+	}
+}
+
+// Gate BEGIN before the transaction can acquire its authenticating-key fence.
+// Tenant-lock traces identify completed message transactions, rather than
+// counting unrelated admission/read transactions or relying on scheduling.
+type daemonMessageBarrier struct {
+	mu                  sync.Mutex
+	armed               bool
+	transactions, after int
+	arrived, release    chan struct{}
+}
+
+func (b *daemonMessageBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
+	b.mu.Lock()
+	gate := b.armed && d.SQL == "begin" && b.transactions == b.after
+	if gate {
+		b.armed = false
+	}
+	if b.armed && strings.Contains(d.SQL, "SELECT id FROM tenants") {
+		b.transactions = 1
+	}
+	b.mu.Unlock()
+	if gate {
+		close(b.arrived)
+		select {
+		case <-b.release:
+		case <-ctx.Done():
+		}
+	}
+	return ctx
+}
+func (*daemonMessageBarrier) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func TestAttachedDaemonAuthorityRecheckedInEveryTransaction(t *testing.T) {
+	for _, operation := range []string{"message_request", "message_activate", "message_observed", "message_offer", "message_validate", "message_receipt", "release"} {
+		for _, revoke := range []string{"key", "scope", "role"} {
+			t.Run(operation+"/"+revoke, func(t *testing.T) {
+				d := dbtest.Open(t)
+				barrier := &daemonMessageBarrier{arrived: make(chan struct{}), release: make(chan struct{})}
+				cfg := d.App.Config()
+				cfg.ConnConfig.Tracer = barrier
+				pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				d.App.Close()
+				d.App = pool
+				service := qualifiedNotes()
+				f, key, in := watchFixtureFromFixture(t, newFixtureInTenant(t, d, "pairtest", service), "", "codex")
+				n := activateNotes(t, service, f, key, in)
+				msg := n.sendNote(t, false)
+				request := n.deliveryRequest("message_offer")
+				if operation == "message_validate" || operation == "message_receipt" {
+					offered := n.offer(t).Offer
+					if offered == nil {
+						t.Fatal("offer prerequisite failed")
+					}
+					request.Operation = operation
+					request.MessageReceipt, _ = json.Marshal(attachedmsg.Receipt{DeliveryID: offered.DeliveryID, MessageID: offered.MessageID, Nonce: offered.Nonce, Epoch: offered.Epoch, Outcome: "shown"})
+				} else if operation != "release" && operation != "message_offer" {
+					request = n.in
+					request.Operation = operation
+					if operation == "message_request" {
+						request.MessageGeneration = ""
+						request.MessageConsentDigest = ""
+					}
+				}
+				// Fixture states make request/activation eligible mutations, rather
+				// than letting a consent-state refusal satisfy the regression.
+				if operation == "message_request" || operation == "message_activate" {
+					state := "approved"
+					if operation == "message_request" {
+						state = "pending"
+					}
+					if _, err = d.Admin.Exec(t.Context(), `UPDATE attached_message_grants SET state=$2,hook_observed_at=NULL,expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, n.grant.ID, state); err != nil {
+						t.Fatal(err)
+					}
+					if operation == "message_activate" {
+						if _, err = d.Admin.Exec(t.Context(), `UPDATE attached_message_grants SET expires_at=clock_timestamp()+interval '1 minute' WHERE id=$1`, n.grant.ID); err != nil {
+							t.Fatal(err)
+						}
+					}
+				}
+				// Prove the request is admissible before installing the race barrier.
+				f.call("GET", "/api/me", nil, false, key, 200)
+				var keyID, principalID string
+				if err = d.Admin.QueryRow(t.Context(), `SELECT k.id::text,k.principal_id::text FROM agent_keys k JOIN agent_pairing_computers c ON c.tenant_id=k.tenant_id AND c.key_id=k.id WHERE c.id=$1`, in.ComputerID).Scan(&keyID, &principalID); err != nil {
+					t.Fatal(err)
+				}
+				ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+				defer cancel()
+				var once sync.Once
+				release := func() { once.Do(func() { close(barrier.release) }) }
+				defer release()
+				result := make(chan *httptest.ResponseRecorder, 1)
+				req := f.request("POST", "/api/agent-pairing/attach", request, false, key).WithContext(ctx)
+				req.Body = &admittedMessageBody{ReadCloser: req.Body, ctx: ctx, barrier: barrier, releaseTransaction: operation == "release"}
+				go func() {
+					w := httptest.NewRecorder()
+					f.h.ServeHTTP(w, req)
+					result <- w
+				}()
+				select {
+				case <-barrier.arrived:
+				case <-ctx.Done():
+					t.Fatal("daemon request never reached transaction barrier")
+				}
+				if operation == "release" {
+					var claimed, released, live bool
+					if err = d.Admin.QueryRow(ctx, `SELECT terminal_outcome IS NULL,body_released_at IS NOT NULL,offer_deadline>clock_timestamp() FROM harness_deliveries WHERE message_id=$1`, msg.ID).Scan(&claimed, &released, &live); err != nil || !claimed || released || !live {
+						t.Fatalf("release barrier did not follow a committed, live claim: %v", err)
+					}
+				}
+				// Revoke using the actual key-usage and tenant fences while the request
+				// is admitted but has not acquired its next mutation transaction.
+				tx, err := d.Admin.Begin(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback(context.Background())
+				if err = authz.LockKeyScopeUseTx(ctx, tx, f.tenantID, keyID); err != nil {
+					t.Fatal(err)
+				}
+				if _, err = tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.tenantID); err != nil {
+					t.Fatal(err)
+				}
+				switch revoke {
+				case "key":
+					_, err = tx.Exec(ctx, `UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE id=$1`, keyID)
+				case "scope":
+					_, err = tx.Exec(ctx, `UPDATE agent_keys SET scopes=array_remove(array_remove(scopes,'harness.worker'),'harness:worker') WHERE id=$1`, keyID)
+				case "role":
+					_, err = tx.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, f.tenantID, principalID)
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err = tx.Commit(ctx); err != nil {
+					t.Fatal(err)
+				}
+				release()
+				select {
+				case w := <-result:
+					var refusal struct {
+						Code string `json:"code"`
+					}
+					if json.Unmarshal(w.Body.Bytes(), &refusal) != nil || w.Code != 403 || refusal.Code != "daemon_authority_lost" {
+						t.Fatalf("wrong daemon revocation result: %d %s", w.Code, w.Body.String())
+					}
+				case <-ctx.Done():
+					t.Fatal("daemon transaction stuck after revocation")
+				}
+				var released, completed bool
+				if err = d.Admin.QueryRow(t.Context(), `SELECT coalesce(bool_or(body_released_at IS NOT NULL),false),coalesce(bool_or(completed_at IS NOT NULL),false) FROM harness_deliveries WHERE message_id=$1`, msg.ID).Scan(&released, &completed); err != nil {
+					t.Fatal(err)
+				}
+				if completed || (operation != "message_receipt" && operation != "message_validate" && released) {
+					t.Fatal("revoked daemon released or completed a note")
+				}
+			})
+		}
+	}
+}
+
+// Reading the body proves admission succeeded. Release races arm the tracer
+// here, so authentication transactions cannot satisfy the regression barrier.
+type admittedMessageBody struct {
+	io.ReadCloser
+	ctx                context.Context
+	barrier            *daemonMessageBarrier
+	releaseTransaction bool
+	once               sync.Once
+}
+
+func (r *admittedMessageBody) Read(p []byte) (int, error) {
+	r.once.Do(func() {
+		if r.releaseTransaction {
+			r.barrier.mu.Lock()
+			r.barrier.armed = true
+			r.barrier.after = 1
+			r.barrier.mu.Unlock()
+		} else {
+			close(r.barrier.arrived)
+			select {
+			case <-r.barrier.release:
+			case <-r.ctx.Done():
+			}
+		}
+	})
+	return r.ReadCloser.Read(p)
+}
+
+func TestAttachedOversizeHookOutputRejectedBeforeAcceptance(t *testing.T) {
+	n := readyNotes(t)
+	for _, compat := range []bool{false, true} {
+		for _, token := range []string{"\t", "\\", "\""} {
+			body := strings.Repeat(token, 3400) + "x"
+			w := n.f.call("POST", n.path(compat), n.body(attachedmsg.UUID(), body, compat), true, "", 400)
+			var refusal struct {
+				Code string `json:"code"`
+			}
+			decodeResult(t, w, &refusal)
+			if refusal.Code != "attached_frame_too_large" {
+				t.Fatalf("wrong size refusal: %s", refusal.Code)
+			}
+		}
+	}
+	var count int
+	var tokens float64
+	if err := n.f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM inbox_messages WHERE recipient_session_id=$1`, n.grant.Binding.SessionID).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("rejected output persisted message metadata: %d %v", count, err)
+	}
+	if err := n.f.db.Admin.QueryRow(t.Context(), `SELECT message_tokens FROM harness_attach_requests WHERE id=$1`, n.in.RequestID).Scan(&tokens); err != nil || tokens != 3 {
+		t.Fatalf("rejected output consumed rate quota: %f %v", tokens, err)
+	}
+	msg := n.sendNote(t, false)
+	if offered := n.offer(t).Offer; offered == nil || offered.MessageID != msg.ID {
+		t.Fatal("rejected output consumed the valid note's sole attempt")
 	}
 }
