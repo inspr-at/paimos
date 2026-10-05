@@ -9,7 +9,8 @@ import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 import { mockPairing } from './agent-pairing-fixtures'
 import { makePng, mockSettings, settingsData } from './settings-fixtures'
 import { defaultStatusHelp } from '../src/lib/statusDefinitions'
-import { expectCompactDialog, expectPhoneSheet, sampleDialog, type DialogSize } from './helpers/dialog-scale'
+import { expectCompactDialog, expectPhoneSheet, phoneSheetFindings, sampleDialog, type DialogSize, type PhoneSheetGeometry } from './helpers/dialog-scale'
+import type { StableInteraction } from './helpers/stable'
 
 // AEON-730: every dialog takes one step of the shared size scale and keeps its
 // actions compact on wide screens; phones get full-height sheets with a pinned
@@ -17,14 +18,19 @@ import { expectCompactDialog, expectPhoneSheet, sampleDialog, type DialogSize } 
 // (1440/1920) run only for evidence capture: AEON_DIALOG_AUDIT=1.
 const WIDTHS = process.env.AEON_DIALOG_AUDIT === '1' ? [1440, 1920, 2560, 390] : [2560, 390]
 
-interface Check { name: string; frame: Locator; actions: Locator; size: DialogSize; phoneSheet?: boolean; hasActions?: boolean }
+// Phone sheets name their scrolling body and the content changes their action
+// bar must ride out (AEON-541 pattern B).
+interface Check { name: string; frame: Locator; actions: Locator; size: DialogSize; phoneSheet?: boolean; hasActions?: boolean; body?: Locator; changes?: StableInteraction[] }
 
 function checker(page: Page, info: TestInfo, width: number, theme: string) {
   const viewport = { width, height: width === 390 ? 844 : 1000 }
-  return async ({ name, frame, actions, size, phoneSheet = true, hasActions = true }: Check) => {
+  return async ({ name, frame, actions, size, phoneSheet = true, hasActions = true, body, changes }: Check) => {
     await expect(frame).toBeVisible()
     if (width > 600) await expectCompactDialog(frame, actions, size, viewport, hasActions)
-    else if (phoneSheet) await expectPhoneSheet(frame, actions, viewport)
+    else if (phoneSheet) {
+      if (!body) throw new Error(`${name}: a phone sheet needs its scrolling body`)
+      await expectPhoneSheet(frame, actions, viewport, { body, changes })
+    }
     else {
       const box = (await frame.boundingBox())!
       expect.soft(box.x).toBeGreaterThanOrEqual(-0.5)
@@ -62,14 +68,18 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     await agent(page, 'ops-agm').getByRole('button', { name: 'Actions for ops-agm' }).click()
     await page.getByRole('menuitem', { name: 'Deactivate…' }).click()
     const confirmation = dialog(page, 'Deactivate ops-agm?')
-    await check({ name: 'confirm', frame: confirmation, actions: confirmation.locator('.actions'), size: 's' })
+    await check({ name: 'confirm', frame: confirmation, actions: confirmation.locator('.actions'), size: 's', body: confirmation.locator('#confirm-body') })
     await confirmation.getByRole('button', { name: 'Cancel', exact: true }).click()
 
     // New key, then Key ready (AccessSheet, actions first): L, one frame for both states.
     await agent(page, 'pharos-deployer').getByRole('button', { name: /active key/ }).click()
     await agent(page, 'pharos-deployer').getByRole('button', { name: 'New key', exact: true }).click()
     const key = dialog(page, 'New key for pharos-deployer')
-    await check({ name: 'new-key', frame: key, actions: key.locator('.sheet-foot'), size: 'l' })
+    const search = key.getByRole('searchbox', { name: 'Find a scope' })
+    await check({ name: 'new-key', frame: key, actions: key.locator('.sheet-foot'), size: 'l', body: key.locator('.sheet-body'), changes: [
+      { name: 'filter the scopes to nothing', run: async () => { await search.fill('zz-no-such-scope'); await expect(key.getByText('No scope matches')).toBeVisible() } },
+      { name: 'clear the filter', run: async () => { await search.fill(''); await expect(key.getByRole('checkbox', { name: /nodes\.read/ })).toBeVisible() } },
+    ] })
     if (width > 600) {
       // Scope presets are buttons too: each keeps its label's width.
       const presets = await sampleDialog(key, key.locator('.preset-actions'))
@@ -80,7 +90,9 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     await key.getByRole('button', { name: 'Create key', exact: true }).click()
     const ready = dialog(page, 'Key ready')
     await expect(ready.getByLabel('New agent key')).toBeVisible()
-    await check({ name: 'key-ready', frame: ready, actions: ready, size: 'l' })
+    await check({ name: 'key-ready', frame: ready, actions: ready.locator('.sheet-foot'), size: 'l', body: ready.locator('.sheet-body'), changes: [
+      { name: 'copy the command', run: async () => { await ready.getByRole('button', { name: 'Copy command', exact: true }).click(); await expect(ready.getByRole('button', { name: 'Command copied', exact: true })).toBeVisible() } },
+    ] })
     if (width > 600) {
       // The one-time key and the CLI command take the room their text needs.
       const token = (await ready.getByLabel('New agent key').boundingBox())!
@@ -95,31 +107,36 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     // Edit scopes (AccessSheet, actions first): L.
     await agent(page, 'pharos-deployer').getByRole('button', { name: /^Edit scopes/ }).first().click()
     const edit = dialog(page, 'Edit scopes for pharos-deployer')
-    await check({ name: 'edit-scopes', frame: edit, actions: edit.locator('.sheet-foot'), size: 'l' })
+    await check({ name: 'edit-scopes', frame: edit, actions: edit.locator('.sheet-foot'), size: 'l', body: edit.locator('.sheet-body') })
     await edit.getByRole('button', { name: 'Cancel', exact: true }).click()
 
     // New agent (AccessSheet, actions first): M.
     await page.getByRole('button', { name: 'New agent', exact: true }).click()
     const newAgent = dialog(page, 'New agent')
-    await check({ name: 'new-agent', frame: newAgent, actions: newAgent.locator('.sheet-foot'), size: 'm' })
+    await check({ name: 'new-agent', frame: newAgent, actions: newAgent.locator('.sheet-foot'), size: 'm', body: newAgent.locator('.sheet-body'), changes: [
+      { name: 'type a name', run: async () => { await newAgent.getByLabel('Name', { exact: true }).fill('release-helper'); await expect(newAgent.getByLabel('Name', { exact: true })).toHaveValue('release-helper') } },
+    ] })
     await newAgent.getByRole('button', { name: 'Cancel', exact: true }).click()
 
     // Invite people and Invite ready (AccessSheet): M.
     await page.goto('/settings/access/invites')
     await page.getByRole('button', { name: 'Invite people', exact: true }).click()
     const invite = dialog(page, 'Invite people')
-    await check({ name: 'invite', frame: invite, actions: invite.locator('.sheet-foot'), size: 'm' })
-    await invite.getByLabel('Email').fill('nora@studio.at')
+    const email = invite.getByLabel('Email')
+    await check({ name: 'invite', frame: invite, actions: invite.locator('.sheet-foot'), size: 'm', body: invite.locator('.sheet-body'), changes: [
+      { name: 'type an email', run: async () => { await email.fill('nora@studio.at'); await expect(email).toHaveValue('nora@studio.at') } },
+    ] })
+    await email.fill('nora@studio.at')
     await invite.getByRole('button', { name: 'Create invite link', exact: true }).click()
     const inviteReady = dialog(page, 'Invite ready')
-    await check({ name: 'invite-ready', frame: inviteReady, actions: inviteReady, size: 'm' })
+    await check({ name: 'invite-ready', frame: inviteReady, actions: inviteReady.locator('.sheet-foot'), size: 'm', body: inviteReady.locator('.sheet-body') })
     await inviteReady.getByRole('button', { name: 'Done', exact: true }).click()
 
     // Delete role (AccessSheet): S.
     await page.goto('/settings/access/roles/role-lead')
     await page.getByRole('button', { name: /^Delete/ }).click()
     const deleteRole = dialog(page, 'Delete Delivery lead?')
-    await check({ name: 'delete-role', frame: deleteRole, actions: deleteRole.locator('.sheet-foot'), size: 's' })
+    await check({ name: 'delete-role', frame: deleteRole, actions: deleteRole.locator('.sheet-foot'), size: 's', body: deleteRole.locator('.sheet-body') })
     await deleteRole.getByRole('button', { name: 'Keep the role', exact: true }).click()
 
     // A person's access (AccessSheet, side): M.
@@ -168,7 +185,10 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     await row.getByRole('button', { name: /Change status of PHAROS-11/ }).click()
     await page.getByRole('menuitemradio', { name: 'Done' }).click()
     const gate = dialog(page, "Before it's done: what does the user gain?")
-    await check({ name: 'done-gate', frame: gate, actions: gate.locator('.actions'), size: 'm' })
+    const pill = gate.locator('textarea, input.field').first()
+    await check({ name: 'done-gate', frame: gate, actions: gate.locator('.actions'), size: 'm', body: gate.locator('.scroll'), changes: [
+      { name: 'type a pill', run: async () => { await pill.fill('Faster releases'); await expect(pill).toHaveValue('Faster releases') } },
+    ] })
     await gate.getByRole('button', { name: 'Not now' }).click()
 
     // Convert kind: M. Status help: L.
@@ -177,7 +197,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     await details.getByRole('button', { name: 'More actions' }).click()
     await page.getByRole('menuitem', { name: 'Convert to…' }).click()
     const convert = dialog(page, 'Convert PHAROS-11')
-    await check({ name: 'convert-kind', frame: convert, actions: convert.locator('.actions'), size: 'm' })
+    await check({ name: 'convert-kind', frame: convert, actions: convert.locator('.actions'), size: 'm', body: convert.locator('.convert-scroll') })
     await convert.getByRole('button', { name: 'Cancel' }).click()
     await details.getByRole('button', { name: /Status: / }).click()
     await page.getByRole('menu', { name: 'Status of PHAROS-11' }).getByRole('menuitem', { name: 'What do these mean?' }).click()
@@ -191,7 +211,10 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     await expect(page.locator('.k-row').first()).toBeVisible()
     await page.keyboard.press('n')
     const knowledge = dialog(page, 'New knowledge entry')
-    await check({ name: 'knowledge-create', frame: knowledge, actions: knowledge.locator('.create-foot'), size: 'l' })
+    const title = knowledge.getByLabel('Title')
+    await check({ name: 'knowledge-create', frame: knowledge, actions: knowledge.locator('.create-foot'), size: 'l', body: knowledge.locator('.create-card'), changes: [
+      { name: 'type a title', run: async () => { await title.fill('Deploy a release'); await expect(title).toHaveValue('Deploy a release') } },
+    ] })
     await knowledge.getByRole('button', { name: 'Cancel' }).click()
 
     // New customer and New quote: M.
@@ -246,3 +269,22 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     expect(errors).toEqual([])
   })
 }
+
+// The phone guard itself: it must reject what the AEON-730 review found it
+// accepting (the frame passed as its own action bar, a short card, a bar that
+// floats above the bottom edge or runs off screen, an empty bar).
+test('the phone sheet guard rejects a short sheet, a floating bar and the frame as its own bar', () => {
+  const viewport = { width: 390, height: 844 }
+  const frame = { x: 0, y: 0, width: 390, height: 844 }
+  const bar = { x: 0, y: 774, width: 390, height: 70 }
+  const buttons = [{ label: 'Done', width: 358, height: 44, bottom: 830 }]
+  const good: PhoneSheetGeometry = { frame, bar, barIsFrame: false, buttons }
+  expect(phoneSheetFindings(good, viewport)).toEqual([])
+  expect(phoneSheetFindings({ ...good, bar: frame, barIsFrame: true }, viewport)).toEqual(['the action bar is the sheet itself; pass its footer'])
+  expect(phoneSheetFindings({ ...good, frame: { ...frame, y: 96, height: 420 }, bar: { ...bar, y: 446 } }, viewport)).toEqual(['sheet covers 96–516, not the window height 844'])
+  expect(phoneSheetFindings({ ...good, frame: { ...frame, x: 8, width: 374 } }, viewport)).toEqual(['sheet spans 8–382, not the window width 390'])
+  expect(phoneSheetFindings({ ...good, bar: { ...bar, y: 600 } }, viewport)).toEqual(["the action bar ends 174px above the sheet's bottom edge"])
+  expect(phoneSheetFindings({ ...good, frame: { ...frame, height: 1000 }, bar: { ...bar, y: 930 }, buttons: [{ ...buttons[0]!, bottom: 986 }] }, viewport)).toEqual(['the action bar ends below the window (1000 > 844)', '“Done” ends below the window'])
+  expect(phoneSheetFindings({ ...good, bar: null, buttons: [] }, viewport)).toEqual(['the action bar has no size', 'the action bar has no visible actions'])
+  expect(phoneSheetFindings({ ...good, buttons: [{ ...buttons[0]!, height: 34 }] }, viewport)).toEqual(['“Done” is 34px, not a 44px touch target'])
+})

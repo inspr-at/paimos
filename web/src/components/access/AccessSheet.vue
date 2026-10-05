@@ -28,8 +28,10 @@ function keydown(event: KeyboardEvent) {
   }
   else if (event.key === 'Escape') {
     event.preventDefault(); event.stopPropagation()
+    // A field (native, editable, or a read-only textbox such as the CLI command)
+    // gives up focus first; the next Escape closes.
     const target = document.activeElement
-    if ((props.actionsFirst || props.escapeFieldFirst) && target instanceof HTMLElement && target.matches('input:not([type=checkbox]):not([type=radio]), textarea, select, [contenteditable=true]')) target.blur()
+    if ((props.actionsFirst || props.escapeFieldFirst) && target instanceof HTMLElement && (target.isContentEditable || target.matches('input:not([type=checkbox]):not([type=radio]), textarea, select, [role=textbox]'))) target.blur()
     else if (!session.requiresSignIn) emit('close')
   }
   else if (event.key === 'Tab') {

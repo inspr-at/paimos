@@ -57,7 +57,7 @@ p { margin-top: 8px; font-size: 13.5px; color: var(--ink-2); }
   .confirm { position: fixed; inset: 0; width: 100%; height: 100dvh; max-width: none; max-height: none; margin: 0; }
   .confirm-card { height: 100%; max-height: none; border-radius: 0; padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
   #confirm-body { flex: 1; order: 1; }
-  .actions { order: 2; }
+  .actions { order: 2; margin-bottom: 0; }
   .actions .btn { flex: 1 0 auto; min-height: 44px; }
 }
 </style>
