@@ -5072,7 +5072,7 @@ paths:
     get:
       operationId: getStatusHelp
       summary: The same status definitions and live workspace limits for people and agents
-      description: Defaults are used while Status autopilot settings are absent. Optional project_id resolves its Inherit/On/Off override through the caller's project visibility. Queued describes Open in the work queue; it is not a stored status. No status values are changed.
+      description: Read-only tenant metadata for authenticated agents and people with nodes.read permission. Agent keys need no scopes or role bindings; customer sessions without nodes.read are denied, and pairing lifecycle checks remain in place. Defaults are used while Status autopilot settings are absent. Optional project_id resolves its Inherit/On/Off override through the caller's project visibility; inaccessible projects return 404. Queued describes Open or Blocked in the work queue; it is not a stored status. Work merged into another ticket is cancelled with a reason naming the destination ticket; done describes completed work merged as code or a reviewed non-code result. No status values or write permissions are changed.
       security: *auth
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
@@ -5080,6 +5080,7 @@ paths:
         '200': {description: 'Definitions, rules and effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/StatusHelp'}}}}
         '400': {description: Invalid project id}
         '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
         '404': {description: Project is not visible}
   /nodes:
     get:
@@ -5798,15 +5799,13 @@ paths:
     get:
       operationId: listEvents
       description: >-
-        Tenant-wide history excludes quote events, whose document metadata is available only through quote-scoped authorized routes. Optional from/to filters select event timestamps in [from, to), spanning at most 366 days; they must be supplied together. Legacy event ID pagination remains unchanged. With order=time (or briefing=true), pages use ascending (at,id) keysets on the existing time index. briefing=true establishes a statement_timestamp() window in the same statement snapshot as the first page (commits after the snapshot are not consumed by its cutoff): since is the previous server cutoff, absent means 24 hours; an older cutoff is capped to 366 days, and a future cutoff is preserved as an empty window. Subsequent time pages must reuse the returned window.
+        Tenant-wide history excludes quote events, whose document metadata is available only through quote-scoped authorized routes. Optional from/to filters select event timestamps in [from, to), spanning at most 366 days; they must be supplied together. Legacy event ID pagination remains unchanged. With order=time, pages use ascending (at,id) keysets on the existing time index and require from/to. Subsequent time pages must reuse those bounds.
       security: *auth
       parameters:
         - {name: node_id, in: query, schema: {type: string, format: uuid}}
         - {name: after, in: query, description: Exclusive event ID, schema: {type: integer, format: int64, minimum: 0}}
         - {name: order, in: query, schema: {type: string, enum: [id, time]}}
         - {name: cursor, in: query, description: 'Opaque exclusive (at,id) cursor; requires from/to and enables order=time', schema: {type: string, maxLength: 256}}
-        - {name: briefing, in: query, schema: {type: boolean}, description: 'Establish the first briefing window; excludes from/to, after and cursor.'}
-        - {name: since, in: query, schema: {type: string, format: date-time}, description: Previous server cutoff; only with briefing=true.}
         - {name: project_id, in: query, schema: {type: string, format: uuid}, description: Restrict to events attached to nodes in this visible project.}
         - {name: from, in: query, schema: {type: string, format: date-time}}
         - {name: to, in: query, schema: {type: string, format: date-time}}
@@ -19791,15 +19790,7 @@ components:
       properties:
         next_cursor:
           type: [string, 'null']
-          description: Exclusive time cursor for order=time or briefing=true pages.
-        window:
-          type: object
-          required: [from, to, first, capped]
-          properties:
-            from: {type: string, format: date-time}
-            to: {type: string, format: date-time}
-            first: {type: boolean}
-            capped: {type: boolean}
+          description: Exclusive time cursor for order=time pages.
         items:
           type: array
           items:

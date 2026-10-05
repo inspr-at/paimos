@@ -18,7 +18,7 @@ import (
 
 const onboardHeaderPrefix = "<!-- paimos: onboarded "
 
-type briefing struct {
+type onboardingGuide struct {
 	project apiNode
 	key     string
 	agent   string
@@ -53,7 +53,7 @@ func (rt *runtime) onboard(project, agent, format, outPath string, check bool, r
 	if err != nil {
 		return err
 	}
-	b := briefing{project: proj, key: projectDisplayKey(proj, project), agent: strings.TrimSpace(agent), kinds: kinds}
+	b := onboardingGuide{project: proj, key: projectDisplayKey(proj, project), agent: strings.TrimSpace(agent), kinds: kinds}
 	for _, n := range children {
 		slug := kinds.slug(n.KindID)
 		switch {
@@ -172,7 +172,7 @@ func (rt *runtime) checkOnboard(path, rev, expected string) error {
 	return err
 }
 
-func (b briefing) markdown(program string, readingLimit int, includeLow bool) string {
+func (b onboardingGuide) markdown(program string, readingLimit int, includeLow bool) string {
 	var out strings.Builder
 	fmt.Fprintf(&out, "# Welcome to %s\n\n", b.project.Title)
 	if line := firstLine(b.project.Body); line != "" {
@@ -281,7 +281,7 @@ func fallbackAgent(agent string) string {
 	return agent
 }
 
-func (b briefing) byKind(slug string) []apiNode {
+func (b onboardingGuide) byKind(slug string) []apiNode {
 	var out []apiNode
 	for _, n := range b.entries {
 		if b.kinds.slug(n.KindID) == slug {
@@ -291,7 +291,7 @@ func (b briefing) byKind(slug string) []apiNode {
 	return out
 }
 
-func (b briefing) section(out *strings.Builder, slug, heading string, limit int) {
+func (b onboardingGuide) section(out *strings.Builder, slug, heading string, limit int) {
 	nodes := b.byKind(slug)
 	if len(nodes) == 0 {
 		return
