@@ -628,6 +628,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "stage-handoffs":
 		return "stage.<op>", true
 	case "outcomes":
+		if len(parts) == 2 && parts[1] == "measurement" && read {
+			return "outcome.read", true
+		}
 		if len(parts) == 1 && (read || r.Method == http.MethodPost) {
 			return scope("outcome")
 		}
