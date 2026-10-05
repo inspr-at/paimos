@@ -94,6 +94,13 @@ func TestRouteDeclarationsFailClosed(t *testing.T) {
 	if err := RequirePattern(context.Background(), "GET /api/ready", Scope{}); err != nil {
 		t.Fatalf("public readiness: %v", err)
 	}
+	const undo = "POST /api/queue/{nodeId}/undo"
+	if permission, declared := PermissionForPattern(undo); !declared || permission != "nodes.read" {
+		t.Fatalf("queue Undo entry permission: %q, declared=%v", permission, declared)
+	}
+	if err := RequirePattern(context.Background(), undo, Scope{}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("anonymous queue Undo: %v", err)
+	}
 }
 
 func TestMeRequiresAuthenticationOnly(t *testing.T) {

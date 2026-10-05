@@ -73,7 +73,7 @@ test('Hide closed reloads the graph projection; the legend and bounded-result no
   const { calls } = await mockTicketGraph(page, world)
   await page.goto('/p/PHAROS/tickets?view=graph'); await ready(page)
   await expect(canvas(page)).toHaveAttribute('aria-label', /50 tickets/)
-  expect(calls[0].get('include_closed')).toBeNull()
+  expect(calls[0].get('include_closed')).toBe('true')
   const legend = page.getByRole('group', { name: 'Ticket graph legend' })
   for (const label of ['Open', 'In progress', 'Closed', 'Epic hub', 'Parent', 'Blocks', 'Relates', 'Implements', 'Duplicates']) await expect(legend.getByText(label, { exact: true })).toBeVisible()
   await expect(page.getByText('This project’s graph is truncated; some tickets or links are not shown.')).toBeVisible()

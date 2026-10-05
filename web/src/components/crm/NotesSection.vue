@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { api } from '../../lib/api'
-import { applyNote, draftNote, errorText, statusOf, undoLatest, type Customer, type NoteProposal } from '../../lib/crm'
+import { applyNote, draftNote, errorText, statusOf, undoEvents, type Customer, type NoteProposal } from '../../lib/crm'
 import { toast } from '../../lib/toast'
 import { useCustomers } from '../../stores/customers'
 import AppIcon from '../AppIcon.vue'
@@ -115,7 +115,7 @@ async function apply() {
       timeout: 8000,
       action: {
         label: 'Undo', run: () => {
-          void undoLatest([{ node: props.customer.id, types: ['crm.note_rewrite_applied'] }])
+          void undoEvents(updated.event_ids)
             .then(() => { emit('reload'); toast('The earlier notes are back.') })
             .catch(e => toast(errorText(e), { tone: 'error' }))
         },
@@ -203,7 +203,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) closeR
 .spacer { flex: 1; }
 .f-note.warn { color: var(--gold-ink); }
 .f-note.warn svg { color: var(--gold-ink); }
-.apply { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.apply { width: min(clamp(640px, 52vw, 1120px), calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .apply::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .apply-card { display: grid; gap: 14px; max-height: calc(100dvh - 24px); overflow: auto; padding: 22px 24px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 .apply-card h2 { font-size: 18px; }

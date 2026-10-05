@@ -110,7 +110,7 @@ func advancePause(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session)
 	if err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 		return s, err
 	}
-	if s.Pause == nil || (s.Pause.State != "requested" && s.Pause.State != "planned") || s.Pause.StopRequested || !s.Pause.DeadlineAt.After(now) {
+	if workHandover(s.Pause) || s.Pause == nil || (s.Pause.State != "requested" && s.Pause.State != "planned") || s.Pause.StopRequested || !s.Pause.DeadlineAt.After(now) {
 		return stampPause(s, now), nil
 	}
 	next := *s.Pause
@@ -348,7 +348,7 @@ func (m *Module) getLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (a
 	for _, item := range items {
 		agents = append(agents, item.ID)
 	}
-	return map[string]any{"deadline_at": deadline, "request_id": id, "items": items, "stop_in_flight": false, "hosts": scope.Hosts, "agents": agents}, nil
+	return map[string]any{"owner_principal_id": p.ID, "deadline_at": deadline, "request_id": id, "items": items, "stop_in_flight": false, "hosts": scope.Hosts, "agents": agents}, nil
 }
 
 func (m *Module) putLeavingAt(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {

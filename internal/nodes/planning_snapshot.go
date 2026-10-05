@@ -54,7 +54,7 @@ func CapturePlanningStart(ctx context.Context, tx pgx.Tx, id, source string) err
 	if err != nil {
 		return err
 	}
-	if kind != "ticket" && kind != "task" {
+	if kind != "work" && kind != "ticket" && kind != "task" {
 		return nil
 	}
 	var exists bool
@@ -64,6 +64,16 @@ func CapturePlanningStart(ctx context.Context, tx pgx.Tx, id, source string) err
 	rows, err := loadPlanRows(ctx, tx, []string{id}, nil)
 	if err != nil || len(rows) == 0 {
 		return err
+	}
+	var row planRow
+	for _, candidate := range rows {
+		if candidate.id == id && candidate.parent == "" {
+			row = candidate
+			break
+		}
+	}
+	if row.id == "" || row.kind == "parent" {
+		return nil
 	}
 	routes, err := resolvePlanRoutes(ctx, tx, rows)
 	if err != nil {
@@ -78,7 +88,6 @@ func CapturePlanningStart(ctx context.Context, tx pgx.Tx, id, source string) err
 	if err := pl.loadLearning(ctx, tx, func(p string) bool { return p == project }, project); err != nil {
 		return err
 	}
-	row := rows[0]
 	route := pl.route(row)
 	cal := pl.calibration(route)
 	snap := planningSnapshot{ModelEstimate: pl.modelEstimate(row), Source: source, Hours: row.hours, Tokens: pl.estimate(row).tokens,

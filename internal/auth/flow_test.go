@@ -93,6 +93,7 @@ func TestOIDCTenantSelection(t *testing.T) {
 func TestOIDCSessionLifecycle(t *testing.T) {
 	reset(t)
 	insertTenant(t, "inspr", "INSPR")
+	bootstrapPrincipals := scalar(t, adminPool, `SELECT count(*) FROM principals`)
 	issuer := startFakeOIDC(t, "aeon-public")
 	mod := newMod(t, Config{
 		Env:                 envDev,
@@ -144,7 +145,7 @@ func TestOIDCSessionLifecycle(t *testing.T) {
 	if n := scalar(t, adminPool, `SELECT count(*) FROM identities`); n != 0 {
 		t.Fatalf("identities %d", n)
 	}
-	if n := scalar(t, adminPool, `SELECT count(*) FROM principals`); n != 0 {
+	if n := scalar(t, adminPool, `SELECT count(*) FROM principals`); n != bootstrapPrincipals {
 		t.Fatalf("principals %d", n)
 	}
 

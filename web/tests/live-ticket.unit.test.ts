@@ -29,7 +29,7 @@ const at = (seconds: number) => `2026-09-29T10:00:${String(seconds).padStart(2, 
 function node(over: Partial<WorkNode> = {}): WorkNode {
   return { id: 'n1', key: 'PRJ-1', kind_id: 'k', title: 'Original', body: '', fields: {}, state: 'new', parent_id: 'p-1', position: '1', created_at: at(0), updated_at: at(1), ...over }
 }
-function item(over: Partial<WorkNode> = {}): ListItem {
+function item(over: Partial<ListItem> = {}): ListItem {
   return { ...node(over), kind_slug: 'ticket', kind_label: 'Ticket', priority: null, assignee: null, parent: null, children_count: 0, project: PROJECT } as ListItem
 }
 // A read the test answers when it wants.
@@ -53,7 +53,9 @@ const settle = async () => { for (let i = 0; i < 6; i++) await Promise.resolve()
 
 let scope: EffectScope | undefined
 function setup(fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>(), start: ListItem = item(), context: { onRemoved?: (item: ListItem) => void; open?: () => FakeSource | null } = {}) {
-  const store = new LiveNodeStore({ open: context.open ?? (() => null), fetchNode, rows: rowStore })
+  const store = new LiveNodeStore({ open: context.open ?? (() => null), fetchNode, rows: rowStore,
+    fetchAggregate: async id => { const value = await fetchNode(id); return value ? { ...start, ...value } : null },
+  })
   const busy = ref(false)
   // The panel shows the row store's object for the node, as the workspace resolves it.
   const current = ref<ListItem | null>(rowStore.row(start.id) ?? rowStore.adopt(start, rowStore.mark(), { show: true }))
@@ -585,7 +587,6 @@ describe('review 326f: views ask the row store', () => {
   })
 })
 
-
 describe('AEON-379 conversion through the live row store', () => {
   it('keeps the converted kind and exact own revision when an older read lands', async () => {
     const answer = slow()
@@ -632,4 +633,80 @@ describe('AEON-379 conversion through the live row store', () => {
     expect(target).toMatchObject({ kind_slug: 'ticket', updated_at: at(1) })
     expect(rowStore.isOwn('n1', at(1))).toBe(false)
   })
+})
+
+describe('parent detail aggregate freshness', () => {
+  it.each(['node.updated', 'harness.heartbeat', 'harness.stopped'])('refetches an open parent after %s on an unseen descendant', async type => {
+    const parent = item({ estimate: { hours: 2, is_parent: true }, eta: { finished: false, progress_pct: 25 } })
+    api.getNode.mockResolvedValue(node({ estimate: parent.estimate, eta: parent.eta }))
+    const fetchNode = vi.fn().mockResolvedValue(node({ estimate: { hours: 8, is_parent: true }, eta: { finished: false, progress_pct: 63 } }))
+    const h = setup(fetchNode, parent)
+    await settle()
+    h.store.apply(change({ id: 'unseen-descendant', type, fields: ['eta'], revision: null }))
+    await settle()
+    expect(fetchNode).toHaveBeenCalledWith('n1')
+    expect(h.target.estimate?.hours).toBe(8)
+    expect(h.target.eta?.progress_pct).toBe(63)
+    expect(h.target.updated_at).toBe(parent.updated_at)
+  })
+})
+
+it('discards a parent aggregate response overtaken by a second descendant hint', async () => {
+  const parent = item({ estimate: { hours: 2, is_parent: true }, eta: { finished: false, progress_pct: 25 } })
+  api.getNode.mockResolvedValue(node({ estimate: parent.estimate, eta: parent.eta }))
+  let release!: (value: WorkNode) => void
+  const held = new Promise<WorkNode>(resolve => { release = resolve })
+  const fetchNode = vi.fn().mockReturnValueOnce(held).mockResolvedValue(node({ estimate: { hours: 12, is_parent: true }, eta: { finished: false, progress_pct: 80 } }))
+  const h = setup(fetchNode, parent)
+  await settle()
+  h.store.apply(change({ id: 'deep-child', eventId: 10, type: 'harness.heartbeat', revision: null, fields: ['eta'] }))
+  expect(fetchNode).toHaveBeenCalledTimes(1)
+  h.store.apply(change({ id: 'deep-child', eventId: 11, type: 'harness.stopped', revision: null, fields: ['eta'] }))
+  release(node({ estimate: { hours: 8, is_parent: true }, eta: { finished: false, progress_pct: 63 } }))
+  await settle()
+  expect(fetchNode).toHaveBeenCalledTimes(2)
+  expect(h.target.estimate?.hours).toBe(12)
+  expect(h.target.eta?.progress_pct).toBe(80)
+})
+
+it('membership changes refresh a former leaf into a parent without changing its own revision', async () => {
+  const parent = item({ estimate: { hours: 2, is_parent: false } })
+  api.getNode.mockResolvedValue(node({ estimate: parent.estimate }))
+  const fetchNode = vi.fn().mockResolvedValue(node({ estimate: { hours: 8, planned_hours: 2, is_parent: true } }))
+  const h = setup(fetchNode, parent)
+  await settle()
+  h.store.apply(change({ id: 'new-child', type: 'node.created', change: 'created' }))
+  await settle()
+  expect(h.target.estimate).toEqual({ hours: 8, planned_hours: 2, is_parent: true })
+  expect(h.target.updated_at).toBe(parent.updated_at)
+})
+
+it('does not invalidate parents from a different project', async () => {
+  const parent = item({ estimate: { hours: 2, is_parent: true } })
+  api.getNode.mockResolvedValue(node({ estimate: parent.estimate }))
+  const fetchNode = vi.fn()
+  const h = setup(fetchNode, parent)
+  await settle()
+  h.store.apply(change({ id: 'foreign-child', projectId: 'another-project', type: 'harness.heartbeat', revision: null, fields: ['eta'] }))
+  await settle()
+  expect(fetchNode).not.toHaveBeenCalled()
+  expect(h.target.estimate?.hours).toBe(2)
+})
+
+it('loads parent ETA and planning from the authorized list projection endpoint', async () => {
+  const parent = item({ estimate: { hours: 2, is_parent: true }, eta: { finished: false, progress_pct: 25 } })
+  api.getNode.mockResolvedValue(node({ estimate: parent.estimate })) // Real detail responses do not carry ETA/planning.
+  const planning = { route: null, tokens: { spent: 350, input: 300, output: 50, cached: 0, sessions: 2, unreported: 0, estimated: 120000 } }
+  api.listNodes.mockResolvedValue({ items: [item({ estimate: { hours: 8, is_parent: true }, eta: { finished: false, progress_pct: 63 }, planning })], next_cursor: null })
+  const store = new LiveNodeStore({ open: () => null, rows: rowStore })
+  const current = ref<ListItem | null>(rowStore.adopt(parent, rowStore.mark(), { show: true }))
+  scope = effectScope()
+  scope.run(() => useTicket(current, { names: new Map(), onRemoved: () => {}, onCreated: () => {}, onMoved: () => {}, live: { busy: ref(false), me: () => 'me', store } }))
+  await settle()
+  store.apply(change({ id: 'unseen-child', type: 'harness.heartbeat', revision: null, fields: ['eta'] }))
+  await settle()
+  expect(api.listNodes).toHaveBeenCalledWith({ ids: ['n1'], limit: 1 })
+  expect(current.value?.eta?.progress_pct).toBe(63)
+  expect(current.value?.estimate?.hours).toBe(8)
+  expect(current.value?.planning).toEqual(planning)
 })

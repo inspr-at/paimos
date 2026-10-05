@@ -59,12 +59,24 @@ func TestDemoSeedTwice(t *testing.T) {
 	if first.Already || first.Projects != 3 || first.Tickets < 40 || first.Stage != "build" {
 		t.Fatalf("summary %+v", first)
 	}
+	if legacy := scalar(t, database, id, `SELECT count(*) FROM node_kinds WHERE slug IN ('epic','ticket','task')`); legacy != 0 {
+		t.Fatalf("demo recreated %d retired work kinds", legacy)
+	}
+	parents := scalar(t, database, id, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+	 WHERE k.slug='work' AND n.deleted_at IS NULL AND EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+	 WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work')`)
+	leaves := scalar(t, database, id, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+	 WHERE k.slug='work' AND n.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+	 WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work')`)
+	if parents < 8 || leaves != first.Tickets {
+		t.Fatalf("demo work hierarchy: %d parents, %d leaves, summary %+v", parents, leaves, first)
+	}
 	after := seedRows(t, database, first.TenantID)
 	if slices.Equal(before, after) {
 		t.Fatal("seed wrote no resources")
 	}
 	events := scalar(t, database, first.TenantID, `SELECT count(*) FROM events`)
-	tickets := scalar(t, database, first.TenantID, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='ticket' AND n.deleted_at IS NULL`)
+	tickets := scalar(t, database, first.TenantID, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='work' AND n.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work')`)
 	kinds := scalar(t, database, first.TenantID, `SELECT count(DISTINCT k.slug) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.deleted_at IS NULL AND k.slug IN ('runbook','guideline','memory','external_system','related_project')`)
 	knowledge := scalar(t, database, first.TenantID, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.deleted_at IS NULL AND k.slug IN ('runbook','guideline','memory','external_system','related_project')`)
 	agents := scalar(t, database, first.TenantID, `SELECT count(*) FROM principals WHERE kind='agent' AND name IN ('Lumen Scribe','Harbor Clerk','Glass Scout')`)
@@ -88,7 +100,7 @@ func TestDemoSeedTwice(t *testing.T) {
 	if again := scalar(t, database, first.TenantID, `SELECT count(*) FROM events`); again != events {
 		t.Fatalf("second seed wrote events: %d to %d", events, again)
 	}
-	if again := scalar(t, database, first.TenantID, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='ticket' AND n.deleted_at IS NULL`); again != tickets {
+	if again := scalar(t, database, first.TenantID, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='work' AND n.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work')`); again != tickets {
 		t.Fatalf("tickets changed %d to %d", tickets, again)
 	}
 	if replay := seedRows(t, database, first.TenantID); !slices.Equal(after, replay) {

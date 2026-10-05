@@ -16,13 +16,14 @@ import (
 )
 
 // The shared API client (including agentd) accepts the minor response addition
-// when decoding into an older consumer type that has no finished property.
+// when decoding into an older consumer type with neither finished nor owner.
 func TestHarnessLegacyClientIgnoresFinished(t *testing.T) {
+	owner := "10000000-0000-4000-8000-000000000001"
 	for _, finished := range []bool{false, true} {
 		t.Run(map[bool]string{false: "false", true: "true"}[finished], func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set(reportercontract.Header, reportercontract.HarnessSession)
-				_ = json.NewEncoder(w).Encode(harness.Session{ID: "session", Finished: finished})
+				_ = json.NewEncoder(w).Encode(harness.Session{ID: "session", Finished: finished, OwnerPrincipalID: &owner})
 			}))
 			defer server.Close()
 			var legacy struct {

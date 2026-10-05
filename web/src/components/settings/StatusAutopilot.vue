@@ -163,10 +163,10 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
 .rule.off .rule-move, .rule.off .rule-cond { color: var(--ink-3); }
 .rules.paused .rule { opacity: .55; }
 .projects { display: grid; }
-.proj { display: grid; grid-template-columns: minmax(140px, 1fr) auto; align-items: center; gap: 8px 18px; min-height: 52px; padding: 8px 0; border-top: 1px solid var(--line); }
+.proj { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, auto); align-items: center; gap: 8px 18px; min-height: 52px; padding: 8px 0; border-top: 1px solid var(--line); }
 .proj.head { min-height: 0; padding: 0 0 6px; border-top: 0; font: 500 10.5px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
 .proj-name { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); }
-.proj-name span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.proj-name span:last-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .proj-ctl { display: grid; gap: 3px; justify-items: start; min-width: 0; }
 .ctl-cap { display: none; font: 500 10px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
 .eff { font-size: 11.5px; color: var(--ink-3); padding-left: 12px; }

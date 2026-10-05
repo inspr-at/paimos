@@ -159,7 +159,7 @@ func TestBriefingNextActionsMatchJourneyRegression(t *testing.T) {
 			continue
 		}
 		if state == "imported" {
-			f.node(t, "ticket", "BAT-999", "Imported work")
+			f.node(t, "work", "BAT-999", "Imported work")
 			if _, err := f.db.Admin.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE key='BAT-999' AND tenant_id=$2`, project, f.tenant); err != nil {
 				t.Fatal(err)
 			}

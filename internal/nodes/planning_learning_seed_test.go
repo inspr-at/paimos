@@ -19,7 +19,7 @@ import (
 // All clocks are fixed; the active time deliberately differs from wall time.
 func seedLearningTicket(t *testing.T, w planningWorld, index int, active any, provisional bool) nodeJSON {
 	t.Helper()
-	n := w.node(t, fmt.Sprintf("LEARN-%d", index), "ticket", w.root.ID, "done", nil)
+	n := w.node(t, fmt.Sprintf("LEARN-%d", index), "work", w.root.ID, "done", nil)
 	order := w.node(t, fmt.Sprintf("LEARNORDER-%d", index), "work_order", w.root.ID, "open", nil)
 	w.session(t, n.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 4_000_000, 0, 0, "api", "")
 	start := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC).Add(time.Duration(index) * 24 * time.Hour)
@@ -63,7 +63,7 @@ func TestPlanningLearningSeededActiveTimeSortAndSnapshot(t *testing.T) {
 	seedLearningTicket(t, w, 7, int64(4*3600000), true)
 	target := placementNode(t, w, "LEARNOPEN-1", map[string]any{"route_role": "build-hard", "area": "backend", "complexity": "L", "estimate_hours": 3})
 	other := placementNode(t, w, "LEARNOPEN-2", map[string]any{"route_role": "build-hard", "area": "backend", "complexity": "L", "estimate_hours": 1})
-	path := "/api/nodes?within=" + w.root.ID + "&kind=ticket&state=open&sort=-tokens"
+	path := "/api/nodes?within=" + w.root.ID + "&kind=work&state=open&sort=-tokens"
 	view := planningOf(t, w.admin, path)[target.Key]
 	if view == nil || view.Tokens.Calibration.Level != "cell" || view.Tokens.Calibration.Tickets != 5 || view.Tokens.Calibration.TokensPerHour != 1_000_000 || *view.Tokens.Estimated != 6_000_000 {
 		t.Fatalf("seeded cell: %+v", view)

@@ -23,8 +23,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Pause the review after pairing, before tree and tenant. The queue must wait
-// for pairing without holding tree or tenant.
+// Pause the review after tenant and pairing, before tree. The queue must wait
+// on the tenant fence without acquiring tree.
 type reviewLockPause struct {
 	first  atomic.Bool
 	locked chan uint32
@@ -97,7 +97,7 @@ func TestTicketQueueMutationAndReviewCreationDoNotDeadlock(t *testing.T) {
 		var waiting bool
 		err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
  WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)) AND query=$2)`, pid,
-			`SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`).Scan(&waiting)
+			`SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`).Scan(&waiting)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -106,9 +106,9 @@ func TestTicketQueueMutationAndReviewCreationDoNotDeadlock(t *testing.T) {
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatal("queue did not wait for pairing lock")
+			t.Fatal("queue did not wait for tenant lock")
 		case code := <-queueDone:
-			t.Fatalf("queue crossed held pairing fence: %d", code)
+			t.Fatalf("queue crossed held tenant fence: %d", code)
 		default:
 		}
 	}

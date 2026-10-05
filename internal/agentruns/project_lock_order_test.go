@@ -18,9 +18,9 @@ import (
 )
 
 // Exercise both project authorization helpers through their HTTP writers while
-// a real pairing caller owns pairing/tree but has not yet acquired tenant.
-// A tree waiter must leave tenant free, or the resumed caller deadlocks.
-func TestProjectWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
+// a real pairing caller owns tenant/pairing/tree. The project writer must wait
+// on tenant first, and the non-key tenant fence must permit foreign-key reads.
+func TestProjectWritesSerializeWithPairingTenantBeforeTree(t *testing.T) {
 	for _, pairedWrite := range []string{"queue", "terminal-node"} {
 		for _, projectWrite := range []string{"membership", "attachment"} {
 			t.Run(pairedWrite+"/"+projectWrite, func(t *testing.T) {
@@ -73,16 +73,16 @@ func TestProjectWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
 					method, path, body = "PATCH", "/api/attachments/"+attachment, `{"caption":"updated"}`
 				}
 				projectResponse, projectDone := start(method, path, body)
-				if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pairedPID, projectDone); lock != "advisory" {
-					t.Fatalf("project writer did not wait on the pairing caller's tree fence: lock=%q", lock)
+				if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pairedPID, projectDone); lock != "transactionid" {
+					t.Fatalf("project writer did not wait on the pairing caller's tenant fence: lock=%q", lock)
 				}
 				probe, err := f.d.Admin.Begin(ctx)
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer probe.Rollback(context.Background())
-				if _, err := probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, f.person.TenantID); err != nil {
-					t.Fatalf("tree waiter must leave tenant free: %v", err)
+				if _, err := probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR KEY SHARE NOWAIT`, f.person.TenantID); err != nil {
+					t.Fatalf("tenant fence must permit foreign-key readers: %v", err)
 				}
 				if err := probe.Rollback(ctx); err != nil {
 					t.Fatal(err)

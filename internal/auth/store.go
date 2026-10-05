@@ -422,8 +422,12 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 	}
 	var p tenant.Principal
 	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
-		var principalID, gotTenant, keyID string
+		var principalID, gotTenant string
 		var creatorID *string
+		var keyID string
+		var marked bool
+		var computer *string
+		var generation int64
 		var scopes pgtype.FlatArray[string]
 		err := tx.QueryRow(ctx, `
 			UPDATE agent_keys k
@@ -438,8 +442,8 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			    WHERE p.id = k.principal_id AND p.kind = 'agent' AND p.status='active'
 			      AND NOT (p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[])
 			  )
-			RETURNING k.principal_id::text, k.tenant_id::text, k.scopes, k.created_by_principal_id::text, k.id::text
-		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant, &scopes, &creatorID, &keyID)
+			RETURNING k.principal_id::text, k.tenant_id::text, k.scopes, k.created_by_principal_id::text, k.id::text, k.owner_workstation, k.workstation_computer_id::text, k.workstation_generation
+		`, prefix, hashSecret(secret)).Scan(&principalID, &gotTenant, &scopes, &creatorID, &keyID, &marked, &computer, &generation)
 		if err != nil {
 			return err
 		}
@@ -451,7 +455,12 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 			FROM principals WHERE id = $1::uuid
 		`, principalID))
 		p.Scopes = []string(scopes)
-		p.KeyID = keyID
+		p.KeyID, p.OwnerWorkstation = keyID, marked
+		p.WorkstationGeneration = generation
+		if computer != nil {
+			p.WorkstationComputerID = *computer
+		}
+		p.AuthKeyID = keyID
 		if creatorID != nil {
 			p.KeyCreatorID = *creatorID
 		}
@@ -470,16 +479,18 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 }
 
 type keyRecord struct {
-	ID          string
-	PrincipalID string
-	Name        string
-	Prefix      string
-	Scopes      []string
-	CreatedAt   time.Time
-	ExpiresAt   *time.Time
-	LastUsedAt  *time.Time
-	RevokedAt   *time.Time
-	Token       string
+	OwnerWorkstation      bool
+	WorkstationComputerID *string
+	ID                    string
+	PrincipalID           string
+	Name                  string
+	Prefix                string
+	Scopes                []string
+	CreatedAt             time.Time
+	ExpiresAt             *time.Time
+	LastUsedAt            *time.Time
+	RevokedAt             *time.Time
+	Token                 string
 }
 
 func (m *Module) createAgentKey(ctx context.Context, p tenant.Principal, name, principalID string, scopes []string, expires *time.Time) (keyRecord, error) {
@@ -520,7 +531,7 @@ func (m *Module) issueAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princi
 			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&tenantLock); err != nil {
 				return err
 			}
-			if p.Kind != tenant.Person {
+			if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 				return authz.ErrForbidden
 			}
 			if err := authz.RequireTx(ctx, tx, p, "keys.manage", authz.Scope{}); err != nil {
@@ -629,6 +640,12 @@ func (m *Module) issueAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princi
 			var creator any
 			if p.ID != "" {
 				creator = p.ID
+				if authz.OwnerWorkstation(p) {
+					if p.KeyCreatorID == "" {
+						return authz.ErrForbidden
+					}
+					creator = p.KeyCreatorID
+				}
 			}
 			err = tx.QueryRow(ctx, `
 				INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes, expires_at, created_by_principal_id)
@@ -828,7 +845,7 @@ func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecor
 	var out []keyRecord
 	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT id::text, principal_id::text, name, prefix, scopes, created_at, expires_at, last_used_at, revoked_at
+			SELECT id::text, principal_id::text, name, prefix, scopes, created_at, expires_at, last_used_at, revoked_at, owner_workstation, workstation_computer_id::text
 			FROM agent_keys
 			ORDER BY created_at DESC, id
 		`)
@@ -839,7 +856,7 @@ func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecor
 		for rows.Next() {
 			var rec keyRecord
 			var scopes pgtype.FlatArray[string]
-			if err := rows.Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt); err != nil {
+			if err := rows.Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt, &rec.OwnerWorkstation, &rec.WorkstationComputerID); err != nil {
 				return err
 			}
 			rec.Scopes = []string(scopes)
@@ -858,6 +875,14 @@ func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecor
 
 func (m *Module) revokeAgentKey(ctx context.Context, p tenant.Principal, id string) error {
 	return m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if p.ID != "" {
+			if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID); err != nil {
+				return err
+			}
+			if err := authz.RequireTx(ctx, tx, p, "keys.manage", authz.Scope{}); err != nil {
+				return err
+			}
+		}
 		return m.revokeAgentKeyTx(ctx, tx, p, id)
 	})
 }
@@ -894,8 +919,8 @@ func (m *Module) revokeAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 
 func lockAgentKey(ctx context.Context, tx pgx.Tx, id string) (keyRecord, error) {
 	var rec keyRecord
-	err := tx.QueryRow(ctx, `SELECT id::text,principal_id::text,name,prefix,scopes,created_at,expires_at,last_used_at,revoked_at
-		FROM agent_keys WHERE id=$1::uuid FOR UPDATE`, id).Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &rec.Scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt)
+	err := tx.QueryRow(ctx, `SELECT id::text,principal_id::text,name,prefix,scopes,created_at,expires_at,last_used_at,revoked_at,owner_workstation,workstation_computer_id::text
+		FROM agent_keys WHERE id=$1::uuid FOR UPDATE`, id).Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &rec.Scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt, &rec.OwnerWorkstation, &rec.WorkstationComputerID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = errNotFound
 	}
@@ -904,7 +929,8 @@ func lockAgentKey(ctx context.Context, tx pgx.Tx, id string) (keyRecord, error) 
 
 func keySnapshot(rec keyRecord) map[string]any {
 	return map[string]any{"key_id": rec.ID, "principal_id": rec.PrincipalID, "name": rec.Name, "prefix": rec.Prefix,
-		"scopes": rec.Scopes, "created_at": rec.CreatedAt, "expires_at": rec.ExpiresAt, "last_used_at": rec.LastUsedAt, "revoked_at": rec.RevokedAt}
+		"scopes": rec.Scopes, "created_at": rec.CreatedAt, "expires_at": rec.ExpiresAt, "last_used_at": rec.LastUsedAt, "revoked_at": rec.RevokedAt,
+		"owner_workstation": rec.OwnerWorkstation, "workstation_computer_id": rec.WorkstationComputerID}
 }
 
 var errKeyRevoked = errors.New("agent key already revoked")
@@ -914,14 +940,18 @@ func (m *Module) rotateAgentKey(ctx context.Context, p tenant.Principal, id stri
 }
 
 func checkRotationScopesTx(ctx context.Context, tx pgx.Tx, actor tenant.Principal, agentID string, scopes []string) error {
-	if actor.Kind != tenant.Person || actor.ID == "" {
+	if (actor.Kind != tenant.Person && !authz.OwnerWorkstation(actor)) || actor.ID == "" {
 		return authz.ErrForbidden
 	}
 	creator, err := authz.EffectiveTx(ctx, tx, actor, "")
 	if err != nil {
 		return err
 	}
-	agent := tenant.Principal{ID: agentID, TenantID: actor.TenantID, Kind: tenant.Agent, Scopes: scopes, KeyCreatorID: actor.ID}
+	creatorID := actor.ID
+	if authz.OwnerWorkstation(actor) {
+		creatorID = actor.KeyCreatorID
+	}
+	agent := tenant.Principal{ID: agentID, TenantID: actor.TenantID, Kind: tenant.Agent, Scopes: scopes, KeyCreatorID: creatorID}
 	// Shared roles combine live workspace/project grants. Generated private
 	// roles additionally cap rotation at their configured workspace permissions.
 	var privatePermissions []string
@@ -1023,6 +1053,12 @@ func (m *Module) loadMe(ctx context.Context, p tenant.Principal) (meView, error)
 			return err
 		}
 		view.Principal = fresh
+		view.Principal.KeyID = p.KeyID
+		view.Principal.KeyCreatorID = p.KeyCreatorID
+		view.Principal.Scopes = p.Scopes
+		view.Principal.OwnerWorkstation = p.OwnerWorkstation
+		view.Principal.WorkstationComputerID = p.WorkstationComputerID
+		view.Principal.WorkstationGeneration = p.WorkstationGeneration
 		var iid, issuer, subject *string
 		var email, display *string
 		err = tx.QueryRow(ctx, `

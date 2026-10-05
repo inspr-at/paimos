@@ -4,6 +4,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { setPageTitle } from './lib/brand'
 import { useProjects } from './stores/projects'
 import { useSession } from './stores/session'
+import { useWorkVocabulary } from './stores/workVocabulary'
 import { sessionEnded } from './lib/api'
 import { can, ensurePermissions, permissionsRevoked } from './lib/authz'
 import { toast } from './lib/toast'
@@ -15,6 +16,7 @@ import SignInView from './views/SignInView.vue'
 import NotFoundView from './views/NotFoundView.vue'
 import { DOCK_MEDIA, isKnowledgeType, parseEntryParam } from './lib/knowledge'
 import { projectSection } from './components/work/projectNavigation'
+import { PEEK_QUERY } from './lib/ticketPeek'
 
 // Child records of the project page carry only the address; ProjectView renders
 // what they name, so they need a component that draws nothing.
@@ -33,6 +35,7 @@ export const router = createRouter({
       children: [
         { path: 'tickets', component: RouteMarker, meta: { projectSection: 'tickets' } },
         { path: 'journey', component: RouteMarker, meta: { title: 'Journey', projectSection: 'journey' } },
+        { path: 'settings', component: RouteMarker, meta: { title: 'Project settings', projectSection: 'settings' } },
         // A docked entry (?entry=<type>/<slug>) on a screen too narrow to dock it opens the entry's own page.
         { path: 'knowledge', component: RouteMarker, meta: { title: 'Knowledge', projectSection: 'knowledge' }, beforeEnter: to => {
           const entry = parseEntryParam(to.query.entry)
@@ -89,19 +92,23 @@ export const router = createRouter({
     // eslint-disable-next-line no-restricted-syntax -- a route of the page, not a request
     { path: '/runs/:runId?', redirect: '/agents' },
     { path: '/approvals', redirect: '/agents' },
+    { path: '/phone-approvals/:kind(approval|attach)/:requestId', component: () => import('./views/PhoneApprovalView.vue'), meta: { title: 'Review approval' } },
     { path: '/pacing', redirect: '/agents' },
     // The release history is a sheet over the page (App.vue); its own links open it over Projects.
     { path: '/releases/:version?', component: ProjectsView, meta: { title: 'Releases' } },
     // Settings: Personal for everyone; Workspace, Business and Projects for admins.
     { path: '/settings', redirect: '/settings/personal' },
     { path: '/settings/business/profiles/:profileId?', component: () => import('./views/settings/DocumentProfilesView.vue'), props: true, meta: { title: 'Document profiles', fill: true } },
-    { path: '/settings/:section(personal|developer|agent-rules|accounts|workspace|business|projects|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
+    { path: '/settings/:section(personal|theme|developer|agent-rules|accounts|workspace|business|projects|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     // Access: /settings/access/<tab>/<id> (a person, a role, a project).
     { path: '/settings/:section(access)/:tab(people|invites|roles|projects|agents|audit)?/:id?', component: () => import('./views/SettingsView.vue'), meta: { title: 'Access', keepsFocus: true } },
     { path: '/link', component: () => import('./views/LinkAccountView.vue'), meta: { title: 'Link an account' } },
     { path: '/signin', component: SignInView, meta: { title: 'Sign in', bare: true } },
     { path: '/from-classic/:rest(.*)*', component: () => import('./views/FromClassicView.vue'), meta: { title: 'Finding your page' } },
     { path: '/offers/:publicTenant/:token', component: () => import('./public/PublicQuoteView.vue'), props: true, meta: { title: 'Customer quote', bare: true, public: true } },
+    { path: '/portal/:tenantSlug/products/:productSlug/releases', component: () => import('./public/PublicReleasesView.vue'), props: true, meta: { title: 'Releases', bare: true, public: true } },
+    { path: '/portal/:tenantSlug/products/:productSlug/roadmap', component: () => import('./public/PublicRoadmapView.vue'), props: true, meta: { title: "What's coming", bare: true, public: true } },
+    { path: '/portal/:tenantSlug/products/:productSlug', component: () => import('./public/PublicPortalView.vue'), props: true, meta: { title: 'Product portal', bare: true, public: true } },
     { path: '/portal/:tenantSlug/releases', component: () => import('./public/PublicReleasesView.vue'), props: true, meta: { title: 'Releases', bare: true, public: true } },
     { path: '/portal/:tenantSlug/roadmap', component: () => import('./public/PublicRoadmapView.vue'), props: true, meta: { title: "What's coming", bare: true, public: true } },
     { path: '/portal/:tenantSlug', component: () => import('./public/PublicPortalView.vue'), props: true, meta: { title: 'Product portal', bare: true, public: true } },
@@ -142,6 +149,7 @@ router.beforeEach(async (to, from) => {
   // including across reload, expand/collapse and links inside the side panel.
   if (to.params.projectKey) {
     const query = { ...to.query }
+    if (to.params.ticketKey) delete query[PEEK_QUERY]
     let section = projectSection(to)
     let path = to.path
     if (!to.meta.projectSection) {
@@ -173,6 +181,7 @@ router.beforeEach(async (to, from) => {
   if (!session.identity && to.path !== '/signin') {
     // A classic link arrives before sign-in (AEON-175): keep it for after OIDC.
     if (to.path.startsWith('/from-classic/')) sessionStorage.setItem('aeon.fromClassicReturn', to.fullPath)
+    if (to.path.startsWith('/phone-approvals/')) return { path: '/signin', query: { return: to.fullPath } }
     if (wasSignedIn) return signInAgain(to.fullPath)
     dropAttachCode()
     return '/signin'
@@ -203,6 +212,14 @@ router.beforeEach(async (to, from) => {
       delete query.new
       return { path: to.path, query, hash: to.hash, replace: true }
     }
+  }
+  // Resolve workspace names before project controls appear, so a late read
+  // cannot change a type chip's width under the pointer.
+  if (session.identity && to.params.projectKey) {
+    const vocabulary = useWorkVocabulary()
+    await vocabulary.load()
+    if (!session.identity || session.requiresSignIn) return signInAgain(to.fullPath)
+    if (vocabulary.error) toast(vocabulary.error, { tone: 'error' })
   }
 })
 // A held attach code is offered once the navigation that cleaned the address bar has settled.

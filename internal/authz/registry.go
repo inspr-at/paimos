@@ -9,12 +9,13 @@ import (
 )
 
 type Permission struct {
-	Key            string   `json:"key"`
-	Group          string   `json:"group"`
-	Description    string   `json:"description"`
-	Risk           string   `json:"risk"`
-	GrantableAt    []string `json:"grantable_at"`
-	AgentGrantable bool     `json:"agent_grantable"`
+	Key                       string   `json:"key"`
+	Group                     string   `json:"group"`
+	Description               string   `json:"description"`
+	Risk                      string   `json:"risk"`
+	GrantableAt               []string `json:"grantable_at"`
+	AgentGrantable            bool     `json:"agent_grantable"`
+	OwnerWorkstationGrantable bool     `json:"owner_workstation_grantable"`
 }
 
 // Registry is the versioned permission catalog. Each key is unique and uses
@@ -36,6 +37,7 @@ func makeRegistry() []Permission {
 		{"run", "create read claim telemetry"}, {"account", "read manage route probe"},
 		{"questions", "ask read decide"}, {"approvals", "read request propose decide decide_high revoke"}, {"inbox", "read send manage receipt"},
 		{"stage", "prepare deploy verify apply"},
+		{"chat", "read send bind receive"},
 		{"model_prefs", "manage"}, {"models", "read manage resolve report refresh"}, {"plugins", "read manage invoke"},
 		{"imports", "read manage"}, {"views", "read write share"},
 		{"events", "read undo undo_other"}, {"search", "read"}, {"outcome", "read write"},
@@ -67,6 +69,9 @@ func makeRegistry() []Permission {
 	}
 	out = append(out, Permission{Key: "ownership.transfer", Group: "Ownership", Description: "Transfer workspace ownership", Risk: "high", GrantableAt: []string{"workspace"}, AgentGrantable: false})
 	out = append(out, Permission{Key: "agents.plan.read", Group: "Agents", Description: "Read the person's agent start plan and running counts", Risk: "low", GrantableAt: []string{"workspace"}, AgentGrantable: true})
+	for i := range out {
+		out[i].OwnerWorkstationGrantable = out[i].AgentGrantable || OwnerWorkstationPermission(out[i].Key)
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Key < out[j].Key })
 	return out
 }
@@ -75,7 +80,7 @@ func makeRegistry() []Permission {
 // customer portal. Those permissions never belong on an agent key.
 func agentGrantable(key string) bool {
 	switch key {
-	case "model_prefs.manage", "harness.watch", "rules.publish", "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
+	case "chat.bind", "model_prefs.manage", "harness.watch", "rules.publish", "harness.force_stop", "harness.recover", "members.manage", "roles.manage", "keys.manage", "keys.read", "settings.manage", "audit.read",
 		"questions.decide", "approvals.decide", "approvals.decide_high",
 		"profile.portal_read", "profile.portal_write", "quotes.portal_read", "quotes.portal_accept":
 		return false

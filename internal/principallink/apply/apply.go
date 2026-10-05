@@ -28,6 +28,17 @@ type Outcome struct {
 	After   json.RawMessage
 }
 
+// Lock takes the access fence before the principal-link advisory. Removing a
+// binding invokes aeon_protect_last_owner, which also locks the tenant row.
+// Callers that create an actor or accept an invite take this before those writes.
+func Lock(ctx context.Context, tx pgx.Tx, tenantID string) error {
+	if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,532))`, tenantID)
+	return err
+}
+
 // Apply links from to to. An empty to unlinks. Linking deletes the source's
 // role bindings; an alias never keeps its own. Unlink may restore a classic
 // workspace binding. Every deleted binding is audited as actorID in this
@@ -38,15 +49,7 @@ func Apply(ctx context.Context, tx pgx.Tx, tenantID, from, to, actorID string) (
 	if strings.TrimSpace(from) == "" {
 		return out, errors.New("from is required")
 	}
-	// Match access-management and invite acceptance: tenant before alias and
-	// principal locks. Binding removal's last-owner trigger takes this same
-	// tenant lock, so taking it after the alias lock could deadlock acceptance.
-	// NO KEY UPDATE also lets concurrent event writers finish tenant FK checks.
-	var lockedTenant string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&lockedTenant); err != nil {
-		return out, err
-	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,532))`, tenantID); err != nil {
+	if err := Lock(ctx, tx, tenantID); err != nil {
 		return out, err
 	}
 	source, err := lookup(ctx, tx, tenantID, from)

@@ -237,6 +237,70 @@ router and small Go/Node checks. Go tests use four pool shards when routing
 admits the batch, otherwise the existing seven hosted shards. Timing budgets,
 static checks and the required `go` aggregate always run hosted.
 
+**Web CI (OPS-257):** hosted `web-setup` runs typecheck, lint, unit tests and
+browser-runner safety once, builds the current web, and shares its dependencies
+and build through the run's `web-runtime` artifact. Dependency and Chromium
+caches are keyed by the lockfile hash and resolved Playwright version; each of
+12 hosted `web-shard` jobs restores that runtime and installs only Chromium's
+system libraries. The shard command is `npm --prefix web run ci:web:shard --
+i/12`, wrapped by `scripts/ci-flake-guard.mjs --kind playwright`; traces and
+screenshots are retained in `web-shard-i-evidence` for seven days. The required
+check remains exactly `web`: its unconditional aggregate rejects failed,
+cancelled or skipped setup/shards. The shards select 53 gated specs: the original
+49 measured specs plus `clip-tip`, `aeon-632b-clip`, `key-trim` and `model-prefs`, whose
+weights are scheduling estimates. `clip-tip` uses its complete local serial
+runtime plus a 20 percent margin; the other three use listed test counts.
+These are not hosted runtime measurements. The 164 specs of the
+`remaining-ui` group are declared in
+`web/ci-web-shards.json` with `gate: false` and run only with `--all`, until a
+follow-up ticket measures them. Unit CI checks the source manifest before
+reconciliation: every spec (including nested files) must belong to a group or
+an explicit exclusion with a ticket key and reason. AEON-676 fixes the touch
+name-width shift and gates all four additions in `clipped-names-and-preferences`,
+with no `clip-tip` exclusion. Browser-free regression checks verify the hosted
+workflow wiring, exact-once default selection and propagation of each spec's
+failure. The layout fix passed six variants × 20 locally; hosted execution of
+the integrated revision must still be verified by the coordinator. Inspect drift
+without browsers using `npm --prefix web run ci:web:shard -- --check --strict`.
+
+**AEON-676 hosted acceptance is open:** the earlier 2026-10-04 read-only
+GitHub check found no commit `42537130c7488f43f6899f1377cd6bbbc964bd33`
+(HTTP 422), no `work/aeon-676` ref (HTTP 404), no PR and zero Actions runs
+for that SHA. The FIX6 check now confirms that the coordinator published
+`2e8c089c3e863fd8d2e2a05cae0ddef41dbdce66` on
+[PR #257](https://github.com/inspr-at/paimos/pull/257). Its
+[CI run 37176759250](https://github.com/inspr-at/paimos/actions/runs/37176759250)
+(attempt 1, `pull_request`, that exact head SHA) has cancelled `web-setup`
+and `web-shard` jobs and a queued `web` aggregate at observation time. The
+setup annotation says a higher-priority request for `ci-pull_request-257`
+superseded it; no successful setup or 12-shard execution establishes acceptance.
+The worker's read-only snapshot is `tmp/aeon-676/fix6/hosted-evidence.json`.
+Post-merge local checks pass: hosted wiring 2/2, shard integration 19/19 and
+signal/failure guard 49/49, all without skips; strict coverage remains 53 gated
+and 164 ungated specs across 12 shards. No behavior or assertion was changed.
+
+The worker is forbidden to push; local checks do not close this gate. The
+coordinator must complete `CI` on the integrated branch (PR or branch dispatch,
+keeping mbp2606 off limits). Retain the run URL, checked-out SHA, logs/reports
+showing `clip-tip`, `aeon-632b-clip`, `key-trim` and `model-prefs` actually
+executed without skips, and successful `web-setup`, all 12 `web-shard` jobs
+and the required `web` aggregate. A later revision must retain these fixes
+and identify its exact SHA; selection-only output or a run on an unrelated
+revision does not establish hosted acceptance. FIX6 completes only the worker's
+verification and handoff; review-cg27's hosted finding remains open.
+
+A flake retry (`CI_FLAKE_PLAYWRIGHT_TESTS`)
+reruns exactly one test in its original config group.
+Signal termination fails the guard before quarantine or test-output handling
+on either attempt; a terminated retry stops the remaining retries. Failure
+evidence records the signal, even when captured output reports passing or
+quarantined tests.
+The AEON-676 FIX5 check confirmed that fix `40f5b53f` survives the main merge
+at `2a6a0803`: all nine signal regressions fail against the reviewed
+`2c51fcd0` implementation, while the guard's 49 tests and the shard integration's
+21 tests pass after the merge. Strict manifest validation also passes. These
+local checks leave the hosted acceptance requirement above open.
+
 **Active and required admission contract: mode B (Free plan), decided by Markus
 on 2026-09-30 and recorded on NIX-600.** The implementation references below
 are pinned to [nixcfg #890](https://github.com/markus-barta/nixcfg/pull/890) at
@@ -566,7 +630,7 @@ The index is the deployment and rollback pin. Partial by-digest platform exports
 
 In parallel, macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The `assets` job waits for both signed darwin targets and the verified image job, builds Linux `paimos-agentd` and all `aeon-cli` targets statically, verifies the darwin binaries and computes `SHA256SUMS` over all eight binaries. It rechecks release immutability, then creates one **draft** GitHub release with all nine assets and the image digest (AEON-356). Existing drafts and published releases are never uploaded to or overwritten. A partial image publication requires a new coordinate rather than a rerun that replaces it.
 
-Publication remains the coordinator's explicit step after successful native agent qualification (AEON-487), before the server switch (AEON-493). Failed or incomplete artifact checks or native qualification leave the release a draft. The tap must be merged and its exact public assets checked before switching the server. Server deployment still requires its separate approval and live verification of the exact image digest, version and health. The tag workflow never opens a tap pull request while the release is draft. Publication triggers `.github/workflows/homebrew-tap.yml` (`release: published`). Its `homebrew-tap` job validates the exact event tag, rejects drafts and prereleases, and reads public release metadata before downloading `SHA256SUMS`. It renders `Formula/aeon-agentd.rb` from that release's darwin checksums and, when `HOMEBREW_TAP_APP_ID` and `HOMEBREW_TAP_APP_KEY` are present in the `homebrew-tap` environment, opens a pull request on `inspr-at/homebrew-tap`. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either secret is absent the job logs `homebrew tap bump skipped: app secrets absent` and succeeds. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
+Publication remains the coordinator's explicit step after successful native agent qualification (AEON-487), before the server switch (AEON-493). Failed or incomplete artifact checks or native qualification leave the release a draft. The tap must be merged and its exact public assets checked before switching the server. Server deployment still requires its separate approval and live verification of the exact image digest, version and health. After publication, the coordinator dispatches `.github/workflows/homebrew-tap.yml` on **main**, passing only the version as data. Release events cannot receive tap secrets: their workflow definition can come from an untrusted tag. The trusted main job requires the exact published immutable release, annotated tag on main, complete digest-pinned assets and `SHA256SUMS` bytes matching the API asset digest before minting a tap token. It renders `Formula/aeon-agentd.rb` from those verified bytes and opens a pull request on `inspr-at/homebrew-tap` using the protected environment's App identity. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either App secret is absent the bump logs `homebrew tap bump skipped: app secrets absent` and succeeds; environment preflight still requires installed protection. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
 
 To verify a published image independently, use its exact digest and source commit:
 
@@ -702,7 +766,13 @@ gh release edit "$tag" --repo inspr-at/paimos --draft=false
 gh release view "$tag" --repo inspr-at/paimos --json tagName,isDraft,publishedAt,url
 ```
 
-Use the coordinator's approved GitHub CLI identity (or an approved GitHub App identity) with release write access. Do not publish using a workflow's `GITHUB_TOKEN`: GitHub suppresses downstream release-event workflows for that token. Publishing via this CLI step emits `release.published`, which starts the Homebrew workflow at the release tag. The new workflow must be included in the tagged commit. See GitHub's [release event reference](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#release) and [workflow token restrictions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow).
+Use the coordinator's approved GitHub CLI identity (or an approved GitHub App identity) with release write access. Enable [immutable releases](https://docs.github.com/en/code-security/concepts/supply-chain-security/immutable-releases) for future releases before publishing; GitHub locks their assets and associated tag at publication. Existing published releases stay unchanged. Verify the public API reports `immutable: true` and dispatch the trusted workflow from main after qualification/publication:
+
+```sh
+gh workflow run homebrew-tap.yml --repo inspr-at/paimos --ref main -f version="${tag#v}"
+```
+
+The workflow must already be independently reviewed on main. Its checkout is the exact main workflow commit; it never executes code from the release tag. The main-only required-reviewer environment is the credential boundary. A tag-shaped version or a workflow `if` cannot establish that boundary.
 
 Confirm `isDraft: false`, public asset availability and the Homebrew workflow result/PR. The coordinator must finish the tap PR’s own checks and approval, merge it, and verify that Homebrew resolves the exact release and checksums before switching the server. If the tap job fails, fix its cause and rerun that job; do not rerun the tag build, toggle publication to retrigger it, replace assets, or reuse the coordinate. The tap PR still follows its own checks and merge approval. Missing app secrets mean no automatic PR; record that result for the coordinator to resolve before claiming Homebrew is updated.
 
@@ -711,6 +781,178 @@ Drafts are excluded from public release discovery and GitHub's `latest` endpoint
 This deliberately supersedes AEON-356's “publish after live verification” order: waiting until after the server switch made the new server's pinned agent downloads unavailable and left Homebrew on the previous release. Native qualification and immutable artifact/provenance checks gate distribution instead; the agent compatibility window covers a newer agent meeting the old server during the rollout. Keep AEON-356's draft assembly, immutable assets, exact checksums, human publication approval and failure handling. If server live verification subsequently fails, keep the old server or roll it back by exact digest; already published agent assets and tags stay immutable, and a fix needs a new coordinate.
 
 The owning coordinator must move the external `~/Code/aeon-worktrees/deploy.sh` publish/tap block to immediately after native agent qualification, then wait for tap merge and verify exact public distribution before the server-switch block. Keep the existing server backup, approval, switch, health/version/digest verification and rollback gates. This repository does not own that script; AEON-493's draft PR records the required change for its owner.
+
+### Automated live verification and distribution finalization (AEON-414)
+
+`.github/workflows/verify-live.yml` is a coordinator-dispatched, hosted workflow
+that runs only from `inspr-at/paimos` main. It defaults to verification without
+release or tap writes. The coordinator supplies a trusted `aeon.rollout.v1`
+record from the approved pin/host rollout; this extends the timing record rather
+than introducing another rollout controller. The workflow has no SSH, deploy,
+pin-writing or PPM credential. The worker's draft PR never runs this workflow
+against production.
+
+Before adding any App secrets, the lead must configure **both**
+`live-verification` and `homebrew-tap` with the payload in
+`.github/live-verification-environment.json` and exactly one deployment policy
+`{"name":"main","type":"branch"}`. This selects only main and requires
+Markus's approval (immutable user ID 276789). Operator dispatch and attended
+operator approval are permitted; the JSON explicitly keeps self-review enabled.
+Replace the old `v*` tap policy and remove any extra branch/tag patterns.
+Store these credentials only as environment secrets, never repository or org
+secrets accessible to arbitrary workflows. Protect the environments **before**
+storing credentials; if credentials already exist, restrict their environment
+before enabling either workflow. A modified branch workflow can remove its own
+guards, so script checks cannot substitute for server-side policy.
+
+`scripts/verify-live-policy.mjs` reads the actual environment and complete branch
+policy list with a read-only Actions token. Missing reviews, extra patterns,
+tags, API failures and partial lists refuse execution. The live workflow runs
+this preflight in a job without App secrets before requesting the protected job;
+both scripts recheck policy before minting tokens. Dispatch and reruns allow only
+`markus-barta`/276789 on the exact main workflow ref. The supplied restart/5xx and
+native qualification fields remain statements from that approved coordinator,
+not cryptographically authenticated host measurements. The attended approval
+must bind them to the collector/native evidence; do not accept arbitrary JSON
+as native qualification.
+
+Store approved non-admin
+App identities as `RELEASE_APP_ID` / `RELEASE_APP_KEY` (paimos release contents
+write) and `HOMEBREW_TAP_APP_ID` / `HOMEBREW_TAP_APP_KEY` (tap contents and pull
+requests write). The release App must read attestations; public nixcfg pin
+metadata is read unauthenticated through the API. The tap App also needs checks
+and commit-status read permissions. Tokens are minted for one repository each
+with exact requested permission maps, including GitHub's mandatory read-only
+metadata permission; any missing, extra or upgraded grant is refused and revoked.
+Attestation gets only attestations read in a new empty HOME/config directory and
+its token is revoked before the live probe. Public source/assets use no App token.
+Contents write is minted only inside the release-body PATCH and immediately
+revoked. Read-only tap inspection uses only contents/PR/checks/status reads;
+tap write/merge tokens exist only after verification and are revoked on success
+or failure. Neither the Actions token nor an admin merge bypass performs writes.
+The payload and preflight are repository code, **not evidence of installed
+protection**. The coordinator must install/verify the policy, immutable-release
+setting and App scope before adding keys, and record denial of a modified-branch
+dispatch. No environment, repository setting, App installation, permission or
+foreign rollout collector is provisioned by this worker change.
+
+The dispatch input `rollout` contains JSON with these fields; obtain identifiers,
+hashes and measurements from the trusted collector and qualification evidence,
+never from the live candidate in the same verification step:
+
+```json
+{
+  "schema": "aeon.rollout.v1",
+  "direction": "forward",
+  "outcome": "success",
+  "version": "261001130110.0.0",
+  "version_scheme": "inspr-calver-3",
+  "image_digest": "sha256:<64 lowercase hex>",
+  "running_digest": "sha256:<same OCI index digest observed by the host>",
+  "source_commit": "<40 lowercase hex>",
+  "pin": {
+    "repository": "markus-barta/nixcfg",
+    "number": 890,
+    "merge_commit_sha": "<40 lowercase hex>",
+    "merged_at": "2026-10-01T13:05:00Z"
+  },
+  "live_at": "2026-10-01T13:06:00Z",
+  "observation": {
+    "started_at": "2026-10-01T13:06:00Z",
+    "ended_at": "2026-10-01T13:07:00Z",
+    "restart_count": 0,
+    "requests_5xx": 0,
+    "requests_total": 100
+  },
+  "web": {
+    "entrypoint": "/assets/index-<fingerprint>.js",
+    "sha256": "<64 lowercase hex from the qualified image bundle>"
+  },
+  "qualification": {
+    "version": "261001130110.0.0",
+    "asset": "paimos-agentd-darwin-arm64",
+    "sha256": "<64 lowercase hex>",
+    "sha256sums": "<SHA256SUMS file SHA-256, 64 lowercase hex>",
+    "operator": "markus-barta",
+    "spctl": true,
+    "foreground_socket": true,
+    "acl_fixture": true,
+    "attach_preview": true,
+    "touch_id": true,
+    "evidence": "AEON-487/comment/native-qualification"
+  }
+}
+```
+
+This is a shape example, not valid release evidence. The collector must report
+the deployed **index** digest, not its architecture's child digest, and measure
+container restart count and actual request counters over at least 60 seconds
+after the switch. The observation must be no more than 15 minutes old, remain
+fresh through verification, and contain nonzero traffic with zero 5xx and zero
+restarts. Missing measurements fail closed. The owning nixcfg/operator tooling
+must supply these fields and dispatch after pin merge; its integration and
+first attended live run remain coordinator acceptance, not worker evidence.
+
+`scripts/verify-live.mjs` rechecks the actual merged main pin PR and its single
+image-line diff in `hosts/csb1/docker/compose-spec.nix`, annotated release tag,
+source commit on main, tagged version/scheme and the hosted image attestation.
+It requires the exact nine-asset release, qualified checksum-file hash and
+downloaded SHA-256 of every binary. It polls `/api/version` for at most ten
+minutes, then observes version, health including database, readiness, SPA
+entrypoint and exact bundle hash for at least one minute. The isolated
+Playwright smoke renders sign-in, checks the same bundle and version, and
+blocks writes, login, third-party traffic, WebSockets and service workers. It
+uses no operator profile or credentials. Probe 5xx counts and timestamps are
+separate from the host's traffic counters; a failed probe stops the gate.
+
+With `apply: true`, only after all gates pass, the script appends one bound
+`Live verification:` line to an already published **immutable** release. Draft
+publication is disabled, including recovery mode: GitHub's documented
+[release PATCH](https://docs.github.com/en/rest/releases/releases#update-a-release)
+has no atomic verified asset-id/digest precondition. A fresh GET, an `If-Match`
+header or a post-publication recheck cannot prove an asset-set lock for a draft.
+The script never sends `draft: false` and refuses drafts or mutable releases
+before minting any App token. Server-side immutability protects the verified
+tag/bytes; finalization compares the fresh stable asset ID/name/size/digest set
+to the verified set and requires an ETag, sent as `If-Match` for additional
+metadata defence. It does not claim that header implements an asset-set CAS.
+Identical reruns leave the line and assets unchanged. **Keep AEON-493's order:**
+qualified agent publication and tap merge precede the server switch; post-switch
+verification finalizes that immutable release. Native qualification and human
+publication approval remain required.
+
+After publication, public `SHA256SUMS` must equal the qualified file. The script
+reuses `homebrew-tap-pr.mjs`, refuses a downgrade or conflicting existing branch,
+and verifies the sole formula change against the exact darwin checksums. Public
+checksum downloads are pinned to the API asset ID and SHA-256, bounded by the
+asset size, and follow only GitHub's HTTPS release-asset host without forwarding
+authorization. The formula writer receives the original qualified bytes and
+does not download a second body. A retry may update an existing branch only at
+the exact default-branch tip. The formula commit has that observed parent and
+updates only the work branch with `force: false`; a concurrent advance refuses
+before opening a PR. Unrelated branches are preserved. It
+waits up to five minutes for the tap PR and green checks, then merges at the
+verified head through the non-admin API, subject to the tap's review and branch
+policy, and rereads the installed formula. Changed heads, extra files, failed,
+absent or incomplete checks fail closed. Already installed exact formula bytes
+are a no-op. Failed checks stop finalization and tap writes; drafts are always
+untouched. Failures after finalization retain the immutable public assets and stop further
+actions. Rerun verification with the same evidence after fixing the cause; never
+unpublish, replace assets or reuse a coordinate.
+
+Every run writes a redacted `live-verification` artifact and job summary; a
+failure emits an Actions error for the lead. Native hardware/Touch ID
+qualification and its evidence remain manual. Under accepted decision **D7 B**,
+the lead still announces through `aeon tell` and closes tickets; this workflow
+does not inject a PPM key or send an inbox message. Deployment/rollback and
+environment bootstrap remain separate human/coordinator controls.
+
+Regression coverage: `node --test scripts/verify-live.test.mjs scripts/verify-live-policy.test.mjs scripts/homebrew-tap-pr.test.mjs` exercises refusal,
+idempotence, forbidden draft publication, exact token scope/lifetimes, installed
+policy validation, source binding, asset/redirect/branch races and
+secret-safe output. `web/e2e/live-verification.spec.ts` exercises the actual
+browser driver against isolated HTTP fixtures in PR CI. Neither is a claim of
+production acceptance or native hardware qualification.
 
 ## Image smoke gate
 
@@ -1169,3 +1411,55 @@ keeps New/Backlog suggestions. Human checks pause only delivery and acceptance.
 Progress inactivity uses actual harness/session-branch and review-PR timestamps,
 so a title edit or comment does not keep stalled work in progress. Triage
 autopilot's judgement modes are a separate phase.
+
+
+### Work-node maintenance switch (AEON-648 / AEON-684)
+
+Before stopping the release-122 container, run the candidate binary's
+`paimos migrate --check` (or `aeon-server migrate --check`) with the existing
+server database configuration. This command opens a read-only repeatable
+snapshot, pages every tenant under FORCE RLS, prints each busy parent key and
+reason using the same predicate as migration 1215, and applies no migrations.
+Exit 78 means a live legacy work parent has a live direct work child and a
+bound unstopped session, queued/starting/running/waiting claim, or running child
+work order. Keep the old container running while claims drain and cooperative
+handovers complete. Rerun the check before the switch; a clean snapshot is not
+an execution permit and 1215 still rechecks under its maintenance locks.
+Preflight errors or timeouts are failures, never clean results. Large reports
+stream in bounded pages; the stderr summary explicitly truncates after 100.
+
+Boot refuses the same blockers with one diagnostic naming their keys and the
+remedy, exits 78, and performs no internal retry. OPS must not stop the old
+container while this check fails. Existing schema-conflict, backup, human
+approval, paused-writer and release gates remain authoritative; the worker's
+preflight does not grant deployment approval.
+
+OPS's 2026-10-04 csb1 real-data rehearsal (AEON-684) migrated 241 files from
+schema 1148 through 1230 in 8 seconds. Epic 317 + task 811 + ticket 5239 became
+6367 work nodes; keys, parents, titles, counters and relations were
+byte-identical. These are OPS-provided facts, not a rehearsal performed by this
+integration worker, and do not claim later migrations were rehearsed.
+Release 122's server boots on that migrated database despite not knowing the
+`work` kind. Boot success therefore does not prove rollback correctness.
+**Rollback requires restoring the matching verified pre-switch database and
+file/blob dump plus the exact old artifact; merely repinning release 122 is
+unsupported.** A partial later migration failure can leave 1215 committed;
+never delete ledger rows or modify published migration bytes to retry.
+
+Integration retains ledger-owned 1237 for release-leaf lifecycle and renumbers
+only the unpublished colliding parent-benefit generation file to reserved
+1239. No published migration or release coordinate changes.
+
+AEON-648 integration fix round 1 retains per-work residency floors in admission
+and live routing, saved account/group pins, canonical Repeat actions/templates,
+and upgraded imported issue links. Reserved forward migration
+`1240_work_account_pins.sql` widens only the pin guard's target kinds and retains
+its tenant, live-target and harness checks. It has a pinned policy exception
+requiring consolidated coordinator review; historical SQL stays unchanged.
+Regression and validation evidence is in
+[aeon-648-int-fix1-evidence.json](qa/aeon-648-int-fix1-evidence.json).
+The deletion regression again retains a real queued run, generated order and
+capacity hold through a failed deletion. Migration 1238's retrospective
+AEON-655 ledger entry remains a coordinator action. Linux browser CI and
+OPS-247 remain unverified; local single-file Chromium evidence is not a
+replacement release gate. This fix round neither pushes to origin nor deploys.

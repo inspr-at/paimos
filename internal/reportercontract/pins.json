@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/2.6",
-    "sha256": "da031929b5e8199fa22d2b79cf5246038ef4b236a109fe1b47b63e940d884a7c",
+    "version": "harness-session/2.7",
+    "sha256": "3b340a60b30b40dce0636b2a7dc7aef67f9b16bf84c2f50414063b8577d0f9f1",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -879,6 +879,35 @@
             "properties": {
               "brief": {
                 "type": "string"
+              },
+              "desk_answers": {
+                "items": {
+                  "properties": {
+                    "answer_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "question_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "replaces": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "question_id",
+                    "answer_id",
+                    "revision"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 100,
+                "type": "array"
               },
               "handover": {
                 "additionalProperties": false,
@@ -1130,6 +1159,35 @@
             "maxItems": 20,
             "type": "array"
           },
+          "desk_answers": {
+            "items": {
+              "properties": {
+                "answer_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "question_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "replaces": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "question_id",
+                "answer_id",
+                "revision"
+              ],
+              "type": "object"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
           "display_label": {
             "maxLength": 128,
             "type": [
@@ -1298,6 +1356,14 @@
           },
           "needs_attention": {
             "type": "boolean"
+          },
+          "owner_principal_id": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "parent_harness_session_id": {
             "format": "uuid",
@@ -2095,6 +2161,35 @@
               "brief": {
                 "type": "string"
               },
+              "desk_answers": {
+                "items": {
+                  "properties": {
+                    "answer_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "question_id": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "replaces": {
+                      "format": "uuid",
+                      "type": "string"
+                    },
+                    "revision": {
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "question_id",
+                    "answer_id",
+                    "revision"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 100,
+                "type": "array"
+              },
               "handover": {
                 "additionalProperties": false,
                 "properties": {
@@ -2345,6 +2440,35 @@
             "maxItems": 20,
             "type": "array"
           },
+          "desk_answers": {
+            "items": {
+              "properties": {
+                "answer_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "question_id": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "replaces": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "revision": {
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "question_id",
+                "answer_id",
+                "revision"
+              ],
+              "type": "object"
+            },
+            "maxItems": 100,
+            "type": "array"
+          },
           "display_label": {
             "maxLength": 128,
             "type": [
@@ -2513,6 +2637,14 @@
           },
           "needs_attention": {
             "type": "boolean"
+          },
+          "owner_principal_id": {
+            "format": "uuid",
+            "readOnly": true,
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "parent_harness_session_id": {
             "format": "uuid",
@@ -3517,8 +3649,8 @@
     ]
   },
   "me": {
-    "version": "me/1.2",
-    "sha256": "fc3949fd89221d495d61295bd91cbc732ab595948aef47b8467f89381e155b0a",
+    "version": "me/1.3",
+    "sha256": "e0e5ca9ce7a2904af7b075ac1c59a3ffd6c02b99c0b6d39929daaf148079fc0d",
     "shape": {
       "GET /me 200": {
         "properties": {
@@ -3567,6 +3699,9 @@
           "oidc_display_name": {
             "maxLength": 48,
             "type": "string"
+          },
+          "owner_workstation": {
+            "type": "boolean"
           },
           "principal": {
             "properties": {
@@ -3684,6 +3819,10 @@
               "name"
             ],
             "type": "object"
+          },
+          "workstation_computer_id": {
+            "format": "uuid",
+            "type": "string"
           }
         },
         "required": [

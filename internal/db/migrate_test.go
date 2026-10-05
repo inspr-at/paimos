@@ -5,6 +5,7 @@ package db_test
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"io/fs"
 	"sort"
@@ -76,6 +77,40 @@ func migrationNames(t *testing.T) []string {
 		t.Fatal("no embedded migrations")
 	}
 	return names
+}
+
+// migrateLegacyWorkWithHook keeps cumulative ticket/task schema assertions at
+// the boundary before kind unification. Those fixtures intentionally include
+// incompatible legacy schemas; work_nodes_migration_test.go covers their
+// reconciliation separately. Use the real runner and verify the entire applied
+// prefix so an earlier migration failure or a missing boundary cannot pass.
+func migrateLegacyWorkWithHook(t *testing.T, d *dbtest.DB, before func(string) error) error {
+	t.Helper()
+	names := migrationNames(t)
+	end := sort.SearchStrings(names, workMigration)
+	if end == len(names) || names[end] != workMigration {
+		return fmt.Errorf("missing legacy work boundary %s", workMigration)
+	}
+	err := db.MigrateWithHook(t.Context(), d.App, func(name string) error {
+		if name == workMigration {
+			return beforeWork
+		}
+		if before != nil {
+			return before(name)
+		}
+		return nil
+	})
+	if !errors.Is(err, beforeWork) {
+		return fmt.Errorf("expected stop before %s, got %v", workMigration, err)
+	}
+	var applied string
+	if err := d.App.QueryRow(t.Context(), `SELECT coalesce(string_agg(version, ',' ORDER BY version), '') FROM schema_migrations`).Scan(&applied); err != nil {
+		return err
+	}
+	if want := strings.Join(names[:end], ","); applied != want {
+		return fmt.Errorf("legacy migration prefix = %s, want %s", applied, want)
+	}
+	return nil
 }
 
 func TestMigrationsApplyAndReapply(t *testing.T) {

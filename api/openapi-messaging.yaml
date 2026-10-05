@@ -139,7 +139,10 @@ components:
         is_action_request: {type: boolean}
         expects_reply: {type: boolean}
         reply_obligation: {type: string, enum: [none, open, closed]}
-        status: {type: string, enum: [accepted, held]}
+        status: {type: string, enum: [accepted, held, pending], description: Pending denotes a durable Decision Desk reply still in its edit window.}
+        question_id: {type: string, format: uuid}
+        answer_revision: {type: integer}
+        deliver_after: {type: string, format: date-time}
         delivery_level: {type: string, enum: [simple, steer]}
         delivery_target:
           description: Immutable redacted primary and simple fallback target version snapshot; private references and credentials are excluded.

@@ -26,19 +26,6 @@ async function open(page: Page, version?: string, now?: number) {
   return history
 }
 
-test('release list screenshot', async ({ page }) => {
-  test.skip(!process.env.RELEASE_LIST_SHOTS, 'Screenshots are opt-in review artifacts.')
-  await page.setViewportSize({ width: 1600, height: 1000 })
-  const now = new Date('2026-10-01T14:01:10Z').getTime()
-  await page.clock.install({ time: new Date(now) })
-  await open(page, undefined, now)
-  await mkdir(process.env.RELEASE_LIST_SHOTS!, { recursive: true })
-  await page.mouse.move(1, 1)
-  await sheet(page).locator('.listbox').focus()
-  await expect(sheet(page).locator('.row').first()).toBeInViewport()
-  await page.screenshot({ path: join(process.env.RELEASE_LIST_SHOTS!, `${process.env.RELEASE_LIST_SHOT_LABEL ?? 'after'}-desktop.png`) })
-})
-
 test('the marketing name leads every row; codename and Pretty version are both visible', async ({ page }) => {
   const history = await open(page)
   // Newest: the name leads, a presented theme is the subtitle.

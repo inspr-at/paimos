@@ -4,12 +4,18 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import type { Kind } from '../../lib/api'
 import { isIssueKind } from '../../lib/kindConvert'
 import { kinds } from '../../lib/useTicket'
-import AppIcon from '../AppIcon.vue'
+import AppIcon, { type IconName } from '../AppIcon.vue'
+import { WORK_ICONS, workNoun } from '../../lib/workVocabulary'
+import { kindLabel } from '../../lib/work'
 import FloatingPanel from './FloatingPanel.vue'
 
 const props = defineProps<{
+  levelName?: string; levelIcon?: string;
   ticketKey: string; kind: string | null; position: { index: number; count: number } | null
-  mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean; canDelete: boolean
+  mode: 'panel' | 'full'; canWrite: boolean; canMove: boolean; canDelete: boolean; canWorkActions?: boolean
+  canRepeat?: boolean
+  recurrenceLabel?: string
+  canEditRecurrence?: boolean
   // Keys of the tickets followed to get here (oldest first), and the edit state.
   trail?: string[]; editing?: boolean; saving?: boolean; dirty?: boolean
   // The peek dock: a labeled way into the project, and a way back to the view it covered.
@@ -17,7 +23,8 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   copyKey: []; copyLink: []; prev: []; next: []; expand: []; collapse: []; newTab: []; close: []; move: [anchor: HTMLElement]; delete: []; convert: []
-  back: [steps: number]; edit: []; save: []; cancel: []; openInProject: []
+  back: [steps: number]; edit: []; save: []; cancel: []; openInProject: []; workActions: []
+  repeat: []; editRecurrence: []
 }>()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 // The trail shows its last two steps; older ones fold into an ellipsis.
@@ -42,9 +49,13 @@ function pick(action: 'copyKey' | 'copyLink' | 'delete' | 'prev' | 'next') {
 }
 function pickMove() { const anchor = moreButton.value ?? null; moreAnchor.value = null; if (anchor) emit('move', anchor) }
 function pickConvert() { moreAnchor.value = null; emit('convert') }
+function pickView() { moreAnchor.value = null; if (props.mode === 'panel') emit('expand'); else emit('collapse') }
+function pickNewTab() { moreAnchor.value = null; emit('newTab') }
+function pickWorkActions() { moreAnchor.value = null; emit('workActions') }
 const catalog = ref<Kind[]>([])
 onMounted(() => { void kinds().then(rows => { catalog.value = rows }).catch(() => {}) })
-const canConvert = computed(() => props.canWrite && !!props.kind && isIssueKind(catalog.value.find(kind => kind.slug === props.kind) ?? props.kind))
+const displayIcon = computed<IconName>(() => WORK_ICONS.includes(props.levelIcon as typeof WORK_ICONS[number]) ? props.levelIcon as IconName : props.kind === 'epic' ? 'epic' : props.kind === 'task' ? 'task' : 'ticket')
+const canConvert = computed(() => props.kind !== 'work' && props.canWrite && !!props.kind && isIssueKind(catalog.value.find(kind => kind.slug === props.kind) ?? props.kind))
 function focusMore() { moreButton.value?.focus() }
 function menuKeys(event: KeyboardEvent) {
   const items = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
@@ -73,7 +84,7 @@ void props
       </nav>
     </template>
     <button type="button" class="key-chip" :aria-label="`Copy ${ticketKey}`" :data-tip="`Copy ${ticketKey}`" @click="emit('copyKey')">
-      <AppIcon v-if="kind" :name="kind === 'epic' ? 'epic' : kind === 'task' ? 'task' : 'ticket'" :size="12" :class="kind" />
+      <AppIcon v-if="kind" :name="displayIcon" :data-tip="levelName" :size="12" :class="kind" />
       <span>{{ ticketKey }}</span>
       <AppIcon name="copy" :size="11" class="copy-glyph" />
     </button>
@@ -106,10 +117,15 @@ void props
         </template>
         <button type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('copyLink')"><AppIcon name="link" :size="14" />Copy link</button>
         <button type="button" role="menuitem" class="menu-item" @click="pick('copyKey')"><AppIcon name="copy" :size="14" />Copy key</button>
+        <button v-if="kind && ['work', 'epic', 'ticket', 'task'].includes(kind)" type="button" role="menuitem" class="menu-item" :disabled="!canRepeat" aria-keyshortcuts="Shift+R" :data-tip="canRepeat ? 'Repeat · Shift R' : 'Needs the Manage recurring work permission'" @click="closeMore(false); emit('repeat')"><AppIcon name="repeat" :size="14" /><span>Repeat…<small v-if="!canRepeat" style="display: block; font-size: 11.5px; color: var(--ink-3)">Needs the Manage recurring work permission</small></span></button>
+        <button v-if="recurrenceLabel" type="button" role="menuitem" class="menu-item" :disabled="!canEditRecurrence" :data-tip="!canEditRecurrence ? 'Needs the Manage recurring work permission' : undefined" @click="closeMore(false); emit('editRecurrence')"><AppIcon name="edit" :size="14" /><span>Edit {{ recurrenceLabel }}…</span></button>
+        <button type="button" role="menuitem" class="menu-item" @click="pickView"><AppIcon :name="mode === 'panel' ? 'expand' : 'collapse'" :size="14" />{{ mode === 'panel' ? 'Open as full page' : 'Show beside the list' }}</button>
+        <button type="button" role="menuitem" class="menu-item" @click="pickNewTab"><AppIcon name="external" :size="14" />Open in a new tab</button>
+        <button v-if="canWorkActions" type="button" role="menuitem" class="menu-item" @click="pickWorkActions"><AppIcon name="task" :size="14" />Work actions</button>
         <button v-if="canConvert" type="button" role="menuitem" class="menu-item" @click="pickConvert"><AppIcon name="refresh" :size="14" />Convert to…</button>
-        <button v-if="canMove" type="button" role="menuitem" class="menu-item" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another epic…</button>
+        <button v-if="canMove" type="button" role="menuitem" class="menu-item" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another parent…</button>
         <div v-if="canMove || canDelete" class="menu-sep" role="separator" />
-        <button v-if="canDelete" type="button" role="menuitem" class="menu-item danger" @click="pick('delete')"><AppIcon name="trash" :size="14" />Delete {{ kind === 'epic' ? 'epic' : kind === 'task' ? 'task' : 'ticket' }}…</button>
+        <button v-if="canDelete" type="button" role="menuitem" class="menu-item danger" @click="pick('delete')"><AppIcon name="trash" :size="14" />Delete {{ workNoun(levelName || kindLabel(kind || 'ticket')) }}…</button>
       </div>
     </FloatingPanel>
     </div>
@@ -117,6 +133,7 @@ void props
       <button v-if="backLabel" type="button" class="btn sm ghost" @click="emit('close')"><AppIcon name="arrow-left" :size="14" />{{ backLabel }}</button>
       <button v-if="openInProject" type="button" class="btn sm" @click="emit('openInProject')"><AppIcon name="folder" :size="14" />Open in project</button>
     </div>
+    <div v-if="$slots.marker" class="header-marker"><slot name="marker" /></div>
   </header>
 </template>
 
@@ -128,6 +145,7 @@ void props
 .peek-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 0 0 8px; }
 .peek-actions .btn { min-width: 0; }
 .peek-actions .btn svg { flex: none; }
+.header-marker { display: flex; align-items: center; padding: 0 0 8px; }
 .key-chip { display: inline-flex; flex-shrink: 0; align-items: center; gap: 6px; height: 26px; white-space: nowrap; padding: 0 9px 0 10px; border: 0; border-radius: 7px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 12px/1 var(--mono); letter-spacing: .03em; font-variant-ligatures: none; }
 .key-chip:hover { box-shadow: inset 0 0 0 1px var(--teal); }
 .key-chip:active { filter: brightness(.97); }
@@ -158,10 +176,14 @@ void props
 .menu-item.danger, .menu-item.danger svg { color: var(--danger); }
 .menu-item.danger:hover:not(:disabled) { background: var(--danger-bg); }
 .menu-sep { height: 1px; margin: 4px 6px; background: var(--line); }
-/* A narrow panel with a trail keeps the last crumb (after an ellipsis) and drops the list position. */
+/* Narrow headers keep Back; breadcrumb text must not compete with the current
+   key and actions, even when the surrounding viewport is wide. */
 @container panel-bar (max-width: 640px) {
-  .has-trail .position, .crumb-item:not(:last-child) { display: none; }
-  .trail-more { display: inline; }
+  .has-trail .position, .trail { display: none; }
+}
+/* A narrow dock uses More for these actions, independently of viewport width. */
+@container panel-bar (max-width: 420px) {
+  .wide-only, .position { display: none; }
 }
 @media (max-width: 720px) {
   .panel-bar { padding: 0 6px 0 12px; }

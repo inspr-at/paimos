@@ -495,7 +495,7 @@ func markCandidate(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, 
 			return err
 		}
 	}
-	rows, err := tx.Query(ctx, `SELECT n.id FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id WHERE t.release_node_id=$1::uuid AND n.deleted_at IS NULL ORDER BY n.id FOR SHARE OF n`, f.Release.ID)
+	rows, err := tx.Query(ctx, `SELECT n.id FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id WHERE t.release_node_id=$1::uuid AND n.deleted_at IS NULL AND aeon_work_is_release_leaf(n.tenant_id,n.id) ORDER BY n.id FOR SHARE OF n`, f.Release.ID)
 	if err != nil {
 		return err
 	}
@@ -507,7 +507,7 @@ func markCandidate(ctx context.Context, tx pgx.Tx, p tenant.Principal, f facts, 
 		return err
 	}
 	var total, open int
-	if err := tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE n.state<>'done') FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id WHERE t.release_node_id=$1::uuid AND n.deleted_at IS NULL`, f.Release.ID).Scan(&total, &open); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT count(*),count(*) FILTER(WHERE n.state<>'done') FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id WHERE t.release_node_id=$1::uuid AND n.deleted_at IS NULL AND aeon_work_is_release_leaf(n.tenant_id,n.id)`, f.Release.ID).Scan(&total, &open); err != nil {
 		return err
 	}
 	if total == 0 {

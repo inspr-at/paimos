@@ -1,0 +1,2496 @@
+{
+  "version": 1,
+  "ticket": "OPS-257",
+  "defaultShards": 12,
+  "specDirectories": [
+    "tests"
+  ],
+  "timingSource": {
+    "file": "tmp/ci-timings-main.jsonl",
+    "sha256": "7ca3010802f080f7485bfc4936d7c41a57f70995eda4d3c90cae2d54b3a4f454",
+    "runId": "37149978354",
+    "allocation": "For each measured step, split its duration proportionally to the listed test count of each original spec. Duplicate specs retain the first dedicated owner. Unmeasured specs use their listed test count times the median measured step seconds/test: an estimate, not runtime evidence.",
+    "unmeasuredSecondsPerListedTest": 2.219512195,
+    "testCollection": {
+      "command": "node node_modules/@playwright/test/cli.js test -c playwright.ui.config.ts --list --reporter=json",
+      "packageLockSha256": "46863a2932bcd65b05de3189d32ed160d422e98ee7c51e96bc7787aa0032a859",
+      "specs": 213,
+      "tests": 3044,
+      "note": "Browser-free native collection; each final group was also collected separately to verify exact files/config/flags. Counts are embedded per spec so CI does not need tmp artifacts."
+    }
+  },
+  "integrationNotes": [
+    "AEON-676: OPS-257 runner/workflow and coverage guard integrated from dc61efd76ad7263749c3b70a515aad5e40df60ba. The clipped-names-and-preferences group gates clip-tip, aeon-632b-clip, key-trim and model-prefs once, with no clip-tip exclusion. The touch layout fix passed six variants x20 locally; hosted execution of this integrated revision still needs coordinator CI. Weights for these 247 tests remain scheduling estimates: clip-tip uses the complete local serial run plus a 20 percent margin; the other three use native test counts. Hosted runtimes remain unmeasured.",
+    "OPS: group remaining-ui is ungated (gate:false). These 164 specs were never part of the CI gate and have no measured timing; the gate keeps today's measured coverage so the merge queue gets faster, not wider. Run them with --all (ci:web:shard -- --all i/N); a follow-up ticket measures them and decides whether they gate.",
+    "The old workflow discovers no full-suite step: it explicitly selects 48 UI specs (37 in web). The manifest covers all 213 UI specs once; 165 have no measured CI step duration.",
+    "Remove the replaced browser invocations, including overlaps in footer/status/e2e jobs, when wiring the full UI shards. Keep their other checks and collect evidence from the shards. Otherwise those old jobs still duplicate manifest coverage.",
+    "Keep e2e/smoke.spec.ts and browser lifecycle probes in e2e; neither is part of the UI spec universe.",
+    "Upload test-results/ci-web, screenshot directories under RUNNER_TEMP, and .agent-shots/planning + .agent-shots/queue from shards. Run --check --shards 12 and ci:web:shard:test in setup before browsers.",
+    "Flake guard can request --last-failed (per-group last-run state) or --test-list /absolute/failures.txt (native Playwright test-list format). Empty groups succeed only during these failure-only selections.",
+    "PLAYWRIGHT_JSON_OUTPUT_FILE enables per-group JSON reports plus one combined report at that path; --reporter=json is also accepted. Prior report bytes are invalidated before launch so startup failure/interruption cannot reuse green evidence.",
+    "Shard assignment is based on file names and timing weights only; groups execute sequentially with their own original policies. Weights for the 165 newly covered specs are estimates; hosted measurement is needed before claiming the 5-minute target.",
+    "RUNNER_ENVIRONMENT must be github-hosted for execution; it is GitHub Actions built-in runner metadata. Local --list/--check remain browser-free. --last-failed preflights per-group state and refuses missing/invalid state instead of Playwright's full-selection fallback.",
+    "AEON-679 rule B: removed low-value capture, polish, duplicate scan and literal geometry cases; mixed protected cases remain. Changed spec listedTests use native collection; weights are proportional scheduling estimates, not measured runtime savings. Historical timingSource and ciInventory remain provenance only. The optional historical/current release-list screenshot jobs were retired with their capture case."
+  ],
+  "configs": [
+    {
+      "file": "playwright.ui.config.ts",
+      "testDir": "tests",
+      "testMatch": "**/*.spec.ts",
+      "project": null,
+      "server": "vite dev --mode test",
+      "ciDefaultWorkers": 4,
+      "fullyParallelInCI": true
+    },
+    {
+      "file": "playwright.perf.config.ts",
+      "testDir": "tests",
+      "testMatch": "**/performance.spec.ts",
+      "project": null,
+      "server": "vite preview (requires build)",
+      "ciDefaultWorkers": 1,
+      "fullyParallelInCI": false
+    },
+    {
+      "file": "playwright.config.ts",
+      "testDir": "e2e",
+      "project": null,
+      "server": "external Go server",
+      "ciDefaultWorkers": null,
+      "fullyParallelInCI": false
+    }
+  ],
+  "ciInventory": [
+    {
+      "id": "web-1",
+      "job": "web",
+      "name": "Run npx playwright install --with-deps chromium",
+      "command": "npx playwright install --with-deps chromium",
+      "config": null,
+      "project": null,
+      "flags": [],
+      "specs": [],
+      "env": {},
+      "measuredSeconds": 14.0,
+      "kind": "browser-install"
+    },
+    {
+      "id": "web-2",
+      "job": "web",
+      "name": "Usage dashboard and morning briefing regressions",
+      "command": "npx playwright test -c playwright.ui.config.ts tests/usage-dashboard.spec.ts tests/morning-briefing.spec.ts --workers=1",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "specs": [
+        "tests/usage-dashboard.spec.ts",
+        "tests/morning-briefing.spec.ts"
+      ],
+      "env": {},
+      "measuredSeconds": 37.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 25
+    },
+    {
+      "id": "web-4",
+      "job": "web",
+      "name": "Run npx playwright test -c playwright.ui.config.ts tests/release-header.spec.ts tests/release-codenames.spec.ts tests/release-presentation.spec.ts tests/version-reveal.spec.ts tests/releases.spec.ts tests/header-menus.spec.ts tests/brand.spec.ts --workers=1",
+      "command": "npx playwright test -c playwright.ui.config.ts tests/release-header.spec.ts tests/release-codenames.spec.ts tests/release-presentation.spec.ts tests/version-reveal.spec.ts tests/releases.spec.ts tests/header-menus.spec.ts tests/brand.spec.ts --workers=1",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "specs": [
+        "tests/release-header.spec.ts",
+        "tests/release-codenames.spec.ts",
+        "tests/release-presentation.spec.ts",
+        "tests/version-reveal.spec.ts",
+        "tests/releases.spec.ts",
+        "tests/header-menus.spec.ts",
+        "tests/brand.spec.ts"
+      ],
+      "env": {
+        "RELEASE_LIST_SHOTS": "${{ runner.temp }}/aeon-release-list-shots"
+      },
+      "measuredSeconds": 231.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 181
+    },
+    {
+      "id": "web-5",
+      "job": "web",
+      "name": "Browser runner safety (no browsers)",
+      "command": "npm run test:browser-safety",
+      "config": null,
+      "project": null,
+      "flags": [],
+      "specs": [],
+      "env": {},
+      "measuredSeconds": 15.0,
+      "kind": "browser-free-supervisor-tests"
+    },
+    {
+      "id": "web-6",
+      "job": "web",
+      "name": "Service tier controls and layout stability",
+      "command": "npx playwright test -c playwright.ui.config.ts tests/service-tier.spec.ts --workers=1",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "specs": [
+        "tests/service-tier.spec.ts"
+      ],
+      "env": {},
+      "measuredSeconds": 91.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 41
+    },
+    {
+      "id": "web-7",
+      "job": "web",
+      "name": "Install browser for access dialog regressions",
+      "command": "npx playwright install --with-deps chromium",
+      "config": null,
+      "project": null,
+      "flags": [],
+      "specs": [],
+      "env": {},
+      "measuredSeconds": 3.0,
+      "kind": "browser-install"
+    },
+    {
+      "id": "web-8",
+      "job": "web",
+      "name": "Access dialog regressions (hosted only)",
+      "command": "npx playwright test -c playwright.ui.config.ts tests/key-dialog.spec.ts tests/new-agent.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts tests/key-full-access.spec.ts tests/scope-codes.spec.ts tests/access.spec.ts --workers=2 --trace=retain-on-failure",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2",
+        "--trace=retain-on-failure"
+      ],
+      "specs": [
+        "tests/key-dialog.spec.ts",
+        "tests/new-agent.spec.ts",
+        "tests/key-scopes.spec.ts",
+        "tests/key-expiry.spec.ts",
+        "tests/key-full-access.spec.ts",
+        "tests/scope-codes.spec.ts",
+        "tests/access.spec.ts"
+      ],
+      "env": {},
+      "measuredSeconds": 329.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 124
+    },
+    {
+      "id": "web-9",
+      "job": "web",
+      "name": "Planning columns regression and theme screenshots",
+      "command": "npx playwright test tests/planning-columns.spec.ts -c playwright.ui.config.ts --workers=2",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2"
+      ],
+      "specs": [
+        "tests/planning-columns.spec.ts"
+      ],
+      "env": {},
+      "measuredSeconds": 31.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 14
+    },
+    {
+      "id": "web-10",
+      "job": "web",
+      "name": "Work queue regressions and theme screenshots",
+      "command": "npx playwright test tests/work-queue.spec.ts -c playwright.ui.config.ts --workers=1",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "specs": [
+        "tests/work-queue.spec.ts"
+      ],
+      "env": {},
+      "measuredSeconds": 29.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 9
+    },
+    {
+      "id": "web-11",
+      "job": "web",
+      "name": "Ticket dispatch, panel and worker regressions",
+      "command": "npx playwright test tests/start-agent.spec.ts tests/ticket-panel.spec.ts tests/ticket-workers.spec.ts -c playwright.ui.config.ts --workers=2",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2"
+      ],
+      "specs": [
+        "tests/start-agent.spec.ts",
+        "tests/ticket-panel.spec.ts",
+        "tests/ticket-workers.spec.ts"
+      ],
+      "env": {},
+      "measuredSeconds": 92.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 51
+    },
+    {
+      "id": "web-12",
+      "job": "web",
+      "name": "Install browser for session linking regressions",
+      "command": "npx playwright install --with-deps chromium",
+      "config": null,
+      "project": null,
+      "flags": [],
+      "specs": [],
+      "env": {},
+      "measuredSeconds": 2.0,
+      "kind": "browser-install"
+    },
+    {
+      "id": "web-13",
+      "job": "web",
+      "name": "Controls stay put and affected dialog regressions (AEON-541)",
+      "command": "npx playwright test -c playwright.ui.config.ts --workers=2 --trace=retain-on-failure tests/no-shift.spec.ts tests/approval-feedback.spec.ts tests/managed-controls.spec.ts tests/accounts-computers.spec.ts tests/agents-top.spec.ts tests/relations.spec.ts tests/ticket-outcomes.spec.ts tests/views-filters.spec.ts tests/session-recovery.spec.ts",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2",
+        "--trace=retain-on-failure"
+      ],
+      "specs": [
+        "tests/no-shift.spec.ts",
+        "tests/approval-feedback.spec.ts",
+        "tests/managed-controls.spec.ts",
+        "tests/accounts-computers.spec.ts",
+        "tests/agents-top.spec.ts",
+        "tests/relations.spec.ts",
+        "tests/ticket-outcomes.spec.ts",
+        "tests/views-filters.spec.ts",
+        "tests/session-recovery.spec.ts"
+      ],
+      "env": {},
+      "measuredSeconds": 424.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 171
+    },
+    {
+      "id": "web-14",
+      "job": "web",
+      "name": "Decision Desk keyboard, protected adapters and geometry (AEON-567)",
+      "command": "npm test -- tests/decision-desk.spec.ts --workers=1 --trace=retain-on-failure",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "specs": [
+        "tests/decision-desk.spec.ts"
+      ],
+      "env": {
+        "AEON_DESK_SHOTS": "${{ runner.temp }}/aeon-desk-shots"
+      },
+      "measuredSeconds": 128.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 35
+    },
+    {
+      "id": "web-15",
+      "job": "web",
+      "name": "Session linking, approval and security regressions",
+      "command": "npm test -- tests/attach-discoverable.spec.ts tests/attach-watch.spec.ts tests/attach-security.spec.ts tests/classic-invite.spec.ts tests/access.spec.ts tests/account-link.spec.ts --workers=2",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2"
+      ],
+      "specs": [
+        "tests/attach-discoverable.spec.ts",
+        "tests/attach-watch.spec.ts",
+        "tests/attach-security.spec.ts",
+        "tests/classic-invite.spec.ts",
+        "tests/access.spec.ts",
+        "tests/account-link.spec.ts"
+      ],
+      "env": {
+        "ATTACH_DISCOVERABLE_SHOTS": "${{ runner.temp }}/aeon-attach-shots",
+        "ATTACH_SHOTS": "${{ runner.temp }}/aeon-attach-shots"
+      },
+      "measuredSeconds": 357.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 180
+    },
+    {
+      "id": "web-16",
+      "job": "web",
+      "name": "Scope proposals and key management regressions",
+      "command": "npx playwright test -c playwright.ui.config.ts tests/scope-codes.spec.ts tests/key-scopes.spec.ts tests/key-expiry.spec.ts --workers=2",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2"
+      ],
+      "specs": [
+        "tests/scope-codes.spec.ts",
+        "tests/key-scopes.spec.ts",
+        "tests/key-expiry.spec.ts"
+      ],
+      "env": {},
+      "measuredSeconds": 77.0,
+      "kind": "browser-test",
+      "disposition": "Duplicate current-code specs; replaced by existing manifest owners.",
+      "listedTests": 41
+    },
+    {
+      "id": "footer-ui-1",
+      "job": "footer-ui",
+      "name": "Run npx playwright install --with-deps chromium",
+      "command": "npx playwright install --with-deps chromium",
+      "config": null,
+      "project": null,
+      "flags": [],
+      "specs": [],
+      "env": {},
+      "measuredSeconds": 17.0,
+      "kind": "browser-install"
+    },
+    {
+      "id": "footer-ui-2",
+      "job": "footer-ui",
+      "name": "Footer and affected release/brand integration checks",
+      "command": "npx playwright test -c playwright.ui.config.ts --workers=2 tests/footer-release-pill.spec.ts tests/footer-flow-pill.spec.ts tests/release-codenames.spec.ts tests/version-reveal.spec.ts tests/developer-settings.spec.ts tests/brand.spec.ts tests/tenant-brand.spec.ts tests/header-menus.spec.ts tests/shell.spec.ts tests/releases.spec.ts",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2"
+      ],
+      "specs": [
+        "tests/footer-release-pill.spec.ts",
+        "tests/footer-flow-pill.spec.ts",
+        "tests/release-codenames.spec.ts",
+        "tests/version-reveal.spec.ts",
+        "tests/developer-settings.spec.ts",
+        "tests/brand.spec.ts",
+        "tests/tenant-brand.spec.ts",
+        "tests/header-menus.spec.ts",
+        "tests/shell.spec.ts",
+        "tests/releases.spec.ts"
+      ],
+      "env": {
+        "AEON_SCREENSHOTS_DIR": "test-results/footer-release-pill"
+      },
+      "measuredSeconds": 172.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 246
+    },
+    {
+      "id": "status-help-ui-1",
+      "job": "status-help-ui",
+      "name": "Run npx playwright install --with-deps chromium",
+      "command": "npx playwright install --with-deps chromium",
+      "config": null,
+      "project": null,
+      "flags": [],
+      "specs": [],
+      "env": {},
+      "measuredSeconds": 29.0,
+      "kind": "browser-install"
+    },
+    {
+      "id": "status-help-ui-2",
+      "job": "status-help-ui",
+      "name": "Status help and human-check browser regressions",
+      "command": "npx playwright test -c playwright.ui.config.ts tests/status-help.spec.ts --workers=1",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "specs": [
+        "tests/status-help.spec.ts"
+      ],
+      "env": {
+        "AEON_521A_SHOTS": "${{ runner.temp }}/aeon-521a-shots"
+      },
+      "measuredSeconds": 24.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 7
+    },
+    {
+      "id": "e2e-1",
+      "job": "e2e",
+      "name": "Install Playwright",
+      "command": "npx playwright install --with-deps --only-shell chromium",
+      "config": null,
+      "project": null,
+      "flags": [],
+      "specs": [],
+      "env": {},
+      "measuredSeconds": 17.0,
+      "kind": "browser-install"
+    },
+    {
+      "id": "e2e-2",
+      "job": "e2e",
+      "name": "Measure Chromium shell cleanup on success, failure and interruption",
+      "command": "node --test --test-concurrency=1 scripts/playwright-safe.test.mjs",
+      "config": null,
+      "project": null,
+      "flags": [],
+      "specs": [],
+      "env": {
+        "AEON_BROWSER_LIFECYCLE": "1"
+      },
+      "measuredSeconds": 19.0,
+      "kind": "browser-lifecycle-tests"
+    },
+    {
+      "id": "e2e-3",
+      "job": "e2e",
+      "name": "Start server and run smoke",
+      "command": "set -euo pipefail\nnohup ./bin/paimos serve >\"$RUNNER_TEMP/aeon.log\" 2>&1 &\necho $! >\"$RUNNER_TEMP/aeon.pid\"\nready=0\nfor _ in $(seq 1 30); do\n  if curl -sf \"$BASE_URL/api/health\" >/dev/null; then\n    ready=1\n    break\n  fi\n  sleep 1\ndone\nif [ \"$ready\" -ne 1 ]; then\n  echo \"server did not become ready\" >&2\n  cat \"$RUNNER_TEMP/aeon.log\" >&2 || true\n  exit 1\nfi\nnpm run e2e --prefix web",
+      "config": "playwright.config.ts",
+      "project": null,
+      "flags": [],
+      "specs": [
+        "e2e/smoke.spec.ts"
+      ],
+      "env": {},
+      "measuredSeconds": 5.0,
+      "kind": "browser-test"
+    },
+    {
+      "id": "e2e-4",
+      "job": "e2e",
+      "name": "Test workspace model provider and catalog refresh controls",
+      "command": "npm test -- tests/model-provider.spec.ts tests/model-refresh.spec.ts --workers=1",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "specs": [
+        "tests/model-provider.spec.ts",
+        "tests/model-refresh.spec.ts"
+      ],
+      "env": {},
+      "measuredSeconds": 14.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 4
+    },
+    {
+      "id": "status-autopilot-ui-1",
+      "job": "status-autopilot-ui",
+      "name": "Run npx playwright install --with-deps chromium",
+      "command": "npx playwright install --with-deps chromium",
+      "config": null,
+      "project": null,
+      "flags": [],
+      "specs": [],
+      "env": {},
+      "measuredSeconds": 23.0,
+      "kind": "browser-install"
+    },
+    {
+      "id": "status-autopilot-ui-2",
+      "job": "status-autopilot-ui",
+      "name": "Run npx playwright test -c playwright.ui.config.ts tests/status-autopilot.spec.ts tests/settings.spec.ts tests/agent-activity.spec.ts --workers=1",
+      "command": "npx playwright test -c playwright.ui.config.ts tests/status-autopilot.spec.ts tests/settings.spec.ts tests/agent-activity.spec.ts --workers=1",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "specs": [
+        "tests/status-autopilot.spec.ts",
+        "tests/settings.spec.ts",
+        "tests/agent-activity.spec.ts"
+      ],
+      "env": {
+        "STATUS_AUTOPILOT_SHOTS": "${{ runner.temp }}/status-autopilot-shots",
+        "AGENT_ACTIVITY_SHOTS": "${{ runner.temp }}/status-autopilot-shots/activity"
+      },
+      "measuredSeconds": 127.0,
+      "kind": "browser-test",
+      "disposition": "Replaced by manifest groups; original jobs must not rerun these current-code specs.",
+      "listedTests": 39
+    }
+  ],
+  "duplicateCurrentSpecs": [
+    {
+      "file": "tests/access.spec.ts",
+      "steps": [
+        "web-8",
+        "web-15"
+      ]
+    },
+    {
+      "file": "tests/brand.spec.ts",
+      "steps": [
+        "web-4",
+        "footer-ui-2"
+      ]
+    },
+    {
+      "file": "tests/header-menus.spec.ts",
+      "steps": [
+        "web-4",
+        "footer-ui-2"
+      ]
+    },
+    {
+      "file": "tests/key-expiry.spec.ts",
+      "steps": [
+        "web-8",
+        "web-16"
+      ]
+    },
+    {
+      "file": "tests/key-scopes.spec.ts",
+      "steps": [
+        "web-8",
+        "web-16"
+      ]
+    },
+    {
+      "file": "tests/release-codenames.spec.ts",
+      "steps": [
+        "web-4",
+        "footer-ui-2"
+      ]
+    },
+    {
+      "file": "tests/releases.spec.ts",
+      "steps": [
+        "web-4",
+        "footer-ui-2"
+      ]
+    },
+    {
+      "file": "tests/scope-codes.spec.ts",
+      "steps": [
+        "web-8",
+        "web-16"
+      ]
+    },
+    {
+      "file": "tests/version-reveal.spec.ts",
+      "steps": [
+        "web-4",
+        "footer-ui-2"
+      ]
+    }
+  ],
+  "groups": [
+    {
+      "id": "usage-briefing",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [
+        "web-2"
+      ],
+      "specs": [
+        {
+          "file": "tests/usage-dashboard.spec.ts",
+          "weightSeconds": 14.8,
+          "weightSource": "web-2",
+          "listedTests": 10
+        },
+        {
+          "file": "tests/morning-briefing.spec.ts",
+          "weightSeconds": 22.2,
+          "weightSource": "web-2",
+          "listedTests": 15
+        }
+      ]
+    },
+    {
+      "id": "release",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {
+        "RELEASE_LIST_SHOTS": "${RUNNER_TEMP}/aeon-release-list-shots",
+        "AEON_SCREENSHOTS_DIR": "test-results/footer-release-pill"
+      },
+      "hostedOnly": true,
+      "sourceSteps": [
+        "web-4",
+        "footer-ui-2"
+      ],
+      "specs": [
+        {
+          "file": "tests/release-header.spec.ts",
+          "weightSeconds": 29.35359084,
+          "weightSource": "web-4",
+          "listedTests": 23
+        },
+        {
+          "file": "tests/release-codenames.spec.ts",
+          "weightSeconds": 30.62983392,
+          "weightSource": "web-4",
+          "listedTests": 24
+        },
+        {
+          "file": "tests/release-presentation.spec.ts",
+          "weightSeconds": 8.933702,
+          "weightSource": "web-4",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/version-reveal.spec.ts",
+          "weightSeconds": 7.657459,
+          "weightSource": "web-4",
+          "listedTests": 6
+        },
+        {
+          "file": "tests/releases.spec.ts",
+          "weightSeconds": 28.077347692,
+          "weightSource": "web-4",
+          "listedTests": 22
+        },
+        {
+          "file": "tests/header-menus.spec.ts",
+          "weightSeconds": 114.861878,
+          "weightSource": "web-4",
+          "listedTests": 90
+        },
+        {
+          "file": "tests/brand.spec.ts",
+          "weightSeconds": 2.552486,
+          "weightSource": "web-4",
+          "listedTests": 2
+        }
+      ]
+    },
+    {
+      "id": "service-tier",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [
+        "web-6"
+      ],
+      "specs": [
+        {
+          "file": "tests/service-tier.spec.ts",
+          "weightSeconds": 91.0,
+          "weightSource": "web-6",
+          "listedTests": 41
+        }
+      ]
+    },
+    {
+      "id": "access-dialogs",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2",
+        "--trace=retain-on-failure"
+      ],
+      "env": {
+        "ATTACH_DISCOVERABLE_SHOTS": "${RUNNER_TEMP}/aeon-attach-shots",
+        "ATTACH_SHOTS": "${RUNNER_TEMP}/aeon-attach-shots"
+      },
+      "hostedOnly": true,
+      "sourceSteps": [
+        "web-8",
+        "web-15",
+        "web-16"
+      ],
+      "specs": [
+        {
+          "file": "tests/key-dialog.spec.ts",
+          "weightSeconds": 23.879032,
+          "weightSource": "web-8",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/new-agent.spec.ts",
+          "weightSeconds": 31.83871,
+          "weightSource": "web-8",
+          "listedTests": 12
+        },
+        {
+          "file": "tests/key-scopes.spec.ts",
+          "weightSeconds": 42.451613,
+          "weightSource": "web-8",
+          "listedTests": 16
+        },
+        {
+          "file": "tests/key-expiry.spec.ts",
+          "weightSeconds": 34.491935,
+          "weightSource": "web-8",
+          "listedTests": 13
+        },
+        {
+          "file": "tests/key-full-access.spec.ts",
+          "weightSeconds": 53.064516,
+          "weightSource": "web-8",
+          "listedTests": 20
+        },
+        {
+          "file": "tests/scope-codes.spec.ts",
+          "weightSeconds": 31.83871,
+          "weightSource": "web-8",
+          "listedTests": 12
+        },
+        {
+          "file": "tests/access.spec.ts",
+          "weightSeconds": 111.435484,
+          "weightSource": "web-8",
+          "listedTests": 42
+        }
+      ]
+    },
+    {
+      "id": "key-layout",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/key-layout.spec.ts",
+          "weightSeconds": 26.634146,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 12
+        }
+      ]
+    },
+    {
+      "id": "planning",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [
+        "web-9"
+      ],
+      "specs": [
+        {
+          "file": "tests/planning-columns.spec.ts",
+          "weightSeconds": 31.0,
+          "weightSource": "web-9",
+          "listedTests": 14
+        }
+      ]
+    },
+    {
+      "id": "work-queue",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [
+        "web-10"
+      ],
+      "specs": [
+        {
+          "file": "tests/work-queue.spec.ts",
+          "weightSeconds": 29.0,
+          "weightSource": "web-10",
+          "listedTests": 9
+        }
+      ]
+    },
+    {
+      "id": "dispatch",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [
+        "web-11"
+      ],
+      "specs": [
+        {
+          "file": "tests/start-agent.spec.ts",
+          "weightSeconds": 36.078431,
+          "weightSource": "web-11",
+          "listedTests": 20
+        },
+        {
+          "file": "tests/ticket-panel.spec.ts",
+          "weightSeconds": 34.509803565,
+          "weightSource": "web-11",
+          "listedTests": 22
+        },
+        {
+          "file": "tests/ticket-workers.spec.ts",
+          "weightSeconds": 19.843137,
+          "weightSource": "web-11",
+          "listedTests": 11
+        }
+      ]
+    },
+    {
+      "id": "stable-controls",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [
+        "web-13"
+      ],
+      "specs": [
+        {
+          "file": "tests/record-ownership.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/no-shift.spec.ts",
+          "weightSeconds": 114.05848,
+          "weightSource": "web-13",
+          "listedTests": 46
+        },
+        {
+          "file": "tests/approval-feedback.spec.ts",
+          "weightSeconds": 32.233918,
+          "weightSource": "web-13",
+          "listedTests": 13
+        },
+        {
+          "file": "tests/managed-controls.spec.ts",
+          "weightSeconds": 61.988304,
+          "weightSource": "web-13",
+          "listedTests": 25
+        },
+        {
+          "file": "tests/accounts-computers.spec.ts",
+          "weightSeconds": 32.233918,
+          "weightSource": "web-13",
+          "listedTests": 26
+        },
+        {
+          "file": "tests/agents-top.spec.ts",
+          "weightSeconds": 81.824561,
+          "weightSource": "web-13",
+          "listedTests": 33
+        },
+        {
+          "file": "tests/relations.spec.ts",
+          "weightSeconds": 17.356725,
+          "weightSource": "web-13",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/ticket-outcomes.spec.ts",
+          "weightSeconds": 4.959064,
+          "weightSource": "web-13",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/views-filters.spec.ts",
+          "weightSeconds": 42.152047,
+          "weightSource": "web-13",
+          "listedTests": 17
+        },
+        {
+          "file": "tests/session-recovery.spec.ts",
+          "weightSeconds": 37.192982,
+          "weightSource": "web-13",
+          "listedTests": 15
+        }
+      ]
+    },
+    {
+      "id": "recurrences",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {
+        "AEON_RECURRENCE_SHOTS": "${RUNNER_TEMP}/aeon-recurrence-shots"
+      },
+      "hostedOnly": true,
+      "sourceSteps": [
+        "AEON-573 recurring work and anchored-control regressions"
+      ],
+      "specs": [
+        {
+          "file": "tests/recurrences.spec.ts",
+          "weightSeconds": 45.0,
+          "weightSource": "estimate"
+        },
+        {
+          "file": "tests/recurrence-marker.spec.ts",
+          "weightSeconds": 45.0,
+          "weightSource": "estimate"
+        }
+      ]
+    },
+    {
+      "id": "decision-desk",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {
+        "AEON_DESK_SHOTS": "${RUNNER_TEMP}/aeon-desk-shots"
+      },
+      "hostedOnly": true,
+      "sourceSteps": [
+        "web-14"
+      ],
+      "specs": [
+        {
+          "file": "tests/decision-desk.spec.ts",
+          "weightSeconds": 128.0,
+          "weightSource": "web-14",
+          "listedTests": 35
+        }
+      ]
+    },
+    {
+      "id": "attachment-security",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2"
+      ],
+      "env": {
+        "ATTACH_DISCOVERABLE_SHOTS": "${RUNNER_TEMP}/aeon-attach-shots",
+        "ATTACH_SHOTS": "${RUNNER_TEMP}/aeon-attach-shots"
+      },
+      "hostedOnly": true,
+      "sourceSteps": [
+        "web-15"
+      ],
+      "specs": [
+        {
+          "file": "tests/attach-discoverable.spec.ts",
+          "weightSeconds": 81.316667,
+          "weightSource": "web-15",
+          "listedTests": 41
+        },
+        {
+          "file": "tests/attach-watch.spec.ts",
+          "weightSeconds": 61.483333,
+          "weightSource": "web-15",
+          "listedTests": 31
+        },
+        {
+          "file": "tests/attach-security.spec.ts",
+          "weightSeconds": 99.166667,
+          "weightSource": "web-15",
+          "listedTests": 50
+        },
+        {
+          "file": "tests/classic-invite.spec.ts",
+          "weightSeconds": 11.9,
+          "weightSource": "web-15",
+          "listedTests": 6
+        },
+        {
+          "file": "tests/account-link.spec.ts",
+          "weightSeconds": 19.833333,
+          "weightSource": "web-15",
+          "listedTests": 10
+        }
+      ]
+    },
+    {
+      "id": "footer",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2"
+      ],
+      "env": {
+        "AEON_SCREENSHOTS_DIR": "test-results/footer-release-pill"
+      },
+      "hostedOnly": true,
+      "sourceSteps": [
+        "footer-ui-2"
+      ],
+      "specs": [
+        {
+          "file": "tests/footer-release-pill.spec.ts",
+          "weightSeconds": 27.96748,
+          "weightSource": "footer-ui-2",
+          "listedTests": 40
+        },
+        {
+          "file": "tests/footer-flow-pill.spec.ts",
+          "weightSeconds": 1.398374,
+          "weightSource": "footer-ui-2",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/developer-settings.spec.ts",
+          "weightSeconds": 5.593496,
+          "weightSource": "footer-ui-2",
+          "listedTests": 8
+        },
+        {
+          "file": "tests/tenant-brand.spec.ts",
+          "weightSeconds": 10.487805,
+          "weightSource": "footer-ui-2",
+          "listedTests": 15
+        },
+        {
+          "file": "tests/shell.spec.ts",
+          "weightSeconds": 22.373984,
+          "weightSource": "footer-ui-2",
+          "listedTests": 32
+        }
+      ]
+    },
+    {
+      "id": "status-help",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {
+        "AEON_521A_SHOTS": "${RUNNER_TEMP}/aeon-521a-shots"
+      },
+      "hostedOnly": true,
+      "sourceSteps": [
+        "status-help-ui-2"
+      ],
+      "specs": [
+        {
+          "file": "tests/status-help.spec.ts",
+          "weightSeconds": 24.0,
+          "weightSource": "status-help-ui-2",
+          "listedTests": 7
+        }
+      ]
+    },
+    {
+      "id": "model-settings",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [
+        "e2e-4"
+      ],
+      "specs": [
+        {
+          "file": "tests/model-provider.spec.ts",
+          "weightSeconds": 10.5,
+          "weightSource": "e2e-4",
+          "listedTests": 3
+        },
+        {
+          "file": "tests/model-refresh.spec.ts",
+          "weightSeconds": 3.5,
+          "weightSource": "e2e-4",
+          "listedTests": 1
+        }
+      ]
+    },
+    {
+      "id": "status-autopilot",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {
+        "STATUS_AUTOPILOT_SHOTS": "${RUNNER_TEMP}/status-autopilot-shots",
+        "AGENT_ACTIVITY_SHOTS": "${RUNNER_TEMP}/status-autopilot-shots/activity"
+      },
+      "hostedOnly": true,
+      "sourceSteps": [
+        "status-autopilot-ui-2"
+      ],
+      "specs": [
+        {
+          "file": "tests/status-autopilot.spec.ts",
+          "weightSeconds": 22.794872,
+          "weightSource": "status-autopilot-ui-2",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/settings.spec.ts",
+          "weightSeconds": 32.564102381,
+          "weightSource": "status-autopilot-ui-2",
+          "listedTests": 10
+        },
+        {
+          "file": "tests/agent-activity.spec.ts",
+          "weightSeconds": 35.820513,
+          "weightSource": "status-autopilot-ui-2",
+          "listedTests": 11
+        },
+        {
+          "file": "tests/features.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        }
+      ]
+    },
+    {
+      "id": "performance",
+      "config": "playwright.perf.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/performance.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        }
+      ]
+    },
+    {
+      "id": "clipped-names-and-preferences",
+      "gate": true,
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/aeon-632b-clip.spec.ts",
+          "weightSeconds": 86.560976,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 39
+        },
+        {
+          "file": "tests/clip-tip.spec.ts",
+          "weightSeconds": 199,
+          "weightSource": "local-serial-runtime-estimate",
+          "listedTests": 159,
+          "timingEstimate": {
+            "command": "npm test -- tests/clip-tip.spec.ts --workers=1 --retries=0 --reporter=line,json",
+            "platform": "darwin",
+            "workers": 1,
+            "passed": 159,
+            "failed": 0,
+            "skipped": 0,
+            "flaky": 0,
+            "durationMs": 165459.95,
+            "marginPercent": 20,
+            "reportSha256": "5ea979ac66d2b4576cff1eb8a47d1c5d954a89d399325808b105ee3fad20496f",
+            "note": "Full local one-worker runtime plus 20 percent scheduling margin; conservative for the group with two workers. Scheduling estimate only; hosted runtime remains unmeasured."
+          }
+        },
+        {
+          "file": "tests/key-trim.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/model-prefs.spec.ts",
+          "weightSeconds": 93.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 42
+        }
+      ]
+    },
+    {
+      "id": "project-header",
+      "gate": true,
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/project-header.spec.ts",
+          "weightSeconds": 33.292683,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 15
+        }
+      ],
+      "env": {}
+    },
+    {
+      "id": "remaining-ui",
+      "gate": false,
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=2"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/a11y.spec.ts",
+          "weightSeconds": 230.829268,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 104
+        },
+        {
+          "file": "tests/accounts-card-fit.spec.ts",
+          "weightSeconds": 2.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 1
+        },
+        {
+          "file": "tests/activity-history.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/add-account.spec.ts",
+          "weightSeconds": 17.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 8
+        },
+        {
+          "file": "tests/aeon-635.spec.ts",
+          "weightSeconds": 46.609756,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 21
+        },
+        {
+          "file": "tests/agent-done-state.spec.ts",
+          "weightSeconds": 6.658537,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 3
+        },
+        {
+          "file": "tests/agent-indicator.spec.ts",
+          "weightSeconds": 33.292682647,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 15
+        },
+        {
+          "file": "tests/agent-pairing.spec.ts",
+          "weightSeconds": 77.682927,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 35
+        },
+        {
+          "file": "tests/agent-rules-budget-clients.spec.ts",
+          "weightSeconds": 22.195122,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 10
+        },
+        {
+          "file": "tests/agent-rules-doctrine.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/agent-rules-flow.spec.ts",
+          "weightSeconds": 24.414634,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 11
+        },
+        {
+          "file": "tests/agent-rules-import.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/agent-rules-shots.spec.ts",
+          "weightSeconds": 35.512195,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 16
+        },
+        {
+          "file": "tests/agent-rules-ticks.spec.ts",
+          "weightSeconds": 28.853659,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 13
+        },
+        {
+          "file": "tests/agent-rules-tldr.spec.ts",
+          "weightSeconds": 24.414634,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 11
+        },
+        {
+          "file": "tests/agent-rules.spec.ts",
+          "weightSeconds": 31.073171,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 14
+        },
+        {
+          "file": "tests/agents-cleanup.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/agents-dial.spec.ts",
+          "weightSeconds": 66.585366,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 30
+        },
+        {
+          "file": "tests/agents-handover.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/agents-harness-status.spec.ts",
+          "weightSeconds": 57.707317,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 26
+        },
+        {
+          "file": "tests/agents-hierarchy.spec.ts",
+          "weightSeconds": 13.317073,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 6
+        },
+        {
+          "file": "tests/agents-metadata.spec.ts",
+          "weightSeconds": 22.195122,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 10
+        },
+        {
+          "file": "tests/agents-mission.spec.ts",
+          "weightSeconds": 22.195122,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 10
+        },
+        {
+          "file": "tests/agents-order.spec.ts",
+          "weightSeconds": 11.097561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 5
+        },
+        {
+          "file": "tests/agents-phone-rows.spec.ts",
+          "weightSeconds": 17.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 8
+        },
+        {
+          "file": "tests/agents-worker-tree.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/agents.spec.ts",
+          "weightSeconds": 64.365854,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 29
+        },
+        {
+          "file": "tests/attachments.spec.ts",
+          "weightSeconds": 26.634146,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 12
+        },
+        {
+          "file": "tests/authz.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/avatar-upload-bounds.spec.ts",
+          "weightSeconds": 11.097561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 5
+        },
+        {
+          "file": "tests/avatars.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/bulk.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/business.spec.ts",
+          "weightSeconds": 13.317073,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 6
+        },
+        {
+          "file": "tests/capacity-learning.spec.ts",
+          "weightSeconds": 11.097561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 5
+        },
+        {
+          "file": "tests/connect-verification.spec.ts",
+          "weightSeconds": 17.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 8
+        },
+        {
+          "file": "tests/cost-units.spec.ts",
+          "weightSeconds": 11.097561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 5
+        },
+        {
+          "file": "tests/crm.spec.ts",
+          "weightSeconds": 55.487805,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 25
+        },
+        {
+          "file": "tests/dead-sessions.spec.ts",
+          "weightSeconds": 35.512195,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 16
+        },
+        {
+          "file": "tests/decision-text.spec.ts",
+          "weightSeconds": 79.902439,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 36
+        },
+        {
+          "file": "tests/delivery-guarantee.spec.ts",
+          "weightSeconds": 17.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 8
+        },
+        {
+          "file": "tests/delivery-rating.spec.ts",
+          "weightSeconds": 11.097561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 5
+        },
+        {
+          "file": "tests/deploy-target.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/doctrine-inbox.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/done-gate.spec.ts",
+          "weightSeconds": 44.390244,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 20
+        },
+        {
+          "file": "tests/estimates.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/eta-column.spec.ts",
+          "weightSeconds": 28.853659,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 13
+        },
+        {
+          "file": "tests/first-impression.spec.ts",
+          "weightSeconds": 84.341463,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 38
+        },
+        {
+          "file": "tests/first-run.spec.ts",
+          "weightSeconds": 35.512195,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 16
+        },
+        {
+          "file": "tests/from-classic.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/graph-canvas.spec.ts",
+          "weightSeconds": 2.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 1
+        },
+        {
+          "file": "tests/graph-focus.spec.ts",
+          "weightSeconds": 17.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 8
+        },
+        {
+          "file": "tests/graph-hit.spec.ts",
+          "weightSeconds": 11.097561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 5
+        },
+        {
+          "file": "tests/graph-motion.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/groups.spec.ts",
+          "weightSeconds": 26.634146,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 12
+        },
+        {
+          "file": "tests/guest.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/header-glimpse-context.spec.ts",
+          "weightSeconds": 11.097561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 5
+        },
+        {
+          "file": "tests/header-glimpse.spec.ts",
+          "weightSeconds": 46.609756,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 21
+        },
+        {
+          "file": "tests/headings.spec.ts",
+          "weightSeconds": 199.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 90
+        },
+        {
+          "file": "tests/hide-states.spec.ts",
+          "weightSeconds": 60,
+          "weightSource": "unmeasured-estimate"
+        },
+        {
+          "file": "tests/hours-edit.spec.ts",
+          "weightSeconds": 24.414634,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 11
+        },
+        {
+          "file": "tests/hours.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/html-sandbox.spec.ts",
+          "weightSeconds": 22.195122,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 10
+        },
+        {
+          "file": "tests/indicator-controls.spec.ts",
+          "weightSeconds": 33.292683158,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 15
+        },
+        {
+          "file": "tests/indicator-creative-gallery.spec.ts",
+          "weightSeconds": 11.097561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 5
+        },
+        {
+          "file": "tests/indicator-gallery.spec.ts",
+          "weightSeconds": 11.097560833,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 5
+        },
+        {
+          "file": "tests/intake-extensions.spec.ts",
+          "weightSeconds": 37.731707,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 17
+        },
+        {
+          "file": "tests/journey-confirmation.spec.ts",
+          "weightSeconds": 42.170732,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 19
+        },
+        {
+          "file": "tests/journey-imported.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/journey-overflow.spec.ts",
+          "weightSeconds": 133.170732,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 60
+        },
+        {
+          "file": "tests/journey-renewal.spec.ts",
+          "weightSeconds": 13.317073,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 6
+        },
+        {
+          "file": "tests/journey.spec.ts",
+          "weightSeconds": 84.341463,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 38
+        },
+        {
+          "file": "tests/kind-convert.spec.ts",
+          "weightSeconds": 11.097561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 5
+        },
+        {
+          "file": "tests/knowledge-dock.spec.ts",
+          "weightSeconds": 24.414634,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 11
+        },
+        {
+          "file": "tests/knowledge-graph.spec.ts",
+          "weightSeconds": 35.512195,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 16
+        },
+        {
+          "file": "tests/knowledge-learnings.spec.ts",
+          "weightSeconds": 22.195122,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 10
+        },
+        {
+          "file": "tests/knowledge-shots.spec.ts",
+          "weightSeconds": 33.292683,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 15
+        },
+        {
+          "file": "tests/list-columns.spec.ts",
+          "weightSeconds": 13.317073,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 6
+        },
+        {
+          "file": "tests/live-agents-layout.spec.ts",
+          "weightSeconds": 8.878049,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 4
+        },
+        {
+          "file": "tests/live-agents.spec.ts",
+          "weightSeconds": 79.902439,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 36
+        },
+        {
+          "file": "tests/live-list-sessions.spec.ts",
+          "weightSeconds": 6.658537,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 3
+        },
+        {
+          "file": "tests/live-list.spec.ts",
+          "weightSeconds": 28.853659,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 13
+        },
+        {
+          "file": "tests/live-panel.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/markdown-ticket-links.spec.ts",
+          "weightSeconds": 8.878049,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 4
+        },
+        {
+          "file": "tests/nav.spec.ts",
+          "weightSeconds": 24.414634,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 11
+        },
+        {
+          "file": "tests/outcome-proposals.spec.ts",
+          "weightSeconds": 13.317073,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 6
+        },
+        {
+          "file": "tests/outline.spec.ts",
+          "weightSeconds": 93.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 42
+        },
+        {
+          "file": "tests/palette.spec.ts",
+          "weightSeconds": 33.292683,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 15
+        },
+        {
+          "file": "tests/phone-controls.spec.ts",
+          "weightSeconds": 59.926829,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 27
+        },
+        {
+          "file": "tests/phone-select.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/pi-openrouter.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/polish-round-two.spec.ts",
+          "weightSeconds": 4.439024375,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/polish-round.spec.ts",
+          "weightSeconds": 8.87804875,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 4
+        },
+        {
+          "file": "tests/portal-admin.spec.ts",
+          "weightSeconds": 6.658537,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 3
+        },
+        {
+          "file": "tests/portal-public.spec.ts",
+          "weightSeconds": 13.317073,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 6
+        },
+        {
+          "file": "tests/portal-releases.spec.ts",
+          "weightSeconds": 11.097561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 5
+        },
+        {
+          "file": "tests/portal-roadmap.spec.ts",
+          "weightSeconds": 6.658537,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 3
+        },
+        {
+          "file": "tests/profile-editor.spec.ts",
+          "weightSeconds": 35.512195,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 16
+        },
+        {
+          "file": "tests/profile.spec.ts",
+          "weightSeconds": 31.073171,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 14
+        },
+        {
+          "file": "tests/project-groups.spec.ts",
+          "weightSeconds": 39.95122,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 18
+        },
+        {
+          "file": "tests/project-list.spec.ts",
+          "weightSeconds": 62.146341,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 28
+        },
+        {
+          "file": "tests/project-sections.spec.ts",
+          "weightSeconds": 53.268293,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 24
+        },
+        {
+          "file": "tests/project-sort.spec.ts",
+          "weightSeconds": 33.292683,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 15
+        },
+        {
+          "file": "tests/project-status-counts.spec.ts",
+          "weightSeconds": 60,
+          "weightSource": "unmeasured-estimate"
+        },
+        {
+          "file": "tests/projects.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/provenance.spec.ts",
+          "weightSeconds": 28.853659,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 13
+        },
+        {
+          "file": "tests/quota-warnings.spec.ts",
+          "weightSeconds": 6.658537,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 3
+        },
+        {
+          "file": "tests/quote-collaboration.spec.ts",
+          "weightSeconds": 24.414634,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 11
+        },
+        {
+          "file": "tests/quote-dock-layout.spec.ts",
+          "weightSeconds": 17.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 8
+        },
+        {
+          "file": "tests/quote-editor-core.spec.ts",
+          "weightSeconds": 8.878049,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 4
+        },
+        {
+          "file": "tests/quote-editor-input.spec.ts",
+          "weightSeconds": 6.658537,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 3
+        },
+        {
+          "file": "tests/quote-editor-route.spec.ts",
+          "weightSeconds": 6.658537,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 3
+        },
+        {
+          "file": "tests/quote-inspector.spec.ts",
+          "weightSeconds": 33.292683,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 15
+        },
+        {
+          "file": "tests/quote-link-vault.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/quote-parity-gaps.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/quote-profile.spec.ts",
+          "weightSeconds": 6.658537,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 3
+        },
+        {
+          "file": "tests/quote-public-page.spec.ts",
+          "weightSeconds": 22.195122,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 10
+        },
+        {
+          "file": "tests/quote-public.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/quote-save-state.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/quote-showcase.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/quote-workspace.spec.ts",
+          "weightSeconds": 46.609756,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 21
+        },
+        {
+          "file": "tests/quotes-tab.spec.ts",
+          "weightSeconds": 31.073171,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 14
+        },
+        {
+          "file": "tests/quotes/parity-flow.spec.ts",
+          "weightSeconds": 2.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 1
+        },
+        {
+          "file": "tests/quotes/print-receipt.spec.ts",
+          "weightSeconds": 6.658537,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 3
+        },
+        {
+          "file": "tests/quotes/two-user-presence.spec.ts",
+          "weightSeconds": 2.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 1
+        },
+        {
+          "file": "tests/release-groups.spec.ts",
+          "weightSeconds": 22.195122,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 10
+        },
+        {
+          "file": "tests/release-historic-tenant.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/release-historic.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/release-own-tenant.spec.ts",
+          "weightSeconds": 8.878049,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 4
+        },
+        {
+          "file": "tests/release-picker.spec.ts",
+          "weightSeconds": 57.707317,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 26
+        },
+        {
+          "file": "tests/release-switches.spec.ts",
+          "weightSeconds": 37.731707,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 17
+        },
+        {
+          "file": "tests/release-tenant-notes.spec.ts",
+          "weightSeconds": 44.390244,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 20
+        },
+        {
+          "file": "tests/release-ticket-links.spec.ts",
+          "weightSeconds": 31.073171,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 14
+        },
+        {
+          "file": "tests/release-update-notice.spec.ts",
+          "weightSeconds": 35.512195,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 16
+        },
+        {
+          "file": "tests/reserved-versions.spec.ts",
+          "weightSeconds": 26.634146,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 12
+        },
+        {
+          "file": "tests/resilient-polling.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/row-actions.spec.ts",
+          "weightSeconds": 26.634146,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 12
+        },
+        {
+          "file": "tests/run-kinds.spec.ts",
+          "weightSeconds": 2.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 1
+        },
+        {
+          "file": "tests/session-attention.spec.ts",
+          "weightSeconds": 8.878049,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 4
+        },
+        {
+          "file": "tests/session-chat-cli.spec.ts",
+          "weightSeconds": 8.878049,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 4
+        },
+        {
+          "file": "tests/session-chat.spec.ts",
+          "weightSeconds": 62.146341,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 28
+        },
+        {
+          "file": "tests/session-ended.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/session-inbox.spec.ts",
+          "weightSeconds": 8.878049,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 4
+        },
+        {
+          "file": "tests/session-messages.spec.ts",
+          "weightSeconds": 37.731707,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 17
+        },
+        {
+          "file": "tests/session-removal.spec.ts",
+          "weightSeconds": 37.731707,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 17
+        },
+        {
+          "file": "tests/session-requests.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/session-rows.spec.ts",
+          "weightSeconds": 35.512195,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 16
+        },
+        {
+          "file": "tests/settings-accounts.spec.ts",
+          "weightSeconds": 46.609756,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 21
+        },
+        {
+          "file": "tests/stability.spec.ts",
+          "weightSeconds": 28.853659,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 13
+        },
+        {
+          "file": "tests/state-colours.spec.ts",
+          "weightSeconds": 26.634146,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 12
+        },
+        {
+          "file": "tests/status-buckets.spec.ts",
+          "weightSeconds": 2.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 1
+        },
+        {
+          "file": "tests/tap-targets.spec.ts",
+          "weightSeconds": 62.146341,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 28
+        },
+        {
+          "file": "tests/theme-settings.spec.ts",
+          "weightSeconds": 79.902439,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 36
+        },
+        {
+          "file": "tests/theme.spec.ts",
+          "weightSeconds": 2.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 1
+        },
+        {
+          "file": "tests/ticket-agent-work.spec.ts",
+          "weightSeconds": 17.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 8
+        },
+        {
+          "file": "tests/ticket-benefits.spec.ts",
+          "weightSeconds": 33.292683,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 15
+        },
+        {
+          "file": "tests/ticket-graph-view.spec.ts",
+          "weightSeconds": 17.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 8
+        },
+        {
+          "file": "tests/ticket-peek.spec.ts",
+          "weightSeconds": 15.536585,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 7
+        },
+        {
+          "file": "tests/ticket-placement.spec.ts",
+          "weightSeconds": 4.439024,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 2
+        },
+        {
+          "file": "tests/ticket-reviews.spec.ts",
+          "weightSeconds": 8.878049,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 4
+        },
+        {
+          "file": "tests/title-divider.spec.ts",
+          "weightSeconds": 8.878049,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 4
+        },
+        {
+          "file": "tests/ui-audit-rules.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/ui-audit.spec.ts",
+          "weightSeconds": 2.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 1
+        },
+        {
+          "file": "tests/usage-accounts.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/vendor-signals.spec.ts",
+          "weightSeconds": 11.097561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 5
+        },
+        {
+          "file": "tests/wide.spec.ts",
+          "weightSeconds": 17.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 8
+        },
+        {
+          "file": "tests/work-integration.spec.ts",
+          "weightSeconds": 70,
+          "weightSource": "estimate"
+        }
+      ]
+    },
+    {
+      "id": "aeon-624-dialogs",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/dialog-widths.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        },
+        {
+          "file": "tests/dialog-full-text.spec.ts",
+          "weightSeconds": 115.414634,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 52
+        },
+        {
+          "file": "tests/role-picker-layout.spec.ts",
+          "weightSeconds": 184.219512,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 83
+        }
+      ]
+    },
+    {
+      "id": "theme-agents",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "specs": [
+        {
+          "file": "tests/theme-agents.spec.ts",
+          "weightSeconds": 31.073171,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 14
+        }
+      ]
+    },
+    {
+      "id": "phone-approvals",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [
+        "AEON-455 phone approval regressions"
+      ],
+      "specs": [
+        {
+          "file": "tests/phone-approvals.spec.ts",
+          "weightSeconds": 8.878049,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 4
+        }
+      ]
+    },
+    {
+      "id": "agent-pause",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "specs": [
+        {
+          "file": "tests/agent-pause.spec.ts",
+          "weightSeconds": 19.97561,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 9
+        }
+      ]
+    },
+    {
+      "id": "decision-knowledge",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [
+        "AEON-564 Decision Knowledge history and presentation regressions"
+      ],
+      "specs": [
+        {
+          "file": "tests/knowledge.spec.ts",
+          "weightSeconds": 35.512195,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 16
+        }
+      ]
+    },
+    {
+      "id": "webcore-recovery",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/webcore-recovery.spec.ts",
+          "weightSeconds": 12,
+          "weightSource": "unmeasured-test-count-estimate",
+          "listedTests": 4
+        }
+      ]
+    },
+    {
+      "id": "work-node-integration",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "specs": [
+        {
+          "file": "tests/parent-benefits.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-aggregates.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-history-fix5.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-lifecycle-header.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-lifecycle.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-parent-releases.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-parent-status.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-surfaces-fix2.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-surfaces-fix3.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-surfaces-fix4.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-vocabulary.spec.ts",
+          "weightSeconds": 60
+        }
+      ]
+    }
+  ],
+  "sourceRevision": "068611ab87b80319ed1f0843bbad79ca897b7dcb",
+  "originalNpmScripts": {
+    "dev": "vite",
+    "build": "vue-tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "vue-tsc -b --noEmit",
+    "lint": "eslint src",
+    "prebuild": "node ../scripts/verify-release.mjs",
+    "test": "node ../scripts/playwright-safe.mjs -c playwright.ui.config.ts",
+    "test:remote": "node ../scripts/playwright-remote.mjs",
+    "test:ui-shards": "node ../scripts/playwright-ui-shards-safe.mjs",
+    "test:browser-safety": "node --test ../scripts/playwright-safe.test.mjs ../scripts/playwright-remote.test.mjs tests/playwright-policy.test.ts",
+    "audit:ui": "node ../scripts/ui-audit/run.mjs",
+    "test:unit": "node --experimental-strip-types --test $(ls tests/*.test.ts | grep -v '\\.unit\\.test\\.ts$') && vitest run .unit.test.ts",
+    "test:editor-unit": "vitest run tests/quote-editor.unit.test.ts",
+    "e2e": "node ../scripts/playwright-safe.mjs"
+  },
+  "exclusions": []
+}

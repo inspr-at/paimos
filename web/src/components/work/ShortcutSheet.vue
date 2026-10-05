@@ -163,7 +163,7 @@ defineExpose({ open, close })
 </template>
 
 <style scoped>
-.sheet { width: min(520px, calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 48px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.sheet { width: min(clamp(520px, 44vw, 960px), calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 48px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .sheet::backdrop { background: var(--scrim); backdrop-filter: blur(3px); }
 .sheet-card { max-height: calc(100dvh - 48px); overflow: auto; padding: 22px 26px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }

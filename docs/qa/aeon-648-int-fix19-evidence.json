@@ -1,0 +1,132 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix19",
+  "recorded_at": "2026-10-05T03:23:11.880861+00:00",
+  "branch": "work/aeon-648-int",
+  "base_commit": "b705fb87ee59706da3735080d2d94e99925f175a",
+  "review": "review-ci272vocab.out",
+  "summary": "Restored Q16 workspace vocabulary across quick and child creation, type labels/filters/groups, recurrence templates and agent summaries while retaining internal work/k-work and the existing components. Restored Type: Ticket spec coverage; added default/custom naming, identity, failure and draft-isolation regressions. 32 targeted web unit tests, app typecheck, touched-source lint, CI shard check and 89-case browser collection pass; 10 naming regressions fail on b705fb87 for the expected labels. Remote browser execution/screenshots remain unavailable because OPS-247 keeps the launcher disabled; the Go-only remote-test.sh requires a prohibited Git push and no Go package changed. No push, deploy, migration, secret access, model review or other worktree access. Needs Opus design for further layout work; this scoped naming fix reuses existing UI.",
+  "review_finding": {
+    "severity": "P1",
+    "file": "web/tests/ticket-panel.spec.ts",
+    "result": "Fixed product labels and restored Type: Ticket. Default/custom names now come from the workspace vocabulary instead of hard-coded Work item."
+  },
+  "decisions": {
+    "internal_kind": "Keep work and k-work; no API or migration changes.",
+    "default_names": "Keep existing workLevel defaults Ticket/Epic/Story and existing legacy kind names Ticket/Epic/Task. Names returned by the server take precedence for existing rows.",
+    "generic_copy": "Retain approved creation/nesting doctrine in vocabulary settings and operational headings such as Work queue and Work actions; these describe features rather than type names.",
+    "ui": "Reuse existing PAIMOS components, chip layout, clip-tip directive and stability guard; only constrain long type labels to fit. Needs Opus design for additional layout work."
+  },
+  "safety": {
+    "identity": "Vocabulary reads reset and abort on tenant/person changes; generations reject late answers. Creation re-checks the captured project/person/tenant and nested parent revision after a naming read. The route guard re-checks the signed-in session after its added vocabulary read; read failures show an error.",
+    "drafts": "Accepted vocabulary is copied away from editable settings drafts; failed saves never publish new names.",
+    "bounds": "Naming reads have a 10-second total abort bound; server vocabulary names and levels retain their existing limits."
+  },
+  "validation": {
+    "merge": {
+      "live_pr_mergeable": "MERGEABLE",
+      "base": "main",
+      "merge_required": false
+    },
+    "web_unit": {
+      "result": "pass",
+      "passed": 32,
+      "failed": 0,
+      "skipped": 0,
+      "one_file_at_a_time": true,
+      "files": {
+        "work-creation-vocabulary.unit.test.ts": 11,
+        "work-vocabulary-card.unit.test.ts": 1,
+        "recurrence-source.unit.test.ts": 13,
+        "work-fixtures.unit.test.ts": 3,
+        "work-vocabulary.test.ts": 4
+      }
+    },
+    "baseline_regression": {
+      "base": "b705fb87",
+      "component_method": "Execute exact git-show component blobs with the same controlled workspace naming inputs and unchanged assertions. No production files replaced.",
+      "component_failures": [
+        {
+          "name": "quick creation retains the default Ticket name while submitting a work draft",
+          "failure": "AssertionError: expected '<!--[--><tr class=\"create-row\"><td cl…' to contain 'aria-label=\"Type: Ticket\"'"
+        },
+        {
+          "name": "detail deletion names the on-screen workspace level",
+          "failure": "AssertionError: expected '<button type=\"button\" role=\"menuitem\"…' to contain 'Delete Vorhaben…'"
+        },
+        {
+          "name": "type properties resolve unenriched work parents through the workspace vocabulary",
+          "failure": "AssertionError: expected '<span class=\"prop-static\"><!---->Tick…' to contain 'Vorhaben'"
+        },
+        {
+          "name": "quick creation uses custom leaf spelling and icon under a parent",
+          "failure": "AssertionError: expected '<!--[--><tr class=\"create-row nested\"…' to contain 'aria-label=\"Type: Arbeitsschritt\"'"
+        },
+        {
+          "name": "read-only details name the workspace level on screen",
+          "failure": "AssertionError: expected '<p class=\"read-only\" role=\"note\"><!--…' to contain 'You can read this Vorhaben but not ch…'"
+        },
+        {
+          "name": "child creation preserves custom names in its heading, action and parent context",
+          "failure": "AssertionError: expected '<section class=\"children\" aria-label=…' to contain 'Children in this Vorhaben'"
+        },
+        {
+          "name": "agent summaries name the on-screen level instead of the internal work kind",
+          "failure": "AssertionError: expected 'work item' to be 'Vorhaben' // Object.is equality"
+        },
+        {
+          "name": "recurrence templates display the configured leaf name and child description",
+          "failure": "AssertionError: expected '<!--teleport start anchor--><dialog c…' to contain '<span class=\"field-label\">Arbeitsschr…'"
+        }
+      ],
+      "component_expected_failures": 8,
+      "component_safety_guards_passed": 3,
+      "helper_method": "Copy exact baseline work/vocabulary/ticketList modules and identical regression test to temporary modules in this worktree, adapting only import paths. The new workNoun helper is supplied separately; both naming failures arise from the original labels. Remove all temporary modules afterward.",
+      "helper_expected_failures": 2,
+      "helper_existing_tests_passed": 2,
+      "helper_failures": [
+        "default internal work label is Work instead of Ticket",
+        "custom type facet label is Work instead of Arbeitsschritt"
+      ],
+      "logs_sha256": {
+        "aeon-648-fix19-baseline-unit.json": "60c558876d5749583277a8a38b41bee30b2df457b545031b5ab2cde166bd9e7e",
+        "aeon-648-fix19-baseline-node.log": "63a2401f7b604a6b546f657369f02f3046c41e72cbd963ebd3f76528631ee707"
+      }
+    },
+    "browser_collection": {
+      "result": "pass",
+      "cases": 89,
+      "files": 6,
+      "command": "node scripts/playwright-safe.mjs -c playwright.ui.config.ts tests/work-vocabulary.spec.ts tests/ticket-panel.spec.ts tests/views-filters.spec.ts tests/work-surfaces-fix2.spec.ts tests/work-surfaces-fix3.spec.ts tests/recurrences.spec.ts --list --workers=1",
+      "browser_processes_before_peak_after": [
+        0,
+        0,
+        0
+      ],
+      "new_naming_cases": 12,
+      "new_naming_matrix": "390/1024/1440 px, light/dark, default/custom; named control stability plus exact k-work write payload and no plain-Enter write."
+    },
+    "browser_execution": {
+      "result": "unavailable",
+      "remote_launcher_exit": 3,
+      "reason": "OPS-247 bootstrap and approved browser launcher contract remain pending; scripts/playwright-remote.mjs refuses before SSH or transfer. No bypass or local browser fallback attempted.",
+      "screenshots": "No fresh screenshots. New naming specs will write web/test-results/aeon-648-int-fix19/quick-{default,custom}-{390,1024,1440}-{light,dark}.png when the coordinator runs the suite.",
+      "ci_equivalent_linux_chromium": "Not executed; coordinator-owned hosted CI remains required."
+    },
+    "go": {
+      "affected_packages": [],
+      "result": "not applicable",
+      "remote_test": "Go-only remote-test.sh requires pushing a temporary Git ref; direct no-push instruction takes precedence. Not invoked."
+    },
+    "static": {
+      "app_typecheck": "pass",
+      "touched_source_eslint": "pass",
+      "ci_web_shard_check": "pass",
+      "essential_regressions_registered": 25,
+      "release_check": "pass",
+      "git_diff_check": "pass"
+    },
+    "full_suites": "Full npm build, npm test:unit, just test and browser execution not claimed; remote readiness and no-push constraints prevent those checks."
+  },
+  "constraints": "No push, deployment, production access, new credential, secret read, model review, subagent, other worktree access or migration changes. Commit on existing branch only."
+}

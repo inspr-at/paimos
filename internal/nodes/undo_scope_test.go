@@ -17,7 +17,7 @@ import (
 func TestBulkUndoNeedsTheEditPermission(t *testing.T) {
 	owner := newPrincipal(t, "bulk-undo-scope")
 	project := kindBySlug(t, owner, "project")
-	ticket := kindBySlug(t, owner, "ticket")
+	ticket := kindBySlug(t, owner, "work")
 	root := mustNode(t, owner, `{"kind_id":"`+project.ID+`","title":"Undo project"}`)
 	item := mustNode(t, owner, `{"kind_id":"`+ticket.ID+`","parent_id":"`+root.ID+`","title":"Item","state":"new","fields":`+benefitFields+`}`)
 	status, raw := call(t, &owner, http.MethodPost, "/api/nodes/bulk", `{"ids":["`+item.ID+`"],"state":"done"}`)

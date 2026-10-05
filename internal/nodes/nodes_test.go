@@ -205,6 +205,17 @@ func kindBySlug(t *testing.T, p tenant.Principal, slug string) kindJSON {
 	return kindJSON{}
 }
 
+// Explicit tenant definitions for tests that need multiple distinct kinds.
+// Ordinary work fixtures use the seeded work kind; do not recreate retired
+// starter kinds globally, which would hide migration compatibility failures.
+func customKind(t *testing.T, p tenant.Principal, slug, icon string) kindJSON {
+	t.Helper()
+	status, body := call(t, &p, http.MethodPost, "/api/kinds", fmt.Sprintf(
+		`{"slug":%q,"label":%q,"short_prefix":%q,"icon":%q,"field_schema":{"type":"object","issue_family":true}}`,
+		slug, slug, strings.ToUpper(slug[:3]), icon))
+	return decode[kindJSON](t, status, body, http.StatusCreated)
+}
+
 type storedEvent struct {
 	Type   string
 	NodeID *string
@@ -249,12 +260,20 @@ func TestUnauthorized(t *testing.T) {
 
 func TestKindCRUD(t *testing.T) {
 	p := newPrincipal(t, "kinds")
+	baseline := len(tenantEvents(t, p.TenantID))
 	status, body := call(t, &p, http.MethodGet, "/api/kinds", "")
 	page := decode[struct {
 		Items []kindJSON `json:"items"`
 	}](t, status, body, http.StatusOK)
-	if len(page.Items) != 12 {
+	if len(page.Items) != 10 {
 		t.Fatalf("starter kinds: %d", len(page.Items))
+	}
+	seeded := map[string]bool{}
+	for _, kind := range page.Items {
+		seeded[kind.Slug] = true
+	}
+	if !seeded["work"] || seeded["ticket"] || seeded["epic"] || seeded["task"] {
+		t.Fatalf("starter kinds must contain work without retired kinds: %v", seeded)
 	}
 	if page.Items[0].AllowedChildKinds != nil {
 		t.Fatalf("starter allowed children: %#v", page.Items[0].AllowedChildKinds)
@@ -294,7 +313,7 @@ func TestKindCRUD(t *testing.T) {
 	if status != http.StatusNotFound {
 		t.Fatalf("get deleted %d", status)
 	}
-	ev := tenantEvents(t, p.TenantID)
+	ev := tenantEvents(t, p.TenantID)[baseline:]
 	want := []string{evKindCreated, evKindUpdated, evKindDeleted}
 	if len(ev) != len(want) {
 		t.Fatalf("events %#v", ev)
@@ -311,6 +330,7 @@ func TestKindCRUD(t *testing.T) {
 
 func TestNodeKeysFieldsAndEvents(t *testing.T) {
 	p := newPrincipal(t, "nodes")
+	baseline := len(tenantEvents(t, p.TenantID))
 	project := kindBySlug(t, p, "project")
 	status, body := call(t, &p, http.MethodPost, "/api/nodes", `{
 		"kind_id":"`+project.ID+`","title":"Alpha","key":"PAI-123"
@@ -373,7 +393,7 @@ func TestNodeKeysFieldsAndEvents(t *testing.T) {
 		t.Fatalf("updated %#v", updated)
 	}
 
-	ev := tenantEvents(t, p.TenantID)
+	ev := tenantEvents(t, p.TenantID)[baseline:]
 	var created int
 	for _, event := range ev {
 		if event.Actor != p.ID {
@@ -394,8 +414,8 @@ func TestNodeKeysFieldsAndEvents(t *testing.T) {
 func TestListCursorFiltersAndTree(t *testing.T) {
 	p := newPrincipal(t, "tree")
 	project := kindBySlug(t, p, "project")
-	epic := kindBySlug(t, p, "epic")
-	ticket := kindBySlug(t, p, "ticket")
+	epic := kindBySlug(t, p, "work")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Root"}`)
 	other := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Other"}`)
 	e2 := mustNode(t, p, `{"kind_id":"`+epic.ID+`","title":"E2","parent_id":"`+root.ID+`"}`)
@@ -462,8 +482,8 @@ func TestListCursorFiltersAndTree(t *testing.T) {
 func TestMoveDeleteAndNarrowedKind(t *testing.T) {
 	p := newPrincipal(t, "move")
 	project := kindBySlug(t, p, "project")
-	epic := kindBySlug(t, p, "epic")
-	ticket := kindBySlug(t, p, "ticket")
+	epic := kindBySlug(t, p, "work")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Root"}`)
 	leaf := mustNode(t, p, `{"kind_id":"`+epic.ID+`","title":"Leaf","parent_id":"`+root.ID+`"}`)
 	child := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"Child","parent_id":"`+root.ID+`"}`)
@@ -559,6 +579,7 @@ func TestTenantIsolation(t *testing.T) {
 
 func TestWriterSeam(t *testing.T) {
 	p := newPrincipal(t, "writer")
+	baseline := len(tenantEvents(t, p.TenantID))
 	stub := &countingWriter{}
 	status, body := callAs(t, New(appPool, stub), &p, http.MethodPost, "/api/kinds", `{
 		"slug":"note","label":"Note","short_prefix":"NTE","icon":"note","field_schema":{}
@@ -569,7 +590,7 @@ func TestWriterSeam(t *testing.T) {
 	if stub.n != 1 {
 		t.Fatalf("writer calls %d", stub.n)
 	}
-	if ev := tenantEvents(t, p.TenantID); len(ev) != 0 {
+	if ev := tenantEvents(t, p.TenantID); len(ev) != baseline {
 		t.Fatalf("stub wrote rows %#v", ev)
 	}
 }

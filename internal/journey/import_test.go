@@ -53,12 +53,12 @@ func TestImportedJourneyStagesAndReleaseBackfill(t *testing.T) {
 	releases.New(f.db.App).Mount(f.mux)
 	live := importedNode(t, f, "project", "IMP-1", "", "open")
 	liveRelease := importedNode(t, f, "release", "IMP-2", live, "done")
-	importedNode(t, f, "ticket", "IMP-3", live, "done")
+	importedNode(t, f, "work", "IMP-3", live, "done")
 	build := importedNode(t, f, "project", "IMP-4", "", "open")
 	buildRelease := importedNode(t, f, "release", "IMP-5", build, "open")
-	openTicket := importedNode(t, f, "ticket", "IMP-6", build, "open")
+	openTicket := importedNode(t, f, "work", "IMP-6", build, "open")
 	plan := importedNode(t, f, "project", "IMP-7", "", "open")
-	importedNode(t, f, "ticket", "IMP-8", plan, "open")
+	importedNode(t, f, "work", "IMP-8", plan, "open")
 	if got := backfill(t, f); got != 2 {
 		t.Fatalf("backfilled %d releases", got)
 	}
@@ -125,7 +125,7 @@ func TestImportedCandidateRefusal(t *testing.T) {
 	f := newFixture(t)
 	project := importedNode(t, f, "project", "IMP-9", "", "open")
 	release := importedNode(t, f, "release", "IMP-10", project, "open")
-	ticket := importedNode(t, f, "ticket", "IMP-11", project, "open")
+	ticket := importedNode(t, f, "work", "IMP-11", project, "open")
 	if backfill(t, f) != 1 {
 		t.Fatal("release backfill missing")
 	}

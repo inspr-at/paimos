@@ -4,11 +4,14 @@ package nodes
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+
+	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -63,6 +66,14 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 func writeErr(w http.ResponseWriter, err error) {
+	var pgerr *pgconn.PgError
+	scopeLimit := errors.As(err, &pgerr) && pgerr.Code == "54000" &&
+		(pgerr.Message == "work shape budget exceeded" || pgerr.Message == "work scope root budget exceeded" || pgerr.Message == "work scope expansion budget exceeded")
+	if scopeLimit || errors.Is(err, context.DeadlineExceeded) {
+		w.Header().Set("Cache-Control", "no-store")
+		writeError(w, http.StatusServiceUnavailable, "Work aggregates exceeded a resource limit; narrow the scope or retry.")
+		return
+	}
 	var he *httpError
 	if errors.As(err, &he) {
 		if he.code != "" || he.node != nil || len(he.children) > 0 || len(he.fields) > 0 {

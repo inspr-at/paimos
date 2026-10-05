@@ -23,13 +23,32 @@ export function setLimit(plan: WorkingPreference, harness: string, limit: Harnes
   return { ...planValue(plan), limits: { ...plan.limits, [harness]: limit } }
 }
 export function stepLimit(plan: WorkingPreference, harness: string, effective: number, delta: number): WorkingPreference {
-  const limit = plan.limits[harness]
-  const shown = limit === 'off' ? 0 : typeof limit === 'number' ? limit : effective
-  const next = clamp(shown + delta)
-  return setLimit(plan, harness, next < 1 ? 'off' : next)
+  return setLimit(plan, harness, stepHarnessLimit(plan.limits[harness], effective, delta))
 }
-export function stepExpandedLimit(plan: WorkingPreference, harness: string, shown: number, delta: number): WorkingPreference {
-  return setLimit(plan, harness, Math.max(1, clamp(shown + delta)))
+// One ladder in both views: off · 1 … 30 · no own limit. A stored API zero
+// remains visible until edited; it is not rewritten by an unrelated change.
+export function stepHarnessLimit(limit: HarnessLimit | undefined, effective: number, delta: number): HarnessLimit {
+  if (delta === 0) return limit ?? 'no_limit'
+  if (limitMode(limit) === 'none') return delta > 0 ? 'no_limit' : effective <= 1 ? 'off' : clamp(effective - 1)
+  if (limit === 'off') return delta > 0 ? 1 : 'off'
+  const shown = limit as number
+  if (delta > 0) return shown >= CAP_MAX ? 'no_limit' : clamp(shown + 1)
+  return shown <= 0 ? shown : shown <= 1 ? 'off' : clamp(shown - 1)
+}
+export const nextLimitMode = (limit: HarnessLimit | undefined): LimitMode => ({ none: 'max', max: 'off', off: 'none' } as const)[limitMode(limit)]
+export function modeLimit(limit: HarnessLimit | undefined, mode: LimitMode, remembered = 2): HarnessLimit {
+  return mode === 'none' ? 'no_limit' : mode === 'off' ? 'off' : Math.max(1, clamp(typeof limit === 'number' ? limit : remembered))
+}
+export function typedTotal(input: string): number | undefined {
+  if (input.length > 64) return undefined
+  const value = input.trim()
+  return /^\d+$/.test(value) ? clamp(Number(value)) : undefined
+}
+export function typedLimit(input: string): HarnessLimit | undefined {
+  if (input.length > 64) return undefined
+  if (!input.trim()) return 'no_limit'
+  const value = typedTotal(input)
+  return value === undefined ? undefined : value === 0 ? 'off' : value
 }
 export function effectiveLimit(total: number, running: number, room: number | null): number {
   // Unknown account room never becomes an invented zero or a claim of capacity.
@@ -95,7 +114,7 @@ export function workingRows(plan: WorkingPreference, snapshot: PlanSnapshot, roo
     const tail = mode === 'off' ? (running ? `${running} running, finishing` : 'none running') : typeof limit === 'number' && running > limit ? `${running} running, ${running - limit} above, finishing` : `${running} running`
     return { key, label: HARNESS_NAME[key] ?? key, mode, limit, running, effective, shown,
       sub: tail + (count ? ` · ${count} waiting` : ''),
-      words: mode === 'off' ? 'no new starts' : mode === 'none' ? `${effective ? `up to ${effective}` : 'none now'} · no own limit` : `at most ${shown}`,
+      words: mode === 'off' ? 'no new starts' : mode === 'none' ? `no own limit · up to ${effective} now` : `at most ${shown}`,
       summary: mode === 'none' ? 'no own limit' : mode === 'off' ? 'off' : `at most ${shown}`,
     }
   })

@@ -20,7 +20,7 @@ export class AssignCancelled extends Error {
   constructor() { super('cancelled'); this.name = 'AssignCancelled' }
 }
 
-export interface AssignTicket { id: string; key: string; title: string; state?: string; kind?: string }
+export interface AssignTicket { id: string; key: string; title: string; state?: string; kind?: string; isParent?: boolean }
 export type ReleaseTarget = { kind: 'existing'; id: string; title: string } | { kind: 'new'; title: string }
 export interface AssignOutcome {
   releaseId: string
@@ -33,7 +33,7 @@ export interface AssignOutcome {
 }
 
 function closed(ticket: AssignTicket): boolean {
-  return ticket.kind === 'epic' || (!!ticket.state && statusMeta(ticket.state).closed)
+  return !ticket.isParent && !!ticket.state && statusMeta(ticket.state).closed
 }
 
 async function confirmMoves(moves: { key: string; title: string; releaseTitle?: string | null }[], into: string): Promise<boolean> {
@@ -56,7 +56,7 @@ export async function confirmOptionMoves(tickets: MembershipTicket[], into: stri
 }
 
 export async function assignToRelease(projectId: string, tickets: AssignTicket[], target: ReleaseTarget, knownMoves: { key: string; title: string; releaseTitle: string | null }[] = []): Promise<AssignOutcome> {
-  const skipped = tickets.filter(closed).map(ticket => ({ key: ticket.key, reason: ticket.kind === 'epic' ? 'An epic is not a release ticket.' : 'Closed tickets cannot join a release.' }))
+  const skipped = tickets.filter(closed).map(ticket => ({ key: ticket.key, reason: 'Closed leaves cannot join a release.' }))
   const ids = [...new Set(tickets.filter(ticket => !closed(ticket)).map(ticket => ticket.id))]
   if (!ids.length) throw new Error(skipped[0]?.reason ?? 'Choose a ticket to add.')
   if (ids.length > 100) throw new Error('Add up to 100 tickets at a time.')

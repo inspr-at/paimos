@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -43,14 +44,25 @@ func WithUndoHandlers(handlers map[string]UndoFunc) Option {
 	}
 }
 
+// WithCausalUndoHandlers installs handlers available only through a previewed
+// derived-parent action, leaving ordinary event Undo availability unchanged.
+func WithCausalUndoHandlers(handlers map[string]UndoFunc) Option {
+	return func(m *module) {
+		for typ, fn := range handlers {
+			m.causalUndo[typ] = fn
+		}
+	}
+}
+
 type module struct {
-	pool *pgxpool.Pool
-	undo map[string]UndoFunc
+	pool       *pgxpool.Pool
+	undo       map[string]UndoFunc
+	causalUndo map[string]UndoFunc
 }
 
 // New returns a module for event history, SSE and registered resource undo.
 func New(pool *pgxpool.Pool, options ...Option) httpapi.Module {
-	m := &module{pool: pool, undo: make(map[string]UndoFunc)}
+	m := &module{pool: pool, undo: make(map[string]UndoFunc), causalUndo: make(map[string]UndoFunc)}
 	for _, option := range options {
 		option(m)
 	}
@@ -61,6 +73,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/events", m.list)
 	mux.HandleFunc("GET /api/events/stream", m.stream)
 	mux.HandleFunc("POST /api/events/{eventId}/undo", m.handleUndo)
+	mux.HandleFunc("GET /api/events/{eventId}/undo-preview", m.handleUndoPreview)
 }
 
 // These errors let resource undo handlers return safe API outcomes.
@@ -356,11 +369,51 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid_request", "invalid event ID")
 		return
 	}
+	// Network reads must finish before InTenant takes any mutation fences.
+	// Empty bodies remain valid for ordinary Undo; derived Undo requires a
+	// matching confirmation, rechecked against the locked current cause below.
+	var confirm struct {
+		Cause int64 `json:"confirmed_cause_event_id"`
+	}
+	if err := httpapi.BufferRequestBody(w, r, 1024); err != nil {
+		failure(w, ErrConflict)
+		return
+	}
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	decodeErr := decoder.Decode(&confirm)
+	if decodeErr != nil && decodeErr != io.EOF {
+		failure(w, ErrConflict)
+		return
+	}
+	if decodeErr == nil {
+		var trailing any
+		if err := decoder.Decode(&trailing); err != io.EOF {
+			failure(w, ErrConflict)
+			return
+		}
+	}
 	var result Event
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		// Serialize attempts on this original event without modifying history or
-		// taking the event counter before a resource lock (writers take it last).
-		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1, 12))`, p.TenantID+":"+strconv.FormatInt(id, 10)); err != nil {
+		// Match the shared tenant -> pairing -> tree prefix before taking the
+		// per-event lock. NO KEY UPDATE allows concurrent event FK shares.
+		if _, err := tx.Exec(r.Context(), `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
+			return err
+		}
+		// agentpairing depends on events, so use its shared SQL key directly.
+		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`); err != nil {
+			return err
+		}
+		if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
+			return err
+		}
+		// Reject callers with no Undo authority before looking up the event.
+		// AnyProject is admission only: project-scoped causal grants still reach
+		// the target checks below, under the same access-change fences.
+		if err := authz.RequireTx(r.Context(), tx, p, "events.undo", authz.Scope{AnyProject: true}); err != nil {
+			if errors.Is(err, authz.ErrForbidden) {
+				return ErrForbidden
+			}
 			return err
 		}
 		e, err := scanEvent(tx.QueryRow(r.Context(), `SELECT id,actor_principal_id::text,node_id::text,type,before,after,at,undo_of
@@ -368,10 +421,50 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if e.ActorPrincipalID != p.ID && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.RouteScope(r.Context())) != nil {
+		// Causal Undo resolves and checks every current project target in
+		// causalChange under these same fences. A workspace-scope check here
+		// would reject legitimate project grants before resolving hidden causes.
+		if e.Type != derivedStatusEvent {
+			if err := authz.RequireTx(r.Context(), tx, p, "events.undo", authz.RouteScope(r.Context())); err != nil {
+				if errors.Is(err, authz.ErrForbidden) {
+					return ErrForbidden
+				}
+				return err
+			}
+		}
+		// Serialize attempts on this original event without modifying history or
+		// taking the event counter before a resource lock (writers take it last).
+		if _, err := tx.Exec(r.Context(), `SELECT pg_advisory_xact_lock(hashtextextended($1, 12))`, p.TenantID+":"+strconv.FormatInt(id, 10)); err != nil {
+			return err
+		}
+		ownsActor := e.ActorPrincipalID == p.ID
+		// Theme identity survives principal linking. Its resource undo handler
+		// rechecks the current owner under the authority fence before writing.
+		// This exception is limited to registered theme events, never agents or
+		// unrelated workspace activity.
+		if !ownsActor && p.Kind == tenant.Person && m.undo[e.Type] != nil && strings.HasPrefix(e.Type, "theme.") {
+			if err := tx.QueryRow(r.Context(), `SELECT aeon_theme_owns($1::uuid)`, e.ActorPrincipalID).Scan(&ownsActor); err != nil {
+				return err
+			}
+		}
+		if e.Type != derivedStatusEvent && !ownsActor && authz.RequireTx(r.Context(), tx, p, "events.undo_other", authz.RouteScope(r.Context())) != nil {
 			return ErrForbidden
 		}
 		fn := m.undo[e.Type]
+		causeID := int64(0)
+		if e.Type == derivedStatusEvent {
+			cause, causeFn, preview, err := m.causalChange(r.Context(), tx, p, e)
+			if err != nil {
+				return err
+			}
+			if confirm.Cause != preview.CauseEventID {
+				return ErrConflict
+			}
+			causeID = cause.ID
+			fn = func(ctx context.Context, tx pgx.Tx, p tenant.Principal, _ Event) (Change, error) {
+				return causeFn(ctx, tx, p, cause)
+			}
+		}
 		if fn == nil || e.UndoOf != nil {
 			return ErrConflict
 		}
@@ -386,10 +479,26 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		change.UndoOf = &id
+		if causeID != 0 {
+			// Undo the original cause once, so sibling parent events cannot
+			// reopen the same child a second time. Keep the parent action as
+			// separate evidence without pretending its status was edited.
+			change.UndoOf = &causeID
+		} else {
+			change.UndoOf = &id
+		}
 		result, err = Append(r.Context(), tx, p, change)
 		if err != nil {
 			return err
+		}
+		if causeID != 0 {
+			metadata, err := json.Marshal(map[string]any{"cause_event_id": causeID, "rule_version": 1, "reason": "Reverted the triggering work change."})
+			if err != nil {
+				return err
+			}
+			if _, err := Append(r.Context(), tx, p, Change{NodeID: e.NodeID, Type: "status_autopilot.causal_undo", After: map[string]any{"id": *e.NodeID}, Metadata: metadata, UndoOf: &id}); err != nil {
+				return err
+			}
 		}
 		items := []Event{result}
 		if err := redactAccountEvents(r.Context(), tx, p, items); err != nil {

@@ -43,6 +43,12 @@ export const useCapacity = defineStore('capacity', () => {
   async function load() {
     await Promise.all([capacityRead.refresh(), schedulesRead.refresh(), computersRead.refresh()])
   }
+  // An enrollment write needs a new inventory read, even when polling already
+  // has a pre-write response in flight. Keep its outcome for honest UI feedback.
+  function refreshComputers() {
+    computersRead.invalidate()
+    return computersRead.refresh()
+  }
   const invalidate = () => { capacityRead.invalidate(); schedulesRead.invalidate(); computersRead.invalidate() }
   // Snapshots belong to one person/workspace and access epoch. Retaining them
   // across a transient failure is safe only until that ownership is reset.
@@ -206,5 +212,6 @@ export const useCapacity = defineStore('capacity', () => {
     state, loaded, stale, load, inputs, rows, accountLines, byAccount, computers: computersRead.data, computersLoaded: computed(() => computersRead.status.value.updatedAt !== null), computersState, computersStale, refreshCapacity: capacityRead.refresh, pools, ready, signins, schedule, timezone, saveSchedule, setPreset, setNights, setPoolOverride, gauge, setGauge,
     schedulesLoaded, away, reserveConfirmed, hasUserSchedule, poolReserves, saveKeep, confirmReserve, endAway,
     invalidate,
+    refreshComputers,
   }
 })

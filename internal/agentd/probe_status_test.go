@@ -71,8 +71,8 @@ func TestClaudeBillingProbeRespectsEmailFence(t *testing.T) {
 		code   int
 		want   ProbeStatus
 	}{
-		{"fenced API key with matching email", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"email":"a@example.com","authMethod":"api_key"}`, 0, ProbeStatus{Failure: ProbeAuthFailed}},
-		{"fenced API key without email", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"authMethod":"api_key"}`, 0, ProbeStatus{Failure: ProbeAuthFailed}},
+		{"fenced API key with matching email", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"email":"a@example.com","authMethod":"api_key"}`, 0, ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeAPIKeyLogin}},
+		{"fenced API key without email", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"authMethod":"api_key"}`, 0, ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeAPIKeyLogin}},
 		{"fenced subscription", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`, 0, ProbeStatus{OK: true, BillingMode: "subscription"}},
 		{"fenced unknown auth kind", map[string]string{"k": "a@example.com"}, `{"loggedIn":true,"email":"a@example.com","authMethod":"new_kind"}`, 0, ProbeStatus{OK: true}},
 		{"unfenced API key", nil, `{"loggedIn":true,"authMethod":"api_key"}`, 0, ProbeStatus{OK: true, BillingMode: "api"}},
@@ -119,7 +119,7 @@ func TestProbeStatusSeparatesSignOutFromUnavailable(t *testing.T) {
 		{"codex signed in but failing", codex("Logged in using ChatGPT", 1), ProbeStatus{Failure: ProbeUnavailable}},
 		{"claude signed in", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"claude.ai"}`, 0), ProbeStatus{OK: true, BillingMode: "subscription"}},
 		{"claude signed out", claude(`{"loggedIn":false}`, 1), ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeSignedOut}},
-		{"claude other identity", claude(`{"loggedIn":true,"email":"b@example.com","authMethod":"claude.ai"}`, 0), ProbeStatus{Failure: ProbeAuthFailed}},
+		{"claude other identity", claude(`{"loggedIn":true,"email":"b@example.com","authMethod":"claude.ai"}`, 0), ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeDifferentIdentity}},
 		{"claude empty object", claude(`{}`, 0), ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeOutputInvalid}},
 		{"claude malformed", claude(`not json`, 0), ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeOutputInvalid}},
 		{"cursor signed in", cursor(`{"status":"authenticated","isAuthenticated":true,"userInfo":{"userId":"42"}}`, 0), ProbeStatus{OK: true}},
@@ -129,7 +129,7 @@ func TestProbeStatusSeparatesSignOutFromUnavailable(t *testing.T) {
 		// AEON-299 re-review: incomplete or unknown answers are never a sign-out.
 		{"claude signed in without email", claude(`{"loggedIn":true}`, 0), ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeEmailMissing}},
 		{"claude signed in with empty email", claude(`{"loggedIn":true,"email":"","authMethod":"claude.ai"}`, 0), ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeEmailMissing}},
-		{"claude api key login", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"api_key"}`, 0), ProbeStatus{Failure: ProbeAuthFailed}},
+		{"claude api key login", claude(`{"loggedIn":true,"email":"a@example.com","authMethod":"api_key"}`, 0), ProbeStatus{Failure: ProbeAuthFailed, ReasonDetail: agentsetup.ProbeAPIKeyLogin}},
 		{"claude loggedIn null", claude(`{"loggedIn":null}`, 0), ProbeStatus{Failure: ProbeUnavailable, ReasonDetail: agentsetup.ProbeOutputInvalid}},
 		{"cursor unknown status", cursor(`{"status":"refreshing","isAuthenticated":false}`, 0), ProbeStatus{Failure: ProbeUnavailable}},
 		{"cursor logged out word", cursor(`{"status":"logged_out","isAuthenticated":false}`, 1), ProbeStatus{Failure: ProbeAuthFailed}},

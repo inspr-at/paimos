@@ -8,8 +8,14 @@ import { defaultStatusHelp, days, ruleCopy, ruleLive } from '../../lib/statusDef
 import { statusHelpRequest } from '../../lib/statusHelp'
 import AppIcon from '../AppIcon.vue'
 import StatusIcon from './StatusIcon.vue'
+import TicketTypeIcon from './TicketTypeIcon.vue'
+import { recurringWord } from '../../lib/recurrenceMarker'
+import { useProfile } from '../../stores/profile'
 
 const id = useId()
+const profile = useProfile()
+const recurringLabel = computed(() => recurringWord(profile.profile?.locale || navigator.language))
+const recurringSample = { id: 'sample', project_id: 'sample', project_key: 'sample', number: 4, retired: false, trigger: { kind: 'time' as const, rrule: 'FREQ=WEEKLY;BYDAY=MO' } }
 const dialog = ref<HTMLDialogElement>()
 const closeButton = ref<HTMLButtonElement>()
 const help = ref(defaultStatusHelp())
@@ -75,6 +81,7 @@ const triageWord = computed(() => { const mode = help.value.triage.mode; return 
         <tbody>
           <template v-for="def in help.definitions" :key="def.state">
             <tr v-if="def.state === 'cancelled'" class="queued"><td class="st"><span class="st-cell"><AppIcon name="inbox" :size="14" />{{ help.queued.label }}</span></td><td class="meaning">{{ help.queued.meaning }}</td><td data-label="Set by">Work queue</td><td data-label="Automatic rule">Open or Blocked in the queue; not a status</td></tr>
+            <tr v-if="def.state === 'cancelled'" class="recurring"><td class="st"><span class="st-cell"><TicketTypeIcon kind="ticket" :recurrence="recurringSample" />{{ recurringLabel }}</span></td><td class="meaning">{{ (help.recurring ?? defaultStatusHelp().recurring)?.meaning }}</td><td data-label="Set by">Recurring work</td><td data-label="Automatic rule">A marker, not a status</td></tr>
             <tr v-if="def.state === 'cancelled'" class="group"><td colspan="4"><span class="eyebrow">Exits</span></td></tr>
             <tr :data-status="def.state"><td class="st"><span class="st-cell"><StatusIcon :state="def.state" />{{ def.label }}</span></td><td class="meaning">{{ def.meaning }}</td><td data-label="Set by">{{ def.set_by }}</td><td data-label="Automatic rule">
               <div v-if="def.state === 'blocked'" class="rule-line">Blocker required</div>
