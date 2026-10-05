@@ -139,6 +139,8 @@ type harnessMetadata struct {
 
 type Supervisor struct {
 	recoveryMu             sync.Mutex
+	attachedHooks          map[string]*attachedHookBinding
+	attachedHookVerifier   *AttachManager
 	stepUps                *StepUpManager
 	capacityNow            func() time.Time
 	capacityWake           chan struct{}

@@ -6,10 +6,13 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
+	"github.com/inspr-at/paimos/internal/workorders"
 )
 
 const recoveryCapability = "session_recovery_v1"
@@ -89,6 +92,10 @@ func (s *Supervisor) recoverAgents(ctx context.Context) error {
 	}
 	for _, q := range requests {
 		if q.RunID == nil {
+			outcome := s.reconnectAttachedHook(ctx, q)
+			if err := api.CompleteAgentRecovery(ctx, s.daemonID, s.generation, RecoveryReport{ID: q.ID, Outcome: outcome}); err != nil {
+				return err
+			}
 			continue
 		}
 		s.mu.Lock()
@@ -247,4 +254,183 @@ func (s *Supervisor) applyAgentRecovery(ctx context.Context, entry *owned, q Rec
 		return "rejected"
 	}
 	return "reconnected"
+}
+
+// AttachedHookRequest transfers only the existing worker lease over the
+// owner-only socket. It never names an auth home or a file to change.
+type AttachedHookRequest struct {
+	Operation  string `json:"operation,omitempty"`
+	DeliveryID string `json:"delivery_id,omitempty"`
+	Cursor     int64  `json:"cursor,omitempty"`
+	Origin     string `json:"origin"`
+	ProjectID  string `json:"project_id"`
+	SessionID  string `json:"session_id"`
+	Harness    string `json:"harness"`
+	Lease      string `json:"worker_lease"`
+	OwnerPID   int    `json:"owner_pid"`
+	Sequence   int64  `json:"activity_sequence"`
+	Activity   string `json:"activity"`
+}
+type attachedHookBinding struct {
+	helper, process attachwatch.Process
+	image           os.FileInfo
+	session         HarnessSession
+	touched         time.Time
+}
+type attachedHookAPI interface {
+	ProbeAttachedInbox(context.Context, HarnessSession) error
+}
+
+func (r *Remote) ProbeAttachedInbox(ctx context.Context, session HarnessSession) error {
+	// Drain is replayable until the foreground hook confirms stdout handoff.
+	// No control is consumed and no message is acknowledged here.
+	_, err := r.DrainHarness(ctx, session)
+	return err
+}
+func (s *Supervisor) bindAttachedHook(ctx context.Context, peer attachObservation, in AttachedHookRequest) error {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	m := s.attachedHookVerifier
+	if m == nil || in.Origin != m.cfg.Origin || !workorders.UUID(in.ProjectID) || !workorders.UUID(in.SessionID) || len(in.Lease) < 32 || len(in.Lease) > 256 || in.Sequence < 1 || (in.Activity != "busy" && in.Activity != "idle" && in.Activity != "throttled") {
+		return ErrScope
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || m.unavailable != nil {
+		return ErrNotOwned
+	}
+	helper, err := m.observe(peer.PID)
+	if err != nil || helper.Process != peer.Process || helper.UID != os.Getuid() {
+		return ErrNotOwned
+	}
+	process, err := m.observe(in.OwnerPID)
+	if err != nil || process.UID != helper.UID || !attachwatch.Within(m.cfg.Workspace, process.CWD) {
+		return ErrNotOwned
+	}
+	image, err := m.validateHarnessImage(ctx, process, in.Harness)
+	if err != nil {
+		return ErrNotOwned
+	}
+	if s.attachedHooks == nil {
+		s.attachedHooks = make(map[string]*attachedHookBinding)
+	}
+	// Prune only our in-memory bindings; never renew them during recovery.
+	for id, b := range s.attachedHooks {
+		if time.Since(b.touched) > 10*time.Minute {
+			delete(s.attachedHooks, id)
+		}
+	}
+	b := s.attachedHooks[in.SessionID]
+	if b == nil {
+		if len(s.attachedHooks) >= 32 {
+			return ErrScope
+		}
+		processID, err := randomID()
+		if err != nil {
+			return err
+		}
+		identity := ownedprocess.Identity{DaemonID: s.daemonID, Generation: s.generation, ProcessID: processID, RootPID: process.PID, GroupID: process.PID, StartedAt: time.Now().UTC()}
+		b = &attachedHookBinding{helper: helper.Process, process: process.Process, image: image, session: HarnessSession{ID: in.SessionID, ProjectID: in.ProjectID, Harness: in.Harness, Lease: in.Lease, Ownership: &identity, AttachedHook: true}, touched: time.Now()}
+	} else if b.helper != helper.Process || b.process != process.Process || b.session.ProjectID != in.ProjectID || b.session.Harness != in.Harness || b.session.Lease != in.Lease || !sameAttachImage(b.image, image) {
+		return ErrGeneration
+	}
+	b.session.ActivitySequence = in.Sequence
+	b.session.Activity = in.Activity
+	// Reobserve after vendor verification and before attesting to the server.
+	current, e := m.observe(process.PID)
+	helperNow, h := m.observe(helper.PID)
+	if e != nil || h != nil || current.Process != process.Process || helperNow.Process != helper.Process || !m.unchangedHarnessImage(current, image) || ctx.Err() != nil {
+		return ErrNotOwned
+	}
+	// Keep the same identity for an uncertain heartbeat reply. A retry must
+	// never manufacture a second binding after the server already committed.
+	s.attachedHooks[in.SessionID] = b
+	if err := s.api.HeartbeatHarness(ctx, b.session, "working"); err != nil {
+		return err
+	}
+	b.touched = time.Now()
+	s.attachedHooks[in.SessionID] = b
+	return nil
+}
+func (s *Supervisor) reconnectAttachedHook(ctx context.Context, q RecoveryRequest) string {
+	m := s.attachedHookVerifier
+	b := s.attachedHooks[q.SessionID]
+	api, ok := s.api.(attachedHookAPI)
+	if !ok || m == nil || b == nil || q.Action != "reconnect" || q.RunID != nil || q.ProjectID != b.session.ProjectID || b.session.Ownership == nil || *b.session.Ownership != q.Ownership || q.Ownership.DaemonID != s.daemonID || q.Ownership.Generation != s.generation || q.deadline.IsZero() || time.Until(q.deadline) <= 0 || time.Since(b.touched) > 10*time.Minute {
+		return "rejected"
+	}
+	ctx, cancel := context.WithDeadline(ctx, q.deadline)
+	defer cancel()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || m.unavailable != nil {
+		return "rejected"
+	}
+	process, e := m.observe(b.process.PID)
+	helper, h := m.observe(b.helper.PID)
+	if e != nil || h != nil || process.Process != b.process || helper.Process != b.helper || !m.unchangedHarnessImage(process, b.image) {
+		return "rejected"
+	}
+	if _, err := m.validateHarnessImage(ctx, process, b.session.Harness); err != nil || ctx.Err() != nil {
+		return "rejected"
+	}
+	// Never signal the external CLI, revive attach consent, rewrite its config,
+	// consume pending controls or advance foreground helper expiry.
+	b.session.ActivitySequence++
+	if err := s.api.HeartbeatHarness(ctx, b.session, "working"); err != nil {
+		return "rejected"
+	}
+	if err := api.ProbeAttachedInbox(ctx, b.session); err != nil || ctx.Err() != nil {
+		return "rejected"
+	}
+	return "reconnected"
+}
+
+// The installed turn-boundary hook uses the same memory-only lease as recovery.
+// Only a kernel-verified descendant of the bound external CLI can read or ack.
+func (s *Supervisor) serviceAttachedHook(ctx context.Context, peer attachObservation, in AttachedHookRequest) ([]HarnessDelivery, error) {
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
+	b := s.attachedHooks[in.SessionID]
+	m := s.attachedHookVerifier
+	if b == nil || m == nil {
+		return nil, ErrNotOwned
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed || time.Since(b.touched) > 10*time.Minute {
+		return nil, ErrGeneration
+	}
+	process, e := m.observe(b.process.PID)
+	helper, h := m.observe(b.helper.PID)
+	current, c := m.observe(peer.PID)
+	if e != nil || h != nil || c != nil || process.Process != b.process || helper.Process != b.helper || current.Process != peer.Process || current.UID != process.UID || !m.unchangedHarnessImage(process, b.image) {
+		return nil, ErrGeneration
+	}
+	found := false
+	for depth := 0; depth < 128 && current.PID > 1; depth++ {
+		if sameAttachProcessIdentity(current, process) {
+			found = true
+			break
+		}
+		next, err := m.ancestry(current.Parent)
+		if err != nil || next.PID == current.PID || next.UID != process.UID {
+			break
+		}
+		current = next
+	}
+	if !found || ctx.Err() != nil {
+		return nil, ErrNotOwned
+	}
+	switch in.Operation {
+	case "pull":
+		return s.api.DrainHarness(ctx, b.session)
+	case "complete":
+		if !workorders.UUID(in.DeliveryID) || in.Cursor < 1 {
+			return nil, ErrScope
+		}
+		return []HarnessDelivery{}, s.api.CompleteHarnessDelivery(ctx, b.session, HarnessDelivery{ID: in.DeliveryID, Cursor: in.Cursor})
+	default:
+		return nil, ErrScope
+	}
 }

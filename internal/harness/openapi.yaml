@@ -186,6 +186,8 @@ paths:
               type: object
               required: [phase, activity_sequence]
               properties:
+                process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+                attached_hook: {type: boolean, default: false, description: "Bind an existing unmanaged inbox hook to its paired daemon and exact process identity. Requires the current worker lease, inbox capability and active pairing; never grants process controls or watch consent."}
                 phase: {type: string}
                 activity_sequence: {type: integer, minimum: 0}
                 max_session_file_bytes: {type: [integer, 'null'], minimum: 2000, maximum: 512000, description: "Optional; omitted/null resets capability to legacy 12000."}
@@ -207,6 +209,7 @@ paths:
   /api/projects/{projectId}/harness-sessions/{sessionId}/drain:
     post:
       operationId: drainHarnessInbox
+      description: "Existing managed inbox or an explicitly paired attached hook. Attached hooks lease only exact-session messages; an unfinished lease is replayed until the foreground hook confirms handoff. Reconnect never acknowledges messages."
       parameters:
         - $ref: '#/components/parameters/projectId'
         - $ref: '#/components/parameters/sessionId'

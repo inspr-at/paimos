@@ -176,6 +176,9 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 	}
 	defer res.Body.Close()
 	if res.StatusCode != 200 {
+		if path == "/v1/attached-hook" && res.StatusCode == 404 {
+			return ErrAttachedHookUnavailable
+		}
 		if path == "/v1/step-up" {
 			raw, readErr := io.ReadAll(io.LimitReader(res.Body, 769))
 			hint := strings.TrimSpace(string(raw))
@@ -281,4 +284,20 @@ func validAttachDiagnostic(text string) bool {
 		}
 	}
 	return true
+}
+
+func (c Client) BindAttachedHook(ctx context.Context, in agentd.AttachedHookRequest) error {
+	return c.lifecycleRequest(ctx, "POST", "/v1/attached-hook", in, &struct{}{})
+}
+
+var ErrAttachedHookUnavailable = errors.New("no live paired hook binding")
+
+func (c Client) PullAttachedHook(ctx context.Context, session string) ([]agentd.HarnessDelivery, error) {
+	var out []agentd.HarnessDelivery
+	err := c.lifecycleRequest(ctx, "POST", "/v1/attached-hook", agentd.AttachedHookRequest{Operation: "pull", SessionID: session}, &out)
+	return out, err
+}
+func (c Client) CompleteAttachedHook(ctx context.Context, session string, delivery agentd.HarnessDelivery) error {
+	var out []agentd.HarnessDelivery
+	return c.lifecycleRequest(ctx, "POST", "/v1/attached-hook", agentd.AttachedHookRequest{Operation: "complete", SessionID: session, DeliveryID: delivery.ID, Cursor: delivery.Cursor}, &out)
 }

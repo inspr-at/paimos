@@ -55,6 +55,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/deskdelivery"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -1271,6 +1272,7 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		ModelReports []modelregistry.Observation `json:"model_reports"`
 		pauseProgressReport
 		rules.ClientReport
+		AttachedHook     bool                    `json:"attached_hook"`
 		ProcessOwnership *ownedprocess.Identity  `json:"process_ownership"`
 		Phase            string                  `json:"phase"`
 		Activity         string                  `json:"activity"`
@@ -1293,6 +1295,11 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		return nil, workorders.Fail(400, "invalid heartbeat")
 	}
 	ctx := r.Context()
+	if in.AttachedHook {
+		if err := agentpairing.LockMutation(ctx, tx); err != nil {
+			return nil, err
+		}
+	}
 	if err := lockActivityPolicy(ctx, tx, true); err != nil {
 		return nil, err
 	}
@@ -1304,8 +1311,11 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	if err != nil {
 		return nil, err
 	}
+	if in.AttachedHook && in.ProcessOwnership == nil {
+		return nil, workorders.Fail(400, "exact attached hook identity required")
+	}
 	if in.ProcessOwnership != nil {
-		if err := m.reportOwnership(ctx, tx, s, *in.ProcessOwnership); err != nil {
+		if err := m.reportOwnership(ctx, tx, s, *in.ProcessOwnership, in.AttachedHook); err != nil {
 			return nil, err
 		}
 	}

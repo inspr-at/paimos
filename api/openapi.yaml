@@ -7324,6 +7324,7 @@ paths:
                 max_session_file_bytes: {$ref: '#/components/schemas/RulesClientMaximum'}
                 rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80}
                 process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+                attached_hook: {type: boolean, default: false, description: "Bind an existing unmanaged inbox hook to its paired daemon and exact process identity. Requires the current worker lease, inbox capability and active pairing; never grants process controls or watch consent."}
                 phase: {type: string, enum: [starting, working, yielded, stopping]}
                 activity: {type: string, enum: [unknown, busy, idle, throttled]}
                 activity_sequence: {type: integer, format: int64, minimum: 0}
@@ -7357,6 +7358,20 @@ paths:
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /projects/{projectId}/harness-sessions/{sessionId}/drain:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    post:
+      operationId: drainHarnessInbox
+      description: "Existing managed inbox or an explicitly paired attached hook. Attached hooks lease only exact-session messages; an unfinished lease is replayed until the foreground hook confirms handoff. Reconnect never acknowledges messages. Requires existing harness.worker authority and this registration's worker lease."
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '200': {description: Empty or one replayable delivery, content: {application/json: {schema: {type: array, maxItems: 1, items: {type: object, required: [delivery_id, message_id, cursor, sender_principal_id, body, leased_at], properties: {delivery_id: {type: string, format: uuid}, message_id: {type: string, format: uuid}, cursor: {type: integer, format: int64}, sender_principal_id: {type: string, format: uuid}, body: {type: string}, leased_at: {type: string, format: date-time}}}}}}}
+        '403': {description: Worker proof rejected}
+        '409': {description: An existing managed inbox or paired attached hook is required}
+        '410': {description: Archived generation}
   /projects/{projectId}/harness-sessions/{sessionId}/model-reports:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}

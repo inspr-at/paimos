@@ -155,6 +155,10 @@
     "internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink"
   ],
   "tests": [
+    {"kind":"go","package":"internal/harness","name":"TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestAttachedHookSocketAndReconnectPreserveExternalOwnership","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/cli","name":"TestHeartbeatPairedReconnectBindsOnlyItsLiveIndexedSession","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/cli","name":"TestPairedInboxHookAcknowledgesOnlyForegroundHandoff","tier":"ESSENTIAL"},
     {"package":"internal/harness","name":"TestAgentRecoveryOpenAPIContractsAgree","kind":"go","tier":"ESSENTIAL"},
     {"package":"internal/auth","name":"TestAgentRecoveryRuntimeRouteCeiling","kind":"go","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryDiagnosisDoesNotGuessExitOrAuth","tier":"ESSENTIAL"},

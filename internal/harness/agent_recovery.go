@@ -40,8 +40,16 @@ func diagnoseAgent(s Session, now time.Time, paired, keyLive, hostFresh bool, ru
 		out.Cause, out.Detail = "credential_rejected", "The paired daemon credential is revoked or expired. Credential delivery is required before recovery."
 	case !hostFresh:
 		out.Cause, out.Detail = "host_not_reporting", "The paired host has not reported recently; its process state is unknown."
-	case s.Management != "managed":
+	case s.Management != "managed" && (!has(s, "attached_reconnect_v1") || s.ProcessOwnership == nil || s.RunID != nil):
 		out.Cause, out.Detail = "hook_binding_unavailable", "The attached session has no verified daemon-owned heartbeat and inbox hook binding."
+	case s.Management == "unmanaged" && s.StoppedAt != nil:
+		out.Cause, out.Detail = "hook_binding_unavailable", "The attached hook registration has ended; reconnect cannot revive it."
+	case s.Management == "unmanaged" && (s.HeartbeatAt == nil || now.Sub(*s.HeartbeatAt) >= 2*time.Minute):
+		out.Cause, out.Detail, out.Action = "heartbeat_overdue", "The paired host is reporting but the attached hook heartbeat is overdue.", "reconnect"
+	case s.Management == "unmanaged" && (s.InboxSeenAt == nil || now.Sub(*s.InboxSeenAt) >= 2*time.Minute):
+		out.Cause, out.Detail, out.Action = "inbox_not_listening", "The attached hook is reporting but its inbox is not listening.", "reconnect"
+	case s.Management == "unmanaged":
+		out.Cause, out.Detail = "reporting", "Attached heartbeat and inbox reporting are current."
 	case !has(s, recoveryCapability) || s.ProcessOwnership == nil || s.RunID == nil:
 		out.Cause, out.Detail = "adapter_unavailable", "This daemon has not reported support for recovery of this exact process generation."
 	case runStatus == "failed" || runStatus == "cancelled" || runStatus == "completed":

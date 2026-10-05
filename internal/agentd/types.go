@@ -93,6 +93,7 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
+	AttachedHook     bool                    `json:"-"`
 	DisplayLabel     *string                 `json:"display_label,omitempty"`
 	ServiceTier      string                  `json:"service_tier,omitempty"`
 	Doing            string                  `json:"-"`

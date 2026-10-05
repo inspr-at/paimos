@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/inbox"
 	"gopkg.in/yaml.v3"
 	"net/http"
 	"net/http/httptest"
@@ -85,7 +87,7 @@ func (v recoveryAgentFixture) request(t *testing.T) map[string]any {
 
 // Exercise the real bearer authentication, paired-resource ceiling and route
 // declarations as well as the handler; injecting a principal would miss them.
-func (v recoveryAgentFixture) runtimeCall(t *testing.T, path string, body any) *httptest.ResponseRecorder {
+func (v recoveryAgentFixture) runtimeCall(t *testing.T, path string, body any, lease ...string) *httptest.ResponseRecorder {
 	t.Helper()
 	module, err := auth.New(auth.Config{SessionKey: bytes.Repeat([]byte{1}, 32)}, v.f.db.App)
 	if err != nil {
@@ -94,6 +96,9 @@ func (v recoveryAgentFixture) runtimeCall(t *testing.T, path string, body any) *
 	raw, _ := json.Marshal(body)
 	r := httptest.NewRequest(http.MethodPost, path, bytes.NewReader(raw))
 	r.Header.Set("Authorization", "Bearer "+v.f.key)
+	if len(lease) > 0 {
+		r.Header.Set("X-Aeon-Worker-Lease", lease[0])
+	}
 	_, r.Pattern = v.f.mux.Handler(r)
 	w := httptest.NewRecorder()
 	module.Middleware(v.f.mux).ServeHTTP(w, r)
@@ -269,4 +274,100 @@ func TestAgentRecoveryOpenAPIContractsAgree(t *testing.T) {
 			t.Fatalf("recovery schema diverges: %s", name)
 		}
 	}
+}
+
+func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T) {
+	v := recoveryAgent(t)
+	f := v.f
+	dbtest.BindRole(t, f.db, f.foreign.TenantID, f.foreign.ID, "admin")
+	inbox.New(f.db.App).Mount(f.mux)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET management='unmanaged',run_id=NULL,capabilities=ARRAY['inbox','status'],process_ownership=NULL,process_observed_at=NULL WHERE id=$1`, v.session)
+		return err
+	})
+	beat := map[string]any{"phase": "working", "activity_sequence": 2, "attached_hook": true, "process_ownership": v.identity}
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
+	expect(t, f.call(f.agent, "POST", v.path+"/heartbeat", beat, "wrong-lease"), 403)
+	wrong := v.identity
+	wrong.DaemonID = "unpaired"
+	beat["process_ownership"] = wrong
+	expect(t, f.call(f.agent, "POST", v.path+"/heartbeat", beat, v.lease), 403)
+	beat["process_ownership"] = v.identity
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
+	d := f.call(f.person, "GET", v.path+"/recover-agent", nil, "")
+	expect(t, d, 200)
+	diagnosis := decode(t, d)
+	if diagnosis["action"] != "reconnect" || diagnosis["cause"] != "inbox_not_listening" {
+		t.Fatalf("attached diagnosis=%v", diagnosis)
+	}
+	body := map[string]any{"request_id": uid(), "expected_revision": diagnosis["observed_revision"], "action": "restart"}
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 409)
+	body["action"] = "reconnect"
+	expect(t, f.call(f.agent, "POST", v.path+"/recover-agent", body, v.lease), 403)
+	expect(t, f.call(f.foreign, "POST", v.path+"/recover-agent", body, ""), 404)
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
+	if len(v.claim(t)) != 0 {
+		t.Fatal("revoked attached recovery reached daemon")
+	}
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	body["request_id"] = uid()
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	claimed := v.claim(t)
+	if len(claimed) != 1 || claimed[0]["run_id"] != nil {
+		t.Fatalf("attached claim=%v", claimed)
+	}
+	endpoint := "/api/harness-recoveries/" + body["request_id"].(string) + "/complete"
+	completion := map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation, "outcome": "reconnected"}
+	expect(t, v.runtimeCall(t, endpoint, completion), 409)
+	expect(t, v.runtimeCall(t, v.path+"/heartbeat", beat, v.lease), 200)
+	// The paired hook uses the existing session-scoped replayable drain.
+	messageID := uid()
+	for _, id := range []string{uid(), messageID} {
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			var target any
+			if id == messageID {
+				target = v.session
+			}
+			event, err := events.Append(t.Context(), tx, f.person, events.Change{Type: "inbox.sent", After: map[string]any{"id": id}})
+			if err != nil {
+				return err
+			}
+			_, err = tx.Exec(t.Context(), `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id) VALUES($1,$2,$3,$4,$5,'attached fixture message',$6,$7)`, f.person.TenantID, id, f.person.ID, f.agent.ID, event.ID, uid(), target)
+			return err
+		})
+	}
+	var deliveryID any
+	for round := 0; round < 2; round++ {
+		drain := v.runtimeCall(t, v.path+"/drain", map[string]any{}, v.lease)
+		expect(t, drain, 200)
+		var deliveries []map[string]any
+		if err := json.Unmarshal(drain.Body.Bytes(), &deliveries); err != nil || len(deliveries) != 1 || deliveries[0]["message_id"] != messageID {
+			t.Fatal("attached drain consumed a broadcast or lost its exact message")
+		}
+		if round == 0 {
+			deliveryID = deliveries[0]["delivery_id"]
+		} else if deliveryID != deliveries[0]["delivery_id"] {
+			t.Fatal("reconnect did not preserve the replayable delivery")
+		}
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var acked bool
+		if err := tx.QueryRow(t.Context(), `SELECT acked_at IS NOT NULL FROM inbox_messages WHERE id=$1`, messageID).Scan(&acked); err != nil {
+			return err
+		}
+		if acked {
+			t.Fatal("reconnect acknowledged a message before foreground handoff")
+		}
+		return nil
+	})
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
+	expect(t, v.runtimeCall(t, endpoint, completion), 403)
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
+	w := v.runtimeCall(t, endpoint, completion)
+	expect(t, w, 200)
+	if got := decode(t, w); got["outcome"] != "reconnected" || got["next_run_id"] != nil {
+		t.Fatalf("attached completion=%v", got)
+	}
+	expect(t, v.runtimeCall(t, endpoint, completion), 200)
 }

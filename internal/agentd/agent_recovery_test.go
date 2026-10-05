@@ -13,10 +13,13 @@ import (
 
 type recoveryAPI struct {
 	*fakeAPI
-	recoveryMu  sync.Mutex
-	requests    []RecoveryRequest
-	completions []RecoveryReport
-	fail        bool
+	recoveryMu    sync.Mutex
+	requests      []RecoveryRequest
+	completions   []RecoveryReport
+	fail          bool
+	probeError    error
+	hookReplyLost bool
+	probes        int
 }
 
 func (a *recoveryAPI) ClaimAgentRecoveries(context.Context, string, string) ([]RecoveryRequest, error) {
@@ -187,4 +190,18 @@ func TestAgentRecoveryReconnectRefreshesReportingWithoutStopping(t *testing.T) {
 		t.Fatal("reconnect stopped the process")
 	default:
 	}
+}
+
+func (a *recoveryAPI) ProbeAttachedInbox(context.Context, HarnessSession) error {
+	a.probes++
+	return a.probeError
+}
+
+func (a *recoveryAPI) HeartbeatHarness(ctx context.Context, session HarnessSession, phase string) error {
+	err := a.fakeAPI.HeartbeatHarness(ctx, session, phase)
+	if session.AttachedHook && a.hookReplyLost {
+		a.hookReplyLost = false
+		return errors.New("fixture binding reply lost after commit")
+	}
+	return err
 }

@@ -198,8 +198,6 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
         <SessionRecovery v-if="!reported?.watch" :session="view.session" />
         <RemoveSessionDialog :session="view.session" :label="view.name" :quick="quick" />
       </div>
-      <p v-if="view && !loading && view.session.agent_recovery" class="outside-note">{{ view.session.agent_recovery.detail }}</p>
-      <p v-else-if="view && !loading && outside" class="outside-note">Runs outside {{ brand.short_name }} — stop it in its terminal</p>
       <SessionPauseActions v-if="view && !loading && compactControls && !reported?.watch" :session="reported || view.session" />
       <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now" :run-status="view.run?.status">
         <template v-if="compactControls" #more="{ anchor }">
@@ -213,6 +211,8 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <SessionRecovery v-if="view && !loading && compactControls" ref="recovery" hide-trigger :session="view.session" />
       <RemoveSessionDialog v-if="view && !loading && compactControls" ref="removal" hide-trigger :session="view.session" :label="view.name" :quick="quick" />
       <SessionTabs v-if="view && !loading && !reported?.watch" :selected="tab" :unread="tab === 'messages' ? 0 : unread" @select="selectTab" />
+      <p v-if="view && !loading && view.session.agent_recovery" class="outside-note">{{ view.session.agent_recovery.detail }}</p>
+      <p v-else-if="view && !loading && outside" class="outside-note">Runs outside {{ brand.short_name }} — stop it in its terminal</p>
     </header>
 
     <!-- Until the first load completes the body stays a placeholder, so runs and

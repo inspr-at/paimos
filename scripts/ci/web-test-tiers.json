@@ -2438,6 +2438,7 @@
     "node:tests/work-vocabulary.test.ts:Parents / Leaves and depth survive links, saved views and API translation"
   ],
   "tests": [
+    {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"changing diagnosis remains below every session control and tab","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"Restart requests the exact row and keeps destructive actions behind the separator","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"Reconnect waits for reporting confirmation and rejected recovery stays an error","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"offline and unauthorized sessions offer no Restart or Reconnect","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
