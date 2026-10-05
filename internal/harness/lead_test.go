@@ -23,7 +23,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-func leadFixture(t *testing.T, admission harness.LeadAdmission) *harnessFixture {
+func leadHandoffFixture(t *testing.T, admission harness.LeadAdmission) *harnessFixture {
 	f := fixture(t)
 	f.mux = http.NewServeMux()
 	harness.NewWithLeadAdmission(f.db.App, admission).Mount(f.mux)
@@ -57,7 +57,7 @@ func claimLead(t *testing.T, f *harnessFixture, session, lease string, revision 
 }
 
 func TestProjectLeadLifecycleAndExplicitMigration(t *testing.T) {
-	f := leadFixture(t, readyLeadChecks)
+	f := leadHandoffFixture(t, readyLeadChecks)
 	base := "/api/projects/" + f.project
 	session, lease, _ := leadCandidate(t, f)
 	unrelated, _, _ := leadCandidate(t, f)
@@ -175,7 +175,7 @@ func TestProjectLeadAdmissionIsFreshAndFailClosed(t *testing.T) {
 					return checks, nil
 				}
 			}
-			f := leadFixture(t, admission)
+			f := leadHandoffFixture(t, admission)
 			session, lease, _ := leadCandidate(t, f)
 			l := startLead(t, f, 0)
 			l = claimLead(t, f, session, lease, l["revision"])
@@ -197,7 +197,7 @@ func TestProjectLeadAdmissionIsFreshAndFailClosed(t *testing.T) {
 }
 
 func TestProjectLeadLostContactDoesNotPermitSuccession(t *testing.T) {
-	f := leadFixture(t, readyLeadChecks)
+	f := leadHandoffFixture(t, readyLeadChecks)
 	session, lease, body := leadCandidate(t, f)
 	views.New(f.db.App).Mount(f.mux)
 	l := startLead(t, f, 0)
@@ -276,7 +276,7 @@ func (b *leadBarrier) TraceQueryEnd(ctx context.Context, c *pgx.Conn, q pgx.Trac
 func TestProjectLeadCompetingStartsClaimsAndRevocation(t *testing.T) {
 	for _, mode := range []string{"starts", "claims", "succession", "revocation"} {
 		t.Run(mode, func(t *testing.T) {
-			f := leadFixture(t, readyLeadChecks)
+			f := leadHandoffFixture(t, readyLeadChecks)
 			var session, lease string
 			var l map[string]any
 			if mode != "starts" {
@@ -408,7 +408,7 @@ func TestProjectLeadCompetingStartsClaimsAndRevocation(t *testing.T) {
 }
 
 func TestProjectLeadAssignmentFenceAndArchive(t *testing.T) {
-	f := leadFixture(t, readyLeadChecks)
+	f := leadHandoffFixture(t, readyLeadChecks)
 	session, lease, _ := leadCandidate(t, f)
 	l := startLead(t, f, 0)
 	l = claimLead(t, f, session, lease, l["revision"])
@@ -503,7 +503,7 @@ func TestProjectLeadReportingCadenceAndBoundaries(t *testing.T) {
 		{"future", -time.Microsecond, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			f := leadFixture(t, readyLeadChecks)
+			f := leadHandoffFixture(t, readyLeadChecks)
 			session, lease, _ := leadCandidate(t, f)
 			l := startLead(t, f, 0)
 			now := time.Date(2026, 10, 6, 12, 0, 0, 0, time.UTC)
