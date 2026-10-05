@@ -155,6 +155,13 @@
     "internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink"
   ],
   "tests": [
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsConcurrentRevisionHasOneWinner","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadPolicyInheritanceAndBounds","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsRevisionsOwnershipInheritanceAndRedaction","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsInputAndCurrentBindings","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsWriteRechecksRevocation","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/cli","name":"TestLeadSettingsCLIContractAndValidation","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/auth","name":"TestLeadSettingsAgentRoutesReadOnly","tier":"GATED-FULL"},
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachFallbackRefreshCannotWidenApprovedRoot","tier":"GATED-FULL"},
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachStartupDropsOnlyUnverifiableFallbacks","tier":"GATED-FULL"},
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachStartupRegistersWithUnverifiableFallback","tier":"GATED-FULL"},

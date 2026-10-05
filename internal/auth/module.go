@@ -407,6 +407,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "lead-settings":
+			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
+				return "nodes.read", true
+			}
 		case "questions":
 			if len(parts) == 3 && read {
 				return "questions.read", true
