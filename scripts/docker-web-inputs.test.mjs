@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { basename, dirname, extname, join, posix, relative, resolve } from 'node:path';
+import { dirname, extname, join, relative, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -25,66 +25,46 @@ function externalImports(directory = join(web, 'src')) {
       for (const target of externalImports(path)) targets.add(target);
     } else if (sourceExtensions.has(extname(path))) {
       for (const specifier of importSpecifiers(readFileSync(path, 'utf8'))) {
-        const target = resolve(dirname(path), specifier.split(/[?#]/)[0]);
-        const fromWeb = relative(web, target);
-        if (fromWeb !== '..' && !fromWeb.startsWith('../')) continue;
-        const fromRoot = relative(root, target);
-        assert.ok(fromRoot !== '..' && !fromRoot.startsWith('../'), `${path}: import escapes the repository: ${specifier}`);
-        // Resolve extensionless modules too; dependencies must be real files.
-        const candidates = [target, ...[...sourceExtensions, '.json'].flatMap(extension => [target + extension, join(target, 'index' + extension)])];
-        const file = candidates.find(candidate => existsSync(candidate) && statSync(candidate).isFile());
-        assert.ok(file, `${path}: external import does not resolve: ${specifier}`);
-        targets.add(relative(root, file));
+        const target = externalTarget(path, specifier);
+        if (target) targets.add(target);
       }
     }
   }
   return targets;
 }
 
-function copiedWebInputs(dockerfile) {
-  const copies = new Set();
-  let inWeb = false;
-  for (const line of dockerfile.replace(/\\\r?\n/g, ' ').split(/\r?\n/)) {
-    if (/^\s*FROM\s/i.test(line)) {
-      if (inWeb) break;
-      inWeb = /\sAS\s+web\s*$/i.test(line);
-      continue;
-    }
-    if (!inWeb) continue;
-    // A copy in another stage or after the build cannot satisfy its imports.
-    if (/^\s*RUN\s+.*\bnpm\s+run\s+build\b/i.test(line)) break;
-    const copy = /^\s*COPY\s+(.*)$/i.exec(line);
-    if (!copy || copy[1].startsWith('--')) continue;
-    const args = copy[1].startsWith('[') ? JSON.parse(copy[1]) : copy[1].trim().split(/\s+/);
-    const destination = args.pop();
-    for (const source of args) {
-      // Require explicit files at their repository-relative /src paths. Broad
-      // directory copies would grow the minimal web stage with unrelated code.
-      const target = destination.endsWith('/') ? posix.join(destination, basename(source)) : destination;
-      if (posix.normalize(target) === posix.join('/src', source)) copies.add(posix.normalize(source));
-    }
-  }
-  return copies;
+function externalTarget(path, specifier) {
+  const target = resolve(dirname(path), specifier.split(/[?#]/)[0]);
+  const fromWeb = relative(web, target);
+  if (fromWeb !== '..' && !fromWeb.startsWith('../')) return null;
+  const fromRoot = relative(root, target);
+  assert.ok(fromRoot !== '..' && !fromRoot.startsWith('../'), `${path}: import escapes the repository: ${specifier}`);
+  const candidates = [target, ...[...sourceExtensions, '.json'].flatMap(extension => [target + extension, join(target, 'index' + extension)])];
+  const file = candidates.find(candidate => existsSync(candidate) && statSync(candidate).isFile());
+  assert.ok(file, `${path}: external import does not resolve: ${specifier}`);
+  return relative(root, file);
 }
 
-function assertInputsCopied(targets, dockerfile) {
-  const copies = copiedWebInputs(dockerfile);
-  const missing = [...targets].filter(target => !copies.has(target)).sort();
-  assert.deepEqual(missing, [], `Dockerfile web stage must COPY before npm run build: ${missing.join(', ')}`);
-}
-
-test('every web/src import outside web/ is explicitly copied into the Dockerfile web stage', () => {
-  assertInputsCopied(externalImports(), readFileSync(join(root, 'Dockerfile'), 'utf8'));
+test('production external web compilation resolves every shared import in the full checkout', () => {
+  const targets = externalImports();
+  for (const input of ['internal/agentactivity/privacy.json', 'internal/authz/permission_labels.json',
+    'internal/authz/project_self_permissions.json', 'internal/authz/builtin_agent_exclusions.json',
+    'internal/nodes/status_definitions.json']) assert.ok(targets.has(input), `missing shared import ${input}`);
 });
 
-test('rejects the real Dockerfile when the activity privacy JSON copy is missing', () => {
-  const input = 'internal/agentactivity/privacy.json';
-  const targets = externalImports();
-  assert.ok(targets.has(input), 'the activity privacy import must be discovered');
+test('assembly Dockerfile only copies prebuilt production artifacts into the frozen runtime', () => {
   const dockerfile = readFileSync(join(root, 'Dockerfile'), 'utf8');
-  const missingCopy = dockerfile.replace(/^COPY internal\/agentactivity\/privacy\.json .*\r?\n/m, '');
-  assert.notEqual(missingCopy, dockerfile, 'the fixture must remove the privacy JSON copy');
-  assert.throws(() => assertInputsCopied(targets, missingCopy), /internal\/agentactivity\/privacy\.json/);
+  assert.match(dockerfile, /^FROM aeon-runtime$/m);
+  assert.doesNotMatch(dockerfile, /^RUN /m);
+  assert.match(dockerfile, /^COPY dist\/image-input\/paimos \/paimos$/m);
+  assert.match(dockerfile, /^COPY NOTICE \/usr\/share\/doc\/aeon\/NOTICE$/m);
+  assert.match(dockerfile, /^USER 65532:65532$/m);
+  const runtime = readFileSync(join(root, 'scripts/Dockerfile.runtime'), 'utf8');
+  assert.match(runtime, /^FROM alpine:3\.24@sha256:[a-f0-9]{64}$/m);
+  for (const pin of ['chromium=152.0.7977.82-r0', 'tini=0.19.0-r3']) {
+    assert.ok(runtime.includes(pin));
+    assert.ok(dockerfile.includes(pin), 'quote evidence pin annotation drifted');
+  }
 });
 
 test('recognizes multiline, side-effect, re-export and dynamic relative imports without comments', () => {
@@ -98,18 +78,9 @@ test('recognizes multiline, side-effect, re-export and dynamic relative imports 
   `), ['../../../static.json', '../../../side-effect.js', '../../../export.js', '../../../dynamic.js']);
 });
 
-test('rejects absent, misplaced, broad and late copies, including copies in another stage', () => {
-  const input = 'internal/example.json';
-  const stage = 'FROM node:24 AS web\nWORKDIR /src/web\n';
-  const copy = `COPY ${input} /src/${input}\n`;
-  for (const dockerfile of [
-    stage + 'RUN npm run build\n',
-    stage + `COPY ${input} /src/web/example.json\nRUN npm run build\n`,
-    stage + 'COPY internal/ /src/internal/\nRUN npm run build\n',
-    stage + 'RUN npm run build\n' + copy,
-    stage + 'FROM golang:1.26 AS build\n' + copy,
-    stage + `COPY --from=build ${input} /src/${input}\nRUN npm run build\n`,
-  ]) assert.throws(() => assertInputsCopied([input], dockerfile), /internal\/example.json/);
-  assertInputsCopied([input], stage + copy + 'RUN npm run build\n');
-  assertInputsCopied([input], stage + `COPY ["${input}", "/src/internal/"]\nRUN npm run build\n`);
+test('rejects missing shared dependencies and imports escaping the full production checkout', () => {
+  const importer = join(web, 'src/fixture.ts');
+  assert.throws(() => externalTarget(importer, '../../internal/aeon-422-missing.json'), /external import does not resolve/);
+  assert.throws(() => externalTarget(importer, '../../../aeon-422-outside.json'), /escapes the repository/);
+  assert.equal(externalTarget(importer, '../../internal/agentactivity/privacy.json'), 'internal/agentactivity/privacy.json');
 });

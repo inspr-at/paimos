@@ -183,7 +183,7 @@
     {
       "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
       "mode": "action",
-      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "sha256": "d1612e89f849a699f2684c05aa6f64a7f1dec30a9e98efe9b56380ad1b933ab6",
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
     },
     {
@@ -235,6 +235,24 @@
       "step": "Release history"
     },
     {
+      "counterpart": "image-dry-run/Require native platform",
+      "mode": "step",
+      "sha256": "a05091bb2f4940b1af0af9fab542ac710c420478deb185a7d01b07e40b5f75e9",
+      "step": "Require native platform"
+    },
+    {
+      "counterpart": "image-dry-run/Freeze external build inputs",
+      "mode": "step",
+      "sha256": "7ee7b6ce05af216b24eadc697fc620f79fe3333819856c6c20aff2cffd3b50fe",
+      "step": "Freeze external build inputs"
+    },
+    {
+      "counterpart": "image-dry-run/Compile web and Go outside Docker",
+      "mode": "step",
+      "sha256": "cd96c1fef9ef4b4abedd087c00916828999f48e6394e72b128fbbd04f2078adb",
+      "step": "Compile web and Go outside Docker"
+    },
+    {
       "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
       "mode": "action",
       "sha256": "f1c421c866796120658fcc5886fcd38c9490f8f0c7b5c946c0fdb465fa72940e",
@@ -253,15 +271,27 @@
       "step": "Reject an existing image tag"
     },
     {
-      "counterpart": "image-dry-run/Require native platform",
+      "counterpart": "image-dry-run/Prepare pinned runtime closure",
       "mode": "step",
-      "sha256": "a05091bb2f4940b1af0af9fab542ac710c420478deb185a7d01b07e40b5f75e9",
-      "step": "Require native platform"
+      "sha256": "834fe5434efc36d7a3e2fe56d004f10ca886fefec85232a4dc41773c63ed3c63",
+      "step": "Prepare pinned runtime closure"
+    },
+    {
+      "counterpart": "image-dry-run/Bind runtime closure digest",
+      "mode": "step",
+      "sha256": "7fe5746782093069dd07b82e1619240099e608f880d8e30cc552b81741500cf6",
+      "step": "Bind runtime closure digest"
+    },
+    {
+      "counterpart": "image-dry-run/Start assembly and smoke timing",
+      "mode": "step",
+      "sha256": "d40f9764accb3b753a1ef9757a3c7f10bd2634d56e6e56d4a15fb252a96eba8c",
+      "step": "Start assembly and smoke timing"
     },
     {
       "counterpart": "image-dry-run/Build cached smoke image",
       "mode": "step",
-      "sha256": "0fe7948bf008d90249262025082b512df3cc41535d08168278e97c21a752c334",
+      "sha256": "670211901cb0ba500e17c48a8854d3e1821b39286cb4f4b6986611acc5e7360a",
       "step": "Build cached smoke image"
     },
     {
@@ -273,13 +303,37 @@
     {
       "counterpart": "image-dry-run/Smoke production image",
       "mode": "step",
-      "sha256": "3cf21fda6c4b7c037aa39e03d4a3fb5a8d0d2aea56db6172eaf02229b289a117",
+      "sha256": "07df291287f9a33403263d1d3047bf2668177a3867afcd5173716ff60ee5b709",
       "step": "Smoke production image"
+    },
+    {
+      "counterpart": "image-dry-run/Record assembly and smoke timing",
+      "mode": "step",
+      "sha256": "6fecce4e6d2f832dbb50a132fffe469c7e199b6ef80cf11a86fbe2247e9de7cb",
+      "step": "Record assembly and smoke timing"
+    },
+    {
+      "counterpart": "image-dry-run/Prove two clean image rebuilds",
+      "mode": "step",
+      "sha256": "ab5402c0a4a103c115d045bdd66305b8537c42e25ee30fef5b045bc27c26f93c",
+      "step": "Prove two clean image rebuilds"
+    },
+    {
+      "counterpart": "image-dry-run/Upload image assembly evidence",
+      "mode": "step",
+      "sha256": "4c075411d3ad3ea66f98832cb44d10f8524d21fd2fd94594f63a1ae3fce6483f",
+      "step": "Upload image assembly evidence"
+    },
+    {
+      "counterpart": "TestRuntimeCacheSavedAfterSmoke",
+      "mode": "test",
+      "sha256": "dc4c8be400ebc1e82081df228e8841a1e89f70f71925fade5b741a38a47e2f2a",
+      "step": "Save verified runtime closure"
     },
     {
       "counterpart": "image-dry-run/Export production image with provenance locally",
       "mode": "step",
-      "sha256": "4863a035ebf9ff4b1bb2e76ca0d587068d403624778f11ca2d2e9279839aeedd",
+      "sha256": "407b627043b6008d1b4fabbae4fa8bd6ae96ccca6bd0078c4bc1c593e021ba7e",
       "step": "Build and push"
     },
     {

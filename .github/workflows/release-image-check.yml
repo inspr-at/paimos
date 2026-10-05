@@ -64,12 +64,15 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
       - name: Check release workflow invariants
         run: |
           go test ./scripts/releaseworkflow
+          node --test scripts/image-assembly.test.mjs scripts/docker-web-inputs.test.mjs
           node --test scripts/release-image-index.test.mjs
           node --test scripts/release-pin-pr.test.mjs scripts/check-release-rehearsal.test.mjs scripts/release-rehearsal-gh.test.mjs scripts/create-release-tag.test.mjs
           node scripts/check-own-release-notes.mjs
@@ -83,25 +86,58 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: go run ./internal/releasehistory/generate -repo . -repository "$GITHUB_REPOSITORY" -offline -candidate "$VERSION"
-      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - name: Require native platform
         env:
           ARCH: ${{ matrix.arch }}
         run: |
           set -euo pipefail
           case "$ARCH:$(uname -m)" in amd64:x86_64|arm64:aarch64) ;; *) echo 'Native runner architecture mismatch' >&2; exit 1 ;; esac
+      - name: Freeze external build inputs
+        id: inputs
+        env:
+          ARCH: ${{ matrix.arch }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: node scripts/build-image-inputs.mjs inputs
+      - name: Compile web and Go outside Docker
+        env:
+          ARCH: ${{ matrix.arch }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SOURCE_DATE_EPOCH: ${{ steps.inputs.outputs.epoch }}
+        run: node scripts/build-image-inputs.mjs build
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - name: Prepare pinned runtime closure
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        with:
+          context: .
+          file: scripts/Dockerfile.runtime
+          platforms: linux/${{ matrix.arch }}
+          provenance: false
+          outputs: type=oci,dest=${{ runner.temp }}/aeon-runtime,tar=false,rewrite-timestamp=true
+          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}-runtime
+          build-args: |
+            SOURCE_DATE_EPOCH=0
+      - name: Bind runtime closure digest
+        id: runtime
+        run: node scripts/image-evidence.mjs runtime "$RUNNER_TEMP/aeon-runtime" linux/${{ matrix.arch }}
+      - name: Start assembly and smoke timing
+        run: node scripts/image-evidence.mjs start "$RUNNER_TEMP/image-timing"
       - name: Build cached smoke image
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
           load: true
+          outputs: type=docker,rewrite-timestamp=true,oci-mediatypes=true
           platforms: linux/${{ matrix.arch }}
           provenance: false
           tags: aeon-release-smoke:${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.arch }}
           cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}
+          build-contexts: |
+            aeon-runtime=oci-layout://${{ runner.temp }}/aeon-runtime@${{ steps.runtime.outputs.digest }}
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
+            SOURCE_DATE_EPOCH=${{ steps.inputs.outputs.epoch }}
+            BUILDKIT_MULTI_PLATFORM=1
       - name: Resolve loaded smoke image
         id: smoke-image
         env:
@@ -115,10 +151,40 @@ jobs:
           fi
           echo "image=$image" >> "$GITHUB_OUTPUT"
       - name: Smoke production image
+        id: smoke
         env:
           AEON_SMOKE_IMAGE: ${{ steps.smoke-image.outputs.image }}
           AEON_SMOKE_VERSION: ${{ steps.version.outputs.version }}
         run: bash scripts/smoke-image.sh
+
+      - name: Record assembly and smoke timing
+        if: always()
+        env:
+          ASSEMBLY_OUTCOME: ${{ steps.build.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+        run: node scripts/image-evidence.mjs timing "$RUNNER_TEMP/image-timing" linux/${{ matrix.arch }}
+
+      - name: Prove two clean image rebuilds
+        env:
+          ARCH: ${{ matrix.arch }}
+          VERSION: ${{ steps.version.outputs.version }}
+          SOURCE_DATE_EPOCH: ${{ steps.inputs.outputs.epoch }}
+          RUNTIME_DIGEST: ${{ steps.runtime.outputs.digest }}
+          SMOKE_IMAGE: ${{ steps.smoke-image.outputs.image }}
+          SMOKE_CONFIG_DIGEST: ${{ steps.build.outputs.imageid }}
+        run: node scripts/reproduce-image.mjs "$RUNNER_TEMP/aeon-runtime" "$RUNNER_TEMP/image-reproducibility.json"
+      - name: Upload image assembly evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: image-assembly-${{ matrix.arch }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/image-timing.json
+            ${{ runner.temp }}/image-reproducibility.json
+            dist/image-input/inputs.json
+            ${{ runner.temp }}/aeon-runtime/index.json
+          if-no-files-found: error
+          retention-days: 14
       # Exercise production BuildKit provenance locally; registry/attestation writes stay disabled.
       - name: Export production image with provenance locally
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
@@ -127,10 +193,14 @@ jobs:
           push: false
           platforms: linux/${{ matrix.arch }}
           provenance: mode=max
-          outputs: type=oci,dest=${{ runner.temp }}/release-${{ matrix.arch }}.tar
+          outputs: type=oci,dest=${{ runner.temp }}/release-${{ matrix.arch }}.tar,rewrite-timestamp=true,oci-mediatypes=true
           cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}
+          build-contexts: |
+            aeon-runtime=oci-layout://${{ runner.temp }}/aeon-runtime@${{ steps.runtime.outputs.digest }}
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
+            SOURCE_DATE_EPOCH=${{ steps.inputs.outputs.epoch }}
+            BUILDKIT_MULTI_PLATFORM=1
       - name: Record dry run
         run: echo 'linux/${{ matrix.arch }} built and smoked natively; nothing pushed, attested or published.' >> "$GITHUB_STEP_SUMMARY"
 

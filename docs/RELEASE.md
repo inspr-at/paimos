@@ -16,7 +16,7 @@ Development builds leave the linker version at `dev`. A release build sets:
 -X github.com/inspr-at/paimos/internal/version.Version=<version>
 ```
 
-with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `CGO_ENABLED=0` (`Dockerfile` for the image). Darwin `paimos-agentd` is built on macOS with `CGO_ENABLED=1` and links LocalAuthentication. `scripts/build-release-binaries.sh` is the build used by `.github/workflows/release.yml`.
+with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `CGO_ENABLED=0` (`scripts/build-image-inputs.mjs` for the image). Darwin `paimos-agentd` is built on macOS with `CGO_ENABLED=1` and links LocalAuthentication. `scripts/build-release-binaries.sh` builds the distributed client binaries in `.github/workflows/release.yml`.
 
 ## Workflow
 
@@ -97,9 +97,11 @@ disabled privileged operation. The workflow tests reject new jobs, new steps,
 changed step bodies/flags and missing counterparts. When a release step changes,
 implement its counterpart first, then review the updated fingerprint and run the
 negative drift fixtures. Do not regenerate fingerprints as a substitute for a
-counterpart. `docker-web-check.yml` separately builds the real Dockerfile `web`
-stage on PR changes to `web/**`, `internal/**/*.json` and its build inputs, so
-shared JSON imports are checked inside the production context before release.
+counterpart. `docker-web-check.yml` retains its established check identity and
+runs `scripts/build-image-inputs.mjs web`, the production host web build, on PR
+changes to `web/**`, `internal/**/*.json` and its build inputs. Shared JSON
+imports keep their full checkout paths; the obsolete Docker `web` stage no
+longer compiles anything. Both image rehearsals also check these imports.
 
 ### Cross-family verdict and merge queue (AEON-411)
 
@@ -638,9 +640,9 @@ A push of an annotated `v*` tag runs `.github/workflows/release.yml`. The coordi
 The server image pipeline starts independently of the macOS jobs (AEON-407, AEON-504). **Every release requires linux/amd64 and linux/arm64**, built and smoked natively in parallel; either platform failing prevents release-index publication. GitHub's hosted `ubuntu-24.04` runner builds amd64 and `ubuntu-24.04-arm` builds arm64 ([runner labels](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)). No QEMU is installed, and each job checks `uname -m` before building.
 
 1. Each `image-platform` matrix job checks out all tags, validates the calendar coordinate and presentation bundle, and requires an annotated tag matching `version.json`. It refuses an existing GitHub release (including drafts) or GHCR release tag; lookup errors fail closed.
-2. Generate the release-history manifest embedded in the image. Both the loaded smoke build and the provenance export use the same working-directory context and build arguments.
-3. Import the architecture's registry cache, `ghcr.io/inspr-at/aeon:buildcache` or `:buildcache-arm64`, and load its native image into Docker. Resolve the loaded tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable ID. Independent cache refs prevent the two exporters overwriting each other; the existing amd64 cache is retained and the first arm64 import may miss while its cache warms.
-4. After smoke passes, export the same inputs with BuildKit `provenance: mode=max`, push **by digest only**, and update that architecture's separate cache in `mode=max`. Platform jobs never assign the release tag. Each creates and verifies a GitHub build-provenance attestation bound to its digest, repository, workflow, source tag and commit, then uploads its digest artifact.
+2. Generate the release-history manifest once. Freeze the source commit timestamp as `SOURCE_DATE_EPOCH`; compile web and Go on the native host using warm npm and Go caches. `scripts/build-image-inputs.mjs` runs the production prebuild checks, uses `-trimpath -buildvcs=false -tags webembed`, disables CGO, and injects the exact reserved version. The input manifest records the tree, toolchain versions, generated-history hash, web hashes and binary hash; the final executable has mode 755 and a fixed mtime.
+3. Prepare `scripts/Dockerfile.runtime` using the architecture's `:buildcache-runtime` or `:buildcache-arm64-runtime` cache. Bind its exported OCI runtime manifest digest as the `aeon-runtime` named context. The main Dockerfile only copies `dist/image-input/paimos` and `NOTICE`, retaining UID/GID 65532 and the tini entrypoint. Import the existing `:buildcache` or `:buildcache-arm64` assembly cache and load the native image. Resolve its tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable ID. Both assembly and export use the same working-directory context, base digest and arguments, with `rewrite-timestamp=true` and OCI media types.
+4. Record assembly plus smoke timing and require two clean same-input rebuilds (below). After these gates pass, save the verified runtime's architecture-specific registry cache, then export the same image inputs with BuildKit `provenance: mode=max` and push **by digest only**. Update that architecture's assembly cache in `mode=max`. Platform jobs never assign the release tag. Each creates and verifies a GitHub build-provenance attestation bound to its digest, repository, workflow, source tag and commit, then uploads its digest artifact.
 5. The `image` job waits for both platform jobs to succeed, rechecks release/tag immutability, and combines their immutable references using `docker buildx imagetools create`. Before publishing and after reading back, require exactly linux/amd64 and linux/arm64 runtime manifests with separate bound BuildKit provenance descriptors. Publish one multi-arch OCI index at `ghcr.io/inspr-at/aeon:<version>`, without a `latest` alias.
 6. Attest and verify the index digest too. Preserve `needs.image.outputs.version` and `needs.image.outputs.digest`; **digest is the index digest**, also recorded in the summary and draft release notes. Production **csb1 is x86_64 and automatically pulls linux/amd64 from this index**. ARM servers and Apple-silicon Linux VMs pull linux/arm64 from the same tag or digest, without emulation.
 
@@ -738,7 +740,78 @@ the evidence. Fixture timings are not live acceptance evidence.
 
 ### Image dry runs and timing evidence
 
-`.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. Its two native hosted matrix jobs run the workflow/index regression tests, generate offline release history, import the matching architecture cache, load that platform's production build and run the same full smoke gate. Both are required to pass. The Actions job timings and build logs record per-platform timing and cache hits; cold-cache and warm-cache times must be distinguished. Its token has only `contents: read`; it has no signing environment, registry login, cache export, image push, attestation or release creation. Before tagging, require the successful exact-SHA `main` receipt described in [Mandatory pre-tag rehearsal (AEON-531)](#mandatory-pre-tag-rehearsal-aeon-531); a work-branch or PR run is diagnostic only and cannot authorize a release tag. Hosted timing and real attestation verification still require a coordinator-authorized publishing run; a local fixture test does not establish either acceptance criterion.
+`.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. Its two native hosted matrix jobs run the workflow/index and assembly-script regression tests, generate offline release history once, compile externally, import the matching architecture caches, freeze the runtime closure, load that platform's production assembly and run the same full smoke gate. Both must also pass the 90-second assembly/smoke budget and the two-clean-rebuild digest proof. The rehearsal exports production BuildKit provenance locally with the identical digest-bound base and inputs. Its token has only `contents: read`; it has no signing environment, registry login, registry cache export, image push, attestation or release creation. Before tagging, require the successful exact-SHA `main` receipt described in [Mandatory pre-tag rehearsal (AEON-531)](#mandatory-pre-tag-rehearsal-aeon-531); a work-branch or PR run is diagnostic only and cannot authorize a release tag. Hosted timing can be measured in rehearsal; real attestation verification still requires a coordinator-authorized publishing run. A local fixture test establishes neither.
+
+### Host compilation, runtime pin and digest proof (AEON-422)
+
+`scripts/Dockerfile.runtime` pins the official Alpine 3.24 multi-platform index
+by digest (3.24.2 when observed on 2026-10-05), while preserving Chromium
+152.0.7977.82-r0 and tini 0.19.0-r3. The index keeps both native architectures;
+the smoke gate still checks their installed pins, licenses, NOTICE, UID/GID,
+mounted files, embedded web, authenticated APIs and Chromium PDF rendering.
+The runtime closure uses epoch 0 so it can remain cached across source commits.
+Only the tag workflow saves its registry cache, after smoke and the proof pass.
+Rehearsal reads those caches without registry writes.
+
+Alpine's APK repository and unpinned transitive dependencies still resolve
+during a **cold runtime preparation**. A pinned Alpine index alone does not
+freeze them. The exported OCI closure digest freezes all their bytes before
+assembly, smoke, both proof runs and provenance export. Changing that digest
+changes the input: equality across independently regenerated cold closures is
+not claimed. Retain the complete runtime OCI layout/cache when replaying old
+evidence; the input/base hashes in JSON identify it but cannot recover its
+bytes. Pin/package changes require the existing render-parity and NOTICE
+review; unavailable pinned APKs fail preparation rather than being upgraded.
+
+`scripts/reproduce-image.mjs RUNTIME_LAYOUT EVIDENCE.json` requires a clean
+tracked checkout. It archives the exact commit into two distinct fresh source
+directories, copies the exact already-generated history fixture, and builds
+web and Go independently with shared dependency caches. Neither compiled
+outputs nor incremental web state are carried between runs. Each assembly
+uses `--no-cache --network=none`, the same runtime digest, reserved version,
+source epoch and normalization flags. It compares **platform runtime manifest
+digests**, excluding provenance envelopes, and requires each rebuilt input
+manifest to equal the original smoked build's inputs. It separately compares
+the rebuilt config to BuildKit's smoked config digest; the daemon's runnable
+ID is recorded independently because it need not equal that config digest.
+Temporary fixtures remain under ignored `tmp/image-repro-*` for diagnosis.
+
+Both workflows upload `image-assembly-<arch>-<run_id>-<attempt>` for 14 days:
+
+- `inputs.json` (`aeon.image-inputs.v1`): tree, reserved version, platform,
+  source epoch, generated-history/NOTICE/recipe/web/binary hashes and exact
+  Go/Node/npm versions.
+- `image-reproducibility.json` (`aeon.image-reproducibility.v1`): source SHA,
+  those inputs, runtime base/config digests, both runs' runtime manifest/config
+  digests, smoke IDs, `reproducible`, and failure/completeness fields.
+- `image-timing.json` (`aeon.image-timing.v1`): timezone-bearing start/end,
+  run/attempt/SHA/platform, assembly/smoke outcomes, `assembly_smoke_s`,
+  `within_target`, and `completeness: {state, reasons}`. Missing/failed/skipped
+  evidence is **unknown**, never zero or success, following
+  `scripts/release-timing.mjs`'s validated interval conventions.
+- Runtime `index.json`: the frozen local OCI root descriptor. Archive the
+  full runtime layout separately if a durable replay fixture is required.
+
+The timing interval starts immediately before COPY assembly and stops after
+the complete immutable-ID smoke, including image load, ID resolution, fixture
+setup and cleanup. Successful samples over 90 seconds fail the job. Host
+compilation, runtime preparation, setup, clean rebuild proofs and provenance
+export are outside that named acceptance metric; their separate named Actions
+step durations must still be reported when assessing total release latency.
+Record native runner, cold/warm cache state and run attempt with every sample.
+
+Hosted evidence remains pending until the coordinator integrates this change
+and dispatches `release-image-check.yml` on the exact `main` SHA using the
+existing pre-tag procedure. Download both architecture artifacts, require
+`reproducible: true`, equal `runs[0].image.digest` and `runs[1].image.digest`,
+matching inputs/base, complete timing with `assembly_smoke_s <= 90`, and the
+full smoke/job success. Use `gh run view RUN_ID --json jobs,createdAt,updatedAt`
+to retain per-step durations and cold/warm logs; compare like-for-like samples
+to release 123's 142 s amd64 and 129 s arm64 build-plus-smoke baseline. Those
+baseline numbers are OPS-provided, not measured by this worker. No local or
+hosted runtime result is claimed by the fixture tests. The final tag build
+must repeat these gates and retain its existing signer workflow and exact-SHA
+receipt checks; rehearsing never grants publication or deployment permission.
 
 Baseline evidence: [release run 36647379702](https://github.com/inspr-at/paimos/actions/runs/36647379702), obtained with `gh run view --json jobs,createdAt,updatedAt`, took **641 s (10:41)** from run creation to pushed digest. The release job began after **237 s**; Linux/CLI builds took **99 s**, artifact download **1 s**, history **32 s**, image smoke (including its original build) **119 s**, and build/push **122 s**. Removing the signing dependency and client build/download time gives a conservative structural estimate of **304 s (5:04)** before the new attestation/verification overhead, with cache gains unmeasured. The ≤6 min target and successful test-image verification remain pending a hosted run; do not report this estimate as measured acceptance.
 
@@ -974,7 +1047,7 @@ production acceptance or native hardware qualification.
 
 ## Image smoke gate
 
-`scripts/smoke-image.sh` builds the release image and exercises it before anything is published. CI sets `AEON_SMOKE_IMAGE` to the cached build's immutable image ID, which skips rebuilding and preserves the caller-owned image during cleanup; standalone runs still build and clean up their own disposable image. It checks the pinned Chromium and tini packages, their licenses, and `NOTICE`. It then starts a disposable Postgres and the server with mounted secret files, and checks startup, the database role, UID 65532, health, and headers. The script's dev mode is only for authenticated upload and quote calls. Live OIDC is not part of the gate, because the database is disposable and has no identity provider.
+`scripts/smoke-image.sh` exercises the release image before anything is published. CI sets `AEON_SMOKE_IMAGE` to the cached assembly's immutable image ID, which skips rebuilding and preserves the caller-owned image during cleanup; standalone runs use `scripts/assemble-image.mjs` to compile externally, prepare the runtime and load one disposable image, then clean up that image. Standalone assembly needs Go, Node/npm and a Buildx `docker-container` builder (OCI export and named contexts); it generates offline history only when no generated fixture exists. It checks the pinned Chromium and tini packages, their licenses, and `NOTICE`. It then starts a disposable Postgres and the server with mounted secret files, and checks startup, the database role, UID/GID 65532, health, and headers. The script's dev mode is only for authenticated upload and quote calls. Live OIDC is not part of the gate, because the database is disposable and has no identity provider.
 
 The gate needs Docker. It is a release check, not the day-to-day `just test` run.
 
