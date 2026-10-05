@@ -80,9 +80,10 @@ test('Shift F opens every filter: labels, parent, cost unit and release by name,
   await expect(keys(page)).toHaveText(['PHAROS-13'])
   await page.keyboard.press('Escape')
   await page.getByRole('button', { name: /Remove Labels filter/ }).click()
-  // Epic: the project's epics by title; the list asks for the epic's id.
+  // Parent by title retains the legacy epic query for saved-view compatibility.
+  // Match exactly: the menu also offers the separate Parents / Leaves filter.
   await page.getByRole('button', { name: 'Filter by more' }).click()
-  await page.getByRole('menuitem', { name: 'Parent' }).click()
+  await more.getByRole('menuitem', { name: 'Parent', exact: true }).click()
   const epics = page.getByRole('dialog', { name: 'Filter by Parent' })
   await epics.getByText('Guarded multi-cloud provisioning').click()
   await expect.poll(() => lastList(calls).query.get('epic')).toBe('n-epic')
