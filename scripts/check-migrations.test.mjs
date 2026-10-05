@@ -484,6 +484,13 @@ for (const [file, ticket] of [
   assert.match(checkMigrations(new Map(), new Map(), null, {exceptions}).join('\n'), /: exception migration removed/);
 });
 
+test('AEON-724 person ownership migration is expand-only without a contract exception', () => {
+  const name = '1256_agent_key_person_owner.sql';
+  const source = readFileSync(new URL('../internal/db/migrations/' + name, import.meta.url), 'utf8');
+  assert.equal(destructive(source), false);
+  assert.deepEqual(checkMigrations(new Map([[name, source]]), new Map(), null), []);
+});
+
 test('the current tree requires all exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));

@@ -339,8 +339,9 @@ func TestPairingApprovalRedemptionIsolationAndOneShot(t *testing.T) {
 	}
 	v := f.redeem(p)
 	var creator string
-	if err := f.db.Admin.QueryRow(t.Context(), `SELECT k.created_by_principal_id::text FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.tenant_id=$1 AND c.id=$2`, f.tenantID, *v.ComputerID).Scan(&creator); err != nil || creator != f.person {
-		t.Fatal("pairing omitted approving person creator")
+	var required bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT k.created_by_principal_id::text,k.person_owner_required FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.tenant_id=$1 AND c.id=$2`, f.tenantID, *v.ComputerID).Scan(&creator, &required); err != nil || creator != f.person || !required {
+		t.Fatal("pairing omitted approving person creator or ownership marker")
 	}
 
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime

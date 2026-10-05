@@ -20,17 +20,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Reconstruct a pre-migration key; the guard is restored before any assertion.
+// Reconstruct a key written by a previous binary during the expansion rollout.
 func legacyKey(t *testing.T, m *Module, owner tenant.Principal, id string) {
 	t.Helper()
 	err := db.InTenant(dbtest.Seed(t.Context()), m.pool, owner.TenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `ALTER TABLE agent_keys DISABLE TRIGGER agent_key_person_owner_guard`); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_keys SET person_owner_required=false,created_by_principal_id=NULL WHERE id=$1`, id); err != nil {
-			return err
-		}
-		_, err := tx.Exec(t.Context(), `ALTER TABLE agent_keys ENABLE TRIGGER agent_key_person_owner_guard`)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET person_owner_required=false,created_by_principal_id=NULL WHERE id=$1`, id)
 		return err
 	})
 	if err != nil {
@@ -253,7 +247,26 @@ func TestAdoptAgentKeyConcurrentNoTakeover(t *testing.T) {
 
 func TestAgentKeyCreationRequiresPersonCreator(t *testing.T) {
 	m, owner := keyFixture(t)
-	for _, p := range []tenant.Principal{{TenantID: owner.TenantID}, {TenantID: owner.TenantID, KeyCreatorID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, {ID: owner.ID, TenantID: owner.TenantID, Kind: tenant.Agent}} {
+	var agent, inactive, foreignPerson, foreignTenant string
+	ctx := dbtest.Seed(t.Context())
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Invalid creator') RETURNING id::text`, owner.TenantID).Scan(&agent); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,status) VALUES($1,'person','Inactive creator','deactivated') RETURNING id::text`, owner.TenantID).Scan(&inactive); err != nil {
+			return err
+		}
+		return tx.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('foreign-creator','Foreign creator') RETURNING id::text`).Scan(&foreignTenant)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(ctx, m.pool, foreignTenant, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Foreign creator') RETURNING id::text`, foreignTenant).Scan(&foreignPerson)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	beforeKeys, beforeEvents := keyCounts(t, m, owner)
+	for _, p := range []tenant.Principal{{TenantID: owner.TenantID}, {TenantID: owner.TenantID, KeyCreatorID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"}, {ID: owner.ID, TenantID: owner.TenantID, Kind: tenant.Agent}, {TenantID: owner.TenantID, KeyCreatorID: agent}, {TenantID: owner.TenantID, KeyCreatorID: inactive}, {TenantID: owner.TenantID, KeyCreatorID: foreignPerson}} {
 		if _, err := m.createAgentKey(dbtest.Seed(t.Context()), p, "bad", "", []string{"nodes.read"}, nil); !errors.Is(err, authz.ErrForbidden) {
 			t.Fatalf("creator denial=%v", err)
 		}
@@ -261,15 +274,24 @@ func TestAgentKeyCreationRequiresPersonCreator(t *testing.T) {
 	if _, _, _, err := OperatorCreateAgentKey(t.Context(), m.pool, owner.TenantID, "bad", "", nil, nil); err == nil {
 		t.Fatal("operator accepted missing creator")
 	}
+	for _, creator := range []string{agent, inactive, foreignPerson} {
+		if _, _, _, err := OperatorCreateAgentKey(t.Context(), m.pool, owner.TenantID, "bad", "", []string{"nodes.read"}, nil, creator); !errors.Is(err, authz.ErrForbidden) {
+			t.Fatalf("operator person creator denial=%v", err)
+		}
+	}
+	if keys, events := keyCounts(t, m, owner); keys != beforeKeys || events != beforeEvents {
+		t.Fatal("denied issuance changed keys or audit events")
+	}
 	key, _, _, err := OperatorCreateAgentKey(t.Context(), m.pool, owner.TenantID, "explicit", "", []string{"nodes.read"}, nil, owner.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), m.pool, owner.TenantID, func(tx pgx.Tx) error {
 		var creator string
-		err := tx.QueryRow(t.Context(), `SELECT created_by_principal_id::text FROM agent_keys WHERE id=$1`, key).Scan(&creator)
-		if err == nil && creator != owner.ID {
-			t.Error("operator creator missing")
+		var required bool
+		err := tx.QueryRow(t.Context(), `SELECT created_by_principal_id::text,person_owner_required FROM agent_keys WHERE id=$1`, key).Scan(&creator, &required)
+		if err == nil && (creator != owner.ID || !required) {
+			t.Error("operator creator or ownership marker missing")
 		}
 		return err
 	}); err != nil {

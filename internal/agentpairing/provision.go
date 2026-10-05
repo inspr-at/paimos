@@ -167,7 +167,7 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			}
 			prefix := strings.ReplaceAll(p.TenantID, "-", "") + suffix
 			var key string
-			if err = tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id::text`, p.TenantID, principal, rec.Details.ComputerName, prefix, rec.RuntimeHash, RuntimePermissions, p.ID).Scan(&key); err != nil {
+			if err = tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id,person_owner_required) VALUES($1,$2,$3,$4,$5,$6,$7,true) RETURNING id::text`, p.TenantID, principal, rec.Details.ComputerName, prefix, rec.RuntimeHash, RuntimePermissions, p.ID).Scan(&key); err != nil {
 				return err
 			}
 			if _, err = tx.Exec(ctx, `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,local_auth_public_key) VALUES($1,$2,$2,$3,$4,$5,$6,$7)`, p.TenantID, computer, principal, key, daemon, rec.LifecycleHash, rec.Details.LocalAuthPublicKey); err != nil {

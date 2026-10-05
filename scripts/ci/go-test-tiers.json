@@ -3901,7 +3901,7 @@
     {"kind":"go","package":"internal/auth","name":"TestAdoptAgentKeyWaitsForAdmittedUse","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/auth","name":"TestAgentKeyCreationRequiresPersonCreator","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/auth","name":"TestAdoptAgentKeyRechecksPermissionInsideWrite","tier":"ESSENTIAL"},
-    {"kind":"go","package":"internal/db","name":"TestAgentKeyPersonOwnerMigrationPreservesLegacyAndGuardsNew","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/db","name":"TestAgentKeyPersonOwnerExpansionPreservesLegacyWriters","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/cli","name":"TestKeyAdoptPersonSessionMetadataAndRefusal","tier":"ESSENTIAL"}
   ],
   "timingWeights": {

@@ -652,8 +652,8 @@ func (m *Module) issueAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princi
 			var created time.Time
 			creator := creatorID
 			err = tx.QueryRow(ctx, `
-				INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes, expires_at, created_by_principal_id)
-				VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::uuid)
+				INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes, expires_at, created_by_principal_id, person_owner_required)
+				VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::uuid, true)
 				RETURNING id::text, created_at
 			`, p.TenantID, principalID, name, prefix, hash, scopes, expires, creator).Scan(&id, &created)
 			if isUnique(err) {
