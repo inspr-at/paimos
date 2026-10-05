@@ -8081,6 +8081,15 @@ paths:
       responses:
         '200': {description: Run, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRun'}}}}
         '404': {$ref: '#/components/responses/Error'}
+  /runs/{runId}/handoff:
+    get:
+      operationId: getWorkerHandoff
+      description: Read the durable lead assignment for a run. Requires current run.read and project access. Returns content-free ticket/order revisions, brief digest, opaque worktree identity and receipts; no paths, prompts, account details or worker leases. launch_unknown never authorizes retry. Lead succession does not transfer an active writer.
+      parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses:
+        '200': {description: Durable assignment, content: {application/json: {schema: {$ref: '#/components/schemas/WorkerHandoff'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /runs/{runId}/claim:
     post:
       operationId: claimAgentRun
@@ -8098,7 +8107,7 @@ paths:
   /runs/{runId}/telemetry:
     post:
       operationId: reportRunTelemetry
-      description: Daemon reports monotonic sequence numbers; exact duplicate is idempotent and divergent replay conflicts. Telemetry is content-free. Totals, run status and event update atomically; budget excess blocks further dispatch.
+      description: Daemon reports monotonic sequence numbers; exact duplicate is idempotent and divergent replay conflicts. Telemetry is content-free. Totals, run status and event update atomically; budget excess blocks further dispatch. Lead assignments require local process evidence on finished reports. Unconfirmed ownership_lost remains fenced; a later finished exited report from the same authenticated daemon may reconcile it. No lead-generation change transfers the writer.
       security: [{agentKey: []}]
       parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunTelemetry'}}}}
@@ -16055,6 +16064,9 @@ components:
         daemon_id: {type: string, minLength: 1, maxLength: 128}
         daemon_generation: {type: string, minLength: 1, maxLength: 128}
         reservation_ids: {type: array, items: {type: string, format: uuid}, description: Required and nonempty for a normal claim; empty for verification refusal.}
+        handoff:
+          allOf: [{$ref: '#/components/schemas/WorkerPickup'}]
+          description: Required for a lead-routed assignment. Accepts the exact frozen brief and revisions with a host-local opaque worktree identity. Claim commits launch_unknown before any local process launch. A replay must retain this pickup and daemon generation; response loss is recovered through the existing durable daemon journal, never a second launch.
         verification_unavailable:
           type: string
           enum: [adapter_unsupported, binding_incomplete, local_binding_missing]
@@ -17287,6 +17299,35 @@ components:
             parallel_runs: {type: integer, minimum: 0}
             work_hours: {type: [number, 'null'], minimum: 0}
             warning: {type: boolean, description: 'True from approximately four hours, or when no capacity is available'}
+    WorkerPickup:
+      type: object
+      additionalProperties: false
+      required: [ticket_revision, work_order_revision, brief_sha256, worktree_id]
+      properties:
+        ticket_revision: {type: string, format: date-time}
+        work_order_revision: {type: integer, format: int64, minimum: 1}
+        brief_sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+        worktree_id: {type: string, pattern: '^[a-f0-9]{64}$', description: Domain-separated digest of tenant, daemon and physical workspace. No filesystem path or credential.}
+    WorkerHandoff:
+      type: object
+      required: [run_id, work_order_id, worker_principal_id, project_id, lead_session_id, lead_generation, ticket_id, ticket_revision, work_order_revision, brief_sha256, state]
+      properties:
+        run_id: {type: string, format: uuid}
+        work_order_id: {type: string, format: uuid}
+        worker_principal_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        lead_session_id: {type: string, format: uuid}
+        lead_generation: {type: integer, format: int64, minimum: 1}
+        ticket_id: {type: string, format: uuid}
+        ticket_revision: {type: string, format: date-time}
+        work_order_revision: {type: integer, format: int64, minimum: 1}
+        brief_sha256: {type: string, pattern: '^[a-f0-9]{64}$', description: SHA-256 of domain-separated canonical JSON title, body and ordered criterion descriptions; content is fetched through existing work-order/node APIs.}
+        worktree_id: {type: string, pattern: '^[a-f0-9]{64}$'}
+        state: {type: string, enum: [assigned, launch_unknown, launched, completed], description: Completed requires confirmed process exit or proof launch was not attempted. Silence and terminal labels do not prove exit.}
+        accepted_at: {type: string, format: date-time}
+        launched_at: {type: string, format: date-time}
+        completed_at: {type: string, format: date-time}
+        outcome: {type: string, enum: [completed, failed, cancelled, ownership_lost]}
     AgentRun:
       type: object
       required: [id, work_order_id, agent_principal_id, status, model_evidence, input_tokens, output_tokens, cost_micros, created_at]
@@ -17335,6 +17376,7 @@ components:
       type: object
       required: [sequence, kind]
       properties:
+        process_state: {type: string, enum: [not_attempted, exited, unconfirmed], description: Content-free local journal proof on finished reports for lead assignments. not_attempted is allowed only before a launch receipt; unconfirmed never releases the writer fence. Legacy runs may omit this field.}
         service_tier: {$ref: '#/components/schemas/ServiceTier'}
         sequence: {type: integer, format: int64, minimum: 1}
         kind: {type: string, enum: [started, heartbeat, turn, tool, usage, status, finished]}
@@ -17819,6 +17861,13 @@ components:
       type: object
       description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.
       properties:
+        worker_assignment: {$ref: '#/components/schemas/WorkerHandoff'}
+        project_lead:
+          type: object
+          required: [session_id, generation]
+          properties:
+            session_id: {type: string, format: uuid}
+            generation: {type: integer, format: int64, minimum: 1}
         role: {type: string}
         project_id: {type: string, format: uuid}
         selector: {$ref: '#/components/schemas/ModelSelector'}

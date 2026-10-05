@@ -118,6 +118,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 		{"GET /api/runs", "run.read", false, 200, m.list},
 		{"GET /api/runs/queued", "run.read", true, 200, m.queued},
 		{"GET /api/runs/{runId}", "run.read", false, 200, m.get},
+		{"GET /api/runs/{runId}/handoff", "run.read", false, 200, m.getHandoff},
 		{"POST /api/runs/{runId}/capacity-override", "run.create", false, 200, m.runNow},
 		{"POST /api/runs/{runId}/cancel", "run.create", false, 200, m.cancel},
 		{"POST /api/runs/{runId}/claim", "run.claim", true, 200, m.claim},
@@ -332,6 +333,15 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			return nil, &modelprefs.ResidencyUnmet{}
 		}
 	}
+	// A configured project's build leaf can be dispatched only through its
+	// lead queue; direct creation must not bypass a durable writer assignment.
+	var configured bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes o JOIN nodes t ON t.id=o.parent_id JOIN project_leads l ON l.project_id=t.project_id WHERE o.id=$1)`, o.NodeID).Scan(&configured); err != nil {
+		return nil, err
+	}
+	if configured {
+		return nil, workorders.Fail(409, "configured project work requires lead queue dispatch")
+	}
 	if in.Retry != nil {
 		var orderID, agentID string
 		err = tx.QueryRow(ctx, `SELECT work_order_id::text, agent_principal_id::text FROM agent_runs WHERE id=$1`, *in.Retry).Scan(&orderID, &agentID)
@@ -394,10 +404,11 @@ func releaseObsoleteClaim(ctx context.Context, tx pgx.Tx, p tenant.Principal, v 
 
 func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Daemon       string   `json:"daemon_id"`
-		Generation   string   `json:"daemon_generation"`
-		Reservations []string `json:"reservation_ids"`
-		Refusal      string   `json:"verification_unavailable"`
+		Daemon       string        `json:"daemon_id"`
+		Generation   string        `json:"daemon_generation"`
+		Reservations []string      `json:"reservation_ids"`
+		Refusal      string        `json:"verification_unavailable"`
+		Handoff      *WorkerPickup `json:"handoff,omitempty"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -434,6 +445,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, err
 	}
 	if err = queueClaimable(ctx, tx, v); err != nil {
+		return nil, err
+	}
+	if err = pickupHandoff(ctx, tx, p, v, o, in.Handoff); err != nil {
 		return nil, err
 	}
 	if v.ReadOnlyReview && r.Header.Get(reviewgate.PolicyHeader) != reviewgate.Policy {

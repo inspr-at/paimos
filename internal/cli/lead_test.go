@@ -102,3 +102,59 @@ func TestLeadCLIContractAndProofPrivacy(t *testing.T) {
 		}
 	}
 }
+
+func TestLeadHandoffCLIAndQueueDispatchPrivacy(t *testing.T) {
+	const id = "11111111-1111-1111-1111-111111111111"
+	const proof = "fixture-lead-lease-private-000000000000"
+	for _, action := range []string{"handoff", "next"} {
+		t.Run(action, func(t *testing.T) {
+			isolate(t)
+			calls := 0
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if action == "handoff" {
+					if r.Method != "GET" || r.URL.Path != "/api/runs/"+id+"/handoff" {
+						t.Error("wrong handoff route")
+					}
+					_, _ = w.Write([]byte(`{"run_id":"` + id + `","ticket_id":"` + id + `","state":"launch_unknown","lead_generation":1,"work_order_revision":2}`))
+				} else {
+					if r.Method != "POST" || r.URL.Path != "/api/queue/next" || r.Header.Get("X-Aeon-Lead-Session") != id || r.Header.Get("X-Aeon-Lead-Generation") != "3" || r.Header.Get("X-Aeon-Worker-Lease") != proof {
+						t.Error("dispatch proof lost")
+					}
+					var body map[string]any
+					if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+						t.Error(err)
+					}
+					if len(body) != 0 {
+						t.Error("proof leaked into body")
+					}
+					_, _ = w.Write([]byte(`{"entry":null}`))
+				}
+			}))
+			defer server.Close()
+			t.Setenv("AEON_URL", server.URL)
+			t.Setenv("AEON_API_KEY", testKey)
+			args := []string{"aeon", "--json", "lead", "handoff", id}
+			input := ""
+			if action == "next" {
+				args = []string{"aeon", "--json", "queue", "next", "--lead-session", id, "--lead-generation", "3", "--worker-lease-file", "-"}
+				input = proof
+			}
+			code, out, stderr := runCLI(args, input)
+			if code != 0 || calls != 1 {
+				t.Fatalf("code %d calls %d: %s %s", code, calls, out, stderr)
+			}
+			if strings.Contains(out+stderr, proof) {
+				t.Fatal("worker lease printed")
+			}
+			assertNoSecret(t, out+stderr)
+		})
+	}
+	for _, args := range [][]string{{"lead", "handoff", "bad"}, {"queue", "next", "--lead-session", id}, {"queue", "next", "--lead-generation", "1"}} {
+		isolate(t)
+		code, _, _ := runCLI(append([]string{"aeon"}, args...), "")
+		if code != 2 {
+			t.Fatalf("invalid handoff args: %v", args)
+		}
+	}
+}

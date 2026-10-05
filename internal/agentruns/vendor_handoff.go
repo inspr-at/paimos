@@ -18,6 +18,16 @@ import (
 // Only terminal failed attempts may hand off: never mid-turn, after a cancel,
 // or when ownership was lost. Replayed telemetry cannot arm a second retry.
 func armVendorRetry(ctx context.Context, tx pgx.Tx, v Run) error {
+	// Lead work returns through its qualified queue after exit reconciliation.
+	// A legacy vendor poll cannot inherit an assignment or bypass its lead.
+	h, err := runHandoff(v)
+	if err != nil {
+		return err
+	}
+	if h != nil {
+		return nil
+	}
+
 	if v.Status != "failed" || v.Purpose != "managed" || v.AccountID == nil || v.ReadOnlyReview {
 		return nil
 	}

@@ -169,7 +169,7 @@ func (rt *runtime) reportedSessionFileLimit(projectID, sessionID string) (int, e
 }
 
 // harnessDoCtx is harnessDo bound to ctx so a heartbeat can abort on shutdown.
-func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string, body, dest any) error {
+func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string, body, dest any, extra ...map[string]string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -198,6 +198,11 @@ func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string,
 	}
 	if lease != "" {
 		req.Header.Set("X-Aeon-Worker-Lease", lease)
+	}
+	for _, headers := range extra {
+		for name, value := range headers {
+			req.Header.Set(name, value)
+		}
 	}
 	hc := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("harness request redirect refused") }}
 	res, err := hc.Do(req)

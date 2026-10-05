@@ -155,6 +155,16 @@
     "internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink"
   ],
   "tests": [
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffWorktreeIsHeldUntilExit","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentRemoteClaimCarriesExactPickup","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffReceiptsReplayAndSuccession","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffRejectsChangedBriefAndMissingPickup","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffUnknownExitBlocksRetryAndReconciles","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffConcurrentPickupOneWriter","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentClaimResponseLossUsesJournalProof","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentUnknownForkNeverRetries","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentChangedBriefCannotClaim","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/cli","name":"TestLeadHandoffCLIAndQueueDispatchPrivacy","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/auth","name":"TestProjectLeadThroughProductionAuthentication","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentruns","name":"TestLegacyQueueSkipsOtherProjectDispatchAuthorities","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadReportingCadenceAndBoundaries","tier":"ESSENTIAL"},

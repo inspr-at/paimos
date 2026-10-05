@@ -224,6 +224,9 @@ func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTi
 		return false, err
 	}
 	defer func() { _ = attempt.Rollback(ctx) }()
+	if err = freezeHandoff(ctx, attempt, t, v, target.Agent, lead); err != nil {
+		return false, err
+	}
 	var model string
 	err = attempt.QueryRow(ctx, `SELECT model FROM model_profiles WHERE id=$1 AND enabled`, target.Profile).Scan(&model)
 	if err != nil {

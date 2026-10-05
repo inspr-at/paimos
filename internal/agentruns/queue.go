@@ -292,6 +292,9 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
+	if err = requireWriterFree(ctx, tx, t.ID, ""); err != nil {
+		return nil, err
+	}
 	ready := readiness(t)
 	if !ready.Ready {
 		return nil, &queueError{Status: 422, Message: "Not ready to queue: " + strings.Join(ready.Missing, ", "), Code: "queue_not_ready", Readiness: &ready}
