@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -730,6 +732,138 @@ func TestSessionFullWorkCollections(t *testing.T) {
 					if len(groups[name]) != 1 || groups[name][0]["id"] != items[i+3].ID {
 						t.Errorf("%s collection: %#v", name, groups[name])
 					}
+				}
+			})
+		}
+	}
+}
+
+func TestSessionFullProjectScope(t *testing.T) {
+	isolate(t)
+	for _, scenario := range []string{"depth-32", "depth-33", "depth-1000", "withheld-ancestor", "empty"} {
+		t.Run(scenario, func(t *testing.T) {
+			items := []apiNode{}
+			depth := 0
+			if strings.HasPrefix(scenario, "depth-") {
+				depth, _ = strconv.Atoi(strings.TrimPrefix(scenario, "depth-"))
+			}
+			parent := transcriptProjectID
+			for i := 1; i <= depth; i++ {
+				id := fmt.Sprintf("60000000-0000-4000-8000-%012d", i)
+				parentID := parent
+				items = append(items, apiNode{ID: id, Key: fmt.Sprintf("AEON-%d", i), KindID: "work-kind", ParentID: &parentID})
+				parent = id
+			}
+			if scenario == "withheld-ancestor" {
+				hidden := "60000000-0000-4000-8000-000000000001"
+				items = append(items, apiNode{ID: transcriptEntryID, Key: "AEON-2", KindID: "work-kind", ParentID: &hidden})
+			}
+			calls := 0
+			var project apiNode
+			project = sessionBundleFixture(t, []string{"work"}, func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				q := r.URL.Query()
+				if q.Get("within") != transcriptProjectID || q.Get("limit") != "200" {
+					t.Errorf("bundle must request bounded project descendants: %s", r.URL)
+				}
+				pageItems := items
+				if q.Get("within") == "" {
+					// Simulate the tenant-wide endpoint too, so the old code sees
+					// every ancestor but still silently omits depths >=32.
+					other := apiNode{ID: "70000000-0000-4000-8000-000000000001", Key: "OTHER-1", KindID: "work-kind"}
+					pageItems = append(append([]apiNode{project}, items...), other)
+				}
+				offset := 0
+				if q.Get("cursor") != "" {
+					var err error
+					offset, err = strconv.Atoi(q.Get("cursor"))
+					if err != nil || offset < 0 || offset >= len(pageItems) {
+						t.Errorf("invalid page cursor: %s", r.URL)
+						http.Error(w, "invalid cursor", http.StatusBadRequest)
+						return
+					}
+				}
+				end := min(offset+200, len(pageItems))
+				page := nodePage{Items: pageItems[offset:end]}
+				if end < len(pageItems) {
+					cursor := strconv.Itoa(end)
+					page.NextCursor = &cursor
+				}
+				json.NewEncoder(w).Encode(page)
+			})
+			var out bytes.Buffer
+			rt := &runtime{program: "aeon", configPath: filepath.Join(t.TempDir(), "missing.yaml"), stdout: &out, stderr: &bytes.Buffer{}}
+			if err := rt.harnessSessionFull("AEON", "worker", "json", transcriptSessionID); err != nil {
+				t.Fatal(err)
+			}
+			_, groups := decodeSessionBundle(t, out.Bytes())
+			wantIDs := map[string]bool{project.ID: true}
+			for _, n := range items {
+				wantIDs[n.ID] = true
+			}
+			gotIDs := map[string]bool{}
+			for _, entry := range groups["nodes"] {
+				id := entry["id"].(string)
+				if gotIDs[id] {
+					t.Errorf("duplicate node %s", id)
+				}
+				gotIDs[id] = true
+			}
+			if !reflect.DeepEqual(gotIDs, wantIDs) {
+				t.Errorf("bundle returned %d of %d project nodes (deepest %s present: %v)", len(gotIDs), len(wantIDs), parent, gotIDs[parent])
+			}
+			if len(groups["work"]) != len(items) {
+				t.Errorf("scoped work: got %d want %d", len(groups["work"]), len(items))
+			}
+			if calls != max(1, (len(items)+199)/200) {
+				t.Errorf("list requests: got %d want %d", calls, max(1, (len(items)+199)/200))
+			}
+		})
+	}
+}
+
+func TestSessionFullScopeIncomplete(t *testing.T) {
+	isolate(t)
+	for _, scenario := range []string{"repeated-cursor", "page-budget", "page-error"} {
+		for _, format := range []string{"json", "files", "env"} {
+			t.Run(scenario+"/"+format, func(t *testing.T) {
+				calls := 0
+				project := sessionBundleFixture(t, []string{"work"}, func(w http.ResponseWriter, r *http.Request) {
+					calls++
+					if r.URL.Query().Get("within") != transcriptProjectID {
+						t.Errorf("incomplete bundle query must remain project-scoped: %s", r.URL)
+					}
+					if scenario == "page-error" && calls == 2 {
+						w.WriteHeader(http.StatusForbidden)
+						w.Write([]byte(`{"error":"forbidden"}`))
+						return
+					}
+					cursor := "next"
+					if scenario == "page-budget" {
+						cursor = strconv.Itoa(calls)
+					}
+					items := []apiNode{}
+					parent := transcriptProjectID
+					for i := 0; i < 200; i++ {
+						id := fmt.Sprintf("80000000-0000-4000-8000-%012d", (calls-1)*200+i+1)
+						items = append(items, apiNode{ID: id, KindID: "work-kind", ParentID: &parent})
+					}
+					json.NewEncoder(w).Encode(nodePage{Items: items, NextCursor: &cursor})
+				})
+				cfg := filepath.Join(t.TempDir(), "missing.yaml")
+				args := []string{"aeon", "--config", cfg, "session", "start", "--project", "AEON", "--agent", "worker", "--bundle", "full", "--format", format}
+				code, out, errOut := runCLI(args, "")
+				want, wantCalls := "repeated cursor", 2
+				if scenario == "page-budget" {
+					want, wantCalls = "exceeds 10000 items", 50
+				} else if scenario == "page-error" {
+					want = "forbidden"
+				}
+				if code == 0 || out != "" || !strings.Contains(errOut, want) || calls != wantCalls {
+					t.Fatalf("incomplete bundle: exit %d stdout %q stderr %q requests %d; want %q and %d requests", code, out, errOut, calls, want, wantCalls)
+				}
+				if _, err := os.Stat(filepath.Join(filepath.Dir(cfg), "bundles", project.ID)); !os.IsNotExist(err) {
+					t.Fatalf("incomplete bundle wrote cache: %v", err)
 				}
 			})
 		}
