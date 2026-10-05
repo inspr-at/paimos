@@ -100,4 +100,3 @@
           retention-days: 1
           overwrite: true
           if-no-files-found: error
-

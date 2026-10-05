@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { validate, select, shard, key, exactPattern, webGraph, counts } from './core.mjs'
+import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
@@ -361,7 +361,6 @@ test('four unit shards partition the existing ledger by file with every identity
 test('serial tier weights rebalance the twelve browser shards without changing full or changed-area coverage',()=>{
   const manifest=JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url)))
   const rows=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests
-  const weights=tierWeights(manifest)
   const graph=Object.fromEntries([...new Set(rows.map(row=>row.file))].map(file=>[file,[]]))
   for(const options of [
     {event:'pull_request',paths:['.github/workflows/ci.yml']},
@@ -369,12 +368,44 @@ test('serial tier weights rebalance the twelve browser shards without changing f
     {event:'push'}, {event:'workflow_dispatch'}, {event:'schedule'},
   ]) {
     const selected=select(rows,options).tests.filter(row=>row.kind==='browser')
+    const weights=tierWeights(manifest,selected)
     const bins=Array.from({length:12},(_,i)=>shard(selected,i+1,12,weights))
     assert.deepEqual(bins.flat().map(key).sort(),selected.map(key).sort(),options.event)
     if(options.paths?.[0]==='.github/workflows/ci.yml'||options.event==='push') {
       const loads=bins.map(bin=>[...new Set(bin.map(row=>row.file))].reduce((n,file)=>n+weights[file],0)).sort((a,b)=>a-b)
       assert.ok(loads[11]<=1.3*(loads[5]+loads[6])/2,`Serial scheduling estimates: ${loads}`)
+      assert.ok(loads[11]<=1.25*(loads[5]+loads[6])/2,`Hosted scheduling estimates: ${loads}`)
     }
+  }
+})
+
+test('hosted unit and Go weights preserve files/packages and every selected identity',()=>{
+  for(const kind of ['web','go']) {
+    const manifest=JSON.parse(readFileSync(new URL(`../ci/${kind}-test-tiers.json`,import.meta.url)))
+    for(const event of ['pull_request','merge_group','push','schedule']) {
+      const rows=select(manifest.tests,{event,paths:['.github/workflows/ci.yml']}).tests.filter(row=>kind==='web'?row.kind!=='browser':row.lane!=='timing')
+      const weights=measuredWeights(manifest,rows),count=kind==='web'?4:7
+      const bins=Array.from({length:count},(_,i)=>shard(rows,i+1,count,weights))
+      assert.deepEqual(bins.flat().map(key).sort(),rows.map(key).sort())
+      const owners=new Map()
+      bins.forEach((bin,i)=>bin.forEach(row=>{
+        const owner=kind==='go'?row.package:row.file
+        if(owners.has(owner))assert.equal(owners.get(owner),i,'An owner cannot run twice')
+        owners.set(owner,i)
+      }))
+    }
+  }
+})
+
+test('measured weights scale the selected slice, retain zero elapsed and reject invalid data',()=>{
+  const manifest={timingWeights:{owners:{'tests/scope.test.ts':{seconds:10,selectedTests:2}}}}
+  assert.deepEqual(measuredWeights(manifest,[cases[5]]),{'tests/scope.test.ts':5})
+  assert.deepEqual(measuredWeights(manifest,cases),{'tests/scope.test.ts':10})
+  manifest.timingWeights.owners['tests/scope.test.ts'].seconds=0
+  assert.deepEqual(measuredWeights(manifest,cases),{'tests/scope.test.ts':0})
+  for(const timing of [{seconds:-1,selectedTests:2},{seconds:NaN,selectedTests:2},{seconds:1,selectedTests:0},{seconds:1,selectedTests:1.5}]) {
+    manifest.timingWeights.owners['tests/scope.test.ts']=timing
+    assert.throws(()=>measuredWeights(manifest,cases),/Invalid measured timing: tests\/scope.test.ts/)
   }
 })
 

@@ -83,6 +83,21 @@ test('one-worker tier weights convert measured parallel steps but retain serial 
   }
 })
 
+test('hosted tier timings override historical worker conversion and scale only the selected slice', async () => {
+  const { tierWeights } = await import('./ci-web-shard.mjs')
+  const manifest = fixture(), spec = manifest.groups[0].specs[0]
+  spec.tierTiming = { seconds: 432, selectedTests: 39 }
+  const before = structuredClone(manifest)
+  assert.equal(tierWeights(manifest)[spec.file], 432)
+  assert.equal(tierWeights(manifest, [{ file: spec.file }])[spec.file], 432 / 39)
+  assert.equal(tierWeights(manifest, [])[spec.file], 0)
+  assert.deepEqual(manifest, before)
+  for (const timing of [{ seconds: -1, selectedTests: 39 }, { seconds: NaN, selectedTests: 39 }, { seconds: 432, selectedTests: 0 }]) {
+    spec.tierTiming = timing
+    assert.throws(() => tierWeights(manifest), /Invalid tier timing/)
+  }
+})
+
 test('assignment is deterministic despite manifest group/spec order and breaks ties by path', () => {
   const manifest = fixture(), reordered = structuredClone(manifest)
   reordered.groups.reverse().forEach(g => g.specs.reverse())

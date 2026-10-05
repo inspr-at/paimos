@@ -31,7 +31,8 @@
     "Shard assignment is based on file names and timing weights only; groups execute sequentially with their own original policies. Weights for the 165 newly covered specs are estimates; hosted measurement is needed before claiming the 5-minute target.",
     "RUNNER_ENVIRONMENT must be github-hosted for execution; it is GitHub Actions built-in runner metadata. Local --list/--check remain browser-free. --last-failed preflights per-group state and refuses missing/invalid state instead of Playwright's full-selection fallback.",
     "AEON-679 rule B: removed low-value capture, polish, duplicate scan and literal geometry cases; mixed protected cases remain. Changed spec listedTests use native collection; weights are proportional scheduling estimates, not measured runtime savings. Historical timingSource and ciInventory remain provenance only. The optional historical/current release-list screenshot jobs were retired with their capture case.",
-    "OPS-257 round 3: the tier runner forces --workers=1. tierWeights converts historical per-file allocations from measured N-worker steps to N * weightSeconds serial estimates; local-serial and unmeasured test-count estimates stay unchanged. Original exact-spec weights, launch policies, gated membership and tier classifications are preserved. On the committed full-gate tier ledger, corrected LPT bins estimate 367.9\u2013371.8 seconds of tests (max/median 1.01, previously 266.1\u2013496.5 seconds under the same serial model). These are scheduling estimates derived from historical step timings, not new per-spec hosted measurements. Run 37333283440 had 5.3\u201310.4 minute jobs; runner setup, native collection and group launches remain additional costs."
+    "OPS-257 round 3: the tier runner forces --workers=1. tierWeights converts historical per-file allocations from measured N-worker steps to N * weightSeconds serial estimates; local-serial and unmeasured test-count estimates stay unchanged. Original exact-spec weights, launch policies, gated membership and tier classifications are preserved. On the committed full-gate tier ledger, corrected LPT bins estimate 367.9\u2013371.8 seconds of tests (max/median 1.01, previously 266.1\u2013496.5 seconds under the same serial model). These are scheduling estimates derived from historical step timings, not new per-spec hosted measurements. Run 37333283440 had 5.3\u201310.4 minute jobs; runner setup, native collection and group launches remain additional costs.",
+    "OPS-257 fix1: hosted per-case tierTiming replaces serial historical allocations for 58 measured files. aeon-632b-clip has 39 cases / 432.3 seconds including group overhead: keep one worker and schedule it alone; no gated membership or launch flags change. Unmeasured files keep explicit historical estimates; the next hosted run must validate runner and native collection costs."
   ],
   "configs": [
     {
@@ -624,13 +625,21 @@
           "file": "tests/usage-dashboard.spec.ts",
           "weightSeconds": 14.8,
           "weightSource": "web-2",
-          "listedTests": 10
+          "listedTests": 10,
+          "tierTiming": {
+            "seconds": 16.828409,
+            "selectedTests": 10
+          }
         },
         {
           "file": "tests/morning-briefing.spec.ts",
           "weightSeconds": 22.2,
           "weightSource": "web-2",
-          "listedTests": 15
+          "listedTests": 15,
+          "tierTiming": {
+            "seconds": 25.223621,
+            "selectedTests": 15
+          }
         }
       ]
     },
@@ -661,25 +670,41 @@
           "file": "tests/release-codenames.spec.ts",
           "weightSeconds": 30.62983392,
           "weightSource": "web-4",
-          "listedTests": 24
+          "listedTests": 24,
+          "tierTiming": {
+            "seconds": 68.541716,
+            "selectedTests": 24
+          }
         },
         {
           "file": "tests/release-presentation.spec.ts",
           "weightSeconds": 8.933702,
           "weightSource": "web-4",
-          "listedTests": 7
+          "listedTests": 7,
+          "tierTiming": {
+            "seconds": 9.975585,
+            "selectedTests": 7
+          }
         },
         {
           "file": "tests/version-reveal.spec.ts",
           "weightSeconds": 7.657459,
           "weightSource": "web-4",
-          "listedTests": 6
+          "listedTests": 6,
+          "tierTiming": {
+            "seconds": 13.071426,
+            "selectedTests": 6
+          }
         },
         {
           "file": "tests/releases.spec.ts",
           "weightSeconds": 28.077347692,
           "weightSource": "web-4",
-          "listedTests": 22
+          "listedTests": 22,
+          "tierTiming": {
+            "seconds": 31.286242,
+            "selectedTests": 22
+          }
         },
         {
           "file": "tests/header-menus.spec.ts",
@@ -691,7 +716,11 @@
           "file": "tests/brand.spec.ts",
           "weightSeconds": 2.552486,
           "weightSource": "web-4",
-          "listedTests": 2
+          "listedTests": 2,
+          "tierTiming": {
+            "seconds": 4.093226,
+            "selectedTests": 2
+          }
         }
       ]
     },
@@ -712,7 +741,11 @@
           "file": "tests/service-tier.spec.ts",
           "weightSeconds": 91.0,
           "weightSource": "web-6",
-          "listedTests": 41
+          "listedTests": 41,
+          "tierTiming": {
+            "seconds": 102.193836,
+            "selectedTests": 41
+          }
         }
       ]
     },
@@ -745,7 +778,11 @@
           "file": "tests/new-agent.spec.ts",
           "weightSeconds": 31.83871,
           "weightSource": "web-8",
-          "listedTests": 12
+          "listedTests": 12,
+          "tierTiming": {
+            "seconds": 26.604001,
+            "selectedTests": 12
+          }
         },
         {
           "file": "tests/key-scopes.spec.ts",
@@ -757,13 +794,21 @@
           "file": "tests/key-expiry.spec.ts",
           "weightSeconds": 34.491935,
           "weightSource": "web-8",
-          "listedTests": 13
+          "listedTests": 13,
+          "tierTiming": {
+            "seconds": 46.714827,
+            "selectedTests": 13
+          }
         },
         {
           "file": "tests/key-full-access.spec.ts",
           "weightSeconds": 53.064516,
           "weightSource": "web-8",
-          "listedTests": 20
+          "listedTests": 20,
+          "tierTiming": {
+            "seconds": 82.961085,
+            "selectedTests": 20
+          }
         },
         {
           "file": "tests/scope-codes.spec.ts",
@@ -775,7 +820,11 @@
           "file": "tests/access.spec.ts",
           "weightSeconds": 111.435484,
           "weightSource": "web-8",
-          "listedTests": 42
+          "listedTests": 42,
+          "tierTiming": {
+            "seconds": 165.454394,
+            "selectedTests": 42
+          }
         }
       ]
     },
@@ -794,7 +843,11 @@
           "file": "tests/key-layout.spec.ts",
           "weightSeconds": 26.634146,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 12
+          "listedTests": 12,
+          "tierTiming": {
+            "seconds": 46.763301,
+            "selectedTests": 12
+          }
         }
       ]
     },
@@ -836,7 +889,11 @@
           "file": "tests/work-queue.spec.ts",
           "weightSeconds": 29.0,
           "weightSource": "web-10",
-          "listedTests": 9
+          "listedTests": 9,
+          "tierTiming": {
+            "seconds": 74.007203,
+            "selectedTests": 24
+          }
         }
       ]
     },
@@ -857,19 +914,31 @@
           "file": "tests/start-agent.spec.ts",
           "weightSeconds": 36.078431,
           "weightSource": "web-11",
-          "listedTests": 20
+          "listedTests": 20,
+          "tierTiming": {
+            "seconds": 40.443671,
+            "selectedTests": 21
+          }
         },
         {
           "file": "tests/ticket-panel.spec.ts",
           "weightSeconds": 34.509803565,
           "weightSource": "web-11",
-          "listedTests": 22
+          "listedTests": 22,
+          "tierTiming": {
+            "seconds": 104.096073,
+            "selectedTests": 22
+          }
         },
         {
           "file": "tests/ticket-workers.spec.ts",
           "weightSeconds": 19.843137,
           "weightSource": "web-11",
-          "listedTests": 11
+          "listedTests": 11,
+          "tierTiming": {
+            "seconds": 34.479934,
+            "selectedTests": 11
+          }
         }
       ]
     },
@@ -903,7 +972,11 @@
           "file": "tests/approval-feedback.spec.ts",
           "weightSeconds": 32.233918,
           "weightSource": "web-13",
-          "listedTests": 13
+          "listedTests": 13,
+          "tierTiming": {
+            "seconds": 77.404982,
+            "selectedTests": 13
+          }
         },
         {
           "file": "tests/managed-controls.spec.ts",
@@ -915,37 +988,61 @@
           "file": "tests/accounts-computers.spec.ts",
           "weightSeconds": 32.233918,
           "weightSource": "web-13",
-          "listedTests": 26
+          "listedTests": 26,
+          "tierTiming": {
+            "seconds": 39.696264,
+            "selectedTests": 13
+          }
         },
         {
           "file": "tests/agents-top.spec.ts",
           "weightSeconds": 81.824561,
           "weightSource": "web-13",
-          "listedTests": 33
+          "listedTests": 33,
+          "tierTiming": {
+            "seconds": 52.181546,
+            "selectedTests": 33
+          }
         },
         {
           "file": "tests/relations.spec.ts",
           "weightSeconds": 17.356725,
           "weightSource": "web-13",
-          "listedTests": 7
+          "listedTests": 7,
+          "tierTiming": {
+            "seconds": 72.275763,
+            "selectedTests": 7
+          }
         },
         {
           "file": "tests/ticket-outcomes.spec.ts",
           "weightSeconds": 4.959064,
           "weightSource": "web-13",
-          "listedTests": 2
+          "listedTests": 2,
+          "tierTiming": {
+            "seconds": 7.332329,
+            "selectedTests": 2
+          }
         },
         {
           "file": "tests/views-filters.spec.ts",
           "weightSeconds": 42.152047,
           "weightSource": "web-13",
-          "listedTests": 17
+          "listedTests": 17,
+          "tierTiming": {
+            "seconds": 75.741996,
+            "selectedTests": 17
+          }
         },
         {
           "file": "tests/session-recovery.spec.ts",
           "weightSeconds": 37.192982,
           "weightSource": "web-13",
-          "listedTests": 15
+          "listedTests": 15,
+          "tierTiming": {
+            "seconds": 40.491276,
+            "selectedTests": 15
+          }
         }
       ]
     },
@@ -997,7 +1094,11 @@
           "file": "tests/decision-desk.spec.ts",
           "weightSeconds": 128.0,
           "weightSource": "web-14",
-          "listedTests": 35
+          "listedTests": 35,
+          "tierTiming": {
+            "seconds": 116.979237,
+            "selectedTests": 35
+          }
         }
       ]
     },
@@ -1021,25 +1122,41 @@
           "file": "tests/attach-discoverable.spec.ts",
           "weightSeconds": 81.316667,
           "weightSource": "web-15",
-          "listedTests": 41
+          "listedTests": 41,
+          "tierTiming": {
+            "seconds": 100.881181,
+            "selectedTests": 41
+          }
         },
         {
           "file": "tests/attach-watch.spec.ts",
           "weightSeconds": 61.483333,
           "weightSource": "web-15",
-          "listedTests": 31
+          "listedTests": 31,
+          "tierTiming": {
+            "seconds": 87.014751,
+            "selectedTests": 31
+          }
         },
         {
           "file": "tests/attach-security.spec.ts",
           "weightSeconds": 99.166667,
           "weightSource": "web-15",
-          "listedTests": 50
+          "listedTests": 50,
+          "tierTiming": {
+            "seconds": 138.181044,
+            "selectedTests": 50
+          }
         },
         {
           "file": "tests/classic-invite.spec.ts",
           "weightSeconds": 11.9,
           "weightSource": "web-15",
-          "listedTests": 6
+          "listedTests": 6,
+          "tierTiming": {
+            "seconds": 11.101174,
+            "selectedTests": 6
+          }
         },
         {
           "file": "tests/account-link.spec.ts",
@@ -1074,7 +1191,11 @@
           "file": "tests/footer-flow-pill.spec.ts",
           "weightSeconds": 1.398374,
           "weightSource": "footer-ui-2",
-          "listedTests": 2
+          "listedTests": 2,
+          "tierTiming": {
+            "seconds": 21.975281,
+            "selectedTests": 2
+          }
         },
         {
           "file": "tests/developer-settings.spec.ts",
@@ -1092,7 +1213,11 @@
           "file": "tests/shell.spec.ts",
           "weightSeconds": 22.373984,
           "weightSource": "footer-ui-2",
-          "listedTests": 32
+          "listedTests": 32,
+          "tierTiming": {
+            "seconds": 43.247437,
+            "selectedTests": 32
+          }
         }
       ]
     },
@@ -1136,13 +1261,21 @@
           "file": "tests/model-provider.spec.ts",
           "weightSeconds": 10.5,
           "weightSource": "e2e-4",
-          "listedTests": 3
+          "listedTests": 3,
+          "tierTiming": {
+            "seconds": 6.989386,
+            "selectedTests": 3
+          }
         },
         {
           "file": "tests/model-refresh.spec.ts",
           "weightSeconds": 3.5,
           "weightSource": "e2e-4",
-          "listedTests": 1
+          "listedTests": 1,
+          "tierTiming": {
+            "seconds": 4.519062,
+            "selectedTests": 1
+          }
         }
       ]
     },
@@ -1166,19 +1299,31 @@
           "file": "tests/status-autopilot.spec.ts",
           "weightSeconds": 22.794872,
           "weightSource": "status-autopilot-ui-2",
-          "listedTests": 7
+          "listedTests": 7,
+          "tierTiming": {
+            "seconds": 23.201036,
+            "selectedTests": 8
+          }
         },
         {
           "file": "tests/settings.spec.ts",
           "weightSeconds": 32.564102381,
           "weightSource": "status-autopilot-ui-2",
-          "listedTests": 10
+          "listedTests": 10,
+          "tierTiming": {
+            "seconds": 41.296961,
+            "selectedTests": 10
+          }
         },
         {
           "file": "tests/agent-activity.spec.ts",
           "weightSeconds": 35.820513,
           "weightSource": "status-autopilot-ui-2",
-          "listedTests": 11
+          "listedTests": 11,
+          "tierTiming": {
+            "seconds": 37.906178,
+            "selectedTests": 11
+          }
         },
         {
           "file": "tests/features.spec.ts",
@@ -1203,7 +1348,11 @@
           "file": "tests/performance.spec.ts",
           "weightSeconds": 4.439024,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 2
+          "listedTests": 2,
+          "tierTiming": {
+            "seconds": 12.621308,
+            "selectedTests": 2
+          }
         }
       ]
     },
@@ -1224,7 +1373,16 @@
           "file": "tests/aeon-632b-clip.spec.ts",
           "weightSeconds": 86.560976,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 39
+          "listedTests": 39,
+          "tierTiming": {
+            "seconds": 432.27675,
+            "selectedTests": 39,
+            "caseSeconds": {
+              "min": 1.82125,
+              "median": 4.80025,
+              "max": 28.25925
+            }
+          }
         },
         {
           "file": "tests/clip-tip.spec.ts",
@@ -1243,19 +1401,31 @@
             "marginPercent": 20,
             "reportSha256": "5ea979ac66d2b4576cff1eb8a47d1c5d954a89d399325808b105ee3fad20496f",
             "note": "Full local one-worker runtime plus 20 percent scheduling margin; conservative for the group with two workers. Scheduling estimate only; hosted runtime remains unmeasured."
+          },
+          "tierTiming": {
+            "seconds": 262.020096,
+            "selectedTests": 159
           }
         },
         {
           "file": "tests/key-trim.spec.ts",
           "weightSeconds": 15.536585,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 7
+          "listedTests": 7,
+          "tierTiming": {
+            "seconds": 23.052071,
+            "selectedTests": 7
+          }
         },
         {
           "file": "tests/model-prefs.spec.ts",
           "weightSeconds": 93.219512,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 42
+          "listedTests": 42,
+          "tierTiming": {
+            "seconds": 198.688672,
+            "selectedTests": 42
+          }
         }
       ]
     },
@@ -1458,13 +1628,21 @@
           "file": "tests/attachments.spec.ts",
           "weightSeconds": 26.634146,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 12
+          "listedTests": 12,
+          "tierTiming": {
+            "seconds": 10.42526,
+            "selectedTests": 2
+          }
         },
         {
           "file": "tests/authz.spec.ts",
           "weightSeconds": 4.439024,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 2
+          "listedTests": 2,
+          "tierTiming": {
+            "seconds": 2.46026,
+            "selectedTests": 2
+          }
         },
         {
           "file": "tests/avatar-upload-bounds.spec.ts",
@@ -1482,7 +1660,11 @@
           "file": "tests/bulk.spec.ts",
           "weightSeconds": 15.536585,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 7
+          "listedTests": 7,
+          "tierTiming": {
+            "seconds": 27.55826,
+            "selectedTests": 2
+          }
         },
         {
           "file": "tests/business.spec.ts",
@@ -1661,7 +1843,11 @@
           "file": "tests/html-sandbox.spec.ts",
           "weightSeconds": 22.195122,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 10
+          "listedTests": 10,
+          "tierTiming": {
+            "seconds": 6.035101,
+            "selectedTests": 1
+          }
         },
         {
           "file": "tests/indicator-controls.spec.ts",
@@ -1996,7 +2182,11 @@
           "file": "tests/quote-save-state.spec.ts",
           "weightSeconds": 15.536585,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 7
+          "listedTests": 7,
+          "tierTiming": {
+            "seconds": 5.612313,
+            "selectedTests": 1
+          }
         },
         {
           "file": "tests/quote-showcase.spec.ts",
@@ -2394,7 +2584,11 @@
           "file": "tests/knowledge.spec.ts",
           "weightSeconds": 35.512195,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 16
+          "listedTests": 16,
+          "tierTiming": {
+            "seconds": 49.035329,
+            "selectedTests": 15
+          }
         }
       ]
     },
@@ -2431,15 +2625,27 @@
       "specs": [
         {
           "file": "tests/parent-benefits.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 51.516941,
+            "selectedTests": 16
+          }
         },
         {
           "file": "tests/work-aggregates.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 156.221891,
+            "selectedTests": 29
+          }
         },
         {
           "file": "tests/work-history-fix5.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 24.516289,
+            "selectedTests": 6
+          }
         },
         {
           "file": "tests/work-lifecycle-header.spec.ts",
@@ -2447,31 +2653,59 @@
         },
         {
           "file": "tests/work-lifecycle.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 48.775104,
+            "selectedTests": 8
+          }
         },
         {
           "file": "tests/work-parent-releases.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 51.273208,
+            "selectedTests": 6
+          }
         },
         {
           "file": "tests/work-parent-status.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 20.020024,
+            "selectedTests": 6
+          }
         },
         {
           "file": "tests/work-surfaces-fix2.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 48.204847,
+            "selectedTests": 12
+          }
         },
         {
           "file": "tests/work-surfaces-fix3.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 18.304728,
+            "selectedTests": 6
+          }
         },
         {
           "file": "tests/work-surfaces-fix4.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 28.599921,
+            "selectedTests": 6
+          }
         },
         {
           "file": "tests/work-vocabulary.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 135.468682,
+            "selectedTests": 18
+          }
         }
       ]
     },
@@ -2491,7 +2725,11 @@
           "file": "tests/settings-shared.spec.ts",
           "weightSeconds": 20,
           "weightSource": "unmeasured-test-count-estimate",
-          "listedTests": 23
+          "listedTests": 23,
+          "tierTiming": {
+            "seconds": 36.003214,
+            "selectedTests": 23
+          }
         }
       ]
     }
@@ -2513,5 +2751,10 @@
     "test:editor-unit": "vitest run tests/quote-editor.unit.test.ts",
     "e2e": "node ../scripts/playwright-safe.mjs"
   },
-  "exclusions": []
+  "exclusions": [],
+  "tierTimingSource": {
+    "runId": "37341114152",
+    "sha": "ee0c4ecf1554aa86d9a40c91ff55cb37bd5514fb",
+    "basis": "Serial per-case result.duration seconds plus each group stats.duration residual divided equally across collected cases. Only 9 of 12 shard artifacts supplied; missing specs keep historical serial estimates. weightSeconds preserves the historical exact-spec allocation; tierTiming schedules the measured tier lane."
+  }
 }
