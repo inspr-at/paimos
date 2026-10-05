@@ -71,3 +71,16 @@ it('current cards and unknown bookmarks keep their section', async () => {
     expect(router.currentRoute.value.fullPath).toBe(url)
   }
 })
+
+it('retired briefing bookmarks open Agents and keep request links', async () => {
+  for (const path of ['/briefing', '/briefing/', '/briefing?needs=a:00000000-0000-4000-8000-000000000001#request']) {
+    await router.push(path)
+    expect(router.currentRoute.value.path).toBe('/agents')
+    expect(router.currentRoute.value.meta.title).toBe('Agents')
+    expect(router.currentRoute.value.redirectedFrom?.path).toBe(path.split('?')[0])
+    if (path.includes('?')) {
+      expect(router.currentRoute.value.query.needs).toBe('a:00000000-0000-4000-8000-000000000001')
+      expect(router.currentRoute.value.hash).toBe('#request')
+    }
+  }
+})

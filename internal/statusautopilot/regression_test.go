@@ -15,7 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func TestBriefingReadsPublishedAndSkippedSnapshotsUnderProjectVisibility(t *testing.T) {
+func TestEventRangeReadsPublishedAndSkippedSnapshotsUnderProjectVisibility(t *testing.T) {
 	f := setup(t)
 	human := "Touch ID"
 	delivered := f.add("AUT-2", "work", "done", 15, nil)
@@ -63,7 +63,7 @@ func TestBriefingReadsPublishedAndSkippedSnapshotsUnderProjectVisibility(t *test
 		_, err := events.Append(t.Context(), tx, f.p, events.Change{NodeID: &delivered, Type: Changed, After: crossProject})
 		return err
 	})
-	path := "/api/events?briefing=true&since=" + url.QueryEscape(start.Format(time.RFC3339Nano)) + "&type=node.updated,status_autopilot.changed,status_autopilot.skipped,run.telemetry,status_autopilot.private"
+	path := "/api/events?order=time&from=" + url.QueryEscape(start.Format(time.RFC3339Nano)) + "&to=" + url.QueryEscape(time.Now().UTC().Format(time.RFC3339Nano)) + "&type=node.updated,status_autopilot.changed,status_autopilot.skipped,run.telemetry,status_autopilot.private"
 	w := f.call(reader, "GET", path, "", 200)
 	var page struct {
 		Items []events.Event `json:"items"`

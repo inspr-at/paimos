@@ -871,52 +871,15 @@ proofs are rejected. Writes are limited to 30 attempts per person per ten minute
 with bounded notification batches and delivery retries. Approval and credential
 events remain in the tenant event log under its existing retention policy.
 
-## Morning briefing
+## Decision Desk projection
 
-People can open **Morning briefing** on Projects or `/briefing`. The daily
-in-app reminder uses a chosen time in the device's local timezone (08:00 by
-default). It reads existing completion and release outcomes, delivered-state
-and recorded ticket merge evidence, Status autopilot deliveries and skipped
-human checks, failed reviews/CI, current approvals, held human
-requests and available journey decisions. Each fact links to its item and source.
-The suggested next step is one of those person actions or recorded findings.
-
-The first visit covers 24 hours; later visits start at that person's saved
-briefing visit. The database statement start establishes the window alongside the first
-event page; only complete successful log reads advance the saved server cutoff.
-Denied logs, failed logs and log pagination limits retain the earlier cutoff.
-Pending approvals, held requests, journey actions and usage are separate current
-snapshots: their page limits or failures do not freeze completed log windows.
-Very old visits are bounded to 366 days. Preferences use the existing tenant/person-scoped store;
-there is no new activity tracking or generated narrative.
-
-Usage requires `harness.read`. Its API list value is approximate, includes
-lifetime usage of sessions **started** in the window, and is not interval spend
-or an invoice. Recorded ticket totals reuse the planning columns' measured and
-estimated figures and Paid semantics; account budget windows describe current
-reported usage. Permitted windows remain visible when account budget coverage is
-partial. The briefing explains privacy omissions and the independent window/account
-truncation limit; shared windows are counted once across project reads.
-Unknown usage stays unknown. Headline usage sums only projects with
-`harness.read`, using the workspace dashboard only for a workspace grant; source
-links appear only after successful reads. Merge facts use changes to a ticket’s
-recorded `fields.merge_commit`, available under project visibility; PR URLs alone
-do not count as merges. The visit-bounded autopilot log must also load completely
-before the cutoff advances. Journey next actions use one batch snapshot query.
-The additive `GET /api/decision-desk/projection` supplies the future Decision
-Desk's canonical order and exact counts. Held approvals sort by expiry, then
-other held work by age, then ordinary open items by age, with source ID ties.
-Questions with several askers count once; a question replaces its linked action
-request. Sign-ins remain separate chores. Counts cover currently readable sources
-independently of page size; coverage above 1000 projects returns an explicit 422.
-The current Agents badge continues to count the approvals and held requests its
-panel can display. Agents does not poll the unused desk projection before the
-P6/P8 cutover, so failures in that future source do not affect its refresh state.
-Morning briefing retains actionable approvals with their scope labels/rationale
-and held requests with their project/body and app Source links.
-P6/P8 must switch desk, badge and briefing together when the complete desk UI and
-question deep links are available; ordinary questions currently remain in the
-server projection, without generating pushes.
+`GET /api/decision-desk/projection` supplies the Decision Desk's canonical
+order and exact counts. Held approvals sort by expiry, then other held work by
+age, then ordinary open items by age, with source ID ties. Questions with several
+askers count once; a question replaces its linked action request. Sign-ins remain
+separate chores. Counts cover currently readable sources independently of page
+size; coverage above 1000 projects returns an explicit 422. The Agents badge
+counts the approvals and held requests its panel can display.
 
 AEON-568's notification adapter (`internal/decisiondesk`) exposes bounded
 `NoticesTx`, final `ClaimTx` admission and `CurrentTx` reauthorization for the
@@ -942,8 +905,6 @@ tests, agreement on the warning window and integrated doctrine toast suppression
 The current adapter treats approval requests against unfinished ticket/task work
 as held; the coordinator must confirm that policy before activation. Durable
 claims retain retry evidence rather than being pruned while a source can recur.
-
-The in-app briefing is available; push, e-mail and spoken delivery remain future work.
 
 ## Link a vendor account to yourself
 
