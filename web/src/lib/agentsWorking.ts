@@ -33,6 +33,8 @@ const accountBlockers: Record<CapacityWait['code'], string> = {
 export function workingAccountRoom(accounts: AccountRow[], now: number, current: boolean, configured: string[] = []): WorkingAccountRoom {
   const room: WorkingAccountRoom['room'] = {}, reasons: WorkingAccountRoom['reasons'] = {}
   const pools = buildPools(accounts, now)
+  // Shared-quota aliases carry no gauge of their own; the canonical row does.
+  const byId = new Map(pools.flatMap(p => p.rows).map(r => [r.id, r]))
   const known = new Set(['codex', 'claude', 'cursor', ...configured, ...accounts.map(a => a.harness)])
   let incomplete = !current
   for (const harness of POOL_ORDER.filter(h => known.has(h))) {
@@ -54,7 +56,8 @@ export function workingAccountRoom(accounts: AccountRow[], now: number, current:
     const notes = matching.flatMap(a => {
       if (!a.routing) return ['not measured yet — start advice is unavailable']
       const notes = a.routing.wait ? [accountBlockers[a.routing.wait.code]] : []
-      if (a.routing.wait?.code !== 'reading' && (!a.primary || a.primary.freshness !== 'fresh' || a.primary.reading.source === 'estimate' || a.awaitingReading)) {
+      const gauge = (a.sameQuotaAs && byId.get(a.sameQuotaAs)) || a
+      if (a.routing.wait?.code !== 'reading' && (!gauge.primary || gauge.primary.freshness !== 'fresh' || gauge.primary.reading.source === 'estimate' || gauge.awaitingReading)) {
         notes.push(hidesCapacityLimit(a.harness) ? 'quota not measured yet — the harness does not report usage' : 'quota not measured yet — a managed run must report current usage')
       }
       return notes
@@ -165,9 +168,11 @@ export function waitingCopy(plan: WorkingPreference, snapshot: PlanSnapshot, roo
       const usable = candidates.filter(h => plan.limits[h] !== 'off' && (typeof plan.limits[h] !== 'number' || (snapshot.running[h] ?? 0) < (plan.limits[h] as number)))
       if (!usable.length && item.harness) why = plan.limits[item.harness] === 'off' ? `${HARNESS_NAME[item.harness] ?? item.harness} is off` : `${HARNESS_NAME[item.harness] ?? item.harness} is at its limit`
       else if (!usable.length && candidates.length) why = 'every harness is off or at its limit'
+      // Only confirmed positive room is ready; unknown room is never a start.
+      else if (usable.some(h => (room[h] ?? 0) > 0)) why = item.reason || 'ready for a start'
       else if (usable.length && usable.every(h => room[h] === 0)) why = item.reason || usable.map(h => reasons[h] ? `${HARNESS_NAME[h] ?? h}: ${reasons[h]}` : '').filter(Boolean).join('; ') || 'room on an account'
-      else if (usable.length && usable.every(h => room[h] === null || room[h] === undefined)) why = item.reason || 'account room is not measured yet'
-      else why = item.reason || 'ready for a start'
+      else if (usable.every(h => room[h] === null || room[h] === undefined)) why = item.reason || 'account room is not measured yet'
+      else why = item.reason || usable.map(h => `${HARNESS_NAME[h] ?? h}: ${reasons[h] || (room[h] === 0 ? 'no start slots available' : 'account room not measured yet')}`).join('; ')
     }
     groups.set(why, (groups.get(why) ?? 0) + 1)
   }

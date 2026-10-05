@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest'
 import { accountRoomCopy, accountRoomDetail, effectiveLimit, liveCopy, modeLimit, nextLimitMode, noOwnTip, nowCopy, setLimit, statusCopy, stepHarnessLimit, stepLimit, stepTotal, typedLimit, typedTotal, waitingCopy, workingAccountRoom, workingRows, type HarnessLimit, type PlanSnapshot } from '../src/lib/agentsWorking'
-import { buildRows, defaultSchedule, type AccountCapacity, type AccountInput, type CapacityRouting, type CapacityWindow } from '../src/lib/capacity'
+import { buildPools, buildRows, defaultSchedule, type AccountCapacity, type AccountInput, type CapacityRouting, type CapacityWindow } from '../src/lib/capacity'
 const snapshot: PlanSnapshot = { total: 5, limits: { codex: 4, claude: 2, cursor: 'off' }, principal_id: 'owner', running: { codex: 12, claude: 1, cursor: 3 }, running_total: 16, source: 'plan', updated_at: null }
 describe('the one dial', () => {
   it('changes only the ceiling, preserving running agents and independent harness limits', () => {
@@ -186,6 +186,32 @@ describe('honest account room (AEON-720)', () => {
     const stale = workingAccountRoom(rows, now, false)
     expect(stale.total).toBeNull()
     expect(accountRoomDetail(stale, 'codex')).toContain('account information is unavailable')
+  })
+  it('claims readiness only from confirmed room when unknown and zero room mix', () => {
+    const idle = { ...snapshot, total: 5, limits: {}, running: {}, running_total: 0 }
+    const room = workingAccountRoom(buildRows([input('codex')], [cap('codex', { ...ready(0), rank: 0, wait: { code: 'reading', run_now_allowed: false } }, [])]), now, true)
+    expect(room.room).toEqual({ codex: null, claude: 0, cursor: 0 })
+    const copy = waitingCopy(idle, idle, room.room, [{}], room.reasons)
+    expect(copy).not.toContain('ready for a start')
+    expect(copy).toBe('1 waiting: Codex: not measured yet — a current reading is missing; Claude: no linked accounts; Cursor: no linked accounts')
+    expect(waitingCopy(idle, idle, { codex: null, claude: 0 }, [{}])).toBe('1 waiting: Codex: account room not measured yet; Claude: no start slots available')
+    expect(waitingCopy(idle, idle, { codex: null, claude: 2, cursor: 0 }, [{}])).toBe('1 waiting: ready for a start')
+  })
+  it('resolves a shared-quota alias measurement from the canonical gauge', () => {
+    const rows = buildRows([input('codex', 'a'), input('codex', 'b')], [
+      { ...cap('a', ready(3)), quota_fingerprint: 'shared', group_id: 'one' },
+      { ...cap('b', { ...ready(0), same_quota_as: 'a' }), quota_fingerprint: 'shared', group_id: 'two', same_quota_as: 'a' },
+    ])
+    expect(buildPools(rows, now).flatMap(p => p.rows).find(r => r.id === 'b')!.primary).toBeNull()
+    const room = workingAccountRoom(rows, now, true)
+    expect(room.total).toBe(3)
+    expect(room.reasons.codex).toBe('')
+    expect(accountRoomDetail(room, 'codex')).toBe('Codex room for 3 more')
+    const unmeasured = buildRows([input('codex', 'a'), input('codex', 'b')], [
+      { ...cap('a', ready(3), []), quota_fingerprint: 'shared', group_id: 'one' },
+      { ...cap('b', { ...ready(0), same_quota_as: 'a' }, []), quota_fingerprint: 'shared', group_id: 'two', same_quota_as: 'a' },
+    ])
+    expect(workingAccountRoom(unmeasured, now, true).reasons.codex).toBe('quota not measured yet — a managed run must report current usage')
   })
   it('never turns unused ceiling positions into waiting work', () => {
     const idle = { ...snapshot, total: 5, limits: {}, running: {}, running_total: 0 }
