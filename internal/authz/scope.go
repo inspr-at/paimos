@@ -76,6 +76,7 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/projects":                           true,
 	"GET /api/nodes":                              true,
 	"GET /api/outcomes":                           true,
+	"GET /api/outcomes/measurement":               true,
 	"GET /api/nodes/lookup":                       true,
 	"GET /api/nodes/tree":                         true,
 	"GET /api/search":                             true,

@@ -11129,6 +11129,19 @@ paths:
       responses:
         '200': {description: Totals, content: {application/json: {schema: {$ref: '#/components/schemas/TimeTotals'}}}}
         '404': {$ref: '#/components/responses/Error'}
+  /outcomes/measurement:
+    get:
+      operationId: ticketWorkMeasurement
+      summary: Read bounded ticket work evidence
+      description: Requires outcome.read and harness.read in the current project. Project-only readers may read their authorized tickets; restricted source visibility leaves diff totals null. Counts are lifetime recorded completion, review and fix events (at most 10000); diff totals cover distinct commits with full 40-character hexadecimal IDs on currently bound sessions (at most 200 sessions and 10000 commits). Abbreviated or invalid IDs are excluded from the commit count and produce a commit_identity_incomplete gap with null diff totals. This live view does not certify contributor coverage or persist a completion receipt. Missing diff readings remain null. Gaps and truncation are explicit. Evidence from another project requires harness.read there too.
+      security: *auth
+      parameters:
+        - {name: ticket_node_id, in: query, required: true, schema: {type: string, maxLength: 128}, description: Ticket id or key}
+      responses:
+        '200': {description: Recorded evidence, content: {application/json: {schema: {$ref: '#/components/schemas/TicketWorkMeasurement'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /outcomes:
     get:
       operationId: listOutcomes
@@ -11187,7 +11200,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.3']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.7']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.8']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -16929,6 +16942,13 @@ components:
         started_at: {type: string, format: date-time}
         source: {type: string, enum: [session, status]}
         estimate_hours: {type: [number, 'null']}
+        work_classification:
+          type: object
+          description: Area, role and complexity frozen with the estimate; absent on legacy snapshots.
+          properties:
+            area: {type: string}
+            route_role: {type: string}
+            complexity: {type: string}
         model_estimate: {$ref: '#/components/schemas/ModelEstimateHistory'}
         estimated_tokens: {type: [integer, 'null']}
         estimated_cost_usd: {type: [string, 'null'], description: Computed API list value at start; never an invoice. Omitted without harness.read.}
@@ -17138,6 +17158,9 @@ components:
       properties:
         sha: {type: string, pattern: '^[0-9a-fA-F]{7,40}$'}
         subject: {type: string, minLength: 1, maxLength: 200}
+        lines_added: {type: integer, format: int64, minimum: 0, maximum: 1000000000, description: Optional measured numstat total; all three diff counts must be supplied together.}
+        lines_deleted: {type: integer, format: int64, minimum: 0, maximum: 1000000000}
+        files_changed: {type: integer, format: int64, minimum: 0, maximum: 1000000000}
     HarnessSessionHierarchy:
       description: Agents tree extension for lists and hierarchy mutations. The pinned reporter status and heartbeat responses retain HarnessSession without these fields.
       allOf:
@@ -17327,7 +17350,8 @@ components:
         effective_model: {type: [string, 'null']}
         outcome: {type: [string, 'null'], enum: [completed, failed, cancelled, ownership_lost, null]}
         duration_ms: {type: [integer, 'null'], format: int64, description: Whole elapsed milliseconds for terminal runs; null until both timestamps exist}
-        active_ms: {type: [integer, 'null'], format: int64, description: Milliseconds not spent waiting. Null until the run is terminal and both timestamps exist. Equal to duration_ms when no waiting telemetry was recorded.}
+        waiting_ms: {type: [integer, 'null'], format: int64, description: Recorded waiting spans clipped to run timestamps and closed at terminal time. Null for legacy runs or timing-history overflow.}
+        active_ms: {type: [integer, 'null'], format: int64, description: 'Milliseconds not spent waiting. Null until terminal timestamps exist, or when timing history exceeds 10000 status records. For measured runs, active_ms + waiting_ms equals duration_ms. Legacy active_ms is preserved; waiting_ms remains null.'}
         outcome_detail: {type: [string, 'null'], enum: [no_commit, committed, pr_opened, merged, abandoned, null], description: Derived when the run becomes terminal. Local git evidence yields committed or no_commit only; merged is reserved for forge or release evidence. A pull-request URL is pr_opened. Null when the run is not terminal.}
         retry_of_run_id: {type: [string, 'null'], format: uuid, description: Earlier run of the same work order and agent that this run retries.}
         model_evidence: {type: string, enum: [unverified, vendor_reported]}
@@ -18540,6 +18564,21 @@ components:
         outcomes:
           type: array
           items: {$ref: '#/components/schemas/OutcomeEvent'}
+    TicketWorkMeasurement:
+      type: object
+      required: [ticket_node_id, scope, completions, review_rounds, fix_rounds, commits, lines_added, lines_deleted, file_changes, gaps, truncated]
+      properties:
+        ticket_node_id: {type: string, format: uuid}
+        scope: {type: string, const: lifetime_events_and_current_bindings}
+        completions: {type: integer, minimum: 0}
+        review_rounds: {type: integer, minimum: 0, description: Number of recorded review verdict events; repeated round numbers remain separate evidence.}
+        fix_rounds: {type: integer, minimum: 0, description: Number of recorded fix-round events.}
+        commits: {type: integer, minimum: 0, description: Distinct canonical full commit IDs; unresolved identities are excluded and reported as gaps.}
+        lines_added: {type: [integer, 'null'], format: int64}
+        lines_deleted: {type: [integer, 'null'], format: int64}
+        file_changes: {type: [integer, 'null'], format: int64, description: Sum of files changed per distinct commit; not unique paths.}
+        gaps: {type: array, items: {type: string}}
+        truncated: {type: boolean, description: Counts are lower bounds and diff totals are null when the relevant bound is reached.}
     OutcomeEvent:
       type: object
       required: [id, kind, ticket_node_id, ticket_key, project_id, source, payload, actor_principal_id, recorded_at, idempotency_key]
