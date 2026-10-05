@@ -2,6 +2,7 @@
 <script lang="ts">
 // One inline SVG set: 16×16 grid, stroke 1.8, round caps and joins, currentColor.
 export type IconName =
+  | 'flag' | 'square'
   | 'queue' | 'queue-add' | 'queue-on' | 'queue-off' | 'to-top' | 'repeat'
   | 'sun' | 'moon' | 'user' | 'chevron' | 'chevron-right' | 'chevron-left' | 'chevron-up' | 'arrow' | 'arrow-up' | 'arrow-down'
   | 'logout' | 'tree' | 'compass' | 'search' | 'list' | 'plus' | 'close' | 'edit' | 'copy' | 'external' | 'filter' | 'check'
@@ -21,7 +22,9 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
 
 <template>
   <svg :width="size" :height="size" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-    <path v-if="name === 'queue'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h7.8M2.4 12h7.8" />
+    <path v-if="name === 'flag'" d="M3.5 14V2.6M3.5 3h8.2l-1.8 3 1.8 3H3.5" />
+    <rect v-else-if="name === 'square'" x="2.2" y="2.2" width="11.6" height="11.6" rx="2" />
+    <path v-else-if="name === 'queue'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h7.8M2.4 12h7.8" />
     <path v-else-if="name === 'queue-add'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M11.6 8.8v5.4M8.9 11.5h5.4" />
     <path v-else-if="name === 'queue-on'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M8.6 11.6l1.9 1.9 3.6-3.9" />
     <path v-else-if="name === 'queue-off'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M8.9 11.5h5.4" />

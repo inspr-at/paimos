@@ -18,6 +18,34 @@ const cases=[g('internal/auth','TestCeiling','ESSENTIAL'),g('internal/auth','Tes
 const fixture=()=>({version:1,tests:structuredClone(cases)})
 const noFlaky={version:1,entries:[]}
 
+test('AEON-697 Go attention regressions are classified and permission and revision guards remain essential',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
+  const discovered=[]
+  for(const file of ['internal/db/attention_events_migration_test.go',
+    'internal/releases/node_undo_integration_test.go','internal/statusautopilot/attention_test.go']) {
+    const source=readFileSync(new URL(`../../${file}`,import.meta.url),'utf8')
+    const names=[...source.matchAll(/^func (Test\w+)\(t \*testing\.T\)/gm)].map(match=>match[1])
+    assert.ok(names.length>0,`${file} must contain regression cases`)
+    for(const name of names)discovered.push({kind:'go',package:file.slice(0,file.lastIndexOf('/')),name})
+  }
+  const ids=new Set(discovered.map(key)),warnings=[]
+  const stored={...manifest,tests:manifest.tests.filter(row=>ids.has(key(row)))}
+  assert.deepEqual(stored.tests.map(key).sort(),discovered.map(key).sort(),'Every Go attention regression needs an explicit tier entry')
+  const rows=validate(stored,discovered,undefined,
+    {strict:true,warn:warning=>warnings.push(warning)})
+  assert.deepEqual(warnings,[])
+  assert.ok(rows.every(row=>row.tier==='ESSENTIAL'||row.tier==='GATED-FULL'))
+  for(const event of ['pull_request','merge_group']) {
+    const core=select(rows,{event,paths:['README.md']}).tests
+    for(const name of ['TestAttentionChecksRevocationUnderFinalWriteFence','TestAdditionalAttentionFencePreservesAuthenticationGuard',
+      'TestAttentionResolutionVisibilityPreservesHiddenReferences','TestAttentionUndoRequiresPermissionAndActorOwnership',
+      'TestAttentionReleaseUndoRejectsExternalProjectAndReleaseChanges','TestAttentionBulkReturnsPartialResultsAndGuardsUndo']) {
+      assert.ok(core.some(row=>row.name===name),`${event} must retain ${name}`)
+    }
+    assert.deepEqual(select(rows,{event,forceFull:true}).tests.map(key).sort(),rows.map(key).sort())
+  }
+})
+
 test('AEON-648 pending writes and identity fences stay protected without promoting ordinary display tests',()=>{
   const manifest=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
   for(const [file,names] of [

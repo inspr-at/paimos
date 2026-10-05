@@ -39,11 +39,14 @@ type membershipInput struct {
 	Revision    int64    `json:"expected_revision"`
 	IDs         []string `json:"ticket_node_ids"`
 	ConfirmMove bool     `json:"confirm_move"`
+	allowMissed bool
+	deferEvent  bool
 }
 type membershipResult struct {
 	Walker  Walker   `json:"walker"`
 	EventID int64    `json:"event_id"`
 	LeafIDs []string `json:"leaf_node_ids"`
+	change  events.Change
 }
 type memberState struct {
 	TicketID      string  `json:"ticket_node_id"`
@@ -305,7 +308,7 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 		if candidate.ProjectID != project || (candidate.Kind != "ticket" && candidate.Kind != "work") {
 			return result, fail(404, "ticket not found in project")
 		}
-		if closedTicketState(candidate.Status) && !fromParents[id] {
+		if closedTicketState(candidate.Status) && !fromParents[id] && !(in.allowMissed && candidate.Status == "done") {
 			return result, fail(409, "closed tickets cannot be added")
 		}
 		old := candidate.Member
@@ -383,12 +386,15 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 	if _, err := tx.Exec(ctx, `UPDATE journey_projects SET revision=revision+1,updated_at=now() WHERE project_node_id=$1`, project); err != nil {
 		return result, err
 	}
-	event, err := events.Append(ctx, tx, p, events.Change{NodeID: &release, Type: "journey.release_membership_changed", Before: before, After: after})
-	if err != nil {
-		return result, err
+	result.change = events.Change{NodeID: &release, Type: "journey.release_membership_changed", Before: before, After: after}
+	if !in.deferEvent {
+		event, err := events.Append(ctx, tx, p, result.change)
+		if err != nil {
+			return result, err
+		}
+		result.EventID = event.ID
 	}
 	result.Walker, err = load(ctx, tx, project, release)
-	result.EventID = event.ID
 	result.LeafIDs = leaves
 	return result, err
 }
@@ -402,6 +408,54 @@ func AddExistingToNewRelease(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	}
 	_, err := addExisting(ctx, tx, p, project, release, membershipInput{Revision: 1, IDs: ids})
 	return err
+}
+
+// AddMissedReleaseTx uses the ordinary membership gates for a done leaf flagged
+// as missed. It never moves an existing member or opens a new release.
+// The caller appends the returned audit change after its remaining writes, so
+// the event counter is acquired only after all resource locks.
+func AddMissedReleaseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, release, id string, revision int64) (events.Change, error) {
+	if err := lockMembership(ctx, tx, p, project); err != nil {
+		return events.Change{}, err
+	}
+	if err := authz.RequireTx(ctx, tx, p, "nodes.write", authz.Scope{ProjectID: project}); err != nil {
+		return events.Change{}, err
+	}
+	var marked bool
+	if err := tx.QueryRow(ctx, `SELECT state='done' AND coalesce(status_autopilot->>'missed_release'='true',false) FROM nodes WHERE id=$1 AND project_id=$2 AND deleted_at IS NULL FOR UPDATE`, id, project).Scan(&marked); err != nil {
+		return events.Change{}, err
+	}
+	parent, err := db.WorkStatusParentTx(ctx, tx, id)
+	if err != nil {
+		return events.Change{}, err
+	}
+	if !marked || parent {
+		return events.Change{}, events.ErrConflict
+	}
+	result, err := addExisting(ctx, tx, p, project, release, membershipInput{Revision: revision, IDs: []string{id}, allowMissed: true, deferEvent: true})
+	return result.change, err
+}
+
+// UndoMissedReleaseTx restores one attention membership against the project and
+// release identities currently on screen. This permits independent tickets to
+// be undone after other confirmed attention writes refreshed those identities.
+// The normal handler still fences permissions, current release, revisions and
+// the exact member state; external changes with stale identities still fail.
+func UndoMissedReleaseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event, ticket string, releaseRevision, projectRevision int64) (events.Change, error) {
+	var before, after membershipSnapshot
+	if json.Unmarshal(e.Before, &before) != nil || json.Unmarshal(e.After, &after) != nil ||
+		len(before.Members) != 1 || len(after.Members) != 1 || len(before.Parents) != 0 || len(after.Parents) != 0 ||
+		before.Members[0].TicketID != ticket || after.Members[0].TicketID != ticket || before.Members[0].ReleaseID != nil ||
+		releaseRevision < after.ReleaseRevision || projectRevision < after.ProjectRevision {
+		return events.Change{}, events.ErrConflict
+	}
+	after.ReleaseRevision, after.ProjectRevision = releaseRevision, projectRevision
+	raw, err := json.Marshal(after)
+	if err != nil {
+		return events.Change{}, err
+	}
+	e.After = raw
+	return undoMembership(ctx, tx, p, e)
 }
 
 func closedTicketState(state string) bool {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
+import { controlStability } from './control-stability'
 
 const canonical = '260923120000.0.0'
 // The shared renderer's accessible name: canonical version and its UTC date-time (INSPR-CalVer3).
@@ -97,6 +98,32 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         expect(errors).toEqual([])
       })
     }
+  }
+}
+
+for (const width of [390, 1024, 1440]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`home attention entry fits and stays still at ${width}px in ${colorScheme}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.emulateMedia({ colorScheme })
+      await mockAPI(page)
+      await page.goto('/')
+      const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
+      await expect(attention).toHaveAttribute('href', '/tickets?view=needs-attention')
+      await page.evaluate(() => document.fonts.ready)
+      await noOverflow(page)
+      const bounds = await attention.boundingBox()
+      expect(bounds!.height).toBeGreaterThanOrEqual(width === 390 ? 44 : 20)
+      expect(bounds!.width).toBeGreaterThanOrEqual(44)
+      const guard = await controlStability(page, {
+        attention,
+        search: page.getByRole('searchbox', { name: 'Filter projects' }),
+        display: page.getByRole('button', { name: /^Display/ }),
+      })
+      await guard.check(async () => { await attention.focus(); await attention.hover() })
+      guard.done()
+      await page.screenshot({ path: testInfo.outputPath(`home-attention-${width}-${colorScheme}.png`), fullPage: true })
+    })
   }
 }
 

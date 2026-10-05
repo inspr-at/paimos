@@ -123,6 +123,20 @@ func WithTenantGuard(ctx context.Context, guard TenantGuard) context.Context {
 	return context.WithValue(ctx, tenantGuardKey{}, guard)
 }
 
+// WithAdditionalTenantGuard preserves an authentication guard while adding a
+// handler fence. Both run before target reads and the visibility refresh.
+func WithAdditionalTenantGuard(ctx context.Context, guard TenantGuard) context.Context {
+	prior, _ := ctx.Value(tenantGuardKey{}).(TenantGuard)
+	return WithTenantGuard(ctx, func(ctx context.Context, tx pgx.Tx, tid string) error {
+		if prior != nil {
+			if err := prior(ctx, tx, tid); err != nil {
+				return err
+			}
+		}
+		return guard(ctx, tx, tid)
+	})
+}
+
 type transactionContextKey struct{}
 
 // InTransaction groups sequential InTenant calls into one atomic unit. Each

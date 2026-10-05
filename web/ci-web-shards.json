@@ -30,7 +30,8 @@
     "PLAYWRIGHT_JSON_OUTPUT_FILE enables per-group JSON reports plus one combined report at that path; --reporter=json is also accepted. Prior report bytes are invalidated before launch so startup failure/interruption cannot reuse green evidence.",
     "Shard assignment is based on file names and timing weights only; groups execute sequentially with their own original policies. Weights for the 165 newly covered specs are estimates; hosted measurement is needed before claiming the 5-minute target.",
     "RUNNER_ENVIRONMENT must be github-hosted for execution; it is GitHub Actions built-in runner metadata. Local --list/--check remain browser-free. --last-failed preflights per-group state and refuses missing/invalid state instead of Playwright's full-selection fallback.",
-    "AEON-679 rule B: removed low-value capture, polish, duplicate scan and literal geometry cases; mixed protected cases remain. Changed spec listedTests use native collection; weights are proportional scheduling estimates, not measured runtime savings. Historical timingSource and ciInventory remain provenance only. The optional historical/current release-list screenshot jobs were retired with their capture case."
+    "AEON-679 rule B: removed low-value capture, polish, duplicate scan and literal geometry cases; mixed protected cases remain. Changed spec listedTests use native collection; weights are proportional scheduling estimates, not measured runtime savings. Historical timingSource and ciInventory remain provenance only. The optional historical/current release-list screenshot jobs were retired with their capture case.",
+    "AEON-697: Needs attention gates once in its own serial, trace-preserving group. listedTests comes from native collection; weightSeconds uses the existing unmeasured seconds/test estimate, not hosted runtime evidence."
   ],
   "configs": [
     {
@@ -938,7 +939,7 @@
           "file": "tests/views-filters.spec.ts",
           "weightSeconds": 42.152047,
           "weightSource": "web-13",
-          "listedTests": 17
+          "listedTests": 29
         },
         {
           "file": "tests/session-recovery.spec.ts",
@@ -1278,6 +1279,25 @@
         }
       ],
       "env": {}
+    },
+    {
+      "id": "needs-attention",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "specs": [
+        {
+          "file": "tests/needs-attention.spec.ts",
+          "weightSeconds": 46.609756,
+          "weightSource": "estimate",
+          "listedTests": 29
+        }
+      ]
     },
     {
       "id": "remaining-ui",
