@@ -20,6 +20,24 @@ with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `C
 
 ## Workflow
 
+### Nix Go dependency hash (AEON-703)
+
+The Linux `release-check-run` job builds `aeon.goModules` to verify the shared
+`vendorHash` used by both flake packages. `ci-plan` selects it for PR changes to
+`go.mod`, `go.sum`, `flake.nix`, `flake.lock` or the guard's wiring. Main, merge
+queue and manual runs select it too; missing classification selects it safely.
+The required `release-check` aggregate includes failures from this step.
+Nix inputs are cached by OS, architecture and those four files, with cache
+writes confined to main pushes. The dependency output is always rebuilt, so
+an existing fixed-output store path cannot hide a stale hash; no application
+compilation or Postgres is needed for this check.
+
+Run `bash scripts/check-nix-vendor-hash.sh` from the repository root. After a
+dependency update, obtain the new hash from a real `nix build .#aeon -L` hash
+mismatch, update `flake.nix`, then rerun the check and package build. Do not
+guess a hash or add a downstream override. These are package builds, never
+NixOS configuration builds on macOS.
+
 ### Mandatory pre-tag rehearsal (AEON-531)
 
 Every release PR must pass **`release-rehearsal`** in

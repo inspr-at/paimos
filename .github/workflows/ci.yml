@@ -143,6 +143,7 @@ jobs:
     outputs:
       lane: ${{ steps.plan.outputs.lane }}
       specs: ${{ steps.plan.outputs.specs }}
+      nix_vendor: ${{ steps.plan.outputs.nix_vendor }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -159,7 +160,7 @@ jobs:
         run: |
           set -euo pipefail
           full_plan() {
-            printf 'lane=full\nspecs=[]\n' >> "$GITHUB_OUTPUT"
+            printf 'lane=full\nspecs=[]\nnix_vendor=true\n' >> "$GITHUB_OUTPUT"
             echo 'CI: full; trusted classification unavailable or not a PR' >> "$GITHUB_STEP_SUMMARY"
           }
           # Never execute the candidate's classifier. A first-time adoption
@@ -736,8 +737,25 @@ jobs:
     needs: [ci-plan, tree-reuse]
     if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
+      # Missing output from an older trusted base classifier also runs the check.
+      - name: Install Nix for the vendor hash gate
+        if: needs.ci-plan.outputs.nix_vendor != 'false'
+        uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31
+        with:
+          enable_kvm: false
+      - name: Cache Nix build inputs
+        if: needs.ci-plan.outputs.nix_vendor != 'false'
+        uses: nix-community/cache-nix-action@135667ec418502fa5a3598af6fb9eb733888ce6a # v6
+        with:
+          primary-key: nix-vendor-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('go.mod', 'go.sum', 'flake.nix', 'flake.lock') }}
+          restore-prefixes-first-match: nix-vendor-v1-${{ runner.os }}-${{ runner.arch }}-
+          save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+      - name: Verify the Go vendor hash
+        if: needs.ci-plan.outputs.nix_vendor != 'false'
+        run: bash scripts/check-nix-vendor-hash.sh
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
