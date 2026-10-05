@@ -7463,7 +7463,7 @@ paths:
               required: [interval_minutes]
               properties:
                 interval_minutes: {type: integer, minimum: 1, maximum: 240}
-                expected_interval_minutes: {type: integer, minimum: 1, maximum: 240, description: Optional current value required for a conditional reverse write}
+                expected_interval_minutes: {type: integer, minimum: 1, maximum: 240, description: Optional current value required for a conditional save or reverse write}
       responses:
         '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
@@ -7577,7 +7577,7 @@ paths:
               required: [mode]
               properties:
                 mode: {type: string, enum: [off, tool_activity, agent_summary]}
-                expected_mode: {type: string, enum: [off, tool_activity, agent_summary], description: Optional current value required for a conditional reverse write}
+                expected_mode: {type: string, enum: [off, tool_activity, agent_summary], description: Optional current value required for a conditional save or reverse write}
       responses:
         '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Saved policy, content: {application/json: {schema: {$ref: '#/components/schemas/AgentActivitySetting'}}}}
@@ -7610,7 +7610,7 @@ paths:
               required: [heartbeat_lost_minutes]
               properties:
                 heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
-                expected_heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440, description: Optional current value required for a conditional reverse write}
+                expected_heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440, description: Optional current value required for a conditional save or reverse write}
       responses:
         '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':

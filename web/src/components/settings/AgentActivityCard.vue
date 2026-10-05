@@ -16,10 +16,10 @@ const options = [
 interface Field {
   path: string; key: string; label: string; min?: number; max?: number
   draft: string; confirmed: string | null; loading: boolean; saving: boolean
-  error: string; loadError: boolean; saved: boolean; version: number
+  error: string; conflict: boolean; loadError: boolean; saved: boolean; version: number
 }
 const field = (path: string, key: string, label: string, min?: number, max?: number): Field =>
-  reactive({ path, key, label, min, max, draft: '', confirmed: null, loading: true, saving: false, error: '', loadError: false, saved: false, version: 0 })
+  reactive({ path, key, label, min, max, draft: '', confirmed: null, loading: true, saving: false, error: '', conflict: false, loadError: false, saved: false, version: 0 })
 const activity = field('/settings/agent-activity', 'mode', 'Agent activity')
 const estimate = field('/settings/eta-interval', 'interval_minutes', 'Estimates', 1, 240)
 const lost = field('/settings/heartbeat-lost', 'heartbeat_lost_minutes', 'Silent sessions', 5, 1440)
@@ -47,12 +47,15 @@ async function read(item: Field) {
 }
 async function load(item: Field) {
   const started = epoch, identity = owner()
-  item.loading = true; item.loadError = false
+  item.loading = true; item.loadError = false; item.saved = false
   try {
     const value = await read(item)
-    if (current(started, identity)) { item.draft = value; item.confirmed = value; item.error = '' }
+    if (current(started, identity)) { item.draft = value; item.confirmed = value; item.error = ''; item.conflict = false; item.version++ }
   } catch { if (current(started, identity)) item.loadError = true }
   finally { if (current(started, identity)) item.loading = false }
+}
+function needsReload(item: Field): boolean {
+  return item.conflict || item === activity && !!item.error
 }
 function keys(event: KeyboardEvent, item: Field) {
   if (event.isComposing || event.repeat) return
@@ -63,7 +66,7 @@ function keys(event: KeyboardEvent, item: Field) {
   }
 }
 async function save(item: Field, undo?: { version: number; before: string; after: string }) {
-  if (!can('settings.manage') || disposed || item.saving || item.loading || item.confirmed === null) return
+  if (!can('settings.manage') || disposed || item.saving || item.loading || item.conflict || item.confirmed === null) return
   if (undo && (item.version !== undo.version || item.confirmed !== undo.after || item.draft !== undo.after)) return
   const draft = undo ? undo.before : item.draft, value = valueOf(item, draft)
   item.saved = false
@@ -73,9 +76,9 @@ async function save(item: Field, undo?: { version: number; before: string; after
   item.saving = true; item.error = ''
   try {
     if (!current(started, identity)) return
-    const response = await api(item.path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [item.key]: value, ...(undo ? { [`expected_${item.key}`]: valueOf(item, undo.after) } : {}) }) })
+    const response = await api(item.path, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [item.key]: value, [`expected_${item.key}`]: valueOf(item, before) }) })
     if (response.status === 409) {
-      if (current(started, identity)) item.error = 'Changed elsewhere. Reload before undoing.'
+      if (current(started, identity)) { item.conflict = true; item.error = 'Changed elsewhere. Reload to continue.' }
       return
     }
     if (!response.ok) throw new Error('save')
@@ -106,7 +109,7 @@ watch(owner, () => {
   for (const notice of notices) dismiss(notice)
   notices.clear()
   for (const item of fields) {
-    item.draft = ''; item.confirmed = null; item.error = ''; item.saving = false; item.saved = false; item.version++
+    item.draft = ''; item.confirmed = null; item.error = ''; item.conflict = false; item.saving = false; item.saved = false; item.version++
     void load(item)
   }
 }, { immediate: true })
@@ -142,9 +145,9 @@ onBeforeUnmount(() => {
       </div>
     </div>
     <div class="feedback-line">
-      <p id="mode-feedback" :role="activity.error || fields.some(item => item.loadError) ? 'alert' : 'status'" :class="{ error: activity.error || fields.some(item => item.loadError) }"><template v-if="activity.error">Agent activity: {{ activity.error }} </template><template v-if="fields.some(item => item.loadError)">Couldn't load this.</template><template v-else-if="!activity.error && fields.some(item => item.saved)">Saved</template><template v-else-if="!activity.error && fields.some(item => item.loading)">Loading agent settings…</template></p>
+      <p id="mode-feedback" :role="activity.error || fields.some(item => item.loadError) ? 'alert' : 'status'" :class="{ error: activity.error || fields.some(item => item.loadError) }"><template v-if="activity.error">Agent activity: {{ activity.error }} </template><template v-if="fields.some(item => item.loadError)">Couldn't load this.</template><template v-else-if="!fields.some(item => item.error) && fields.some(item => item.saved)">Saved</template><template v-else-if="!fields.some(item => item.error) && fields.some(item => item.loading)">Loading agent settings…</template></p>
       <button v-if="fields.some(item => item.loadError)" type="button" class="btn sm" @click="fields.filter(item => item.loadError).forEach(item => load(item))">Try again</button>
-      <button v-else-if="activity.error" type="button" class="btn sm" @click="load(activity)">Reload</button>
+      <button v-else-if="fields.some(needsReload)" type="button" class="btn sm" :disabled="fields.some(item => item.loading || item.saving)" @click="fields.filter(needsReload).forEach(item => load(item))">Reload</button>
     </div>
   </SettingsCard>
 </template>
