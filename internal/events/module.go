@@ -71,6 +71,7 @@ func New(pool *pgxpool.Pool, options ...Option) httpapi.Module {
 
 func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/events", m.list)
+	mux.HandleFunc("GET /api/events/activity", m.activity)
 	mux.HandleFunc("GET /api/events/stream", m.stream)
 	mux.HandleFunc("POST /api/events/{eventId}/undo", m.handleUndo)
 	mux.HandleFunc("GET /api/events/{eventId}/undo-preview", m.handleUndoPreview)

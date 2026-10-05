@@ -177,7 +177,7 @@ function chooseProject(id: string) { const project = pickerChoices.value.find(p 
       </SettingsCard>
       <SettingsCard title="Latest automatic changes" icon="history" anchor="autopilot-recent">
         <template #lead>The five newest moves by Status autopilot, with their reasons. Each ticket’s Activity keeps its own record.</template>
-        <template #aside><a class="btn sm" href="/activity?view=automatic">Show all<AppIcon name="arrow" :size="13" /></a></template>
+        <template #aside><RouterLink class="btn sm" to="/activity?view=automatic">Show all<AppIcon name="arrow" :size="13" /></RouterLink></template>
         <ul class="auto-changes"><li v-for="change in changes" :key="change.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><TicketLink :ticket-key="change.key" /><span v-clip-tip="change.title" class="change-title">{{ change.title }}</span></p><AutomaticChangeRow :change="change" recent @undone="recent" /></div></li></ul>
         <p v-if="!changes.length" class="empty">Nothing has moved on its own yet.</p>
       </SettingsCard>

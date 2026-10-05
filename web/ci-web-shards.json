@@ -1181,6 +1181,12 @@
           "listedTests": 11
         },
         {
+          "file": "tests/workspace-activity.spec.ts",
+          "weightSeconds": 17.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 8
+        },
+        {
           "file": "tests/features.spec.ts",
           "weightSeconds": 15.536585,
           "weightSource": "unmeasured-test-rate",

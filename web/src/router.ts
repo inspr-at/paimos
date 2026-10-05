@@ -27,6 +27,7 @@ export const router = createRouter({
   routes: [
     { path: '/', component: ProjectsView, meta: { title: 'Projects' } },
     { path: '/briefing', component: () => import('./views/MorningBriefingView.vue'), meta: { title: 'Morning briefing' } },
+    { path: '/activity', component: () => import('./views/ActivityView.vue'), meta: { title: 'Activity' } },
     // One record for the project page: its list, the open ticket and its Knowledge
     // tab and entries are children, so moving between them never remounts the page
     // (and its guards stay on the record that is matched throughout).
