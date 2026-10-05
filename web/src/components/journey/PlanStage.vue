@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { APIError, undoEvent } from '../../lib/api'
 import { ACTION_LONG, gateApprovals, hours, offeredApproval, RELEASE_STATE_LABEL } from '../../lib/journey'
 import { toast } from '../../lib/toast'
@@ -47,26 +47,31 @@ const newTitle = ref('')
 const newFeature = ref<string>('')
 const adding = ref(false)
 const picking = ref(false)
+watch(ctx.data.planOwner, () => { newTitle.value = ''; newFeature.value = ''; adding.value = false; picking.value = false }, { flush: 'sync' })
 const epics = computed(() => ctx.plan.groups.value.flatMap(group => group.feature ? [{ id: group.feature.id, key: group.feature.key, title: group.feature.title }] : []))
 async function addTicket() {
   const title = newTitle.value.trim()
-  if (!title || adding.value) return
+  const owner = ctx.data.capturePlanOwner()
+  if (!title || adding.value || !owner || !ctx.editable.value) return
+  const label = ctx.releaseLabel.value
   adding.value = true
   try {
     const before = new Set((walker.value?.tickets ?? []).map(t => t.ticket_node_id))
-    const saved = await ctx.data.addTicket(title, newFeature.value || null, true)
+    const saved = await ctx.data.addTicket(owner, title, newFeature.value || null, true)
+    if (!saved || !ctx.data.isPlanOwnerCurrent(owner)) return
     const added = saved.tickets.find(t => !before.has(t.ticket_node_id))
     newTitle.value = ''
-    toast(`${added?.key ?? 'The ticket'} joins ${ctx.releaseLabel.value.toLowerCase()}.`)
-    void store.load(ctx.project.value.id, true)
+    toast(`${added?.key ?? 'The ticket'} joins ${label.toLowerCase()}.`)
+    void store.load(owner.projectId, true)
   } catch (e) {
+    if (!ctx.data.isPlanOwnerCurrent(owner)) return
     const missing = e instanceof APIError && (e.status === 404 || e.status === 405)
     toast(missing ? 'This server cannot add tickets to a plan yet.' : `The ticket was not added: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
-  } finally { adding.value = false }
+  } finally { if (ctx.data.isPlanOwnerCurrent(owner)) adding.value = false }
 }
 async function addedExisting(payload: { count: number | null; result: MembershipResult }) {
+  if (!ctx.data.patchWalker(payload.result.walker)) return
   picking.value = false
-  ctx.data.patchWalker(payload.result.walker)
   void ctx.data.loadWork(true)
   void store.load(ctx.project.value.id, true)
   const label = ctx.releaseLabel.value

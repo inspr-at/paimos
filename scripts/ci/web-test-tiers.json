@@ -7443,6 +7443,26 @@
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"drops a queued toggle when the selected release changes before dispatch","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"drops a queued toggle when its project changes and comes back synchronously","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"rechecks editability immediately before a queued write","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"discards a late plan success without refreshing the newly selected release","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"discards a late plan conflict without rollback toast or stale refresh","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"resets partial feature selection memory for a different release owner","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"serializes same-owner toggles using the preceding saved revision","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a same-release reload invalidates an in-flight write and queued successor","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"an old save cannot clear the busy state or block writes for a new owner","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"only the latest walker load can install a result after release A B A navigation","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"rolls back a current-owner transport failure and surfaces its real error","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"reloads a current-owner conflict from its captured release","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"drops an explicitly captured ticket creation owner before dispatch after navigation","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a late ticket creation result cannot replace another project or refresh its work","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"adopts current-owner ticket creation and refreshes work for that project","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"discards a plan result after its view scope is disposed","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the ticket form preserves a new release draft and busy state after an old success","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the ticket form discards late failure feedback after release navigation","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the ticket form rechecks editability before submitting its captured draft","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a foreign-release membership result cannot patch the plan or report success","tier":"ESSENTIAL"}
   ]
 }

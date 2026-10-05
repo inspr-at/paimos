@@ -1,0 +1,75 @@
+{
+  "ticket": "AEON-706",
+  "scope": "Queued plan actions and late plan/add-ticket results bound to captured project, release and load generation.",
+  "ownership": {
+    "tracker": "ppm",
+    "worker_marker": "Coordinator marker verified on AEON-706 before edits",
+    "branch": "work/aeon-706-planbind",
+    "release_gates": "Coordinator owned; no worker model reviews, push, merge or deployment"
+  },
+  "changes": [
+    "Explicit owner passed to plan writes and ticket creation; expected_revision remains server precondition.",
+    "Queued writes recheck owner and editability before transport; stale operations resolve false/null.",
+    "Owner generations fence GET/write adoption, rollback, conflict reload, refresh callbacks and scope disposal, including same-release reload and A-B-A navigation.",
+    "Owner changes reset feature memory, pending chain/busy state, add-ticket drafts and picker visibility. Late results cannot clear a new owner busy state or drafts.",
+    "Release selection invalidates synchronously; after-save project refresh uses captured project. Foreign membership walkers cannot trigger success feedback."
+  ],
+  "validation": [
+    {
+      "command": "node node_modules/vitest/vitest.mjs run tests/plan-owner.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+      "phase": "before fix",
+      "result": "All first six regression tests failed against original source; assertions were retained."
+    },
+    {
+      "command": "node node_modules/vitest/vitest.mjs run tests/plan-owner.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+      "phase": "after fix",
+      "result": "20 passed, 0 failed. Deferred promises establish interleavings; no sleeps or elapsed-time assertions. Actual PlanStage setup/watchers exercised in a non-DOM Vue host."
+    },
+    {
+      "command": "npm run typecheck",
+      "result": "passed"
+    },
+    {
+      "command": "node node_modules/eslint/bin/eslint.js src/lib/useJourneyData.ts src/lib/usePlan.ts src/components/journey/JourneyView.vue src/components/journey/PlanStage.vue",
+      "result": "passed"
+    },
+    {
+      "command": "python3 -m unittest discover -s scripts/audit",
+      "result": "33 passed. New web test file is covered by S9 web/tests/**; no ownership-map modification required."
+    },
+    {
+      "command": "Native targeted Vitest collection + scripts/test-tiers/core.mjs validate(strict) and full/push selection",
+      "result": "20 exact classifications; 17 ESSENTIAL record-identity/permission cases and 3 GATED-FULL positive/current-owner controls; all 20 selected by full/push."
+    },
+    {
+      "command": "git diff --check",
+      "result": "passed"
+    }
+  ],
+  "limits": [
+    "Focused web validation only; full just test, build and browser suites remain coordinator/hosted-CI gates. No layout/CSS changes or browser geometry claims.",
+    "No Go source or migration changes; remote Go runner not invoked. No pushes (including temporary remote refs), production access, merges or deployment."
+  ],
+  "tests": [
+    "drops a queued toggle when the selected release changes before dispatch",
+    "drops a queued toggle when its project changes and comes back synchronously",
+    "rechecks editability immediately before a queued write",
+    "discards a late plan success without refreshing the newly selected release",
+    "discards a late plan conflict without rollback toast or stale refresh",
+    "resets partial feature selection memory for a different release owner",
+    "serializes same-owner toggles using the preceding saved revision",
+    "a same-release reload invalidates an in-flight write and queued successor",
+    "an old save cannot clear the busy state or block writes for a new owner",
+    "only the latest walker load can install a result after release A B A navigation",
+    "rolls back a current-owner transport failure and surfaces its real error",
+    "reloads a current-owner conflict from its captured release",
+    "drops an explicitly captured ticket creation owner before dispatch after navigation",
+    "a late ticket creation result cannot replace another project or refresh its work",
+    "adopts current-owner ticket creation and refreshes work for that project",
+    "discards a plan result after its view scope is disposed",
+    "the ticket form preserves a new release draft and busy state after an old success",
+    "the ticket form discards late failure feedback after release navigation",
+    "the ticket form rechecks editability before submitting its captured draft",
+    "a foreign-release membership result cannot patch the plan or report success"
+  ]
+}
