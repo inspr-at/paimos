@@ -15918,7 +15918,7 @@ components:
         recipient_principal_id: {type: string, format: uuid}
         recipient_session_id: {type: string, format: uuid}
         sender_label: {type: string, description: Frozen owner or agent label}
-        body: {type: string, const: ''}
+        body: {type: string, const: 'Attached-session note; text not retained', description: Fixed stored placeholder; never the note text}
         idempotency_key: {type: string}
         expires_at: {type: string, format: date-time}
         sent_event_id: {type: integer, format: int64}

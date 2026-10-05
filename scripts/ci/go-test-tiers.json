@@ -3923,6 +3923,7 @@
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachedSessionValidityLockedThroughCommit","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachedSessionValidityRecheckedAfterConcurrentMutation","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachedNoteCanariesAndIdempotency","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedSendResponsesMatchContract","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachedConsentAndTupleNegatives","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachedConcurrentQuotas","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachedSenderAndTenantPolicy","tier":"GATED-FULL"},

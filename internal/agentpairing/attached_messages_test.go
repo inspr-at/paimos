@@ -8,16 +8,19 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/db"
@@ -27,6 +30,7 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"gopkg.in/yaml.v3"
 )
 
 func qualifiedNotes() *attachedmsg.Service {
@@ -180,6 +184,112 @@ func TestAttachedNoteCanariesAndIdempotency(t *testing.T) {
 	}
 	// The failed reservation did not consume the remaining token.
 	f.call("POST", n.path(false), n.body("after-rollback", "accepted", false), true, "", 201)
+}
+
+// Actual handler output, first response and idempotent replay, must satisfy the
+// published send and receipt schemas in both attached modes.
+func TestAttachedSendResponsesMatchContract(t *testing.T) {
+	raw, e := os.ReadFile("../../api/openapi.yaml")
+	if e != nil {
+		t.Fatal(e)
+	}
+	var doc struct {
+		Paths      map[string]map[string]any `yaml:"paths"`
+		Components struct {
+			Schemas map[string]any `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if e = yaml.Unmarshal(raw, &doc); e != nil {
+		t.Fatal(e)
+	}
+	response := func(path, method, status string) *jsonschema.Resolved {
+		t.Helper()
+		var cursor any = doc.Paths[path][method]
+		for _, key := range []string{"responses", status, "content", "application/json", "schema"} {
+			object, ok := cursor.(map[string]any)
+			if !ok {
+				t.Fatalf("%s %s missing response object at %s", method, path, key)
+			}
+			cursor = object[key]
+		}
+		shape, ok := cursor.(map[string]any)
+		if !ok {
+			t.Fatalf("%s %s missing response schema", method, path)
+		}
+		defs := map[string]any{}
+		for _, name := range []string{"InboxSend", "InboxMessage", "InboxReceipt", "InboxSendResponse", "InboxReceiptResponse", "AttachedInboxMessage", "AttachedInboxReceipt", "AttachedMessageStatus"} {
+			if defs[name] = doc.Components.Schemas[name]; defs[name] == nil {
+				t.Fatalf("missing response schema %s", name)
+			}
+		}
+		root := map[string]any{"$defs": defs}
+		for key, value := range shape {
+			root[key] = value
+		}
+		encoded, e := json.Marshal(root)
+		if e != nil {
+			t.Fatal(e)
+		}
+		encoded = bytes.ReplaceAll(encoded, []byte("#/components/schemas/"), []byte("#/$defs/"))
+		var schema jsonschema.Schema
+		if e = json.Unmarshal(encoded, &schema); e != nil {
+			t.Fatal(e)
+		}
+		resolved, e := schema.Resolve(nil)
+		if e != nil {
+			t.Fatal(e)
+		}
+		return resolved
+	}
+	send := response("/inbox/messages", "post", "201")
+	receipt := response("/inbox/messages/{messageId}/receipt", "get", "200")
+	validate := func(name string, schema *jsonschema.Resolved, w *httptest.ResponseRecorder) map[string]any {
+		t.Helper()
+		var value map[string]any
+		decodeResult(t, w, &value)
+		if e := schema.Validate(value); e != nil {
+			t.Fatalf("%s violates the contract: %v: %s", name, e, w.Body.String())
+		}
+		return value
+	}
+	n := readyNotes(t)
+	f := n.f
+	var created struct {
+		Token string `json:"token"`
+	}
+	decodeResult(t, f.call("POST", "/api/agent-keys", map[string]any{"name": "Contract agent", "scopes": []string{"inbox.send", "inbox.read", "inbox.receipt", "nodes.read", "harness.read"}}, true, "", 201), &created)
+	for _, tc := range []struct {
+		mode   string
+		person bool
+		token  string
+	}{{attachedmsg.Volatile, true, ""}, {attachedmsg.Notification, false, created.Token}} {
+		canary := "aeon660-contract-" + attachedmsg.UUID()
+		body := n.body(attachedmsg.UUID(), canary, false)
+		if !tc.person {
+			delete(body, "recipient_message_generation")
+		}
+		first := f.call("POST", n.path(false), body, tc.person, tc.token, 201)
+		replay := f.call("POST", n.path(false), body, tc.person, tc.token, 201)
+		var id any
+		for name, w := range map[string]*httptest.ResponseRecorder{"first send": first, "idempotent replay": replay} {
+			if strings.Contains(w.Body.String(), canary) {
+				t.Fatalf("%s %s discloses note text", tc.mode, name)
+			}
+			value := validate(tc.mode+" "+name, send, w)
+			if value["content_mode"] != tc.mode || value["body"] != attachedmsg.Placeholder {
+				t.Fatalf("%s is not the %s projection: %s", name, tc.mode, w.Body.String())
+			}
+			if id != nil && value["id"] != id {
+				t.Fatalf("%s replay created a second note", tc.mode)
+			}
+			id = value["id"]
+		}
+		status := validate(tc.mode+" receipt", receipt, f.call("GET", "/api/inbox/messages/"+id.(string)+"/receipt", nil, tc.person, tc.token, 200))
+		attached, _ := status["attached"].(map[string]any)
+		if attached["content_mode"] != tc.mode {
+			t.Fatalf("receipt lost its attached status: %v", status)
+		}
+	}
 }
 func TestAttachedConsentAndTupleNegatives(t *testing.T) {
 	n := readyNotes(t)

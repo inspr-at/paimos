@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/inbox"
 
 	"gopkg.in/yaml.v3"
@@ -69,7 +70,8 @@ func TestStrictLegacyResponseSnapshotsUnchanged(t *testing.T) {
 }
 
 // Validate the real wire types against both response branches. Attached sends
-// return metadata with an empty body, unlike the durable InboxSend shape.
+// return metadata with the fixed stored placeholder as body, never note text.
+// Actual handler responses are validated in internal/agentpairing.
 func TestAttachedResponsesUseSeparateSchemas(t *testing.T) {
 	raw, err := os.ReadFile("../../api/openapi.yaml")
 	if err != nil {
@@ -162,7 +164,7 @@ func TestAttachedResponsesUseSeparateSchemas(t *testing.T) {
 	}
 	for _, mode := range []string{"attached_volatile", "attached_notification"} {
 		t.Run(mode, func(t *testing.T) {
-			msg.ContentMode, msg.Body, msg.RecipientSessionID, msg.MessageDeadline = mode, "", &id, &at
+			msg.ContentMode, msg.Body, msg.RecipientSessionID, msg.MessageDeadline = mode, attachedmsg.Placeholder, &id, &at
 			if mode == "attached_volatile" {
 				msg.MessageGrantID, msg.RecipientMessageGeneration = &id, &id
 			} else {
@@ -175,12 +177,14 @@ func TestAttachedResponsesUseSeparateSchemas(t *testing.T) {
 			if err := attachedSend.Validate(value); err != nil {
 				t.Fatalf("separate attached send: %v", err)
 			}
-			value["body"] = "must never disclose text"
-			if err := attachedSend.Validate(value); err == nil {
-				t.Fatal("attached response schema permits text disclosure")
-			}
-			if err := send.Validate(value); err == nil {
-				t.Fatal("send response permits attached text through its legacy branch")
+			for _, text := range []string{"must never disclose text", ""} {
+				value["body"] = text
+				if err := attachedSend.Validate(value); err == nil {
+					t.Fatalf("attached response schema permits body %q", text)
+				}
+				if err := send.Validate(value); err == nil {
+					t.Fatalf("send response permits attached body %q through its legacy branch", text)
+				}
 			}
 			rec.Attached = &inbox.AttachedStatus{Protocol: "attached_messages_v1", Outcome: "queued", ContentMode: mode}
 			value = wire(rec)
