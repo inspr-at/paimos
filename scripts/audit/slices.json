@@ -187,6 +187,7 @@
         "internal/localjournal/**",
         "internal/releasehistory/**",
         "internal/releases/**",
+        "internal/releasesettlement/**",
         "internal/reportercontract/**",
         "internal/ciproof/**",
         "internal/ciexecutor/**",
