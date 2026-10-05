@@ -12,7 +12,7 @@ export const PLACES: readonly Place[] = [
 
 // Which place a page belongs to; settings and the like belong to none.
 export function placeOf(path: string): PlaceId | null {
-  if (path === '/' || path === '/briefing' || path.startsWith('/p/') || path === '/knowledge' || path === '/releases' || path.startsWith('/releases/')) return 'projects'
+  if (path === '/' || path === '/briefing' || path.startsWith('/p/') || path === '/knowledge' || path === '/tickets' || path === '/releases' || path.startsWith('/releases/')) return 'projects'
   if (path === '/agents' || path.startsWith('/agents/')) return 'agents'
   if (path === '/business' || path.startsWith('/business/')) return 'business'
   return null

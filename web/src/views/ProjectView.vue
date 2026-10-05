@@ -1743,6 +1743,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </header>
       <div class="project-navigation" :class="{ 'legacy-navigation': !ticketsHeader }">
         <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections tips @select="setSection" />
+        <RouterLink v-if="ticketsHeader" class="attention-view-link" :to="{ path: '/tickets', query: { view: 'needs-attention', project_id: project.id } }"><AppIcon name="flag" :size="13" />Needs attention</RouterLink>
         <span v-if="ticketsHeader" class="nav-divider" aria-hidden="true" />
       <ViewBar
         v-if="(ticketsHeader && !graphActive) || showViewBar" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
@@ -1896,6 +1897,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 .project-page { width: 100%; margin: 0; padding: 22px var(--gutter) 12px; }
 /* The header follows its own width, not the window's: a docked ticket panel can
    leave the list as narrow as a phone on a wide screen (AEON-140). */
+.attention-view-link { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; padding: 0 10px; font-size: 13px; color: var(--ink-2); text-decoration: none; }
 .project-head { padding: 4px 0 14px; container: projecthead / inline-size; }
 .head-flex { display: flex; align-items: flex-start; justify-content: space-between; gap: 32px; }
 .head-flex.with-glimpse { display: grid; grid-template-columns: minmax(0, max-content) minmax(180px, 1fr) auto; align-items: stretch; column-gap: 28px; }

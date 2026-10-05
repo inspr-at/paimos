@@ -39,6 +39,7 @@ type membershipInput struct {
 	Revision    int64    `json:"expected_revision"`
 	IDs         []string `json:"ticket_node_ids"`
 	ConfirmMove bool     `json:"confirm_move"`
+	allowMissed bool
 }
 type membershipResult struct {
 	Walker  Walker   `json:"walker"`
@@ -305,7 +306,7 @@ func addExisting(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, re
 		if candidate.ProjectID != project || (candidate.Kind != "ticket" && candidate.Kind != "work") {
 			return result, fail(404, "ticket not found in project")
 		}
-		if closedTicketState(candidate.Status) && !fromParents[id] {
+		if closedTicketState(candidate.Status) && !fromParents[id] && !(in.allowMissed && candidate.Status == "done") {
 			return result, fail(409, "closed tickets cannot be added")
 		}
 		old := candidate.Member
@@ -402,6 +403,30 @@ func AddExistingToNewRelease(ctx context.Context, tx pgx.Tx, p tenant.Principal,
 	}
 	_, err := addExisting(ctx, tx, p, project, release, membershipInput{Revision: 1, IDs: ids})
 	return err
+}
+
+// AddMissedReleaseTx uses the ordinary membership gates for a done leaf flagged
+// as missed. It never moves an existing member or opens a new release.
+func AddMissedReleaseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, release, id string, revision int64) (int64, error) {
+	if err := lockMembership(ctx, tx, p, project); err != nil {
+		return 0, err
+	}
+	if err := authz.RequireTx(ctx, tx, p, "nodes.write", authz.Scope{ProjectID: project}); err != nil {
+		return 0, err
+	}
+	var marked bool
+	if err := tx.QueryRow(ctx, `SELECT state='done' AND coalesce(status_autopilot->>'missed_release'='true',false) FROM nodes WHERE id=$1 AND project_id=$2 AND deleted_at IS NULL FOR UPDATE`, id, project).Scan(&marked); err != nil {
+		return 0, err
+	}
+	parent, err := db.WorkStatusParentTx(ctx, tx, id)
+	if err != nil {
+		return 0, err
+	}
+	if !marked || parent {
+		return 0, events.ErrConflict
+	}
+	result, err := addExisting(ctx, tx, p, project, release, membershipInput{Revision: revision, IDs: []string{id}, allowMissed: true})
+	return result.EventID, err
 }
 
 func closedTicketState(state string) bool {
