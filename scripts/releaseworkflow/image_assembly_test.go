@@ -35,6 +35,9 @@ func TestExternalImageAssemblyAndEvidence(t *testing.T) {
 			t.Fatal("runtime preparation is not a separately frozen closure")
 		}
 		_, build := named(t, j, "Build cached smoke image")
+		if build.With["load"] != "true" || build.With["provenance"] != "false" || strings.Contains(build.With["build-args"], "BUILDKIT_MULTI_PLATFORM") {
+			t.Fatal("Docker exporter must load a single-platform result without provenance or forced manifest lists")
+		}
 		if build.With["outputs"] != "type=docker,rewrite-timestamp=true,oci-mediatypes=true" || !strings.Contains(build.With["build-contexts"], "@${{ steps.runtime.outputs.digest }}") || !strings.Contains(build.With["build-args"], "SOURCE_DATE_EPOCH=${{ steps.inputs.outputs.epoch }}") {
 			t.Fatal("assembly lacks immutable base or timestamp normalization")
 		}
@@ -50,6 +53,25 @@ func TestExternalImageAssemblyAndEvidence(t *testing.T) {
 		if upload.If != "always()" || upload.With["if-no-files-found"] != "error" || !strings.Contains(upload.With["path"], "image-reproducibility.json") || !strings.Contains(upload.With["path"], "image-timing.json") {
 			t.Fatal("timing/proof evidence lost")
 		}
+	}
+}
+
+func TestSinglePlatformProvenanceExport(t *testing.T) {
+	release := readWorkflow(t, "release.yml").Jobs["image-platform"]
+	dry := readWorkflow(t, "release-image-check.yml").Jobs["image-dry-run"]
+	_, smoke := named(t, release, "Build cached smoke image")
+	_, push := named(t, release, "Build and push")
+	_, export := named(t, dry, "Export production image with provenance locally")
+	for _, s := range []step{push, export} {
+		if s.With["build-args"] != smoke.With["build-args"] || strings.Contains(s.With["build-args"], "BUILDKIT_MULTI_PLATFORM") || s.With["provenance"] != "mode=max" || s.With["load"] == "true" {
+			t.Fatal("provenance export must keep smoke inputs and use an index-capable exporter without loading")
+		}
+		if s.With["platforms"] != "linux/${{ matrix.arch }}" || !strings.Contains(s.With["outputs"], "rewrite-timestamp=true,oci-mediatypes=true") {
+			t.Fatal("export must preserve native platform and reproducible OCI media types")
+		}
+	}
+	if export.With["outputs"] != "type=oci,dest=${{ runner.temp }}/release-${{ matrix.arch }}.tar,tar=true,rewrite-timestamp=true,oci-mediatypes=true" {
+		t.Fatal("rehearsal provenance must write an explicit local OCI tar")
 	}
 }
 

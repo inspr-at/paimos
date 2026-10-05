@@ -641,7 +641,7 @@ The server image pipeline starts independently of the macOS jobs (AEON-407, AEON
 
 1. Each `image-platform` matrix job checks out all tags, validates the calendar coordinate and presentation bundle, and requires an annotated tag matching `version.json`. It refuses an existing GitHub release (including drafts) or GHCR release tag; lookup errors fail closed.
 2. Generate the release-history manifest once. Freeze the source commit timestamp as `SOURCE_DATE_EPOCH`; compile web and Go on the native host using warm npm and Go caches. `scripts/build-image-inputs.mjs` runs the production prebuild checks, uses `-trimpath -buildvcs=false -tags webembed`, disables CGO, and injects the exact reserved version. The input manifest records the tree, toolchain versions, generated-history hash, web hashes and binary hash; the final executable has mode 755 and a fixed mtime.
-3. Prepare `scripts/Dockerfile.runtime` using the architecture's `:buildcache-runtime` or `:buildcache-arm64-runtime` cache. Bind its exported OCI runtime manifest digest as the `aeon-runtime` named context. The main Dockerfile only copies `dist/image-input/paimos` and `NOTICE`, retaining UID/GID 65532 and the tini entrypoint. Import the existing `:buildcache` or `:buildcache-arm64` assembly cache and load the native image. Resolve its tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable ID. Both assembly and export use the same working-directory context, base digest and arguments, with `rewrite-timestamp=true` and OCI media types.
+3. Prepare `scripts/Dockerfile.runtime` using the architecture's `:buildcache-runtime` or `:buildcache-arm64-runtime` cache. Bind its exported OCI runtime manifest digest as the `aeon-runtime` named context. The main Dockerfile only copies `dist/image-input/paimos` and `NOTICE`, retaining UID/GID 65532 and the tini entrypoint. Import the existing `:buildcache` or `:buildcache-arm64` assembly cache and load the native image. Resolve its tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable ID. Both assembly and export use the same working-directory context, base digest and single-platform arguments, with `rewrite-timestamp=true` and OCI media types.
 4. Record assembly plus smoke timing and require two clean same-input rebuilds (below). After these gates pass, save the verified runtime's architecture-specific registry cache, then export the same image inputs with BuildKit `provenance: mode=max` and push **by digest only**. Update that architecture's assembly cache in `mode=max`. Platform jobs never assign the release tag. Each creates and verifies a GitHub build-provenance attestation bound to its digest, repository, workflow, source tag and commit, then uploads its digest artifact.
 5. The `image` job waits for both platform jobs to succeed, rechecks release/tag immutability, and combines their immutable references using `docker buildx imagetools create`. Before publishing and after reading back, require exactly linux/amd64 and linux/arm64 runtime manifests with separate bound BuildKit provenance descriptors. Publish one multi-arch OCI index at `ghcr.io/inspr-at/aeon:<version>`, without a `latest` alias.
 6. Attest and verify the index digest too. Preserve `needs.image.outputs.version` and `needs.image.outputs.digest`; **digest is the index digest**, also recorded in the summary and draft release notes. Production **csb1 is x86_64 and automatically pulls linux/amd64 from this index**. ARM servers and Apple-silicon Linux VMs pull linux/arm64 from the same tag or digest, without emulation.
@@ -752,6 +752,24 @@ mounted files, embedded web, authenticated APIs and Chromium PDF rendering.
 The runtime closure uses epoch 0 so it can remain cached across source commits.
 Only the tag workflow saves its registry cache, after smoke and the proof pass.
 Rehearsal reads those caches without registry writes.
+
+Every assembly targets exactly one native platform and omits
+`BUILDKIT_MULTI_PLATFORM=1`. Hosted rehearsal run
+[37340960096](https://github.com/inspr-at/paimos/actions/runs/37340960096)
+failed on both architectures after the COPY steps with
+`docker exporter does not currently support exporting manifest lists`.
+That flag forces a multi-platform result even for one target; the
+[BuildKit 0.33.1 Docker exporter](https://github.com/moby/buildkit/blob/v0.33.1/exporter/oci/export.go)
+rejects it. Smoke uses `load: true`, `type=docker`, and `provenance: false`;
+standalone assembly explicitly passes `--load`. Clean proofs export
+single-platform OCI directories with provenance disabled. Rehearsal's
+`mode=max` provenance export writes an explicit `tar=true` OCI archive;
+production uses the index-capable image exporter to push by digest.
+Version, epoch, platform and digest-bound runtime inputs stay identical across
+these exports. Provenance envelopes may create an index, so evidence walks
+the layout and binds the actual platform manifest/config rather than its root
+index. BuildKit's smoke `imageid` supplies the config digest for the proof;
+the daemon-resolved image ID supplies the runnable smoke identity.
 
 Alpine's APK repository and unpinned transitive dependencies still resolve
 during a **cold runtime preparation**. A pinned Alpine index alone does not

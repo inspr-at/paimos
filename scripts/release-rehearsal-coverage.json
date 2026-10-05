@@ -291,7 +291,7 @@
     {
       "counterpart": "image-dry-run/Build cached smoke image",
       "mode": "step",
-      "sha256": "670211901cb0ba500e17c48a8854d3e1821b39286cb4f4b6986611acc5e7360a",
+      "sha256": "e095dcae367f3416e706dde3a2e6c8c1fe4717e5f2a275fb83de825c2cffe41d",
       "step": "Build cached smoke image"
     },
     {
@@ -333,7 +333,7 @@
     {
       "counterpart": "image-dry-run/Export production image with provenance locally",
       "mode": "step",
-      "sha256": "407b627043b6008d1b4fabbae4fa8bd6ae96ccca6bd0078c4bc1c593e021ba7e",
+      "sha256": "9399716ab107ecc2e0b7dfc212a1d3816b134ae89506de65dc8e6b2fca25a344",
       "step": "Build and push"
     },
     {

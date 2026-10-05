@@ -20,7 +20,7 @@ export function assemblyArgs(cwd, runtimePath, runtimeDigest, inputs, output) {
   return ['buildx', 'build', '--no-cache', '--network=none', '--platform', inputs.platform,
     '--build-context', `aeon-runtime=oci-layout://${resolve(runtimePath)}@${runtimeDigest}`,
     '--build-arg', `VERSION=${inputs.version}`, '--build-arg', `SOURCE_DATE_EPOCH=${inputs.source_date_epoch}`,
-    '--build-arg', 'BUILDKIT_MULTI_PLATFORM=1', '--provenance=false',
+    '--provenance=false',
     '--output', `type=oci,dest=${output},tar=false,rewrite-timestamp=true,oci-mediatypes=true`, cwd];
 }
 export function reproduce(runtimePath, output, cwd = root, values = process.env, run = command, build = compile) {

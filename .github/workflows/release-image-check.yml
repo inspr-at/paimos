@@ -121,6 +121,8 @@ jobs:
         run: node scripts/image-evidence.mjs runtime "$RUNNER_TEMP/aeon-runtime" linux/${{ matrix.arch }}
       - name: Start assembly and smoke timing
         run: node scripts/image-evidence.mjs start "$RUNNER_TEMP/image-timing"
+      # A forced multi-platform result cannot be loaded by the Docker exporter.
+      # Use the same single-platform arguments for smoke, proof and OCI export.
       - name: Build cached smoke image
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
@@ -137,7 +139,6 @@ jobs:
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
             SOURCE_DATE_EPOCH=${{ steps.inputs.outputs.epoch }}
-            BUILDKIT_MULTI_PLATFORM=1
       - name: Resolve loaded smoke image
         id: smoke-image
         env:
@@ -193,14 +194,13 @@ jobs:
           push: false
           platforms: linux/${{ matrix.arch }}
           provenance: mode=max
-          outputs: type=oci,dest=${{ runner.temp }}/release-${{ matrix.arch }}.tar,rewrite-timestamp=true,oci-mediatypes=true
+          outputs: type=oci,dest=${{ runner.temp }}/release-${{ matrix.arch }}.tar,tar=true,rewrite-timestamp=true,oci-mediatypes=true
           cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}
           build-contexts: |
             aeon-runtime=oci-layout://${{ runner.temp }}/aeon-runtime@${{ steps.runtime.outputs.digest }}
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
             SOURCE_DATE_EPOCH=${{ steps.inputs.outputs.epoch }}
-            BUILDKIT_MULTI_PLATFORM=1
       - name: Record dry run
         run: echo 'linux/${{ matrix.arch }} built and smoked natively; nothing pushed, attested or published.' >> "$GITHUB_STEP_SUMMARY"
 

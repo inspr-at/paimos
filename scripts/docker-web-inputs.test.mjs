@@ -67,6 +67,16 @@ test('assembly Dockerfile only copies prebuilt production artifacts into the fro
   }
 });
 
+test('assembly recipes leave single-platform result selection to the native Buildx target', () => {
+  for (const file of ['Dockerfile', 'scripts/Dockerfile.runtime']) {
+    const source = readFileSync(join(root, file), 'utf8');
+    assert.doesNotMatch(source, /^ARG BUILDKIT_MULTI_PLATFORM/m, `${file}: recipe must not force a manifest list for the Docker smoke exporter`);
+  }
+  const standalone = readFileSync(join(root, 'scripts/assemble-image.mjs'), 'utf8');
+  assert.doesNotMatch(standalone, /BUILDKIT_MULTI_PLATFORM/);
+  assert.match(standalone, /'--provenance=false', '--load', '--tag', tag/);
+});
+
 test('recognizes multiline, side-effect, re-export and dynamic relative imports without comments', () => {
   assert.deepEqual(importSpecifiers(`
     // import ignored from '../../../ignored.json'

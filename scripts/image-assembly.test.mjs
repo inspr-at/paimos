@@ -37,7 +37,7 @@ function compilerStub(calls = []) {
     }
   };
 }
-function oci(path, { arch = 'arm64', token = 'same', attest = false, duplicate = false } = {}) {
+function oci(path, { arch = 'arm64', token = 'same', attest = false, duplicate = false, flat = false } = {}) {
   mkdirSync(join(path, 'blobs/sha256'), { recursive: true });
   function blob(value) {
     const bytes = Buffer.from(JSON.stringify(value));
@@ -51,7 +51,7 @@ function oci(path, { arch = 'arm64', token = 'same', attest = false, duplicate =
   if (attest) manifests.push({ ...blob({ config: { digest: 'bad' }, layers: [] }), platform: { os: 'unknown', architecture: 'unknown' } });
   if (duplicate) manifests.push(manifest);
   const index = blob({ manifests });
-  writeFileSync(join(path, 'index.json'), JSON.stringify({ manifests: [index] }));
+  writeFileSync(join(path, 'index.json'), JSON.stringify({ manifests: flat ? manifests : [index] }));
   return { digest: manifest.digest, config_digest: config.digest };
 }
 
@@ -115,6 +115,16 @@ test('OCI evidence fails closed on duplicates, oversized JSON and unsafe digests
   for (const value of ['sha256:../../file', 'sha256:' + 'g'.repeat(64), 'sha256:' + 'a'.repeat(64) + '\n', 'abc']) assert.throws(() => digest(value), /digest/);
 });
 
+test('single-platform OCI exports bind the platform manifest and config without descriptor platform metadata', () => {
+  for (const arch of ['amd64', 'arm64']) {
+    for (const attest of [false, true]) {
+      const path = fixture(), expected = oci(path, { arch, flat: true, attest });
+      assert.deepEqual(runtimeManifest(path, `linux/${arch}`), expected);
+      assert.throws(() => runtimeManifest(path, `linux/${arch === 'amd64' ? 'arm64' : 'amd64'}`), /exactly one runtime platform manifest/);
+    }
+  }
+});
+
 test('timing reports only successful bounded evidence; failures/skips/missing timestamps stay unknown', () => {
   const start = '2026-10-05T12:00:00.000Z', end = '2026-10-05T12:01:30.000Z';
   assert.equal(timingEvidence(start, end, 'success', 'success').within_target, true);
@@ -145,6 +155,8 @@ test('proof assembly disables cache/network, freezes base/epoch and exports runt
   for (const flag of ['--no-cache', '--network=none', '--provenance=false', `SOURCE_DATE_EPOCH=${values.SOURCE_DATE_EPOCH}`]) assert.ok(args.includes(flag));
   assert.ok(args.includes('aeon-runtime=oci-layout:///tmp/base@sha256:' + 'a'.repeat(64)));
   assert.ok(args.includes('type=oci,dest=/tmp/image,tar=false,rewrite-timestamp=true,oci-mediatypes=true'));
+  assert.ok(!args.some(arg => arg.includes('BUILDKIT_MULTI_PLATFORM')));
+  assert.ok(!args.includes('--load'));
   assert.ok(!args.includes('--push'));
 });
 
@@ -165,6 +177,9 @@ test('standalone smoke counterpart compiles externally and loads one caller-tagg
   assert.ok(builds[0].args.includes('scripts/Dockerfile.runtime'));
   assert.ok(builds[1].args.includes('aeon-smoke:fixture'));
   assert.ok(builds[1].args.includes('type=docker,rewrite-timestamp=true,oci-mediatypes=true'));
+  assert.ok(builds[1].args.includes('--load'));
+  assert.ok(builds[1].args.includes('--provenance=false'));
+  assert.ok(builds.every(call => !call.args.some(arg => arg.includes('BUILDKIT_MULTI_PLATFORM'))));
   assert.ok(builds.every(call => !call.args.includes('--push')));
 });
 

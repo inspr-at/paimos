@@ -254,8 +254,9 @@ jobs:
             exit 1
           fi
 
-      # Docker's local image store cannot retain provenance. Load the image for
-      # smoke, then use the same builder/context/args to export it with provenance.
+      # Keep one platform result: BUILDKIT_MULTI_PLATFORM=1 forces a manifest
+      # list that the Docker exporter rejects even for one target. Load without
+      # provenance, then export the same builder/context/args with provenance.
       - name: Prepare pinned runtime closure
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
@@ -288,7 +289,6 @@ jobs:
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
             SOURCE_DATE_EPOCH=${{ steps.inputs.outputs.epoch }}
-            BUILDKIT_MULTI_PLATFORM=1
 
       # BuildKit's config digest is not a runnable ID in every Docker image
       # store. Resolve the loaded tag through the daemon, then pin that ID.
@@ -372,7 +372,6 @@ jobs:
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
             SOURCE_DATE_EPOCH=${{ steps.inputs.outputs.epoch }}
-            BUILDKIT_MULTI_PLATFORM=1
 
       - name: Attest pushed image
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4

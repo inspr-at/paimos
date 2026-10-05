@@ -24,7 +24,7 @@ export function assemble(tag, values = process.env, run = command, build = compi
   run('docker', ['buildx', 'build', '--network=none', '--platform', inputs.platform,
     '--build-context', `aeon-runtime=oci-layout://${runtimePath}@${runtime.digest}`,
     '--build-arg', `VERSION=${inputs.version}`, '--build-arg', `SOURCE_DATE_EPOCH=${inputs.source_date_epoch}`,
-    '--build-arg', 'BUILDKIT_MULTI_PLATFORM=1', '--provenance=false', '--tag', tag,
+    '--provenance=false', '--load', '--tag', tag,
     '--output', 'type=docker,rewrite-timestamp=true,oci-mediatypes=true', '.'], cwd);
   return inputs;
 }
