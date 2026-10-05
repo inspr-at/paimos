@@ -23,10 +23,10 @@ test('AEON-676 regressions retain hosted launch policy and full nightly coverage
     }
   }
   assert.match(job('web'), /if: always\(\)/)
-  requireDependencies('web', ['web-setup', 'web-shard'])
+  requireDependencies('web', ['web-setup', 'web-unit', 'web-shard'])
   assert.match(job('web'), /test "\$WEB_SETUP" = success/)
   assert.match(job('web'), /test "\$WEB_SHARD" = success/)
-  assert.match(job('web-setup'), /cli\.mjs run web --unit/)
+  assert.match(job('web-unit'), /cli\.mjs run web --unit --shard/)
   const shard = job('web-shard')
   requireDependencies('web-shard', ['ci-plan', 'web-setup', 'tree-reuse', 'tier-plan'])
   assert.match(shard, /runs-on: ubuntu-latest/)

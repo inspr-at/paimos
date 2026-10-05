@@ -180,7 +180,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 
 	// All contexts and supporting job identities are reserved, even on a
 	// path-filtered workflow, and even when a different id sets a reserved name.
-	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-setup", "web-shard", "e2e-run", "release-check-run", "cross-family", "gate/cross-family"} {
+	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-setup", "web-unit", "web-shard", "e2e-run", "release-check-run", "cross-family", "gate/cross-family"} {
 		for _, identity := range []string{id, strings.ToUpper(id)} {
 			add("reserved-id/"+identity, "extra.yaml", "reserved to ci.yml", func(w map[string]any) {
 				w["jobs"] = map[string]any{identity: map[string]any{"runs-on": "ubuntu-latest"}}
@@ -288,7 +288,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	add("non-pr-shared-group", "ci.yml", "reviewed concurrency policy", func(w map[string]any) {
 		mapping(w["concurrency"])["group"] = "ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}"
 	})
-	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-setup", "web-shard", "e2e-run", "release-check-run", "migration-compat"} {
+	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-setup", "web-unit", "web-shard", "e2e-run", "release-check-run", "migration-compat"} {
 		for _, rename := range []bool{false, true} {
 			add(fmt.Sprintf("missing-or-renamed/%s/%t", id, rename), "ci.yml", "is missing", func(w map[string]any) {
 				jobs := mapping(w["jobs"])
@@ -316,11 +316,27 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		add("renamed-check-context/"+id, "ci.yml", "renamed to", func(w map[string]any) { mapping(mapping(w["jobs"])[id])["name"] = "other" })
 	}
 	add("missing-go-dependency", "ci.yml", "go must gate every", func(w map[string]any) { mapping(mapping(w["jobs"])["go"])["needs"] = []any{"go-test", "go-timing"} })
-	add("missing-web-dependency", "ci.yml", "web must gate setup and every UI shard", func(w map[string]any) { mapping(mapping(w["jobs"])["web"])["needs"] = []any{"web-setup"} })
+	add("missing-web-dependency", "ci.yml", "web must gate setup, every unit shard and every UI shard", func(w map[string]any) { mapping(mapping(w["jobs"])["web"])["needs"] = []any{"web-setup"} })
 	add("web-skipped-on-failure", "ci.yml", "web must report failures", func(w map[string]any) { delete(mapping(mapping(w["jobs"])["web"]), "if") })
 	add("web-full-shards-omitted", "ci.yml", "web shard matrix must retain", func(w map[string]any) {
 		mapping(mapping(mapping(mapping(w["jobs"])["web-shard"])["strategy"])["matrix"])["shard"] = []any{1}
 	})
+	add("web-units-omitted-from-aggregate", "ci.yml", "web must gate setup, every unit shard", func(w map[string]any) {
+		mapping(mapping(w["jobs"])["web"])["needs"] = []any{"ci-plan", "web-setup", "web-shard", "tree-reuse", "cache-prime", "tier-plan"}
+	})
+	for _, mutate := range []string{"matrix", "fail-fast", "continue-on-error"} {
+		add("web-unit-weakened/"+mutate, "ci.yml", "four blocking shards", func(w map[string]any) {
+			unit := mapping(mapping(w["jobs"])["web-unit"])
+			switch mutate {
+			case "matrix":
+				mapping(mapping(unit["strategy"])["matrix"])["shard"] = []any{1}
+			case "fail-fast":
+				mapping(unit["strategy"])["fail-fast"] = true
+			case "continue-on-error":
+				unit["continue-on-error"] = true
+			}
+		})
+	}
 	add("collapsed-shards", "ci.yml", "routed shard count", func(w map[string]any) {
 		mapping(mapping(mapping(mapping(w["jobs"])["go-test"])["strategy"])["matrix"])["shard"] = []any{1}
 	})
@@ -455,7 +471,7 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 						continue
 					}
 					values[name] = "skipped"
-					if lane == "full" || lane == "spec-only" && (name == "WEB_SETUP" || name == "WEB_SHARD") {
+					if lane == "full" || lane == "spec-only" && (name == "WEB_SETUP" || name == "WEB_UNIT" || name == "WEB_SHARD") {
 						values[name] = "success"
 					}
 				}
@@ -531,7 +547,7 @@ func TestCIClassifiedWebShardMatrix(t *testing.T) {
 	if checkout["fetch-depth"] != "${{ github.event_name == 'pull_request' && '0' || '1' }}" || checkout["persist-credentials"] != false {
 		t.Fatal("classifier checkout must keep PR-only history and no persisted credentials")
 	}
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
 		steps := mapping(jobs[id])["steps"].([]any)
 		if depth := mapping(mapping(steps[0])["with"])["fetch-depth"]; depth != nil {
 			t.Fatalf("%s heavy checkout must retain shallow history; got %v", id, depth)
