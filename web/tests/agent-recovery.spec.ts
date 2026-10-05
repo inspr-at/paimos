@@ -76,7 +76,7 @@ test('offline and unauthorized sessions offer no Restart or Reconnect', async ({
 })
 
 for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
-  test(`recovery actions stay still ${width} ${theme}`, async ({ page }) => {
+  test(`recovery actions stay still ${width} ${theme}`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })
     const fixture = await setup(page, 'restart', true, true)
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
@@ -121,6 +121,6 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     await controls.check(() => fixture.diagnosis('The paired host is reporting, but this exact attached session has not supplied current heartbeat and inbox evidence. Reconnect waits for the daemon to verify the existing live hook binding without changing any external process or credential.'))
     controls.done()
     expect(await panel.evaluate(el => el.scrollWidth <= el.clientWidth)).toBe(true)
-    await page.screenshot({ path: `/private/tmp/claude-501/-Users-markus-Code-aithema/af3ab8bf-63f6-4fb5-bccf-086eb11c043e/scratchpad/aeon/shots/aeon-731-recover/recovery-${width}-${theme}.png`, fullPage: true })
+    await page.screenshot({ path: testInfo.outputPath(`recovery-${width}-${theme}.png`), fullPage: true })
   })
 }

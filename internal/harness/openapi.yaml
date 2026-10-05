@@ -86,7 +86,7 @@ paths:
         - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
-        '200': {description: Pending, claimed, completed or expired; expired claims have unconfirmed outcome, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
+        '200': {description: "Pending, claimed, completed or expired; expired claims have unconfirmed outcome", content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
   /api/harness-recoveries/claim:
     post:
       operationId: claimAgentRecoveries
@@ -110,8 +110,8 @@ paths:
           application/json:
             schema: {type: object, required: [daemon_id, generation, outcome], additionalProperties: false, properties: {daemon_id: {type: string, maxLength: 128}, generation: {type: string, pattern: '^[0-9a-f]{32}$'}, outcome: {type: string, enum: [reconnected, exited, rejected]}}}
       responses:
-        '200': {description: Recorded result; continuation_queued means waiting for normal dispatch, not process started, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
-        '409': {description: Claim expired, binding changed, prior exit unconfirmed, or divergent completion}
+        '200': {description: "Recorded result; continuation_queued means waiting for normal dispatch, not process started", content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
+        '409': {description: "Claim expired, binding changed, prior exit unconfirmed, or divergent completion"}
   /api/projects/{projectId}/harness-sessions/{sessionId}/recovery:
     get:
       operationId: previewHarnessRecovery

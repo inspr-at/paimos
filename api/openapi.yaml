@@ -7160,7 +7160,7 @@ paths:
         - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
       responses:
-        '200': {description: Pending, claimed, completed or expired; expired claims have unconfirmed outcome, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
+        '200': {description: "Pending, claimed, completed or expired; expired claims have unconfirmed outcome", content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
   /harness-recoveries/claim:
     post:
       operationId: claimAgentRecoveries
@@ -7184,8 +7184,8 @@ paths:
           application/json:
             schema: {type: object, required: [daemon_id, generation, outcome], additionalProperties: false, properties: {daemon_id: {type: string, maxLength: 128}, generation: {type: string, pattern: '^[0-9a-f]{32}$'}, outcome: {type: string, enum: [reconnected, exited, rejected]}}}
       responses:
-        '200': {description: Recorded result; continuation_queued means waiting for normal dispatch, not process started, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
-        '409': {description: Claim expired, binding changed, prior exit unconfirmed, or divergent completion}
+        '200': {description: "Recorded result; continuation_queued means waiting for normal dispatch, not process started", content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
+        '409': {description: "Claim expired, binding changed, prior exit unconfirmed, or divergent completion"}
   /projects/{projectId}/harness-sessions/{sessionId}/recovery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -11307,7 +11307,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.3']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.8']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.9']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
