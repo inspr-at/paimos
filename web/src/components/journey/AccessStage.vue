@@ -50,6 +50,7 @@ const approval = computed(() => offeredApproval(ctx.approvals.value, journey.val
     <div class="j-col">
       <GateCard
         v-if="next.key === 'approve_permit'" eyebrow="Decision" :title="next.access_renewal_action === 'renew_permit' ? 'Renew the Access permit' : 'Approve the permit'"
+        :action-labels="['Await Access evidence']"
         :action="{ label: ctx.next.value.label, disabled: ctx.next.value.disabled, busy: ctx.next.value.busy, tip: ctx.next.value.tip }" @act="ctx.runNext()"
       >
         <p>{{ ACTION_LONG[next.access_renewal_action ?? 'approve_permit'] }}</p>

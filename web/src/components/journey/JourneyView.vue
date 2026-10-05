@@ -52,12 +52,13 @@ const viewed = computed<Stage>(() => isStage(props.stage) ? props.stage : journe
 const data = useJourneyData(computed(() => projectId.value), journey)
 // A stage shows once what it reads has arrived the first time (later refreshes
 // keep what is shown), so nothing reads as empty or "not started" while loading.
-const loadedOnce = { intake: ref(false), origin: ref(false), work: ref(false) }
+const loadedOnce = { intake: ref(false), origin: ref(false), work: ref(false), releases: ref(false) }
 watch(projectId, () => { for (const flag of Object.values(loadedOnce)) flag.value = false })
 const settled = (status: string) => status === 'ready' || status === 'error'
 watch(data.intake.status, status => { if (settled(status)) loadedOnce.intake.value = true })
 watch(data.origin.status, status => { if (settled(status)) loadedOnce.origin.value = true })
 watch(data.work.status, status => { if (settled(status)) loadedOnce.work.value = true })
+watch(data.releaseNodes.status, status => { if (settled(status)) loadedOnce.releases.value = true })
 const imported = computed(() => !!journey.value && isImported(journey.value))
 const loadingStage = computed(() => {
   const j = journey.value
@@ -65,7 +66,7 @@ const loadingStage = computed(() => {
   const stage = viewed.value
   if (['inspire', 'shape', 'requirements'].includes(stage) && !loadedOnce.intake.value) return true
   if (['inspire', 'shape'].includes(stage) && imported.value && !loadedOnce.origin.value) return true
-  if (['plan', 'build', 'deploy', 'access', 'live'].includes(stage) && !!j.current_release_id && !settled(data.releaseNodes.status.value)) return true
+  if (['plan', 'build', 'deploy', 'access', 'live'].includes(stage) && !!j.current_release_id && !loadedOnce.releases.value) return true
   // Tickets are counted and grouped by their state and epic: wait for them.
   if (['requirements', 'plan', 'build', 'live'].includes(stage) && (imported.value || stage !== 'requirements') && !loadedOnce.work.value) return true
   return false
@@ -311,6 +312,8 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
         <span class="owner mono" :data-tip="`${STAGE_LABEL[viewed]} is carried by ${STAGE_OWNER[viewed] ?? brand.short_name}`">{{ STAGE_OWNER[viewed] ?? brand.short_name }}</span>
       </header>
       <component :is="STAGE_VIEW[viewed]" :key="viewed" />
+      <!-- Phone feedback grows below the stage instead of moving its controls. -->
+      <p v-if="next.disabled && (next.tip || journey.next_action.reason)" class="phone-next-reason">{{ next.tip || journey.next_action.reason }}</p>
       <p class="journey-hint">
         <kbd class="keycap">[</kbd><kbd class="keycap">]</kbd> stages<template v-if="data.walker.value.value?.tickets.length && ['plan', 'build', 'live'].includes(viewed)"> · <kbd class="keycap">w</kbd> walk the release</template> · <kbd class="keycap">?</kbd> all shortcuts
       </p>
@@ -325,6 +328,8 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
 <style scoped>
 /* Wide screens: the journey keeps a readable width, aligned with the header. */
 .journey-view { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 16px; max-width: 1760px; padding: 4px 0 8px; container: journey / inline-size; }
+.phone-next-reason { display: none; font-size: 12px; color: var(--ink-3); }
+@media (max-width: 720px) { .phone-next-reason { display: block; } }
 /* A docked ticket narrows the journey without narrowing the viewport. Keep
    both cards readable by responding to the space the stage actually has. */
 @container journey (max-width: 800px) {

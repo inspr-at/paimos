@@ -2,6 +2,7 @@
 import { test, expect } from '@playwright/test'
 import { fixtures, mockWork, me } from './work-fixtures'
 import { journeyWorld, mockJourney } from './journey-fixtures'
+import { controlStability } from './control-stability'
 
 function renewalWorld(state: 'pending' | 'approved' | 'expired' | 'missing' = 'pending') {
   const world = journeyWorld('deploy')
@@ -97,35 +98,107 @@ test('renewal confirmation rejects a changed renewal action', async ({ page }) =
 })
 
 // AEON-588: the person confirms the fresh Access request bound to the release.
-test('renews an expired Access permit without moving the control or redeploying', async ({ page }, testInfo) => {
-  await mockWork(page, fixtures())
-  const world = journeyWorld('deploy')
-  world.journey.stage = 'access'
-  world.walkers['r-2'].state = 'access'
-  for (const stage of world.journey.stages) stage.state = stage.key === 'access' ? 'current' : stage.key === 'live' ? 'later' : 'done'
-  const template = world.approvals[0]
-  const future = new Date(Date.now() + 3_600_000).toISOString()
-  world.approvals = [{ ...template, id: 'fresh-access', scope: 'journey.access', decision: 'approved', decided_by_principal_id: me.id, expires_at: future }]
-  Object.assign(world.journey.stages.find(s => s.key === 'access')!, { gate_approval_id: 'old-access', gate_live: false, gate_offer_id: 'fresh-access', gate_offer_state: 'approved_live', gate_offer_expires_at: future })
-  world.journey.next_action = { key: 'approve_permit', access_renewal_action: 'renew_permit', label: 'Renew Access permit', stage: 'access', available: true, approval_request_id: 'fresh-access' }
-  const calls = await mockJourney(page, world)
-  await page.goto('/p/PHAROS?view=journey&stage=access')
-  await expect(page.getByRole('region', { name: 'Decision: Renew the Access permit' })).toContainText('completed deployment stays recorded')
-  const control = page.getByRole('button', { name: 'Renew Access permit', exact: true })
-  await expect(control).toBeEnabled()
-  const before = await control.boundingBox()
-  await page.reload()
-  await expect(control).toBeEnabled()
-  const after = await control.boundingBox()
-  expect(before).not.toBeNull(); expect(after).not.toBeNull()
-  expect(after!.x).toBeCloseTo(before!.x, 0); expect(after!.y).toBeCloseTo(before!.y, 0)
-  await page.screenshot({ path: testInfo.outputPath('access-renewal.png'), fullPage: true })
-  await control.click()
-  const dialog = page.getByRole('dialog', { name: 'Renew Access permit?' })
-  await expect(dialog).toContainText('completed deployment stays recorded')
-  await dialog.getByRole('button', { name: 'Renew Access permit' }).click()
-  await expect.poll(() => calls.filter(c => c.path.endsWith('/journey/actions')).length).toBe(1)
-  expect(calls.find(c => c.path.endsWith('/journey/actions'))!.body).toMatchObject({ action: 'renew_permit', release_id: 'r-2', expected_revision: 12, approval_request_id: 'fresh-access' })
-  await expect(page.getByRole('button', { name: 'Await Access evidence', exact: true })).toBeDisabled()
-  expect(calls.filter(c => c.path.includes('/stage-handoffs') && c.method !== 'GET')).toEqual([])
-})
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) for (const label of ['Renew Access permit', 'Access-Genehmigung erneuern']) {
+  test(`renews an expired Access permit without moving the control or redeploying at ${width} ${theme} · ${label}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    const work = fixtures()
+    work.preferences.theme = { choice: theme }
+    await mockWork(page, work)
+    const world = journeyWorld('deploy')
+    world.journey.stage = 'access'
+    world.walkers['r-2'].state = 'access'
+    for (const stage of world.journey.stages) stage.state = stage.key === 'access' ? 'current' : stage.key === 'live' ? 'later' : 'done'
+    const template = world.approvals[0]
+    const future = new Date(Date.now() + 3_600_000).toISOString()
+    world.approvals = [{ ...template, id: 'fresh-access', scope: 'journey.access', decision: 'approved', decided_by_principal_id: me.id, expires_at: future }]
+    Object.assign(world.journey.stages.find(s => s.key === 'access')!, { gate_approval_id: 'old-access', gate_live: false, gate_offer_id: 'fresh-access', gate_offer_state: 'approved_live', gate_offer_expires_at: future })
+    world.journey.next_action = { key: 'approve_permit', access_renewal_action: 'renew_permit', label, stage: 'access', available: true, approval_request_id: 'fresh-access' }
+    const calls = await mockJourney(page, world)
+    await page.goto('/p/PHAROS?view=journey&stage=access')
+    await expect(page.getByRole('region', { name: 'Decision: Renew the Access permit' })).toContainText('completed deployment stays recorded')
+    const control = page.getByRole('button', { name: label, exact: true })
+    await expect(control).toBeEnabled()
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+    // Keep this locator tied to the same button as its accessible label changes.
+    const gate = page.getByRole('region', { name: /^Decision: (Renew the Access permit|Approve the permit)$/ })
+    const action = gate.getByRole('button').first()
+    await action.scrollIntoViewIfNeeded()
+    const originalAction = await action.elementHandle()
+    expect(originalAction).not.toBeNull()
+    const stability = await controlStability(page, { renew: action })
+    let finish!: () => void
+    const held = new Promise<void>(resolve => { finish = resolve })
+    let started = false
+    await page.route('**/api/projects/p-pharos/journey/actions', async route => {
+      started = true
+      await held
+      await route.fallback()
+    })
+    let finishRefresh!: () => void
+    const refreshHeld = new Promise<void>(resolve => { finishRefresh = resolve })
+    let refreshing = false
+    await page.route('**/api/nodes?**', async route => {
+      if (new URL(route.request().url()).searchParams.get('kind_id') !== 'k-release') return route.fallback()
+      refreshing = true
+      await refreshHeld
+      await route.fallback()
+    })
+    await page.screenshot({ path: testInfo.outputPath('access-renewal.png'), fullPage: true })
+    await gate.screenshot({ path: testInfo.outputPath('access-renewal-card.png') })
+    await stability.check(() => control.click())
+    const dialog = page.getByRole('dialog', { name: `${label}?` })
+    await expect(dialog).toContainText('completed deployment stays recorded')
+    try {
+      await stability.check(async () => {
+        await dialog.getByRole('button', { name: label, exact: true }).click()
+        await expect.poll(() => started).toBe(true)
+        await expect(action).toHaveAccessibleName('Working…')
+        await expect(action).toBeDisabled()
+      })
+      finish()
+      await stability.check(async () => {
+        await expect.poll(() => refreshing).toBe(true)
+        await expect(action).toHaveAccessibleName('Await Access evidence')
+        await expect(action).toBeDisabled()
+        expect(await originalAction!.evaluate(el => el.isConnected), 'refresh keeps the original action mounted').toBe(true)
+        if (width <= 720) await expect(page.locator('.phone-next-reason')).toHaveText('Access apply has not succeeded.')
+      })
+      const refreshed = page.waitForResponse(response => new URL(response.url()).searchParams.get('kind_id') === 'k-release')
+      finishRefresh()
+      await stability.check(async () => {
+        await refreshed
+        await expect(action).toHaveAccessibleName('Await Access evidence')
+        expect(await originalAction!.evaluate(el => el.isConnected), 'completed refresh keeps the original action mounted').toBe(true)
+      })
+    } finally { finish(); finishRefresh() }
+    stability.done()
+    await expect.poll(() => calls.filter(c => c.path.endsWith('/journey/actions')).length).toBe(1)
+    expect(calls.find(c => c.path.endsWith('/journey/actions'))!.body).toMatchObject({ action: 'renew_permit', release_id: 'r-2', expected_revision: 12, approval_request_id: 'fresh-access' })
+    await expect(page.getByRole('button', { name: 'Await Access evidence', exact: true })).toBeDisabled()
+    expect(calls.filter(c => c.path.includes('/stage-handoffs') && c.method !== 'GET')).toEqual([])
+  })
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`decision card uses neutral elevation without a coloured glow in ${theme}`, async ({ page }) => {
+    const work = fixtures()
+    work.preferences.theme = { choice: theme }
+    await mockWork(page, work)
+    await mockJourney(page, journeyWorld('plan'))
+    await page.goto('/p/PHAROS?view=journey')
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
+    const card = page.locator('.gate-card.gate')
+    await expect(card).toBeVisible()
+    // Resolve the theme's elevation token through CSS, rather than hardcoding
+    // colour serialization or accepting an extra coloured outer shadow.
+    const shadows = await card.evaluate(el => {
+      const reference = document.createElement('div')
+      reference.style.boxShadow = 'var(--shadow)'
+      el.append(reference)
+      const result = { actual: getComputedStyle(el).boxShadow, neutral: getComputedStyle(reference).boxShadow }
+      reference.remove()
+      return result
+    })
+    expect(shadows.actual).toBe(shadows.neutral)
+  })
+}
