@@ -137,7 +137,7 @@ func TestClaudeVerificationSDKEnforcesNoTools(t *testing.T) {
  return {streamInput:async()=>{},interrupt:async()=>({still_queued:[]}),close:()=>{},async *[Symbol.asyncIterator]() {
   if ((await o.canUseTool('Bash',{})).behavior!=='deny') throw new Error('tool permission');
   if ((await o.hooks.PreToolUse[0].hooks[0]({tool_name:'Write'})).hookSpecificOutput.permissionDecision!=='deny') throw new Error('hook permission');
-  yield {type:'system',subtype:'init',session_id:'verification-session',model:'test-model',capabilities:[]};
+  yield {type:'system',subtype:'init',session_id:'verification-session',model:'test-model',capabilities:['interrupt_receipt_v1']};
   yield {type:'result',subtype:'success',is_error:false,modelUsage:{model:{inputTokens:2,outputTokens:1}},total_cost_usd:0.000001};
  }};
 }`
@@ -149,7 +149,7 @@ func TestClaudeVerificationSDKEnforcesNoTools(t *testing.T) {
 	cmd := exec.CommandContext(ctx, node, bridgePath, sdkPath, "/bin/true", root)
 	cmd.Stdin = strings.NewReader(`{"op":"start","purpose":"pairing_verification","prompt":"AEON_VERIFIED","model":"test-model","effort":"high","tools":null}` + "\n")
 	output, err := cmd.Output()
-	if err != nil || !strings.Contains(string(output), `"turn_completed"`) || strings.Contains(string(output), `"control_failed"`) {
+	if err != nil || !strings.Contains(string(output), `"turn_completed"`) || !strings.Contains(string(output), `"model_evidence_status":"vendor_reported"`) || strings.Count(string(output), `"turn_started"`) != 1 || strings.Contains(string(output), `"control_failed"`) {
 		t.Fatal("SDK confinement or normal verification completion failed")
 	}
 }

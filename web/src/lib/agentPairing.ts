@@ -95,6 +95,7 @@ export interface PairingEnrollment {
   active_run_ids: string[]
   /** Actual run result. A verification_run_id alone is not success. */
   verification_state?: VerificationState
+  verification_stalled?: boolean
   verification_expired_ready?: boolean
   can_verify?: boolean
   verification_reason?: string
@@ -898,8 +899,23 @@ export function describeProgress(view: PairingView | null, now = Date.now()): Pa
   return setupProgress(view)
 }
 
+/** Fixed explanations only: telemetry never supplies vendor error text. */
+export function verificationFailureText(enrollment: Pick<PairingEnrollment, 'verification_stalled' | 'verification_error'>): string {
+  if (enrollment.verification_stalled) return 'The check has not settled after its time limit. The helper must confirm that it stopped before a new check can start.'
+  switch (enrollment.verification_error) {
+    case 'verification_timeout': case 'timed out': return 'The verification timed out. The helper must confirm that it stopped before a new check can start.'
+    case 'reporter_unavailable': return 'The helper could not report this check. Update the helper, then use Verify again. Usage may be incomplete.'
+    case 'app_server_protocol': return 'The helper could not complete the check protocol. Update the helper, then use Verify again.'
+    case 'child_exit_failed': case 'turn_failed': return 'The verification process failed. Check the vendor sign-in, then use Verify again.'
+    case 'vendor_limit': return 'The vendor limit stopped this check. Use Verify again after capacity is available.'
+    default: return 'The verification did not succeed. The account owner can use Verify again.'
+  }
+}
+
 function setupProgress(view: PairingView): PairingProgress {
   const progress = view.setup_state
+  const stalled = view.enrollments.find(item => item.verification_stalled)
+  if (stalled) return { phase: 'verify', title: 'Verification stalled', detail: verificationFailureText(stalled), next: 'Use Verify again to check whether the previous run has settled. It cannot replace unconfirmed work.', renewsAuthority: false }
   if (view.connectivity === 'offline' && progress !== 'login_required' && progress !== 'service_conflict' && progress !== 'setup_failed') {
     return { phase: 'setup', title: 'The computer is offline', detail: `${localProcessSentence(view)} Being offline does not show that work has stopped.`, next: 'Server access follows the pairing record. Accounting for runs that have not settled stays unconfirmed.', renewsAuthority: false }
   }
@@ -920,8 +936,8 @@ function setupProgress(view: PairingView): PairingProgress {
     }
   }
   if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED.includes(item.verification_state) || (item.verification_state === 'expired' && describeEnrollmentStatus(view, item) !== 'Ready')))) {
-    const reason = view.enrollments.find(item => item.verification_error)?.verification_error
-    return { phase: 'verify', title: 'Verification did not succeed', detail: reason || 'The verification run did not succeed.', next: 'The one-time allowance was not refilled. The account owner can use Verify again for a fresh read-only check.', renewsAuthority: false }
+    const failed = view.enrollments.find(item => item.verification_error)
+    return { phase: 'verify', title: 'Verification did not succeed', detail: verificationFailureText(failed ?? {}), next: 'The one-time allowance was not refilled. The account owner can use Verify again for a fresh read-only check.', renewsAuthority: false }
   }
   if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state))) {
     return { phase: 'verify', title: 'Verification is running', detail: 'One short read-only run was approved for each selected harness. A later run on the computer is not a verification.', next: 'Ongoing work follows your account approval. This page will not start another verification.', renewsAuthority: false }
@@ -1194,7 +1210,7 @@ export function describeHarnessStatus(view: HarnessView, harness: string): strin
 }
 
 /** Per-enrollment label. A complete attention list names the blocked accounts and leaves the others Ready. An account missing from a truncated list is not Ready. */
-export function describeEnrollmentStatus(view: HarnessView, enrollment: { account_id: string; harness: string; verification_state?: VerificationState; verification_expired_ready?: boolean }): string {
+export function describeEnrollmentStatus(view: HarnessView, enrollment: { account_id: string; harness: string; verification_state?: VerificationState; verification_expired_ready?: boolean; verification_stalled?: boolean }): string {
   if (view.computer_state !== 'connected') return ''
   const detail = harnessDetail(view, enrollment.harness)
   const attention = attentionReport(detail)
@@ -1205,6 +1221,7 @@ export function describeEnrollmentStatus(view: HarnessView, enrollment: { accoun
     if (detail?.state !== 'ready' || attention.truncated || attention.count !== attention.accounts.length) return freshLabel(view, 'Needs attention')
     status = freshLabel(view, 'Ready')
   }
+  if (enrollment.verification_stalled) return freshLabel(view, 'Verification stalled')
   if (enrollment.verification_state === 'expired' && enrollment.verification_expired_ready === false) return freshLabel(view, 'Verification failed')
   if (status && status !== 'Ready') return status
   const verification = enrollment.verification_state
@@ -1834,6 +1851,7 @@ function enrollments(value: unknown): PairingEnrollment[] {
       local_cleanup: oneOf(record.local_cleanup, CLEANUP_STATES, 'enrollment.local_cleanup'),
       verification_run_id: optionalUuid(record.verification_run_id, 'verification_run_id'),
       ...(typeof record.can_verify === 'boolean' ? { can_verify: record.can_verify } : {}),
+      ...(typeof record.verification_stalled === 'boolean' ? { verification_stalled: record.verification_stalled } : {}),
       ...(typeof record.verification_expired_ready === 'boolean' ? { verification_expired_ready: record.verification_expired_ready } : {}),
       active_run_ids: uuidList(record.active_run_ids, 'active_run_ids'),
       ...optionalVerification(record),

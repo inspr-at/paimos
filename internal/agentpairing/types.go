@@ -102,6 +102,7 @@ type Verification struct {
 	Task           string    `json:"task"`
 }
 type Enrollment struct {
+	VerificationStalled      bool     `json:"verification_stalled"`
 	CanVerify                bool     `json:"can_verify"`
 	LocalProcesses           string   `json:"local_processes"`
 	AccountingState          string   `json:"accounting_state"`

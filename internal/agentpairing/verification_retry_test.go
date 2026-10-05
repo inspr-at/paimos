@@ -2,12 +2,17 @@
 package agentpairing_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"log/slog"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -310,5 +315,141 @@ func TestVerifyAgainConnectOnlyPreservesOrdinaryAllowanceAndTenantBoundary(t *te
 	}
 	if runs != 0 {
 		t.Fatal("cross-tenant retry created a run")
+	}
+}
+
+// The daemon's actual DTO and wire order reproduce the release-123 failure.
+func TestVerificationTelemetryPrestartBatchAndRetry(t *testing.T) {
+	for _, recovery := range []bool{false, true} {
+		name := "exact_four_event_batch"
+		if recovery {
+			name = "rejected_batch_terminal_recovery"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newFixture(t)
+			p := f.propose("claude")
+			f.approve(p, "one_per_harness")
+			v := f.redeem(p)
+			e := v.Enrollments[0]
+			key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+			f.probe(v, e, key, 200)
+			f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+			batch := []agentd.Telemetry{
+				{Sequence: 1, Kind: "status", EffectiveModel: "claude-fable-5-1", ModelEvidence: "vendor_reported"},
+				{Sequence: 2, Kind: "turn", TurnCountDelta: 1},
+				{Sequence: 3, Kind: "started", Status: "running"},
+				{Sequence: 4, Kind: "finished", Status: "failed", ErrorCode: "app_server_protocol"},
+			}
+			post := func(report agentd.Telemetry, code int) agentruns.Run {
+				t.Helper()
+				r := f.request("POST", "/api/runs/"+*e.VerificationRunID+"/telemetry", report, false, key)
+				r.Header.Set(agentruns.DaemonHeader, *v.DaemonID)
+				r.Header.Set(agentruns.GenerationHeader, "test-generation")
+				w := httptest.NewRecorder()
+				f.h.ServeHTTP(w, r)
+				if w.Code != code {
+					t.Fatalf("sequence %d: HTTP %d, want %d: %s", report.Sequence, w.Code, code, w.Body.String())
+				}
+				var run agentruns.Run
+				if code == 200 {
+					decodeResult(t, w, &run)
+				}
+				return run
+			}
+			count, turns, errorCode := 4, 1, "app_server_protocol"
+			if recovery {
+				var logs bytes.Buffer
+				old := slog.Default()
+				slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))
+				defer slog.SetDefault(old)
+				bad := batch[0]
+				bad.EffectiveModel = "PRIVATE-FIXTURE model\nvalue"
+				for i := 0; i < 3; i++ {
+					post(bad, 400)
+				}
+				if !strings.Contains(logs.String(), "effective_model must be a bounded model identifier") || strings.Contains(logs.String(), "PRIVATE-FIXTURE") || strings.Contains(logs.String(), key) {
+					t.Fatal("rejection log lost the field-level reason or leaked request values")
+				}
+				// Fresh sequence, no disputed usage/model/tier and no replay rewrite.
+				batch = []agentd.Telemetry{{Sequence: 5, Kind: "finished", Status: "failed", ErrorCode: "reporter_unavailable"}}
+				count, turns, errorCode = 1, 0, "reporter_unavailable"
+			}
+			for i, report := range batch {
+				run := post(report, 200)
+				if !recovery && i < 2 && run.Status != "starting" {
+					t.Fatal("model/turn event invented completed startup")
+				}
+				if !recovery && (run.EffectiveModel == nil || *run.EffectiveModel != "claude-fable-5-1" || run.ModelEvidence != "vendor_reported") {
+					t.Fatal("vendor model evidence lost")
+				}
+			}
+			// Lost HTTP receipts can replay the original reports after termination.
+			for _, report := range batch {
+				post(report, 200)
+			}
+			var n, gotTurns, held int
+			var status, code string
+			if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.status,
+    (SELECT count(*) FROM run_telemetry WHERE run_id=r.id),
+    (SELECT coalesce(sum(turn_count_delta),0) FROM run_telemetry WHERE run_id=r.id),
+    (SELECT error_code FROM run_telemetry WHERE run_id=r.id ORDER BY sequence DESC LIMIT 1),
+    (SELECT count(*) FROM account_reservations WHERE run_id=r.id AND state='active')
+    FROM agent_runs r WHERE r.id=$1`, *e.VerificationRunID).Scan(&status, &n, &gotTurns, &code, &held); err != nil {
+				t.Fatal(err)
+			}
+			if status != "failed" || n != count || gotTurns != turns || code != errorCode || held != 0 {
+				t.Fatalf("wrong settlement: %s rows=%d turns=%d code=%s holds=%d", status, n, gotTurns, code, held)
+			}
+			var current agentpairing.View
+			decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &current)
+			result := current.Enrollments[0]
+			if result.VerificationState != "failed" || result.VerificationError != errorCode || result.VerificationStalled || !result.CanVerify {
+				t.Fatal("failed verification missing from owner projection")
+			}
+			var retried struct {
+				RunID string `json:"run_id"`
+			}
+			decodeResult(t, f.call("POST", retryPath(current, e.AccountID), retryBody(current, result), true, "", 200), &retried)
+			if retried.RunID == "" || retried.RunID == *e.VerificationRunID {
+				t.Fatal("settled failure cannot be retried")
+			}
+		})
+	}
+}
+
+func TestStalledVerificationPreservesOwnership(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	f.probe(v, e, key, 200)
+	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+	for _, tc := range []struct {
+		age     string
+		stalled bool
+	}{{"30 seconds", false}, {"121 seconds", true}} {
+		if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_enrollments SET verification_claimed_at=clock_timestamp()-$2::interval WHERE account_id=$1`, e.AccountID, tc.age); err != nil {
+			t.Fatal(err)
+		}
+		var current agentpairing.View
+		decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &current)
+		got := current.Enrollments[0]
+		if got.VerificationStalled != tc.stalled || got.VerificationState != "starting" || got.AccountingState != "unconfirmed" || len(got.ActiveRunIDs) != 1 {
+			t.Fatal("timeout concealed active ownership or missed the bounded wait")
+		}
+		if tc.stalled && got.VerificationError != "verification_timeout" {
+			t.Fatal("stalled check lacks its reason")
+		}
+		retryErrorCode(t, f.call("POST", retryPath(current, e.AccountID), retryBody(current, got), true, "", 409), "verification_active")
+	}
+	var status string
+	var held int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT r.status,(SELECT count(*) FROM account_reservations WHERE run_id=r.id AND state='active') FROM agent_runs r WHERE r.id=$1`, *e.VerificationRunID).Scan(&status, &held); err != nil {
+		t.Fatal(err)
+	}
+	if status != "starting" || held != 1 {
+		t.Fatal("elapsed time granted process-exit or accounting authority")
 	}
 }

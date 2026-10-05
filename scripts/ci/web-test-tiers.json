@@ -2438,6 +2438,9 @@
     "node:tests/work-vocabulary.test.ts:Parents / Leaves and depth survive links, saved views and API translation"
   ],
   "tests": [
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification reporting failures > shows a stalled check as a problem without changing its active ownership","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification reporting failures > explains a rejected report without blaming the vendor protocol or exposing raw errors","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-716: stalled verification reports the ownership fence and remains retryable after settlement","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"Settings primary actions have no glow and retain keyboard focus in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"Settings primary actions have no glow and retain keyboard focus in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"needs-you counts problems, keeps calm kinds and uses the container for narrow actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},

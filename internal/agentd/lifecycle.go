@@ -301,7 +301,7 @@ func (s *Supervisor) lifecycleAt(accountID string, now time.Time) LifecycleStatu
 			if !noLocalProcess(e.record) && (state == "completed" || state == "failed" || state == "cancelled") {
 				state = "unconfirmed"
 			}
-			if len(e.record.Pending) > 0 || e.record.SettlementGap {
+			if len(e.record.Pending) > 0 || e.record.SettlementGap && !e.record.TerminalRecovery {
 				state = "settlement_pending"
 			}
 			v.VerificationResults[e.record.RunID] = state
@@ -398,7 +398,7 @@ func (s *Supervisor) freezeOnError(account string) {
 
 // handleRunError fences dispatch on uncertain delivery or authority loss, but
 // stops the exact owned child only for a confirmed telemetry protocol failure.
-// Keep the rejected outbox intact: observing exit does not settle server usage.
+// Keep rejected evidence durable: observing exit does not settle server usage.
 func (s *Supervisor) handleRunError(entry *owned, err error) {
 	if err == nil {
 		return
@@ -531,6 +531,30 @@ func (s *Supervisor) settlePending(ctx context.Context) {
 
 func (s *Supervisor) flushReports(ctx context.Context, e *owned) error {
 	for len(e.record.Pending) > 0 {
+		if e.record.ReportRejections >= 3 {
+			if !noLocalProcess(e.record) {
+				return ErrTelemetryProtocol
+			}
+			if e.record.TerminalRecovery {
+				// Even the minimal terminal path was permanently rejected. Keep
+				// it pending for operator reconciliation, without an endless POST.
+				return ErrTelemetryProtocol
+			}
+			next := e.record
+			next.DeadLetters = append([]Telemetry(nil), next.Pending...)
+			next.SettlementGap = true
+			next.TerminalRecovery = true
+			next.ReportRejections = 0
+			next.State = "failed"
+			next.Sequence++
+			// Omit model, service tier, usage and evidence: any could be the
+			// rejected field. A new sequence preserves immutable replay identity.
+			next.Pending = []Telemetry{{Sequence: next.Sequence, Kind: "finished", Status: "failed", ErrorCode: "reporter_unavailable"}}
+			if err := s.journal.Put(next); err != nil {
+				return err
+			}
+			e.record = next
+		}
 		t := e.record.Pending[0]
 		var err error
 		if reporter, ok := s.api.(interface {
@@ -541,12 +565,23 @@ func (s *Supervisor) flushReports(ctx context.Context, e *owned) error {
 			err = s.api.Report(ctx, e.record.RunID, t)
 		}
 		if err != nil {
+			if errors.Is(err, ErrTelemetryProtocol) {
+				next := e.record
+				next.ReportRejections++
+				if saveErr := s.journal.Put(next); saveErr != nil {
+					return errors.Join(err, saveErr)
+				}
+				e.record = next
+			}
 			return err
 		}
-		e.record.Pending = e.record.Pending[1:]
-		if err := s.journal.Put(e.record); err != nil {
+		next := e.record
+		next.Pending = next.Pending[1:]
+		next.ReportRejections = 0
+		if err := s.journal.Put(next); err != nil {
 			return err
 		}
+		e.record = next
 	}
 	return nil
 }

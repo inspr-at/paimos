@@ -76,10 +76,14 @@ type Record struct {
 	ExitObserved  bool   `json:"exit_observed,omitempty"`
 	// LaunchRev and LaunchDefaultRev are the workspace HEAD and the default
 	// branch's commit at launch, the base of the run's commit evidence.
-	LaunchBranch     string            `json:"launch_branch,omitempty"`
-	LaunchRev        string            `json:"launch_rev,omitempty"`
-	LaunchDefaultRev string            `json:"launch_default_rev,omitempty"`
-	Pending          []Telemetry       `json:"pending,omitempty"`
+	LaunchBranch     string      `json:"launch_branch,omitempty"`
+	LaunchRev        string      `json:"launch_rev,omitempty"`
+	LaunchDefaultRev string      `json:"launch_default_rev,omitempty"`
+	Pending          []Telemetry `json:"pending,omitempty"`
+	// Rejected reports remain durable evidence, separate from the retry outbox.
+	DeadLetters      []Telemetry       `json:"dead_letters,omitempty"`
+	ReportRejections int               `json:"report_rejections,omitempty"`
+	TerminalRecovery bool              `json:"terminal_recovery,omitempty"`
 	SettlementGap    bool              `json:"settlement_gap,omitempty"`
 	TenantID         string            `json:"tenant_id"`
 	PrincipalID      string            `json:"principal_id"`
@@ -1566,7 +1570,7 @@ func (s *Supervisor) monitor(entry *owned) {
 		status, code = "cancelled", ""
 	}
 	if protocolFailed {
-		status, code = "failed", "app_server_protocol"
+		status, code = "failed", "reporter_unavailable"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1852,6 +1856,9 @@ func (s *Supervisor) update(ctx context.Context, entry *owned, t Telemetry) erro
 	t.ServiceTier = entry.harness.ServiceTier
 	if entry.record.Generation != s.generation && entry.record.LaunchState != launchPrepared {
 		return ErrGeneration
+	}
+	if entry.record.TerminalRecovery {
+		return s.flushReports(ctx, entry)
 	}
 	if t.Kind == "heartbeat" && (entry.record.State == "completed" || entry.record.State == "failed" || entry.record.State == "cancelled" || entry.record.State == "ownership_lost") {
 		return nil

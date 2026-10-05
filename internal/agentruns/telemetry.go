@@ -5,6 +5,7 @@ package agentruns
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -88,7 +89,7 @@ func (t Telemetry) validate() error {
 	default:
 		return workorders.Fail(400, "invalid run status")
 	}
-	if t.Kind == "status" && t.Status == "" {
+	if t.Kind == "status" && t.Status == "" && t.Model == "" {
 		return workorders.Fail(400, "status report requires status")
 	}
 	if t.Kind == "started" && t.Status != "" && t.Status != "running" {
@@ -151,7 +152,15 @@ func sameTelemetry(a, b Telemetry) bool {
 	}
 	return true
 }
-func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (out any, err error) {
+	defer func() {
+		var rejected *workorders.Error
+		if errors.As(err, &rejected) && rejected.Status == http.StatusBadRequest {
+			// Decode/validation messages are fixed field-level text, never values
+			// from the body, headers, vendor output or database errors.
+			slog.WarnContext(r.Context(), "run telemetry rejected", "reason", rejected.Message)
+		}
+	}()
 	var t Telemetry
 	if err := workorders.Decode(r, &t); err != nil {
 		return nil, err

@@ -6,7 +6,7 @@
 // that do not report a limit, and the legend
 // appears only where a bar is drawn. Everything here is a pure mapping of the
 // capacity projection, the pairing list and the person's schedule.
-import { agentUpdateAdvice, describeEnrollmentDiagnostic, describeEnrollmentStatus, describeHarnessFix, describeHarnessHint, platformCaption, type PairingEnrollment, type PairingView } from './agentPairing.ts'
+import { agentUpdateAdvice, describeEnrollmentDiagnostic, describeEnrollmentStatus, describeHarnessFix, describeHarnessHint, platformCaption, verificationFailureText, type PairingEnrollment, type PairingView } from './agentPairing.ts'
 import {
   HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, estimateLabel, gauge as gaugeOf, hidesCapacityLimit, hourLabel, pct, unreportedCapacity, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
 } from './capacity.ts'
@@ -113,6 +113,9 @@ export function offlineNotice(view: PairingView, now: number): ComputerNotice | 
  */
 export function readiness(row: AccountRow, computer: PairingView | null, now: number): Readiness {
   const enrollment = computer?.enrollments.find(e => e.account_id === row.id && e.state !== 'revoked')
+  if (computer?.computer_state === 'connected' && enrollment?.state === 'connected' && (enrollment.verification_stalled || enrollment.verification_state === 'failed')) {
+    return { kind: 'attention', text: enrollment.verification_stalled ? 'Verification stalled' : 'Verification failed', tone: 'warn', tip: verificationFailureText(enrollment) }
+  }
   if (computer?.computer_state === 'connected' && computer.connectivity === 'offline') return { kind: 'offline', text: 'Paused · computer offline', tone: 'warn', tip: `Agents can't start on ${computer.computer_name} until it reports again.` }
   if (!computer && row.state === 'offline') return { kind: 'offline', text: 'Paused · computer offline', tone: 'warn', tip: `Agents can't start on ${row.host} until it reports again.` }
   if (computer?.computer_state === 'draining' || enrollment?.state === 'draining' || row.disconnecting) return { kind: 'paused', text: 'Paused · disconnecting', tone: 'mute', tip: `Disconnecting from ${computer?.computer_name ?? row.host}: agents start nothing new on it.` }

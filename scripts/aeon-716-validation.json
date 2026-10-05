@@ -1,0 +1,62 @@
+{
+  "ticket": "AEON-716",
+  "base_commit": "67c13c32541a8467e7d7d20501ba95f509ccf781",
+  "scope": "Local implementation and validation only; no push, PR, merge or deployment.",
+  "root_cause": [
+    "Claude emits vendor model evidence as a status event with no status field before Start returns; the server rejected it with HTTP 400.",
+    "The supervisor interpreted that telemetry rejection as a protocol failure, stopped only its owned child, and mislabeled the finished event app_server_protocol; the rejected head blocked terminal settlement forever.",
+    "Claude CLI 2.1.287 completed an isolated no-tools, no-session-persistence print probe with compatible init/model/capabilities and success result; no stream drift was observed."
+  ],
+  "changes": [
+    "Accept model-only status reports while preserving starting state; continue rejecting empty status and malformed fields; fixed field-level 400 reasons in server logs.",
+    "Persist three-attempt rejection limits; after proven local exit archive the bounded pending outbox and use a fresh minimal finished/failed reporter_unavailable event under the original claim. Preserve disputed usage as an explicit settlement gap. Bound permanent rejection of the fallback too.",
+    "Project stalled verification after the 60 second runtime plus 60 second settlement grace without changing run ownership or releasing holds. Explain failures and keep the owner retry action usable; the server refuses to replace unconfirmed work.",
+    "Preserve displayed computer-card order through readiness changes to keep retry controls stationary; reset this order on identity change."
+  ],
+  "proof": {
+    "server_before": "Same exact daemon DTO four-event test failed at seq1: HTTP400 status report requires status when the original predicate was restored.",
+    "server_after": "Exact sequence, replay, model evidence, failed terminal, reservation settlement, error projection and fresh owner retry passed through real authentication/handler/Postgres/RLS fixtures.",
+    "daemon_before": "Same new recovery regression fails with original flushReports: unbounded rejection retries.",
+    "daemon_after": "Three attempts, durable original evidence, no terminal without exit proof, identical terminal replay after a 503, and bounded fallback rejection pass.",
+    "browser_before": "New rendered stability guard found a 345.890625px button displacement when attention-based sorting changed after retry.",
+    "browser_after": "14 targeted existing/new browser cases pass; owned browser processes after=0."
+  },
+  "passed": [
+    "internal/agentpairing: TestVerificationTelemetryPrestartBatchAndRetry, TestStalledVerificationPreservesOwnership and all five TestVerifyAgain cases (5.728s).",
+    "internal/agentd: TestTelemetry*, TestClaudeVerificationSDKEnforcesNoTools, TestRemoteTelemetryErrorClassification, TestCodexModelUsageThroughSupervisorAndTelemetryHTTP and TestOutagePreservesProcessAndPersistsExactSettlement (5.927s).",
+    "internal/agentruns: telemetry/replay/fencing selection (5.151s).",
+    "Full internal/reportercontract package including OpenAPI parsing, response pins and backward-compatibility checks (2.119s).",
+    "30 computer-accounts Vitest tests and 53 agent-pairing Node tests.",
+    "14 AEON-685/AEON-716 cases in accounts-computers.spec.ts through the guarded runner with one worker; includes 390/1024/1440 light/dark and control bounding-box checks.",
+    "Web vue-tsc typecheck and ESLint on changed web sources.",
+    "33 scripts/audit tests; no new Go/web source files require new slice assignments.",
+    "Test-tier manifest validation: four new Go tests, two Vitest cases and one browser case classified ESSENTIAL.",
+    "git diff --check."
+  ],
+  "limitations": [
+    "Full just test, full web suite, hosted/Linux CI and live verification were not run. The prescribed remote runner pushes a temporary ref, so the user no-push instruction limits this handoff to targeted local checks. Lead owns consolidated review and release.",
+    "Stalled is diagnostic only. Retry remains server-fenced until the previous process and reservations have settled; no timeout-based replacement authority was added.",
+    "Dead-lettered usage remains unconfirmed; a terminal failure does not claim discarded usage was applied.",
+    "OPS: the Homebrew formula generator defines no service. The repo paired LaunchAgent renderer already includes StandardOutPath/StandardErrorPath; identify and upgrade the owning legacy/brew service separately. No live plist or daemon checkpoint was read or changed.",
+    "UI reuses existing account rows, status labels and retry controls; needs Opus design (worker-common). No new layout direction was invented."
+  ],
+  "safety": "Only assigned worktree changed. No new secrets; no real daemon state or person-only project access; no model review CLI, force stop of foreign processes, ticket status change, push or deployment. The sole Claude CLI call beyond help/version was the brief-authorized harmless print probe. Owned fixture databases were dropped after checks.",
+  "source_sha256": {
+    "api/openapi.yaml": "97bc93a51ed85c1f21b2e179f32aeaf03a60ce024f7f9fa0fb3101a9646851e8",
+    "internal/agentd/lifecycle.go": "8e4838c26f5f6cda26e329c082067e1025aef98cfdc8af014e084b1cc81baf32",
+    "internal/agentd/supervisor.go": "653e97f09285adff610254b1c7173371b1a5e2345d9dbf4b0189318411d6882c",
+    "internal/agentd/telemetry_lifecycle_test.go": "714adb6ce8e4045edda4a6ae66e887f812b917a246d9a7e5a6ec2c8076c6050a",
+    "internal/agentd/verification_test.go": "725fc54bd445845694a5f55abaf676d2e7acf6a1533540aac58eb9cfd2fa5aea",
+    "internal/agentpairing/provision.go": "c464c41096f1507fd03abb43eaa7cbc991a1b43fb7f585509b39d7bfbaffb96d",
+    "internal/agentpairing/types.go": "cff31407d458401a89e48c03ff13733bf380734021ad39dd9f633b7fabc7a8f8",
+    "internal/agentpairing/verification_retry_test.go": "10eaf472a43f988b209171350348f7529a17a851c9d1f483e1012167df718a99",
+    "internal/agentruns/telemetry.go": "c1a514a4d90deeb5480f64c731020d515f5d46a52052c6d8b90e8297c6ad719c",
+    "scripts/ci/go-test-tiers.json": "19bf2ac7a7e048d1ba2751de69db35d77a62d666852c3de0445b7d858d7a7d65",
+    "scripts/ci/web-test-tiers.json": "d94879582b6ffe8b9c4da07517ca4d91c373c3d0dc0cf9b35f2d1cfef988e12f",
+    "web/src/components/agents/AccountsComputers.vue": "05c112dcacdb81b2758db753ea380f641d5236ba383cb84e54dbf3af8dcd5806",
+    "web/src/lib/agentPairing.ts": "c6326ae1d94131bfad10199e623c679af5373534fc2048ada05533e7a2fd438f",
+    "web/src/lib/computerAccounts.ts": "93929503e863913194b4f16cb7a1dc3cd730be6b6724f3caf87acf2778f8dbed",
+    "web/tests/accounts-computers.spec.ts": "1834f36807fa00db08e59c7fce1d637f3675c78af4b51e03a3b930df0771d91f",
+    "web/tests/computer-accounts.unit.test.ts": "c2c65ea36dd39a3eb1060101694f07cd05995998934e8ddbff95a515b1690426"
+  }
+}

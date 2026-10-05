@@ -4,10 +4,13 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -79,7 +82,7 @@ func TestTelemetryHTTPAuthorityAndOutagePreserveActiveProcess(t *testing.T) {
 			entry.mu.Lock()
 			defer entry.mu.Unlock()
 			p := entry.record.Pending
-			if !entry.record.ExitObserved || len(p) != 3 || p[0].Sequence != 1 || p[1].Sequence != 2 || p[1].InputTokensDelta != 7 || p[2].Sequence != 3 || p[2].Kind != "finished" {
+			if !entry.record.ExitObserved || len(entry.record.DeadLetters) != 0 || entry.record.ReportRejections != 0 || len(p) != 3 || p[0].Sequence != 1 || p[1].Sequence != 2 || p[1].InputTokensDelta != 7 || p[2].Sequence != 3 || p[2].Kind != "finished" {
 				t.Fatal("exit or exact unsettled telemetry lost")
 			}
 		})
@@ -162,10 +165,105 @@ func TestTelemetryProtocolStopsOnlyOwnedChild(t *testing.T) {
 			}
 			entry.mu.Lock()
 			defer entry.mu.Unlock()
-			p := entry.record.Pending
-			if !entry.record.ExitObserved || entry.record.State != "failed" || len(p) < 2 || p[len(p)-1].ErrorCode != "app_server_protocol" {
+			p := append(append([]Telemetry(nil), entry.record.DeadLetters...), entry.record.Pending...)
+			if !entry.record.ExitObserved || entry.record.State != "failed" || len(p) < 2 || p[len(p)-1].ErrorCode != "reporter_unavailable" {
 				t.Fatal("protocol failure lost truthful exit/failure or unsettled evidence")
 			}
 		})
+	}
+}
+
+func TestTelemetryDeadLettersBoundedAndRecoversAfterObservedExit(t *testing.T) {
+	s, api, _ := testSupervisor(t)
+	pending := []Telemetry{
+		{Sequence: 1, Kind: "status", EffectiveModel: "invalid model", ModelEvidence: "vendor_reported"},
+		{Sequence: 2, Kind: "turn", TurnCountDelta: 1},
+		{Sequence: 3, Kind: "started", Status: "running"},
+		{Sequence: 4, Kind: "finished", Status: "failed", ErrorCode: "app_server_protocol"},
+	}
+	entry := &owned{record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", AccountID: "account", Generation: s.generation, ExecutionMode: VerificationPurpose, LaunchState: launchAttempted, State: "failed", Sequence: 4, Pending: pending}}
+	s.runs["run"] = entry
+	var rejected, terminal int
+	var final Telemetry
+	var mu sync.Mutex
+	counts := func() (int, int, Telemetry) { mu.Lock(); defer mu.Unlock(); return rejected, terminal, final }
+	useTelemetryHTTP(t, s, api, func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		var report Telemetry
+		if json.NewDecoder(r.Body).Decode(&report) != nil {
+			t.Error("invalid report")
+			w.WriteHeader(400)
+			return
+		}
+		if r.Header.Get("X-Aeon-Daemon-Generation") != s.generation {
+			t.Error("claim generation changed")
+		}
+		if report.Sequence <= 4 {
+			rejected++
+			w.WriteHeader(400)
+			return
+		}
+		terminal++
+		if terminal == 1 {
+			final = report
+			w.WriteHeader(503)
+			return
+		} // uncertain terminal delivery
+		if !reflect.DeepEqual(final, report) {
+			t.Error("terminal receipt replay changed")
+		}
+		w.WriteHeader(204)
+	})
+	for i := 0; i < 8; i++ {
+		s.settlePending(t.Context())
+	}
+	rejectCount, terminalCount, _ := counts()
+	if rejectCount != 3 || terminalCount != 0 || len(entry.record.DeadLetters) != 0 {
+		t.Fatal("unconfirmed exit allowed terminal recovery or unbounded rejection retries")
+	}
+	// Restore only durable fixture state: retry limits survive a daemon restart.
+	records := s.journal.Snapshot()
+	if len(records) != 1 || records[0].ReportRejections != 3 {
+		t.Fatal("retry limit was not durable")
+	}
+	entry.record = records[0]
+	entry.record.ExitObserved = true
+	if err := s.journal.Put(entry.record); err != nil {
+		t.Fatal(err)
+	}
+	s.settlePending(t.Context())
+	_, terminalCount, _ = counts()
+	if terminalCount != 1 || !reflect.DeepEqual(entry.record.DeadLetters, pending) || len(entry.record.Pending) != 1 || !entry.record.SettlementGap {
+		t.Fatal("terminal outage erased rejected evidence or unknown usage")
+	}
+	records = s.journal.Snapshot()
+	entry.record = records[0]
+	s.settlePending(t.Context())
+	for i := 0; i < 8; i++ {
+		s.settlePending(t.Context())
+	}
+	want := Telemetry{Sequence: 5, Kind: "finished", Status: "failed", ErrorCode: "reporter_unavailable"}
+	rejectCount, terminalCount, finalReport := counts()
+	if terminalCount != 2 || rejectCount != 3 || !reflect.DeepEqual(finalReport, want) || len(entry.record.Pending) != 0 || entry.record.State != "failed" {
+		t.Fatal("minimal terminal recovery failed or retried settled evidence")
+	}
+	lifecycle := s.Lifecycle("")
+	if lifecycle.VerificationResults["run"] != "failed" || len(lifecycle.SettlementPendingRunIDs) != 1 {
+		t.Fatal("failed verification confused with unconfirmed usage")
+	}
+}
+
+func TestTelemetryTerminalRejectionIsBounded(t *testing.T) {
+	s, api, _ := testSupervisor(t)
+	entry := &owned{record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", AccountID: "account", Generation: s.generation, State: "failed", ExitObserved: true, Sequence: 1, Pending: []Telemetry{{Sequence: 1, Kind: "status"}}}}
+	s.runs["run"] = entry
+	var attempts atomic.Int64
+	useTelemetryHTTP(t, s, api, func(w http.ResponseWriter, r *http.Request) { attempts.Add(1); w.WriteHeader(422) })
+	for i := 0; i < 20; i++ {
+		s.settlePending(t.Context())
+	}
+	if attempts.Load() != 6 || len(entry.record.DeadLetters) != 1 || len(entry.record.Pending) != 1 || entry.record.ReportRejections != 3 || !entry.record.SettlementGap {
+		t.Fatal("permanently rejected terminal lost evidence or retried forever")
 	}
 }

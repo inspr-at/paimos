@@ -310,3 +310,27 @@ describe('expired account verification', () => {
     }
   })
 })
+
+
+describe('verification reporting failures', () => {
+  it('shows a stalled check as a problem without changing its active ownership', () => {
+    const view = computer()
+    Object.assign(view.enrollments[0], { verification_state: 'starting', verification_stalled: true, verification_error: 'verification_timeout', active_run_ids: ['run'] })
+    const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), capacity()), now: NOW })
+    expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'attention', text: 'Verification stalled' })
+    expect(cards[0].accounts[0].readiness.tip).toContain('helper must confirm that it stopped')
+    expect(view.enrollments[0].verification_state).toBe('starting')
+    expect(view.enrollments[0].active_run_ids).toEqual(['run'])
+    expect(cards[0].accounts[1].readiness.kind).toBe('ready')
+  })
+  it('explains a rejected report without blaming the vendor protocol or exposing raw errors', () => {
+    const view = computer()
+    Object.assign(view.enrollments[0], { verification_state: 'failed', verification_error: 'reporter_unavailable' })
+    const cards = buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), capacity()), now: NOW })
+    expect(cards[0].accounts[0].readiness).toMatchObject({ kind: 'attention', text: 'Verification failed' })
+    expect(cards[0].accounts[0].readiness.tip).toContain('Update the helper, then use Verify again')
+    expect(cards[0].accounts[0].readiness.tip).toContain('Usage may be incomplete')
+    view.enrollments[0].verification_error = 'raw-private-error'
+    expect(buildComputerCards({ computers: [view], rows: buildRows(inputs('online'), capacity()), now: NOW })[0].accounts[0].readiness.tip).not.toContain('raw-private-error')
+  })
+})
