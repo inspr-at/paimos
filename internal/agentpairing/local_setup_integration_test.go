@@ -156,7 +156,8 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 		Now:      func() time.Time { return now },
 	}
 	// Use a qualified verification harness; no vendor process is launched by this fixture.
-	o := agentsetup.Options{Origin: origin, ComputerName: "integration computer", Workspace: workspace, Platform: agentsetup.Platform{OS: "darwin", Arch: "arm64"}, Candidates: []agentsetup.Candidate{setupAccount(t, f, "claude", home)}, NodePath: nodePath, ClaudeSDKPath: sdkEntry}
+	// Hook reports describe the running OS, so the request must use that OS too.
+	o := agentsetup.Options{Origin: origin, ComputerName: "integration computer", Workspace: workspace, Platform: agentsetup.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}, Candidates: []agentsetup.Candidate{setupAccount(t, f, "claude", home)}, NodePath: nodePath, ClaudeSDKPath: sdkEntry}
 	p, err := e.Begin(t.Context(), o)
 	if err != nil || p.Stage != "awaiting_approval" || p.UserCode == "" {
 		t.Fatalf("initial code request: stage=%s err=%v", p.Stage, err)
@@ -185,6 +186,9 @@ func TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain(t *testing.T) {
 	assertNoRuntimeKey(t, string(key), p)
 	var initial agentpairing.View
 	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+config.ComputerID, nil, true, "", 200), &initial)
+	if initial.Platform != runtime.GOOS || len(initial.HookCapabilities) != 1 || initial.HookCapabilities[0].OS != initial.Platform || initial.HookCapabilities[0].Verified || initial.HookCapabilities[0].Blocker != "feature_disabled" {
+		t.Fatal("setup reported the wrong platform or enabled hooks", initial.HookCapabilities)
+	}
 	if len(initial.Enrollments) != 1 || initial.Enrollments[0].VerificationRunID == nil {
 		t.Fatal("approved verification run missing")
 	}

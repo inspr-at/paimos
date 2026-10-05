@@ -6373,7 +6373,7 @@ paths:
       security: *auth
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InboxSend'}}}}
       responses:
-        '201': {description: Sent message, content: {application/json: {schema: {$ref: '#/components/schemas/InboxMessage'}}}}
+        '201': {description: Sent message or content-free attached note metadata, content: {application/json: {schema: {$ref: '#/components/schemas/InboxSendResponse'}}}}
         '429': {description: Attached note quota exceeded, headers: {Retry-After: {schema: {type: integer}, description: Seconds before retry}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -6484,7 +6484,7 @@ paths:
       security: *auth
       parameters: [{name: messageId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
-        '200': {description: Hand-off receipt, content: {application/json: {schema: {$ref: '#/components/schemas/InboxReceipt'}}}}
+        '200': {description: Hand-off receipt or separate attached note evidence, content: {application/json: {schema: {$ref: '#/components/schemas/InboxReceiptResponse'}}}}
         '401': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
   /inbox/messages/{messageId}/ack:
@@ -15884,6 +15884,56 @@ components:
       additionalProperties: false
       required: [message_id, idempotency_key, tenant, sender_principal_id, recipient_principal_id, target_id, target_version, adapter, address, effective_level, state, handed_off_at, failure_reason]
       properties:
+        message_id: {type: string, format: uuid}
+        idempotency_key: {type: string}
+        tenant: {type: string, description: Tenant slug}
+        sender_principal_id: {type: string, format: uuid}
+        recipient_principal_id: {type: string, format: uuid}
+        target_id: {type: [string, 'null'], format: uuid, description: 'Receiver target, null for direct inbox messages'}
+        target_version: {type: [integer, 'null'], minimum: 1}
+        adapter: {type: string, description: 'Receiver adapter, for example grok_bot_routine'}
+        address: {type: string}
+        effective_level: {type: string, description: Empty for a direct inbox acknowledgement; simple or steer for a managed adapter hand-off}
+        state: {type: string, enum: [queued, handed_off, failed]}
+        handed_off_at: {type: [string, 'null'], format: date-time, description: 'RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms'}
+        failure_reason: {type: string}
+    InboxReceiptResponse:
+      oneOf:
+        - {$ref: '#/components/schemas/InboxReceipt'}
+        - {$ref: '#/components/schemas/AttachedInboxReceipt'}
+    InboxSendResponse:
+      oneOf:
+        - allOf:
+            - {$ref: '#/components/schemas/InboxMessage'}
+            - not: {required: [content_mode]}
+        - {$ref: '#/components/schemas/AttachedInboxMessage'}
+    AttachedInboxMessage:
+      description: Content-free attached note acceptance metadata. Text is volatile and never returned by this response or ordinary inbox reads.
+      type: object
+      additionalProperties: false
+      required: [id, sender_principal_id, recipient_principal_id, recipient_session_id, body, idempotency_key, sent_event_id, created_at, acked_at, content_mode, message_deadline]
+      properties:
+        id: {type: string, format: uuid}
+        sender_principal_id: {type: string, format: uuid}
+        recipient_principal_id: {type: string, format: uuid}
+        recipient_session_id: {type: string, format: uuid}
+        sender_label: {type: string, description: Frozen owner or agent label}
+        body: {type: string, const: ''}
+        idempotency_key: {type: string}
+        expires_at: {type: string, format: date-time}
+        sent_event_id: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        acked_at: {type: 'null'}
+        content_mode: {type: string, enum: [attached_volatile, attached_notification]}
+        message_grant_id: {type: string, format: uuid}
+        recipient_message_generation: {type: string, format: uuid}
+        message_deadline: {type: string, format: date-time}
+    AttachedInboxReceipt:
+      description: Attached note receipt; separate from the pinned durable receipt. Acceptance and uncertainty never imply a hand-off.
+      type: object
+      additionalProperties: false
+      required: [message_id, idempotency_key, tenant, sender_principal_id, recipient_principal_id, target_id, target_version, adapter, address, effective_level, state, handed_off_at, failure_reason, attached]
+      properties:
         attached: {$ref: '#/components/schemas/AttachedMessageStatus'}
         message_id: {type: string, format: uuid}
         idempotency_key: {type: string}
@@ -15939,9 +15989,6 @@ components:
             id: {type: string, format: uuid}
             sender_principal_id: {type: string, format: uuid}
             sender_label: {type: string, description: Frozen at send time; returned for session-aware reads}
-            content_mode: {type: string, enum: [durable, attached_volatile, attached_notification]}
-            message_grant_id: {type: string, format: uuid}
-            message_deadline: {type: string, format: date-time}
             sent_event_id: {type: integer, format: int64}
             created_at: {type: string, format: date-time}
             acked_at: {type: [string, 'null'], format: date-time}

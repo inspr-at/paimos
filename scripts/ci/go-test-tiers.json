@@ -3665,6 +3665,7 @@
     {"kind":"go","package":"internal/chat","name":"TestLateVendorAliasRechecksAccessBeforeHierarchyLock","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/chat","name":"TestLateVendorAliasRejectsHistoricalConflict","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/chat","name":"TestStrictLegacyResponseSnapshotsUnchanged","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/chat","name":"TestAttachedResponsesUseSeparateSchemas","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/chat","name":"TestBindingRejectsForeignWrongRoleManagedAndStaleRegistration","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/chat","name":"TestBindingVersusRevocationUsesFinalAccessFence","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/chat","name":"TestDisabledAndBoundedContract","tier":"GATED-FULL"},
