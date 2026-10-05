@@ -206,7 +206,17 @@ func (c Client) lifecycleRequest(ctx context.Context, method, path string, body,
 		}
 		return errors.New("local lifecycle request rejected")
 	}
-	d := json.NewDecoder(io.LimitReader(res.Body, 64<<10))
+	limit := int64(64 << 10)
+	if in, ok := body.(agentd.AttachedHookRequest); ok && path == "/v1/attached-hook" && in.Operation == "pull" {
+		// Drain returns at most one message: 65,536 Unicode characters,
+		// up to six JSON bytes per character, plus delivery metadata.
+		limit = 512 << 10
+	}
+	payload, err := io.ReadAll(io.LimitReader(res.Body, limit+1))
+	if err != nil || int64(len(payload)) > limit {
+		return errors.New("invalid local lifecycle response")
+	}
+	d := json.NewDecoder(bytes.NewReader(payload))
 	d.DisallowUnknownFields()
 	if d.Decode(dest) != nil || d.Decode(&struct{}{}) != io.EOF {
 		return errors.New("invalid local lifecycle response")

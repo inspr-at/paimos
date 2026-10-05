@@ -157,6 +157,7 @@
   "tests": [
     {"kind":"go","package":"internal/harness","name":"TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentd","name":"TestAttachedHookSocketAndReconnectPreserveExternalOwnership","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestAttachedHookHelperCrashResumePreservesBinding","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatPairedReconnectBindsOnlyItsLiveIndexedSession","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/cli","name":"TestPairedInboxHookAcknowledgesOnlyForegroundHandoff","tier":"ESSENTIAL"},
     {"package":"internal/harness","name":"TestAgentRecoveryOpenAPIContractsAgree","kind":"go","tier":"ESSENTIAL"},
@@ -902,6 +903,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestPiVerificationBlocksBeforeAnyVendorProcess","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentdwire","name":"TestAttachConflictDiagnosticIsSurfacedAndBounded","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentdwire","name":"TestAuthenticatedLocalControl","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentdwire","name":"TestAttachedHookMaximumInboxDeliveryDoesNotBlockNext","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentdwire","name":"TestAttachedHookInboxResponseBoundsAndStrictJSON","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentdwire","name":"TestOpenClientReportsFallbackHomeMismatch","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentdwire","name":"TestOpenClientUsesSharedSocketResolver","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/agentdwire","name":"TestStepUpWireChecksOriginAndSendsOnlyID","tier":"ESSENTIAL"},

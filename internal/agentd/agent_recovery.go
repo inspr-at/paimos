@@ -314,10 +314,15 @@ func (s *Supervisor) bindAttachedHook(ctx context.Context, peer attachObservatio
 	if s.attachedHooks == nil {
 		s.attachedHooks = make(map[string]*attachedHookBinding)
 	}
-	// Prune only our in-memory bindings; never renew them during recovery.
+	// Expiry disables service, but a verified resume still needs the identity
+	// already attested to the server. Prune only after confirmed process exit
+	// or PID reuse; an observation failure cannot prove either.
 	for id, b := range s.attachedHooks {
 		if time.Since(b.touched) > 10*time.Minute {
-			delete(s.attachedHooks, id)
+			current, err := m.observe(b.process.PID)
+			if errors.Is(err, errAttachExited) || err == nil && current.PID == b.process.PID && current.Started != "" && current.Started != b.process.Started {
+				delete(s.attachedHooks, id)
+			}
 		}
 	}
 	b := s.attachedHooks[in.SessionID]
@@ -331,8 +336,21 @@ func (s *Supervisor) bindAttachedHook(ctx context.Context, peer attachObservatio
 		}
 		identity := ownedprocess.Identity{DaemonID: s.daemonID, Generation: s.generation, ProcessID: processID, RootPID: process.PID, GroupID: process.PID, StartedAt: time.Now().UTC()}
 		b = &attachedHookBinding{helper: helper.Process, process: process.Process, image: image, session: HarnessSession{ID: in.SessionID, ProjectID: in.ProjectID, Harness: in.Harness, Lease: in.Lease, Ownership: &identity, AttachedHook: true}, touched: time.Now()}
-	} else if b.helper != helper.Process || b.process != process.Process || b.session.ProjectID != in.ProjectID || b.session.Harness != in.Harness || b.session.Lease != in.Lease || !sameAttachImage(b.image, image) {
-		return ErrGeneration
+	} else {
+		if b.process != process.Process || b.session.ProjectID != in.ProjectID || b.session.Harness != in.Harness || b.session.Lease != in.Lease || !sameAttachImage(b.image, image) {
+			return ErrGeneration
+		}
+		if b.helper != helper.Process {
+			old, err := m.observe(b.helper.PID)
+			if !errors.Is(err, errAttachExited) && !(err == nil && old.PID == b.helper.PID && old.Started != "" && old.Started != b.helper.Started) {
+				return ErrGeneration
+			}
+		}
+		// Stage the replacement without changing the live binding until both
+		// processes have been reobserved. Keep the external ownership unchanged.
+		next := *b
+		b = &next
+		b.helper = helper.Process
 	}
 	b.session.ActivitySequence = in.Sequence
 	b.session.Activity = in.Activity

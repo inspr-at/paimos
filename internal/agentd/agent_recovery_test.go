@@ -4,6 +4,7 @@ package agentd
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -204,4 +205,143 @@ func (a *recoveryAPI) HeartbeatHarness(ctx context.Context, session HarnessSessi
 		return errors.New("fixture binding reply lost after commit")
 	}
 	return err
+}
+
+func TestAttachedHookHelperCrashResumePreservesBinding(t *testing.T) {
+	for _, scenario := range []string{"resumed", "expired-binding", "pid-reused", "lost-rebind-reply", "old-helper-live", "old-helper-unobservable", "wrong-lease", "wrong-project", "wrong-harness", "changed-process", "helper-changes-during-verification"} {
+		t.Run(scenario, func(t *testing.T) {
+			s, api, p := testSupervisor(t)
+			a := &recoveryAPI{fakeAPI: api}
+			s.api = a
+			t.Cleanup(func() { _ = s.Close(context.Background()) })
+			m, oldHelper, target, _, _ := attachIdentityFixture(t, Claude)
+			s.attachedHookVerifier = m
+			observe := m.observe
+			newHelper := oldHelper
+			newHelper.PID, newHelper.Started = 31, "resumed-helper"
+			hook := oldHelper
+			hook.PID, hook.Started, hook.Parent = 50, "foreground-hook", target.PID
+			oldGone, newChecks := false, 0
+			m.observe = func(pid int) (attachObservation, error) {
+				if pid == hook.PID {
+					return hook, nil
+				}
+				if pid == newHelper.PID && (oldGone || pid != oldHelper.PID) {
+					newChecks++
+					if scenario == "helper-changes-during-verification" && newChecks > 1 {
+						return attachObservation{}, errAttachExited
+					}
+					return newHelper, nil
+				}
+				if pid == oldHelper.PID && oldGone {
+					if scenario == "old-helper-unobservable" {
+						return attachObservation{}, errors.New("fixture observation denied")
+					}
+					return attachObservation{}, errAttachExited
+				}
+				return observe(pid)
+			}
+			m.ancestry = m.observe
+			in := AttachedHookRequest{Origin: m.cfg.Origin, ProjectID: "11111111-1111-4111-8111-111111111111", SessionID: "22222222-2222-4222-8222-222222222222", Harness: Claude, Lease: strings.Repeat("fixture-", 8), OwnerPID: target.PID, Sequence: 2, Activity: "busy"}
+			if err := s.bindAttachedHook(t.Context(), oldHelper, in); err != nil {
+				t.Fatal(err)
+			}
+			initial := s.attachedHooks[in.SessionID]
+			identity := *initial.session.Ownership
+			oldGone = scenario != "old-helper-live"
+			if scenario == "pid-reused" {
+				newHelper.PID = oldHelper.PID
+			}
+			if oldGone {
+				if _, err := s.serviceAttachedHook(t.Context(), hook, AttachedHookRequest{Operation: "pull", SessionID: in.SessionID}); !errors.Is(err, ErrGeneration) {
+					t.Fatalf("dead helper did not invalidate foreground delivery: %v", err)
+				}
+			}
+			if scenario == "expired-binding" {
+				initial.touched = time.Now().Add(-11 * time.Minute)
+				other := in
+				other.SessionID = "33333333-3333-4333-8333-333333333333"
+				if err := s.bindAttachedHook(t.Context(), newHelper, other); err != nil {
+					t.Fatal(err)
+				}
+			}
+			changed := in
+			changed.Sequence++
+			switch scenario {
+			case "wrong-lease":
+				changed.Lease = strings.Repeat("other-", 8)
+			case "wrong-project":
+				changed.ProjectID = "44444444-4444-4444-8444-444444444444"
+			case "wrong-harness":
+				changed.Harness = Codex
+			case "changed-process":
+				target.Started = "reused-external-pid"
+			}
+			if scenario == "lost-rebind-reply" {
+				a.hookReplyLost = true
+				if err := s.bindAttachedHook(t.Context(), newHelper, changed); err == nil || err.Error() != "fixture binding reply lost after commit" {
+					t.Fatalf("lost rebind reply did not expose uncertainty: %v", err)
+				}
+				if *s.attachedHooks[in.SessionID].session.Ownership != identity {
+					t.Fatal("uncertain rebind replaced server identity")
+				}
+			}
+			err := s.bindAttachedHook(t.Context(), newHelper, changed)
+			if scenario != "resumed" && scenario != "expired-binding" && scenario != "pid-reused" && scenario != "lost-rebind-reply" {
+				want := ErrGeneration
+				if scenario == "wrong-harness" || scenario == "helper-changes-during-verification" {
+					want = ErrNotOwned
+				}
+				if !errors.Is(err, want) {
+					t.Fatalf("unsafe replacement helper refusal=%v; want %v", err, want)
+				}
+				if s.attachedHooks[in.SessionID] != initial || initial.helper != oldHelper.Process || *initial.session.Ownership != identity || initial.session.ActivitySequence != in.Sequence {
+					t.Fatal("refused helper changed binding")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("verified resumed helper refused: %v", err)
+			}
+			binding := s.attachedHooks[in.SessionID]
+			if binding.helper != newHelper.Process || binding.process != target.Process || *binding.session.Ownership != identity || binding.session.Lease != in.Lease {
+				t.Fatal("resuming helper replaced external process authority")
+			}
+			q := RecoveryRequest{ID: "resumed-reconnect", SessionID: in.SessionID, ProjectID: in.ProjectID, Action: "reconnect", Ownership: identity, deadline: time.Now().Add(time.Minute)}
+			a.requests = []RecoveryRequest{q}
+			if err := s.recoverAgents(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			if len(a.completions) != 1 || a.completions[0].Outcome != "reconnected" || a.probes != 1 {
+				t.Fatal("resumed binding could not reconnect")
+			}
+			delivery := HarnessDelivery{ID: "55555555-5555-4555-8555-555555555555", Cursor: 1, Body: "pending foreground input"}
+			a.harnessDeliveries = []HarnessDelivery{delivery}
+			for i := 0; i < 2; i++ {
+				out, err := s.serviceAttachedHook(t.Context(), hook, AttachedHookRequest{Operation: "pull", SessionID: in.SessionID})
+				if err != nil || len(out) != 1 || out[0] != delivery {
+					t.Fatalf("resumed foreground inbox unavailable: %v", err)
+				}
+			}
+			if a.harnessDeliveryCompletions != 0 {
+				t.Fatal("reconnect acknowledged pending delivery")
+			}
+			if _, err := s.serviceAttachedHook(t.Context(), hook, AttachedHookRequest{Operation: "complete", SessionID: in.SessionID, DeliveryID: delivery.ID, Cursor: delivery.Cursor}); err != nil {
+				t.Fatal(err)
+			}
+			for _, beat := range a.harnessBeatSessions {
+				if beat.ID == in.SessionID && (beat.Ownership == nil || *beat.Ownership != identity) {
+					t.Fatal("heartbeat changed server ownership")
+				}
+			}
+			if a.claims != 0 || a.harnessDeliveryCompletions != 1 || len(m.sessions) != 0 {
+				t.Fatal("helper resume launched work, revived consent, or acknowledged twice")
+			}
+			select {
+			case <-p.stopped:
+				t.Fatal("helper resume signalled external process")
+			default:
+			}
+		})
+	}
 }
