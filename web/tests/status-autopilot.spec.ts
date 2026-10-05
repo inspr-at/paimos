@@ -66,7 +66,7 @@ test('250 attention ticket pills stay steady for 3 seconds with bounded lookups'
     lookups.push(keys)
     return route.fulfill({ json: { items: keys.map(key => ({ requested_key: key, key, id: `pill-${key}`, title: key, state: 'new', project_id: 'p-aeon' })) } })
   })
-  await page.goto('/settings/workspace')
+  await page.goto('/settings/autopilot')
   const attention = page.getByRole('region', { name: 'Tickets needing attention', exact: true })
   await expect(attention.locator('a.ticket-link')).toHaveCount(250)
   await expect(attention.locator('.ticket-plain')).toHaveCount(0)
@@ -118,7 +118,7 @@ test('upgrade proposals offer Apply and Dismiss while stale proposals stay guard
   Object.assign(world.settings, { server_mode: 'on', effective_mode: 'suggest', suggest_until: '2026-10-02T18:00:00Z' })
   const base: AutopilotProposal = { event_id: 200, node_id: 'ticket-1', key: 'ORB-142', title: 'Review before moving', rule: 'progress', reason: 'No session, branch or PR activity for 3 days.', from: 'in_progress', to: 'open', at: '2026-10-01T17:00:00Z', changed_since: false, applicable: true }
   world.proposals.push(base, { ...base, event_id: 201, key: 'ORB-143', changed_since: true, applicable: false })
-  await page.goto('/settings/workspace')
+  await page.goto('/settings/autopilot')
   const card = page.getByRole('region', { name: 'Status autopilot', exact: true })
   await expect(card.getByText('Suggest', { exact: true })).toBeVisible()
   await expect(card.getByText(/After this upgrade/)).toBeVisible()
@@ -136,7 +136,7 @@ test('owner explicitly confirms upgrade while server Suggest remains the cap', a
   const world = await setup(page)
   await page.route('**/api/me/permissions*', route => route.fulfill({ json: { workspace: { role: { id: 'owner', key: 'owner', name: 'Owner' }, permissions: ['settings.manage', 'ownership.transfer', 'nodes.read', 'nodes.write'] }, project: null } }))
   Object.assign(world.settings, { server_mode: 'on', effective_mode: 'suggest', suggest_until: '2026-10-02T18:00:00Z' })
-  await page.goto('/settings/workspace')
+  await page.goto('/settings/autopilot')
   const button = page.getByRole('button', { name: 'Enable automatic changes', exact: true })
   await button.click()
   await expect(button).toHaveCount(0)
@@ -150,7 +150,7 @@ test('owner explicitly confirms upgrade while server Suggest remains the cap', a
 
 test('approved rules, master switch, validation, inheritance and audited Undo', async ({ page }) => {
   const world = await setup(page)
-  await page.goto('/settings/workspace')
+  await page.goto('/settings/autopilot')
   const card = page.getByRole('region', { name: 'Status autopilot', exact: true })
   await expect(card.getByRole('switch', { name: 'Status autopilot', exact: true })).toBeChecked()
   await expect(card.locator('.rules')).toHaveCSS('margin-top', '14px')
@@ -187,7 +187,7 @@ test('approved rules, master switch, validation, inheritance and audited Undo', 
 })
 
 test('stale setting writes explain recovery and keep the saved limits', async ({ page }) => {
-  const world = await setup(page); await page.goto('/settings/workspace'); world.conflict()
+  const world = await setup(page); await page.goto('/settings/autopilot'); world.conflict()
   const card = page.getByRole('region', { name: 'Status autopilot', exact: true })
   await card.getByLabel('Days delivered without objection before Accepted').fill('60')
   await card.getByLabel('Days delivered without objection before Accepted').blur()
@@ -197,12 +197,12 @@ test('stale setting writes explain recovery and keep the saved limits', async ({
 })
 
 test('members have no workspace autopilot controls', async ({ page }) => {
-  await setup(page, 'member'); await page.goto('/settings/workspace')
+  await setup(page, 'member'); await page.goto('/settings/autopilot')
   await expect(page.getByRole('region', { name: 'Status autopilot', exact: true })).toHaveCount(0)
 })
 
 test('light, dark and narrow settings evidence beside the approved fragment', async ({ page }, testInfo) => {
-  await setup(page); await page.goto('/settings/workspace')
+  await setup(page); await page.goto('/settings/autopilot')
   const folder = process.env.STATUS_AUTOPILOT_SHOTS ?? testInfo.outputPath('shots'); await mkdir(folder, { recursive: true })
   for (const theme of ['light', 'dark']) {
     await page.setViewportSize({ width: 1440, height: 2400 })

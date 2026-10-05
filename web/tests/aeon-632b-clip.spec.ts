@@ -165,7 +165,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     const change = { event_id: 632, node_id: 'n-1', key: 'PHAROS-11', title: NAME, actor: 'Status autopilot', rule: 'new', reason: 'Synthetischer Grund.', from: 'new', to: 'triage_list', at: '2026-10-03T10:00:00Z', undone: false, undoable: false, changed_since: false, applicable: true }
     await page.route('**/api/status-autopilot/changes**', route => route.fulfill({ json: { items: [change] } }))
     await page.route('**/api/status-autopilot/proposals', route => route.fulfill({ json: { items: [change] } }))
-    await page.goto('/settings/workspace')
+    await page.goto('/settings/autopilot')
     await disclosure(page, page.locator('.proj-name > span:last-child').first(), { modes: page.locator('.proj-ctl .seg').first() })
     await capture(page, 'autopilot-projects', width, theme)
     for (const name of await page.locator('.change-title').all()) await disclosure(page, name)
