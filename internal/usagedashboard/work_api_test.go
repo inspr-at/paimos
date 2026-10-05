@@ -84,7 +84,7 @@ func TestCompletionCapSignalsTruncationWithoutSessionsInRange(t *testing.T) {
 	w.tx(t, w.home, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `WITH tickets AS (
 		INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id,state)
-		SELECT $1,'CAP-'||(i+1),k.id,'Completed',$2,'done' FROM generate_series(1,5001) i CROSS JOIN node_kinds k WHERE k.tenant_id=$1 AND k.slug='ticket' RETURNING id
+		SELECT $1,'CAP-'||(i+1),k.id,'Completed',$2,'done' FROM generate_series(1,5001) i CROSS JOIN node_kinds k WHERE k.tenant_id=$1 AND k.slug='work' RETURNING id
 		) INSERT INTO outcome_events(tenant_id,kind,project_id,ticket_node_id,session_id,idempotency_key,actor_principal_id,source,payload,request_digest,recorded_at)
 		SELECT $1,'ticket_done',$2,id,$3,'cap:'||id,$4,'recorded','{}'::jsonb,decode(md5(id::text),'hex'),CASE WHEN row_number() OVER(ORDER BY id)=5001 THEN '2026-09-11T12:00:00Z'::timestamptz ELSE '2026-09-10T12:00:00Z'::timestamptz END FROM tickets`, w.home.TenantID, project, session, w.home.ID)
 		return err

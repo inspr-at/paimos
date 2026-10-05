@@ -23,7 +23,7 @@ func TestCycleSearchBudgetFailsClosed(t *testing.T) {
 			err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
 				rows, err := tx.Query(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title)
 				 SELECT $1,'BUD-'||i,k.id,'Budget node' FROM generate_series(1,$2::int) i
-				 CROSS JOIN node_kinds k WHERE k.tenant_id=$1 AND k.slug='task' RETURNING id::text`, f.a.TenantID, n)
+				 CROSS JOIN node_kinds k WHERE k.tenant_id=$1 AND k.slug='work' RETURNING id::text`, f.a.TenantID, n)
 				if err != nil {
 					return err
 				}
@@ -39,6 +39,9 @@ func TestCycleSearchBudgetFailsClosed(t *testing.T) {
 				rows.Close()
 				if err != nil {
 					return err
+				}
+				if len(ids) != n {
+					t.Fatalf("budget fixture has %d nodes, want %d", len(ids), n)
 				}
 				for _, typ := range []string{"blocks", "implements", "duplicates"} {
 					if wide {

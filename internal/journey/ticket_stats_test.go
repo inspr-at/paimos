@@ -50,7 +50,7 @@ func TestCurrentTicketStatsIgnoreDeletedMembersAndRestoreThem(t *testing.T) {
 		}
 		for i, out := range []*string{&live, &deleted, &historical} {
 			key := []string{"TKT-1", "TKT-2", "TKT-3"}[i]
-			if err := node("ticket", key, project, out); err != nil {
+			if err := node("work", key, project, out); err != nil {
 				return err
 			}
 			r := release
