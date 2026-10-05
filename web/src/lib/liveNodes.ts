@@ -7,7 +7,7 @@
 // however many views show it). After a gap it cannot bridge (the first
 // connection, a restart past a long backlog) it asks every view to refetch
 // what it shows. What is known about a node lives in the row store only.
-import { APIError, getNode, type WorkNode } from './api'
+import { APIError, getNode, listNodes, type ListItem, type WorkNode } from './api'
 import { compareRevision, type ChangeKind } from './liveUpdates'
 import { rowStore, type RowStore } from './rowStore'
 import { TICKET_SESSION_EVENTS } from './liveAgents'
@@ -40,7 +40,7 @@ interface SourceLike {
   close(): void
 }
 
-export const NODE_EVENTS = ['node.created', 'node.updated', 'node.moved', 'node.kind_changed', 'node.project_moved', 'node.deleted', 'node.bulk_changed'] as const
+export const NODE_EVENTS = ['status_autopilot.derived', 'status_autopilot.changed', 'status_autopilot.undone', 'import.node_updated', 'import.node_created', 'import.parent_changed', 'node.benefits_generated', 'node.created', 'node.updated', 'node.moved', 'node.kind_changed', 'node.project_moved', 'node.deleted', 'node.bulk_changed'] as const
 const CLOSED = 2
 
 // The node_changes of one stream event, in client shape.
@@ -97,11 +97,24 @@ async function fetchLive(id: string): Promise<WorkNode | null> {
   }
 }
 
+const aggregateHint = (change: NodeChange) => change.type === 'work.aggregates_changed'
+  || change.fields.includes('estimate') && change.fields.includes('planning')
+
+async function fetchAggregate(id: string): Promise<ListItem | null> {
+  try { return (await listNodes({ ids: [id], limit: 1 })).items[0] ?? null }
+  catch (error) {
+    if (error instanceof APIError && [403, 404, 410].includes(error.status)) return null
+    throw error
+  }
+}
+
 export interface LiveOptions {
   url?: string
   // Null when this environment has no EventSource: the store then stays off.
   open?: (url: string) => SourceLike | null
   fetchNode?: (id: string) => Promise<WorkNode | null>
+  // Aggregates include ETA/planning projections absent from GET /nodes/:id.
+  fetchAggregate?: (id: string) => Promise<ListItem | null>
   // How long the stream stays open after the last view leaves (switching tickets).
   graceMs?: number
   // Waits before reopening a stream the browser gave up on.
@@ -137,6 +150,7 @@ export class LiveNodeStore {
       url: '/api/events/stream',
       open: url => typeof EventSource === 'undefined' ? null : new EventSource(url) as unknown as SourceLike,
       fetchNode: fetchLive,
+      fetchAggregate,
       graceMs: 30_000,
       retryMs: [2_000, 5_000, 15_000, 30_000],
       refetchMs: [1_000, 3_000, 10_000, 30_000],
@@ -184,7 +198,7 @@ export class LiveNodeStore {
     }
     source.addEventListener('stream.ready', current(event => this.ready(event)))
     source.addEventListener('stream.ping', current(() => {}))
-    for (const name of [...NODE_EVENTS, ...TICKET_SESSION_EVENTS]) source.addEventListener(name, current(event => this.receive(event)))
+    for (const name of [...NODE_EVENTS, ...TICKET_SESSION_EVENTS, 'harness.usage_reported']) source.addEventListener(name, current(event => this.receive(event)))
     source.onerror = () => {
       if (this.source !== source) return
       // Distrust in-flight pages as soon as the stream is lost, including
@@ -253,6 +267,30 @@ export class LiveNodeStore {
   // Views that show the node get it refetched (or the store's copy when that
   // is at least as new); every other view learns of the change without a node.
   apply(change: NodeChange) {
+    const projects = new Set<string>()
+    if (change.projectId) projects.add(change.projectId)
+    const former = this.rows.latest(change.id)?.project?.id
+    if (former) projects.add(former)
+    const membership = change.change !== 'updated' || ['node.moved', 'node.project_moved', 'node.kind_changed', 'import.parent_changed'].includes(change.type)
+      || change.fields.some(field => ['parent_id', 'project_id', 'kind_id'].includes(field))
+    // A moved descendant need not have been loaded. The stream names only
+    // its destination, so no cached source means any held project may have
+    // lost it. Refresh held rows through their normal authorized reads.
+    const unknownSource = !former && (['node.moved', 'node.project_moved', 'import.parent_changed'].includes(change.type)
+      || change.fields.some(field => ['parent_id', 'project_id'].includes(field)))
+    const parents = this.rows.aggregateParents(unknownSource ? null : projects, membership || unknownSource)
+    this.applyOne(change)
+    // Parent status and revision can stay unchanged while leaf estimates,
+    // sessions, spend or membership change. These are projection hints only;
+    // lists batch them and the panel shares the existing causal read/retry path.
+    for (const parent of parents) {
+      if (parent.id === change.id) continue
+      this.applyOne({ ...change, id: parent.id, projectId: parent.project!.id,
+        type: 'work.aggregates_changed', actorId: '', change: 'updated', revision: null,
+        fields: ['eta', 'estimate', 'planning', 'children_count'] })
+    }
+  }
+  private applyOne(change: NodeChange) {
     // Older than what the store knows (a replay after a reconnect): the
     // views have that newer version or will get it with its own event.
     if (this.rows.note(change) === 'older') return
@@ -292,14 +330,15 @@ export class LiveNodeStore {
       if (!showing.length) { this.settled(id); return }
       if (this.rows.isDeleted(id)) { this.settled(id); return }
       const cached = this.rows.latest(id)
-      if (cached && this.rows.current(id) && compareRevision(cached.updated_at, dirty.change.revision) >= 0 && !this.rows.newer(id, cached.updated_at)) {
+      if (cached && !['status_autopilot.derived', 'import.parent_changed'].includes(dirty.change.type) && !aggregateHint(dirty.change) && this.rows.current(id) && compareRevision(cached.updated_at, dirty.change.revision) >= 0 && !this.rows.newer(id, cached.updated_at)) {
         this.settled(id)
         for (const view of showing) view.changed(dirty.change, cached)
         return
       }
       const sent = this.rows.mark()
-      let node: WorkNode | null
-      try { node = await this.options.fetchNode(id) }
+      const aggregate = aggregateHint(dirty.change)
+      let node: WorkNode | ListItem | null
+      try { node = aggregate ? await this.options.fetchAggregate(id) : await this.options.fetchNode(id) }
       catch { this.retry(id); return }
       // Sent before a gap: the answer may predate a change the stream missed,
       // so the store does not take it. The resync reads what views show, and
@@ -308,10 +347,12 @@ export class LiveNodeStore {
       // News after the request was sent (not this answer's own): the answer
       // may speak for an older state.
       const news = this.rows.touchedSince(id, sent)
-      if (node) this.rows.adoptNode(node, sent)
+      if (node && aggregate) this.rows.adopt(node as ListItem, sent)
+      else if (node) this.rows.adoptNode(node, sent)
       else this.rows.gone(id, sent)
-      if (news && (!node || this.rows.isDeleted(id) || this.rows.newer(id, node.updated_at))) continue
       const change = this.dirty.get(id)?.change
+      const projectionChanged = change && (['status_autopilot.derived', 'import.parent_changed'].includes(change.type) || aggregateHint(change))
+      if (news && (!node || this.rows.isDeleted(id) || this.rows.newer(id, node.updated_at) || projectionChanged)) continue
       if (!change) return
       this.settled(id)
       const copy = node && !this.rows.isDeleted(id) ? this.rows.latest(id) ?? null : null

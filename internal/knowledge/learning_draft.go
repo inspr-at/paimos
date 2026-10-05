@@ -105,10 +105,14 @@ func canonicalUUID(s string) bool {
 func (m *module) draftLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, layerID, setID string, confirm bool) (LearningDecision, error) {
 	var out LearningDecision
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		// Undo already holds this fence before taking the learning lock. Take
+		// it first here too, and recheck write access while it is held.
+		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
+			return err
+		}
 		if !canWrite(ctx, tx, p, "knowledge.write") {
 			return fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
 		}
-		// Learning lock first, then the rules tenant lock inside PrepareWrite.
 		if err := lockLearning(ctx, tx, p.TenantID, publicID); err != nil {
 			return err
 		}

@@ -1026,7 +1026,7 @@ func TestPairingExpiredReservationReleasesSlotAndAllowsOngoing(t *testing.T) {
 		t.Fatalf("expiry leaked reservation or invented process: %s %s held=%d started=%v claimed=%v expired=%v", state, holdState, held, started, claimed, expired)
 	}
 	retry := f.redeem(p)
-	if retry.Enrollments[0].VerificationState != "expired" || *retry.Enrollments[0].VerificationRunID != *e.VerificationRunID {
+	if retry.Enrollments[0].VerificationState != "expired" || !retry.Enrollments[0].VerificationExpiredReady || *retry.Enrollments[0].VerificationRunID != *e.VerificationRunID {
 		t.Fatal("expiry projection/retry binding wrong")
 	}
 	f.claim(v, e, key, ids, 409)

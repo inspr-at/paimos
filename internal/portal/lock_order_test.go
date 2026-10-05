@@ -4,6 +4,7 @@ package portal
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -18,12 +19,13 @@ import (
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// Pause the shipped pairing fence after tree acquisition, before tenant. Every
-// real writer must wait without owning tenant, so the pairing caller can finish.
+// Pause the pairing fence after tree acquisition, with tenant already held.
+// Every real writer must wait on tenant before taking its own resource locks.
 // PostgreSQL's wait graph proves overlap; deadlines only guard against hangs.
-func TestPortalWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
+func TestPortalWritesSerializeWithPairingTenantBeforeTree(t *testing.T) {
 	for _, name := range []string{
 		"portal-settings", "product-settings", "moderation", "market",
 		"node-create", "node-update", "node-terminal", "node-delete", "node-move", "node-bulk", "node-convert",
@@ -36,7 +38,7 @@ func TestPortalWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
 			product := insertNode(t, f.d, tid, "PPR-1", "portal_product", "Product", "summary", "published", "", "{}")
 			configureFixtureProduct(t, f.d, tid, product, "first", "legacy", true)
 			wish := insertNode(t, f.d, tid, "PWS-1", "portal_wish", "Wish", "summary", "published", product, "{}")
-			ticket := insertNode(t, f.d, tid, "TKT-1", "ticket", "Ticket", "", "open", "", "{}")
+			ticket := insertNode(t, f.d, tid, "TKT-1", "work", "Ticket", "", "open", "", "{}")
 			project := insertNode(t, f.d, tid, "PRJ-1", "project", "Project", "", "open", "", "{}")
 			setPortal(t, f.d, tid, true)
 			var kind string
@@ -47,7 +49,12 @@ func TestPortalWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
 				if _, err := tx.Exec(t.Context(), `INSERT INTO portal_competitors(tenant_id,product_id,name,published,position) VALUES($1,$2,'Northwind',true,1)`, tid, product); err != nil {
 					return err
 				}
-				return tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug='ticket'`).Scan(&kind)
+				if name == "node-convert" {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO node_kinds(tenant_id,slug,label,short_prefix,icon,field_schema) VALUES($1,'build','Build','BLD','task','{"type":"object","issue_family":true}')`, tid); err != nil {
+						return err
+					}
+				}
+				return tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE slug='work'`).Scan(&kind)
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -90,8 +97,8 @@ func TestPortalWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
 				method, path, body = "POST", "/api/nodes/bulk", fmt.Sprintf(`{"ids":[%q],"priority":"high"}`, ticket)
 				event, effect = "node.bulk_changed", `SELECT count(*) FROM nodes WHERE fields->>'priority'='high'`
 			case "node-convert":
-				method, path, body = "POST", "/api/nodes/"+ticket+"/convert", `{"to_kind":"task"}`
-				event, effect = "node.kind_changed", `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE k.slug='task'`
+				method, path, body = "POST", "/api/nodes/"+ticket+"/convert", `{"to_kind":"build"}`
+				event, effect = "node.kind_changed", `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE k.slug='build'`
 			case "wish-legacy", "wish-product":
 				person = false
 				method, path, body, status = "POST", base+"/wishes", `{"title":"New wish","summary":"New summary"}`, http.StatusCreated
@@ -142,8 +149,8 @@ func TestPortalWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
 				dbtest.Await(t, cleanup, done)
 				dbtest.Await(t, cleanup, pairedDone)
 			})
-			if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pid, done); lock != "advisory" {
-				t.Fatalf("writer must wait on the pairing/tree fence: lock=%q", lock)
+			if lock := dbtest.BlockedOrDone(t, ctx, f.d.Admin, pid, done); lock != "transactionid" {
+				t.Fatalf("writer must wait on the tenant access fence: lock=%q", lock)
 			}
 			probe, err := f.d.Admin.Begin(ctx)
 			if err != nil {
@@ -151,8 +158,9 @@ func TestPortalWritesSerializeWithPairingTreeBeforeTenant(t *testing.T) {
 			}
 			_, err = probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR UPDATE NOWAIT`, tid)
 			_ = probe.Rollback(ctx)
-			if err != nil {
-				t.Fatalf("tree waiter must leave tenant free: %v", err)
+			var pe *pgconn.PgError
+			if !errors.As(err, &pe) || pe.Code != "55P03" {
+				t.Fatalf("tenant fence must already be held: %v", err)
 			}
 			barrier.Release()
 			if err := dbtest.Await(t, ctx, paired); err != nil {

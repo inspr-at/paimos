@@ -5,6 +5,7 @@ import { api, type ListItem } from '../../lib/api'
 import { loadTicketKinds, placementPatch, placementSuggested, ticketKinds, type PlacementKind, type PlacementKindPage } from '../../lib/ticketPlacement'
 import type { SaveResult } from '../../lib/useTicket'
 import { useSession } from '../../stores/session'
+import { isWorkLeaf } from '../../lib/workVocabulary'
 
 const props = defineProps<{ item: ListItem; editable: boolean; save?: (fields: Record<string, unknown>) => Promise<SaveResult> }>()
 const session = useSession()
@@ -52,7 +53,7 @@ function choose(field: 'area' | 'complexity', event: Event) { void save(field, (
 </script>
 
 <template>
-  <template v-if="['ticket', 'task'].includes(item.kind_slug)">
+  <template v-if="isWorkLeaf(item)">
     <div class="prop placement-prop">
       <dt>Kind of work</dt>
       <dd>

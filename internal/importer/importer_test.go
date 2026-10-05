@@ -245,7 +245,7 @@ func TestAllClassicIssueKindsUseR1Nodes(t *testing.T) {
 	}
 	for _, kind := range kinds {
 		var count int
-		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM nodes n JOIN node_kinds k ON n.kind_id=k.id WHERE k.slug=$1`, kind).Scan(&count); err != nil {
+		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM nodes n JOIN node_kinds k ON n.kind_id=k.id WHERE k.slug=$1`, canonicalType(kind)).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count != 1 {

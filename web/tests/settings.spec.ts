@@ -25,7 +25,7 @@ test('the account menu opens Settings on Personal: theme, greeting and keys', as
   await page.getByRole('menuitem', { name: 'Personal settings' }).click()
   await expect(page).toHaveURL('/settings/personal')
   await expect(page).toHaveTitle(/^Settings · /)
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Developer/, /^Workspace/, /^Access/, /^Business/, /^Projects/, /^Product portal/])
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Access/, /^Business/, /^Projects/, /^Product portal/])
   await expect(sections(page).getByRole('link', { name: /^Personal/ })).toHaveAttribute('aria-current', 'page')
 
   await page.getByRole('radio', { name: 'Dark' }).click()
@@ -59,7 +59,7 @@ test('members see Personal and Developer; an admin section explains itself', asy
   await page.goto('/settings')
   await expect(page).toHaveURL('/settings/personal')
   // Members get both per-person settings sections.
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Developer/])
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/])
   await expect(page.getByRole('heading', { name: 'Greeting' })).toBeVisible()
   await page.goto('/settings/workspace')
   await expect(page.getByRole('heading', { name: 'Workspace settings are for workspace admins' })).toBeVisible()
@@ -133,7 +133,8 @@ test('Agents links admins to the agent keys', async ({ page }) => {
   await mockSettings(page, settingsData())
   await mockAccess(page, accessWorld())
   await page.goto('/agents')
-  await page.getByRole('link', { name: 'Agent keys' }).click()
+  await page.getByRole('button', { name: 'More agent actions', exact: true }).click()
+  await page.getByRole('menuitem', { name: /^Agent keys/ }).click()
   await expect(page).toHaveURL('/settings/access/agents')
   await expect(page.getByRole('list', { name: 'Agents' })).toContainText('aeon-coordinator')
 })

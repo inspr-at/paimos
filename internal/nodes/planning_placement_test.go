@@ -27,7 +27,7 @@ import (
 // normal estimate write would fill them with classifier suggestions instead.
 func placementNode(t *testing.T, w planningWorld, key string, fields map[string]any) nodeJSON {
 	t.Helper()
-	n := w.node(t, key, "ticket", w.root.ID, "open", nil)
+	n := w.node(t, key, "work", w.root.ID, "open", nil)
 	raw, err := json.Marshal(fields)
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
 		tickets = append(tickets, placementNode(t, w, fmt.Sprintf("LINK-%d", i+1), fields))
 	}
 	for i := range 5 {
-		n := w.node(t, fmt.Sprintf("GROKHIST-%d", i+1), "ticket", w.root.ID, "done", nil)
+		n := w.node(t, fmt.Sprintf("GROKHIST-%d", i+1), "work", w.root.ID, "done", nil)
 		w.session(t, n.ID, "grok", "grok-4.7", "high", "grok-4.7", 60, 1_000_000, 0, 0, "api", "")
 	}
 	if _, err := testDB.Admin.Exec(t.Context(), `UPDATE harness_sessions SET created_at='2026-09-30T12:00:00Z',stopped_at='2026-09-30T13:00:00Z' WHERE tenant_id=$1`, w.admin.TenantID); err != nil {
@@ -117,7 +117,7 @@ func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
 		t.Helper()
 		mux := http.NewServeMux()
 		New(appPool, nil).Mount(mux)
-		r := httptest.NewRequest("GET", "/api/nodes?within="+w.root.ID+"&kind=ticket&state=open&limit=100&sort="+order, nil)
+		r := httptest.NewRequest("GET", "/api/nodes?within="+w.root.ID+"&kind=work&state=open&limit=100&sort="+order, nil)
 		r = r.WithContext(agentaccounts.WithResidencyClassifier(tenant.WithPrincipal(r.Context(), p), evidence))
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, r)
@@ -196,7 +196,7 @@ func placementCalibration(t *testing.T, w planningWorld) {
 		if i >= 5 {
 			harness, model, effort, tokens = "claude", "opus", "high", 8_000_000
 		}
-		n := w.node(t, fmt.Sprintf("HISTORY-%d", i+1), "ticket", w.root.ID, "done", nil)
+		n := w.node(t, fmt.Sprintf("HISTORY-%d", i+1), "work", w.root.ID, "done", nil)
 		w.session(t, n.ID, harness, model, effort, model, 60, tokens, 0, 0, "api", "")
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
@@ -426,7 +426,7 @@ func TestTicketAreasAreProjectScopedAndSystemRowsStaySeparate(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		body := fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Area","fields":{"area":%q}}`, kindBySlug(t, w.admin, "ticket").ID, tc.project, tc.area)
+		body := fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Area","fields":{"area":%q}}`, kindBySlug(t, w.admin, "work").ID, tc.project, tc.area)
 		code, raw := call(t, &w.admin, "POST", "/api/nodes", body)
 		if tc.ok && code != 201 || !tc.ok && code != 400 {
 			t.Fatalf("area %+v: %d %s", tc, code, raw)
@@ -438,7 +438,7 @@ func TestTicketAreasAreProjectScopedAndSystemRowsStaySeparate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	code, _ := call(t, &w.admin, "POST", "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Archived","fields":{"area":"firmware"}}`, kindBySlug(t, w.admin, "ticket").ID, w.root.ID))
+	code, _ := call(t, &w.admin, "POST", "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Archived","fields":{"area":"firmware"}}`, kindBySlug(t, w.admin, "work").ID, w.root.ID))
 	if code != 400 {
 		t.Fatalf("archived area accepted: %d", code)
 	}

@@ -52,13 +52,16 @@ func newVisibilityFixture(t *testing.T, d *dbtest.DB, slug string) *visibilityFi
 			f.kinds[slug] = id
 		}
 		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Actor') RETURNING id::text`, f.tenant).Scan(&f.actor); err != nil {
 			return err
 		}
 		f.projectA = insertNode(ctx, t, tx, f, "project", "PA-1", nil)
 		f.projectB = insertNode(ctx, t, tx, f, "project", "PB-1", nil)
-		f.ticketA = insertNode(ctx, t, tx, f, "ticket", "TA-1", &f.projectA)
-		f.ticketB = insertNode(ctx, t, tx, f, "ticket", "TB-1", &f.projectB)
+		f.ticketA = insertNode(ctx, t, tx, f, "work", "TA-1", &f.projectA)
+		f.ticketB = insertNode(ctx, t, tx, f, "work", "TB-1", &f.projectB)
 		f.orgNode = insertNode(ctx, t, tx, f, "organisation", "ORG-1", nil)
 		if _, err := tx.Exec(ctx, `INSERT INTO node_relations(tenant_id,source_node_id,target_node_id,type) VALUES($1,$2,$3,'blocks')`, f.tenant, f.ticketA, f.ticketB); err != nil {
 			return err
@@ -82,8 +85,12 @@ func newVisibilityFixture(t *testing.T, d *dbtest.DB, slug string) *visibilityFi
 
 func insertNode(ctx context.Context, t *testing.T, tx pgx.Tx, f *visibilityFixture, kind, key string, parent *string) string {
 	t.Helper()
+	kindID, ok := f.kinds[kind]
+	if !ok || kindID == "" {
+		t.Fatalf("insert %s: missing fixture kind %q", key, kind)
+	}
 	var id string
-	if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) VALUES($1,$2,$3,$3,$4) RETURNING id::text`, f.tenant, f.kinds[kind], key, parent).Scan(&id); err != nil {
+	if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) VALUES($1,$2,$3,$3,$4) RETURNING id::text`, f.tenant, kindID, key, parent).Scan(&id); err != nil {
 		t.Fatalf("insert %s: %v", key, err)
 	}
 	return id
@@ -146,7 +153,7 @@ func TestProjectVisibilityFailsClosed(t *testing.T) {
 
 	// Writes fail closed too: nothing can be created or changed unseen.
 	err := db.InTenant(ctx, d.App, f.tenant, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) VALUES($1,$2,'TA-2','x',$3)`, f.tenant, f.kinds["ticket"], f.projectA)
+		_, err := tx.Exec(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) VALUES($1,$2,'TA-2','x',$3)`, f.tenant, f.kinds["work"], f.projectA)
 		return err
 	})
 	if err == nil || !strings.Contains(err.Error(), "42501") && !strings.Contains(err.Error(), "parent node does not exist") {
@@ -206,10 +213,10 @@ func TestNodeProjectRootFollowsMoves(t *testing.T) {
 		return *project
 	}
 	err := db.InTenant(ctx, d.App, f.tenant, func(tx pgx.Tx) error {
-		epic := insertNode(ctx, t, tx, f, "epic", "EA-1", &f.projectA)
-		ticket := insertNode(ctx, t, tx, f, "ticket", "TA-9", &epic)
-		task := insertNode(ctx, t, tx, f, "task", "KA-9", &ticket)
-		deleted := insertNode(ctx, t, tx, f, "task", "KA-10", &ticket)
+		epic := insertNode(ctx, t, tx, f, "work", "EA-1", &f.projectA)
+		ticket := insertNode(ctx, t, tx, f, "work", "TA-9", &epic)
+		task := insertNode(ctx, t, tx, f, "work", "KA-9", &ticket)
+		deleted := insertNode(ctx, t, tx, f, "work", "KA-10", &ticket)
 		if _, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=now() WHERE id=$1`, deleted); err != nil {
 			return err
 		}
@@ -254,7 +261,7 @@ func TestNodeProjectRootFollowsMoves(t *testing.T) {
 		}
 		// A nested project is its own project; moving its parent leaves it.
 		nested := insertNode(ctx, t, tx, f, "project", "PN-1", &epic)
-		inner := insertNode(ctx, t, tx, f, "ticket", "TN-1", &nested)
+		inner := insertNode(ctx, t, tx, f, "work", "TN-1", &nested)
 		if projectOf(tx, nested) != nested || projectOf(tx, inner) != nested {
 			t.Fatal("nested project does not own its subtree")
 		}
@@ -272,7 +279,7 @@ func TestNodeProjectRootFollowsMoves(t *testing.T) {
 		if projectOf(tx, ticket) != ticket || projectOf(tx, task) != ticket {
 			t.Fatal("kind change to project did not cascade")
 		}
-		if _, err := tx.Exec(ctx, `UPDATE nodes SET kind_id=$1 WHERE id=$2`, f.kinds["ticket"], ticket); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET kind_id=$1 WHERE id=$2`, f.kinds["work"], ticket); err != nil {
 			return err
 		}
 		if projectOf(tx, ticket) != f.projectA || projectOf(tx, task) != f.projectA {
@@ -609,10 +616,10 @@ func TestEventReferencesByValue(t *testing.T) {
 	ctx := t.Context()
 	var relA, relB, relB2, gone string
 	err := db.InTenant(dbtest.Seed(ctx), d.App, f.tenant, func(tx pgx.Tx) error {
-		relA = insertNode(ctx, t, tx, f, "ticket", "RA-1", &f.projectA)
-		relB = insertNode(ctx, t, tx, f, "ticket", "RB-1", &f.projectB)
-		relB2 = insertNode(ctx, t, tx, f, "ticket", "RB-2", &f.projectB)
-		gone = insertNode(ctx, t, tx, f, "ticket", "DB-1", &f.projectB)
+		relA = insertNode(ctx, t, tx, f, "work", "RA-1", &f.projectA)
+		relB = insertNode(ctx, t, tx, f, "work", "RB-1", &f.projectB)
+		relB2 = insertNode(ctx, t, tx, f, "work", "RB-2", &f.projectB)
+		gone = insertNode(ctx, t, tx, f, "work", "DB-1", &f.projectB)
 		return nil
 	})
 	if err != nil {
@@ -798,5 +805,31 @@ func buryValue(rng *rand.Rand, key string, value any, depth int) any {
 		return map[string]any{"slot_" + fmt.Sprint(rng.IntN(10000)): buryValue(rng, key, value, depth-1)}
 	default:
 		return map[string]any{"wrap": buryValue(rng, key, value, depth-1), "note": "plain"}
+	}
+}
+
+// A revocation can commit between initial visibility setup and the request's
+// authorization fence. The final handler must see the post-fence project set.
+func TestTenantGuardRefreshesVisibilityAfterRevocation(t *testing.T) {
+	d := dbtest.Open(t)
+	f := newVisibilityFixture(t, d, "guard-visibility")
+	if _, err := d.Admin.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='guest'`, f.tenant, f.actor, f.projectA); err != nil {
+		t.Fatal(err)
+	}
+	ctx := tenant.WithPrincipal(t.Context(), tenant.Principal{ID: f.actor, TenantID: f.tenant, Kind: tenant.Person})
+	if countVisible(t, ctx, f).nodes != 2 {
+		t.Fatal("project grant fixture is not visible")
+	}
+	ctx = db.WithTenantGuard(ctx, func(ctx context.Context, tx pgx.Tx, tid string) error {
+		// This is the deterministic interleaving point, after enterTenant and before
+		// the fence is acquired. Commit the revocation on a separate connection.
+		if _, err := d.Admin.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, tid, f.actor); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, tid)
+		return err
+	})
+	if got := countVisible(t, ctx, f); got.nodes != 0 || got.attachments != 0 || got.nodeEvents != 0 {
+		t.Fatalf("stale project access after guard: %+v", got)
 	}
 }

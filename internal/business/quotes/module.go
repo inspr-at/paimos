@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/plugins/fence"
@@ -59,7 +60,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/quotes", m.list)
 	mux.HandleFunc("POST /api/quotes", m.create)
 	mux.HandleFunc("GET /api/quotes/{quoteId}", m.get)
-	mux.HandleFunc("DELETE /api/quotes/{quoteId}", m.remove)
+	mux.HandleFunc("DELETE /api/quotes/{quoteId}", events.WithMutationReceipt(m.remove))
 	mux.HandleFunc("GET /api/quotes/settings", m.settingsGet)
 	mux.HandleFunc("PATCH /api/quotes/settings", m.settingsPatch)
 	mux.HandleFunc("GET /api/quote-profiles", m.profileList)
@@ -75,8 +76,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PATCH /api/quotes/{quoteId}/draft", m.draftPatch)
 	mux.HandleFunc("POST /api/quotes/{quoteId}/draft/branch", m.branchDraft)
 	mux.HandleFunc("POST /api/quotes/{quoteId}/finalize", m.finalize)
-	mux.HandleFunc("POST /api/quotes/{quoteId}/duplicate", m.duplicate)
-	mux.HandleFunc("PATCH /api/quotes/{quoteId}/visibility", m.visibility)
+	mux.HandleFunc("POST /api/quotes/{quoteId}/duplicate", events.WithMutationReceipt(m.duplicate))
+	mux.HandleFunc("PATCH /api/quotes/{quoteId}/visibility", events.WithMutationReceipt(m.visibility))
 	mux.HandleFunc("GET /api/quotes/{quoteId}/versions", m.versions)
 	mux.HandleFunc("POST /api/quotes/{quoteId}/versions", m.freeze)
 	mux.HandleFunc("GET /api/quotes/{quoteId}/versions/{version}", m.version)

@@ -12,12 +12,14 @@ import (
 // Trigger is deliberately a bounded RFC 5545 subset. Unsupported rule parts
 // fail validation rather than silently changing the user's schedule.
 type Trigger struct {
-	Kind      string `json:"kind"`
-	RRULE     string `json:"rrule,omitempty"`
-	TimeOfDay string `json:"time_of_day,omitempty"`
-	Timezone  string `json:"timezone,omitempty"`
-	StartDate string `json:"start_date,omitempty"`
-	Event     string `json:"event,omitempty"`
+	Kind          string `json:"kind"`
+	RRULE         string `json:"rrule,omitempty"`
+	TimeOfDay     string `json:"time_of_day,omitempty"`
+	Timezone      string `json:"timezone,omitempty"`
+	StartDate     string `json:"start_date,omitempty"`
+	Event         string `json:"event,omitempty"`
+	EventStart    string `json:"event_start,omitempty"`
+	EventTimezone string `json:"event_timezone,omitempty"`
 }
 type schedule struct {
 	location     *time.Location
@@ -32,7 +34,7 @@ type schedule struct {
 var weekdays = map[string]time.Weekday{"SU": time.Sunday, "MO": time.Monday, "TU": time.Tuesday, "WE": time.Wednesday, "TH": time.Thursday, "FR": time.Friday, "SA": time.Saturday}
 
 func parseSchedule(t Trigger) (*schedule, error) {
-	if t.Kind != "time" || t.Event != "" || len(t.RRULE) > 256 || len(t.Timezone) > 128 || t.Timezone == "Local" || t.Timezone == "" {
+	if t.Kind != "time" || t.Event != "" || t.EventStart != "" || t.EventTimezone != "" || len(t.RRULE) > 256 || len(t.Timezone) > 128 || t.Timezone == "Local" || t.Timezone == "" {
 		return nil, fmt.Errorf("time trigger requires an RRULE, HH:MM and IANA timezone")
 	}
 	loc, err := time.LoadLocation(t.Timezone)

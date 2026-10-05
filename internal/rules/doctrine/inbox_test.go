@@ -62,7 +62,7 @@ func inboxTicket(t *testing.T, f doctrineFixture, p tenant.Principal) string {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'INB-1','Inbox fixtures' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING nodes.id::text`, p.TenantID).Scan(&project); err != nil {
 			return err
 		}
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'INB-2','Estimate before work',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING nodes.id::text`, p.TenantID, project).Scan(&ticket)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'INB-2','Estimate before work',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING nodes.id::text`, p.TenantID, project).Scan(&ticket)
 	})
 	if err != nil {
 		t.Fatal(err)

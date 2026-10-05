@@ -48,7 +48,7 @@ func TestPublicPortalBoundary(t *testing.T) {
 	insertNode(t, d, tenantA, "PWS-1", "portal_wish", "A public wish", "Join without an account.", "published", productA, "{}")
 	insertNode(t, d, tenantA, "PWS-2", "portal_wish", "SECRET-PENDING-A", "still in review", "pending", productA, "{}")
 	insertNode(t, d, tenantA, "PWS-9", "portal_wish", "ORPHAN-WISH", "no product", "published", "", "{}")
-	insertNode(t, d, tenantA, "TKT-1", "ticket", "SECRET-TICKET-A", "SECRET-TICKET-BODY", "open", "", "{}")
+	insertNode(t, d, tenantA, "TKT-1", "work", "SECRET-TICKET-A", "SECRET-TICKET-BODY", "open", "", "{}")
 	insertNode(t, d, tenantB, "PPR-1", "portal_product", "OTHER-TENANT-PRODUCT", "other summary", "published", "", "{}")
 	insertNode(t, d, tenantC, "PPR-1", "portal_product", "SHOULD-STAY-HIDDEN", "closed summary", "published", "", "{}")
 	setPortal(t, d, tenantB, true)

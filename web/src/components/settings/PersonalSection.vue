@@ -13,8 +13,10 @@ import KeyCap from '../KeyCap.vue'
 import ProfileCard from './ProfileCard.vue'
 import SettingsCard from './SettingsCard.vue'
 import AgentIndicatorSettings from './AgentIndicatorSettings.vue'
+import AgentPauseSettings from './AgentPauseSettings.vue'
 import GraphMotionSettings from './GraphMotionSettings.vue'
 import SessionWatchingSettings from './SessionWatchingSettings.vue'
+import PhoneApprovalSettings from './PhoneApprovalSettings.vue'
 import { useSession } from '../../stores/session'
 import { can } from '../../lib/authz'
 
@@ -81,6 +83,10 @@ const KEYS: { keys: string[][]; label: string }[] = [
       <SessionWatchingSettings :key="`${session.identity?.tenant.id}/${session.identity?.principal.id}`" />
     </SettingsCard>
 
+    <SettingsCard v-if="session.identity?.principal.kind === 'person' && can('profile.read')" title="Phone approvals" icon="shield" anchor="phone-approvals">
+      <PhoneApprovalSettings :key="`${session.identity?.tenant.id}/${session.identity?.principal.id}`" />
+    </SettingsCard>
+
     <SettingsCard v-if="profile || profileError" title="Appearance" icon="sun" anchor="appearance">
       <template #lead>Light, dark, or whatever your system uses. Saved to your account, so it stays after a reload and on your other devices.</template>
       <template #aside>
@@ -94,7 +100,8 @@ const KEYS: { keys: string[][]; label: string }[] = [
     </SettingsCard>
 
     <SettingsCard v-if="profile || profileError" title="Agents" icon="agent" anchor="agents">
-      <template #lead>Your indicator style, state palette, heartbeat warnings and how estimates are shown.</template>
+      <template #lead>Heartbeat warnings and how estimates are shown. Agent appearance is in Theme.</template>
+      <AgentPauseSettings />
       <AgentIndicatorSettings />
       <div class="eta-display">
         <span id="eta-display-label">Estimates show as</span>

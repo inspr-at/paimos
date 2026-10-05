@@ -16,6 +16,7 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/inspr-at/paimos/internal/workqueue"
+	"github.com/inspr-at/paimos/internal/workstate"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -104,12 +105,15 @@ func (m *Module) runNow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var in struct {
-		Key string `json:"idempotency_key"`
+		Key        string `json:"idempotency_key"`
+		Revision   int64  `json:"expected_revision"`
+		Force      bool   `json:"force_overlap"`
+		ReleaseKey string `json:"release_key"`
 	}
 	if !decode(w, r, &in) {
 		return
 	}
-	if strings.TrimSpace(in.Key) == "" || len(in.Key) > 128 {
+	if strings.TrimSpace(in.Key) == "" || len(in.Key) > 128 || len(in.ReleaseKey) > 256 || in.Revision < 0 {
 		httpError(w, 400, "idempotency_key must be 1..128 bytes")
 		return
 	}
@@ -142,11 +146,41 @@ func (m *Module) runNow(w http.ResponseWriter, r *http.Request) {
 		if err = authorizeDefinition(r.Context(), tx, p, item.Input); err != nil {
 			return err
 		}
+		if in.Revision != 0 && in.Revision != item.Revision {
+			return workorders.Fail(409, "recurrence revision changed")
+		}
 		now, err := m.clock(r.Context(), tx)
 		if err != nil {
 			return err
 		}
-		out, err = occur(r.Context(), tx, actor, item, "manual:"+in.Key, now, nil, "", "")
+		key, name, version := "manual:"+in.Key, "", ""
+		if in.ReleaseKey != "" {
+			if item.Trigger.Kind != "event" {
+				return workorders.Fail(400, "release_key requires an event trigger")
+			}
+			choices, _, err := m.releases(r.Context(), tx, item, now)
+			if err != nil {
+				return err
+			}
+			found := false
+			for _, choice := range choices {
+				if choice.Key == in.ReleaseKey {
+					found = true
+					if choice.Receipt != nil {
+						out = choice.Receipt.Occurrence
+						return nil
+					}
+					key = "release:" + choice.Key
+					name = choice.Name
+					version = choice.Version
+					break
+				}
+			}
+			if !found {
+				return workorders.Fail(404, "published release not found")
+			}
+		}
+		out, err = occur(r.Context(), tx, actor, item, key, now, nil, name, version, in.Force)
 		return err
 	})
 	reply(w, 200, out, err)
@@ -158,7 +192,13 @@ func httpError(w http.ResponseWriter, status int, message string) {
 // occur takes no event lock until all the ticket, receipt, order and run writes
 // have finished. A failure rolls the entire transaction back; the durable key
 // and count are committed atomically, including overlap skips.
-func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence, key string, at time.Time, eventID *int64, name, version string) (Occurrence, error) {
+func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence, key string, at time.Time, eventID *int64, name, version string, forceOverlap ...bool) (Occurrence, error) {
+	// Normalize historical definitions defensively as well as migrating storage.
+	switch r.Template.Type {
+	case "epic", "ticket", "task":
+		r.Template.Type = "work"
+	}
+
 	existing, err := scanOccurrence(tx.QueryRow(ctx, `SELECT `+occurrenceColumns+` FROM recurrence_occurrences WHERE recurrence_id=$1 AND occurrence_key=$2`, r.ID, key))
 	if err == nil {
 		return existing, nil
@@ -181,9 +221,15 @@ func occur(ctx context.Context, tx pgx.Tx, actor tenant.Principal, r Recurrence,
 	if err != nil {
 		return Occurrence{}, err
 	}
-	if reason == "" && r.OverlapPolicy == "skip" {
+	// The locked reload replaces the earlier normalized copy.
+	switch r.Template.Type {
+	case "epic", "ticket", "task":
+		r.Template.Type = "work"
+	}
+	if reason == "" && r.OverlapPolicy == "skip" && !(len(forceOverlap) > 0 && forceOverlap[0]) {
 		var open bool
-		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM recurrence_occurrences o JOIN nodes n ON n.tenant_id=o.tenant_id AND n.id=o.node_id WHERE o.recurrence_id=$1 AND n.deleted_at IS NULL AND regexp_replace(lower(btrim(n.state)),'[[:space:]-]+','_','g') NOT IN ('done','cancelled','canceled','archived','delivered','accepted'))`, r.ID).Scan(&open)
+		cte, join, predicate := workstate.ReadSQL("n", "cfg")
+		err = tx.QueryRow(ctx, `WITH `+cte+` SELECT EXISTS(SELECT 1 FROM recurrence_occurrences o JOIN nodes n ON n.tenant_id=o.tenant_id AND n.id=o.node_id`+join+` WHERE o.recurrence_id=$1 AND n.deleted_at IS NULL AND `+predicate+`)`, r.ID).Scan(&open)
 		if err != nil {
 			return Occurrence{}, err
 		}

@@ -450,7 +450,7 @@ func (w *batchWorld) task() string {
 	w.t.Helper()
 	var id string
 	err := db.InTenant(dbtest.Seed(w.t.Context()), w.d.App, w.tid, func(tx pgx.Tx) error {
-		return tx.QueryRow(w.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'RBT-1','A task',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='task' RETURNING id::text`, w.tid, w.project).Scan(&id)
+		return tx.QueryRow(w.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'RBT-1','A task',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, w.tid, w.project).Scan(&id)
 	})
 	if err != nil {
 		w.t.Fatal(err)
@@ -751,16 +751,17 @@ func TestRulesPublishDoesNotDeadlockWithAForeignKeyReference(t *testing.T) {
 	}
 }
 
-// The demotion guard relies on access changes locking the tenant row FOR
-// UPDATE, which conflicts with the NO KEY UPDATE taken by rules writes.
-func TestAccessChangesStillLockTheTenantForUpdate(t *testing.T) {
+// Both UPDATE and NO KEY UPDATE fences conflict with the NO KEY UPDATE taken
+// by rules writes. The project mutation order is exercised with real waits.
+func TestAccessChangesStillFenceTheTenant(t *testing.T) {
 	for _, file := range []string{"../authz/module.go", "../authz/project_members.go"} {
 		src, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(string(src), "FROM tenants WHERE id=$1::uuid FOR UPDATE") {
-			t.Fatalf("%s no longer locks the tenant row FOR UPDATE; revisit rules lockAccess", file)
+		if !strings.Contains(string(src), "FROM tenants WHERE id=$1::uuid FOR UPDATE") &&
+			!strings.Contains(string(src), "FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE") {
+			t.Fatalf("%s no longer fences the tenant row; revisit rules lockAccess", file)
 		}
 	}
 }

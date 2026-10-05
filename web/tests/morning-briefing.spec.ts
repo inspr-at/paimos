@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
+import { mkdirSync } from 'node:fs'
+import { expectStableControls } from './helpers/stable'
 import { setupUsage, NOW } from './usage-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { watchErrors } from './work-fixtures'
@@ -10,7 +12,7 @@ const AT = new Date(NOW - 3600_000).toISOString()
 const uuid = '45400000-0000-4000-8000-000000000001'
 const outcome = (id: string, kind: string, payload: Record<string, unknown>) => ({ id, kind, ticket_node_id: 'n-a1', ticket_key: 'AEON-1', project_id: 'p-aeon', session_id: null, rules_version: null, release_title: null, payload, recorded_at: AT })
 test.use({ timezoneId: 'Europe/Vienna' })
-async function setup(page: Page, options: { failure?: boolean; noCost?: boolean; dark?: boolean; empty?: boolean; slow?: boolean; autopilot?: boolean; autopilotFailure?: boolean; permissionFailure?: 'workspace' | 'project' } = {}) {
+async function setup(page: Page, options: { canonical?: boolean; failure?: boolean; noCost?: boolean; dark?: boolean; empty?: boolean; slow?: boolean; autopilot?: boolean; autopilotFailure?: boolean; permissionFailure?: 'workspace' | 'project' } = {}) {
   await setupUsage(page, { variant: 'reported', theme: options.dark ? 'dark' : 'light' })
   const writes: Record<string, unknown>[] = []
   let preference: Record<string, unknown> = { time: '08:00', last_visit: START }
@@ -28,10 +30,10 @@ async function setup(page: Page, options: { failure?: boolean; noCost?: boolean;
   })
   await page.route('**/api/nodes?**', route => {
     const ids = new URL(route.request().url()).searchParams.get('ids')?.split(',') ?? []
-    if (!ids.includes('work-1')) return route.fallback()
+    if (!ids.includes('work-1') && !(options.canonical && ids.includes('n-a1'))) return route.fallback()
     const rows = [
-      { id: 'work-1', key: 'WO-454', kind_slug: 'work_order', parent: { id: 'n-a1', key: 'AEON-1', title: 'Aeon foundation', kind_slug: 'ticket' } },
-      { id: 'n-a1', key: 'AEON-1', kind_slug: 'ticket', parent: null },
+      { id: 'work-1', key: 'WO-454', kind_slug: 'work_order', parent: { id: 'n-a1', key: 'AEON-1', title: 'Aeon foundation', kind_slug: options.canonical ? 'work' : 'ticket' } },
+      { id: 'n-a1', key: 'AEON-1', kind_slug: options.canonical ? 'work' : 'ticket', is_leaf: true, parent: null },
     ].filter(n => ids.includes(n.id)).map(n => ({ ...n, project: { id: 'p-aeon', key: 'PRJ-35', title: 'Aeon' }, fields: {}, title: n.key, state: 'done', created_at: AT, updated_at: AT }))
     return route.fulfill({ json: { items: rows, next_cursor: null } })
   })
@@ -242,3 +244,22 @@ test('leaving during a slow source read never advances the visit marker', async 
   expect(data.writes).toEqual([])
   expect(data.preference().last_visit).toBe(START)
 })
+
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`canonical work briefing keeps human checks and linked order facts at ${width}px ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const data = await setup(page, { canonical: true, autopilot: true, dark: theme === 'dark' })
+    await page.goto('/briefing')
+    await expect(page.getByRole('link', { name: 'AEON-1 · Marked delivered' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'AEON-1 · Human check', exact: true })).toHaveAttribute('href', '/p/AEON/AEON-1')
+    await expect(page.getByRole('link', { name: 'AEON-1 · Merge reported' })).toBeVisible()
+    await expect.poll(() => data.writes.length).toBe(1)
+    const reminder = page.getByLabel('Daily reminder at'), refresh = page.getByRole('button', { name: 'Refresh', exact: true })
+    await expectStableControls({ controls: { reminder, refresh }, interactions: [{ name: 'change reminder', run: async () => {
+      await reminder.fill('09:30'); await reminder.blur(); await expect.poll(() => data.preference().time).toBe('09:30'); await expect(refresh).toBeEnabled()
+    } }] })
+    mkdirSync('test-results/aeon-648-int-fix2', { recursive: true })
+    await page.screenshot({ path: `test-results/aeon-648-int-fix2/briefing-${width}-${theme}.png`, fullPage: true })
+  })
+}

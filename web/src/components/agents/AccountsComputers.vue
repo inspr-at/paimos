@@ -1,5 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { useRoute } from 'vue-router'
+import { api } from '../../lib/api'
 import { openModelPrefs } from '../../lib/modelPrefsCommand'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { can } from '../../lib/authz'
@@ -30,6 +32,7 @@ import ScheduleEditor from './ScheduleEditor.vue'
 // accounts nested inside, each with one readiness state and capacity only as
 // measured. Pacing collapses into one summary button with the existing
 // editors; destructive actions live in the row menus.
+const route = useRoute()
 const props = defineProps<{ permissions: PairingPermissions; showAccounts: boolean }>()
 const capacity = useCapacity()
 const agents = useAgents()
@@ -47,8 +50,15 @@ const layoutPref = usePreference<{ setupFolded?: boolean }>('agents-page')
 // The stored choice decides before the cards first show: no flash of a folded panel.
 const layoutReady = ref(false)
 void layoutPref.ready.then(() => { layoutReady.value = true })
-const folded = computed(() => !!layoutPref.value.value?.setupFolded)
-function toggleFold() { layoutPref.save({ ...(layoutPref.value.value ?? {}), setupFolded: !folded.value }, 0) }
+// Reveal each new approval link once; an explicit Fold wins while it stays open.
+const revealVerification = ref(!!route.query.verify_account)
+watch(() => route.query.verify_account, account => { revealVerification.value = !!account })
+const folded = computed(() => !!layoutPref.value.value?.setupFolded && !revealVerification.value)
+function toggleFold() {
+  const setupFolded = !folded.value
+  revealVerification.value = false
+  layoutPref.save({ ...(layoutPref.value.value ?? {}), setupFolded }, 0)
+}
 
 // ---------- Cards ----------
 const rows = computed(() => (props.showAccounts ? capacity.rows : []))
@@ -57,6 +67,41 @@ const summary = computed(() => readySummary(cards.value))
 const pacingLine = computed(() => pacingSummary(schedule.value))
 const empty = computed(() => capacity.loaded && !cards.value.length)
 const shown = (line: AccountLine) => middleEllipsis(line.identity, 48)
+
+// Owner-approved checks retain the row identity through both the write and refresh.
+const verifying = ref('')
+const identityKey = computed(() => `${session.identity?.tenant.id ?? ''}/${session.identity?.principal.id ?? ''}`)
+watch(identityKey, () => { verifying.value = ''; revealVerification.value = !!route.query.verify_account })
+const enrollmentOf = (line: AccountLine, card: ComputerCard) => card.computer?.enrollments.find(e => e.account_id === line.id)
+function canVerify(line: AccountLine, card: ComputerCard) {
+  const e = enrollmentOf(line, card)
+  return mayManage.value && card.computer?.computer_state === 'connected' && e?.state === 'connected' && e.can_verify === true
+    && card.computer.verification_capabilities?.[line.harness]?.supported === true
+}
+function verifyBusy(line: AccountLine, card: ComputerCard) {
+  return !!verifying.value || ['starting', 'running', 'waiting', 'ownership_lost'].includes(enrollmentOf(line, card)?.verification_state ?? '')
+}
+async function verifyAgain(line: AccountLine, card: ComputerCard) {
+  if (!canVerify(line, card) || verifyBusy(line, card)) return
+  const c = card.computer!, e = enrollmentOf(line, card)!
+  const owner = identityKey.value, account = line.id, computer = c.computer_id, revision = c.revision, priorRun = e.verification_run_id
+  if (!computer || !revision) return
+  verifying.value = account
+  try {
+    const response = await api(`/agent-pairing/computers/${computer}/enrollments/${account}/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: revision, expected_verification_run_id: priorRun }) })
+    if (!response.ok) throw new Error(response.status === 403 ? 'Only the account owner may verify it again.' : response.status === 409 ? 'The account or verification changed. Refresh before verifying again.' : 'Verification could not be requested. Please try again.')
+    const created = await response.json() as { account_id?: string; run_id?: string }
+    if (created.account_id !== account || typeof created.run_id !== 'string') throw new Error('Verification response could not be confirmed. Refresh the account list.')
+    const current = cards.value.find(card => card.computer?.computer_id === computer)?.computer
+    const currentEnrollment = current?.enrollments.find(e => e.account_id === account)
+    if (identityKey.value !== owner || current?.revision !== revision || !currentEnrollment?.can_verify || ![priorRun, created.run_id].includes(currentEnrollment.verification_run_id)) return
+    toast(`Verification requested for ${line.vendor} on ${card.name}.`)
+    const result = await capacity.refreshComputers()
+    if (identityKey.value === owner && !result.ok) toast('Verification was queued, but the account list could not refresh.', { tone: 'error' })
+  } catch (error) {
+    if (identityKey.value === owner) toast(error instanceof Error ? error.message : 'Verification could not be requested.', { tone: 'error' })
+  } finally { if (identityKey.value === owner) verifying.value = '' }
+}
 
 // ---------- Check now: read capacity again; say what came back, a failure as a failure ----------
 const checking = ref('')
@@ -419,7 +464,10 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
               </div>
             </div>
             <div role="cell" class="acct-ready">
-              <span class="pill" :class="line.readiness.tone" :data-tip="line.readiness.tip"><span class="dot" aria-hidden="true" />{{ line.readiness.text }}</span>
+              <div class="readiness-actions">
+                <button v-if="canVerify(line, card)" type="button" class="verify-again" :disabled="verifyBusy(line, card)" :aria-busy="verifying === line.id" :data-requested="route.query.verify_account === line.id || undefined" @click="verifyAgain(line, card)">Verify again</button>
+                <span class="pill" :class="line.readiness.tone" :data-tip="line.readiness.tip"><span class="dot" aria-hidden="true" />{{ line.readiness.text }}</span>
+              </div>
               <button v-if="line.readiness.command" type="button" class="fix" :data-tip="`Copies ${line.readiness.command} to run on ${card.name}`" @click="copy(line.readiness.command, card.name)"><AppIcon name="copy" :size="13" />{{ line.readiness.command }}</button>
               <p v-if="line.readiness.hint" class="r-hint">{{ line.readiness.hint }}</p>
             </div>
@@ -540,9 +588,15 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 </template>
 
 <style scoped>
+.readiness-actions { align-self: flex-start; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.verify-again { font: inherit; font-size: 12px; padding: .35em .6em; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; }
+@media (pointer: coarse) { .verify-again { min-height: 44px; } }
+.verify-again:disabled { cursor: default; opacity: .6; }
+.verify-again[data-requested] { outline: 1px solid var(--ink-3); outline-offset: 2px; }
 .computer-confirmation { margin: 0; padding: 0 16px 12px; color: var(--ink-2); font-size: 12px; }
 .ac { position: relative; display: grid; gap: 14px; min-width: 0; z-index: 3; container: ac / inline-size; }
-.ac-head { display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap; min-width: 0; }
+/* Folding removes the taller actions; keep the title controls anchored at the top. */
+.ac-head { display: flex; align-items: flex-start; gap: 10px 12px; flex-wrap: wrap; min-width: 0; }
 .ac-title { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; min-width: 0; }
 .ac-title h2 { font: 700 21px/1.2 var(--font); letter-spacing: -.015em; color: var(--ink); }
 .ac-title h2:focus { outline: none; }
@@ -618,7 +672,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 
 /* ---------- Its accounts ---------- */
 .accts { margin-top: 14px; }
-.acct { display: grid; grid-template-columns: minmax(0, 280px) 210px minmax(0, 1fr) 36px; align-items: center; gap: 20px; padding: 14px 4px; border-top: 1px solid var(--line); min-width: 0; }
+.acct { display: grid; grid-template-columns: minmax(0, 280px) 210px minmax(0, 1fr) 36px; align-items: start; gap: 20px; padding: 14px 4px; border-top: 1px solid var(--line); min-width: 0; }
 .acct-who { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .vendor { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 11px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); }
 .who-text { min-width: 0; }
@@ -695,6 +749,8 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
   .acct { grid-template-columns: minmax(0, 1fr) auto 36px; grid-template-areas: "who ready more" "cap cap cap"; gap: 10px 14px; }
   .acct-who { grid-area: who; }
   .acct-ready { grid-area: ready; align-items: flex-end; }
+  /* The auto column grows leftward with its status; anchor the action at its right edge. */
+  .readiness-actions { align-self: flex-end; align-items: flex-end; }
   .acct-cap { grid-area: cap; padding-left: 48px; }
   .row-more { grid-area: more; }
 }
@@ -711,6 +767,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
   .notice { margin-top: 12px; }
   .acct { grid-template-columns: minmax(0, 1fr) 40px; grid-template-areas: "who more" "ready ready" "cap cap"; gap: 10px; padding: 14px 0; }
   .acct-ready { align-items: flex-start; }
+  .readiness-actions { align-self: flex-start; align-items: flex-start; }
   .acct-cap { padding-left: 0; }
   .more { width: 44px; height: 44px; }
   .legend-row .fine { width: 100%; margin-left: 0; }

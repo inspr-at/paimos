@@ -105,13 +105,16 @@ describe('per-person Display preference persistence', () => {
     })
     vi.stubGlobal('fetch', fetch)
     try {
+      const { setPreferenceOwner } = await import('../src/lib/preferences')
+      setPreferenceOwner({ tenant: { id: 'test-tenant' }, principal: { id: 'test-person' } })
       const { useModelDisplay } = await import('../src/lib/prefs')
       const prefs = useModelDisplay(); await prefs.ready
       expect(prefs.modelDisplay.value).toEqual(DEFAULT_MODEL_DISPLAY)
       prefs.set('effortMeter', false); prefs.set('modelNames', 'full'); prefs.set('modelVersion', 'hide')
       await vi.waitFor(() => expect(stored).toMatchObject({ density: 'compact', headerGraph: false, effortMeter: false, modelNames: 'full', modelVersion: 'hide' }))
-      expect(fetch.mock.calls.some(([path, init]) => String(path).includes('/preferences/list:display') && init?.method === 'PUT')).toBe(true)
+      expect(fetch.mock.calls.some(([path, init]) => decodeURIComponent(String(path)).includes('/preferences/list:display') && init?.method === 'PUT')).toBe(true)
       vi.resetModules()
+      ;(await import('../src/lib/preferences')).setPreferenceOwner({ tenant: { id: 'test-tenant' }, principal: { id: 'test-person' } })
       const reloaded = (await import('../src/lib/prefs')).useModelDisplay(); await reloaded.ready
       expect(reloaded.modelDisplay.value).toEqual({ effortMeter: false, modelNames: 'full', modelVersion: 'hide' })
     } finally { vi.unstubAllGlobals() }

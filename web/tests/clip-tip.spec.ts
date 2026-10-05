@@ -105,7 +105,7 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
 
       for (const kind of ['epic', 'label', 'option', 'relation']) {
         await page.getByRole('button', { name: kind, exact: true }).click()
-        const dialog = page.locator('.floating')
+        const dialog = page.getByRole('dialog')
         await expect(dialog).toBeVisible()
         const nameClass = kind === 'label' ? '.name' : kind === 'option' ? '.label' : '.title'
         const name = dialog.locator(nameClass).filter({ hasText: longName }).first()
@@ -148,7 +148,7 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
       await page.getByRole('button', { name: 'epic', exact: true }).focus()
       await page.keyboard.press('Enter')
       await requested
-      const search = page.getByRole('combobox', { name: 'Find an epic' })
+      const search = page.getByRole('combobox', { name: 'Find a parent' })
       await expect(search).toBeFocused()
       await expect(search).toHaveAttribute('aria-activedescendant', 'epic-option-0')
       await expect(page.getByRole('option')).toHaveCount(0)
@@ -564,14 +564,14 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       const calls = await mockWork(page, data)
       await page.goto('/p/PHAROS/PHAROS-14')
       const workspace = page.getByRole('complementary', { name: 'Ticket details' })
-      await workspace.getByRole('button', { name: 'No epic. Choose an epic' }).tap()
-      const panel = page.getByRole('dialog', { name: 'Epic for PHAROS-14' })
+      await workspace.getByRole('button', { name: 'No parent. Choose a parent' }).tap()
+      const panel = page.getByRole('dialog', { name: 'Parent for PHAROS-14' })
       const row = panel.getByRole('option')
       await expect(row.locator('.title')).toHaveAttribute('data-tip', longName)
       // Clear autofocus disclosure through ordinary touch input before the
       // hold. Older hosts must reach the missing 500 ms disclosure assertion,
       // rather than fail because the search's initial focus already showed it.
-      await panel.getByText('Epic', { exact: true }).tap()
+      await panel.getByText('Parent', { exact: true }).tap()
       await expect(page.locator('.tooltip')).toHaveCount(0)
       const writes = () => calls.filter(call => call.method !== 'GET')
       const before = writes().length

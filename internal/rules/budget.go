@@ -55,7 +55,7 @@ func budgetView(ctx context.Context, tx pgx.Tx, p tenant.Principal, b Budget) (B
 	view := BudgetView{Budget: b, DefaultBytes: LegacyMaxBytes, MinBytes: MinBudgetBytes, CeilingBytes: ceiling, MinLayerBytes: MinLayerBytes}
 	// The product ceiling is public to rules readers, but tenant-wide host/version
 	// inventory is workspace administration data, not project membership data.
-	if p.Kind == tenant.Person && authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{}) == nil {
+	if (p.Kind == tenant.Person || authz.OwnerWorkstation(p)) && authz.RequireTx(ctx, tx, p, "settings.manage", authz.Scope{}) == nil {
 		for i := range clients {
 			clients[i].DeliveredMaxBytes = min(b.MaxBytes, clients[i].Maximum)
 			clients[i].Truncated = clients[i].Maximum < b.MaxBytes
@@ -77,7 +77,7 @@ func (m *Module) getBudget(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 // settings may; the change is refused when a session file that is served now
 // would no longer fit, so a smaller budget never silently breaks session start.
 func (m *Module) putBudget(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	if p.Kind != tenant.Person {
+	if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 		return nil, authz.ErrForbidden
 	}
 	ctx := r.Context()

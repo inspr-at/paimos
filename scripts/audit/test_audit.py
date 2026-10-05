@@ -119,6 +119,18 @@ class CoverageTests(unittest.TestCase):
         for path in ('internal/servicetier/tier.go', 'internal/servicetier/tier_test.go'):
             self.assertEqual(owners(path, config), ['S2'])
 
+    def test_field_schema_belongs_to_domain_a(self):
+        config = load(HERE / 'slices.json')
+        for path in ('internal/fieldschema/schema.go', 'internal/fieldschema/schema_test.go'):
+            with self.subTest(path=path):
+                self.assertEqual(owners(path, config), ['S5'])
+
+    def test_parent_benefits_belong_to_domain_b(self):
+        config = load(HERE / 'slices.json')
+        for name in ('doc.go', 'module.go', 'module_test.go', 'source.go', 'worker.go', 'worker_test.go'):
+            with self.subTest(name=name):
+                self.assertEqual(owners(f'internal/parentbenefits/{name}', config), ['S6'])
+
 
 class MergeTests(unittest.TestCase):
     def test_tool_theme_sampling_and_individual_override(self):

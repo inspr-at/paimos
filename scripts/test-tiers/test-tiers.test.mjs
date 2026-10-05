@@ -18,6 +18,25 @@ const cases=[g('internal/auth','TestCeiling','ESSENTIAL'),g('internal/auth','Tes
 const fixture=()=>({version:1,tests:structuredClone(cases)})
 const noFlaky={version:1,entries:[]}
 
+test('AEON-648 pending writes and identity fences stay protected without promoting ordinary display tests',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
+  for(const [file,names] of [
+    ['tests/parent-benefit-generation.unit.test.ts',[
+      'retry captures its generation/revision and discards a result after navigation',
+      'tenant changes fence an old status read even for the same node id',
+      'an old provider save cannot restore another person’s opt-in or drafts',
+    ]],
+    ['tests/work-vocabulary-card.unit.test.ts',['serializes a deferred Reload with Save and leaves the saved revision visible']],
+  ]) for(const name of names) {
+    const row=manifest.tests.find(row=>row.file===file&&row.name===name)
+    assert.equal(row?.tier,'ESSENTIAL',`${file}: ${name}`)
+    for(const event of ['pull_request','merge_group'])
+      assert.deepEqual(select([row],{event,paths:['README.md']}).tests,[row])
+  }
+  const display=manifest.tests.find(row=>row.file==='tests/work-benefit-visibility.unit.test.ts'&&row.name==='work offers its benefit reading section in the workspace')
+  assert.equal(display?.tier,'NIGHTLY')
+})
+
 test('runtime reconciliation defaults new cases to NIGHTLY and drops stale cases with named warnings',()=>{
   const stale=cases[0],added={kind:'go',package:'internal/auth',name:'TestNew',active:false}
   const discovered=[...cases.slice(1),added],warnings=[],manifest=fixture(),before=structuredClone(manifest)
@@ -364,14 +383,16 @@ test('three-tier full is exactly ESSENTIAL plus GATED-FULL even for unknown impa
   const rows=[g('internal/auth','TestCore','ESSENTIAL'),g('internal/auth','TestExisting','GATED-FULL'),
     g('internal/auth','TestUnclassified'),
     {kind:'browser',file:'tests/gated.spec.ts',name:'gate',tier:'GATED-FULL'},
-    {kind:'browser',file:'tests/optional.spec.ts',name:'gallery',tier:'NIGHTLY'}]
+    {kind:'browser',file:'tests/optional.spec.ts',name:'gallery',tier:'NIGHTLY'},
+    {kind:'browser',file:'tests/gated.spec.ts',name:'new case defaults to nightly',tier:'NIGHTLY'},
+    {kind:'vitest',file:'tests/new.unit.test.ts',name:'new unit defaults to nightly',tier:'NIGHTLY'}]
   for(const event of ['pull_request','merge_group','push','workflow_dispatch']) {
     for(const paths of [undefined,['.github/workflows/ci.yml'],['web/src/deleted.ts'],['scripts/check.mjs','web/tests/optional.spec.ts']]) {
       for(const forceFull of [false,true]) {
         const selection=select(rows,{event,paths,forceFull})
         assert.deepEqual(selection.tests,[rows[0],rows[1],rows[3]],`${event} ${paths} explicit=${forceFull}`)
         assert.equal(selection.scope,'gated-full')
-        assert.equal(selection.deferredBrowserCases,1)
+        assert.equal(selection.deferredBrowserCases,2)
       }
     }
   }
@@ -385,6 +406,8 @@ test('three-tier full is exactly ESSENTIAL plus GATED-FULL even for unknown impa
   // The changed-area lane still exercises optional tests when their area changes.
   for(const event of ['pull_request','merge_group']) assert.deepEqual(
     select(rows,{event,paths:['web/tests/optional.spec.ts'],webImports:{'tests/optional.spec.ts':[]}}).tests,[rows[0],rows[4]])
+  for(const event of ['pull_request','merge_group']) assert.deepEqual(
+    select(rows,{event,paths:['web/tests/gated.spec.ts'],webImports:{'tests/gated.spec.ts':[]}}).tests,[rows[0],rows[3],rows[5]])
 })
 
 test('three-tier validation and reports retain GATED-FULL results and deletion candidates',()=>{
@@ -403,25 +426,29 @@ test('three-tier validation and reports retain GATED-FULL results and deletion c
   assert.throws(()=>validate({version:1,tests:promoted},rows,known),/Known-flaky case cannot be ESSENTIAL/)
 })
 
-test('three-tier manifests preserve the old Go and unit gates and never promote ungated browser cases',()=>{
+test('three-tier manifests allow new NIGHTLY cases and never promote ungated browser cases',()=>{
   const policy=JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url)))
   const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
   const go=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
   const web=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
   // Cases first classified after the old gate retain the NIGHTLY default.
   // An explicit inventory keeps the assertion strict for every legacy case.
-  const postGateCases=new Set(go.postGateCases??[])
-  assert.equal(postGateCases.size,(go.postGateCases??[]).length)
+  const postGateCases=new Set([...(go.postGateCases??[]),...(web.postGateCases??[])])
+  assert.equal(postGateCases.size,(go.postGateCases??[]).length+(web.postGateCases??[]).length)
   for(const id of postGateCases) {
-    const row=go.tests.find(row=>key(row)===id)
+    const row=[...go.tests,...web.tests].find(row=>key(row)===id)
     assert.ok(row,`Unknown post-gate case: ${id}`)
     assert.equal(row.tier,'NIGHTLY',id)
   }
   for(const row of [...go.tests,...web.tests]) {
-    if(row.kind==='go'&&postGateCases.has(key(row)))continue
+    if(postGateCases.has(key(row)))continue
     if(row.tier==='ESSENTIAL')continue
     assert.equal(row.tier,row.kind!=='browser'||gated.has(row.file)?'GATED-FULL':'NIGHTLY',key(row))
   }
+  // This established Knowledge registration caused the merge-group regression:
+  // its launch group is gated, so it must retain its full-gate classification.
+  assert.equal(web.tests.find(row=>row.kind==='browser'&&row.file==='tests/knowledge.spec.ts'&&
+    row.name==='the Knowledge tab groups by kind, filters, searches the text and moves with keys')?.tier,'GATED-FULL')
   assert.ok(web.tests.some(row=>row.kind==='browser'&&row.tier==='NIGHTLY'))
   assert.ok(web.tests.some(row=>row.kind==='browser'&&row.tier==='GATED-FULL'))
 })

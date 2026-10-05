@@ -15,7 +15,7 @@ const report: TierReport = { harness: 'codex', model: 'fixture-model', harness_v
   { tier: 'fast', name: 'Fast', offered: true, price_multiplier: 2, usage_multiplier: 3, speed_factor: 2, mechanism: 'fixture fast' },
   { tier: 'fastest', name: 'Fastest', offered: true, price_multiplier: 6, usage_multiplier: 8, speed_factor: 8, mechanism: 'fixture fastest' },
 ] }
-async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: boolean; ended?: boolean; denied?: boolean; request?: boolean; fail?: boolean; active?: 'default' | 'fast'; agent?: boolean; cancelReceipt?: boolean; evidence?: boolean; tierRead?: 'delayed' | 'error' } = {}) {
+async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: boolean; ended?: boolean; denied?: boolean; request?: boolean; fail?: boolean; active?: 'default' | 'fast'; agent?: boolean; cancelReceipt?: boolean; managedControls?: boolean; evidence?: boolean; tierRead?: 'delayed' | 'error' } = {}) {
   await mockWork(page, fixtures(), { admin: true, principalKind: options.agent ? 'agent' : 'person' })
   const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   data.approvals.splice(0)
@@ -23,6 +23,7 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
   const reports = [{ ...report, tiers: report.tiers.map(t => options.unpriced && t.tier !== 'default' ? { ...t, offered: false, price_multiplier: null, speed_factor: null, reason: 'not offered: no published price' } : t) }]
   const active = options.active ?? 'default'
   Object.assign(data.sessions[0]!, { harness: 'codex', display_label: 'Tier fixture', model: report.model, service_tier: active, service_tier_revision: 1, service_tier_reports: reports, service_tier_request: options.request ? 'fast' : null, advertised_capabilities: ['inbox', 'status', 'stop', 'service_tier_v1'], agent_principal_id: options.agent ? me.id : data.sessions[0]!.agent_principal_id, process_ownership: ownership, process_observed_at: new Date().toISOString(), heartbeat_at: new Date().toISOString(), ...(options.unmanaged ? { management_mode: 'unmanaged' } : {}), ...(options.ended ? { phase: 'stopped', stopped_at: new Date().toISOString() } : {}) })
+  if (options.managedControls) data.sessions[0]!.advertised_capabilities.push('managed_control_v1')
   for (let i = 1; i < data.sessions.length; i++) Object.assign(data.sessions[i]!, { harness: 'codex', model: report.model, service_tier: 'default', service_tier_reports: [{ ...report, tiers: report.tiers.map((t, j) => ({ ...t, offered: j <= i - 1 })) }], service_tier_revision: 1 })
   await mockAgents(page, data)
   if (options.denied) await page.route('**/api/me/permissions*', async route => {
@@ -71,8 +72,68 @@ async function setup(page: Page, options: { unpriced?: boolean; unmanaged?: bool
   return { data, writes, releaseTierRead, getReads: () => reads, cancelElsewhere: () => cancel('other-viewer-undo'), reject: () => { state = { ...state, pending: null, last_change: { ...state.pending!, state: 'completed', outcome: 'rejected', reason: 'vendor_rejected' } } }, confirm: () => { state = { ...state, active_tier: state.pending!.value, pending: null, revision: state.revision + 1 }; Object.assign(data.sessions[0]!, { service_tier: state.active_tier, service_tier_revision: state.revision }) }, getState: () => state }
 }
 const row = (page: Page) => page.locator(`[data-row="s:${id}"]`)
-const glyph = (page: Page) => row(page).locator('.c-tier [data-tier]')
+// The list uses its inline control when a docked panel narrows its container.
+// Do not focus a hidden copy: Undo and rejection assertions must still execute.
+const glyph = (page: Page) => row(page).locator('[data-tier]:visible')
 const picker = (page: Page) => page.getByRole('dialog', { name: 'Change tier', exact: true })
+
+for (const width of [320, 390]) test(`${width}: phone Change tier menu opens and restores its actual trigger`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 })
+  const { writes } = await setup(page, { managedControls: true })
+  await page.goto(`/agents/${id}`)
+  const panel = page.getByRole('complementary', { name: 'Session details' })
+  const more = panel.getByRole('button', { name: 'More session controls', exact: true })
+  await expectStableControls({ controls: { more }, interactions: [
+    { name: 'open tier from overflow', run: async () => {
+      await more.click()
+      await page.getByRole('menuitem', { name: 'Change tier…', exact: true }).click()
+      await expect(picker(page)).toBeVisible()
+      await expect(page.getByRole('menu', { name: 'More session actions' })).toHaveCount(0)
+      await picker(page).getByRole('button', { name: /Cancel/ }).click()
+      await expect(picker(page)).toHaveCount(0)
+      await expect(more).toBeFocused()
+    } },
+  ] })
+  expect(writes).toHaveLength(0)
+  // Selecting through the same menu targets this session, rather than merely
+  // opening an unrelated or detached sheet.
+  await more.click()
+  await page.getByRole('menuitem', { name: 'Change tier…', exact: true }).click()
+  await expect(picker(page).locator('[data-option=fast]')).toHaveAttribute('aria-disabled', 'false')
+  await picker(page).locator('[data-option=fast]').click()
+  await picker(page).locator('.tp-go').click()
+  await expect(page.locator('.tier-toast')).toBeVisible()
+  expect(writes).toHaveLength(1)
+  expect(writes[0]).toMatchObject({ tier: 'fast', expected_revision: 1, expected_ownership: ownership })
+})
+
+test('1440: compact Default tier control keeps its box through confirmation and Undo', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const { writes, confirm, getState } = await setup(page)
+  await page.goto(`/agents/${id}`)
+  await expect(page.locator('.agents-page')).toHaveClass(/panel-open/)
+  const list = page.locator('.sessions'), host = row(page).locator('.host-badge'), actions = row(page).locator('.more')
+  expect((await list.boundingBox())!.width).toBeLessThanOrEqual(880)
+  await expect(glyph(page)).toHaveCount(1)
+  await expect(glyph(page)).toBeVisible()
+  await expect(glyph(page)).toHaveAccessibleName(/^Service tier: Default/)
+  await expectStableControls({ controls: { tier: glyph(page), host, actions, row: row(page) }, scrollAreas: { list }, interactions: [
+    { name: 'keyboard step from Default', run: async () => {
+      await glyph(page).focus(); await expect(glyph(page)).toBeFocused()
+      await glyph(page).press('ArrowRight'); await expect(page.locator('.tier-toast')).toBeVisible()
+    } },
+    { name: 'daemon confirms Fast', run: async () => {
+      confirm()
+      // Reading the actual receipt makes the active tier (and price) appear.
+      await page.locator('.tier-toast').getByRole('button', { name: 'Undo', exact: true }).click()
+      await expect(glyph(page)).toHaveAccessibleName(/^Service tier: Fast/)
+      await expect.poll(() => writes.length).toBe(2)
+    } },
+  ] })
+  expect(getState().pending?.value).toBe('default')
+  expect(writes[0]).toMatchObject({ tier: 'fast', expected_revision: 1, expected_ownership: ownership })
+  expect(writes[1]).toMatchObject({ tier: 'default', expected_revision: 3, expected_ownership: ownership })
+})
 
 for (const width of [1280, 1366, 1440]) test(`${width}: panel-open session table fits and keeps Host and overflow controls`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 })

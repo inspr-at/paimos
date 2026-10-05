@@ -13,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -26,7 +27,12 @@ type queueTarget struct {
 	Profile string  `json:"model_profile_id,omitempty"`
 	Account *string `json:"requested_account_id,omitempty"`
 }
+type queueUndoToken struct {
+	RunID    string    `json:"run_id"`
+	Revision time.Time `json:"revision"`
+}
 type queueEntry struct {
+	Undo       *queueUndoToken   `json:"undo,omitempty"`
 	NodeID     string            `json:"node_id"`
 	ProjectID  *string           `json:"project_id"`
 	Key        string            `json:"key"`
@@ -55,6 +61,7 @@ type queueTicket struct {
 	ProjectID                         *string
 	Fields                            map[string]any
 	Raw                               json.RawMessage
+	Stale                             bool
 	NamedBlocker                      bool
 }
 type queueError struct {
@@ -72,8 +79,7 @@ func (e *queueError) ErrorCode() string { return e.Code }
 // before order/run/account rows and the tenant event counter. Claim and queue edits
 // serialize; an entry cannot be removed while pickup commits.
 func queueLock(ctx context.Context, tx pgx.Tx) error {
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`)
-	return err
+	return db.LockWorkTreeTx(ctx, tx)
 }
 func (m *module) mountQueue(mux *http.ServeMux) {
 	for _, route := range []struct {
@@ -84,6 +90,7 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 		{"GET /api/queue", false, m.queueList},
 		{"GET /api/queue/{nodeId}/readiness", false, m.queueReadiness},
 		{"POST /api/queue/{nodeId}/estimate", true, m.queueEstimate},
+		{"POST /api/queue/{nodeId}/undo", true, m.queueUndo},
 		{"POST /api/queue", true, m.queueAdd},
 		{"DELETE /api/queue/{nodeId}", true, m.queueRemove},
 		{"POST /api/queue/{nodeId}/move", true, m.queueMove},
@@ -101,7 +108,10 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 				httpapi.WriteError(w, 400, "invalid node id")
 				return
 			}
-			r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
+			if err := httpapi.BufferRequestBody(w, r, 1<<20); err != nil {
+				workorders.WriteError(w, workorders.Fail(400, "request body could not be read within limits"))
+				return
+			}
 			var out any
 			err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 				if err := authz.RequireTx(r.Context(), tx, p, "nodes.read", authz.Scope{AnyProject: true}); err != nil {
@@ -113,10 +123,7 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 					}
 				}
 				if route.write {
-					if err := agentpairing.Lock(r.Context(), tx); err != nil {
-						return err
-					}
-					if err := queueLock(r.Context(), tx); err != nil {
+					if err := agentpairing.LockMutation(r.Context(), tx); err != nil {
 						return err
 					}
 				}
@@ -173,10 +180,22 @@ func queueLoadTicket(ctx context.Context, tx pgx.Tx, id string, lock bool) (queu
 			}
 		}
 	}
+	if err == nil && workqueue.Progress(t.State) {
+		var stale map[string]bool
+		stale, err = workqueue.Stale(ctx, tx, []string{id})
+		t.Stale = stale[id]
+	}
+	if err == nil && t.Kind == "work" {
+		var leaf bool
+		err = tx.QueryRow(ctx, `SELECT aeon_work_leaf($1::uuid) AND aeon_work_pending($1::uuid) IS NULL`, id).Scan(&leaf)
+		if !leaf {
+			t.Kind = "parent"
+		}
+	}
 	return t, err
 }
 func readiness(t queueTicket) workqueue.Readiness {
-	return workqueue.Check(t.Kind, t.State, t.Title, t.Body, t.Fields, t.NamedBlocker)
+	return workqueue.Check(t.Kind, t.State, t.Title, t.Body, t.Fields, t.NamedBlocker, t.Stale)
 }
 func (m *module) queueReadiness(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	t, err := queueLoadTicket(r.Context(), tx, r.PathValue("nodeId"), false)
@@ -221,7 +240,7 @@ func (m *module) queueEstimate(r *http.Request, tx pgx.Tx, p tenant.Principal) (
 	}
 	return readiness(t), nil
 }
-func queueUpdateTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, event string) error {
+func queueUpdateTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, event string, runID ...string) error {
 	raw, err := json.Marshal(t.Fields)
 	if err != nil {
 		return err
@@ -231,7 +250,12 @@ func queueUpdateTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, t que
 	if err != nil {
 		return err
 	}
-	return workorders.Record(ctx, tx, p, t.ID, event, t.Raw, after)
+	change := events.Change{NodeID: &t.ID, Type: event, Before: t.Raw, After: after}
+	if len(runID) > 0 {
+		change.Metadata, _ = json.Marshal(map[string]string{"run_id": runID[0]})
+	}
+	_, err = events.Append(ctx, tx, p, change)
+	return err
 }
 func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
@@ -295,7 +319,7 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 			return nil, workorders.Fail(409, "queue holder identity conflicts")
 		}
 	}
-	o, err := workorders.Create(ctx, tx, p, workorders.CreateInput{Title: t.Title, Body: t.Body, Parent: &t.ID, Criteria: workqueue.Criteria(t.Fields)})
+	o, changes, err := workorders.CreateDeferred(ctx, tx, p, workorders.CreateInput{Title: t.Title, Body: t.Body, Parent: &t.ID, Criteria: workqueue.Criteria(t.Fields)})
 	if err != nil {
 		return nil, err
 	}
@@ -346,13 +370,30 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		t.Fields["needs_review"] = true
 		t.Fields["review_route"] = "review-gate"
 	}
-	if err = queueUpdateTicket(ctx, tx, p, t, "queue.added"); err != nil {
+	// All resource locks and writes precede the first event-counter lock.
+	for _, change := range changes {
+		if _, err = events.Append(ctx, tx, p, change); err != nil {
+			return nil, err
+		}
+	}
+	if err = queueUpdateTicket(ctx, tx, p, t, "queue.added", v.ID); err != nil {
 		return nil, err
 	}
 	if err = workorders.Record(ctx, tx, p, o.NodeID, "run.created", nil, v); err != nil {
 		return nil, err
 	}
-	return m.queueEntry(ctx, tx, t.ID)
+	entry, err := m.queueEntry(ctx, tx, t.ID)
+	if err != nil {
+		return nil, err
+	}
+	if ready.Stale {
+		var revision time.Time
+		if err = tx.QueryRow(ctx, `SELECT updated_at FROM nodes WHERE id=$1`, t.ID).Scan(&revision); err != nil {
+			return nil, err
+		}
+		entry.Undo = &queueUndoToken{RunID: v.ID, Revision: revision}
+	}
+	return entry, nil
 }
 func sameTarget(v Run, in queueTarget) bool {
 	agent := ""

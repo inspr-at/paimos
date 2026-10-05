@@ -20,7 +20,7 @@ const shown = computed(() => {
   <FloatingPanel :anchor="anchor" :width="264" :label="`Filter by ${title}`" @close="restore => emit('close', restore)">
     <div class="facet-head">
       <p class="eyebrow">{{ title }}</p>
-      <button v-if="selected.length" type="button" class="clear" @click="emit('clear')">Clear</button>
+      <button type="button" class="clear" :style="{ visibility: selected.length ? 'visible' : 'hidden' }" :disabled="!selected.length" @click="emit('clear')">Clear</button>
     </div>
     <input v-if="searchable" v-model="term" class="field facet-search" :placeholder="`Find ${title.toLowerCase()}…`" :aria-label="`Find ${title.toLowerCase()}`" data-autofocus />
     <FacetOptions :dimension="dimension" :options="shown" :selected="selected" @toggle="value => emit('toggle', value)" @exclude="value => emit('exclude', value)" />

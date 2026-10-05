@@ -26,7 +26,7 @@ func TestNodeWritesAllowConcurrentCommentTenantFK(t *testing.T) {
 	for _, name := range []string{"tree-first-update", "moderation-first-delete"} {
 		t.Run(name, func(t *testing.T) {
 			p := newPrincipal(t, "comment-fk")
-			kind := kindBySlug(t, p, "ticket").ID
+			kind := kindBySlug(t, p, "work").ID
 			node := mustCreateNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Original ticket"}`, kind))
 			commentPool, commentBarrier, commentCtx := dbtest.BarrierPool(t, appPool, func(sql string) bool {
 				return strings.Contains(sql, "FROM nodes") && strings.Contains(sql, "FOR SHARE")

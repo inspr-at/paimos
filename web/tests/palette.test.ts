@@ -79,3 +79,12 @@ test('groups: empty shows Recent and Actions; a bare project key puts Projects f
   assert.deepEqual(assemble('aeon', { recent, tickets, projects: projectResults('aeon', projects), actions: [] }).map(g => g.id), ['projects', 'tickets'])
   assert.deepEqual(assemble('foundation', { recent, tickets, projects: projectResults('foundation', projects), actions: actionResults('foundation', actions) }).map(g => g.id), ['tickets'])
 })
+
+
+test('canonical work survives palette exact-key and title results with scope and deduplication', () => {
+  const canonicalKinds = new Map([...work, ['k-work', 'work']])
+  assert.deepEqual(ticketResults('PHAROS-12', [listed('PHAROS-12', 'Exact', 'work')], [], canonicalKinds, projectFor, null).map(r => r.key), ['PHAROS-12'])
+  const out = ticketResults('connector', [listed('PHAROS-12', 'Connector', 'work')], [hit('PHAROS-12', 'Connector', 'work'), hit('PHAROS-7', 'Connector meaning', 'work'), hit('AEON-3', 'Foreign project', 'work'), hit('PHAROS-9', 'Gone', 'work', { deleted_at: '2026-10-01' })], canonicalKinds, projectFor, 'PHAROS')
+  assert.deepEqual(out.map(r => r.key), ['PHAROS-12', 'PHAROS-7'])
+  assert.equal(out[0].kind, 'work')
+})

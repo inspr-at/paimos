@@ -390,8 +390,8 @@ func resolveTicket(ctx context.Context, tx pgx.Tx, ref string) (ticketRef, error
 	if len(found) > 1 {
 		return ticketRef{}, invalid("ticket is ambiguous")
 	}
-	if slug != "ticket" {
-		return ticketRef{}, invalid("outcomes are recorded on tickets")
+	if slug != "ticket" && slug != "work" {
+		return ticketRef{}, invalid("outcomes are recorded on work items or legacy tickets")
 	}
 	if found[0].projectID == "" {
 		return ticketRef{}, invalid("ticket has no project")

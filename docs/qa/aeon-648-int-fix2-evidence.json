@@ -1,0 +1,531 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix2",
+  "recorded_at": "2026-10-04T20:33:22.631738+00:00",
+  "branch": "work/aeon-648-int",
+  "reviewed_commit": "8bcd98885cb7a0eab6192f6df55956589c0508ad",
+  "tested_commit": "eefde267a7a2fab4d6451b54c6cd4c5678afcc50",
+  "completion": "Six code findings fixed and validated; coordinator-owned migration reservation remains open.",
+  "findings": [
+    {
+      "finding": 1,
+      "severity": "P1",
+      "status": "fixed",
+      "behavior": "LockWorkTreeTx takes tenant FOR NO KEY UPDATE, then pairing, then tree; resource rows and event counter follow.",
+      "regression": "internal/db/work_tree_test.go: TestWorkTreeTenantBeforePairingWithDerivationDisabled",
+      "baseline_failure": "With parent derivation disabled, the work fence held pairing while blocked on the access writer tenant row. The access writer could not acquire pairing.",
+      "proof": "pg_blocking_pids establishes the interleaving; pg_try_advisory_xact_lock rejects the inversion; worker commit is checked. No sleeps or elapsed-time assertions."
+    },
+    {
+      "finding": 2,
+      "severity": "P2",
+      "status": "fixed",
+      "behavior": "Agent-work and delivery-rating scopes admit canonical work leaves and parents, retaining migrated sessions, costs and ratings within existing visibility rules. OpenAPI changes are additive.",
+      "regressions": [
+        "internal/ticketwork/work_upgrade_test.go: TestMigratedWorkSessionsAndCostsRespectVisibility",
+        "internal/deliveryvote/work_upgrade_test.go: TestMigratedWorkRetainsDeliveryRatingsAndVisibility"
+      ],
+      "baseline_failure": "Both canonical leaf and parent requests returned HTTP 404 after the actual legacy-kind migration.",
+      "proof": "Fixtures start before 1215, preserve real legacy parent/task/session/cost/vote data, then run the full migration. Assertions exclude sessions in a hidden project even when their node is visible, and reject hidden roots, non-work roots and foreign tenants."
+    },
+    {
+      "finding": 3,
+      "severity": "P2",
+      "status": "fixed",
+      "behavior": "Palette, title/key relation searches and recent relation resolution include canonical work through shared WORK_KINDS.",
+      "regressions": [
+        "web/tests/palette.test.ts",
+        "web/tests/ticket-search.unit.test.ts",
+        "web/tests/work-integration.spec.ts: canonical work palette and relation key/title search"
+      ],
+      "baseline_failure": "Palette dropped the canonical exact-key result; the search-kind map omitted work; corrected browser test could not find the canonical title/key result.",
+      "proof": "Tests check list and hybrid query kinds, scope/signal propagation, result identities, deduplication and captured relation write. Browser tests await shortcut registration before searching."
+    },
+    {
+      "finding": 4,
+      "severity": "P2",
+      "status": "fixed",
+      "behavior": "Canonical leaves retain Kind of work, Complexity and suggestion confirmation controls; canonical parents remain ineligible. Existing record/revision capture is retained.",
+      "regression": "web/tests/work-integration.spec.ts: canonical leaf classification renders, confirms and saves",
+      "baseline_failure": "The canonical leaf had no classification select controls.",
+      "proof": "Fixture n-1 is a genuine leaf; n-2 is a genuine parent with n-3 child. Save assertions check target id and captured revision. Existing placement spec assertions remain unchanged."
+    },
+    {
+      "finding": 5,
+      "severity": "P2",
+      "status": "fixed",
+      "behavior": "Backlog, Build, Requirements and ImportedOrigin use canonical parent/leaf shape and nested parent projections. Legacy tickets keep their existing subdivision counts.",
+      "regressions": [
+        "web/tests/work-integration.spec.ts: canonical project journey shows leaves and parent groups",
+        "web/tests/journey-work.test.ts",
+        "web/tests/journey-imported.spec.ts"
+      ],
+      "baseline_failure": "Corrected canonical project fixture showed empty leaf backlog and zero parent/work counts on reviewed sources.",
+      "proof": "A nested canonical parent has an actual child. Leaf counts propagate to ancestors once, exclude non-work children, and bound parent cycles at 64. Original legacy journey assertions pass unchanged."
+    },
+    {
+      "finding": 6,
+      "severity": "P2",
+      "status": "fixed",
+      "behavior": "Morning briefing derives work facts and pending human checks from canonical work and resolves work-order facts through visible canonical work parents.",
+      "regressions": [
+        "web/tests/morning-briefing-view.unit.test.ts: canonical work and canonical work-order parent cases",
+        "web/tests/morning-briefing.spec.ts: canonical work briefing keeps human checks and linked order facts"
+      ],
+      "baseline_failure": "Canonical work facts and human checks vanished; work-order facts used the order instead of the canonical parent and exposed facts when the parent was omitted by visibility.",
+      "proof": "Tests preserve merge and delivery facts, human checks and parent links, and suppress order facts when the canonical parent is unavailable."
+    }
+  ],
+  "baseline": {
+    "go_and_briefing_checkpoint": "d8614cd03fdfd0b91c882866661d339f116702a6",
+    "production_sources": "Tests-only checkpoint retained reviewed production sources. Corrected search-unit and browser failure proofs separately used exact git-show bytes from 8bcd98885 for the affected production files; final fixed bytes were restored afterward.",
+    "logs": [
+      "web/test-results/aeon-648-int-fix2/logs/baseline-remote.log",
+      "web/test-results/aeon-648-int-fix2/logs/baseline-search-unit.log",
+      "web/test-results/aeon-648-int-fix2/logs/baseline-browser-corrected.log"
+    ],
+    "browser_proof": "Three targeted 390px/light cases fail for missing canonical search, classification controls and journey leaf counts. Earlier exploratory runs are retained but are not the final regression proof.",
+    "assertions": "No assertion loosened or skipped. Existing ETA concurrency expectation now checks the required tenant fence and is strengthened with the exact tenant-lock query and zero early advisory locks. Existing legacy fixture constructors stop before 1215 instead of attempting retired kind inserts into a fully migrated fresh tenant."
+  },
+  "validation": {
+    "remote_transport": "Coordinator-approved remote-test.sh to mbp2606. HEAD committed before each run; runner-owned parallelism; temporary non-production test refs only; no origin push.",
+    "go_packages": {
+      "result": "pass",
+      "command": "remote-test.sh <assigned-worktree> <affected-packages> -count=1",
+      "runs": [
+        {
+          "commit": "4c745042794150ee1caa83fe551c3863a69de315",
+          "passed": {
+            "internal/db": 126.632,
+            "internal/nodes": 268.063,
+            "internal/agentruns": 73.205,
+            "internal/workorders": 5.631,
+            "internal/crossreview": 46.726
+          },
+          "log": "web/test-results/aeon-648-int-fix2/logs/final-remote.log",
+          "note": "Initial harness/legacy fixtures/web shard failures are retained in this log. Those three packages and web were repaired and rerun. Backend production bytes did not change after this run."
+        },
+        {
+          "commit": "eefde267a7a2fab4d6451b54c6cd4c5678afcc50",
+          "passed": {
+            "internal/harness": 94.632,
+            "internal/ticketwork": 18.365,
+            "internal/deliveryvote": 7.829
+          },
+          "log": "web/test-results/aeon-648-int-fix2/logs/final-repaired-remote.log"
+        }
+      ],
+      "total_affected_packages": 8
+    },
+    "web_remote": {
+      "commit": "eefde267a7a2fab4d6451b54c6cd4c5678afcc50",
+      "build": "pass",
+      "lint": "pass",
+      "npm_run_test_unit": "pass",
+      "transport": "Temporary .qa648 Go test adapter ran each npm command with command failures recorded as test errors. The adapter is removed from the final tree.",
+      "result": "TestWebValidation passed in 172.264 seconds, remote runner exit 0.",
+      "count_note": "Successful Go-test stdout is suppressed by the runner; no final unit case count is claimed.",
+      "log": "web/test-results/aeon-648-int-fix2/logs/final-repaired-remote.log"
+    },
+    "targeted_browser": {
+      "result": "50 passed",
+      "new_canonical_cases": 24,
+      "retained_cases": 26,
+      "workers": 1,
+      "suite_concurrency": 1,
+      "platform": "Local isolated headless Chromium, after approved Linux remote launcher refused with exit 3.",
+      "specs": [
+        {
+          "file": "web/tests/work-integration.spec.ts",
+          "passed": 18,
+          "log": "web/test-results/aeon-648-int-fix2/logs/final-canonical-browser.log"
+        },
+        {
+          "file": "web/tests/morning-briefing.spec.ts",
+          "passed": 21,
+          "log": "web/test-results/aeon-648-int-fix2/logs/final-morning-all.log"
+        },
+        {
+          "file": "web/tests/journey-imported.spec.ts",
+          "passed": 9,
+          "log": "web/test-results/aeon-648-int-fix2/logs/final-legacy-journey.log"
+        },
+        {
+          "file": "web/tests/ticket-placement.spec.ts",
+          "passed": 2,
+          "log": "web/test-results/aeon-648-int-fix2/logs/final-legacy-placement.log"
+        }
+      ],
+      "widths": [
+        390,
+        1024,
+        1440
+      ],
+      "themes": [
+        "light",
+        "dark"
+      ],
+      "control_stability": "Shared Playwright stability guard measures named search/classification controls, selector groups and clicked rows, plus journey navigation and briefing reminder controls with \u00b10.5px bounds; horizontal overflow checks retained.",
+      "long_text": "Long German classification title and journey description exercised. Existing layout and components reused."
+    },
+    "migration_guard": {
+      "result": "pass",
+      "base_ref": "v261003095616.0.0",
+      "unique_numbers": 258,
+      "historical_published_sql_unchanged": true,
+      "exception_hashes_match": true,
+      "new_migrations_in_this_round": 0
+    },
+    "migration_and_tier_contract_tests": {
+      "result": "65 passed",
+      "log": "web/test-results/aeon-648-int-fix2/logs/guards.log"
+    },
+    "web_shard_contract_tests": {
+      "result": "21 passed",
+      "log": "web/test-results/aeon-648-int-fix2/logs/shard-repair.log"
+    },
+    "ci_metadata": {
+      "scripts/ci/go-test-tiers.json": {
+        "existing_rows_retained": 3708,
+        "new_rows": 3
+      },
+      "scripts/ci/web-test-tiers.json": {
+        "existing_rows_retained": 7055,
+        "new_rows": 33
+      },
+      "web/ci-web-shards.json": {
+        "existing_group_policies_unchanged": true,
+        "existing_spec_rows_retained": true,
+        "new_spec": "tests/work-integration.spec.ts",
+        "placement": "existing remaining-ui group"
+      }
+    },
+    "new_test_tiers": {
+      "go": "GATED-FULL",
+      "web_unit": "GATED-FULL",
+      "browser": "NIGHTLY; existing gates and group policies retained"
+    },
+    "git_diff_check": "pass",
+    "main_merge": "No PR; local origin/main release123 already contained by the assigned branch. No merge needed."
+  },
+  "screenshots": [
+    {
+      "path": "web/test-results/aeon-648-int-fix2/briefing-1024-dark.png",
+      "sha256": "5e9987e2441cf79f23fdc175abe9909c011a01fa9cc64691b6755418acf90d2b"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/briefing-1024-light.png",
+      "sha256": "5daeb38a727d4af9ca47e848f7b8791e73552fb85620de1ecc586e7a3fb5c2fb"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/briefing-1440-dark.png",
+      "sha256": "ebbada1dfe97c2318d0f75906f95bc1789390ebf787e9d7372e1227076510572"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/briefing-1440-light.png",
+      "sha256": "7e843c4f3190c8a816f97b48f723b11a3de1273c02edad6d30ad7968a1b9d67d"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/briefing-390-dark.png",
+      "sha256": "1f301857fe86e8ffb63917a6145c630fc6b686ef6b6db8703f0146551320bcf9"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/briefing-390-light.png",
+      "sha256": "05427384e07e39efb6efb85129b3f69fad4758e733c1c133cafe99c2153f5af9"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/classification-1024-dark.png",
+      "sha256": "4377379b9efb62150344966a03966eaf56cea4aeb00b9b0ba2f430663b6dc25d"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/classification-1024-light.png",
+      "sha256": "5477226b1a66e6ac0e0aad2c07933d36310019925b79c92f8a5085efd78497fe"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/classification-1440-dark.png",
+      "sha256": "d0ecc26fbf47d3a90e6cef5ae8c6bc0a4d0f23190dc1e455301fdf3ce9768a0b"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/classification-1440-light.png",
+      "sha256": "862a965bb39183b72e4c1949131e3a747e096278b2726c1acd8543d1e50e14e8"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/classification-390-dark.png",
+      "sha256": "a29b44fda8b202dc778757548ccec7e60c13d12426e2ff5375c572eef0f0656b"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/classification-390-light.png",
+      "sha256": "69945f8bde511996bc957e24cd1cee4366e2939f5af485d2e8a4adf95250a13c"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-build-1024-dark.png",
+      "sha256": "238e72151f26daada6cd5460f64e4b8960b0b1857d6dca68dc167be5346f0db2"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-build-1024-light.png",
+      "sha256": "4734b957e672a3e682679e547ae26b847185733cc2237a3df924661ac1a41312"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-build-1440-dark.png",
+      "sha256": "0e480bb3b73a11e175367dfa8baa569b7ba2fe630dde681df467fb65feff6b81"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-build-1440-light.png",
+      "sha256": "6c7375f9f4538d8e8f0f00e03e8d6355bc9763b32e8edcf3042ff82a81496597"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-build-390-dark.png",
+      "sha256": "6a0a5854f1b6671f7dc3e1cf8208428fba18d9ed34eb121867d6ae9bdc496a83"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-build-390-light.png",
+      "sha256": "92b6a075b03c5f8da2a36d0ebd748d9d3e531425b8c8952c6bea977f0a8cd6b3"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-inspire-1024-dark.png",
+      "sha256": "5a10fbe2e06644dcbbb5e135bf237a3a55ef14abfc5c567932d89097b9c0fbab"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-inspire-1024-light.png",
+      "sha256": "41f2482db9dcc09cb049c61cf086b4bee156fbbec96c5b5040d4bb8cbab56eeb"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-inspire-1440-dark.png",
+      "sha256": "fb4b437071c0a3a22f384fd98414157191d155e3bdd88928bd2b8376f3ec609f"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-inspire-1440-light.png",
+      "sha256": "27cb5dd4f333219ecebcabc34d46c3a796be4692e56305a1d4818a43ed5e414d"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-inspire-390-dark.png",
+      "sha256": "22bf897f90dd7ac4f4837974535b8787d7376c62f9f84f5dc6b1770fb198fb55"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-inspire-390-light.png",
+      "sha256": "948c9b0b488e4b252227b25a7997fcb356ff4d4d93c96b3ce7b67dc8d90683a2"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-plan-1024-dark.png",
+      "sha256": "6aa095d1c5d74584975c01f5aa12c0f5d1953fe9bfa4afd15542941dd0374691"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-plan-1024-light.png",
+      "sha256": "08cd07279b127fb4d4fb2040eb902ea8895dfd0424c486fa70ca4a6daa8afbed"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-plan-1440-dark.png",
+      "sha256": "2d4faf65575f3df81e38d48aae752b0b284957deac589f5bf2a4512742295a7f"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-plan-1440-light.png",
+      "sha256": "4a6d0b8f9a60f5043ea6f8a650d183c66e5fee57be4ef773699766971a8aa270"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-plan-390-dark.png",
+      "sha256": "f546b8c861daf3fcce8e0f9e114cf55de74af96b7b09ef73c3d7a621dfdb2e30"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-plan-390-light.png",
+      "sha256": "ce2d4686ea69a19b99a778a55cac6891cbf06486fca633f6ad28f14f4a3b7ef3"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-requirements-1024-dark.png",
+      "sha256": "a4f7119b7f6ddc2f9689763f21c7d5aa95bc297124baa566400438a3393cd9fc"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-requirements-1024-light.png",
+      "sha256": "2d925677c1a5b544446cb9ca3f35798b2a0cfe45e8a42b33b346a6f2b115050c"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-requirements-1440-dark.png",
+      "sha256": "930752589ddffbec8fcbaf45fefa2c0c4d699ddbd4aac1b4374dd454402ef3c1"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-requirements-1440-light.png",
+      "sha256": "eb12e909e14a4edb003a4e122a0080df55773afac740603ca5cdb8e150c591d6"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-requirements-390-dark.png",
+      "sha256": "607d7be457bd156952ca61ac748edf33b0470b5ef2854bbcefa14c5616b91fed"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/journey-requirements-390-light.png",
+      "sha256": "bccfe1d0fb9b90bc4c02b83fc9f15b9a9506382a30517d22c7bc6647117659ea"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/palette-1024-dark.png",
+      "sha256": "5d7ae76b292ab6405ad56680288c0f8e515329c7c60cfe315bb032e3a8dea7ce"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/palette-1024-light.png",
+      "sha256": "3595e0a8ac409d379fc300d0ee7233a8f2b86bb15ef8ba2a03c16f62faa39617"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/palette-1440-dark.png",
+      "sha256": "07ffcb86e75f20a18c4081dfccdaec038736839ed6a57e9184cb9e1208dbe900"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/palette-1440-light.png",
+      "sha256": "5d291cffb953a09395abb2b3e10f3d242ae17e11aa1398238a760951b1db778e"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/palette-390-dark.png",
+      "sha256": "a65e64b4a0bdc41e639f35f350ef9131978b171e520f986d7d9758739c0b87a4"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/palette-390-light.png",
+      "sha256": "678e7a05ebecd8fe92bad7056b0b28ccc13bd69fc101010b68636186b45cc62f"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/relations-1024-dark.png",
+      "sha256": "04ddfe96ef211d0b33e8d91b426c561880e66a4c491372490049909d1513015a"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/relations-1024-light.png",
+      "sha256": "20122cc3ebb4d1c179b8ebd2aaf66a1022d4a16f0775307eb79d2c2d8b6a2bfc"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/relations-1440-dark.png",
+      "sha256": "9a2fc83b9ce20921e6a248a6f0c5d17353432562b36598bc6bee9c06f5694510"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/relations-1440-light.png",
+      "sha256": "83217b6c8fac25a9c7ce5ec1e705c93f58893d6ac706d736f1b74da1d5af0c91"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/relations-390-dark.png",
+      "sha256": "9e23f68b8388f6e13fab78b3c757bcf581539cefe29621b93897502d3ca45c92"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/relations-390-light.png",
+      "sha256": "f3193a78b59cd6b1253a14233f2a1e66397864214d39bd5591616006ab9d1afa"
+    }
+  ],
+  "logs": [
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/baseline-browser-corrected.log",
+      "sha256": "01090c2f3361ac3abc3bef3d9cdab63aca13f0f3a67794fa67f93ce284cbb0c0"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/baseline-browser.log",
+      "sha256": "1eec2f3b19f3c104669ecf714670fe10589025af6cfd0fd71674591736e71e52"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/baseline-remote.log",
+      "sha256": "510b3abb5ee6538572259e0d4d6db637d36332d27878c59760448545e48f33a9"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/baseline-search-unit.log",
+      "sha256": "db577f8cb0f0558e5c3012aa554005d1eacea7c4985958fab1ac7ff67a857068"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/browser-list.json",
+      "sha256": "7e08cc665eba2d75ab9b9e10a98b4f403dad0b3524e55708f0f0d2fcf057c262"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/final-briefing-browser.log",
+      "sha256": "241ddfff1f7353f834ec54a3ee21e35aabc8ba69849e0e984f7bf2d666ebfaab"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/final-browser.log",
+      "sha256": "a827d0fd11f84fb4c88ad1380c39309e5eae69871f446338021d8116bc2896c1"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/final-canonical-browser.log",
+      "sha256": "ea372af655bb41ba2a11cc69bedc7f3b0ccf4e8644f860f4d34f249c36eee7c5"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/final-legacy-journey.log",
+      "sha256": "981c914f5dec838535e045d17b94df790b3342a912341e9f8c37e0fa13479512"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/final-legacy-placement.log",
+      "sha256": "72edaa652a5402ed8ec2917660d1f16556f83522bf8382fef4ebe8512f181bae"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/final-morning-all.log",
+      "sha256": "8cc0b933bd1b49cec37fc5d4dee70b82ad35b3ae98e31b487a65059928fffae7"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/final-remote.log",
+      "sha256": "98347b203261919e64c7be58a3c9b1ec985bab13d900580d83985d5c2fd925d5"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/final-repaired-remote.log",
+      "sha256": "ede1117983397c2e88297cc33b73ce23b6708dfa5cac0103a7cb679a359c1c9e"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/final-web-remote.log",
+      "sha256": "7138d5ee4d2f63206ee96f2162ef4dc129dc8fbd95b030f56b67035d56b37bcd"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/fixed-browser-smoke.log",
+      "sha256": "2fcb77b304bc8d0060986d89b2c0bd300f3ef8e727c264d0f7731831ee37fde2"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/fixed-browser-smoke2.log",
+      "sha256": "6f3a56b866bf57604e99ce2df66f4ab52870f97a0983bdff5d786fd479910996"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/guards.log",
+      "sha256": "28b4fe07aa5670fc955f0d1f5604bf83756971a57172828737162f49efb808fa"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/legacy-journey.log",
+      "sha256": "7f99991fdb9363e55b5d4f51b4825915b98f48114835ba497215ad1003b06454"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/shard-repair.log",
+      "sha256": "3cdcc0c23e3d3f032ab39f3e89a05d50b9da377b5694c634464676fd16c32887"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix2/logs/unit-list.json",
+      "sha256": "1283f2903ee22f78b7df4956c8d17d1b4b01e61e86fe5c4070f56bf935d78ba4"
+    }
+  ],
+  "open": [
+    {
+      "finding": 7,
+      "severity": "P3",
+      "description": "Migration 1238 reservation still absent from shared ledger.",
+      "owner": "coordinator / AEON-655",
+      "status": "Worker cannot claim another package ownership; coordinator must append the existing reservation and attach its evidence.",
+      "expected_line": "1238 AEON-655 (work vocabulary)",
+      "ledger": "/private/tmp/claude-501/-Users-markus-Code-aithema/af3ab8bf-63f6-4fb5-bccf-086eb11c043e/scratchpad/aeon/migration-ledger.txt",
+      "ledger_sha256_at_record": "849007af43ae78c35d917d5ed4ff9399c5aee06a19cc70c7562497356e9b71c9",
+      "migration": "internal/db/migrations/1238_work_vocabulary.sql",
+      "migration_sha256": "27eaf2c0851a1b633ae7f070a9f5283d3d1b7a3eace74a792bed4dace5c789c4"
+    },
+    {
+      "check": "CI-equivalent Linux Chromium",
+      "owner": "coordinator / OPS-247",
+      "status": "Approved remote browser launcher refused with exit 3: bootstrap/launcher pending. Local targeted specs passed; no origin push means no new hosted CI run. No manual SSH/browser workaround."
+    },
+    {
+      "gate": "consolidated review and release approval",
+      "owner": "coordinator",
+      "status": "Not performed by package worker; no model approval or release acceptance claimed."
+    },
+    {
+      "design": "needs Opus design",
+      "status": "No design artifact named in this fix brief; existing PAIMOS components and layouts reused, only specified behavior restored."
+    }
+  ],
+  "safety": {
+    "selected_github_account": "markus-barta (verified with gh api user --jq .login)",
+    "worker_attribution": "Coordinator recorded worker marker before dispatch, per worker-common.md.",
+    "origin_push": false,
+    "deploy": false,
+    "production_access": false,
+    "ticket_status_changed": false,
+    "migration_ledger_modified": false,
+    "historical_migrations_modified": false,
+    "new_secrets_requested": false,
+    "credentials_read_or_displayed": false,
+    "other_worktrees_modified": false,
+    "other_model_clis_called": false,
+    "version_artifacts_modified": false,
+    "generated_output_committed": false
+  }
+}

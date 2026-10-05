@@ -30,7 +30,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
-	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/systemactor"
@@ -312,173 +311,67 @@ func (m *Module) proposeToInbox(r *http.Request, actor tenant.Principal) (any, e
 // text, private quotation guard) but writes nothing to GitHub. Locked rules
 // change only through a person. The outcome job proposes here too.
 func (m *Module) recordInboxProposal(parent context.Context, actor tenant.Principal, in InboxInput) (Proposal, error) {
-	if err := m.proposalAccess(actor); err != nil {
-		return Proposal{}, err
-	}
-	if len(m.guardMaster) < 32 {
-		return Proposal{}, fail(503, "guard_unavailable", missingGuardReason)
-	}
+	ctx, cancel := context.WithTimeout(parent, fetchTimeout)
+	defer cancel()
 	if !workorders.UUID(in.RequestID) || strings.ToLower(in.RequestID) != in.RequestID {
 		return Proposal{}, fail(400, "invalid_request", "Name a canonical request UUID.")
 	}
-	if in.Ticket != "" && !ticketKeyPattern.MatchString(in.Ticket) {
-		return Proposal{}, fail(400, "invalid_request", "ticket must be a key such as INSPR-491.")
-	}
-	if in.RuleSHA != "" && !digestPattern.MatchString(in.RuleSHA) {
-		return Proposal{}, fail(400, "invalid_request", "rule_sha256 must be a SHA-256.")
-	}
-	ctx, cancel := context.WithTimeout(parent, fetchTimeout)
-	defer cancel()
-	var source Source
-	var files []File
-	var guard *guardCorpus
-	var replay *Proposal
+	// Preserve exact replay semantics before rendering or quotation checks.
+	var p Proposal
+	found := false
 	err := m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
-		p, err := getProposal(ctx, tx, in.RequestID)
-		if err == nil {
-			replay = &p
+		stored, err := getProposal(ctx, tx, in.RequestID)
+		var refusal *failure
+		if errors.As(err, &refusal) && refusal.Status == 404 {
 			return nil
 		}
-		var f *failure
-		if !errors.As(err, &f) || f.Status != 404 {
+		if err != nil {
 			return err
 		}
-		if source, err = inboxSource(ctx, tx, in); err != nil {
-			return err
+		if !stored.Inbox || stored.ProposedBy != actor.ID || stored.InboxRequestDigest != inboxRequestDigest(in) || stored.DeskQuestionID != "" || stored.DeskAnswerID != "" {
+			return fail(409, "request_conflict", "That request UUID belongs to another proposal.")
 		}
-		if !writableSource(source) {
-			return fail(422, "unsupported_repository", "Only the public and private INSPR doctrine repositories accept proposals; their visibility must match.")
-		}
-		if source.CredentialRef != "" {
-			if err := m.credentials.authorize(source.CredentialRef, actor.TenantID, source.Repository); err != nil {
-				return err
-			}
-		}
-		if files, err = cachedFiles(ctx, tx, source); err != nil {
-			return err
-		}
-		if source.Repository == publicRepository {
-			guard, err = m.privateGuard(ctx, tx, actor)
-		}
-		return err
+		p, found = stored, true
+		return nil
 	})
+	if err != nil || found {
+		return p, err
+	}
+	prepared, err := m.PrepareDeskDraft(ctx, actor, in)
 	if err != nil {
-		return Proposal{}, err
+		return p, err
 	}
-	if replay != nil {
-		// The same request id replays its proposal; anything else is a conflict.
-		if !replay.Inbox || replay.ProposedBy != actor.ID || replay.Path != in.Path || replay.RuleKey != in.RuleKey {
-			return Proposal{}, fail(409, "request_conflict", "That request UUID belongs to another proposal.")
-		}
-		return *replay, nil
-	}
-	file, rule, index, ok := locateRule(Render(source.Repository, source.Commit, source.Visibility == "private", files), in.Path, in.RuleKey, "", -1)
-	if !ok || file.Problem != "" {
-		return Proposal{}, fail(409, "stale_rule", "That rule is not indexed at the pinned commit.")
-	}
-	if in.RuleSHA != "" && in.RuleSHA != rule.SHA256 {
-		return Proposal{}, fail(409, "stale_rule", "The rule changed at the pin; reload it before proposing.")
-	}
-	pin := ProposalInput{RequestID: in.RequestID, SourceID: source.ID, Path: in.Path, RuleKey: in.RuleKey, RuleSHA: rule.SHA256, Source: in.Source, Explanation: in.Why}
-	switch {
-	case in.TLDR != nil:
-		pin.TLDR.EN, pin.TLDR.DE = in.TLDR.EN, in.TLDR.DE
-	case rule.TLDR != nil:
-		pin.TLDR.EN, pin.TLDR.DE = rule.TLDR.EN, rule.TLDR.DE
-	}
-	if strings.TrimSpace(pin.TLDR.EN) == "" {
-		return Proposal{}, fail(400, "invalid_request", "This rule has no TL;DR yet; propose one with the change.")
-	}
-	if err := pin.validate(); err != nil {
-		return Proposal{}, err
-	}
-	_, old, next, err := editRuleViews(source, files, pin)
-	if err != nil {
-		return Proposal{}, err
-	}
-	if !humanActor(actor) && (old.Strength == "locked" || next.Strength == "locked") {
-		return Proposal{}, fail(403, "locked_rule", "Locked rules change only through a person. Ask one to edit it under Doctrine.")
-	}
-	// A TL;DR alone is a change; adding one to a rule without one is too.
-	if next.SHA256 == old.SHA256 && rule.TLDR != nil && tldrDigest(rule.TLDR.EN, rule.TLDR.DE) == tldrDigest(pin.TLDR.EN, pin.TLDR.DE) {
-		return Proposal{}, fail(400, "no_change", "The proposal matches the pinned rule.")
-	}
-	if _, err := m.checkPrivateQuotes(ctx, actor, source, files, guard, pin.Source, pin.TLDR.EN, pin.TLDR.DE, pin.Explanation); err != nil {
-		return Proposal{}, err
-	}
-	p := Proposal{
-		ID: in.RequestID, SourceID: source.ID, Repository: source.Repository, Path: in.Path, RuleKey: in.RuleKey,
-		State: "pending", ProposedBy: actor.ID, Inbox: true, BaseRuleSHA: old.SHA256, ProposedSHA: next.SHA256, Ticket: in.Ticket,
-		ProposedTLDR: tldrDigest(pin.TLDR.EN, pin.TLDR.DE), RuleSet: rule.Set, RuleIndex: index,
-	}
+	ctx = WithPreparedInbox(ctx, prepared)
 	err = m.tx(ctx, actor, "rules.write", func(tx pgx.Tx) error {
-		current, err := getSource(ctx, tx, source.ID, true)
+		var changes []events.Change
+		var err error
+		p, changes, err = m.recordInboxTx(ctx, tx, actor, in, "", "", "")
 		if err != nil {
 			return err
 		}
-		if current.Commit != source.Commit {
-			return fail(409, "stale_source", "The doctrine pin moved; reload the rule and propose again.")
-		}
-		var total, mine int
-		var sameID, sameSHA string
-		if err := tx.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE proposed_by=$1),
-			COALESCE(max(id::text) FILTER (WHERE proposed_by=$1 AND source_id=$2 AND path=$3 AND rule_key=$4),''),
-			COALESCE(max(data->>'proposed_rule_sha256') FILTER (WHERE proposed_by=$1 AND source_id=$2 AND path=$3 AND rule_key=$4),'')
-			FROM doctrine_proposals WHERE data->>'inbox'='true' AND data->>'state'='pending'`, actor.ID, source.ID, in.Path, in.RuleKey).Scan(&total, &mine, &sameID, &sameSHA); err != nil {
-			return err
-		}
-		if sameID != "" {
-			if sameSHA == next.SHA256 {
-				existing, err := getProposal(ctx, tx, sameID)
-				replay = &existing
-				return err
-			}
-			return fail(409, "rule_proposal_open", "You already proposed a change to this rule. A person has to act on it first.")
-		}
-		if total >= maxInboxPending || mine >= maxInboxPerProposer {
-			return fail(409, "inbox_full", "The doctrine inbox is full. A person has to act on waiting proposals first.")
-		}
-		if in.Ticket != "" {
-			var projectID string
-			err := tx.QueryRow(ctx, `SELECT id::text, COALESCE(project_id::text,'') FROM nodes WHERE key=$1 AND deleted_at IS NULL`, in.Ticket).Scan(&p.TicketID, &projectID)
-			if errors.Is(err, pgx.ErrNoRows) {
-				return fail(404, "ticket_not_found", "That ticket is not in this workspace.")
-			}
-			if err != nil {
-				return err
-			}
-			if err := authz.RequireTx(ctx, tx, actor, "nodes.read", authz.Scope{ProjectID: projectID}); err != nil {
+		for _, change := range changes {
+			if _, err := events.Append(ctx, tx, actor, change); err != nil {
 				return err
 			}
 		}
-		raw, err := jsonData(p)
-		if err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO doctrine_proposals(tenant_id,id,source_id,repository,path,rule_key,input_digest,base_commit,proposed_by,data) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-			actor.TenantID, p.ID, p.SourceID, p.Repository, p.Path, p.RuleKey, inputDigest(pin), source.Commit, actor.ID, raw); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `INSERT INTO doctrine_proposal_drafts(tenant_id,proposal_id,source,tldr_en,tldr_de,why) VALUES($1,$2,$3,$4,$5,$6)`,
-			actor.TenantID, p.ID, pin.Source, strings.TrimSpace(pin.TLDR.EN), strings.TrimSpace(pin.TLDR.DE), strings.TrimSpace(pin.Explanation)); err != nil {
-			return err
-		}
-		_, err = events.Append(ctx, tx, actor, events.Change{Type: "doctrine.inbox_proposed", After: map[string]any{
-			"proposal_id": p.ID, "repository": p.Repository, "path": p.Path, "rule_key": p.RuleKey, "proposed_by": actor.ID, "ticket": p.Ticket,
-		}})
-		return err
+		return nil
 	})
-	if err != nil {
-		return Proposal{}, err
-	}
-	if replay != nil {
-		return *replay, nil
-	}
-	return scanStored(ctx, m, actor, p.ID)
+	return p, err
+}
+
+// This is the immutable original request, distinct from input_digest, which
+// changes when a person edits for publication. Omit only the UUID so an exact
+// retry with a fresh UUID can deduplicate. Legacy rows without this evidence
+// cannot safely certify a replay and return a conflict.
+func inboxRequestDigest(in InboxInput) string {
+	in.RequestID = ""
+	raw, _ := json.Marshal(in)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
 }
 
 func jsonData(p Proposal) ([]byte, error) {
-	return json.Marshal(proposalData{Proposal: p})
+	return json.Marshal(proposalData{Proposal: p, InboxRequestDigest: p.InboxRequestDigest})
 }
 
 func scanStored(ctx context.Context, m *Module, actor tenant.Principal, id string) (Proposal, error) {
@@ -918,9 +811,34 @@ func ticketComment(ctx context.Context, tx pgx.Tx, actor tenant.Principal, ticke
 // indexed at this commit. The linked ticket gets a comment. It runs inside the
 // index transaction.
 func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Source, files []File) error {
-	rows, err := tx.Query(ctx, `SELECT `+proposalColumns+` FROM doctrine_proposals
+	// Filter by actual landed bytes before the batch bound: unmatched history
+	// and active publication leases cannot permanently occupy the first page.
+	type landedRule struct {
+		Path string `json:"path"`
+		SHA  string `json:"sha"`
+		TLDR string `json:"tldr"`
+	}
+	landed := []landedRule{}
+	for _, v := range Render(s.Repository, s.Commit, s.Visibility == "private", files) {
+		for _, r := range v.Rules {
+			if r.TLDR != nil {
+				landed = append(landed, landedRule{v.Path, r.SHA256, tldrDigest(r.TLDR.EN, r.TLDR.DE)})
+			}
+		}
+	}
+	if len(landed) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(landed)
+	if err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `SELECT `+proposalColumns+` FROM doctrine_proposals p
 		WHERE source_id=$1 AND data->>'inbox'='true' AND COALESCE(data->>'state','proposed') NOT IN ('dismissed','promoted')
-		AND COALESCE(data->>'proposed_rule_sha256','')<>'' AND COALESCE(data->>'proposed_tldr_sha256','')<>'' ORDER BY created_at LIMIT 200`, s.ID)
+		AND (COALESCE(data->>'operation_id','')='' OR COALESCE((data->>'operation_until')::timestamptz,'-infinity'::timestamptz) <= $3)
+		AND EXISTS (SELECT 1 FROM jsonb_to_recordset($2::jsonb) AS landed(path text,sha text,tldr text)
+		 WHERE landed.path=p.path AND landed.sha=p.data->>'proposed_rule_sha256' AND landed.tldr=p.data->>'proposed_tldr_sha256')
+		ORDER BY created_at,id LIMIT 200 FOR NO KEY UPDATE`, s.ID, encoded, time.Now())
 	if err != nil {
 		return err
 	}
@@ -940,17 +858,13 @@ func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Sou
 	if len(open) == 0 {
 		return nil
 	}
-	landed := map[string]bool{}
-	for _, v := range Render(s.Repository, s.Commit, s.Visibility == "private", files) {
-		for _, r := range v.Rules {
-			if r.TLDR != nil {
-				landed[v.Path+"\x00"+r.SHA256+"\x00"+tldrDigest(r.TLDR.EN, r.TLDR.DE)] = true
-			}
-		}
-	}
+
 	var system *tenant.Principal
+	type notification struct{ ticket, body string }
+	var notifications []notification
+	var changes []events.Change
 	for _, p := range open {
-		if !landed[p.Path+"\x00"+p.ProposedSHA+"\x00"+p.ProposedTLDR] || p.OperationID != "" && time.Now().Before(p.OperationUntil) {
+		if p.OperationID != "" && time.Now().Before(p.OperationUntil) {
 			continue
 		}
 		p.State, p.PromotedCommit = "promoted", s.Commit
@@ -960,7 +874,7 @@ func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Sou
 				p.ApprovedFileSHA = hashText(string(f.Content))
 			}
 		}
-		if err := saveProposal(ctx, tx, actor, &p, "doctrine.inbox_promoted"); err != nil {
+		if err := saveProposal(ctx, tx, actor, &p, ""); err != nil {
 			var f *failure
 			if errors.As(err, &f) && f.Code == "proposal_changed" {
 				continue
@@ -970,6 +884,7 @@ func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Sou
 		if err := deleteDraft(ctx, tx, p.ID); err != nil {
 			return err
 		}
+		changes = append(changes, proposalChange(p, "doctrine.inbox_promoted"))
 		if p.TicketID == "" {
 			continue
 		}
@@ -988,7 +903,16 @@ func promoteLanded(ctx context.Context, tx pgx.Tx, actor tenant.Principal, s Sou
 		if p.PRURL != "" {
 			body += " PR: " + p.PRURL
 		}
-		if err := ticketComment(ctx, tx, *system, p.TicketID, body); err != nil {
+		notifications = append(notifications, notification{p.TicketID, body})
+	}
+	// All proposal/draft/system-principal writes precede the event counter.
+	for _, change := range changes {
+		if _, err := events.Append(ctx, tx, actor, change); err != nil {
+			return err
+		}
+	}
+	for _, notice := range notifications {
+		if err := ticketComment(ctx, tx, *system, notice.ticket, notice.body); err != nil {
 			return err
 		}
 	}

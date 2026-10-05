@@ -330,7 +330,12 @@ type fix struct {
 
 func newFix(t *testing.T) *fix {
 	t.Helper()
-	f := &fix{db: dbtest.Open(t), mux: http.NewServeMux()}
+	return newFixWithDB(t, oldVoteDatabase(t))
+}
+
+func newFixWithDB(t *testing.T, d *dbtest.DB) *fix {
+	t.Helper()
+	f := &fix{db: d, mux: http.NewServeMux()}
 	f.person = tenant.Principal{ID: id(), TenantID: id(), Kind: tenant.Person}
 	f.member = tenant.Principal{ID: id(), TenantID: f.person.TenantID, Kind: tenant.Person}
 	f.guest = tenant.Principal{ID: id(), TenantID: f.person.TenantID, Kind: tenant.Person}

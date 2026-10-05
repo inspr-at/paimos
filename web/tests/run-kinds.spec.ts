@@ -136,6 +136,11 @@ for (const theme of ['light', 'dark'] as const) test(`ended and lost-contact pho
         }
       }
       expectModelGlyphFits(await modelGlyphSize(row.locator('.exec-model'), 6), `${width}px ${session.display_label}: complete ffmpeg remains visible`)
+      if (width <= 390) {
+        const stateBox = (await row.locator('.agent-state-label').boundingBox())!
+        const ticketBox = (await row.locator('.c-ticket').boundingBox())!
+        expect(stateBox.x + stateBox.width, `${width}px ${session.display_label}: state stays clear of project`).toBeLessThanOrEqual(ticketBox.x + .5)
+      }
       if (width <= 390) await expectStableControls({ controls: { row, host, pencil, remove, menu }, scrollAreas: { row }, interactions: [
         { name: 'open Host from badge', run: async () => {
           await host.click()
@@ -269,8 +274,8 @@ test('execution kinds and person-specific host names on the real agents table', 
     expectHostBadgeFits(renamed!.width, availableBadgeWidth, 'renamed badge fits the cell beside the pencil')
     expect(await workerHost.evaluate(el => getComputedStyle(el).width)).not.toBe('104px')
     await workerHost.click()
-    await expect(dialog.getByRole('button', { name: "Use 'mbp2606'" })).toBeEnabled()
-    await dialog.getByRole('button', { name: "Use 'mbp2606'" }).click()
+    await expect(dialog.getByRole('button', { name: 'Use registered name', exact: true })).toBeEnabled()
+    await dialog.getByRole('button', { name: 'Use registered name', exact: true }).click()
     await expect(workerHost).toContainText('mbp2606')
     expect((await workerHost.boundingBox())?.width).toBe(original?.width)
     // Long labels use the available width up to the cap, visibly ellipsised.
@@ -371,8 +376,8 @@ test('execution kinds and person-specific host names on the real agents table', 
     await page.emulateMedia({ colorScheme: 'light' })
 
     await workerHost.click()
-    await expect(dialog.getByRole('button', { name: "Use 'mbp2606'" })).toBeEnabled()
-    await dialog.getByRole('button', { name: "Use 'mbp2606'" }).click()
+    await expect(dialog.getByRole('button', { name: 'Use registered name', exact: true })).toBeEnabled()
+    await dialog.getByRole('button', { name: 'Use registered name', exact: true }).click()
     await expect(dialog).toHaveCount(0)
     await expect(workerHost.locator('.host-name')).toHaveText('mbp2606')
   }

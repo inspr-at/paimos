@@ -84,7 +84,7 @@ func (m *module) createTicket(w http.ResponseWriter, r *http.Request) {
 func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, release string, in ticketInput) (Walker, error) {
 	var out Walker
 	// Match R1 structural writes and the release planner's lock order.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
+	if err := lockMembership(ctx, tx, p, project); err != nil {
 		return out, err
 	}
 	var person bool
@@ -95,7 +95,8 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
 		return out, fail(403, "person required")
 	}
 	var current *string
-	if err := tx.QueryRow(ctx, `SELECT current_release_node_id::text FROM journey_projects WHERE project_node_id=$1 FOR UPDATE`, project).Scan(&current); err != nil {
+	var projectRevision int64
+	if err := tx.QueryRow(ctx, `SELECT current_release_node_id::text,revision FROM journey_projects WHERE project_node_id=$1 FOR UPDATE`, project).Scan(&current, &projectRevision); err != nil {
 		return out, err
 	}
 	var state string
@@ -146,7 +147,7 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
   JOIN tree t ON t.id=f.feature_node_id
   JOIN nodes n ON n.id=f.feature_node_id AND n.tenant_id=f.tenant_id
   JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id
-  WHERE f.project_node_id=$1 AND f.feature_node_id=$2 AND k.slug='epic'`, project, *in.FeatureID).Scan(&parent)
+  WHERE f.project_node_id=$1 AND f.feature_node_id=$2 AND k.slug IN ('work','epic')`, project, *in.FeatureID).Scan(&parent)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return out, fail(404, "feature not found in project")
 		}
@@ -155,7 +156,7 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
 		}
 	}
 	var allows bool
-	if err := tx.QueryRow(ctx, `SELECT k.allowed_child_kinds IS NULL OR 'ticket'=ANY(k.allowed_child_kinds)
+	if err := tx.QueryRow(ctx, `SELECT k.allowed_child_kinds IS NULL OR CASE WHEN EXISTS(SELECT 1 FROM node_kinds WHERE slug='work') THEN 'work' ELSE 'ticket' END=ANY(k.allowed_child_kinds)
   FROM nodes n JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id
   WHERE n.id=$1 AND n.deleted_at IS NULL`, parent).Scan(&allows); err != nil {
 		return out, err
@@ -165,7 +166,7 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
 	}
 	var schema jsonschema.Schema
 	var schemaJSON []byte
-	if err := tx.QueryRow(ctx, `SELECT field_schema FROM node_kinds WHERE slug='ticket'`).Scan(&schemaJSON); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT field_schema FROM node_kinds WHERE slug IN ('work','ticket') ORDER BY (slug='work') DESC LIMIT 1`).Scan(&schemaJSON); err != nil {
 		return out, err
 	}
 	if err := json.Unmarshal(schemaJSON, &schema); err != nil {
@@ -183,12 +184,9 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
 	err = tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title,position)
   SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),$2,$3,
    coalesce((SELECT max(position)+1024 FROM nodes WHERE parent_id=$2 AND deleted_at IS NULL),1024)
-  FROM node_kinds k WHERE k.slug='ticket'
+  FROM node_kinds k WHERE k.slug IN ('work','ticket') ORDER BY (k.slug='work') DESC LIMIT 1
   RETURNING id::text,to_jsonb(nodes)||jsonb_build_object('position',position::text)`, p.TenantID, parent, in.Title).Scan(&id, &snapshot)
 	if err != nil {
-		return out, err
-	}
-	if _, err := events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: "node.created", After: snapshot}); err != nil {
 		return out, err
 	}
 	var assigned *string
@@ -196,14 +194,20 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
 		assigned = &release
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO journey_tickets(tenant_id,ticket_node_id,project_node_id,feature_node_id,release_node_id,walker_position,source,scope_revision_required)
-  VALUES($1,$2,$3,$4,$5,(SELECT coalesce(max(walker_position)+1,0) FROM journey_tickets WHERE project_node_id=$3),'manual',true)`, p.TenantID, id, project, in.FeatureID, assigned)
+  VALUES($1,$2,$3,$4,$5,(SELECT coalesce(max(walker_position)+1,0) FROM journey_tickets WHERE project_node_id=$3),'manual',true)
+ ON CONFLICT(tenant_id,ticket_node_id) DO UPDATE SET feature_node_id=excluded.feature_node_id,release_node_id=excluded.release_node_id,scope_revision_required=excluded.scope_revision_required`, p.TenantID, id, project, in.FeatureID, assigned)
 	if err != nil {
 		return out, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE journey_releases SET revision=revision+1 WHERE release_node_id=$1`, release); err != nil {
+	// Inheritance may already have invalidated these revisions. One quick-create
+	// operation advances each fence once, including an explicit exclusion.
+	if _, err := tx.Exec(ctx, `UPDATE journey_releases SET revision=revision+1 WHERE release_node_id=$1 AND revision=$2`, release, revision); err != nil {
 		return out, err
 	}
-	if _, err := tx.Exec(ctx, `UPDATE journey_projects SET revision=revision+1,updated_at=now() WHERE project_node_id=$1`, project); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE journey_projects SET revision=revision+1,updated_at=now() WHERE project_node_id=$1 AND revision=$2`, project, projectRevision); err != nil {
+		return out, err
+	}
+	if _, err := events.Append(ctx, tx, p, events.Change{NodeID: &id, Type: "node.created", After: snapshot}); err != nil {
 		return out, err
 	}
 	out, err = load(ctx, tx, project, release)

@@ -17,6 +17,10 @@ test('people, agents and menus share all approved states, definitions, rule defa
     assert.ok(def.meaning && def.hint && def.set_by)
   }
   assert.equal(help.queued.is_status, false)
+  assert.equal(help.recurring?.is_status, false)
+  assert.equal(help.recurring?.label, 'Recurring')
+  assert.match(help.recurring!.meaning, /occurrence number/)
+  assert.equal(statusOptions().some(option => option.value === 'recurring'), false)
   assert.match(help.queued.meaning, /Blocked waits on its named blocker/)
   assert.match(help.queued.meaning, /Open or Blocked plus a place in the work queue \(AEON-522\)/)
   assert.equal(statusOptions().some(option => option.value === 'queued'), false)
