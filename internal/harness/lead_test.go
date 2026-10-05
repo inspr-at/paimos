@@ -460,7 +460,7 @@ func TestProjectLeadOpenAPIContract(t *testing.T) {
 			prefix = "/api"
 		}
 		paths := doc["paths"].(map[string]any)
-		for _, suffix := range []string{"/lead", "/lead/claim", "/lead/pause"} {
+		for _, suffix := range []string{"/lead", "/lead/claim", "/lead/pause", "/lead/yield"} {
 			path := prefix + "/projects/{projectId}" + suffix
 			operation, ok := paths[path].(map[string]any)
 			if !ok {

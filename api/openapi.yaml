@@ -93,6 +93,28 @@ paths:
         '200': {description: Dispatch fenced; existing graceful handover pending confirmed exit}
         '403': {description: Owner or generation proof required}
         '409': {description: Stale revision or generation}
+  /projects/{projectId}/lead/yield:
+    post:
+      summary: Yield an idle lead's slot through checkpoint and confirmed exit
+      description: Agent-only harness.worker and the current generation lease. Requires expected_revision and generation. The server checks the existing Queue under the tree fence. An idle lead, a lead with a routed worker waiting, or one whose bounded project turn has ended requests the existing cooperative checkpoint/pause. No slot is freed until confirmed exit. Routed assignments retain this generation and can start after worker-priority yield and confirmed exit through all four live gates. Other pauses remain fenced. Restart is explicit and uses ordinary admission; eligible workers precede restart. Automatic production launch remains disabled pending AEON-603.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - {in: header, name: X-Aeon-Worker-Lease, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, generation]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                generation: {type: integer, minimum: 1}
+      responses:
+        '200': {description: Cooperative checkpoint requested; process remains counted until exit}
+        '403': {description: Current worker lease or live owner authority rejected}
+        '409': {description: Stale identity, useful current turn, unavailable scheduling evidence or unavailable handover delivery}
   /settings/work-vocabulary:
     get:
       summary: Read workspace work names and icons
@@ -1245,7 +1267,8 @@ paths:
   /queue/next:
     post:
       operationId: nextWorkQueue
-      description: Coordinator or permitted person routes the first ready run to an eligible agent using existing allowance admission. Targeted work precedes shared work for its agent. Blocked work keeps its place and is skipped. No capacity returns entry null. This selects a run; pickup and In progress occur atomically on the daemon's fenced claim. Repeated selection returns the same assigned run until claim.
+      description: >-
+        Coordinator or permitted person routes the first ready run to an eligible agent using existing allowance admission. Targeted work precedes shared work for its agent. Blocked work keeps its place and is skipped. No capacity returns entry null. This selects a run; pickup and In progress occur atomically on the daemon's fenced claim. Repeated selection returns the same assigned run until claim. Explicit leads share one owner dial: oldest eligible project demand gets one new route per turn, then goes behind waiting projects. Within each project targeted and manual order are preserved. Missing or stale mandatory gates never qualify a contender. Fairness waits return entry null and a redacted wait_reason; no project/account identities escape. Scheduling snapshots are bounded and excess demand waits explicitly.
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {in: header, name: X-Aeon-Lead-Session, required: false, schema: {type: string, format: uuid}, description: Required for projects with an explicit lead intent; the current lead must prove its session lease. Legacy manual routing in unconfigured projects remains compatible.}
@@ -1257,7 +1280,7 @@ paths:
           application/json:
             schema: {$ref: '#/components/schemas/QueueTarget'}
       responses:
-        '200': {description: Selection, content: {application/json: {schema: {type: object, required: [entry], properties: {entry: {oneOf: [{$ref: '#/components/schemas/WorkQueueEntry'}, {type: 'null'}]}}}}}}
+        '200': {description: Selection, content: {application/json: {schema: {type: object, required: [entry], properties: {wait_reason: {type: string}, entry: {oneOf: [{$ref: '#/components/schemas/WorkQueueEntry'}, {type: 'null'}]}}}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {description: Lead proof missing, stale assignment, paused/revoked/archived lead, or mandatory admission unavailable}
   /settings/status-autopilot:

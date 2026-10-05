@@ -46,6 +46,11 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			return nil, err
 		}
 	}
+	if leadProject != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		r = r.WithContext(ctx)
+	}
 	entries, err := m.queueEntries(r.Context(), tx)
 	if err != nil {
 		return nil, err
@@ -128,6 +133,18 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 				return map[string]any{"entry": e}, nil
 			}
 			continue
+		}
+		if leadProject != "" {
+			reason, err := harness.LeadDispatchTurnTx(r.Context(), tx, p, leadProject, e.Run.ID, m.leadAdmission)
+			if err != nil {
+				return nil, err
+			}
+			if reason == "work_not_eligible" {
+				continue
+			}
+			if reason != "" {
+				return map[string]any{"entry": nil, "wait_reason": reason}, nil
+			}
 		}
 		fields, err := json.Marshal(t.Fields)
 		if err != nil {
@@ -248,6 +265,11 @@ func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTi
 	_, err = attempt.Exec(ctx, `UPDATE agent_runs SET queue_routed_at=clock_timestamp() WHERE id=$1`, v.ID)
 	if err != nil {
 		return false, err
+	}
+	if lead != nil {
+		if err = harness.RecordLeadTurnTx(ctx, attempt, project); err != nil {
+			return false, err
+		}
 	}
 	if err = workorders.Record(ctx, attempt, p, t.ID, "queue.routed", v, target); err != nil {
 		return false, err

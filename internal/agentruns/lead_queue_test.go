@@ -208,3 +208,142 @@ func TestLegacyQueueSkipsOtherProjectDispatchAuthorities(t *testing.T) {
 		})
 	}
 }
+
+func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
+	f := setup(t)
+	f.queueAccount(t, 1000000)
+	coordinator := f.other
+	coordinator.Scopes = authz.CoordinatorKeyScopes
+	coordinatorToken := f.key(t, coordinator, authz.CoordinatorKeyScopes)
+	projects := []string{uuid(), uuid()}
+	sessions := []string{uuid(), uuid()}
+	leases := []string{"fair-a-fixture-lease-00000000000000", "fair-b-fixture-lease-00000000000000"}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var role string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'fair_coordinator','Lead') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		for _, permission := range authz.CoordinatorBaseScopes {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, f.person.TenantID, role, permission); err != nil {
+				return err
+			}
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, coordinator.ID, role); err != nil {
+			return err
+		}
+		for i, project := range projects {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title) SELECT $1,$2,$3,id,'Fair project' FROM node_kinds WHERE slug='project'`, f.person.TenantID, project, "FAIR-"+strconv.Itoa(i+1)); err != nil {
+				return err
+			}
+			ref := sha256.Sum256([]byte("aeon.harness.ref\x00fair-ref-" + project))
+			lease := sha256.Sum256([]byte("aeon.harness.lease\x00" + leases[i]))
+			if _, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,phase,heartbeat_at,ref_digest,lease_digest) VALUES($1,$2,$3,$4,$5,'codex','local','unmanaged','coordinator','working',clock_timestamp(),$6,$7)`, f.person.TenantID, sessions[i], project, coordinator.ID, f.person.ID, ref[:], lease[:]); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,session_id,generation,state) VALUES($1,$2,$3,$4,1,'working')`, f.person.TenantID, project, f.person.ID, sessions[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	tickets := []string{f.ticket(t, "open", "low", nil), f.ticket(t, "open", "high", nil), f.ticket(t, "open", "urgent", nil)}
+	runs := []string{}
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i, id := range tickets {
+		project := projects[0]
+		if i == 2 {
+			project = projects[1]
+		}
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, id, project)
+			return err
+		})
+		e := f.addQueue(t, id, nil)
+		runs = append(runs, e.Run.ID)
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_at=$2,queue_rank=$3 WHERE id=$1`, e.Run.ID, at.Add(time.Duration(i)*time.Minute), i+1)
+			return err
+		})
+	}
+	calls := 0
+	admission := func(ctx context.Context, tx pgx.Tx, _ tenant.Principal, _ string, s harness.Session) (harness.LeadChecks, error) {
+		calls++
+		var now time.Time
+		err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+		g := harness.LeadGate{State: "available", CheckedAt: now}
+		return harness.LeadChecks{Dial: g, Harness: g, Account: g, Host: g}, err
+	}
+	f.mux = http.NewServeMux()
+	workorders.New(f.d.App).Mount(f.mux)
+	agentruns.NewWithLeadAdmission(f.d.App, admission).Mount(f.mux)
+	harness.NewWithLeadAdmission(f.d.App, admission).Mount(f.mux)
+	next := func(i int, want, reason string) {
+		t.Helper()
+		r := httptest.NewRequest("POST", "/api/queue/next", strings.NewReader(`{"agent_principal_id":"`+f.agent.ID+`","model_profile_id":"`+f.profile+`"}`)).WithContext(tenant.WithPrincipal(t.Context(), coordinator))
+		r.Header.Set("X-Aeon-Lead-Session", sessions[i])
+		r.Header.Set("X-Aeon-Lead-Generation", "1")
+		r.Header.Set("X-Aeon-Worker-Lease", leases[i])
+		w := httptest.NewRecorder()
+		f.mux.ServeHTTP(w, r)
+		if w.Code != 200 {
+			t.Fatalf("next=%d %s", w.Code, w.Body.String())
+		}
+		var out struct {
+			Entry  *qEntry `json:"entry"`
+			Reason string  `json:"wait_reason"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if want == "" && out.Entry != nil || want != "" && (out.Entry == nil || out.Entry.NodeID != want) || out.Reason != reason {
+			t.Fatalf("next=%s want=%s reason=%s", w.Body.String(), want, reason)
+		}
+	}
+	next(1, "", "project_turn_wait")
+	next(0, tickets[0], "") // Preserve the manual order despite ticket B's urgency.
+	var turn time.Time
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `SELECT last_turn_at FROM project_leads WHERE project_id=$1`, projects[0]).Scan(&turn)
+	})
+	next(0, tickets[0], "") // Idempotent receipt must not consume another turn.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var again time.Time
+		if err := tx.QueryRow(t.Context(), `SELECT last_turn_at FROM project_leads WHERE project_id=$1`, projects[0]).Scan(&again); err != nil {
+			return err
+		}
+		if !again.Equal(turn) {
+			t.Fatal("idempotent route consumed a turn")
+		}
+		return nil
+	})
+	// Pending work wins over a newly requested lead, even in another project.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE project_leads SET session_id=NULL,generation=0,state='waiting_for_room' WHERE project_id=$1`, projects[1])
+		return err
+	})
+	r := httptest.NewRequest("POST", "/api/projects/"+projects[1]+"/lead/claim", strings.NewReader(`{"expected_revision":1,"session_id":"`+sessions[1]+`"}`)).WithContext(tenant.WithPrincipal(t.Context(), coordinator))
+	r.Header.Set("X-Aeon-Worker-Lease", leases[1])
+	r.Header.Set("Authorization", "Bearer "+coordinatorToken)
+	w := httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"reason":"worker_priority"`) {
+		t.Fatalf("restart did not yield to worker: %d %s", w.Code, w.Body.String())
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='cancelled' WHERE id=$1`, runs[0]); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE project_leads SET session_id=$2,generation=1,state='working' WHERE project_id=$1`, projects[1], sessions[1])
+		return err
+	})
+	next(0, "", "project_turn_wait")
+	next(1, tickets[2], "")
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='cancelled' WHERE id=$1`, runs[2])
+		return err
+	})
+	next(0, tickets[1], "")
+	if calls < 6 {
+		t.Fatal("live admission was not repeated")
+	}
+}

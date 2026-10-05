@@ -357,6 +357,12 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if err != nil {
 		return nil, err
 	}
+	if reason == "" && (l.SessionID == nil || *l.SessionID != s.ID) {
+		reason, err = m.leadScheduleWait(ctx, tx, p, l, true)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if reason != "" {
 		l, err = scanLead(tx.QueryRow(ctx, `UPDATE project_leads SET state='waiting_for_room',reason=$2,revision=revision+1,updated_at=clock_timestamp() WHERE project_id=$1 RETURNING `+leadColumns, id, reason))
 	} else {
@@ -592,14 +598,18 @@ func RequireAssignedLeadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, p
 		SessionID  string `json:"session_id"`
 		Generation int64  `json:"generation"`
 	}
-	if json.Unmarshal(binding, &in) != nil || l.SessionID == nil || in.SessionID != *l.SessionID || in.Generation != l.Generation || l.State != "working" {
+	yielded, err := leadWorkerYieldConfirmedTx(ctx, tx, l)
+	if err != nil {
+		return err
+	}
+	if json.Unmarshal(binding, &in) != nil || l.SessionID == nil || in.SessionID != *l.SessionID || in.Generation != l.Generation || (l.State != "working" && !yielded) {
 		return workorders.Fail(409, "assignment lead generation is no longer current")
 	}
 	l, err = projectLead(ctx, tx, p, l)
 	if err != nil {
 		return err
 	}
-	if l.State != "working" {
+	if l.State != "working" && !(yielded && (l.State == "waiting_for_room" || l.State == "paused" && l.Reason == "worker_priority")) {
 		return workorders.Fail(409, "assignment lead generation unavailable")
 	}
 	return nil
