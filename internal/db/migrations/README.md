@@ -626,3 +626,10 @@ queue results and creation time), located by `(tenant_id,id)`. Classify it as
 personal in the AEON-490 DSAR inventory when that package is integrated;
 `internal/dsar/inventory.json` is absent from this branch and its pinned
 `origin/main`. Snapshots contain no credentials, prompts or account details.
+
+AEON-740 fix round 2 keeps this schema unchanged: the bounded JSON payload also
+retains server-held depth-first continuation cursors with exact sibling positions
+and ancestry. The API returns only `continuation_available`, never cursor paths;
+`continuation_of` refers to an owned snapshot of the same parent. Each capture
+creates independent explicit membership, and application rechecks canonical
+`aeon_work_busy` after identical shared-queue membership replay.

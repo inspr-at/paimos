@@ -34,21 +34,34 @@ type snapshotItem struct {
 	RunID    string         `json:"run_id,omitempty"`
 	Path     []snapshotNode `json:"path,omitempty"`
 }
-type parentQueueSnapshot struct {
-	ID             string         `json:"id"`
-	ParentID       string         `json:"parent_id"`
-	ParentRevision time.Time      `json:"parent_revision"`
-	TreeRevision   string         `json:"tree_revision"`
-	State          string         `json:"state"`
-	Truncated      bool           `json:"truncated"`
-	Partial        bool           `json:"partial"`
-	TreeChanged    bool           `json:"tree_changed"`
-	Items          []snapshotItem `json:"items"`
+
+// A depth-first keyset cursor stays bounded by snapshotDepth, even across pages.
+// Positions remain exact decimal strings; UUID breaks ties at equal positions.
+type snapshotCursor struct {
+	Path          []snapshotNode `json:"path"`
+	AfterPosition string         `json:"after_position,omitempty"`
+	AfterID       string         `json:"after_id,omitempty"`
 }
 
-// Walk only the visible work tree, with bounded queries rather than an unbounded
-// recursive CTE. RLS removes hidden branches before LIMIT and before counts.
-func captureQueueTree(ctx context.Context, tx pgx.Tx, parent string) (parentQueueSnapshot, error) {
+type parentQueueSnapshot struct {
+	ID                    string           `json:"id"`
+	ParentID              string           `json:"parent_id"`
+	ParentRevision        time.Time        `json:"parent_revision"`
+	TreeRevision          string           `json:"tree_revision"`
+	State                 string           `json:"state"`
+	Truncated             bool             `json:"truncated"`
+	Partial               bool             `json:"partial"`
+	TreeChanged           bool             `json:"tree_changed"`
+	Items                 []snapshotItem   `json:"items"`
+	ContinuationAvailable bool             `json:"continuation_available"`
+	Start                 []snapshotCursor `json:"_start,omitempty"`
+	Next                  []snapshotCursor `json:"_next,omitempty"`
+}
+
+// Walk only the visible work tree. Each page visits at most snapshotNodes
+// nodes, with keyset queries bounded before eligibility work. RLS removes hidden
+// branches before LIMIT. The server holds the cursor, never the caller.
+func captureQueueTree(ctx context.Context, tx pgx.Tx, parent string, start []snapshotCursor) (parentQueueSnapshot, error) {
 	s := parentQueueSnapshot{ParentID: parent, State: "pending", Items: []snapshotItem{}}
 	var root snapshotNode
 	var kind string
@@ -60,58 +73,66 @@ func captureQueueTree(ctx context.Context, tx pgx.Tx, parent string) (parentQueu
 		return s, workorders.Fail(409, "select a work parent or project")
 	}
 	s.ParentRevision = root.Revision
-	type branch struct {
-		node snapshotNode
-		path []snapshotNode
+	if len(start) == 0 {
+		start = []snapshotCursor{{Path: []snapshotNode{root}}}
 	}
-	pending := []branch{{root, []snapshotNode{root}}}
+	s.Start = append([]snapshotCursor{}, start...)
+	pending := append([]snapshotCursor{}, start...)
 	topology := []snapshotNode{root}
 	for len(pending) > 0 {
-		b := pending[0]
-		pending = pending[1:]
-		remaining := snapshotNodes - len(topology)
-		rows, err := tx.Query(ctx, `SELECT n.id::text,n.parent_id::text,n.updated_at,n.state,aeon_work_leaf(n.id) AND aeon_work_pending(n.id) IS NULL FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.parent_id=$1 AND n.deleted_at IS NULL AND k.slug='work' ORDER BY n.position,n.id LIMIT $2`, b.node.ID, remaining+1)
-		if err != nil {
-			return s, err
-		}
-		for rows.Next() {
-			var n snapshotNode
-			var state string
-			var leaf bool
-			if err = rows.Scan(&n.ID, &n.Parent, &n.Revision, &state, &leaf); err != nil {
-				rows.Close()
+		index := len(pending) - 1
+		b := pending[index]
+		if len(topology) == snapshotNodes || len(s.Items) == snapshotLeaves {
+			// Probe only for another visible child, without evaluating eligibility
+			// or traversing beyond the page budget. Empty frames can be discarded.
+			var more bool
+			err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ WHERE n.parent_id=$1 AND n.deleted_at IS NULL AND k.slug='work'
+ AND ($2::numeric IS NULL OR (n.position,n.id)>($2::numeric,$3::uuid)))`, b.Path[len(b.Path)-1].ID, nullableCursor(b.AfterPosition), nullableCursor(b.AfterID)).Scan(&more)
+			if err != nil {
 				return s, err
 			}
-			if len(topology) >= snapshotNodes {
-				s.Truncated = true
-				break
+			if !more {
+				pending = pending[:index]
+				continue
 			}
-			topology = append(topology, n)
-			path := append(append([]snapshotNode{}, b.path...), n)
-			if leaf {
-				switch workqueue.State(state) {
-				case "new", "open", "backlog", "blocked":
-					if len(s.Items) == snapshotLeaves {
-						s.Truncated = true
-						continue
-					}
-					s.Items = append(s.Items, snapshotItem{NodeID: n.ID, Revision: n.Revision, Outcome: "pending", Path: path})
-				}
-			} else if len(path) >= snapshotDepth {
-				s.Truncated = true
-			} else {
-				pending = append(pending, branch{n, path})
-			}
-		}
-		rows.Close()
-		if err = rows.Err(); err != nil {
-			return s, err
-		}
-		if len(topology) >= snapshotNodes && len(pending) > 0 {
 			s.Truncated = true
 			break
 		}
+		var n snapshotNode
+		var state, position string
+		var leaf bool
+		// The inner LIMIT bounds node selection before the canonical leaf/pending
+		// predicates. Empty cursors select the first child; all later queries advance.
+		err = tx.QueryRow(ctx, `SELECT n.id::text,n.parent_id::text,n.updated_at,n.state,n.position::text,aeon_work_leaf(n.id) AND aeon_work_pending(n.id) IS NULL
+ FROM (SELECT n.* FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+ WHERE n.parent_id=$1 AND n.deleted_at IS NULL AND k.slug='work'
+ AND ($2::numeric IS NULL OR (n.position,n.id)>($2::numeric,$3::uuid))
+ ORDER BY n.position,n.id LIMIT 1) n`, b.Path[len(b.Path)-1].ID, nullableCursor(b.AfterPosition), nullableCursor(b.AfterID)).Scan(&n.ID, &n.Parent, &n.Revision, &state, &position, &leaf)
+		if errors.Is(err, pgx.ErrNoRows) {
+			pending = pending[:index]
+			continue
+		}
+		if err != nil {
+			return s, err
+		}
+		pending[index].AfterPosition = position
+		pending[index].AfterID = n.ID
+		topology = append(topology, n)
+		path := append(append([]snapshotNode{}, b.Path...), n)
+		if leaf {
+			switch workqueue.State(state) {
+			case "new", "open", "backlog", "blocked":
+				s.Items = append(s.Items, snapshotItem{NodeID: n.ID, Revision: n.Revision, Outcome: "pending", Path: path})
+			}
+		} else if len(path) >= snapshotDepth {
+			s.Truncated = true
+		} else {
+			pending = append(pending, snapshotCursor{Path: path})
+		}
 	}
+	s.Next = pending
+	s.ContinuationAvailable = len(pending) > 0
 	raw, err := json.Marshal(topology)
 	if err != nil {
 		return s, err
@@ -122,15 +143,26 @@ func captureQueueTree(ctx context.Context, tx pgx.Tx, parent string) (parentQueu
 	return s, nil
 }
 
+func nullableCursor(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
 func (m *module) queueSnapshotCapture(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Revision time.Time `json:"expected_revision"`
+		Revision       time.Time `json:"expected_revision"`
+		ContinuationOf string    `json:"continuation_of"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
 	if in.Revision.IsZero() {
 		return nil, workorders.Fail(400, "expected_revision required")
+	}
+	if in.ContinuationOf != "" && !workorders.UUID(in.ContinuationOf) {
+		return nil, workorders.Fail(400, "invalid continuation snapshot id")
 	}
 	ctx := r.Context()
 	t, err := queueLoadTicket(ctx, tx, r.PathValue("nodeId"), true)
@@ -140,7 +172,29 @@ func (m *module) queueSnapshotCapture(r *http.Request, tx pgx.Tx, p tenant.Princ
 	if err = queuePermission(ctx, tx, p, t.ProjectID, true); err != nil {
 		return nil, err
 	}
-	s, err := captureQueueTree(ctx, tx, t.ID)
+	var start []snapshotCursor
+	if in.ContinuationOf != "" {
+		previous, err := loadQueueSnapshot(ctx, tx, p, in.ContinuationOf, false)
+		if err != nil {
+			return nil, err
+		}
+		if previous.ParentID != t.ID || previous.State == "cancelled" || len(previous.Next) == 0 {
+			return nil, workorders.Fail(409, "continuation unavailable for this parent")
+		}
+		// Check the complete visible frontier in the final capture transaction.
+		// Moving or hiding a branch cannot redirect the old cursor into another tree.
+		for _, cursor := range previous.Next {
+			current, err := snapshotPathCurrent(ctx, tx, cursor.Path)
+			if err != nil {
+				return nil, err
+			}
+			if !current {
+				return nil, workorders.Fail(409, "continuation ancestry changed; capture a fresh snapshot")
+			}
+		}
+		start = previous.Next
+	}
+	s, err := captureQueueTree(ctx, tx, t.ID, start)
 	if err != nil {
 		return nil, err
 	}
@@ -210,6 +264,8 @@ func saveQueueSnapshot(ctx context.Context, tx pgx.Tx, s parentQueueSnapshot) er
 // Stored identities never substitute for current visibility, even on retry.
 func snapshotVisible(ctx context.Context, tx pgx.Tx, p tenant.Principal, s parentQueueSnapshot) (parentQueueSnapshot, error) {
 	out := s
+	out.Start = nil
+	out.Next = nil
 	out.Items = []snapshotItem{}
 	for _, item := range s.Items {
 		t, err := queueLoadTicket(ctx, tx, item.NodeID, false)
@@ -325,7 +381,7 @@ func (m *module) queueSnapshotApply(r *http.Request, tx pgx.Tx, p tenant.Princip
 	if err = queuePermission(ctx, tx, p, parent.ProjectID, true); err != nil {
 		return nil, err
 	}
-	current, err := captureQueueTree(ctx, tx, s.ParentID)
+	current, err := captureQueueTree(ctx, tx, s.ParentID, s.Start)
 	if err != nil {
 		return nil, err
 	}
@@ -358,6 +414,9 @@ func (m *module) queueSnapshotApply(r *http.Request, tx pgx.Tx, p tenant.Princip
 			return nil, err
 		}
 		if !pathOK || t.Kind != "work" {
+			if !pathOK {
+				s.TreeChanged = true
+			}
 			item.Outcome = "changed"
 			s.Partial = true
 			continue
@@ -375,6 +434,18 @@ func (m *module) queueSnapshotApply(r *http.Request, tx pgx.Tx, p tenant.Princip
 		}
 		if !errors.Is(loadErr, pgx.ErrNoRows) {
 			return nil, loadErr
+		}
+		// Shared membership replay above remains idempotent. Every other live
+		// binding (session, child-order run, or running order) uses the canonical
+		// predicate under the pairing/tree/access fences before creating work.
+		var busy bool
+		if err = tx.QueryRow(ctx, `SELECT aeon_work_busy($1)`, t.ID).Scan(&busy); err != nil {
+			return nil, err
+		}
+		if busy {
+			item.Outcome = "active"
+			s.Partial = true
+			continue
 		}
 		if !revision.Equal(item.Revision) {
 			item.Outcome = "changed"

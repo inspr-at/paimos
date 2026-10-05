@@ -213,18 +213,28 @@ func (rt *runtime) printQueueEntry(e cliQueueEntry) error {
 }
 
 func (rt *runtime) queueSnapshotCommand() *Command {
-	var revision string
-	capture := &Command{Name: "capture", Short: "Capture open leaves of a parent without launching work", Use: "queue snapshot capture <parent-ref> --revision RFC3339", minArgs: 1, maxArgs: 1,
-		addFlags: func(fs *flagSet) { fs.string(&revision, "revision", 0, "parent revision reviewed by the caller") },
+	var revision, continuation string
+	capture := &Command{Name: "capture", Short: "Capture open leaves of a parent without launching work", Use: "queue snapshot capture <parent-ref> --revision RFC3339 [--after snapshot-UUID]", minArgs: 1, maxArgs: 1,
+		addFlags: func(fs *flagSet) {
+			fs.string(&revision, "revision", 0, "parent revision reviewed by the caller")
+			fs.string(&continuation, "after", 0, "continue after a prior owned snapshot")
+		},
 		run: func(args []string) error {
 			if _, err := time.Parse(time.RFC3339Nano, revision); err != nil {
 				return usagef("--revision must be an RFC3339 timestamp")
+			}
+			if continuation != "" && !validUUID(continuation) {
+				return usagef("--after must be a snapshot UUID")
 			}
 			n, err := rt.nodeRef(args[0])
 			if err != nil {
 				return err
 			}
-			return rt.queueSnapshotRequest(http.MethodPost, "/api/queue/"+n.ID+"/snapshots", map[string]string{"expected_revision": revision})
+			body := map[string]string{"expected_revision": revision}
+			if continuation != "" {
+				body["continuation_of"] = continuation
+			}
+			return rt.queueSnapshotRequest(http.MethodPost, "/api/queue/"+n.ID+"/snapshots", body)
 		}}
 	subs := []*Command{capture}
 	for _, action := range []string{"show", "apply", "cancel"} {
@@ -254,10 +264,11 @@ func (rt *runtime) queueSnapshotRequest(method, path string, body any) error {
 		return rt.printJSON(raw)
 	}
 	var s struct {
-		ID, State          string
-		Partial, Truncated bool
-		TreeChanged        bool `json:"tree_changed"`
-		Items              []struct {
+		ID, State             string
+		Partial, Truncated    bool
+		TreeChanged           bool `json:"tree_changed"`
+		ContinuationAvailable bool `json:"continuation_available"`
+		Items                 []struct {
 			NodeID  string `json:"node_id"`
 			Outcome string
 		}
@@ -267,6 +278,11 @@ func (rt *runtime) queueSnapshotRequest(method, path string, body any) error {
 	}
 	if _, err := fmt.Fprintf(rt.stdout, "Snapshot %s: %s; partial=%t truncated=%t tree_changed=%t\n", s.ID, s.State, s.Partial, s.Truncated, s.TreeChanged); err != nil {
 		return err
+	}
+	if s.ContinuationAvailable {
+		if _, err := fmt.Fprintf(rt.stdout, "More traversal available: capture with --after %s and the current parent --revision\n", s.ID); err != nil {
+			return err
+		}
 	}
 	for _, item := range s.Items {
 		if _, err := fmt.Fprintf(rt.stdout, "%s %s\n", item.NodeID, item.Outcome); err != nil {

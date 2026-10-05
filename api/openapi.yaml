@@ -1094,7 +1094,7 @@ paths:
     post:
       operationId: captureParentQueueSnapshot
       summary: Capture visible open executable leaves without starting work
-      description: Captures at most 100 leaves, traversing at most 256 visible work nodes and 32 levels within 5 seconds. Hidden branches are omitted without counts. The server retains leaf identities, revisions and ancestry; later descendants are never added. Truncation requires a fresh snapshot for remaining work. Queue presence grants no launch authority.
+      description: Captures at most 100 leaves, traversing at most 256 visible work nodes and 32 levels within 5 seconds. Hidden branches are omitted without counts. The server retains leaf identities, revisions and ancestry; later descendants are never added. When continuation_available is true, capture a fresh snapshot with continuation_of set to this snapshot id to advance beyond visited nodes. Continuations retain bounded traversal and explicit page membership; they are owned by the caller and must use the same parent. A fresh capture without continuation_of starts at the beginning. The depth limit remains 32 levels. Queue presence grants no launch authority.
       parameters:
         - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
       requestBody:
@@ -1107,12 +1107,13 @@ paths:
               required: [expected_revision]
               properties:
                 expected_revision: {type: string, format: date-time}
+                continuation_of: {type: string, format: uuid, description: Prior owned snapshot whose server-held traversal cursor advances this capture}
       responses:
         '200': {description: Owner-bound snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/ParentQueueSnapshot'}}}}
         '400': {description: Invalid revision or id}
         '403': {description: Queue permission denied}
         '404': {description: Parent unavailable}
-        '409': {description: Parent changed or is not a work parent}
+        '409': {description: 'Parent changed, is not a work parent, or continuation is cancelled, exhausted or its ancestry changed'}
   /queue-snapshots/{snapshotId}:
     get:
       operationId: getParentQueueSnapshot
@@ -17188,6 +17189,7 @@ components:
         tree_revision: {type: string, description: SHA-256 of the bounded visible topology and revisions at capture}
         state: {type: string, enum: [pending, applied, cancelled]}
         truncated: {type: boolean}
+        continuation_available: {type: boolean, description: More visible traversal remains; use this snapshot id as continuation_of for a fresh capture. Remaining nodes may all be ineligible. False when only the depth limit truncated traversal.}
         partial: {type: boolean, description: True when truncated or any captured leaf was skipped or is no longer readable}
         tree_changed: {type: boolean, description: Visible topology or revision changed before application}
         items:

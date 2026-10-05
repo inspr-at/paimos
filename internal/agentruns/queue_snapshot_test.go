@@ -20,13 +20,14 @@ import (
 )
 
 type parentSnapshot struct {
-	ID                 string
-	State              string
-	ParentRevision     time.Time `json:"parent_revision"`
-	TreeRevision       string    `json:"tree_revision"`
-	Partial, Truncated bool
-	TreeChanged        bool `json:"tree_changed"`
-	Items              []struct {
+	ID                    string
+	State                 string
+	ParentRevision        time.Time `json:"parent_revision"`
+	TreeRevision          string    `json:"tree_revision"`
+	Partial, Truncated    bool
+	TreeChanged           bool `json:"tree_changed"`
+	ContinuationAvailable bool `json:"continuation_available"`
+	Items                 []struct {
 		NodeID   string `json:"node_id"`
 		Revision time.Time
 		Outcome  string
@@ -254,7 +255,7 @@ func TestParentQueueSnapshotHiddenMovedLeaf(t *testing.T) {
 		t.Fatalf("hidden leaf result %+v", out)
 	}
 	w := f.request(owner, http.MethodGet, "/api/queue-snapshots/"+s.ID, "", "")
-	if w.Code != 200 || strings.Contains(w.Body.String(), moved) || strings.Contains(w.Body.String(), hiddenLeaf) || strings.Contains(w.Body.String(), "path") {
+	if w.Code != 200 || strings.Contains(w.Body.String(), moved) || strings.Contains(w.Body.String(), hiddenLeaf) || strings.Contains(w.Body.String(), "path") || strings.Contains(w.Body.String(), "_start") || strings.Contains(w.Body.String(), "_next") {
 		t.Fatal("stored snapshot disclosed hidden identity or ancestry")
 	}
 }
@@ -445,12 +446,255 @@ func TestParentQueueSnapshotTraversalBounds(t *testing.T) {
 				}
 			}
 			s := f.captureParent(t, parent)
-			if !s.Truncated || !s.Partial || len(s.Items) != 0 {
+			if !s.Truncated || !s.Partial || len(s.Items) != 0 || shape == "deep" && s.ContinuationAvailable {
 				t.Fatalf("unbounded %s expansion: %+v", shape, s)
 			}
 			if f.queuePage(t).Count != 0 {
 				t.Fatal("capture launched or queued work")
 			}
 		})
+	}
+}
+
+func TestParentQueueSnapshotActiveBindings(t *testing.T) {
+	for _, binding := range []string{"direct_session", "order_ticket_session", "order_session", "run_session", "order_run", "running_order"} {
+		t.Run(binding, func(t *testing.T) {
+			f := setup(t)
+			nodes.New(f.d.App, nil).Mount(f.mux)
+			parent := f.apiQueueTicket(t, nil)
+			leaf := f.apiQueueTicket(t, &parent)
+			var order struct {
+				NodeID string `json:"node_id"`
+			}
+			if binding != "direct_session" {
+				f.call(t, f.person, "POST", "/api/work-orders", map[string]any{"title": "Existing order", "parent_id": leaf, "criteria": []string{"Keep existing work"}}, 201, &order)
+			}
+			s := f.captureParent(t, parent)
+			if len(s.Items) != 1 || s.Items[0].NodeID != leaf {
+				t.Fatalf("missing captured leaf: %+v", s)
+			}
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var project string
+				if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,aeon_next_node_key($1,short_prefix),'Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.person.TenantID).Scan(&project); err != nil {
+					return err
+				}
+				switch binding {
+				case "order_run":
+					_, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status) VALUES($1,$2,$3,$4,'running')`, f.person.TenantID, order.NodeID, f.agent.ID, f.profile)
+					return err
+				case "running_order":
+					_, err := tx.Exec(t.Context(), `UPDATE work_orders SET status='running' WHERE node_id=$1`, order.NodeID)
+					return err
+				}
+				var ticket, workOrder, run any
+				switch binding {
+				case "direct_session":
+					ticket = leaf
+				case "order_ticket_session":
+					ticket = order.NodeID
+				case "order_session":
+					workOrder = order.NodeID
+				case "run_session":
+					var id string
+					if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status) VALUES($1,$2,$3,$4,'completed') RETURNING id::text`, f.person.TenantID, order.NodeID, f.agent.ID, f.profile).Scan(&id); err != nil {
+						return err
+					}
+					run = id
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,work_order_id,run_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase) VALUES($1,$2,$3,$4,$5,$6,'codex','local','unmanaged','worker',CASE WHEN $4::uuid IS NULL THEN 'unknown' ELSE 'ship' END,decode(repeat('ab',32),'hex'),decode(repeat('cd',32),'hex'),'working')`, f.person.TenantID, project, f.agent.ID, ticket, workOrder, run)
+				return err
+			})
+			var revision time.Time
+			var busy bool
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `SELECT updated_at,aeon_work_busy(id) FROM nodes WHERE id=$1`, leaf).Scan(&revision, &busy)
+			})
+			if !busy || !revision.Equal(s.Items[0].Revision) {
+				t.Fatal("fixture must make the unchanged captured leaf busy")
+			}
+			orders := f.count(t, f.person, `SELECT count(*) FROM work_orders`)
+			runs := f.count(t, f.person, `SELECT count(*) FROM agent_runs`)
+			out := f.applyParent(t, s)
+			if snapshotOutcomes(out)[leaf] != "active" || !out.Partial || out.State != "applied" {
+				t.Fatalf("busy leaf was not skipped: %+v", out)
+			}
+			if f.count(t, f.person, `SELECT count(*) FROM work_orders`) != orders || f.count(t, f.person, `SELECT count(*) FROM agent_runs`) != runs || f.count(t, f.person, `SELECT count(*) FROM events WHERE type='queue.added'`) != 0 {
+				t.Fatal("active outcome created order, run or queue audit")
+			}
+			retry := f.applyParent(t, s)
+			if snapshotOutcomes(retry)[leaf] != "active" || f.count(t, f.person, `SELECT count(*) FROM agent_runs`) != runs {
+				t.Fatal("active replay changed receipt or created work")
+			}
+		})
+	}
+}
+
+func (f *fixture) continueParent(t *testing.T, parent string, previous parentSnapshot) parentSnapshot {
+	t.Helper()
+	var n struct {
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	f.call(t, f.person, "GET", "/api/nodes/"+parent, nil, 200, &n)
+	var s parentSnapshot
+	f.call(t, f.person, "POST", "/api/queue/"+parent+"/snapshots", map[string]any{"expected_revision": n.UpdatedAt, "continuation_of": previous.ID}, 200, &s)
+	if s.ID == "" || s.ID == previous.ID {
+		t.Fatal("continuation must create a fresh explicit snapshot")
+	}
+	return s
+}
+
+func TestParentQueueSnapshotLeafContinuation(t *testing.T) {
+	f := setup(t)
+	nodes.New(f.d.App, nil).Mount(f.mux)
+	parent := f.apiQueueTicket(t, nil)
+	leaves := make(map[string]bool)
+	for range 101 {
+		leaves[f.apiQueueTicket(t, &parent)] = true
+	}
+	first := f.captureParent(t, parent)
+	if len(first.Items) != 100 || !first.Truncated || !first.ContinuationAvailable {
+		t.Fatalf("first page: %+v", first)
+	}
+	f.applyParent(t, first)
+	second := f.continueParent(t, parent, first)
+	if len(second.Items) != 1 || second.Truncated || second.Partial || second.ContinuationAvailable {
+		t.Fatalf("remaining page: %+v", second)
+	}
+	for _, item := range first.Items {
+		delete(leaves, item.NodeID)
+	}
+	if !leaves[second.Items[0].NodeID] {
+		t.Fatal("continuation repeated a visited leaf")
+	}
+	// Work arriving after this page was captured stays outside its membership.
+	arrival := f.apiQueueTicket(t, &parent)
+	out := f.applyParent(t, second)
+	if snapshotOutcomes(out)[second.Items[0].NodeID] != "queued" || snapshotOutcomes(out)[arrival] != "" || f.queuePage(t).Count != 101 {
+		t.Fatalf("continued apply: %+v", out)
+	}
+	replay := f.continueParent(t, parent, first)
+	if snapshotOutcomes(f.applyParent(t, replay))[second.Items[0].NodeID] != "already_queued" {
+		t.Fatal("replayed continuation lost identical membership")
+	}
+}
+
+func TestParentQueueSnapshotNodeContinuation(t *testing.T) {
+	for _, shape := range []string{"siblings", "branches"} {
+		t.Run(shape, func(t *testing.T) {
+			f := setup(t)
+			nodes.New(f.d.App, nil).Mount(f.mux)
+			parent := f.apiQueueTicket(t, nil)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				// Equal fractional positions exercise the UUID tie-breaker without losing precision.
+				if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state,parent_id,position) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Preceding node','done',$2,0.000000000000001 FROM node_kinds k CROSS JOIN generate_series(1,257) g WHERE k.slug='work'`, f.person.TenantID, parent); err != nil {
+					return err
+				}
+				if shape == "branches" {
+					_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Closed child','done',n.id FROM nodes n CROSS JOIN node_kinds k WHERE n.parent_id=$2 AND k.slug='work'`, f.person.TenantID, parent)
+					return err
+				}
+				return nil
+			})
+			leaf := f.apiQueueTicket(t, &parent)
+			first := f.captureParent(t, parent)
+			if !first.Truncated || !first.ContinuationAvailable || len(first.Items) != 0 {
+				t.Fatalf("unbounded first traversal: %+v", first)
+			}
+			page := first
+			found := false
+			for range 3 {
+				page = f.continueParent(t, parent, page)
+				if snapshotOutcomes(page)[leaf] == "pending" {
+					found = true
+					break
+				}
+				if len(page.Items) != 0 || !page.Truncated {
+					t.Fatalf("unexpected continuation: %+v", page)
+				}
+			}
+			if !found || page.Truncated {
+				t.Fatalf("continuation did not reach remaining work: %+v", page)
+			}
+			out := f.applyParent(t, page)
+			if snapshotOutcomes(out)[leaf] != "queued" || out.TreeChanged || out.Partial || f.queuePage(t).Count != 1 {
+				t.Fatalf("continued tree receipt: %+v", out)
+			}
+			if f.count(t, f.person, `SELECT count(*) FROM nodes WHERE title='Preceding node'`) != 257 {
+				t.Fatal("fixture lost traversed nodes")
+			}
+		})
+	}
+}
+
+func TestParentQueueSnapshotContinuationGuards(t *testing.T) {
+	f := setup(t)
+	nodes.New(f.d.App, nil).Mount(f.mux)
+	parent := f.apiQueueTicket(t, nil)
+	branch := f.apiQueueTicket(t, &parent)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state,parent_id,position,fields) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Open leaf','open',$2,g,'{"estimate_hours":2,"acceptance_criteria":"- [ ] Keep all leaves"}'::jsonb FROM node_kinds k CROSS JOIN generate_series(1,101) g WHERE k.slug='work'`, f.person.TenantID, branch)
+		return err
+	})
+	s := f.captureParent(t, parent)
+	if !s.ContinuationAvailable || len(s.Items) != 100 {
+		t.Fatalf("missing bounded frontier: %+v", s)
+	}
+	w := f.request(f.person, http.MethodGet, "/api/queue-snapshots/"+s.ID, "", "")
+	if w.Code != 200 || strings.Contains(w.Body.String(), "path") || strings.Contains(w.Body.String(), "_next") || strings.Contains(w.Body.String(), "_start") {
+		t.Fatal("cursor ancestry escaped server storage")
+	}
+	other := tenant.Principal{ID: uuid(), TenantID: f.person.TenantID, Kind: tenant.Person}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Other owner')`, other.TenantID, other.ID)
+		return err
+	})
+	dbtest.BindRole(t, f.d, other.TenantID, other.ID, "admin")
+	body := map[string]any{"expected_revision": s.ParentRevision, "continuation_of": s.ID}
+	reject := func(principal tenant.Principal, target string, request map[string]any, status int, message string) {
+		t.Helper()
+		var response struct{ Error string }
+		f.call(t, principal, "POST", "/api/queue/"+target+"/snapshots", request, status, &response)
+		if response.Error != message {
+			t.Fatalf("wrong rejection: got %q want %q", response.Error, message)
+		}
+	}
+	before := f.count(t, f.person, `SELECT count(*) FROM parent_queue_snapshots`)
+	f.call(t, other, "POST", "/api/queue/"+parent+"/snapshots", body, 404, nil)
+	dbtest.BindRole(t, f.d, f.foreign.TenantID, f.foreign.ID, "admin")
+	foreignParent := ""
+	f.tx(t, f.foreign, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Foreign project' FROM node_kinds k WHERE k.slug='project' RETURNING id::text`, f.foreign.TenantID).Scan(&foreignParent)
+	})
+	f.call(t, f.foreign, "POST", "/api/queue/"+foreignParent+"/snapshots", body, 404, nil)
+	wrongParent := f.apiQueueTicket(t, nil)
+	f.apiQueueTicket(t, &wrongParent)
+	reject(f.person, wrongParent, body, 409, "continuation unavailable for this parent")
+	stale := map[string]any{"expected_revision": s.ParentRevision.Add(-time.Second), "continuation_of": s.ID}
+	reject(f.person, parent, stale, 409, "parent changed")
+	invalid := map[string]any{"expected_revision": s.ParentRevision, "continuation_of": "invalid"}
+	reject(f.person, parent, invalid, 400, "invalid continuation snapshot id")
+	cancelled := f.captureParent(t, parent)
+	f.call(t, f.person, "DELETE", "/api/queue-snapshots/"+cancelled.ID, nil, 200, nil)
+	body["continuation_of"] = cancelled.ID
+	reject(f.person, parent, body, 409, "continuation unavailable for this parent")
+	exhausted := f.continueParent(t, parent, s)
+	if exhausted.ContinuationAvailable {
+		t.Fatalf("unexpected exhausted page: %+v", exhausted)
+	}
+	body["continuation_of"] = exhausted.ID
+	reject(f.person, parent, body, 409, "continuation unavailable for this parent")
+	// Moving an intermediate ancestor invalidates the server-held frontier.
+	f.call(t, f.person, "POST", "/api/nodes/"+branch+"/move", map[string]any{"parent_id": wrongParent}, 200, nil)
+	// Parent remains a parent by retaining another visible work child.
+	f.apiQueueTicket(t, &parent)
+	body["continuation_of"] = s.ID
+	var current struct {
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	f.call(t, f.person, "GET", "/api/nodes/"+parent, nil, 200, &current)
+	body["expected_revision"] = current.UpdatedAt
+	reject(f.person, parent, body, 409, "continuation ancestry changed; capture a fresh snapshot")
+	if f.count(t, f.person, `SELECT count(*) FROM parent_queue_snapshots`) != before+2 || f.count(t, f.person, `SELECT count(*) FROM agent_runs`) != 0 {
+		t.Fatal("rejected continuations changed snapshots or created work")
 	}
 }
