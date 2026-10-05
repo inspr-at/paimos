@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/usagedashboard"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Dependency contract fixtures, not replacement production storage. These are
@@ -182,14 +184,29 @@ func TestLeadUsageGenerationSuccessionAndUnknownEvidence(t *testing.T) {
 		t.Fatalf("fixture lost: %d %v", count, err)
 	}
 }
-func TestLeadUsageUnavailableBoundsAndPrivacy(t *testing.T) {
+func TestLeadUsageUnavailableDependency(t *testing.T) {
 	w := newWorld(t)
-	project := w.project(t, w.home, "PRIVATE-1", "Private")
+	w.leadContracts(t)
+	project := w.project(t, w.home, "MISSING-1", "Missing dependency")
+	// Isolate absence inside this disposable database even after AEON-734 lands.
+	// Renaming retains dependency data and references for database cleanup.
+	if _, err := w.db.Admin.Exec(t.Context(), `ALTER TABLE project_lead_generations RENAME TO lead_generations_unavailable_fixture`); err != nil {
+		t.Fatal(err)
+	}
 	code, _, body := w.getLeadUsage(t, w.home, project, "")
-	if code != 503 || !strings.Contains(body, "unavailable") {
+	if code != 503 || !strings.Contains(body, "lead generation usage is unavailable") {
 		t.Fatalf("missing dependency %d %s", code, body)
 	}
+}
+
+func TestLeadUsageBoundsAndPrivacy(t *testing.T) {
+	w := newWorld(t)
 	w.leadContracts(t)
+	project := w.project(t, w.home, "PRIVATE-1", "Private")
+	code, empty, body := w.getLeadUsage(t, w.home, project, "")
+	if code != 200 || empty.Total.Contributions != 0 || empty.Total.Tokens.Measured != nil || empty.Partial || empty.Truncated {
+		t.Fatalf("available empty project %d %s", code, body)
+	}
 	lead := w.leadSession(t, project, nil, nil, "coordinator", 1)
 	w.leadGeneration(t, project, lead, 1)
 	hidden := w.project(t, w.home, "HIDDEN-1", "Secret")
@@ -322,5 +339,123 @@ func TestLeadUsageSharedRunNeverAddsLeadAndWorkerCounters(t *testing.T) {
 	code, out, body := w.getLeadUsage(t, w.home, project, "")
 	if code != 200 || !out.Partial || out.Total.Attempts != 1 || out.Lead.Tokens.Measured != nil || out.Lead.Tokens.Unknown != 1 || out.Total.Tokens.Measured == nil || *out.Total.Tokens.Measured != "30" {
 		t.Fatalf("overlapping attempt %d %s", code, body)
+	}
+}
+
+// Pause after the session snapshot has been consumed, before the handler can
+// issue another statement. The writer commits while the reader is paused.
+// This uses the same SQL boundary before and after the single-statement fix.
+type leadSnapshotBarrier struct {
+	read      chan struct{}
+	committed chan struct{}
+	once      sync.Once
+}
+type leadSnapshotQueryKey struct{}
+
+func (b *leadSnapshotBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	return context.WithValue(ctx, leadSnapshotQueryKey{}, strings.HasPrefix(data.SQL, "WITH selected AS MATERIALIZED"))
+}
+func (b *leadSnapshotBarrier) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
+	if selected, _ := ctx.Value(leadSnapshotQueryKey{}).(bool); selected && data.Err == nil {
+		b.once.Do(func() {
+			close(b.read)
+			select {
+			case <-b.committed:
+			case <-ctx.Done():
+			}
+		})
+	}
+}
+func TestLeadUsageConcurrentSharedRunUsesOneSnapshot(t *testing.T) {
+	w := newWorld(t)
+	w.leadContracts(t)
+	// The optional status fence must not serialize the reader with registration.
+	if _, err := w.db.Admin.Exec(t.Context(), `UPDATE features SET enabled=false WHERE tenant_id=$1 AND key='work-parent-status'`, w.home.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	project := w.project(t, w.home, "RACE-1", "Concurrent shared run")
+	run := w.managedRun(t, w.home, project)
+	lead := w.leadSession(t, project, nil, &run, "coordinator", 1)
+	w.leadGeneration(t, project, lead, 1)
+	ticket := w.ticket(t, w.home, project, "RACE-2", "Work")
+	episode := w.leadEpisode(t, project, ticket)
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO harness_session_usage(tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,provisional,billing_mode) VALUES($1,$2,'shared-model',1,1000,10,0,false,'subscription')`, w.home.TenantID, lead)
+		return err
+	})
+	barrier := &leadSnapshotBarrier{read: make(chan struct{}), committed: make(chan struct{})}
+	cfg, err := pgxpool.ParseConfig(w.db.AppURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ConnConfig.Tracer = barrier
+	cfg.ConnConfig.RuntimeParams["jit"] = "off"
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	mux := http.NewServeMux()
+	usagedashboard.New(pool).Mount(mux)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	// Release the barrier before pool cleanup even when an assertion fails.
+	defer close(barrier.committed)
+	req := httptest.NewRequest(http.MethodGet, "/api/projects/"+project+"/lead/usage?from=2026-09-01&to=2026-10-01", nil).WithContext(tenant.WithPrincipal(ctx, w.home))
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() { defer close(done); mux.ServeHTTP(rec, req) }()
+	select {
+	case <-barrier.read:
+	case <-ctx.Done():
+		t.Fatal("reader did not reach evidence barrier")
+	}
+	worker := w.leadSession(t, project, &lead, &run, "worker", 2)
+	contribution := w.leadContribution(t, project, episode, worker, "built", &run, true, 30)
+	select {
+	case barrier.committed <- struct{}{}:
+	case <-ctx.Done():
+		t.Fatal("reader did not wait for registration commit")
+	}
+	select {
+	case <-done:
+	case <-ctx.Done():
+		t.Fatal("reader did not finish after committed registration")
+	}
+	var out usagedashboard.LeadUsage
+	if rec.Code != 200 {
+		t.Fatalf("usage %d %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Total.Contributions != 1 || out.Total.Attempts != 1 || out.Worker.Contributions != 0 || out.Total.Tokens.Measured == nil || *out.Total.Tokens.Measured != "1010" {
+		t.Fatalf("mixed evidence snapshots: %s", rec.Body.String())
+	}
+	// The committed evidence remains; the next read must suppress lead counters
+	// and report the worker segment, rather than dropping the concurrent write.
+	code, fresh, body := w.getLeadUsage(t, w.home, project, "")
+	if code != 200 || fresh.Total.Contributions != 2 || fresh.Total.Attempts != 1 || fresh.Lead.Tokens.Measured != nil || fresh.Lead.Tokens.Unknown != 1 || fresh.Total.Tokens.Measured == nil || *fresh.Total.Tokens.Measured != "30" {
+		t.Fatalf("next snapshot %d %s", code, body)
+	}
+	var retained int
+	if err := w.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM ticket_work_contributions WHERE id=$1 AND episode_id=$2`, contribution, episode).Scan(&retained); err != nil || retained != 1 {
+		t.Fatalf("committed evidence lost: %d %v", retained, err)
+	}
+}
+
+func TestLeadUsageEpisodesUnavailableIsPartial(t *testing.T) {
+	w := newWorld(t)
+	w.leadContracts(t)
+	project := w.project(t, w.home, "NOEP-1", "Missing episodes")
+	lead := w.leadSession(t, project, nil, nil, "coordinator", 1)
+	w.leadGeneration(t, project, lead, 1)
+	// The generation contract is available, but no episode source is installed.
+	if _, err := w.db.Admin.Exec(t.Context(), `ALTER TABLE ticket_work_contributions RENAME TO contributions_unavailable_fixture; ALTER TABLE ticket_work_episodes RENAME TO episodes_unavailable_fixture`); err != nil {
+		t.Fatal(err)
+	}
+	code, out, body := w.getLeadUsage(t, w.home, project, "")
+	if code != 200 || !out.Partial || out.Truncated || out.Lead.Contributions != 1 || out.Total.Tokens.Measured != nil || out.Total.Tokens.Unknown != 1 || !strings.Contains(body, "episodes_unavailable") {
+		t.Fatalf("missing episodes %d %s", code, body)
 	}
 }

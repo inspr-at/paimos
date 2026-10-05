@@ -193,7 +193,7 @@ func (m *Module) leadUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	out := LeadUsage{Project: project, Generation: generation, From: from, To: to,
 		Basis: "cumulative_for_sessions_and_segments_started_in_range", Gaps: []string{}, Forecast: "estimate_unavailable",
 		Held: LeadUsageHeld{State: "withheld", Scope: "attributed_run_reservations_not_exclusive_quota", Windows: []LeadUsageHold{}}}
-	// This is a bounded live projection; each source is read once.
+	// This is a bounded live projection; deduplicated evidence shares one snapshot.
 	can, err := authz.ProjectsTx(ctx, tx, p)
 	if err != nil {
 		return nil, err
@@ -235,7 +235,7 @@ func (m *Module) leadUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		}
 		return nil
 	}
-	sessions, err := loadLeadSessions(ctx, tx, project, generation, from, to)
+	sessions, evidence, contributionsTruncated, err := loadLeadEvidence(ctx, tx, project, generation, from, to, episodes)
 	if err != nil {
 		return nil, err
 	}
@@ -246,11 +246,7 @@ func (m *Module) leadUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	measuredSessions := map[string]bool{}
 	if episodes {
-		evidence, truncated, e := loadLeadContributions(ctx, tx, project, generation, from, to)
-		if e != nil {
-			return nil, e
-		}
-		if truncated {
+		if contributionsTruncated {
 			out.Truncated = true
 			out.gap("contribution_limit")
 		}
@@ -296,89 +292,90 @@ func (m *Module) leadUsage(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	return out, nil
 }
 
-func loadLeadSessions(ctx context.Context, tx pgx.Tx, project string, generation *int64, from, to time.Time) ([]leadEvidence, error) {
-	rows, err := tx.Query(ctx, `WITH selected AS MATERIALIZED (
+// Read session overlap checks and episode segments in one statement snapshot.
+// Separate READ COMMITTED statements can retain a lead's counters, then observe
+// a newly registered worker on that same run and add its overlapping counters.
+// Keep independent source caps, including one overflow row per source.
+func loadLeadEvidence(ctx context.Context, tx pgx.Tx, project string, generation *int64, from, to time.Time, episodes bool) ([]leadEvidence, []leadEvidence, bool, error) {
+	query := `WITH selected AS MATERIALIZED (
  SELECT s.*,g.session_id AS lead_session FROM harness_sessions s
  JOIN project_lead_generations g ON g.tenant_id=s.tenant_id AND (g.session_id=s.usage_lead_session_id OR g.session_id=s.id)
  WHERE g.project_id=$1 AND ($2::bigint IS NULL OR g.generation=$2) AND s.created_at >= $3 AND s.created_at < $4
  ORDER BY s.created_at,s.id LIMIT $5
- ) SELECT s.id::text,s.project_id::text,s.run_id::text,s.id=s.lead_session,
-  CASE WHEN NOT EXISTS(SELECT 1 FROM harness_sessions other WHERE other.run_id=s.run_id AND other.id<>s.id) THEN u.tokens::text END,CASE WHEN NOT EXISTS(SELECT 1 FROM harness_sessions other WHERE other.run_id=s.run_id AND other.id<>s.id) THEN r.active_ms::text END,
-  CASE WHEN NOT EXISTS(SELECT 1 FROM harness_sessions other WHERE other.run_id=s.run_id AND other.id<>s.id) THEN r.waiting_ms::text END,
-  coalesce(u.complete,false),coalesce(u.truncated,false)
+ ), evidence AS (
+ SELECT 'session'::text AS source,s.id::text AS id,s.id::text AS session,s.project_id::text AS project,''::text AS episode_project,s.run_id::text AS run,
+  CASE WHEN s.id=s.lead_session THEN 'lead' ELSE 'worker' END AS role,
+  CASE WHEN NOT EXISTS(SELECT 1 FROM harness_sessions other WHERE other.run_id=s.run_id AND other.id<>s.id) THEN u.tokens::text END AS tokens,
+  CASE WHEN NOT EXISTS(SELECT 1 FROM harness_sessions other WHERE other.run_id=s.run_id AND other.id<>s.id) THEN r.active_ms::text END AS active,
+  CASE WHEN NOT EXISTS(SELECT 1 FROM harness_sessions other WHERE other.run_id=s.run_id AND other.id<>s.id) THEN r.waiting_ms::text END AS waiting,
+  coalesce(u.complete,false) AS complete,coalesce(u.truncated,false) AS truncated,s.created_at AS at
  FROM selected s
  LEFT JOIN agent_runs r ON r.tenant_id=s.tenant_id AND r.id=s.run_id
  LEFT JOIN LATERAL (
   SELECT CASE WHEN count(*) BETWEEN 1 AND 200 AND bool_and(input_tokens IS NOT NULL AND output_tokens IS NOT NULL) THEN sum(input_tokens::numeric+output_tokens) END AS tokens,
    count(*) BETWEEN 1 AND 200 AND bool_and(NOT provisional) AS complete,count(*)>200 AS truncated
   FROM (SELECT input_tokens,output_tokens,provisional FROM harness_session_usage WHERE tenant_id=s.tenant_id AND session_id=s.id ORDER BY model LIMIT 201) bounded
- ) u ON s.id=s.lead_session
- ORDER BY s.created_at,s.id`, project, generation, from, to, leadSessionLimit+1)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	out := []leadEvidence{}
-	for rows.Next() {
-		var e leadEvidence
-		var lead, complete, truncated bool
-		if err = rows.Scan(&e.session, &e.project, &e.run, &lead, &e.tokens, &e.active, &e.waiting, &complete, &truncated); err != nil {
-			return nil, err
-		}
-		e.truncated = truncated
-		e.id = "session:" + e.session
-		e.role = "worker"
-		if lead {
-			e.role = "lead"
-			e.complete = complete && e.active != nil && e.waiting != nil && !truncated
-		} else {
-			e.tokens = nil
-			e.active = nil
-			e.waiting = nil
-		}
-		out = append(out, e)
-	}
-	return out, rows.Err()
-}
-func loadLeadContributions(ctx context.Context, tx pgx.Tx, project string, generation *int64, from, to time.Time) ([]leadEvidence, bool, error) {
-	rows, err := tx.Query(ctx, `SELECT c.id::text,c.session_id::text,c.source_project_id::text,ep.source_project_id::text,c.run_id::text,c.role,
+ ) u ON s.id=s.lead_session`
+	args := []any{project, generation, from, to, leadSessionLimit + 1}
+	if episodes {
+		query += `
+ UNION ALL
+ (SELECT 'contribution',c.id::text,c.session_id::text,c.source_project_id::text,ep.source_project_id::text,c.run_id::text,c.role,
  CASE WHEN c.tokens_known THEN c.tokens::text END,CASE WHEN c.timing_known THEN c.active_ms::text END,
  CASE WHEN c.timing_known THEN c.waiting_ms::text END,
- NOT c.gap AND c.tokens_complete AND c.timing_complete AND c.stopped AND ep.coverage_complete
+ NOT c.gap AND c.tokens_complete AND c.timing_complete AND c.stopped AND ep.coverage_complete,false,c.first_work_at
  FROM ticket_work_contributions c JOIN ticket_work_episodes ep ON ep.tenant_id=c.tenant_id AND ep.id=c.episode_id
  JOIN harness_sessions s ON s.tenant_id=c.tenant_id AND s.id=c.session_id
  JOIN project_lead_generations g ON g.tenant_id=s.tenant_id AND g.session_id=s.usage_lead_session_id
  WHERE g.project_id=$1 AND ($2::bigint IS NULL OR g.generation=$2) AND s.id<>g.session_id
  AND c.first_work_at >= $3 AND c.first_work_at < $4
- ORDER BY c.first_work_at,c.id LIMIT $5`, project, generation, from, to, leadContributionLimit+1)
+ ORDER BY c.first_work_at,c.id LIMIT $6)`
+		args = append(args, leadContributionLimit+1)
+	}
+	query += `
+ ) SELECT source,id,session,project,episode_project,run,role,tokens,active,waiting,complete,truncated
+ FROM evidence ORDER BY source,at,id`
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
 	defer rows.Close()
-	out := []leadEvidence{}
+	sessions, contributions := []leadEvidence{}, []leadEvidence{}
 	for rows.Next() {
+		var source string
 		var e leadEvidence
-		if err = rows.Scan(&e.id, &e.session, &e.project, &e.episodeProject, &e.run, &e.role, &e.tokens, &e.active, &e.waiting, &e.complete); err != nil {
-			return nil, false, err
+		if err = rows.Scan(&source, &e.id, &e.session, &e.project, &e.episodeProject, &e.run, &e.role, &e.tokens, &e.active, &e.waiting, &e.complete, &e.truncated); err != nil {
+			return nil, nil, false, err
 		}
-		e.id = "contribution:" + e.id
-		switch e.role {
-		case "built":
-			e.role = "worker"
-		case "reviewed":
-			e.role = "review"
-		case "fixed":
-			e.role = "fix"
+		e.id = source + ":" + e.id
+		if source == "session" {
+			if e.role == "lead" {
+				e.complete = e.complete && e.active != nil && e.waiting != nil && !e.truncated
+			} else {
+				e.tokens, e.active, e.waiting = nil, nil, nil
+				e.complete = false
+			}
+			sessions = append(sessions, e)
+		} else {
+			switch e.role {
+			case "built":
+				e.role = "worker"
+			case "reviewed":
+				e.role = "review"
+			case "fixed":
+				e.role = "fix"
+			}
+			contributions = append(contributions, e)
 		}
-		out = append(out, e)
 	}
 	if err = rows.Err(); err != nil {
-		return nil, false, err
+		return nil, nil, false, err
 	}
-	if len(out) > leadContributionLimit {
-		return out[:leadContributionLimit], true, nil
+	truncated := len(contributions) > leadContributionLimit
+	if truncated {
+		contributions = contributions[:leadContributionLimit]
 	}
-	return out, false, nil
+	return sessions, contributions, truncated, nil
 }
 
 func loadLeadHolds(ctx context.Context, tx pgx.Tx, p tenant.Principal, runs map[string]bool) (LeadUsageHeld, bool, error) {
