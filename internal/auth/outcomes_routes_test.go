@@ -15,6 +15,11 @@ func TestOutcomeAgentRouteCeiling(t *testing.T) {
 		{http.MethodGet, "/api/outcomes", "outcome.read"},
 		{http.MethodHead, "/api/outcomes", "outcome.read"},
 		{http.MethodPost, "/api/outcomes", "outcome.write"},
+		{http.MethodGet, "/api/outcomes/measurement", "outcome.read"},
+		{http.MethodHead, "/api/outcomes/measurement", "outcome.read"},
+		{http.MethodPost, "/api/outcomes/measurement", ""},
+		{http.MethodDelete, "/api/outcomes/measurement", ""},
+		{http.MethodGet, "/api/outcomes/measurement/extra", ""},
 		{http.MethodDelete, "/api/outcomes", ""},
 		{http.MethodPost, "/api/outcomes/extra", ""},
 	} {
