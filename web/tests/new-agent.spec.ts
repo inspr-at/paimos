@@ -46,9 +46,10 @@ for (const width of [390, 1600]) for (const colorScheme of ['light', 'dark'] as 
     await expect(ready.getByRole('button', { name: 'Copied', exact: true })).toBeVisible()
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await ready.getByLabel('New agent key').inputValue())
     const origin = new URL(page.url()).origin
-    await expect(ready.getByLabel('CLI login command')).toHaveValue(`paimos --instance 127.0.0.1 auth login --name 127.0.0.1 --url '${origin}'`)
+    // AEON-730: the instance is named after the workspace (no slug in this fixture: the host).
+    await expect(ready.getByLabel('CLI login command')).toHaveText(`paimos auth login --name 127.0.0.1 --url '${origin}'`)
     await ready.getByRole('button', { name: 'Copy command', exact: true }).click()
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await ready.getByLabel('CLI login command').inputValue())
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(await ready.getByLabel('CLI login command').textContent())
     expect(new URL(page.url()).search).toBe('')
     await shot(page, `${width}-${colorScheme}-ready`)
     const violations = (await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa']).analyze()).violations.filter(v => v.impact === 'serious' || v.impact === 'critical')
@@ -89,7 +90,7 @@ test('selected projects, clipboard rejection and duplicate-name recovery', async
   await expect(ready.getByRole('status')).toContainText('key is selected')
   expect(await ready.getByLabel('New agent key').evaluate((input: HTMLInputElement) => input.selectionStart === 0 && input.selectionEnd === input.value.length && document.activeElement === input)).toBe(true)
   await ready.getByRole('button', { name: 'Copy command', exact: true }).click()
-  expect(await ready.getByLabel('CLI login command').evaluate((input: HTMLTextAreaElement) => input.selectionStart === 0 && input.selectionEnd === input.value.length)).toBe(true)
+  expect(await ready.getByLabel('CLI login command').evaluate(command => getSelection()?.toString() === command.textContent && document.activeElement === command)).toBe(true)
   const created = world.agents.find(a => a.name === 'project-helper')!
   expect(created.workspace_role).toBeNull()
   expect(world.bindings.filter(b => b.principal_id === created.principal_id)).toEqual([{ principal_id: created.principal_id, project_id: 'p-pharos', role_id: 'role-viewer' }])

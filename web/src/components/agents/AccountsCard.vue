@@ -293,7 +293,7 @@ async function backInPool(account: AgentAccount) {
 .account-diagnostic { margin-top: 6px; color: var(--warn-ink); font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
 .account-diagnostic p { margin: 3px 0 0; }
 .account-diagnostic code { color: var(--ink); user-select: all; }
-dialog.separate { width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 32px); margin: auto; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-raised); color: var(--ink); }
+dialog.separate { width: min(var(--dialog-s), calc(100vw - 32px)); max-height: calc(100vh - 32px); margin: auto; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-raised); color: var(--ink); }
 dialog.separate::backdrop { background: var(--scrim); }
 dialog.separate form { display: grid; gap: 10px; padding: 16px 18px 14px; }
 dialog.separate h3 { margin: 0; font-size: 16px; font-weight: 650; }

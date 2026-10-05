@@ -122,6 +122,13 @@
      from 1800px). A width the person dragged (--panel-user-w) wins, within 72vw. */
   --panel-default: clamp(440px, calc(560px + (100vw - 1440px) * .4), 40vw);
   --panel-w: min(var(--panel-user-w, var(--panel-default)), 72vw);
+  /* Dialog size scale (AEON-730): every dialog, sheet and modal takes one step
+     as its maximum width and shrinks with the window; wide screens never stretch it.
+     S: confirmations and one-question prompts. M: forms and results.
+     L: editors and multi-column pickers. Actions keep their label's width. */
+  --dialog-s: 440px;
+  --dialog-m: 560px;
+  --dialog-l: 840px;
 
   /* Legacy aliases kept for older views */
   --brand-teal: #0e6f6c;
