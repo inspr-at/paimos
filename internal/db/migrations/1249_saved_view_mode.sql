@@ -9,8 +9,10 @@ DO $$
 DECLARE
     target uuid;
     prior_tenant text := current_setting('aeon.tenant_id', true);
+    prior_system text := current_setting('aeon.system', true);
     prior_visible text := current_setting('aeon.visible_projects', true);
 BEGIN
+    PERFORM set_config('aeon.system', 'on', true);
     FOR target IN SELECT id FROM tenants ORDER BY id LOOP
         PERFORM set_config('aeon.tenant_id', target::text, true);
         PERFORM set_config('aeon.visible_projects', '*', true);
@@ -31,15 +33,21 @@ BEGIN
             FROM legacy l
             WHERE v.tenant_id = target AND v.id = l.id
             RETURNING v.*, l.snapshot
+        ), actor AS MATERIALIZED (
+            -- Resolve a real System actor only after all retired rows have been
+            -- written: creating this actor may itself append an event.
+            SELECT aeon_authz_system_actor(target) AS id
+            WHERE EXISTS (SELECT 1 FROM retired)
         )
         INSERT INTO events (tenant_id, actor_principal_id, type, before, after)
-        SELECT target, NULL, 'view.deleted', r.snapshot,
+        SELECT target, actor.id, 'view.deleted', r.snapshot,
             to_jsonb(r) - 'tenant_id' - 'sort_field' - 'sort_direction' - 'snapshot'
                 || jsonb_build_object('sort', jsonb_build_object(
                     'field', r.sort_field, 'direction', r.sort_direction))
-        FROM retired r ORDER BY r.id;
+        FROM retired r CROSS JOIN actor ORDER BY r.id;
     END LOOP;
     PERFORM set_config('aeon.tenant_id', coalesce(prior_tenant, ''), true);
     PERFORM set_config('aeon.visible_projects', coalesce(prior_visible, ''), true);
+    PERFORM set_config('aeon.system', coalesce(prior_system, ''), true);
 END;
 $$;

@@ -485,9 +485,22 @@ test('AEON-718 Graph offers saved views, persists mode and applies their filters
   expect(data.work.views[0]).toMatchObject({ mode: 'graph', columns: ['key', 'title', 'status', 'updated'], filters: { priority: 'high' } })
   await expect(bar(page).locator('.dirty')).toBeHidden()
   const guard = await controlStability(page, { modes: toolbar(page).getByRole('tablist', { name: 'Ticket views' }), graph: toolbar(page).getByRole('tab', { name: 'Graph', exact: true }) })
-  await guard.check(() => toolbar(page).getByRole('tab', { name: 'Graph', exact: true }).click()); guard.done()
-  await toolbar(page).getByRole('tab', { name: 'List', exact: true }).click()
+  await guard.check(async () => {
+    await toolbar(page).getByRole('tab', { name: 'List', exact: true }).click()
+    await expect(toolbar(page).getByRole('tab', { name: 'List', exact: true })).toHaveAttribute('aria-selected', 'true')
+  }); guard.done()
   await expect(bar(page).locator('.dirty')).toBeVisible()
+  await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()
+  await expect(bar(page).locator('.dirty')).toBeHidden()
+  expect(data.work.views[0].mode).toBe('list')
+  await toolbar(page).getByRole('tab', { name: 'Graph', exact: true }).click()
+  await expect(bar(page).locator('.dirty')).toBeVisible()
+  await bar(page).getByRole('button', { name: 'Reset', exact: true }).click()
+  await expect(toolbar(page).getByRole('tab', { name: 'List', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await toolbar(page).getByRole('tab', { name: 'Graph', exact: true }).click()
+  await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()
+  await expect(bar(page).locator('.dirty')).toBeHidden()
+  expect(data.work.views[0].mode).toBe('graph')
   await bar(page).getByRole('link', { name: 'All tickets' }).click()
   await toolbar(page).getByRole('tab', { name: 'Graph', exact: true }).click()
   await expect(canvas).toHaveAttribute('data-ready', 'true')
@@ -500,6 +513,14 @@ test('AEON-718 Graph offers saved views, persists mode and applies their filters
   await expect(canvas).toHaveAttribute('aria-label', before!)
   for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme })
+    // Wait for the renderer's resize before fitting/capturing the projection.
+    await expect.poll(() => canvas.evaluate(el => Math.abs(el.clientWidth - el.querySelector('canvas')!.getBoundingClientRect().width))).toBeLessThan(2)
+    await page.getByRole('button', { name: 'Fit graph to view' }).click()
+    await page.evaluate(() => new Promise<void>(done => {
+      let frames = 8
+      const tick = () => --frames ? requestAnimationFrame(tick) : done()
+      requestAnimationFrame(tick)
+    }))
     await page.screenshot({ path: `test-results/aeon-718/graph-${width}-${colorScheme}.png`, fullPage: true })
   }
 })

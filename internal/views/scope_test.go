@@ -80,8 +80,8 @@ func TestProjectViewsRoundTripSoftDeleteAndUndo(t *testing.T) {
 	}
 
 	// The full list shape round-trips; sort is optional and defaults.
-	mine := decode(request(ownerID, http.MethodPost, "/api/views", `{"name":"  My open work ","project_id":"`+projectA+`","filters":{"assignee":["me"],"status":["!done"]},"sort_keys":["state","-updated_at"],"group_by":"assignee","columns":["status","assignee"]}`), http.StatusCreated)
-	if mine.Name != "My open work" || mine.ProjectID == nil || *mine.ProjectID != projectA || strings.Join(mine.SortKeys, ",") != "state,-updated_at" || mine.GroupBy != "assignee" || mine.Sort.Field != "position" || mine.Shared {
+	mine := decode(request(ownerID, http.MethodPost, "/api/views", `{"name":"  My open work ","project_id":"`+projectA+`","filters":{"assignee":["me"],"status":["!done"]},"sort_keys":["state","-updated_at"],"group_by":"assignee","mode":"outline","columns":["status","assignee"]}`), http.StatusCreated)
+	if mine.Name != "My open work" || mine.ProjectID == nil || *mine.ProjectID != projectA || strings.Join(mine.SortKeys, ",") != "state,-updated_at" || mine.GroupBy != "assignee" || mine.Sort.Field != "position" || mine.Mode != "outline" || mine.Shared {
 		t.Fatalf("created = %#v", mine)
 	}
 	shared := decode(request(ownerID, http.MethodPost, "/api/views", `{"name":"Team bugs","project_id":"`+projectA+`","filters":{"tag":["bug"]},"columns":[],"shared":true}`), http.StatusCreated)
@@ -137,7 +137,7 @@ func TestProjectViewsRoundTripSoftDeleteAndUndo(t *testing.T) {
 		t.Fatalf("list after delete = %#v", got)
 	}
 	back := decode(request(ownerID, http.MethodPost, "/api/views/"+mine.ID+"/restore", ""), http.StatusOK)
-	if back.ID != mine.ID || back.DeletedAt != nil || back.Name != "Mine" {
+	if back.ID != mine.ID || back.DeletedAt != nil || back.Name != "Mine" || back.Mode != "outline" {
 		t.Fatalf("restored = %#v", back)
 	}
 	if w := request(ownerID, http.MethodPost, "/api/views/"+mine.ID+"/restore", ""); w.Code != http.StatusConflict {
@@ -199,13 +199,14 @@ func TestLegacyViewsMigrationScopeEventsAndRestore(t *testing.T) {
 		if err := d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','owner') RETURNING id::text`, f.tenant).Scan(&f.owner); err != nil {
 			t.Fatal(err)
 		}
+		dbtest.BindRole(t, d, f.tenant, f.owner, "member")
 		for i, dest := range []*string{&f.legacy, &f.shared, &f.kept, &f.deleted} {
 			columns := []string{}
 			if i == 2 {
 				columns = []string{"key", "title", "updated"}
 			}
-			if err := d.Admin.QueryRow(ctx, `INSERT INTO saved_views(tenant_id,owner_principal_id,name,filters,columns,shared,deleted_at)
-    VALUES($1,$2,'Retained snapshot','{"priority":"high"}',$3,$4,CASE WHEN $5 THEN '2026-01-01'::timestamptz END) RETURNING id::text`, f.tenant, f.owner, columns, i == 1, i == 3).Scan(dest); err != nil {
+			if err := d.Admin.QueryRow(ctx, `INSERT INTO saved_views(tenant_id,owner_principal_id,name,filters,columns,shared,deleted_at,mode,updated_at)
+    VALUES($1,$2,'Retained snapshot','{"priority":"high"}',$3,$4,CASE WHEN $5 THEN '2026-01-01'::timestamptz END,CASE WHEN $6 THEN 'graph' ELSE 'list' END,'2026-01-01'::timestamptz) RETURNING id::text`, f.tenant, f.owner, columns, i == 1, i == 3, i == 2).Scan(dest); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -241,6 +242,22 @@ func TestLegacyViewsMigrationScopeEventsAndRestore(t *testing.T) {
 		}
 		if eventsCount != 2 {
 			t.Fatalf("deletion events=%d want 2", eventsCount)
+		}
+		var validActors int
+		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id
+            WHERE e.tenant_id=$1 AND e.type='view.deleted' AND p.kind='agent' AND p.name='System' AND p.roles @> ARRAY['system']::text[]`, f.tenant).Scan(&validActors); err != nil {
+			t.Fatal(err)
+		}
+		if validActors != 2 {
+			t.Fatalf("system-attributed events=%d want 2", validActors)
+		}
+		var keptMode, keptUpdated string
+		var keptColumns []string
+		if err := d.Admin.QueryRow(ctx, `SELECT mode,columns,updated_at::text FROM saved_views WHERE tenant_id=$1 AND id=$2 AND deleted_at IS NULL`, f.tenant, f.kept).Scan(&keptMode, &keptColumns, &keptUpdated); err != nil {
+			t.Fatal(err)
+		}
+		if keptMode != "graph" || strings.Join(keptColumns, ",") != "key,title,updated" || !strings.HasPrefix(keptUpdated, "2026-01-01") {
+			t.Fatal("nonempty-column view changed")
 		}
 		for _, id := range []string{f.legacy, f.shared} {
 			var before, after savedView

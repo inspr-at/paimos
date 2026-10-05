@@ -116,6 +116,7 @@ func TestViewModeRoundTripAndValidation(t *testing.T) {
 	if err := d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','owner') RETURNING id::text`, tenantID).Scan(&ownerID); err != nil {
 		t.Fatal(err)
 	}
+	dbtest.BindRole(t, d, tenantID, ownerID, "member")
 	mux := http.NewServeMux()
 	New(d.App).Mount(mux)
 	request := func(method, path, body string, want int) savedView {
