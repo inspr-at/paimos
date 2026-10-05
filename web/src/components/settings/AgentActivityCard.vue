@@ -171,6 +171,9 @@ onBeforeUnmount(() => {
 .opt small { display: block; font-size: 12.5px; color: var(--ink-2); }
 .num { width: 7ch; min-height: 34px; padding: 4px 10px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; font-variant-numeric: tabular-nums; text-align: right; }
 .num[aria-invalid="true"] { border-color: var(--danger); box-shadow: 0 0 0 1px var(--danger); }
+/* Keep keyboard focus visible without the global aqua glow. Outlines do not
+   change control geometry; invalid numbers retain their red border. */
+.num:focus-visible, .opt input:focus-visible, .feedback-line .btn:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 2px; box-shadow: none; }
 .feedback-line { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 12.5px; color: var(--ink-2); }
 .error { color: var(--danger); }
 .number-feedback { flex-basis: 100%; min-height: 1.5em; font-size: 12.5px; line-height: 1.5; }

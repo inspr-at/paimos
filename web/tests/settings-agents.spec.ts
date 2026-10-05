@@ -1,9 +1,26 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Risk: invalid or failed writes must not look saved; feedback must not move controls.
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type Locator, type Page } from '@playwright/test'
 import { fixtures, mockWork } from './work-fixtures'
 import { mockSettings, settingsData } from './settings-fixtures'
 import { controlStability } from './control-stability'
+
+// Risk: the global focus glow must not leak into this card, and removing it
+// must leave a visible keyboard outline in both themes, including error states.
+async function expectQuietFocus(control: Locator, color: string) {
+  // Establish keyboard modality even after a pointer interaction, without
+  // forcing the pseudo-class through devtools.
+  await control.press('Tab')
+  await control.focus()
+  await expect(control).toBeFocused()
+  await expect(control).toHaveCSS('box-shadow', 'none')
+  expect(await control.evaluate(el => el.matches(':focus-visible'))).toBe(true)
+  await expect(control).toHaveCSS('outline-style', 'solid')
+  await expect(control).toHaveCSS('outline-width', '2px')
+  await expect(control).toHaveCSS('outline-offset', '2px')
+  await expect(control).toHaveCSS('outline-color', color)
+  expect(color).not.toMatch(/^(?:transparent|rgba\(.*,[\s]*0\))$/)
+}
 
 async function setup(page: Page, theme: 'light' | 'dark' = 'light', admin = true) {
   const work = fixtures(); work.preferences.theme = { choice: theme }
@@ -295,17 +312,27 @@ test('members do not see or fetch workspace agent settings', async ({ page }) =>
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`agent card fits ${width}px ${theme}, with stable controls and long German copy`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1100 })
-    const { values } = await setup(page, theme)
+    const { values, state } = await setup(page, theme)
     await page.goto('/settings/agents')
     const card = page.locator('#while-agents-work')
     const estimate = card.locator('#interval_minutes'), lost = card.locator('#heartbeat_lost_minutes')
     await expect(estimate).toHaveValue('10'); await expect(lost).toHaveValue('15')
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme)
     await card.locator('.flabel small').nth(1).evaluate(el => { el.textContent = 'Wie oft ein arbeitender Agent meldet, wann eine Aufgabe fertig sein und veröffentlicht werden wird.' })
     const group = card.getByRole('radiogroup')
-    const guard = await controlStability(page, { estimate, lost, options: group, 'clicked row': group.locator('.opt').nth(0) })
+    const guard = await controlStability(page, {
+      estimate, lost, options: group,
+      off: group.locator('.opt').nth(0), tool: group.locator('.opt').nth(1), summary: group.locator('.opt').nth(2),
+    })
+    const focusColor = await card.locator('.unit').first().evaluate(el => getComputedStyle(el).color)
+    for (const control of [estimate, lost, ...await group.getByRole('radio').all()]) {
+      await guard.check(() => expectQuietFocus(control, focusColor))
+    }
+    await page.screenshot({ path: `test-results/aeon-699-nb/focus-${width}-${theme}.png`, fullPage: true })
     await guard.check(async () => {
       await estimate.fill('241'); await estimate.press('Tab')
       await expect(estimate).toHaveAttribute('aria-invalid', 'true')
+      await expectQuietFocus(estimate, focusColor)
     })
     await guard.check(async () => { await group.getByRole('radio', { name: /^Off/ }).check(); await expect(group).toBeEnabled() })
     values['eta-interval'] = { interval_minutes: 20 }
@@ -313,7 +340,21 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       await estimate.fill('30'); await estimate.press('Tab')
       await expect(card.locator('#interval_minutes-feedback')).toContainText('Changed elsewhere')
       await expect(card.getByRole('button', { name: 'Reload', exact: true })).toBeVisible()
+      await expectQuietFocus(estimate, focusColor)
     })
+    const reload = card.getByRole('button', { name: 'Reload', exact: true })
+    const reloadGuard = await controlStability(page, { reload })
+    await guard.check(() => reloadGuard.check(() => expectQuietFocus(reload, focusColor)))
+    reloadGuard.done()
+    state.failLoad = 'eta-interval'
+    await guard.check(async () => {
+      await reload.click()
+      await expect(card.locator('#mode-feedback')).toContainText("Couldn't load this")
+    })
+    const retry = card.getByRole('button', { name: 'Try again', exact: true })
+    const retryGuard = await controlStability(page, { retry })
+    await guard.check(() => retryGuard.check(() => expectQuietFocus(retry, focusColor)))
+    retryGuard.done()
     guard.done()
     if (width === 390) expect((await estimate.boundingBox())!.height).toBeGreaterThanOrEqual(44)
     await page.screenshot({ path: `test-results/aeon-699-nb/agents-${width}-${theme}.png`, fullPage: true })
