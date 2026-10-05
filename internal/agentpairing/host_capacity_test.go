@@ -26,6 +26,14 @@ func TestHostCapacityOwnerRevisionRuntimeAndClaimFence(t *testing.T) {
 	if v.HostCapacity == nil || v.HostCapacity.Policy.Mode != "off" || v.HostCapacity.Policy.ConsiderActivity {
 		t.Fatal("throttle and activity must default off")
 	}
+	// The daemon negotiates host capacity from its own computer view.
+	var self struct {
+		HostCapacity *hostcapacity.View `json:"host_capacity"`
+	}
+	decodeResult(t, f.call("GET", "/api/agent-pairing/self", nil, false, key, 200), &self)
+	if self.HostCapacity == nil || self.HostCapacity.Policy.Mode != "off" {
+		t.Fatal("self view must advertise host capacity for negotiation")
+	}
 	policy := hostcapacity.Default()
 	policy.Mode = "fixed"
 	policy.MaximumLoad = 30

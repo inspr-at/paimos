@@ -499,7 +499,7 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 	if reporter, ok := s.api.(interface {
 		HostCapacity(context.Context) (hostcapacity.View, error)
 	}); ok {
-		if _, err := reporter.HostCapacity(ctx); err != nil {
+		if _, err := reporter.HostCapacity(ctx); err != nil && !errors.Is(err, ErrHostCapacityUnsupported) {
 			return err
 		}
 	}

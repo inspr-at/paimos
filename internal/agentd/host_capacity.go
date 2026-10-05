@@ -3,7 +3,9 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
 	"os"
 	"os/exec"
 	"runtime"
@@ -11,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/client"
 	"github.com/inspr-at/paimos/internal/hostcapacity"
 )
 
@@ -167,16 +170,77 @@ func readHostFile(path string) (string, error) {
 	}
 	return string(buf[:n]), nil
 }
+// ErrHostCapacityUnsupported marks a server that predates host capacity (or a
+// key without a paired computer). Starts then follow the legacy path; the
+// server has no host fence to enforce either.
+var ErrHostCapacityUnsupported = errors.New("server does not offer host capacity")
+
+// hostCapacityRenegotiate bounds how long a negotiated answer is reused, so a
+// server upgrade or rollback is picked up without restarting the daemon.
+const hostCapacityRenegotiate = 10 * time.Minute
+
+func (r *Remote) clock() time.Time {
+	if r.now != nil {
+		return r.now()
+	}
+	return time.Now()
+}
+
+// hostCapacitySupported reads the computer view every pre-change server also
+// serves to its paired daemon. Only a server that reports host_capacity there
+// offers the capacity report and its claim fence. An unknown answer (the read
+// failed) stays unknown, and the caller fails closed.
+func (r *Remote) hostCapacitySupported(ctx context.Context) (bool, error) {
+	now := r.clock()
+	r.mu.RLock()
+	support, checked := r.hostCapacitySupport, r.hostCapacityCheckedAt
+	r.mu.RUnlock()
+	if support != 0 && !now.Before(checked) && now.Sub(checked) < hostCapacityRenegotiate {
+		return support > 0, nil
+	}
+	var self struct {
+		HostCapacity json.RawMessage `json:"host_capacity"`
+	}
+	err := r.Client.Do(ctx, "GET", "/api/agent-pairing/self", nil, &self)
+	var status *client.StatusError
+	switch {
+	case err == nil && len(self.HostCapacity) > 0 && string(self.HostCapacity) != "null":
+		support = 1
+	case err == nil, errors.As(err, &status) && status.Status == http.StatusNotFound:
+		support = -1 // No host_capacity in the view, or no paired computer.
+	default:
+		return false, err
+	}
+	r.mu.Lock()
+	r.hostCapacitySupport, r.hostCapacityCheckedAt = support, now
+	r.mu.Unlock()
+	return support > 0, nil
+}
+func (r *Remote) forgetHostCapacitySupport() {
+	r.mu.Lock()
+	r.hostCapacitySupport = 0
+	r.mu.Unlock()
+}
+
 func (r *Remote) HostCapacity(ctx context.Context) (hostcapacity.View, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var out hostcapacity.View
-	err := r.Client.Do(ctx, "POST", "/api/agent-pairing/self/capacity", sampleHost(ctx, false), &out)
+	supported, err := r.hostCapacitySupported(ctx)
 	if err != nil {
 		return out, err
 	}
-	if out.Policy.Mode == "smart" && out.Policy.ConsiderActivity {
+	if !supported {
+		return out, ErrHostCapacityUnsupported
+	}
+	err = r.Client.Do(ctx, "POST", "/api/agent-pairing/self/capacity", sampleHost(ctx, false), &out)
+	if err == nil && out.Policy.Mode == "smart" && out.Policy.ConsiderActivity {
 		err = r.Client.Do(ctx, "POST", "/api/agent-pairing/self/capacity", sampleHost(ctx, true), &out)
+	}
+	if err != nil {
+		// A supported server that fails stays fail-closed; the next call
+		// negotiates again in case the server was rolled back.
+		r.forgetHostCapacitySupport()
 	}
 	return out, err
 }
@@ -191,6 +255,9 @@ func (s *Supervisor) checkHostCapacity(ctx context.Context) error {
 		return nil
 	} // In-process API adapters without a paired computer.
 	view, err := reporter.HostCapacity(ctx)
+	if errors.Is(err, ErrHostCapacityUnsupported) {
+		return nil
+	}
 	if err != nil {
 		return err
 	}

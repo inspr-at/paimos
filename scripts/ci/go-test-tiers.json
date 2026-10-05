@@ -3900,6 +3900,8 @@
     {"kind":"go","package":"internal/hostcapacity","name":"TestHostCapacityBounds","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentd","name":"TestManagedStartWaitsForHostCapacityBeforeRouteAndClaim","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentd","name":"TestManagedStartHostReportFailureNeverClaims","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestManagedStartFollowsLegacyPathOnServerWithoutHostCapacity","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestHostCapacityNegotiationRenegotiatesAndFailsClosed","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentpairing","name":"TestHostCapacityOwnerRevisionRuntimeAndClaimFence","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentpairing","name":"TestSignOutEverywhereFencesCanonicalSetAndPreservesOtherAccounts","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentpairing","name":"TestSignOutEverywhereAppendsNestedEventsAfterEveryTargetLock","tier":"ESSENTIAL"},
