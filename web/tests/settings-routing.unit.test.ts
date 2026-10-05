@@ -15,7 +15,7 @@ beforeEach(() => {
     'vue-router': { createWebHistory: createMemoryHistory, createRouter: (options: Parameters<typeof createRouter>[0]) => createRouter({ ...options, routes: views(options.routes) }) },
     './lib/brand': { setPageTitle() {} }, './stores/projects': {}, './stores/session': { useSession: () => session }, './stores/workVocabulary': {},
     './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': {},
-    './lib/attachLink': { hasAttachFragment: () => false }, './lib/identityScope': {}, './lib/signInReturn': {},
+    './lib/attachLink': { hasAttachFragment: () => false, announceAttachCode() {} }, './lib/identityScope': {}, './lib/signInReturn': {},
     './lib/knowledge': {}, './components/work/projectNavigation': {}, './lib/ticketPeek': {},
     './views/ProjectsView.vue': { default: empty }, './views/SignInView.vue': { default: empty }, './views/NotFoundView.vue': { default: empty },
   }).router
@@ -74,6 +74,7 @@ it('current cards and unknown bookmarks keep their section', async () => {
 
 it('retired briefing bookmarks open Agents and keep request links', async () => {
   for (const path of ['/briefing', '/briefing/', '/briefing?needs=a:00000000-0000-4000-8000-000000000001#request']) {
+    await router.push('/settings/personal')
     await router.push(path)
     expect(router.currentRoute.value.path).toBe('/agents')
     expect(router.currentRoute.value.meta.title).toBe('Agents')
