@@ -22,7 +22,10 @@ import HarnessMark from './HarnessMark.vue'
 // detail inline: name, windows, last readings and the Advanced limit. There is
 // no allowance form: limits are observed, and a limit by hand is one sentence.
 // The card's header (SettingsCard) keeps its aside slot for "Add an account".
-const props = defineProps<{ accounts: AgentAccount[]; state: Availability; now: number; admin: boolean; set: (account: AgentAccount, state: AgentAccount['state']) => Promise<void> }>()
+// `all` is every account in the workspace when this card shows a subset (one
+// shared-quota account in Settings → Accounts and computers): name clashes and
+// pool candidates are found across all of them.
+const props = defineProps<{ accounts: AgentAccount[]; all?: AgentAccount[]; state: Availability; now: number; admin: boolean; set: (account: AgentAccount, state: AgentAccount['state']) => Promise<void> }>()
 const session = useSession()
 const agents = useAgents()
 const capacity = useCapacity()
@@ -36,7 +39,7 @@ const renameActivation = ref(0)
 const renameTrigger = ref<HTMLElement | null>(null)
 
 const rowOf = computed(() => new Map(capacity.rows.map(r => [r.id, r])))
-const clashes = computed(() => nameClashes(props.accounts))
+const clashes = computed(() => nameClashes(props.all ?? props.accounts))
 const groups = computed(() => {
   const byHarness = new Map<string, AgentAccount[]>()
   for (const a of props.accounts) byHarness.set(a.harness, [...(byHarness.get(a.harness) ?? []), a])
@@ -198,7 +201,7 @@ async function backInPool(account: AgentAccount) {
             </div>
             <CapacityLearning :learning="rowOf.get(a.id)?.learning" :host="a.host_label" :now="now" />
             <AccountDetail
-              v-if="open === a.id" :id="`account-detail-${a.id}`" :account="a" :accounts="accounts" :row="rowOf.get(a.id)" :cap="capacity.byAccount.get(a.id)" :now="now"
+              v-if="open === a.id" :id="`account-detail-${a.id}`" :account="a" :accounts="all ?? accounts" :row="rowOf.get(a.id)" :cap="capacity.byAccount.get(a.id)" :now="now"
               :timezone="capacity.timezone" :may-manage="mayManage" :rename="renameAt === a.id ? renameActivation : 0" :rename-trigger="renameTrigger" @changed="changed"
             />
           </li>

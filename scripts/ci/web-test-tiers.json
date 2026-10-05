@@ -9716,7 +9716,8 @@
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"members see account and computer details without mutation controls","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"quota warning popover submits with platform modifier and Undo restores its snapshot","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"Needs you verifies the expired sign-in once and reports a failed request honestly","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
-    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"sign-out confirmation names its scope and a failed write keeps the reviewed account open","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""}
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"sign-out confirmation names its scope and a failed write keeps the reviewed account open","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"a matching login joins the shared quota from the account panel and Sign out everywhere covers it","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""}
   ],
   "timingWeights": {
     "runId": "37341114152",

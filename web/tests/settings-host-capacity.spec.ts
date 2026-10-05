@@ -167,3 +167,42 @@ test('sign-out confirmation names its scope and a failed write keeps the reviewe
   await expect(pane).toBeVisible()
   await cancel.click();await expect(confirm).toHaveCount(0)
 })
+
+// AEON-686 review: pausing, approval and confirming a shared login stay in the
+// account panel. A newly matched login gains the canonical identity there, the
+// panel follows it, and Sign out everywhere then names every sign-in.
+test('a matching login joins the shared quota from the account panel and Sign out everywhere covers it',async({page}) => {
+  const errors=watchErrors(page)
+  const s=await setup(page), fingerprint='ab'.repeat(32)
+  const [main,studio]=[s.world.accounts.find(a=>a.label==='Main')!,s.world.accounts.find(a=>a.label==='Studio')!]
+  for (const a of s.world.accounts.filter(a=>a.harness==='codex')) Object.assign(a,{quota_fingerprint:fingerprint,quota_pool_fingerprint:''})
+  const pools: unknown[]=[], signouts: unknown[]=[]
+  await page.route('**/api/agent-accounts/quota-pool',async r=>{
+    const body=r.request().postDataJSON(); pools.push(body)
+    for (const a of s.world.accounts) if (body.account_ids.includes(a.id)) a.quota_pool_fingerprint=body.confirmed?body.quota_fingerprint:''
+    await r.fulfill({status:204})
+  })
+  await page.route('**/api/agent-pairing/accounts/sign-out',r=>{ signouts.push(r.request().postDataJSON()); return r.fulfill({json:{signed_out:2,local_cleanup:'pending'}}) })
+  await page.reload()
+  await page.locator(`.list-row[data-accounts~="${main.id}"]`).click()
+  const pane=page.locator('section.pane'), use=pane.locator('.use-sec')
+  await expect(use.locator('[data-account]')).toHaveCount(1)
+  await expect(use.getByRole('switch',{name:'Agents may use it · Main'})).toBeEnabled()
+  await use.getByRole('button',{name:'Details for Main'}).click()
+  await use.getByRole('button',{name:'Pool with Studio · studio',exact:true}).click()
+  const confirm=page.getByRole('dialog',{name:'Same login — pool them?'})
+  await expect(confirm.locator('.points li')).toHaveText(['Main · mbp2607','Studio · studio'])
+  await confirm.getByRole('button',{name:'Pool accounts'}).click()
+  await expect.poll(()=>pools).toEqual([{account_ids:[main.id,studio.id],quota_fingerprint:fingerprint,confirmed:true}])
+  // The same panel now shows the canonical account with both logins.
+  await expect(use.locator('[data-account]')).toHaveCount(2)
+  await expect(use.locator('.p-head span')).toHaveText('2 logins share this quota')
+  await expect(page.locator(`.list-row[data-accounts~="${studio.id}"]`)).toHaveAttribute('data-accounts',`${main.id} ${studio.id}`)
+  await pane.getByRole('button',{name:'More actions for Codex'}).click()
+  await page.getByRole('menuitem',{name:/Sign out everywhere/}).click()
+  await page.getByRole('dialog',{name:'Sign out of Codex everywhere?'}).getByRole('button',{name:'Sign out everywhere',exact:true}).click()
+  await expect.poll(()=>signouts.length).toBe(1)
+  const computerOf=(id:string)=>s.world.computers.find(c=>c.enrollments.some(e=>e.account_id===id))!
+  expect(signouts[0]).toEqual({targets:[main.id,studio.id].map(id=>({computer_id:computerOf(id).computer_id,account_id:id,expected_revision:computerOf(id).revision}))})
+  expect(errors).toEqual([])
+})
