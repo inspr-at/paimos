@@ -195,6 +195,64 @@ test('members read Vocabulary as text and cannot invoke its write actions', asyn
   expect(writes).toEqual([])
 })
 
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+  test(`members can read long German Vocabulary names without overflow at ${width}px in ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await setup(page, { role: 'member' })
+    // Include unbroken compounds at the 60-character limit as well as words
+    // separated by spaces: all valid names must remain readable in the card.
+    const names = [
+      'Arbeitsvorbereitungsbesprechungsdokumentationsverantwortlichkeit',
+      'Qualitätssicherungsmaßnahmenkoordination und Arbeitsplanung',
+      'Projektentwicklungszusammenarbeitsvereinbarungsdokumentationen',
+    ].map(name => name.slice(0, 60))
+    await page.route('**/api/settings/work-vocabulary', route => route.fulfill({ json: {
+      revision: 1, leaf: { name: names[0], icon: '' },
+      levels: names.slice(1).map(name => ({ name, icon: '' })),
+    } }))
+    await page.goto('/settings/vocabulary')
+    await page.evaluate(value => document.documentElement.setAttribute('data-theme', value), theme)
+    const card = page.locator('#work-vocabulary')
+    await expect(card.locator('.read-only-levels dd')).toHaveText(names)
+    await expect(card.locator('input, select, .actions')).toHaveCount(0)
+    await expect(card.locator('.preview')).toHaveText(`${names[1]} / ${names[2]} / ${names[0]}`)
+
+    const bounds = await card.evaluate(el => {
+      const cardBox = el.getBoundingClientRect()
+      return [...el.querySelectorAll('.read-only-levels, .read-only-levels > div, dt, dd, .preview')].map(child => {
+        const box = child.getBoundingClientRect()
+        return {
+          label: `${child.tagName}: ${child.textContent}`,
+          width: box.width, left: box.left - cardBox.left, right: cardBox.right - box.right,
+          overflow: child.scrollWidth - child.clientWidth,
+        }
+      })
+    })
+    expect(bounds).toHaveLength(11)
+    for (const bound of bounds) {
+      expect(bound.width, bound.label).toBeGreaterThan(0)
+      expect(bound.left, bound.label).toBeGreaterThanOrEqual(-.5)
+      expect(bound.right, bound.label).toBeGreaterThanOrEqual(-.5)
+      expect(bound.overflow, bound.label).toBeLessThanOrEqual(1)
+    }
+    for (const container of [card, page.locator('.body'), page.locator('main'), page.locator('html')]) {
+      expect(await container.evaluate(el => el.scrollWidth - el.clientWidth), 'container horizontal overflow').toBeLessThanOrEqual(1)
+    }
+    const picker = page.getByRole('button', { name: /^Section:/ })
+    const navigation = sections(page)
+    const guard = await controlStability(page, width <= 720 ? { picker } : { navigation, vocabulary: navigation.getByRole('link', { name: /^Vocabulary/ }) })
+    if (width <= 720) {
+      await guard.check(async () => { await picker.click(); await expect(navigation).toBeVisible() })
+      await guard.check(async () => { await picker.press('Escape'); await expect(navigation).toBeHidden() })
+    } else {
+      await guard.check(() => navigation.getByRole('link', { name: /^Vocabulary/ }).hover())
+    }
+    guard.done()
+    await mkdir('test-results/aeon-694-fix3', { recursive: true })
+    await page.screenshot({ path: `test-results/aeon-694-fix3/vocabulary-member-${width}-${theme}.png`, fullPage: true })
+  })
+}
+
 test('old workspace policy bookmarks open the moved card', async ({ page }) => {
   await setup(page)
   await page.goto('/settings/workspace#estimates')

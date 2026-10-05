@@ -81,7 +81,10 @@ function keys(e: KeyboardEvent) {
   </SettingsCard>
 </template>
 <style scoped>
-.read-only-levels { display: grid; gap: 12px; margin: 14px 0; }.read-only-levels > div { display: flex; justify-content: space-between; gap: 16px; }.read-only-levels dt { color: var(--ink-2); }.read-only-levels dd { margin: 0; }
+.read-only-levels { display: grid; gap: 12px; margin: 14px 0; min-width: 0; }
+.read-only-levels > div { display: flex; justify-content: space-between; gap: 16px; min-width: 0; }
+.read-only-levels dt { color: var(--ink-2); flex-shrink: 0; }
+.read-only-levels dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .feedback { min-height: 3em; margin: 10px 0; color: var(--ink-2); font-size: 13px; overflow-wrap: anywhere; }
 .feedback.error { color: var(--danger); }
