@@ -2329,7 +2329,7 @@
     "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1024, dark)",
     "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, light)",
     "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (1440, dark)",
-    "browser:tests/webcore-recovery.spec.ts:timing failures restore confirmed values, keep both controls anchored and retry the requested value",
+    "browser:tests/webcore-recovery.spec.ts:timing failures keep typed values and controls anchored, and save again on blur",
     "browser:tests/webcore-recovery.spec.ts:knowledge keeps a failed second query visibly stale, with retry and the previous query named",
     "browser:tests/webcore-recovery.spec.ts:a 2051-event access history shows its newest revocation and accurately reports the bounded window",
     "browser:tests/recurrences.spec.ts:migrated leaf Repeat menu and Shift+R keep the canonical target",
