@@ -589,3 +589,32 @@ using the legacy readiness helper (AEON-652), pending its consolidated lifecycle
 changes. Review both seams when merging siblings. Neither migration enables the
 rollout flag. Whole-chain acceptance, verified backup/rollback, push and deployment
 remain the coordinator's gates; this worker performs local checks and commits.
+
+## AEON-503 fix round 3
+
+Merged release-123 `origin/main` `73f40e0d8` in `2f17041d6`, preserving the
+updated Decision Desk documentation and both additive API changes. The combined
+session response adds optional commit counts to the published contract, so its
+header and schema pin now use `harness-session/2.8` (verified as a minor change).
+Every main test classification remains intact; explicit post-gate inventories
+preserve strict legacy tier assertions rather than exempting all NIGHTLY rows.
+
+`54449ea46` renumbers the unchanged waiting-measurement SQL to the coordinator's
+reserved `1243`, after release 123's `1240`. All 258 published SQL files remain
+byte-for-byte unchanged. The migration-order regression passes here and fails
+against `8e0e29c1`'s migration layout specifically because 1213 precedes 1240.
+The real Postgres upgrade test seeds two tenants before the work-kind upgrade,
+proves the waiting column is still absent at the release-123 boundary, preserves
+active time and exact historical snapshot/outcome bytes, and rejects reapplication.
+
+Local validation passed that database regression, reporter-contract tests,
+33 migration-checker tests, the 259-file guard against `v261005070923.0.0`,
+34 strict tier tests, and 19 focused web tests in usage-dashboard, usageWork and
+estimates. The approved remote Go runner transferred committed `54449ea46` but
+returned exit 3 because Colima was down, before running any package tests; its
+early refusal also bypasses its normal remote worktree cleanup. The remote
+browser launcher refused because OPS-247 bootstrap is pending. Broader affected
+Go suites, Linux Chromium and the previous-binary runtime compatibility probe
+remain unverified in this round and need the coordinator's working test lane or
+hosted CI. No assertions were loosened, origin push, deployment, ticket status
+change or model review ran.
