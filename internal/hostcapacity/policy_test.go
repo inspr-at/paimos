@@ -31,6 +31,7 @@ func TestHostCapacityAdmission(t *testing.T) {
 		{"no sample", smart, nil, nil, 0, "host_signals_stale", 0},
 		{"missing load", smart, &Signals{Cores: 18, MemoryPressure: "normal", Power: "unknown", Thermal: "unknown"}, &now, 0, "host_load_unknown", 30},
 		{"activity opt in only", func() Policy { p := smart; p.ConsiderActivity = true; return p }(), &signals, &now, 0, "host_load", 15},
+		{"missing opted-in activity", func() Policy { p := smart; p.ConsiderActivity = true; return p }(), func() *Signals { s := signals; s.InputActive = nil; return &s }(), &now, 0, "host_activity_unknown", 30},
 		{"battery", smart, func() *Signals { s := signals; s.Power = "battery"; return &s }(), &now, 0, "host_load", 15},
 		{"heat", smart, func() *Signals { s := signals; s.Thermal = "hot"; return &s }(), &now, 0, "host_load", 15},
 		{"memory", smart, func() *Signals { s := signals; s.MemoryPressure = "high"; return &s }(), &now, 0, "memory_pressure", 30},

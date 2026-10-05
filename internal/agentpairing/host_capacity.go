@@ -18,10 +18,11 @@ import (
 func hostCapacity(ctx context.Context, tx pgx.Tx, computer string) (hostcapacity.View, error) {
 	v := hostcapacity.View{History: []hostcapacity.Point{}}
 	var policy, signals, history []byte
+	var now time.Time
 	err := tx.QueryRow(ctx, `SELECT capacity_policy,capacity_signals,capacity_reported_at,capacity_history,
  (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.status IN ('starting','running','waiting')),
- (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.status='queued')
- FROM agent_pairing_computers c WHERE c.id=$1`, computer).Scan(&policy, &signals, &v.ReportedAt, &history, &v.Running, &v.Queued)
+ (SELECT count(*) FROM agent_runs r WHERE r.agent_principal_id=c.principal_id AND r.status='queued'),clock_timestamp()
+ FROM agent_pairing_computers c WHERE c.id=$1`, computer).Scan(&policy, &signals, &v.ReportedAt, &history, &v.Running, &v.Queued, &now)
 	if err != nil {
 		return v, notFound(err)
 	}
@@ -36,7 +37,14 @@ func hostCapacity(ctx context.Context, tx pgx.Tx, computer string) (hostcapacity
 	if err = json.Unmarshal(history, &v.History); err != nil {
 		return v, err
 	}
-	v.Reason, v.LoadLimit = hostcapacity.Evaluate(v.Policy, v.Signals, v.ReportedAt, v.Running, time.Now())
+	recent := v.History[:0]
+	for _, point := range v.History {
+		if !point.At.Before(now.Add(-time.Hour)) && !point.At.After(now) {
+			recent = append(recent, point)
+		}
+	}
+	v.History = recent
+	v.Reason, v.LoadLimit = hostcapacity.Evaluate(v.Policy, v.Signals, v.ReportedAt, v.Running, now)
 	return v, nil
 }
 
@@ -74,7 +82,7 @@ func (m *Module) saveHostCapacity(w http.ResponseWriter, r *http.Request, p tena
 			return err
 		}
 		if _, err = tx.Exec(r.Context(), `UPDATE agent_pairing_computers SET capacity_policy=$2,revision=revision+1,
-    capacity_signals=CASE WHEN $3 THEN capacity_signals ELSE capacity_signals-'input_active' END WHERE id=$1`, r.PathValue("computerId"), raw, in.Policy.ConsiderActivity); err != nil {
+    capacity_signals=CASE WHEN $3 THEN capacity_signals ELSE capacity_signals-'input_active' END WHERE id=$1`, r.PathValue("computerId"), raw, in.Policy.Mode == "smart" && in.Policy.ConsiderActivity); err != nil {
 			return err
 		}
 		out, err = hostCapacity(r.Context(), tx, r.PathValue("computerId"))
@@ -127,7 +135,7 @@ func (m *Module) reportHostCapacity(w http.ResponseWriter, r *http.Request) {
 		if err = json.Unmarshal(raw, &policy); err != nil {
 			return err
 		}
-		if !policy.ConsiderActivity {
+		if policy.Mode != "smart" || !policy.ConsiderActivity {
 			signals.InputActive = nil
 		}
 		data, err := json.Marshal(signals)

@@ -2,17 +2,19 @@
 package agentpairing_test
 
 import (
+	"strings"
+	"testing"
+
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
-	"testing"
 )
 
 func TestHostCapacityOwnerRevisionRuntimeAndClaimFence(t *testing.T) {
 	f := newFixture(t)
-	p := f.propose("codex")
+	p := f.propose("claude")
 	f.approve(p, "one_per_harness")
 	v := f.redeem(p)
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
@@ -57,6 +59,13 @@ func TestHostCapacityOwnerRevisionRuntimeAndClaimFence(t *testing.T) {
 	if report.Reason != "" || len(report.History) != 1 {
 		t.Fatal("falling load did not resume or history grew faster than one point/minute")
 	}
+	signals.Cores = 0
+	retryErrorCode(t, f.call("POST", "/api/agent-pairing/self/capacity", signals, false, key, 400), "invalid_request")
+	// Revoked management permission cannot reuse the already reviewed policy.
+	if _, err := f.db.Admin.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.person); err != nil {
+		t.Fatal(err)
+	}
+	retryErrorCode(t, f.call("PUT", path, map[string]any{"expected_revision": v.Revision + 1, "policy": policy}, true, "", 403), "forbidden")
 }
 func TestSignOutEverywhereFencesCanonicalSetAndPreservesOtherAccounts(t *testing.T) {
 	f := newFixture(t)
@@ -66,6 +75,13 @@ func TestSignOutEverywhereFencesCanonicalSetAndPreservesOtherAccounts(t *testing
 	// Different display labels and harnesses do not establish a shared account.
 	target := v.Enrollments[0]
 	other := v.Enrollments[1]
+	secondProposal := f.propose(target.Harness)
+	f.approve(secondProposal, "connect_only")
+	second := f.redeem(secondProposal)
+	shared := second.Enrollments[0]
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=$1,quota_pool_fingerprint=$1 WHERE id=ANY($2::uuid[])`, strings.Repeat("a", 64), []string{target.AccountID, shared.AccountID}); err != nil {
+		t.Fatal(err)
+	}
 	body := map[string]any{"targets": []map[string]any{{"computer_id": v.ComputerID, "account_id": target.AccountID, "expected_revision": v.Revision + 1}}}
 	retryErrorCode(t, f.call("POST", "/api/agent-pairing/accounts/sign-out", body, true, "", 409), "conflict")
 	var connected int
@@ -73,9 +89,14 @@ func TestSignOutEverywhereFencesCanonicalSetAndPreservesOtherAccounts(t *testing
 		t.Fatal("stale signout mutated sign-ins", err)
 	}
 	body["targets"] = []map[string]any{{"computer_id": v.ComputerID, "account_id": target.AccountID, "expected_revision": v.Revision}}
+	retryErrorCode(t, f.call("POST", "/api/agent-pairing/accounts/sign-out", body, true, "", 409), "conflict")
+	body["targets"] = []map[string]any{{"computer_id": v.ComputerID, "account_id": target.AccountID, "expected_revision": v.Revision}, {"computer_id": second.ComputerID, "account_id": shared.AccountID, "expected_revision": second.Revision}}
 	f.call("POST", "/api/agent-pairing/accounts/sign-out", body, true, "", 200)
 	var state, cleanup, sibling string
 	if err := f.db.Admin.QueryRow(t.Context(), `SELECT state,local_cleanup,(SELECT state FROM agent_pairing_enrollments WHERE account_id=$2) FROM agent_pairing_enrollments WHERE account_id=$1`, target.AccountID, other.AccountID).Scan(&state, &cleanup, &sibling); err != nil || state != "revoked" || cleanup != "pending" || sibling != "connected" {
 		t.Fatal("signout changed sibling or invented cleanup", err)
+	}
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT state,local_cleanup FROM agent_pairing_enrollments WHERE account_id=$1`, shared.AccountID).Scan(&state, &cleanup); err != nil || state != "revoked" || cleanup != "pending" {
+		t.Fatal("complete canonical set was not signed out", err)
 	}
 }

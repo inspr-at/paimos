@@ -4,8 +4,9 @@ package agentd
 import (
 	"context"
 	"errors"
-	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"testing"
+
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 )
 
 type hostCapacityAPI struct {
@@ -37,6 +38,12 @@ func TestManagedStartWaitsForHostCapacityBeforeRouteAndClaim(t *testing.T) {
 		t.Fatal("falling host load did not release queued start")
 	}
 	host.reason = "host_load" // A changed host does not kill its running process.
+	if err := s.pollOnce(t.Context(), true); err != nil {
+		t.Fatal("busy host poll failed", err)
+	}
+	if host.reads != 3 {
+		t.Fatal("poll did not observe the changed host policy")
+	}
 	if len(s.Status()) != 1 || s.Status()[0].State != "running" {
 		t.Fatal("host policy changed running work")
 	}

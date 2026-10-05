@@ -9713,6 +9713,8 @@
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1440 dark","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"failed capacity apply stays unsaved and reports the actual failure","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"members see account and computer details without mutation controls","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
-    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"quota warning popover submits with platform modifier and Undo restores its snapshot","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""}
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"quota warning popover submits with platform modifier and Undo restores its snapshot","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"Needs you verifies the expired sign-in once and reports a failed request honestly","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"sign-out confirmation names its scope and a failed write keeps the reviewed account open","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""}
   ]
 }

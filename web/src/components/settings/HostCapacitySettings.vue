@@ -20,6 +20,7 @@ watch(() => props.computer.revision, () => { if (!dirty.value && !busy.value) { 
 const summary = computed(() => {
   const v = props.computer.host_capacity
   if (!v) return 'Off · no load report yet'
+  if (props.computer.computer_state !== 'connected') return `${v.policy.mode === 'smart' ? 'Smart' : v.policy.mode === 'fixed' ? 'Fixed limit' : 'Off'} · new starts blocked`
   return `${v.policy.mode === 'fixed' ? `Fixed limit ${v.policy.maximum_load}` : v.policy.mode === 'smart' ? 'Smart' : 'Off'}${v.reason ? ` · waiting: ${hostCapacityReason(v.reason)}` : ' · new starts allowed'}`
 })
 async function save() {

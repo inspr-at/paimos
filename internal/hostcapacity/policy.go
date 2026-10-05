@@ -85,6 +85,9 @@ func Evaluate(p Policy, s *Signals, at *time.Time, running int, now time.Time) (
 	limit := p.MaximumLoad
 	if p.Mode == "smart" {
 		limit = math.Max(1, float64(s.Cores)*5/3)
+		if p.ConsiderActivity && s.InputActive == nil {
+			return "host_activity_unknown", limit
+		}
 		if p.EaseOnBattery && s.Power == "battery" {
 			limit *= .5
 		}

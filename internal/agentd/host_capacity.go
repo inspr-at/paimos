@@ -175,7 +175,7 @@ func (r *Remote) HostCapacity(ctx context.Context) (hostcapacity.View, error) {
 	if err != nil {
 		return out, err
 	}
-	if out.Policy.ConsiderActivity {
+	if out.Policy.Mode == "smart" && out.Policy.ConsiderActivity {
 		err = r.Client.Do(ctx, "POST", "/api/agent-pairing/self/capacity", sampleHost(ctx, true), &out)
 	}
 	return out, err
