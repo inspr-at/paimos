@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { journeyWorld, retryJourneyWorld, mockJourney, type JourneyStart, type WorldOptions } from './journey-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { controlStability } from './control-stability'
 
 async function open(page: Page, start: JourneyStart = 'plan', path = '/p/PHAROS?view=journey', options: WorldOptions & { failPlan?: boolean; kind?: 'person' | 'agent'; noTicketRoute?: boolean } = {}) {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -22,17 +23,23 @@ const writes = (calls: { method: string; path: string }[], suffix: string) => ca
 
 test('Journey hides partial work totals on pagination failure and retries the complete list', async ({ page }) => {
   const errors = watchErrors(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
   await mockWork(page, fixtures())
   await mockJourney(page, journeyWorld('build'))
-  let complete = false
   let workReads = 0
-  let finishRetry!: () => void
-  const retry = new Promise<void>(resolve => { finishRetry = resolve })
+  let finishFailedRetry!: () => void
+  let finishSuccessfulRetry!: () => void
+  const failedRetry = new Promise<void>(resolve => { finishFailedRetry = resolve })
+  const successfulRetry = new Promise<void>(resolve => { finishSuccessfulRetry = resolve })
   await page.route('**/api/nodes?**', async route => {
     const query = new URL(route.request().url()).searchParams
     if (query.get('kind') !== 'work,epic,ticket,task') return route.fallback()
     workReads++
-    if (complete) { await retry; return route.fallback() }
+    if (workReads === 13) {
+      await failedRetry
+      return route.fulfill({ status: 503, json: { error: 'Project work is temporarily unavailable. Try again once the service recovers.' } })
+    }
+    if (workReads > 13) { await successfulRetry; return route.fallback() }
     await route.fulfill({ json: { items: [{ id: 'n-1', state: 'done', kind_slug: 'work', is_leaf: true }], next_cursor: `more-${workReads}` } })
   })
   await page.goto('/p/PHAROS?view=journey')
@@ -43,14 +50,50 @@ test('Journey hides partial work totals on pagination failure and retries the co
   await page.keyboard.press('w')
   await expect(page.getByRole('dialog', { name: 'Release walker', exact: true })).toHaveCount(0)
   await expect(page).not.toHaveURL(/walk=/)
-  complete = true
-  await alert.getByRole('button', { name: 'Try again' }).click()
-  await expect(alert.getByRole('button', { name: 'Try again' })).toBeDisabled()
-  await expect(page.locator('.journey-view .progress, .journey-view .tally, .journey-view .j-count')).toHaveCount(0)
-  finishRetry()
-  await expect(alert).toHaveCount(0)
-  await expect(page.locator('.journey-view .progress')).toBeVisible()
-  expect(workReads).toBe(13)
+  const navigation = rail(page)
+  const stageButtons = navigation.getByRole('button')
+  await expect(stageButtons).toHaveCount(8)
+  const stages = {
+    'stage navigation': navigation,
+    'stage selector group': navigation.locator('.stages'),
+    ...Object.fromEntries(['Inspire', 'Shape', 'Requirements', 'Plan', 'Build', 'Deploy', 'Access', 'Live'].map((stage, index) => [`${stage} stage`, stageButtons.nth(index)])),
+  }
+  const retryButton = alert.getByRole('button', { name: 'Try again' })
+  // The retry disappears after recovery; stage controls survive every state.
+  const navigationGuard = await controlStability(page, stages)
+  const retryGuard = await controlStability(page, { ...stages, 'retry work': retryButton })
+  await navigationGuard.check(async () => {
+    await retryGuard.check(async () => {
+      await retryButton.click()
+      await expect(retryButton).toBeDisabled()
+      await expect.poll(() => workReads).toBe(13)
+      await expect(page.locator('.journey-view .progress, .journey-view .tally, .journey-view .j-count')).toHaveCount(0)
+    })
+  })
+  await navigationGuard.check(async () => {
+    await retryGuard.check(async () => {
+      finishFailedRetry()
+      await expect(alert).toContainText('Project work is temporarily unavailable. Try again once the service recovers.')
+      await expect(retryButton).toBeEnabled()
+      await expect(page.locator('.journey-view .progress, .journey-view .tally, .journey-view .j-count')).toHaveCount(0)
+    })
+  })
+  await navigationGuard.check(async () => {
+    await retryGuard.check(async () => {
+      await retryButton.click()
+      await expect(retryButton).toBeDisabled()
+      await expect.poll(() => workReads).toBe(14)
+      await expect(page.locator('.journey-view .progress, .journey-view .tally, .journey-view .j-count')).toHaveCount(0)
+    })
+  })
+  retryGuard.done()
+  await navigationGuard.check(async () => {
+    finishSuccessfulRetry()
+    await expect(alert).toHaveCount(0)
+    await expect(page.locator('.journey-view .progress')).toBeVisible()
+  })
+  navigationGuard.done()
+  expect(workReads).toBe(14)
   expect(errors).toEqual([])
 })
 
