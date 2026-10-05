@@ -4485,8 +4485,8 @@
     "261005070923.0.0": {
       "release_channel": "stable",
       "release_sequence": 123,
-      "snapshot_sha256": "e9a6692291f7600c488bef2ef9794f8232667fb2fdaf12b5b1fc22097bf089ab",
-      "captured_at": "2026-10-05T09:06:09Z",
+      "snapshot_sha256": "7e3d98a6cea7ef367d873ac7ffc8a46223ba9025214cf4480ea4851802c34015",
+      "captured_at": "2026-10-05T11:29:58Z",
       "release_revision": 1,
       "items": [
         {
@@ -4725,8 +4725,8 @@
           "key": "AEON-648",
           "pill_en": "Work item rollups",
           "pill_de": "Zusammengefasste Arbeitseinträge",
-          "benefit_en": "Work items share one kind, with rolled-up progress and finish-time estimates that can be partial when leaf estimates are missing. Parent status derivation and nesting labels apply where the parent rollout is enabled.",
-          "benefit_de": "Arbeitseinträge verwenden eine gemeinsame Art und zeigen zusammengefassten Fortschritt sowie Fertigstellungsschätzungen, die bei fehlenden Schätzungen einzelner Arbeitseinträge unvollständig sein können. Abgeleitete Elternstatus und Ebenennamen gelten dort, wo die Elternfunktionen aktiviert sind.",
+          "benefit_en": "Work items share one kind, with rolled-up progress and finish-time estimates that can be partial when leaf estimates are missing or stale when reports are not refreshed. Parent status derivation and nesting labels apply where the parent rollout is enabled.",
+          "benefit_de": "Arbeitseinträge verwenden eine gemeinsame Art und zeigen zusammengefassten Fortschritt sowie Fertigstellungsschätzungen, die bei fehlenden Schätzungen unvollständig oder bei ausbleibenden Aktualisierungen veraltet sein können. Abgeleitete Elternstatus und Ebenennamen gelten dort, wo die Elternfunktionen aktiviert sind.",
           "group": "features"
         },
         {
@@ -4749,8 +4749,8 @@
           "key": "AEON-651",
           "pill_en": "Estimated epic progress",
           "pill_de": "Geschätzter Epic-Fortschritt",
-          "benefit_en": "Epics roll up reported progress, total estimated leaf hours and available finish-time estimates, with estimate coverage shown. Finish times can be partial when leaf estimates are missing.",
-          "benefit_de": "Epics zeigen gemeldeten Fortschritt, die gesamten geschätzten Stunden ihrer einzelnen Arbeitseinträge und verfügbare Fertigstellungsschätzungen samt Schätzungsabdeckung. Bei fehlenden Schätzungen können die Fertigstellungszeiten unvollständig sein.",
+          "benefit_en": "Epics roll up reported progress, total estimated leaf hours and available finish-time estimates, with estimate coverage shown. Finish-time estimates can be partial when leaf estimates are missing or stale when reports are not refreshed.",
+          "benefit_de": "Epics zeigen gemeldeten Fortschritt, die gesamten geschätzten Stunden ihrer einzelnen Arbeitseinträge und verfügbare Fertigstellungsschätzungen samt Schätzungsabdeckung. Fertigstellungsschätzungen können bei fehlenden Schätzungen unvollständig oder bei ausbleibenden Aktualisierungen veraltet sein.",
           "group": "features"
         },
         {
