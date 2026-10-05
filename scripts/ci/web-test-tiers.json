@@ -7443,6 +7443,20 @@
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
+    {"kind":"vitest","file":"tests/workspace-activity.unit.test.ts","name":"drops another person’s history and binds every delayed Undo result to the exact displayed event, ticket and revision","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"older-page failure and retry keep retained rows and Undo still at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"older-page failure and retry keep retained rows and Undo still at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"older-page failure and retry keep retained rows and Undo still at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"delayed project-filter failure keeps retained rows and Undo still at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"delayed project-filter failure keeps retained rows and Undo still at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"delayed project-filter failure keeps retained rows and Undo still at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Show all opens the automatic view and a delayed Undo never marks a different view","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
   ]
 }
