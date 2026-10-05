@@ -68,7 +68,8 @@
         "cmd/**",
         "embed.go",
         "internal/phoneapprovals/**",
-        "internal/features/**"
+        "internal/features/**",
+        "internal/hookcap/**"
       ]
     },
     {
@@ -102,7 +103,8 @@
         "internal/modelprefs/**",
         "internal/crossreview/**",
         "internal/reviewgate/**",
-        "internal/agents/**"
+        "internal/agents/**",
+        "internal/hooknote/**"
       ]
     },
     {
@@ -115,7 +117,8 @@
         "internal/chat/**",
         "internal/client/**",
         "internal/plugins/**",
-        "internal/events/**"
+        "internal/events/**",
+        "internal/attachedmsg/**"
       ]
     },
     {

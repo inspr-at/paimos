@@ -3568,6 +3568,7 @@ paths:
                 oneOf:
                   - {$ref: '#/components/schemas/AttachView'}
                   - {$ref: '#/components/schemas/AttachedMessageCapability'}
+                  - {$ref: '#/components/schemas/AttachedMessageExchange'}
                   - type: object
                     required: [state]
                     additionalProperties: false
@@ -6462,6 +6463,19 @@ paths:
                   name: {type: string}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /inbox/messages/{messageId}/cancel:
+    post:
+      operationId: cancelAttachedNote
+      tags: [inbox]
+      summary: Cancel an owner note only while queued
+      description: Interactive same-origin computer owner only. Serialized with the first offer; cancellation cannot recall an offered note. Works offline and with messaging disabled.
+      parameters:
+        - {name: messageId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Cancelled without releasing text}
+        '403': {description: Interactive computer owner required}
+        '404': {description: No matching attached note}
+        '409': {description: Offer or terminal outcome already won}
   /inbox/messages/{messageId}/receipt:
     get:
       operationId: getInboxReceipt
@@ -12369,10 +12383,10 @@ components:
             operation: {const: register}
           required: [device_proof]
         - properties:
-            operation: {enum: [request, poll, detach, exited, message_request, message_activate, message_observed]}
+            operation: {enum: [request, poll, detach, exited, message_request, message_activate, message_observed, message_offer, message_receipt, message_validate]}
           required: [request_id, snapshot, request_digest]
       properties:
-        operation: {type: string, enum: [register, request, poll, detach, exited, message_request, message_activate, message_observed]}
+        operation: {type: string, enum: [register, request, poll, detach, exited, message_request, message_activate, message_observed, message_offer, message_receipt, message_validate]}
         request_id: {type: string, format: uuid}
         computer_id: {type: string, format: uuid}
         attach_protocol: {type: integer, enum: [1, 2], description: 'Registration only. Omission registers protocol 1; all later attach operations return 409 update_agentd. Protocol 2 declares paired-origin pinning, redirect refusal and kernel checks in both modes. A later request cannot upgrade a registered key.'}
@@ -12389,6 +12403,9 @@ components:
           type: string
           enum: [available, unsupported, unsigned, no_gui, policy]
           description: Registration only. An omitted registration is stored as unreported. A later poll cannot change it. This value never satisfies local confirmation.
+        message_epoch: {type: string, minLength: 1, maxLength: 128, description: Daemon per-binding epoch; first offer binds it atomically to the grant}
+        message_binding: {$ref: '#/components/schemas/AttachedMessageBinding'}
+        message_receipt: {$ref: '#/components/schemas/AttachedMessageReceipt'}
         message_protocol: {type: string, enum: [attached_messages_v1], description: Negotiated at registration; mandatory for message operations}
         message_generation: {type: string, format: uuid}
         hook_release_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
@@ -12442,8 +12459,8 @@ components:
         service_epoch: {type: string, format: uuid}
     AttachedMessageOffer:
       type: object
-      description: S2-3 integration contract; single attempt committed before releasing body, never replayed. This schema grants no new HTTP drain route.
-      required: [binding, grant_id, delivery_id, message_id, deadline, nonce, body]
+      description: Single attempt committed before releasing body, never replayed. Offered only at a fresh hook invocation through the paired attach exchange; a lost response is uncertain. No lease renewal.
+      required: [binding, grant_id, delivery_id, message_id, deadline, nonce, body, owner, created_at, epoch]
       properties:
         binding: {$ref: '#/components/schemas/AttachedMessageBinding'}
         grant_id: {type: string, format: uuid}
@@ -12451,7 +12468,29 @@ components:
         message_id: {type: string, format: uuid}
         deadline: {type: string, format: date-time}
         nonce: {type: string, pattern: '^[a-f0-9]{64}$'}
+        epoch: {type: string}
+        owner: {type: string, description: Server-authenticated owner label}
+        created_at: {type: string, format: date-time}
         body: {type: string, maxLength: 4096, description: 'Volatile UTF-8, 4096 bytes maximum; full escaped frame at most 8000 characters. Never logged or persisted.'}
+    AttachedMessageReceipt:
+      type: object
+      additionalProperties: false
+      required: [delivery_id, message_id, nonce, outcome, epoch]
+      properties:
+        delivery_id: {type: string, format: uuid}
+        message_id: {type: string, format: uuid}
+        nonce: {type: string, pattern: '^[a-f0-9]{64}$'}
+        outcome: {type: string, enum: [shown, uncertain]}
+        epoch: {type: string, description: Exact daemon binding epoch captured at claim; compared atomically with the current grant and attempt at settlement}
+    AttachedMessageExchange:
+      type: object
+      required: [state]
+      description: Content-free except for the first successful offer. Empty/replayed calls never return a previous body. message_validate rechecks current consent and the released attempt without text, immediately before local disclosure. Receipt retries return only committed metadata; they cannot reopen a terminal outcome.
+      properties:
+        state: {type: string, enum: [empty, offered, completed, uncertain, revoked, expired, not_delivered, cancelled]}
+        offer: {$ref: '#/components/schemas/AttachedMessageOffer'}
+        shown_at: {type: string, format: date-time, description: Hook reported full stdout handoff; does not prove model consumption}
+        completed_at: {type: string, format: date-time, description: Transport settlement only; never task completion}
     AttachView:
       type: object
       required: [request_id, request_digest, snapshot, state, expires_at]
@@ -15864,7 +15903,11 @@ components:
       required: [protocol, outcome, content_mode]
       properties:
         protocol: {type: string, const: attached_messages_v1}
-        outcome: {type: string, enum: [queued, notification_only, offered, shown, completed, not_delivered, cancelled, expired, uncertain]}
+        outcome: {type: string, enum: [queued, notification_only, offered, shown, completed, not_delivered, cancelled, expired, uncertain, revoked]}
+        offered_at: {type: [string, 'null'], format: date-time}
+        shown_at: {type: [string, 'null'], format: date-time, description: Hook-reported stdout handoff only}
+        completed_at: {type: [string, 'null'], format: date-time, description: Transport settled; not task completion}
+        offer_deadline: {type: [string, 'null'], format: date-time}
         content_mode: {type: string, enum: [attached_volatile, attached_notification]}
         message_generation: {type: string, format: uuid}
     InboxMessageStatus:

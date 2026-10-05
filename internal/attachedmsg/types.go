@@ -73,6 +73,9 @@ type Capability struct {
 // Offer is the S2-3/S2-4 handoff contract. The future broker must commit its
 // one attempt before using Take, and bind its nonce digest to this entire tuple.
 type Offer struct {
+	Epoch      string    `json:"epoch"`
+	Owner      string    `json:"owner"`
+	CreatedAt  time.Time `json:"created_at"`
 	Binding    Binding   `json:"binding"`
 	GrantID    string    `json:"grant_id"`
 	DeliveryID string    `json:"delivery_id"`

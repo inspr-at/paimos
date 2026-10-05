@@ -4,6 +4,7 @@
 package agentd
 
 import (
+	"context"
 	"crypto/subtle"
 	"encoding/json"
 	"errors"
@@ -17,6 +18,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/hooknote"
 )
 
 // LocalServer exposes fenced local control through an owner-only Unix socket.
@@ -30,6 +32,7 @@ type LocalServer struct {
 	release   func()
 	closeOnce sync.Once
 	closeErr  error
+	hooks     *hooknote.Server
 }
 
 func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ *LocalServer, resultErr error) {
@@ -108,7 +111,9 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 	if err != nil {
 		return nil, err
 	}
+	hooks := hooknote.NewServer()
 	mux := http.NewServeMux()
+	mux.Handle("POST /v1/inbox-hook", hooks)
 	if s.stepUps != nil {
 		mux.HandleFunc("GET /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
 		mux.HandleFunc("POST /v1/step-up", func(w http.ResponseWriter, r *http.Request) { s.stepUps.serve(w, r, token) })
@@ -239,8 +244,8 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(receipt)
 	})
-	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ConnContext: attachConnContext}
-	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, cleanup: cleanup}
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second, ConnContext: localConnContext}
+	local := &LocalServer{Server: server, Listener: listener, Socket: socket, TokenFile: tokenFile, cleanup: cleanup, hooks: hooks}
 	local.release = func() {
 		_ = lock.Close()
 		_ = dir.Close()
@@ -248,6 +253,19 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 	go func() { _ = server.Serve(listener) }()
 	complete = true
 	return local, nil
+}
+
+func localConnContext(ctx context.Context, c net.Conn) context.Context {
+	return hooknote.Annotate(attachConnContext(ctx, c), c)
+}
+
+// SetHookPeer installs the attached-note source. The socket token is not
+// consulted for this route. A nil source stays unavailable and releases nothing.
+func (l *LocalServer) SetHookPeer(src hooknote.NoteSource, grants *hooknote.Registry) {
+	if l == nil || l.hooks == nil {
+		return
+	}
+	l.hooks.Set(src, grants)
 }
 
 func authorized(r *http.Request, token string) bool {

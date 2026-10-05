@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/attachedmsg"
@@ -188,4 +189,53 @@ func (m *module) tryAttached(ctx context.Context, p tenant.Principal, project st
 		}
 	}
 	return
+}
+
+func (m *module) cancelAttached(w http.ResponseWriter, r *http.Request) {
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	id, ok := parseUUID(r.PathValue("messageId"))
+	if !ok {
+		failure(w, errNotFound)
+		return
+	}
+	if !attachedmsg.Interactive(r, m.attached.Origin(), p) {
+		failure(w, errForbidden)
+		return
+	}
+	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := attachedmsg.Lock(r.Context(), tx); err != nil {
+			return err
+		}
+		var project string
+		var owner, current, sender, state string
+		err := tx.QueryRow(r.Context(), `SELECT a.owner_id::text,q.approved_by::text,m.sender_principal_id::text,m.attached_outcome,a.project_id::text
+ FROM inbox_messages m JOIN harness_attach_requests a ON a.tenant_id=m.tenant_id AND a.session_id=m.recipient_session_id
+ JOIN agent_pairing_computers c ON c.tenant_id=a.tenant_id AND c.id=a.computer_id JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+ WHERE m.id=$1::uuid AND m.content_mode='attached_volatile' FOR UPDATE OF a`, id).Scan(&owner, &current, &sender, &state, &project)
+		if err != nil {
+			return err
+		}
+		if p.ID != owner || p.ID != current || p.ID != sender {
+			return errForbidden
+		}
+		if authz.RequireTx(r.Context(), tx, p, "inbox.send", authz.Scope{ProjectID: project}) != nil {
+			return errForbidden
+		}
+		if state == "cancelled" {
+			return nil
+		}
+		if state != "queued" {
+			return attachedmsg.Fail(409, "note_already_offered")
+		}
+		return attachedmsg.Terminalize(r.Context(), tx, id, "cancelled")
+	})
+	if err != nil {
+		failure(w, err)
+		return
+	}
+	m.attached.Discard(p.TenantID, id)
+	writeJSON(w, 200, map[string]string{"state": "cancelled"})
 }

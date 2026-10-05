@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/hooknote"
 	"github.com/inspr-at/paimos/internal/inbox"
 )
 
@@ -38,20 +39,47 @@ func (rt *runtime) cmdHook() *Command {
 	root := &Command{Name: "hook", Short: "Install and run session inbox hooks", Use: "hook <claude|codex|install|uninstall>"}
 	for _, harness := range []string{"claude", "codex"} {
 		var paired bool
-		root.subs = append(root.subs, &Command{Name: harness, Short: "Pull inbox at a harness turn boundary", Use: "hook " + harness + " <PostToolUse|UserPromptSubmit|Stop>", minArgs: 1, maxArgs: 1, addFlags: func(fs *flagSet) { fs.bool(&paired, "paired", 0, "credential-free paired hook") }, run: func(args []string) error {
-			// S2-4 replaces this bounded no-op with the peer-only exchange.
-			// Dispatch before stdin, config, API clients or socket bearer reads.
-			// Never fall back to the legacy inbox while qualification is pending.
+		var socket, daemonPeer, setupRoot string
+		root.subs = append(root.subs, &Command{Name: harness, Short: "Pull inbox at a harness turn boundary", Use: "hook " + harness + " <PostToolUse|UserPromptSubmit|Stop>", minArgs: 1, maxArgs: 1, addFlags: func(fs *flagSet) {
+			fs.bool(&paired, "paired", 0, "credential-free attached-session delivery")
+			fs.string(&socket, "socket", 0, "paired agentd socket; default is the paired state root")
+			fs.string(&daemonPeer, "daemon-peer", 0, "public daemon process pin; default is the paired state root")
+			fs.string(&setupRoot, "setup-root", 0, "paired state root; default is the account's paired directory")
+		}, run: func(args []string) error {
+			// Qualification is decided before stdin, config, or a socket token.
+			// The 391 installer passes only --paired. Explicit socket and pin
+			// flags remain optional overrides.
 			if paired {
-				fmt.Fprintln(rt.stderr, "aeon hook: qualification_pending; continuing")
-				return nil
+				if !hooknote.Enabled() {
+					fmt.Fprintln(rt.stderr, rt.program+" hook: qualification_pending; continuing")
+					return nil
+				}
+				if socket == "" || daemonPeer == "" {
+					derivedSocket, derivedPeer, err := pairedHookEndpoint(setupRoot)
+					if err != nil {
+						fmt.Fprintln(rt.stderr, rt.program+" hook: qualification_pending; continuing")
+						return nil
+					}
+					if socket == "" {
+						socket = derivedSocket
+					}
+					if daemonPeer == "" {
+						daemonPeer = derivedPeer
+					}
+				}
 			}
 			// The outer deadline also bounds blocked stdin, configuration reads and stdout.
 			// The shipped process exits as soon as this returns; canceled workers may not ack.
 			ctx, cancel := context.WithTimeout(context.Background(), hookBudget)
 			defer cancel()
 			done := make(chan error, 1)
-			go func() { done <- rt.runInboxHook(ctx, args[0]) }()
+			go func() {
+				if paired {
+					done <- rt.runPairedHook(ctx, args[0], socket, daemonPeer)
+					return
+				}
+				done <- rt.runInboxHook(ctx, args[0])
+			}()
 			select {
 			case err := <-done:
 				if err != nil {

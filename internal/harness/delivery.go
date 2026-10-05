@@ -42,7 +42,7 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	// Existing uncompleted lease must be replayed before taking later work.
 	var d Delivery
-	err = tx.QueryRow(ctx, `SELECT d.id::text,m.id::text,d.cursor,m.sender_principal_id::text,m.body,d.leased_at FROM harness_deliveries d JOIN inbox_messages m ON m.tenant_id=d.tenant_id AND m.id=d.message_id WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND d.session_id=$1 AND d.completed_at IS NULL AND d.released_at IS NULL AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) ORDER BY d.cursor LIMIT 1 FOR UPDATE OF m`, s.ID).Scan(&d.ID, &d.MessageID, &d.Cursor, &d.SenderPrincipalID, &d.Body, &d.LeasedAt)
+	err = tx.QueryRow(ctx, `SELECT d.id::text,m.id::text,d.cursor,m.sender_principal_id::text,m.body,d.leased_at FROM harness_deliveries d JOIN inbox_messages m ON m.tenant_id=d.tenant_id AND m.id=d.message_id WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND d.session_id=$1 AND d.mode='managed' AND d.completed_at IS NULL AND d.released_at IS NULL AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) ORDER BY d.cursor LIMIT 1 FOR UPDATE OF m`, s.ID).Scan(&d.ID, &d.MessageID, &d.Cursor, &d.SenderPrincipalID, &d.Body, &d.LeasedAt)
 	if err == nil {
 		return []Delivery{d}, nil
 	}
@@ -113,15 +113,18 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 	if err != nil {
 		return nil, err
 	}
+	if s.Management != "managed" || !has(s, "inbox") {
+		return nil, workorders.Fail(409, "managed inbox capability required")
+	}
 	var messageID string
 	var cursor int64
 	var completed, released *time.Time
 	// Lock order (AEON-280): worker() locked the session; then the message row,
 	// then the drain lease; FailMessage and receipts follow.
-	if _, err = tx.Exec(ctx, `SELECT 1 FROM inbox_messages WHERE chat_thread_id IS NULL AND id=(SELECT message_id FROM harness_deliveries WHERE session_id=$1 AND id=$2) FOR UPDATE`, s.ID, in.DeliveryID); err != nil {
+	if _, err = tx.Exec(ctx, `SELECT 1 FROM inbox_messages WHERE chat_thread_id IS NULL AND id=(SELECT message_id FROM harness_deliveries WHERE session_id=$1 AND id=$2 AND mode='managed') FOR UPDATE`, s.ID, in.DeliveryID); err != nil {
 		return nil, err
 	}
-	err = tx.QueryRow(ctx, `SELECT message_id::text,cursor,completed_at,released_at FROM harness_deliveries WHERE session_id=$1 AND id=$2 FOR UPDATE`, s.ID, in.DeliveryID).Scan(&messageID, &cursor, &completed, &released)
+	err = tx.QueryRow(ctx, `SELECT message_id::text,cursor,completed_at,released_at FROM harness_deliveries WHERE session_id=$1 AND id=$2 AND mode='managed' FOR UPDATE`, s.ID, in.DeliveryID).Scan(&messageID, &cursor, &completed, &released)
 	if err != nil {
 		return nil, err
 	}

@@ -115,6 +115,9 @@ func (s Snapshot) Valid() bool {
 }
 
 type DeviceRequest struct {
+	MessageEpoch              string                  `json:"message_epoch,omitempty"`
+	MessageBinding            json.RawMessage         `json:"message_binding,omitempty"`
+	MessageReceipt            json.RawMessage         `json:"message_receipt,omitempty"`
 	Doing                     *string                 `json:"doing,omitempty"`
 	ToolActivity              *agentactivity.Activity `json:"tool_activity,omitempty"`
 	LocalConsentProofVersion  int                     `json:"local_consent_proof_version,omitempty"`

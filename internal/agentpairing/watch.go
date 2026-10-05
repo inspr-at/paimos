@@ -259,7 +259,7 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, fail(400, "invalid_request", "invalid attach request"))
 		return
 	}
-	if in.Operation == "message_request" || in.Operation == "message_activate" || in.Operation == "message_observed" {
+	if in.Operation == "message_request" || in.Operation == "message_activate" || in.Operation == "message_observed" || in.Operation == "message_offer" || in.Operation == "message_receipt" || in.Operation == "message_validate" {
 		m.messageDevice(w, r, p, in, expected)
 		return
 	}

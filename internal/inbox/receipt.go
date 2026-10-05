@@ -66,21 +66,23 @@ func (m *module) receipt(ctx context.Context, p tenant.Principal, id string) (Re
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var at *time.Time
 		var mode string
+		var evidence AttachedStatus
 		var outcome, generation *string
 		err := tx.QueryRow(ctx, `
 			SELECT m.id::text, m.idempotency_key, t.slug,
 			       m.sender_principal_id::text, m.recipient_principal_id::text,
 			       r.target_id::text, r.target_version, COALESCE(r.adapter, ''),
 			       COALESCE(r.address, ''), COALESCE(r.effective_level, ''),
-			       r.state, r.handed_off_at, r.failure_reason,m.content_mode,m.attached_outcome,m.recipient_message_generation::text
+			       r.state, r.handed_off_at, r.failure_reason,m.content_mode,m.attached_outcome,m.recipient_message_generation::text,d.leased_at,d.shown_at,d.completed_at,d.offer_deadline
 			FROM inbox_messages m
 			JOIN tenants t ON t.id = m.tenant_id
 			JOIN inbox_receipts r ON r.tenant_id = m.tenant_id AND r.message_id = m.id
+ LEFT JOIN harness_deliveries d ON d.tenant_id=m.tenant_id AND d.message_id=m.id AND d.mode='attached_hook'
 			WHERE m.chat_thread_id IS NULL AND m.id = $1::uuid AND m.sender_principal_id = $2::uuid`, id, p.ID).Scan(
 			&out.MessageID, &out.IdempotencyKey, &out.Tenant,
 			&out.SenderPrincipalID, &out.RecipientPrincipalID,
 			&out.TargetID, &out.TargetVersion, &out.Adapter, &out.Address, &out.EffectiveLevel,
-			&out.State, &at, &out.FailureReason, &mode, &outcome, &generation)
+			&out.State, &at, &out.FailureReason, &mode, &outcome, &generation, &evidence.OfferedAt, &evidence.ShownAt, &evidence.CompletedAt, &evidence.OfferDeadline)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
@@ -92,12 +94,15 @@ func (m *module) receipt(ctx context.Context, p tenant.Principal, id string) (Re
 			out.HandedOffAt = &s
 		}
 		if mode != "durable" {
-			out.Attached = &AttachedStatus{Protocol: "attached_messages_v1", ContentMode: mode, Generation: generation}
+			out.Attached = &evidence
+			out.Attached.Protocol = "attached_messages_v1"
+			out.Attached.ContentMode = mode
+			out.Attached.Generation = generation
 			if outcome != nil {
 				out.Attached.Outcome = *outcome
 			}
 			out.HandedOffAt = nil
-			if out.State == "handed_off" {
+			if out.State == "handed_off" || out.Attached.Outcome == "uncertain" {
 				out.State = "queued"
 			}
 		}

@@ -53,6 +53,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/inbox/stream", m.stream)
 	mux.HandleFunc("GET /api/inbox/messages/{messageId}/receipt", m.handleReceipt)
 	mux.HandleFunc("POST /api/inbox/messages/{messageId}/ack", m.handleAck)
+	mux.HandleFunc("POST /api/inbox/messages/{messageId}/cancel", m.cancelAttached)
 	mux.HandleFunc("GET /api/inbox/targets", m.handleListTargets)
 	mux.HandleFunc("POST /api/inbox/targets", m.handleCreateTarget)
 	mux.HandleFunc("DELETE /api/inbox/targets/{targetId}", m.handleDeleteTarget)
