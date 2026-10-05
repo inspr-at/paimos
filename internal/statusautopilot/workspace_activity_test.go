@@ -24,6 +24,7 @@ func TestWorkspaceActivityPagingAndCurrentUndoAuthority(t *testing.T) {
 	hiddenProject := f.add("AUT-10", "project", "open", 1, nil)
 	hiddenNode := f.add("AUT-11", "work", "open", 1, nil)
 	reader := tenant.Principal{TenantID: f.p.TenantID, Kind: tenant.Person}
+	var retainedOwner string
 	f.tx(func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE id=$2`, hiddenProject, hiddenNode); err != nil {
 			return err
@@ -34,9 +35,14 @@ func TestWorkspaceActivityPagingAndCurrentUndoAuthority(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Project reader') RETURNING id::text`, reader.TenantID).Scan(&reader.ID); err != nil {
 			return err
 		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Retained owner') RETURNING id::text`, f.p.TenantID).Scan(&retainedOwner); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='viewer'`, reader.TenantID, reader.ID, f.project)
 		return err
 	})
+	// Permission revocation must preserve the last-owner safety constraint.
+	dbtest.BindRole(t, f.d, f.p.TenantID, retainedOwner, "owner")
 	tied := time.Date(2026, 10, 4, 12, 0, 0, 0, time.UTC)
 	older := tied.Add(-time.Hour)
 	eventIDs := []int64{}

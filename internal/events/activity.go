@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -67,7 +66,7 @@ func (q activityQuery) cursor(item activityItem) string {
 
 func parseActivityQuery(values url.Values) (activityQuery, error) {
 	q := activityQuery{view: values.Get("view"), rule: values.Get("rule"), project: values.Get("project_id"), limit: 50}
-	invalid := fmt.Errorf("invalid activity filters or cursor")
+	invalid := errors.New("invalid activity filters or cursor")
 	if len(values.Get("q")) > 200 || !utf8.ValidString(values.Get("q")) {
 		return q, invalid
 	}
@@ -172,7 +171,8 @@ func (m *module) readActivity(ctx context.Context, p tenant.Principal, q activit
  CASE WHEN e.type IN ('status_autopilot.changed','status_autopilot.derived') THEN coalesce(e.metadata->>'rule','') ELSE '' END AS rule,
  CASE WHEN e.type IN ('status_autopilot.changed','status_autopilot.derived') THEN coalesce(e.metadata->>'reason','') ELSE '' END AS reason,
  CASE WHEN e.type IN ('node.created','node.updated','node.deleted','status_autopilot.changed','status_autopilot.derived','status_autopilot.undone') THEN coalesce(e.before->>'state','') ELSE '' END AS from_state,
- CASE WHEN e.type IN ('node.created','node.updated','node.deleted','status_autopilot.changed','status_autopilot.derived','status_autopilot.undone') THEN coalesce(nullif(e.metadata->>'flag',''),e.after->>'state','') ELSE '' END AS to_state,
+ CASE WHEN e.type IN ('status_autopilot.changed','status_autopilot.derived') THEN coalesce(nullif(e.metadata->>'flag',''),e.after->>'state','')
+ WHEN e.type IN ('node.created','node.updated','node.deleted','status_autopilot.undone') THEN coalesce(e.after->>'state','') ELSE '' END AS to_state,
  CASE WHEN e.type IN ('status_autopilot.changed','status_autopilot.derived') THEN e.after->>'updated_at' END AS revision,
  n.updated_at AS current_revision,n.deleted_at IS NULL AND n.id IS NOT NULL AS live,
  n.state= e.after->>'state' AS same_state,p.kind AS actor_kind
