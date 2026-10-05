@@ -7484,6 +7484,20 @@
     {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"refreshes a retained picker revision and submits its retained selection successfully","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"reconciles retained selections with refreshed availability and move details","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"blocks a retained picker write until its refreshed options arrive","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"ignores an older options response after a retained picker owner refresh","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"reloads a revision conflict for a successful person retry","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"reloads a revision conflict for a successful person retry after move confirmation","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"keeps failed conflict recovery honest and blocks another stale write","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing picker recovers a revision conflict without losing the selection","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
   ]
 }

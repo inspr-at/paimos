@@ -19,28 +19,29 @@ afterEach(() => { for (const scope of scopes.splice(0)) scope.stop() })
 
 // Exercise the actual SFC action, with transport and person confirmations mocked.
 // No DOM is needed to prove the emitted result of either successful write path.
-function picker(result: membership.MembershipResult, lateMove: boolean) {
+async function picker(result: membership.MembershipResult, lateMove: boolean) {
   const write = vi.fn().mockResolvedValue(result)
   if (lateMove) write.mockRejectedValueOnce(new APIError(409, 'confirm_move required', {}))
   const confirm = vi.fn().mockResolvedValue(true)
   const confirmOptions = vi.fn().mockResolvedValue(true)
   const owner: PlanOwner = { projectId: 'p', releaseId: 'r', generation: 1 }
-  let current = owner
-  const captureOwner = () => current
-  const isOwnerCurrent = (candidate: PlanOwner) => candidate === current
+  const current = Vue.shallowRef(owner)
+  const captureOwner = () => current.value
+  const isOwnerCurrent = (candidate: PlanOwner) => candidate === current.value
+  const list = vi.fn().mockResolvedValue({ expected_revision: 7, tickets: [option('parent'), option('b')] })
   const modules: Record<string, unknown> = {
     vue: { ...Vue, onMounted: () => {}, onBeforeUnmount: () => {} },
     '../../lib/api': { APIError },
     '../../lib/confirm': { confirmAction: confirm },
     '../../lib/releaseAssign': { confirmOptionMoves: confirmOptions },
-    '../../lib/releaseMembership': { ...membership, addReleaseMembership: write },
+    '../../lib/releaseMembership': { ...membership, addReleaseMembership: write, listReleaseTicketOptions: list },
     '../../lib/work': { statusOptions: () => [] },
   }
   const source = readFileSync(new URL('../src/components/journey/ExistingTicketPicker.vue', import.meta.url), 'utf8')
   const { descriptor } = parse(source)
   const { content } = compileScript(descriptor, { id: 'existing-ticket-picker-test' })
   const { outputText } = ts.transpileModule(content, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } })
-  const exports: { default?: { setup: (props: unknown, context: unknown) => { toggle: (ticket: membership.MembershipTicket) => void; add: () => Promise<void>; note: Vue.Ref<string>; busy: Vue.Ref<boolean> } } } = {}
+  const exports: { default?: { setup: (props: unknown, context: unknown) => { toggle: (ticket: membership.MembershipTicket) => void; add: () => Promise<void>; load: () => Promise<void>; selected: Vue.Ref<Map<string, membership.MembershipTicket>>; revision: Vue.Ref<number>; loading: Vue.Ref<boolean>; failed: Vue.Ref<string>; note: Vue.Ref<string>; busy: Vue.Ref<boolean> } } } = {}
   new Function('require', 'exports', outputText)((id: string) => {
     if (id.endsWith('.vue')) return { default: {} }
     if (!(id in modules)) throw new Error(`Unexpected dependency ${id}`)
@@ -49,7 +50,8 @@ function picker(result: membership.MembershipResult, lateMove: boolean) {
   const scope = Vue.effectScope(); scopes.push(scope)
   const emit = vi.fn()
   const actions = scope.run(() => exports.default!.setup({ projectId: 'p', releaseId: 'r', releaseTitle: 'Next release', epics: [], captureOwner, isOwnerCurrent }, { expose: () => {}, emit }))!
-  return { ...actions, emit, write, confirm, confirmOptions, owner, refresh: () => { current = { ...owner, generation: current.generation + 1 } } }
+  await actions.load()
+  return { ...actions, emit, write, list, confirm, confirmOptions, owner, currentOwner: () => current.value, refresh: () => { current.value = { ...owner, generation: current.value.generation + 1 } } }
 }
 
 const option = (id: string): membership.MembershipTicket => ({
@@ -61,7 +63,7 @@ const walker: Walker = { release_node_id: 'r', project_node_id: 'p', state: 'pla
 for (const lateMove of [false, true]) for (const overlap of [false, true]) {
   it(`counts returned leaves for a parent${overlap ? ' plus an overlapping leaf' : ''}${lateMove ? ' after move confirmation' : ''}`, async () => {
     const result = { walker, event_id: 81, leaf_node_ids: ['a', 'b', 'c', 'b'] }
-    const subject = picker(result, lateMove)
+    const subject = await picker(result, lateMove)
     subject.toggle(option('parent'))
     if (overlap) subject.toggle(option('b'))
     await subject.add()
@@ -74,7 +76,7 @@ for (const lateMove of [false, true]) for (const overlap of [false, true]) {
 
 it('does not invent a leaf count when an older server omits the leaf IDs', async () => {
   const result = { walker, event_id: 81 }
-  const subject = picker(result, false)
+  const subject = await picker(result, false)
   subject.toggle(option('parent'))
   await subject.add()
   expect(subject.emit.mock.calls).toEqual([['added', { count: null, result, owner: subject.owner }]])
@@ -83,7 +85,7 @@ it('does not invent a leaf count when an older server omits the leaf IDs', async
 for (const lateMove of [false, true]) {
   it(`discards a retained picker success after same-release refresh${lateMove ? ' on the move retry' : ''}`, async () => {
     const result = { walker, event_id: 81, leaf_node_ids: ['leaf'] }
-    const subject = picker(result, lateMove), answer = deferred<membership.MembershipResult>(), started = deferred<void>()
+    const subject = await picker(result, lateMove), answer = deferred<membership.MembershipResult>(), started = deferred<void>()
     if (lateMove) subject.write.mockImplementationOnce(() => { started.resolve(); return answer.promise })
     else subject.write.mockReset().mockImplementation(() => { started.resolve(); return answer.promise })
     subject.toggle(option('parent'))
@@ -98,7 +100,7 @@ for (const lateMove of [false, true]) {
 }
 
 it('does not dispatch membership after its initial confirmation owner is refreshed', async () => {
-  const subject = picker({ walker, event_id: 81 }, false), confirmation = deferred<boolean>()
+  const subject = await picker({ walker, event_id: 81 }, false), confirmation = deferred<boolean>()
   subject.confirmOptions.mockReturnValueOnce(confirmation.promise)
   subject.toggle(option('parent'))
   const pending = subject.add()
@@ -111,7 +113,7 @@ it('does not dispatch membership after its initial confirmation owner is refresh
 })
 
 it('does not retry membership after its move confirmation owner is refreshed', async () => {
-  const subject = picker({ walker, event_id: 81 }, true), confirmation = deferred<boolean>(), started = deferred<void>()
+  const subject = await picker({ walker, event_id: 81 }, true), confirmation = deferred<boolean>(), started = deferred<void>()
   subject.confirm.mockImplementationOnce(() => { started.resolve(); return confirmation.promise })
   subject.toggle(option('parent'))
   const pending = subject.add()
@@ -124,7 +126,7 @@ it('does not retry membership after its move confirmation owner is refreshed', a
 })
 
 it('discards stale picker failure feedback after a same-release refresh', async () => {
-  const subject = picker({ walker, event_id: 81 }, false), answer = deferred<membership.MembershipResult>(), started = deferred<void>()
+  const subject = await picker({ walker, event_id: 81 }, false), answer = deferred<membership.MembershipResult>(), started = deferred<void>()
   subject.write.mockReset().mockImplementation(() => { started.resolve(); return answer.promise })
   subject.toggle(option('parent'))
   const pending = subject.add()
@@ -138,7 +140,7 @@ it('discards stale picker failure feedback after a same-release refresh', async 
 })
 
 it('reports a current picker failure without emitting success', async () => {
-  const subject = picker({ walker, event_id: 81 }, false)
+  const subject = await picker({ walker, event_id: 81 }, false)
   subject.write.mockRejectedValueOnce(new Error('Transport refused'))
   subject.toggle(option('parent'))
   await subject.add()
@@ -148,7 +150,7 @@ it('reports a current picker failure without emitting success', async () => {
 })
 
 it('keeps a picker action busy while its person confirmation is pending', async () => {
-  const subject = picker({ walker, event_id: 81 }, false), confirmation = deferred<boolean>()
+  const subject = await picker({ walker, event_id: 81 }, false), confirmation = deferred<boolean>()
   subject.confirmOptions.mockReturnValueOnce(confirmation.promise)
   subject.toggle(option('parent'))
   const pending = subject.add()
@@ -159,4 +161,94 @@ it('keeps a picker action busy while its person confirmation is pending', async 
   await pending
   expect(subject.write).toHaveBeenCalledTimes(1)
   expect(subject.busy.value).toBe(false)
+})
+
+it('refreshes a retained picker revision and submits its retained selection successfully', async () => {
+  const result = { walker: { ...walker, revision: 21 }, event_id: 81, leaf_node_ids: ['parent'] }
+  const subject = await picker(result, false)
+  subject.toggle(option('parent'))
+  subject.list.mockResolvedValueOnce({ expected_revision: 20, tickets: [option('parent')] })
+  subject.refresh()
+  await Vue.nextTick()
+  await subject.add()
+  expect(subject.write.mock.calls).toEqual([['p', 'r', { expected_revision: 20, ticket_node_ids: ['parent'], confirm_move: false }]])
+  expect(subject.emit.mock.calls).toEqual([['added', { count: 1, result, owner: subject.currentOwner() }]])
+})
+
+it('reconciles retained selections with refreshed availability and move details', async () => {
+  const subject = await picker({ walker, event_id: 81 }, false)
+  subject.toggle(option('parent'))
+  subject.toggle(option('b'))
+  const moved = { ...option('parent'), title: 'Fresh title', availability: 'other_release' as const, release_node_id: 'other', release_title: 'Other release' }
+  subject.list.mockResolvedValueOnce({ expected_revision: 20, tickets: [moved, { ...option('b'), availability: 'included' }] })
+  subject.refresh()
+  await Vue.nextTick()
+  expect([...subject.selected.value.values()]).toEqual([moved])
+  await subject.add()
+  expect(subject.confirmOptions).toHaveBeenCalledWith([moved], 'Next release')
+  expect(subject.write.mock.lastCall?.[2]).toEqual({ expected_revision: 20, ticket_node_ids: ['parent'], confirm_move: true })
+})
+
+it('blocks a retained picker write until its refreshed options arrive', async () => {
+  const subject = await picker({ walker, event_id: 81 }, false), answer = deferred<membership.TicketOptions>()
+  subject.toggle(option('parent'))
+  subject.list.mockReturnValueOnce(answer.promise)
+  subject.refresh()
+  await Vue.nextTick()
+  await subject.add()
+  expect(subject.write).not.toHaveBeenCalled()
+  expect(subject.selected.value.has('parent')).toBe(true)
+  answer.resolve({ expected_revision: 20, tickets: [option('parent')] })
+  await Vue.nextTick()
+  await subject.add()
+  expect(subject.write.mock.lastCall?.[2].expected_revision).toBe(20)
+})
+
+it('ignores an older options response after a retained picker owner refresh', async () => {
+  const subject = await picker({ walker, event_id: 81 }, false), old = deferred<membership.TicketOptions>()
+  subject.toggle(option('parent'))
+  subject.list.mockReturnValueOnce(old.promise)
+  const pending = subject.load()
+  subject.list.mockResolvedValueOnce({ expected_revision: 20, tickets: [option('parent')] })
+  subject.refresh()
+  await Vue.nextTick()
+  old.resolve({ expected_revision: 7, tickets: [{ ...option('parent'), availability: 'closed' }] })
+  await pending
+  expect(subject.revision.value).toBe(20)
+  expect(subject.selected.value.has('parent')).toBe(true)
+  await subject.add()
+  expect(subject.write.mock.lastCall?.[2].expected_revision).toBe(20)
+})
+
+for (const lateMove of [false, true]) it(`reloads a revision conflict for a successful person retry${lateMove ? ' after move confirmation' : ''}`, async () => {
+  const result = { walker: { ...walker, revision: 21 }, event_id: 81, leaf_node_ids: ['parent'] }
+  const subject = await picker(result, lateMove)
+  subject.write.mockRejectedValueOnce(new APIError(409, 'Release revision changed'))
+  subject.toggle(option('parent'))
+  subject.list.mockResolvedValueOnce({ expected_revision: 20, tickets: [option('parent')] })
+  await subject.add()
+  expect(subject.emit).not.toHaveBeenCalled()
+  expect(subject.selected.value.has('parent')).toBe(true)
+  expect(subject.note.value).toMatch(/revision|release changed/i)
+  await subject.add()
+  expect(subject.write.mock.calls.map(call => call[2].expected_revision)).toEqual(lateMove ? [7, 7, 20] : [7, 20])
+  expect(subject.emit.mock.calls).toEqual([['added', { count: 1, result, owner: subject.owner }]])
+})
+
+it('keeps failed conflict recovery honest and blocks another stale write', async () => {
+  const subject = await picker({ walker, event_id: 81 }, false)
+  subject.toggle(option('parent'))
+  subject.write.mockRejectedValueOnce(new APIError(409, 'Release revision changed'))
+  subject.list.mockRejectedValueOnce(new Error('Options refresh refused'))
+  await subject.add()
+  expect(subject.failed.value).toBe('Options refresh refused')
+  expect(subject.selected.value.has('parent')).toBe(true)
+  expect(subject.emit).not.toHaveBeenCalled()
+  await subject.add()
+  expect(subject.write).toHaveBeenCalledTimes(1)
+  subject.list.mockResolvedValueOnce({ expected_revision: 20, tickets: [option('parent')] })
+  await subject.load()
+  await subject.add()
+  expect(subject.write.mock.lastCall?.[2].expected_revision).toBe(20)
+  expect(subject.emit).toHaveBeenCalledTimes(1)
 })

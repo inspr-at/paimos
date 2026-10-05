@@ -201,5 +201,76 @@
       "Focused macOS Chromium evidence only; CI-equivalent Linux Chromium, full just test/build/unit/browser suites and consolidated release review remain coordinator gates.",
       "Local commit only; no pushes, remote-test host access, production access, deployments, ticket-status changes, model review gates or version changes."
     ]
+  },
+  "fix_round_4": {
+    "baseline": "19c446c3",
+    "findings_fixed": [
+      "Retained existing-ticket picker sent the options response revision from before a same-release owner refresh and could not recover from revision conflicts."
+    ],
+    "changes": [
+      "Watch the captured ready plan owner; invalidate older option reads when ownership becomes unavailable or changes, then reload bounded ticket options for the new owner generation.",
+      "Bind option data and expected revision to their captured owner. Block Add while options are pending, failed or belong to a stale generation, including keyboard/programmatic action paths.",
+      "Keep selections across refresh and filters; update selected tickets returned by the refreshed page with current availability/title/move details and prune those that can no longer be selected. Selections outside the bounded filtered page remain retained; server membership authorization and revision checks remain authoritative.",
+      "On a current-owner revision conflict, reload options without reporting success or automatically retrying the write. A subsequent person action uses the refreshed revision and reconciled selection; failed reloads expose their error and block stale resubmission.",
+      "Correct phone picker max-width to match its existing card width: the browser default capped the dialog 18px narrower than the card. Existing layout retained; no new visual design or keyboard behavior."
+    ],
+    "regression_evidence": [
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/existing-ticket-picker.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "before": "On unchanged 19c446c3 source, all seven new cases fail at explicit revision 20 vs 7, refreshed selection, blocked dispatch, stale options adoption or failed-recovery assertions; existing 12 cases pass.",
+        "after": "19 passed, 0 failed after final source restoration. Deferred promises and reactive owner changes establish interleavings; no sleeps and no weakened assertions."
+      },
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/plan-owner.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "result": "28 passed, 0 failed; prior record/generation, queued-write, draft and partial-selection protections remain intact."
+      },
+      {
+        "command": "npm test -- tests/release-picker.spec.ts --grep 'retained existing picker.*(390 light|1440 light)|existing picker recovers' --workers=1 --retries=0 --timeout=5000",
+        "before": "Representative phone, desktop refresh and conflict-recovery cases fail against 19c446c3 with final fixtures/assertions: 18px horizontal overflow; no refreshed options response after the walker GET; no recovery options response after a 409. Timeouts only guard missing responses."
+      },
+      {
+        "command": "npm test -- tests/release-picker.spec.ts --grep 'retained existing picker|existing picker recovers|Plan adds three existing|existing parent picker|a ticket in another' --workers=1 --retries=0",
+        "after": "15 passed, 0 failed. Six new light/dark cases at 390/1024/1440px prove retained selection submits revision 20; shared stability guard samples positive-size Add/Cancel/search/selectors/filter-group/list/clicked-row across selection and owner refresh, plus phone frame and horizontal overflow. Conflict recovery sends [7,20] without false success. Eight existing leaf-count/move/positive controls pass. Bundled headless macOS Chromium; after=0 and remaining_processes=0."
+      },
+      {
+        "command": "npm run typecheck",
+        "result": "passed"
+      },
+      {
+        "command": "node node_modules/eslint/bin/eslint.js src/components/journey/ExistingTicketPicker.vue",
+        "result": "passed"
+      },
+      {
+        "command": "python3 -m unittest discover -s scripts/audit",
+        "result": "33 passed. No new code files or ownership-map changes."
+      },
+      {
+        "command": "Native focused Vitest --no-staticParse and Playwright --list collection + strict tier validation/full-push selection",
+        "result": "87 exact classifications across the two unit files and release-picker spec; all 49 gated cases selected by full/push. All 14 new regressions ESSENTIAL; existing classifications unchanged."
+      },
+      {
+        "command": "git fetch origin main; git merge-tree --write-tree --name-only HEAD origin/main",
+        "result": "Newest origin/main fetched; no conflicts in merge simulation. Conditional merge not required."
+      },
+      {
+        "command": "git diff --check",
+        "result": "passed"
+      }
+    ],
+    "screenshots": [
+      "web/test-results/aeon-706-planbind/picker-refresh-390-light.png",
+      "web/test-results/aeon-706-planbind/picker-refresh-390-dark.png",
+      "web/test-results/aeon-706-planbind/picker-refresh-1024-light.png",
+      "web/test-results/aeon-706-planbind/picker-refresh-1024-dark.png",
+      "web/test-results/aeon-706-planbind/picker-refresh-1440-light.png",
+      "web/test-results/aeon-706-planbind/picker-refresh-1440-dark.png"
+    ],
+    "ownership": "Verified ppm account: INSPR tenant, workstation-agents agent; coordinator builder markers for aeon-706-planbind present on AEON-706. No ticket-status changes.",
+    "design": "Existing PAIMOS picker reused; no conflict with approved decisions. Needs Opus design for future new layouts.",
+    "limits": [
+      "Specific brief requires local targeted tests and forbids mbp2606, and direct user instruction forbids pushes. remote-test.sh pushes a temporary ref and uses mbp2606, so it was not invoked. No Go packages, contracts, migrations or versions changed.",
+      "Focused macOS Chromium evidence only. CI-equivalent Linux Chromium, full just test/build/unit/browser suites and consolidated release review remain coordinator gates.",
+      "Local commit only; no pushes, deploys, production access, model review gates, destructive git or changes outside this worktree."
+    ]
   }
 }

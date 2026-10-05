@@ -5,7 +5,7 @@ import { APIError } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
 import { confirmOptionMoves } from '../../lib/releaseAssign'
 import {
-  addReleaseMembership, availabilityMark, canSelectTicket, isMoveConflict, listReleaseTicketOptions,
+  addReleaseMembership, availabilityMark, canSelectTicket, isMoveConflict, isStaleRevision, listReleaseTicketOptions,
   type MembershipResult, type MembershipTicket,
 } from '../../lib/releaseMembership'
 import type { PlanOwner } from '../../lib/useJourneyData'
@@ -36,6 +36,7 @@ const busy = ref(false)
 const note = ref('')
 let timer: ReturnType<typeof setTimeout> | undefined
 let generation = 0
+let optionsOwner: PlanOwner | null = null
 
 const statuses = statusOptions()
 const types = [{ value: 'ticket', label: 'Ticket' }, { value: 'task', label: 'Task' }]
@@ -44,21 +45,29 @@ const addableCount = computed(() => tickets.value.filter(canSelectTicket).length
 
 async function load() {
   const request = ++generation
+  const owner = props.captureOwner()
+  optionsOwner = null
   loading.value = true
   failed.value = ''
+  if (!owner || owner.projectId !== props.projectId || owner.releaseId !== props.releaseId) return
   try {
-    const page = await listReleaseTicketOptions(props.projectId, props.releaseId, {
+    const page = await listReleaseTicketOptions(owner.projectId, owner.releaseId, {
       q: term.value, status: status.value, epic: epic.value, type: type.value, limit: 50,
     })
-    if (request !== generation) return
+    if (request !== generation || !props.isOwnerCurrent(owner)) return
     tickets.value = page.tickets
     revision.value = page.expected_revision
     const next = new Map(selected.value)
-    for (const ticket of page.tickets) if (next.has(ticket.ticket_node_id) && !canSelectTicket(ticket)) next.delete(ticket.ticket_node_id)
+    for (const ticket of page.tickets) {
+      if (!next.has(ticket.ticket_node_id)) continue
+      if (canSelectTicket(ticket)) next.set(ticket.ticket_node_id, ticket)
+      else next.delete(ticket.ticket_node_id)
+    }
     selected.value = next
+    optionsOwner = owner
     active.value = Math.min(active.value, Math.max(0, page.tickets.length - 1))
   } catch (error) {
-    if (request !== generation) return
+    if (request !== generation || !props.isOwnerCurrent(owner)) return
     tickets.value = []
     const missing = error instanceof APIError && (error.status === 404 || error.status === 405)
     failed.value = missing ? 'This server cannot list existing tickets yet.' : error instanceof Error ? error.message : 'Tickets could not be loaded.'
@@ -66,6 +75,9 @@ async function load() {
     if (request === generation) loading.value = false
   }
 }
+// captureOwner becomes null during a walker refresh, then supplies its new
+// generation when ready. Retain the choices, but never reuse their old revision.
+watch(() => props.captureOwner(), () => { clearTimeout(timer); void load() }, { flush: 'sync' })
 watch([term, status, epic, type], () => { clearTimeout(timer); timer = setTimeout(load, 160) })
 onMounted(async () => { dialog.value?.showModal(); await nextTick(); searchEl.value?.focus(); void load() })
 onBeforeUnmount(() => { clearTimeout(timer); generation++ })
@@ -115,7 +127,7 @@ function keydown(event: KeyboardEvent) {
 async function add() {
   const chosen = picked.value
   const owner = props.captureOwner()
-  if (!chosen.length || busy.value || !owner || owner.projectId !== props.projectId || owner.releaseId !== props.releaseId) return
+  if (!chosen.length || busy.value || loading.value || failed.value || !owner || !optionsOwner || !props.isOwnerCurrent(optionsOwner) || owner.projectId !== props.projectId || owner.releaseId !== props.releaseId) return
   const expectedRevision = revision.value, releaseTitle = props.releaseTitle
   note.value = ''
   busy.value = true
@@ -150,6 +162,10 @@ async function add() {
     if (!props.isOwnerCurrent(owner)) return
     const missing = error instanceof APIError && (error.status === 404 || error.status === 405)
     note.value = missing ? 'This server cannot add tickets to a release yet.' : error instanceof Error ? error.message : 'The tickets were not added.'
+    if (isStaleRevision(error)) {
+      await load()
+      if (props.isOwnerCurrent(owner) && optionsOwner && !failed.value) note.value = 'The release changed. Review the refreshed selection and try again.'
+    }
   } finally { busy.value = false }
 }
 function added(result: MembershipResult, owner: PlanOwner) {
@@ -214,7 +230,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
         </p>
         <div class="actions">
           <button type="button" class="btn" @click="close">Cancel</button>
-          <button type="button" class="btn primary" :disabled="!picked.length || busy" :aria-busy="busy" @click="add"><AppIcon name="plus" :size="14" />Add selected</button>
+          <button type="button" class="btn primary" :disabled="!picked.length || busy || loading || !!failed" :aria-busy="busy || loading" @click="add"><AppIcon name="plus" :size="14" />Add selected</button>
         </div>
       </footer>
     </div>
@@ -256,6 +272,7 @@ footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: s
 .actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .btn { height: 36px; }
 @media (max-width: 600px) {
+  .picker { max-width: calc(100vw - 16px); }
   .picker, .card { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
   .filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .filters .field { padding: 0 4px 0 8px; font-size: 13px; text-overflow: ellipsis; }
