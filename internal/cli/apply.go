@@ -4,9 +4,7 @@ package cli
 
 import (
 	"fmt"
-	"io"
 	"net/http"
-	"os"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -52,9 +50,9 @@ func (rt *runtime) cmdApply() *Command {
 		var raw []byte
 		var err error
 		if path == "-" {
-			raw, err = io.ReadAll(io.LimitReader(rt.stdin, 8<<20+1))
+			raw, err = readBounded(rt.stdin, 8<<20)
 		} else {
-			raw, err = os.ReadFile(path)
+			raw, err = readBoundedFile(path, 8<<20)
 		}
 		if err != nil {
 			return rt.fail(err, "")
