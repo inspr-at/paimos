@@ -9,7 +9,7 @@ import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 import { mockPairing } from './agent-pairing-fixtures'
 import { makePng, mockSettings, settingsData } from './settings-fixtures'
 import { defaultStatusHelp } from '../src/lib/statusDefinitions'
-import { expectCompactDialog, expectPhoneSheet, type DialogSize } from './helpers/dialog-scale'
+import { expectCompactDialog, expectPhoneSheet, sampleDialog, type DialogSize } from './helpers/dialog-scale'
 
 // AEON-730: every dialog takes one step of the shared size scale and keeps its
 // actions compact on wide screens; phones get full-height sheets with a pinned
@@ -17,13 +17,13 @@ import { expectCompactDialog, expectPhoneSheet, type DialogSize } from './helper
 // (1440/1920) run only for evidence capture: AEON_DIALOG_AUDIT=1.
 const WIDTHS = process.env.AEON_DIALOG_AUDIT === '1' ? [1440, 1920, 2560, 390] : [2560, 390]
 
-interface Check { name: string; frame: Locator; actions: Locator; size: DialogSize; phoneSheet?: boolean }
+interface Check { name: string; frame: Locator; actions: Locator; size: DialogSize; phoneSheet?: boolean; hasActions?: boolean }
 
 function checker(page: Page, info: TestInfo, width: number, theme: string) {
   const viewport = { width, height: width === 390 ? 844 : 1000 }
-  return async ({ name, frame, actions, size, phoneSheet = true }: Check) => {
+  return async ({ name, frame, actions, size, phoneSheet = true, hasActions = true }: Check) => {
     await expect(frame).toBeVisible()
-    if (width > 600) await expectCompactDialog(frame, actions, size, viewport)
+    if (width > 600) await expectCompactDialog(frame, actions, size, viewport, hasActions)
     else if (phoneSheet) await expectPhoneSheet(frame, actions, viewport)
     else {
       const box = (await frame.boundingBox())!
@@ -70,6 +70,12 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     await agent(page, 'pharos-deployer').getByRole('button', { name: 'New key', exact: true }).click()
     const key = dialog(page, 'New key for pharos-deployer')
     await check({ name: 'new-key', frame: key, actions: key.locator('.sheet-foot'), size: 'l' })
+    if (width > 600) {
+      // Scope presets are buttons too: each keeps its label's width.
+      const presets = await sampleDialog(key, key.locator('.preset-actions'))
+      expect.soft(presets.buttons.length).toBeGreaterThan(0)
+      for (const button of presets.buttons) expect.soft(button.width, `preset “${button.label}” fits its label`).toBeLessThanOrEqual(button.natural + 1)
+    }
     await key.getByRole('checkbox', { name: /nodes\.read/ }).check()
     await key.getByRole('button', { name: 'Create key', exact: true }).click()
     const ready = dialog(page, 'Key ready')
@@ -142,12 +148,9 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z'))
     const errors = watchErrors(page)
     const check = checker(page, info, width, theme)
+    // Each area's mocks are added just before it: later routes win, and an
+    // area's permission mock must not turn the ticket pages read-only.
     await mockWork(page, fixtures(), { admin: true })
-    await mockCRM(page, crmData())
-    await mockQuotes(page, quoteWorld())
-    await mockKnowledge(page, knowledgeWorld())
-    await mockSettings(page, settingsData())
-    await mockPairing(page)
     await page.route('**/api/status/help**', route => route.fulfill({ json: defaultStatusHelp() }))
 
     // Keyboard shortcuts: M.
@@ -156,7 +159,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     if (width > 600) {
       await page.keyboard.press('Shift+?')
       const shortcuts = dialog(page, 'Keyboard shortcuts')
-      await check({ name: 'shortcuts', frame: shortcuts, actions: shortcuts, size: 'm' })
+      await check({ name: 'shortcuts', frame: shortcuts, actions: shortcuts, size: 'm', hasActions: false })
       await shortcuts.getByRole('button', { name: 'Close shortcuts' }).click()
     }
 
@@ -182,27 +185,33 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     await check({ name: 'status-help', frame: help, actions: help, size: 'l', phoneSheet: false })
     await help.getByRole('button', { name: 'Close the status help' }).click()
 
-    // New knowledge entry: M.
+    // New knowledge entry: L (an editor).
+    await mockKnowledge(page, knowledgeWorld())
     await page.goto('/p/PHAROS/knowledge')
     await expect(page.locator('.k-row').first()).toBeVisible()
     await page.keyboard.press('n')
     const knowledge = dialog(page, 'New knowledge entry')
-    await check({ name: 'knowledge-create', frame: knowledge, actions: knowledge.locator('.create-foot'), size: 'm' })
+    await check({ name: 'knowledge-create', frame: knowledge, actions: knowledge.locator('.create-foot'), size: 'l' })
     await knowledge.getByRole('button', { name: 'Cancel' }).click()
 
     // New customer and New quote: M.
-    await page.goto('/business/customers')
-    await expect(page.getByRole('grid', { name: 'Customers' }).locator('tbody .name-link').first()).toBeVisible()
-    await page.keyboard.press('n')
-    const customer = dialog(page, 'New customer')
-    await check({ name: 'customer-create', frame: customer, actions: customer.locator('.create-foot'), size: 'm' })
-    await customer.getByRole('button', { name: 'Cancel' }).click()
-    await page.goto('/business/quotes')
-    await expect(page.getByRole('grid', { name: 'Quotes' })).toBeVisible()
-    await page.getByRole('button', { name: 'New quote' }).click()
-    const quote = dialog(page, 'New quote')
-    await check({ name: 'quote-create', frame: quote, actions: quote.locator('.create-foot'), size: 'm' })
-    await quote.getByRole('button', { name: 'Cancel' }).click()
+    // The desktop lists open them with n; phones list customers differently.
+    await mockCRM(page, crmData())
+    if (width > 600) {
+      await mockQuotes(page, quoteWorld())
+      await page.goto('/business/customers')
+      await expect(page.getByRole('grid', { name: 'Customers' }).locator('tbody .name-link').first()).toBeVisible()
+      await page.keyboard.press('n')
+      const customer = dialog(page, 'New customer')
+      await check({ name: 'customer-create', frame: customer, actions: customer.locator('.create-foot'), size: 'm' })
+      await customer.getByRole('button', { name: 'Cancel' }).click()
+      await page.goto('/business/quotes')
+      await expect(page.getByRole('grid', { name: 'Quotes' })).toBeVisible()
+      await page.getByRole('button', { name: 'New quote' }).click()
+      const quote = dialog(page, 'New quote')
+      await check({ name: 'quote-create', frame: quote, actions: quote.locator('.create-foot'), size: 'm' })
+      await quote.getByRole('button', { name: 'Cancel' }).click()
+    }
 
     // Apply a notes rewrite: L.
     await page.goto(`/business/customers/${HOFER}`)
@@ -216,6 +225,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     await apply.getByRole('button', { name: 'Cancel' }).click()
 
     // Disconnect a computer: S.
+    await mockPairing(page)
     await page.goto('/agents/register-agent')
     await page.getByRole('button', { name: 'Disconnect', exact: true }).first().click()
     const disconnect = page.getByRole('dialog', { name: /^Disconnect / })
@@ -223,6 +233,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     await disconnect.getByRole('button', { name: 'Cancel' }).click()
 
     // Crop a photo: L.
+    await mockSettings(page, settingsData())
     await page.goto('/settings/personal')
     await expect(page.getByLabel('First name')).toHaveValue('Markus')
     const chooser = page.waitForEvent('filechooser')
@@ -230,7 +241,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     await (await chooser).setFiles({ name: 'p.png', mimeType: 'image/png', buffer: makePng(1000, 500) })
     const crop = dialog(page, 'Crop your photo')
     await check({ name: 'avatar-crop', frame: crop, actions: crop.locator('.foot'), size: 'l', phoneSheet: false })
-    await crop.getByRole('button', { name: 'Cancel' }).click()
+    await crop.locator('.foot').getByRole('button', { name: /^Cancel/ }).click()
 
     expect(errors).toEqual([])
   })

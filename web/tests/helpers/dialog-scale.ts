@@ -44,12 +44,12 @@ export async function sampleDialog(frame: Locator, actions: Locator): Promise<Di
 
 /** Desktop: the frame stays within its scale step and inside the window; no
  * action button is wider than its label needs (a small minimum is allowed). */
-export async function expectCompactDialog(frame: Locator, actions: Locator, size: DialogSize, viewport: { width: number; height: number }) {
+export async function expectCompactDialog(frame: Locator, actions: Locator, size: DialogSize, viewport: { width: number; height: number }, hasActions = true) {
   const sample = await sampleDialog(frame, actions)
   expect.soft(sample.frame.width, `dialog width within the ${size.toUpperCase()} step`).toBeLessThanOrEqual(DIALOG_SCALE[size] + 0.5)
   expect.soft(sample.frame.x, 'dialog starts inside the window').toBeGreaterThanOrEqual(-0.5)
   expect.soft(sample.frame.x + sample.frame.width, 'dialog ends inside the window').toBeLessThanOrEqual(viewport.width + 0.5)
-  expect.soft(sample.buttons.length, 'dialog has measurable actions').toBeGreaterThan(0)
+  if (hasActions) expect.soft(sample.buttons.length, 'dialog has measurable actions').toBeGreaterThan(0)
   for (const button of sample.buttons) {
     expect.soft(button.width, `“${button.label}” is no wider than its label needs`).toBeLessThanOrEqual(Math.max(button.natural, 88) + 1)
     expect.soft(button.height, `“${button.label}” is a compact desktop button`).toBeLessThanOrEqual(36.5)

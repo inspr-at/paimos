@@ -144,8 +144,10 @@ for (const width of [1440, 1024, 390, 1920]) for (const theme of ['light', 'dark
     await fits(cancel)
     await fits(revoke)
     const cancelBox = (await cancel.boundingBox())!, revokeBox = (await revoke.boundingBox())!
-    if (width === 390) expect(revokeBox.y).toBeGreaterThanOrEqual(cancelBox.y + cancelBox.height)
-    else expect(Math.abs(cancelBox.y - revokeBox.y)).toBeLessThanOrEqual(0.5)
+    // Side by side when both labels fit (AEON-730), stacked otherwise; never overlapping.
+    const apart = revokeBox.y >= cancelBox.y + cancelBox.height - 0.5 || revokeBox.x >= cancelBox.x + cancelBox.width - 0.5 || cancelBox.x >= revokeBox.x + revokeBox.width - 0.5
+    expect(apart).toBe(true)
+    if (width !== 390) expect(Math.abs(cancelBox.y - revokeBox.y)).toBeLessThanOrEqual(0.5)
     await screenshot(page, info, 'deactivate-confirm', width, theme)
     await expectStableControls({
       controls: { cancel, revoke, actions: confirmation.locator('.actions'), ...(width === 390 ? { frame: confirmation } : {}) },

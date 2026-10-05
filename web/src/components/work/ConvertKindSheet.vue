@@ -162,7 +162,7 @@ async function submit() {
 </template>
 
 <style scoped>
-.convert { display: flex; flex-direction: column; width: min(clamp(420px, 44vw, 760px), calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: hidden; }
+.convert { display: flex; flex-direction: column; width: min(var(--dialog-m), calc(100vw - 32px)); max-width: calc(100vw - 32px); max-height: calc(100dvh - 32px); margin: auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: hidden; }
 .convert::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .convert-card { display: flex; flex-direction: column; min-height: 0; max-height: calc(100dvh - 32px); overflow: hidden; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 .convert-scroll { min-height: 0; overflow: auto; padding: 22px 24px 0; }
@@ -180,4 +180,12 @@ h2 { font-size: 18px; overflow-wrap: anywhere; }
 .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 20px; }
 .actions .btn { min-width: 0; }
 .actions .btn:disabled { opacity: .45; }
+/* Phones: a full-height sheet with the actions pinned to the bottom (AEON-730). */
+@media (max-width: 600px) {
+  .convert { inset: 0; width: 100%; max-width: none; height: 100dvh; max-height: none; margin: 0; }
+  .convert-card { flex: 1; max-height: none; border: 0; border-radius: 0; background: var(--surface-raised); }
+  .convert-scroll { flex: 1; padding: 18px 16px 0; }
+  .actions { margin-top: 0; padding: 10px 16px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
+  .actions .btn { flex: 1 1 auto; min-height: 44px; }
+}
 </style>
