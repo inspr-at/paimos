@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { spawnSync } from 'node:child_process';
 import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -41,6 +42,27 @@ export function runtimeManifest(directory, platform) {
   for (const entry of index.manifests) visit(entry, 0);
   if (matches.length !== 1) throw new Error('expected exactly one runtime platform manifest');
   return matches[0];
+}
+// Layer diff IDs hash the uncompressed layers, so they identify the runtime
+// bytes independently of how an exporter compressed or wrapped them.
+export function runtimeClosure(directory, platform) {
+  const manifest = runtimeManifest(directory, platform);
+  const config = JSON.parse(jsonFile(join(directory, 'blobs/sha256', manifest.config_digest.slice(7))));
+  const layers = config.rootfs?.diff_ids;
+  if (!Array.isArray(layers) || !layers.length || layers.length > 127) throw new Error('OCI config lacks layer diff IDs');
+  return { ...manifest, diff_ids: layers.map(digest) };
+}
+// Raw registry manifest bytes, bounded in size and time. Read-only.
+export function inspectRaw(reference, spawn = spawnSync) {
+  if (typeof reference !== 'string' || !/^[a-z0-9][a-z0-9./_-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(@sha256:[a-f0-9]{64})?$/.test(reference)) throw new Error('invalid image reference');
+  const result = spawn('docker', ['buildx', 'imagetools', 'inspect', '--raw', reference], {
+    stdio: ['ignore', 'pipe', 'pipe'], timeout: 60_000, maxBuffer: 4 * 1024 * 1024,
+  });
+  if (result.error || result.status !== 0) {
+    const reason = String(result.error?.code ?? result.stderr ?? '').trim().split('\n').at(-1).slice(0, 200);
+    throw new Error(`cannot read ${reference}${reason ? `: ${reason}` : ''}`);
+  }
+  return Buffer.from(result.stdout);
 }
 export function timingEvidence(start, end, assembly, smoke, identity = {}) {
   const reasons = [];

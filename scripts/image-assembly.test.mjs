@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { assemble } from './assemble-image.mjs';
-import { buildInputs, compile, epoch, filesIn, sha256 } from './build-image-inputs.mjs';
-import { digest, runtimeManifest, timingEvidence } from './image-evidence.mjs';
+import { buildInputs, compile, epoch, filesIn, goCaches, sha256 } from './build-image-inputs.mjs';
+import { digest, inspectRaw, runtimeClosure, runtimeManifest, timingEvidence } from './image-evidence.mjs';
 import { assemblyArgs, compareRuns, reproduce } from './reproduce-image.mjs';
 
 const version = '261005120000.0.0';
@@ -17,7 +17,7 @@ function fixture() {
   const path = mkdtempSync(join(tmpdir(), 'aeon-image-test-'));
   for (const [name, bytes] of Object.entries({
     'version.json': JSON.stringify({ version }), 'NOTICE': 'AGPL fixture', 'Dockerfile': 'FROM aeon-runtime',
-    'scripts/Dockerfile.runtime': 'FROM alpine@sha256:fixture',
+    'scripts/Dockerfile.runtime': `FROM alpine:3.24@sha256:${'f'.repeat(64)}\nARG RUNTIME_REFRESH=2026-10-01\n`,
     'internal/releasehistory/data/history.json': '{"generated_at":"fixed","releases":[]}',
   })) { mkdirSync(dirname(join(path, name)), { recursive: true }); writeFileSync(join(path, name), bytes); }
   return path;
@@ -47,7 +47,7 @@ function oci(path, { arch = 'arm64', token = 'same', attest = false, duplicate =
     writeFileSync(join(path, 'blobs/sha256', id.slice(7)), bytes);
     return { digest: id, size: bytes.length };
   }
-  const config = blob({ architecture: arch, os: 'linux', token });
+  const config = blob({ architecture: arch, os: 'linux', token, rootfs: { type: 'layers', diff_ids: [`sha256:${sha256(token)}`] } });
   const manifest = blob({ config, layers: [] });
   const manifests = [manifest];
   if (attest) manifests.push({ ...blob({ config: { digest: 'bad' }, layers: [] }), platform: { os: 'unknown', architecture: 'unknown' } });
@@ -70,7 +70,10 @@ test('host compilation records binary/web/history identities and normalizes mtim
   const calls = [], path = fixture();
   const result = compile(path, values, compilerStub(calls));
   const build = calls.find(call => call.file === 'go' && call.args[0] === 'build');
-  assert.deepEqual(build.extra, { CGO_ENABLED: '0', GOOS: 'linux', GOARCH: 'arm64', GOAMD64: 'v1', GOARM64: 'v8.0', GOTOOLCHAIN: 'local', GOFLAGS: '', GOWORK: 'off', SOURCE_DATE_EPOCH: values.SOURCE_DATE_EPOCH });
+  assert.deepEqual(build.extra, { GOTOOLCHAIN: 'local', GOFLAGS: '-mod=readonly', GOWORK: 'off', CGO_ENABLED: '0', GOOS: 'linux', GOARCH: 'arm64', GOAMD64: 'v1', GOARM64: 'v8.0', SOURCE_DATE_EPOCH: values.SOURCE_DATE_EPOCH });
+  // Modules are downloaded (checked against go.sum) and re-hashed before the build, in that order.
+  assert.deepEqual(calls.filter(call => call.file === 'go' && call.args[0] !== 'version').map(call => call.args.slice(0, 2).join(' ')), ['mod download', 'mod verify', 'build -trimpath']);
+  for (const call of calls.filter(call => call.file === 'go' && call.args[0] === 'mod')) assert.deepEqual(call.extra, { GOTOOLCHAIN: 'local', GOFLAGS: '-mod=readonly', GOWORK: 'off' });
   for (const flag of ['-trimpath', '-buildvcs=false', 'webembed']) assert.ok(build.args.includes(flag));
   assert.equal(build.args[build.args.indexOf('-ldflags') + 1], `-X github.com/inspr-at/paimos/internal/version.Version=${version}`);
   assert.equal(calls.filter(call => call.file === 'docker').length, 0);
@@ -81,6 +84,48 @@ test('host compilation records binary/web/history identities and normalizes mtim
   assert.equal(statSync(join(path, 'web/dist/index.html')).mtimeMs, +values.SOURCE_DATE_EPOCH * 1000);
   assert.equal(statSync(join(path, 'dist/image-input/paimos')).mode & 0o777, 0o755);
   assert.deepEqual(JSON.parse(readFileSync(join(path, 'dist/image-input/inputs.json'))), result);
+});
+
+test('a shipped build in GitHub Actions needs an empty build cache and module cache inside RUNNER_TEMP', () => {
+  const temp = mkdtempSync(join(tmpdir(), 'aeon-go-cache-test-'));
+  const hosted = { GITHUB_ACTIONS: 'true', RUNNER_TEMP: temp, GOCACHE: join(temp, 'go-build'), GOMODCACHE: join(temp, 'go-mod') };
+  assert.deepEqual(goCaches(hosted), { GOCACHE: hosted.GOCACHE, GOMODCACHE: hosted.GOMODCACHE });
+  mkdirSync(hosted.GOCACHE);
+  assert.deepEqual(goCaches(hosted), { GOCACHE: hosted.GOCACHE, GOMODCACHE: hosted.GOMODCACHE }, 'an existing empty directory is still cold');
+  // The module cache is shared inside the job and verified before use; it may be populated.
+  mkdirSync(hosted.GOMODCACHE); writeFileSync(join(hosted.GOMODCACHE, 'module'), '');
+  assert.deepEqual(goCaches(hosted), { GOCACHE: hosted.GOCACHE, GOMODCACHE: hosted.GOMODCACHE });
+  for (const [name, change, reason] of [
+    ['missing build cache', { GOCACHE: undefined }, /GOCACHE must be a directory inside RUNNER_TEMP/],
+    ['missing module cache', { GOMODCACHE: '' }, /GOMODCACHE must be a directory inside RUNNER_TEMP/],
+    ['default build cache location', { GOCACHE: join(tmpdir(), 'elsewhere/go-build') }, /GOCACHE must be a directory inside RUNNER_TEMP/],
+    ['module cache outside', { GOMODCACHE: '/home/runner/go/pkg/mod' }, /GOMODCACHE must be a directory inside RUNNER_TEMP/],
+    ['escape through dot-dot', { GOCACHE: join(temp, '../go-build') }, /GOCACHE must be a directory inside RUNNER_TEMP/],
+    ['RUNNER_TEMP itself', { GOCACHE: temp }, /GOCACHE must be a directory inside RUNNER_TEMP/],
+    ['relative path', { GOCACHE: 'go-build' }, /GOCACHE must be an absolute path/],
+    ['no RUNNER_TEMP', { RUNNER_TEMP: undefined }, /GOCACHE must be a directory inside RUNNER_TEMP/],
+    ['shared directory', { GOMODCACHE: hosted.GOCACHE }, /must differ/],
+  ]) assert.throws(() => goCaches({ ...hosted, ...change }), reason, name);
+  writeFileSync(join(hosted.GOCACHE, 'restored-entry'), '');
+  assert.throws(() => goCaches(hosted), /GOCACHE is not empty/);
+  // A used cache stops the build before web or Go work and leaves no manifest.
+  const path = fixture(), calls = [];
+  assert.throws(() => compile(path, { ...values, ...hosted }, compilerStub(calls)), /GOCACHE is not empty/);
+  assert.deepEqual(calls.filter(call => call.file !== 'git'), []);
+  assert.throws(() => readFileSync(join(path, 'dist/image-input/inputs.json')), { code: 'ENOENT' });
+  // The same caches reach every Go command of a hosted compile.
+  const cold = { ...hosted, GOCACHE: join(temp, 'go-build-cold') };
+  compile(path, { ...values, ...cold }, compilerStub(calls));
+  const go = calls.filter(call => call.file === 'go' && call.args[0] !== 'version');
+  assert.equal(go.length, 3);
+  for (const call of go) {
+    assert.equal(call.extra.GOCACHE, cold.GOCACHE);
+    assert.equal(call.extra.GOMODCACHE, cold.GOMODCACHE);
+    assert.equal(call.extra.GOFLAGS, '-mod=readonly');
+  }
+  // Local builds keep their own caches; an explicit one is passed through, used or not.
+  assert.deepEqual(goCaches({}), {});
+  assert.deepEqual(goCaches({ GOCACHE: hosted.GOCACHE }), { GOCACHE: hosted.GOCACHE });
 });
 
 test('a failed host build cannot emit a success manifest or continue to image assembly', () => {
@@ -125,6 +170,38 @@ test('single-platform OCI exports bind the platform manifest and config without 
       assert.throws(() => runtimeManifest(path, `linux/${arch === 'amd64' ? 'arm64' : 'amd64'}`), /exactly one runtime platform manifest/);
     }
   }
+});
+
+test('runtime closure identity includes layer diff IDs and rejects a config without them', () => {
+  const path = fixture(), expected = oci(path, { token: 'layers' });
+  assert.deepEqual(runtimeClosure(path, 'linux/arm64'), { ...expected, diff_ids: [`sha256:${sha256('layers')}`] });
+  const bare = fixture();
+  mkdirSync(join(bare, 'blobs/sha256'), { recursive: true });
+  const blob = value => {
+    const bytes = Buffer.from(JSON.stringify(value)), id = `sha256:${sha256(bytes)}`;
+    writeFileSync(join(bare, 'blobs/sha256', id.slice(7)), bytes);
+    return { digest: id, size: bytes.length };
+  };
+  for (const rootfs of [undefined, { diff_ids: [] }, { diff_ids: ['sha256:short'] }]) {
+    writeFileSync(join(bare, 'index.json'), JSON.stringify({ manifests: [blob({ config: blob({ architecture: 'arm64', os: 'linux', rootfs }), layers: [] })] }));
+    assert.throws(() => runtimeClosure(bare, 'linux/arm64'), /diff IDs|invalid OCI digest/);
+  }
+});
+
+test('registry reads are bounded, argument-safe and report why they failed', () => {
+  const calls = [];
+  const spawn = result => (file, args, options) => { calls.push({ file, args, options }); return result; };
+  const reference = `ghcr.io/inspr-at/aeon@sha256:${'a'.repeat(64)}`;
+  assert.deepEqual(inspectRaw(reference, spawn({ status: 0, stdout: Buffer.from('{"a":1}') })), Buffer.from('{"a":1}'));
+  assert.deepEqual([calls[0].file, calls[0].args], ['docker', ['buildx', 'imagetools', 'inspect', '--raw', reference]]);
+  assert.equal(calls[0].options.timeout, 60_000);
+  assert.equal(calls[0].options.maxBuffer, 4 * 1024 * 1024);
+  assert.throws(() => inspectRaw(reference, spawn({ status: 1, stderr: Buffer.from('ERROR: first\nERROR: not found\n') })), /cannot read .*: ERROR: not found$/);
+  assert.throws(() => inspectRaw(reference, spawn({ error: { code: 'ETIMEDOUT' }, status: null })), /ETIMEDOUT/);
+  for (const unsafe of ['--help', 'ghcr.io/x y', 'ghcr.io/x@sha256:short', 'GHCR.io/x', '', undefined]) {
+    assert.throws(() => inspectRaw(unsafe, spawn({ status: 0, stdout: Buffer.alloc(0) })), /invalid image reference/);
+  }
+  assert.equal(calls.length, 3);
 });
 
 test('timing reports only successful bounded evidence; failures/skips/missing timestamps stay unknown', () => {
@@ -276,19 +353,47 @@ test('proof uses two fresh source snapshots, frozen generated history and detect
     if (file === 'docker') { oci(args[args.indexOf('--output') + 1].match(/dest=([^,]+)/)[1]); return ''; }
     return stub(file, args, cwd, ...rest);
   };
-  const builder = cwd => {
+  const buildCaches = [];
+  let moduleCache = '/fixture/go-mod';
+  const builder = (cwd, buildValues) => {
     assert.equal(readFileSync(join(cwd, 'internal/releasehistory/data/history.json'), 'utf8'), readFileSync(join(path, 'internal/releasehistory/data/history.json'), 'utf8'));
     assert.throws(() => statSync(join(cwd, 'web/dist')), { code: 'ENOENT' });
+    // Each run gets a build cache nobody has written, and leaves it used.
+    assert.equal(existsSync(buildValues.GOCACHE), false);
+    // The verified module downloads are the caller's; only the build cache is per run.
+    assert.equal(buildValues.GOMODCACHE, moduleCache);
+    mkdirSync(buildValues.GOCACHE); writeFileSync(join(buildValues.GOCACHE, 'compiled'), '');
+    buildCaches.push(buildValues.GOCACHE);
     return inputs;
   };
   const out = join(path, 'proof.json');
-  const result = reproduce(runtime, out, path, { ...values, RUNTIME_DIGEST: base.digest, SMOKE_CONFIG_DIGEST: base.config_digest }, runner, builder);
+  const cacheRef = 'ghcr.io/inspr-at/aeon:buildcache-arm64-runtime-2026-10-01-' + 'a'.repeat(16);
+  // A build cache passed by the caller (the smoked compilation's) is never reused by a proof run.
+  const proofValues = { ...values, RUNTIME_DIGEST: base.digest, SMOKE_CONFIG_DIGEST: base.config_digest, GOCACHE: join(path, 'smoked-go-build'), GOMODCACHE: '/fixture/go-mod',
+    RUNTIME_CACHE_REF: cacheRef, RUNTIME_CACHE_HIT: 'true', RUNTIME_CACHE_MANIFEST: 'b'.repeat(64) };
+  const result = reproduce(runtime, out, path, proofValues, runner, builder);
   assert.equal(result.reproducible, true);
   assert.equal(snapshots.length, 2);
   assert.notEqual(snapshots[0], snapshots[1]);
+  assert.equal(new Set([...buildCaches, proofValues.GOCACHE]).size, 3);
+  assert.deepEqual(result.runs.map(run => run.go_build_cache), buildCaches);
+  assert.match(result.proof_scope, /Same runner, same frozen runtime closure, same history fixture/);
+  // The evidence names the runtime bytes and where this run got them.
+  assert.deepEqual(result.runtime_base, { platform: 'linux/arm64', ...base, diff_ids: [`sha256:${sha256('same')}`],
+    recipe_sha256: sha256(readFileSync(join(path, 'scripts/Dockerfile.runtime'))), refresh: '2026-10-01', source: 'restored',
+    cache: { ref: cacheRef, hit: true, manifest_sha256: 'b'.repeat(64) } });
+  assert.deepEqual(JSON.parse(readFileSync(out)).runtime_base, result.runtime_base);
   assert.equal(calls.filter(call => call.file === 'git' && call.args[0] === 'archive').length, 1);
   assert.equal(calls.filter(call => call.file === 'docker' && call.args[1] === 'build').length, 2);
+  moduleCache = undefined;
   assert.throws(() => reproduce(runtime, out, path, { ...values, SMOKE_CONFIG_DIGEST: 'sha256:' + 'b'.repeat(64) }, runner, builder), /smoked build config/);
   assert.equal(JSON.parse(readFileSync(out)).reproducible, false);
   assert.throws(() => reproduce(runtime, out, path, { ...values, GITHUB_ACTIONS: 'true' }, runner, builder), /OCI digest/);
+  // In Actions the proof caches live in RUNNER_TEMP, where the build requires them.
+  const runnerTemp = mkdtempSync(join(tmpdir(), 'aeon-proof-temp-'));
+  buildCaches.length = 0;
+  moduleCache = '/fixture/go-mod';
+  reproduce(runtime, out, path, { ...proofValues, RUNNER_TEMP: runnerTemp }, runner, builder);
+  assert.equal(buildCaches.length, 2);
+  for (const cache of buildCaches) assert.ok(cache.startsWith(runnerTemp + '/image-repro-go-'), cache);
 });

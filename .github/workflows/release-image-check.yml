@@ -54,13 +54,16 @@ jobs:
             cache: buildcache-arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    # Same budget as the tag build: three cold Go compilations.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
+      # npm cache kept, Go caches never restored: same reasons and the same
+      # settings as release.yml, so this run proves what the tag build will do.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
@@ -69,10 +72,12 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
+          cache: false
       - name: Check release workflow invariants
         run: |
           go test ./scripts/releaseworkflow
           node --test scripts/image-assembly.test.mjs scripts/docker-web-inputs.test.mjs
+          node --test scripts/runtime-closure.test.mjs scripts/verify-pushed-image.test.mjs
           node --test scripts/release-image-index.test.mjs
           node --test scripts/release-pin-pr.test.mjs scripts/check-release-rehearsal.test.mjs scripts/release-rehearsal-gh.test.mjs scripts/create-release-tag.test.mjs
           node scripts/check-own-release-notes.mjs
@@ -85,7 +90,14 @@ jobs:
       - name: Release history fixture
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: go run ./internal/releasehistory/generate -repo . -repository "$GITHUB_REPOSITORY" -offline -candidate "$VERSION"
+          GOCACHE: ${{ runner.temp }}/go-build-history
+          GOMODCACHE: ${{ runner.temp }}/go-mod
+          GOFLAGS: -mod=readonly
+        run: |
+          set -euo pipefail
+          go mod download
+          go mod verify
+          go run ./internal/releasehistory/generate -repo . -repository "$GITHUB_REPOSITORY" -offline -candidate "$VERSION"
       - name: Require native platform
         env:
           ARCH: ${{ matrix.arch }}
@@ -103,22 +115,33 @@ jobs:
           ARCH: ${{ matrix.arch }}
           VERSION: ${{ steps.version.outputs.version }}
           SOURCE_DATE_EPOCH: ${{ steps.inputs.outputs.epoch }}
+          GOCACHE: ${{ runner.temp }}/go-build-image
+          GOMODCACHE: ${{ runner.temp }}/go-mod
+          GOFLAGS: -mod=readonly
         run: node scripts/build-image-inputs.mjs build
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      # Reads the public cache reference without credentials; never writes it.
+      - name: Resolve runtime closure cache
+        id: runtime-cache
+        run: node scripts/runtime-closure.mjs resolve linux/${{ matrix.arch }} ${{ matrix.cache }}
       - name: Prepare pinned runtime closure
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
-          file: scripts/Dockerfile.runtime
+          file: ${{ steps.runtime-cache.outputs.file }}
           platforms: linux/${{ matrix.arch }}
           provenance: false
           outputs: type=oci,dest=${{ runner.temp }}/aeon-runtime,tar=false,rewrite-timestamp=true
-          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}-runtime
+          build-contexts: ${{ steps.runtime-cache.outputs.build_contexts }}
           build-args: |
             SOURCE_DATE_EPOCH=0
       - name: Bind runtime closure digest
         id: runtime
-        run: node scripts/image-evidence.mjs runtime "$RUNNER_TEMP/aeon-runtime" linux/${{ matrix.arch }}
+        env:
+          RUNTIME_CACHE_REF: ${{ steps.runtime-cache.outputs.ref }}
+          RUNTIME_CACHE_HIT: ${{ steps.runtime-cache.outputs.hit }}
+          RUNTIME_CACHE_MANIFEST: ${{ steps.runtime-cache.outputs.manifest_sha256 }}
+        run: node scripts/runtime-closure.mjs bind "$RUNNER_TEMP/aeon-runtime" linux/${{ matrix.arch }}
       - name: Start assembly and smoke timing
         run: node scripts/image-evidence.mjs start "$RUNNER_TEMP/image-timing"
       # A forced multi-platform result cannot be loaded by the Docker exporter.
@@ -173,6 +196,12 @@ jobs:
           RUNTIME_DIGEST: ${{ steps.runtime.outputs.digest }}
           SMOKE_IMAGE: ${{ steps.smoke-image.outputs.image }}
           SMOKE_CONFIG_DIGEST: ${{ steps.build.outputs.imageid }}
+          RUNTIME_CACHE_REF: ${{ steps.runtime-cache.outputs.ref }}
+          RUNTIME_CACHE_HIT: ${{ steps.runtime-cache.outputs.hit }}
+          RUNTIME_CACHE_MANIFEST: ${{ steps.runtime-cache.outputs.manifest_sha256 }}
+          # Each proof run creates its own empty GOCACHE; none is passed here.
+          GOMODCACHE: ${{ runner.temp }}/go-mod
+          GOFLAGS: -mod=readonly
         run: node scripts/reproduce-image.mjs "$RUNNER_TEMP/aeon-runtime" "$RUNNER_TEMP/image-reproducibility.json"
       - name: Upload image assembly evidence
         if: always()
@@ -201,6 +230,19 @@ jobs:
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
             SOURCE_DATE_EPOCH=${{ steps.inputs.outputs.epoch }}
+      # Counterpart of the tag build's pushed-image check, without a push: the
+      # provenance export above must carry the smoked image config. The probe
+      # then walks a public digest-pinned index (the runtime recipe's base) with
+      # the same registry reads the tag build uses on its pushed digest.
+      - name: Require exported image to equal the smoked build
+        env:
+          SMOKE_CONFIG_DIGEST: ${{ steps.build.outputs.imageid }}
+        run: |
+          set -euo pipefail
+          mkdir "$RUNNER_TEMP/release-export"
+          tar -xf "$RUNNER_TEMP/release-${{ matrix.arch }}.tar" -C "$RUNNER_TEMP/release-export"
+          node scripts/verify-pushed-image.mjs layout "$RUNNER_TEMP/release-export" linux/${{ matrix.arch }}
+          node scripts/verify-pushed-image.mjs probe linux/${{ matrix.arch }}
       - name: Record dry run
         run: echo 'linux/${{ matrix.arch }} built and smoked natively; nothing pushed, attested or published.' >> "$GITHUB_STEP_SUMMARY"
 
@@ -227,9 +269,13 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
+          cache: false
       - name: Build darwin paimos-agentd with LocalAuthentication
         env:
           AEON_DARWIN_ARCH: ${{ matrix.arch }}
+          GOCACHE: ${{ runner.temp }}/go-build-agentd
+          GOMODCACHE: ${{ runner.temp }}/go-mod
+          GOFLAGS: -mod=readonly
         run: bash scripts/build-release-binaries.sh darwin-agentd
       - name: Native unsigned agent qualification
         env:
@@ -256,12 +302,17 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
+          cache: false
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: rehearsal-agentd-darwin-*
           path: dist
           merge-multiple: true
+      # The production body names one empty GOCACHE per build itself.
       - name: Exact production assets assembly
+        env:
+          GOMODCACHE: ${{ runner.temp }}/go-mod
+          GOFLAGS: -mod=readonly
         run: |
           set -euo pipefail
           go run scripts/rehearsal-step.go assets 'Build linux paimos-agentd and aeon-cli' > "$RUNNER_TEMP/assemble.sh"

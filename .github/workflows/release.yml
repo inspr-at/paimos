@@ -38,9 +38,16 @@ jobs:
       AEON_DEVELOPER_ID_TEAM: P66J39QV6V
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # No job that ships a binary restores a Go cache (AEON-422). setup-go's
+      # cache is also written by CI jobs on the self-hosted pool and the go
+      # command never re-verifies a build-cache entry, so a poisoned entry
+      # would be compiled into the release. Each shipped build compiles cold
+      # in an empty GOCACHE under RUNNER_TEMP, from modules checked against
+      # go.sum (scripts/build-release-binaries.sh enforces both).
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
+          cache: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
@@ -51,6 +58,9 @@ jobs:
       - name: Build darwin paimos-agentd with LocalAuthentication
         env:
           AEON_DARWIN_ARCH: ${{ matrix.arch }}
+          GOCACHE: ${{ runner.temp }}/go-build-agentd
+          GOMODCACHE: ${{ runner.temp }}/go-mod
+          GOFLAGS: -mod=readonly
         run: bash scripts/build-release-binaries.sh darwin-agentd
       # Before upload: SHA256SUMS in the assets job is computed over the signed
       # binary. Bare binaries cannot be stapled; Gatekeeper checks online.
@@ -138,7 +148,9 @@ jobs:
             cache: buildcache-arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    # Three cold Go compilations (smoked build and both proof runs) replace
+    # the former warm cache; the timeout only guards against a hang.
+    timeout-minutes: 30
     permissions:
       # Preserve push access for the draft-aware release immutability lookup.
       contents: write
@@ -146,6 +158,10 @@ jobs:
       packages: write
       attestations: write
       id-token: write
+    # One output name per matrix leg; each leg sets only its own.
+    outputs:
+      runtime_amd64: ${{ steps.runtime.outputs.runtime_amd64 }}
+      runtime_arm64: ${{ steps.runtime.outputs.runtime_arm64 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -153,6 +169,10 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
           persist-credentials: false
+      # The npm cache stays, unlike the Go caches below: it holds downloaded
+      # tarballs only, web/package-lock.json pins a sha512 for every one and
+      # npm ci checks that hash for cached and downloaded bytes alike, so
+      # altered cache content fails the install instead of shipping.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
@@ -204,16 +224,28 @@ jobs:
             exit 1
           fi
 
+      # No restored Go cache: see agentd-darwin. Every Go step that feeds the
+      # image names its own empty GOCACHE under RUNNER_TEMP; the module cache
+      # there is shared within this job and verified before each use.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
+          cache: false
 
       # Embed the history in both the smoked and pushed builds. Path context is
       # intentional: the generated manifest is not committed to the tag.
+      # The generator's output is linked into the binary, so it runs cold too.
       - name: Release history
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: go run ./internal/releasehistory/generate -repo . -repository "${GITHUB_REPOSITORY}"
+          GOCACHE: ${{ runner.temp }}/go-build-history
+          GOMODCACHE: ${{ runner.temp }}/go-mod
+          GOFLAGS: -mod=readonly
+        run: |
+          set -euo pipefail
+          go mod download
+          go mod verify
+          go run ./internal/releasehistory/generate -repo . -repository "${GITHUB_REPOSITORY}"
 
       - name: Require native platform
         env:
@@ -232,6 +264,9 @@ jobs:
           ARCH: ${{ matrix.arch }}
           VERSION: ${{ steps.version.outputs.version }}
           SOURCE_DATE_EPOCH: ${{ steps.inputs.outputs.epoch }}
+          GOCACHE: ${{ runner.temp }}/go-build-image
+          GOMODCACHE: ${{ runner.temp }}/go-mod
+          GOFLAGS: -mod=readonly
         run: node scripts/build-image-inputs.mjs build
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
@@ -254,23 +289,41 @@ jobs:
             exit 1
           fi
 
+      # The saved closure is an image named after the recipe hash and its
+      # refresh key (scripts/runtime-closure.mjs). A changed recipe or a bumped
+      # key cannot find it and prepares cold; so does any failed read. Warns,
+      # never fails, when the refresh key is older than 35 days. Until a tag
+      # build has saved a closure under the current key every run takes the
+      # cold path, so the restore path first runs after that tag build.
+      - name: Resolve runtime closure cache
+        id: runtime-cache
+        run: node scripts/runtime-closure.mjs resolve linux/${{ matrix.arch }} ${{ matrix.cache }}
       # Keep one platform result: BUILDKIT_MULTI_PLATFORM=1 forces a manifest
       # list that the Docker exporter rejects even for one target. Load without
       # provenance, then export the same builder/context/args with provenance.
+      # Hit: re-wrap the saved image (scripts/Dockerfile.runtime-cache).
+      # Miss: build scripts/Dockerfile.runtime; build-contexts is then empty.
       - name: Prepare pinned runtime closure
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
-          file: scripts/Dockerfile.runtime
+          file: ${{ steps.runtime-cache.outputs.file }}
           platforms: linux/${{ matrix.arch }}
           provenance: false
           outputs: type=oci,dest=${{ runner.temp }}/aeon-runtime,tar=false,rewrite-timestamp=true
-          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}-runtime
+          build-contexts: ${{ steps.runtime-cache.outputs.build_contexts }}
           build-args: |
             SOURCE_DATE_EPOCH=0
+      # Everything after this step uses the closure by this digest only. The
+      # summary and the proof evidence record it, so a release's runtime bytes
+      # stay traceable even though the cache tag itself is mutable.
       - name: Bind runtime closure digest
         id: runtime
-        run: node scripts/image-evidence.mjs runtime "$RUNNER_TEMP/aeon-runtime" linux/${{ matrix.arch }}
+        env:
+          RUNTIME_CACHE_REF: ${{ steps.runtime-cache.outputs.ref }}
+          RUNTIME_CACHE_HIT: ${{ steps.runtime-cache.outputs.hit }}
+          RUNTIME_CACHE_MANIFEST: ${{ steps.runtime-cache.outputs.manifest_sha256 }}
+        run: node scripts/runtime-closure.mjs bind "$RUNNER_TEMP/aeon-runtime" linux/${{ matrix.arch }}
       - name: Start assembly and smoke timing
         run: node scripts/image-evidence.mjs start "$RUNNER_TEMP/image-timing"
       - name: Build cached smoke image
@@ -327,6 +380,12 @@ jobs:
           RUNTIME_DIGEST: ${{ steps.runtime.outputs.digest }}
           SMOKE_IMAGE: ${{ steps.smoke-image.outputs.image }}
           SMOKE_CONFIG_DIGEST: ${{ steps.build.outputs.imageid }}
+          RUNTIME_CACHE_REF: ${{ steps.runtime-cache.outputs.ref }}
+          RUNTIME_CACHE_HIT: ${{ steps.runtime-cache.outputs.hit }}
+          RUNTIME_CACHE_MANIFEST: ${{ steps.runtime-cache.outputs.manifest_sha256 }}
+          # Each proof run creates its own empty GOCACHE; none is passed here.
+          GOMODCACHE: ${{ runner.temp }}/go-mod
+          GOFLAGS: -mod=readonly
         run: node scripts/reproduce-image.mjs "$RUNNER_TEMP/aeon-runtime" "$RUNNER_TEMP/image-reproducibility.json"
       - name: Upload image assembly evidence
         if: always()
@@ -340,19 +399,6 @@ jobs:
             ${{ runner.temp }}/aeon-runtime/index.json
           if-no-files-found: error
           retention-days: 14
-
-      - name: Save verified runtime closure
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
-        with:
-          context: .
-          file: scripts/Dockerfile.runtime
-          platforms: linux/${{ matrix.arch }}
-          provenance: false
-          outputs: type=cacheonly
-          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}-runtime
-          cache-to: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}-runtime,mode=max
-          build-args: |
-            SOURCE_DATE_EPOCH=0
 
       # Export by digest only. Neither worker can publish the release tag.
       # Separate cache refs prevent parallel architectures overwriting each other.
@@ -372,6 +418,17 @@ jobs:
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
             SOURCE_DATE_EPOCH=${{ steps.inputs.outputs.epoch }}
+
+      # The push is a second export of the smoked inputs. Nothing is attested
+      # unless the pushed platform manifest carries the smoked image config;
+      # a mismatch prints both digests. The rehearsal runs the same check on
+      # its local provenance export; reading back a pushed digest can only be
+      # proven by a tag build.
+      - name: Require pushed image to equal the smoked build
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+          SMOKE_CONFIG_DIGEST: ${{ steps.build.outputs.imageid }}
+        run: node scripts/verify-pushed-image.mjs registry "ghcr.io/inspr-at/aeon@${DIGEST}" linux/${{ matrix.arch }}
 
       - name: Attest pushed image
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
@@ -420,6 +477,37 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+      # Last, off the critical path: the digest is already attested and handed
+      # over, and continue-on-error keeps a registry problem from failing the
+      # release. Nothing is rebuilt. The script requires the layout to still
+      # have the verified digest, then pushes that layout with
+      # `docker buildx build`, the one tool certain to exist on both hosted
+      # runner images (skopeo/crane/oras are not guaranteed on the arm image);
+      # it uses the existing packages: write token. A closure restored from the
+      # cache, or one already saved under this key, is never rewritten.
+      # Never part of the rehearsal, which has no registry write; its first
+      # execution is the first tag build after this change.
+      - name: Save verified runtime closure
+        id: runtime-save
+        continue-on-error: true
+        timeout-minutes: 5
+        env:
+          RUNTIME_DIGEST: ${{ steps.runtime.outputs.digest }}
+          RUNTIME_CACHE_REF: ${{ steps.runtime-cache.outputs.ref }}
+          RUNTIME_CACHE_HIT: ${{ steps.runtime-cache.outputs.hit }}
+        run: node scripts/runtime-closure.mjs save "$RUNNER_TEMP/aeon-runtime" linux/${{ matrix.arch }} ${{ matrix.cache }}
+      # A failed or timed-out save is green by design; say so where it is read.
+      - name: Report runtime closure cache
+        if: always()
+        env:
+          OUTCOME: ${{ steps.runtime-save.outcome }}
+        run: |
+          set -euo pipefail
+          if [ "$OUTCOME" != success ]; then
+            echo "::warning::Runtime closure cache save: ${OUTCOME:-not run}. The release is unaffected; the next run prepares the closure cold."
+            echo "Runtime closure cache save: **${OUTCOME:-not run}**. The release is unaffected; the next run prepares the closure cold." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
   # Both native smoke and platform attestation gates must finish successfully.
   # Preserve the image job/output contract: deploy pins this multi-arch index.
   image:
@@ -438,6 +526,9 @@ jobs:
       version: ${{ steps.version.outputs.version }}
       digest: ${{ steps.push.outputs.digest }}
       pin_evidence: ${{ steps.pin.outputs.pin_evidence }}
+      # Per-architecture runtime closure digests, for the draft release notes.
+      runtime_amd64: ${{ needs.image-platform.outputs.runtime_amd64 }}
+      runtime_arm64: ${{ needs.image-platform.outputs.runtime_arm64 }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -576,13 +667,15 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: "24"
+      # No restored Go cache: see agentd-darwin.
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
+          cache: false
 
       # Darwin paimos-agentd is built on the matching Mac with LocalAuthentication.
       # Linux agentd and every CLI target stay static. -trimpath and the version
-      # -X match the server image (Dockerfile).
+      # -X match the server image (scripts/build-image-inputs.mjs).
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: agentd-darwin-*
@@ -591,10 +684,13 @@ jobs:
       - name: Build linux paimos-agentd and aeon-cli
         env:
           VERSION: ${{ needs.image.outputs.version }}
+          GOMODCACHE: ${{ runner.temp }}/go-mod
+          GOFLAGS: -mod=readonly
         run: |
           set -euo pipefail
-          bash scripts/build-release-binaries.sh linux-agentd
-          bash scripts/build-release-binaries.sh cli
+          # One empty build cache per compilation; the script rejects a used one.
+          GOCACHE="$RUNNER_TEMP/go-build-linux-agentd" bash scripts/build-release-binaries.sh linux-agentd
+          GOCACHE="$RUNNER_TEMP/go-build-cli" bash scripts/build-release-binaries.sh cli
           bash scripts/build-release-binaries.sh verify-darwin
           (
             cd dist
@@ -631,6 +727,8 @@ jobs:
           VERSION: ${{ needs.image.outputs.version }}
           DIGEST: ${{ needs.image.outputs.digest }}
           PIN_EVIDENCE: ${{ needs.image.outputs.pin_evidence }}
+          RUNTIME_AMD64: ${{ needs.image.outputs.runtime_amd64 }}
+          RUNTIME_ARM64: ${{ needs.image.outputs.runtime_arm64 }}
         run: |
           set -euo pipefail
           tag="v${VERSION}"
@@ -643,6 +741,8 @@ jobs:
             "" \
             "Container: ghcr.io/inspr-at/aeon:${VERSION}" \
             "Digest: ${DIGEST}" \
+            "Runtime closure linux/amd64: ${RUNTIME_AMD64:-unknown}" \
+            "Runtime closure linux/arm64: ${RUNTIME_ARM64:-unknown}" \
             "" \
             "$PIN_EVIDENCE")"
           gh release create "$tag" \
