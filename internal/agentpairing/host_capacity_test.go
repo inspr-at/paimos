@@ -209,3 +209,50 @@ func TestSignOutEverywhereAppendsNestedEventsAfterEveryTargetLock(t *testing.T) 
 		t.Fatalf("summary event must be last, got %q (%v)", last, err)
 	}
 }
+
+// Migration 1250 is expand-only, so the bounds its CHECKs used to hold are
+// enforced by the writers alone; this proves each one against the stored row.
+func TestHostCapacityBoundsHeldByWritersWithoutDatabaseChecks(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	var checks int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM pg_constraint WHERE conrelid='agent_pairing_computers'::regclass AND contype='c' AND pg_get_constraintdef(oid) ~ '(display_name|capacity_)'`).Scan(&checks); err != nil || checks != 0 {
+		t.Fatal("host capacity columns must not carry contract-phase CHECKs", checks, err)
+	}
+	path := "/api/agent-pairing/computers/" + *v.ComputerID + "/name"
+	retryErrorCode(t, f.call("PUT", path, map[string]any{"expected_revision": v.Revision, "name": strings.Repeat("a", 129)}, true, "", 400), "invalid_request")
+	f.call("PUT", path, map[string]any{"expected_revision": v.Revision, "name": strings.Repeat("a", 128)}, true, "", 200)
+	var name string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT display_name FROM agent_pairing_computers WHERE id=$1`, *v.ComputerID).Scan(&name); err != nil || name != strings.Repeat("a", 128) {
+		t.Fatal("bounded name not stored", len(name), err)
+	}
+	// 75 recent points older than a minute plus 5 older than an hour: the next
+	// report must keep exactly the newest 60, all within the hour.
+	if _, err := f.db.Admin.Exec(t.Context(), `UPDATE agent_pairing_computers SET capacity_history=(SELECT jsonb_agg(jsonb_build_object('at',clock_timestamp()-make_interval(secs=>s),'load',1) ORDER BY s DESC)
+  FROM (SELECT 120+45*g AS s FROM generate_series(0,74) g UNION ALL SELECT 3700+g FROM generate_series(0,4) g) x) WHERE id=$1`, *v.ComputerID); err != nil {
+		t.Fatal(err)
+	}
+	load := 7.5
+	signals := hostcapacity.Signals{Load: &load, Cores: 4096, MemoryPressure: "normal", Power: "plugged_in", Thermal: "normal"}
+	var report hostcapacity.View
+	decodeResult(t, f.call("POST", "/api/agent-pairing/self/capacity", signals, false, key, 200), &report)
+	var stored, stale int
+	var newest float64
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT jsonb_array_length(capacity_history),
+  (SELECT count(*) FROM jsonb_array_elements(capacity_history) p WHERE (p->>'at')::timestamptz<=clock_timestamp()-interval '1 hour'),
+  (capacity_history->-1->>'load')::float8 FROM agent_pairing_computers WHERE id=$1`, *v.ComputerID).Scan(&stored, &stale, &newest); err != nil {
+		t.Fatal(err)
+	}
+	if stored != 60 || stale != 0 || newest != load || len(report.History) != 60 {
+		t.Fatalf("history not bounded by the writer: stored=%d stale=%d newest=%v view=%d", stored, stale, newest, len(report.History))
+	}
+	// Policies and signals are fixed-shape structs: their largest encodings stay
+	// far below the 2 KiB the dropped CHECKs allowed.
+	var size int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT octet_length(capacity_signals::text) FROM agent_pairing_computers WHERE id=$1`, *v.ComputerID).Scan(&size); err != nil || size > 2048 {
+		t.Fatal("stored signals exceed bound", size, err)
+	}
+}

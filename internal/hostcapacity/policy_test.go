@@ -2,6 +2,7 @@
 package hostcapacity
 
 import (
+	"encoding/json"
 	"math"
 	"testing"
 	"time"
@@ -67,5 +68,23 @@ func TestHostCapacityBounds(t *testing.T) {
 	n := math.NaN()
 	if (Signals{Load: &n, Cores: 18, MemoryPressure: "normal", Power: "unknown", Thermal: "normal"}).Validate() == nil {
 		t.Fatal("accepted NaN")
+	}
+}
+
+// Migration 1250 has no size CHECKs; the widest valid values must still encode
+// within the 2 KiB budget the columns were designed for.
+func TestHostCapacityLargestEncodingsStayBounded(t *testing.T) {
+	big, yes := 1048576.0, true
+	load := 10000.0
+	policy := Policy{Mode: "smart", MaximumAgents: 64, MaximumLoad: 199.99999999999997, WaitWhenBusy: true, EaseOnBattery: true, EaseWhenHot: true, ConsiderActivity: true}
+	signals := Signals{Load: &load, Cores: 4096, MemoryPressure: "unknown", MemoryUsedGB: &big, MemoryTotalGB: &big, Power: "plugged_in", Thermal: "unknown", InputActive: &yes}
+	if policy.Validate() != nil || signals.Validate() != nil {
+		t.Fatal("fixture must be valid")
+	}
+	for _, v := range []any{policy, signals} {
+		raw, err := json.Marshal(v)
+		if err != nil || len(raw) > 512 {
+			t.Fatal("encoding exceeds bound", len(raw), err)
+		}
 	}
 }
