@@ -4485,8 +4485,8 @@
     "261005070923.0.0": {
       "release_channel": "stable",
       "release_sequence": 123,
-      "snapshot_sha256": "f6d1aaca7247f66f620db7490cc4e8169610eebaaa2b1a470949019a12b0fa86",
-      "captured_at": "2026-10-05T07:09:51Z",
+      "snapshot_sha256": "e9a6692291f7600c488bef2ef9794f8232667fb2fdaf12b5b1fc22097bf089ab",
+      "captured_at": "2026-10-05T09:06:09Z",
       "release_revision": 1,
       "items": [
         {
@@ -4501,16 +4501,16 @@
           "key": "AEON-442",
           "pill_en": "Safer attach approval",
           "pill_de": "Sicherere Andock-Freigabe",
-          "benefit_en": "Attaching a session asks for your fingerprint by default on a Mac, and works from sudo or ssh shells on Linux.",
-          "benefit_de": "Das Andocken einer Sitzung fragt am Mac standardmäßig nach deinem Fingerabdruck und funktioniert unter Linux auch aus sudo- oder ssh-Shells.",
+          "benefit_en": "On supported Macs with an upgraded pairing, attaching a session asks for Touch ID by default. Linux attachment also supports verified sessions started through sudo or SSH shells.",
+          "benefit_de": "Auf unterstützten Macs mit aktualisierter Kopplung wird das Andocken einer Sitzung standardmäßig per Touch ID bestätigt. Unter Linux lassen sich auch geprüfte Sitzungen aus sudo- oder SSH-Shells andocken.",
           "group": "features"
         },
         {
           "key": "AEON-455",
           "pill_en": "Phone approvals",
           "pill_de": "Freigaben per Handy",
-          "benefit_en": "Receive approval notifications on your phone and approve or decline requests after confirming your identity on the device.",
-          "benefit_de": "Du kannst Freigabeanfragen auf dem Handy empfangen und nach Bestätigung deiner Identität auf dem Gerät freigeben oder ablehnen.",
+          "benefit_en": "After an administrator configures phone approvals and push delivery, register a passkey on a supported device and enable notifications. Requests can then be approved or declined using device verification.",
+          "benefit_de": "Nach Einrichtung von Handyfreigaben und Push-Versand durch die Administration lassen sich auf einem unterstützten Gerät ein Passkey registrieren und Benachrichtigungen aktivieren. Anfragen können anschließend nach Gerätebestätigung freigegeben oder abgelehnt werden.",
           "group": "features"
         },
         {
@@ -4637,24 +4637,24 @@
           "key": "AEON-629",
           "pill_en": "Full text when deciding",
           "pill_de": "Ganzer Text beim Entscheiden",
-          "benefit_en": "Approval reasons, held agent requests and Decision Desk options are never cut off while you decide.",
-          "benefit_de": "Begründungen, zurückgehaltene Agentenanfragen und Optionen am Entscheidungstisch werden beim Entscheiden nie abgeschnitten.",
+          "benefit_en": "Expand approval reasons and held requests to read their full text; select a Decision Desk option to read its full details.",
+          "benefit_de": "Begründungen und zurückgehaltene Anfragen lassen sich vollständig aufklappen. Nach Auswahl einer Option am Entscheidungstisch sind ihre vollständigen Details lesbar.",
           "group": "features"
         },
         {
           "key": "AEON-631",
           "pill_en": "Full headings",
           "pill_de": "Ganze Überschriften",
-          "benefit_en": "Project names, session names and ticket titles in headings are always shown in full.",
-          "benefit_de": "Projektnamen, Sitzungsnamen und Tickettitel in Überschriften werden immer vollständig angezeigt.",
+          "benefit_en": "Long headings wrap where space permits, with full-text disclosure for capped headings.",
+          "benefit_de": "Lange Überschriften werden umgebrochen, soweit der Platz reicht. Bei begrenzten Überschriften lässt sich der vollständige Text einblenden.",
           "group": "features"
         },
         {
           "key": "AEON-632",
-          "pill_en": "Full names everywhere",
-          "pill_de": "Ganze Namen überall",
-          "benefit_en": "Long names in lists and pickers reveal their full text on hover, keyboard focus or tap, and use two lines on phones.",
-          "benefit_de": "Lange Namen in Listen und Auswahlfeldern zeigen beim Zeigen, Fokussieren oder Tippen den ganzen Text, auf Telefonen zweizeilig.",
+          "pill_en": "Read long names",
+          "pill_de": "Lange Namen lesen",
+          "benefit_en": "Updated lists and pickers reveal clipped names on hover, keyboard focus or a long press. Pickers with a full-name button also support tapping that button.",
+          "benefit_de": "In den überarbeiteten Listen und Auswahlfeldern lassen sich abgeschnittene Namen beim Zeigen, per Tastaturfokus oder durch langes Drücken lesen. Auswahlfelder mit einer Taste für den vollständigen Namen zeigen ihn auch beim Antippen dieser Taste.",
           "group": "features"
         },
         {
@@ -4693,16 +4693,16 @@
           "key": "AEON-643",
           "pill_en": "Agent appearance",
           "pill_de": "Aussehen der Agenten",
-          "benefit_en": "You can choose agent avatars, motion, size and state colours in your theme and preview every state in light and dark.",
-          "benefit_de": "Du kannst Avatare, Bewegung, Größe und Zustandsfarben deiner Agenten im Design einstellen und alle Zustände im hellen und dunklen Modus ansehen.",
+          "benefit_en": "Choose agent avatars, motion, size and state colours in your theme, with light and dark previews of Working, Waiting, Throttled, Problem and Idle.",
+          "benefit_de": "Avatare, Bewegung, Größe und Zustandsfarben der Agenten lassen sich im Design einstellen. Die Vorschau zeigt Working, Waiting, Throttled, Problem und Idle im hellen und dunklen Modus.",
           "group": "features"
         },
         {
           "key": "AEON-645",
           "pill_en": "One-click status filters",
           "pill_de": "Status per Klick",
-          "benefit_en": "Click any status count in the project header to show just those tickets; Comfortable shows every status at a glance, including what was cancelled.",
-          "benefit_de": "Ein Klick auf eine Statuszahl im Projektkopf zeigt nur diese Tickets; die großzügige Ansicht zeigt alle Status auf einen Blick, auch was abgebrochen wurde.",
+          "benefit_en": "Click a status count to filter tickets. On wider screens, Comfortable shows the built-in status breakdown, including cancelled and archived tickets.",
+          "benefit_de": "Ein Klick auf eine Statuszahl filtert die Tickets. Auf breiteren Bildschirmen zeigt die Ansicht Comfortable die eingebauten Status, einschließlich abgebrochener und archivierter Tickets.",
           "group": "features"
         },
         {
@@ -4723,10 +4723,10 @@
         },
         {
           "key": "AEON-648",
-          "pill_en": "Parents follow their work",
-          "pill_de": "Eltern folgen der Arbeit",
-          "benefit_en": "Epics show the true status, progress and finish time of their tickets, with one simple kind of work item whose name follows how it is nested.",
-          "benefit_de": "Epics zeigen den tatsächlichen Status, Fortschritt und Fertigstellungstermin ihrer Tickets, mit einer einzigen Art von Arbeitseintrag, dessen Name sich aus der Verschachtelung ergibt.",
+          "pill_en": "Work item rollups",
+          "pill_de": "Zusammengefasste Arbeitseinträge",
+          "benefit_en": "Work items share one kind, with rolled-up progress and finish-time estimates that can be partial when leaf estimates are missing. Parent status derivation and nesting labels apply where the parent rollout is enabled.",
+          "benefit_de": "Arbeitseinträge verwenden eine gemeinsame Art und zeigen zusammengefassten Fortschritt sowie Fertigstellungsschätzungen, die bei fehlenden Schätzungen einzelner Arbeitseinträge unvollständig sein können. Abgeleitete Elternstatus und Ebenennamen gelten dort, wo die Elternfunktionen aktiviert sind.",
           "group": "features"
         },
         {
@@ -4739,18 +4739,18 @@
         },
         {
           "key": "AEON-650",
-          "pill_en": "Parents follow their work",
-          "pill_de": "Eltern folgen der Arbeit",
-          "benefit_en": "An epic's status always matches its tickets, and every change says why it happened.",
-          "benefit_de": "Der Status eines Epics passt immer zu seinen Tickets, und jede Änderung nennt ihren Grund.",
+          "pill_en": "Derived parent status",
+          "pill_de": "Abgeleiteter Elternstatus",
+          "benefit_en": "With parent-status rollout enabled for the project, epic statuses follow their work children and derived transitions record a reason.",
+          "benefit_de": "Wenn die Elternstatusführung für das Projekt aktiviert ist, folgen die Status der Epics ihren untergeordneten Arbeitseinträgen. Abgeleitete Statusänderungen nennen ihren Grund.",
           "group": "features"
         },
         {
           "key": "AEON-651",
-          "pill_en": "True progress for epics",
-          "pill_de": "Echter Epic-Fortschritt",
-          "benefit_en": "Epics show progress, remaining hours and finish time from their real tickets, including how much is estimated.",
-          "benefit_de": "Epics zeigen Fortschritt, offene Stunden und Fertigstellung aus ihren echten Tickets, samt dem geschätzten Anteil.",
+          "pill_en": "Estimated epic progress",
+          "pill_de": "Geschätzter Epic-Fortschritt",
+          "benefit_en": "Epics roll up reported progress, total estimated leaf hours and available finish-time estimates, with estimate coverage shown. Finish times can be partial when leaf estimates are missing.",
+          "benefit_de": "Epics zeigen gemeldeten Fortschritt, die gesamten geschätzten Stunden ihrer einzelnen Arbeitseinträge und verfügbare Fertigstellungsschätzungen samt Schätzungsabdeckung. Bei fehlenden Schätzungen können die Fertigstellungszeiten unvollständig sein.",
           "group": "features"
         },
         {
@@ -4771,18 +4771,18 @@
         },
         {
           "key": "AEON-654",
-          "pill_en": "Auto epic summaries",
-          "pill_de": "Automatische Epic-Texte",
-          "benefit_en": "When an epic is done, its benefit text is written for you from its tickets, in English and German.",
-          "benefit_de": "Ist ein Epic erledigt, wird sein Nutzentext automatisch aus seinen Tickets geschrieben, auf Deutsch und Englisch.",
+          "pill_en": "Draft epic summaries",
+          "pill_de": "Epic-Texte entwerfen",
+          "benefit_en": "With parent rollout, a workspace AI provider and parent-benefit generation enabled, Aeon can draft English and German benefits for completed epics. Authored text is preserved, and failed drafts can be retried.",
+          "benefit_de": "Wenn Elternfunktionen, ein KI-Anbieter im Arbeitsbereich und die Erstellung von Eltern-Nutzentexten aktiviert sind, kann Aeon Nutzentexte erledigter Epics auf Deutsch und Englisch entwerfen. Eigene Texte bleiben erhalten; fehlgeschlagene Entwürfe lassen sich erneut anfordern.",
           "group": "features"
         },
         {
           "key": "AEON-655",
           "pill_en": "Name your levels",
           "pill_de": "Ebenen selbst benennen",
-          "benefit_en": "Call your levels what your team calls them, like Epic, Story or Step, and Aeon names every item by where it sits.",
-          "benefit_de": "Ebenen heißen, wie das Team sie nennt, etwa Epic, Story oder Schritt, und Aeon benennt jeden Eintrag nach seiner Position.",
+          "benefit_en": "Save your team's level names. Where work-vocabulary rollout is enabled, parent labels follow nesting and leaves use the chosen leaf name.",
+          "benefit_de": "Die Ebenennamen des Teams lassen sich speichern. Wo die Arbeitsebenen aktiviert sind, folgen Elternbezeichnungen der Verschachtelung, und einzelne Arbeitseinträge verwenden den gewählten Namen.",
           "group": "features"
         },
         {
@@ -4795,10 +4795,10 @@
         },
         {
           "key": "AEON-667",
-          "pill_en": "Agents ready again",
-          "pill_de": "Agenten wieder bereit",
-          "benefit_en": "After an update of the local agent service, signed-in agent accounts become ready again instead of timing out.",
-          "benefit_de": "Nach einem Update des lokalen Agentendienstes werden angemeldete Agentenkonten wieder bereit, statt in eine Zeitüberschreitung zu laufen.",
+          "pill_en": "Agent readiness checks",
+          "pill_de": "Bereitschaft der Agenten",
+          "benefit_en": "Fixes pairing-sync and login-context problems that could prevent signed-in accounts from completing their readiness check after a local agent-service update.",
+          "benefit_de": "Behoben sind Kopplungs- und Anmeldekontextprobleme, die nach einem Update des lokalen Agentendienstes die Bereitschaftsprüfung angemeldeter Konten verhindern konnten.",
           "group": "features"
         },
         {
@@ -4821,24 +4821,24 @@
           "key": "AEON-682",
           "pill_en": "Queue stale work",
           "pill_de": "Liegengebliebenes einreihen",
-          "benefit_en": "Work that is marked in progress but has nobody on it can be queued for the next free agent in one click.",
-          "benefit_de": "Arbeit, die als in Bearbeitung markiert ist, an der aber niemand arbeitet, lässt sich mit einem Klick für den nächsten freien Agenten einreihen.",
+          "benefit_en": "Queue eligible, unassigned work left In progress with no worker. If its estimate and acceptance criteria are already set, one click adds it to the queue.",
+          "benefit_de": "Geeignete, unzugewiesene Arbeit ohne Agenten im Status In progress lässt sich einreihen. Sind Schätzung und Abnahmekriterien bereits vorhanden, genügt dafür ein Klick.",
           "group": "features"
         },
         {
           "key": "AEON-685",
           "pill_en": "Verify accounts again",
           "pill_de": "Konten erneut prüfen",
-          "benefit_en": "An agent account whose one-time check expired keeps working, and you can run the check again with one click instead of removing the account.",
-          "benefit_de": "Ein Agentenkonto, dessen einmalige Prüfung abgelaufen ist, bleibt nutzbar, und die Prüfung lässt sich mit einem Klick wiederholen, statt das Konto zu entfernen.",
+          "benefit_en": "An expired one-time verification no longer blocks an otherwise-ready account. As its owner, you can request a new supported verification with one click without removing the account.",
+          "benefit_de": "Eine abgelaufene Einmalprüfung blockiert ein ansonsten bereites Konto nicht mehr. Kontoeigentümer können eine unterstützte Prüfung mit einem Klick erneut anfordern, ohne das Konto zu entfernen.",
           "group": "features"
         },
         {
           "key": "AEON-687",
           "pill_en": "Correct record links",
           "pill_de": "Richtige Datensatz-Links",
-          "benefit_en": "A link to a ticket always opens exactly that ticket, and the list stays visible next to it.",
-          "benefit_de": "Ein Link auf ein Ticket öffnet immer genau dieses Ticket, und die Liste bleibt daneben sichtbar.",
+          "benefit_en": "Ticket links open the selected record without another peek covering it; on wide screens, the list stays alongside.",
+          "benefit_de": "Ticket-Links öffnen den ausgewählten Eintrag, ohne dass eine weitere Vorschau ihn verdeckt. Auf breiten Bildschirmen bleibt die Liste daneben sichtbar.",
           "group": "features"
         }
       ]
