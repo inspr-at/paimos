@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type Component } from 'vue'
 import { useRoute } from 'vue-router'
 import '../styles/settings.css'
 import { can, permissionsKnown, permissionsRevoked, refreshPermissions } from '../lib/authz'
@@ -21,6 +21,7 @@ import AccountsSection from '../components/settings/AccountsSection.vue'
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId } from '../lib/settings'
 import { useSession } from '../stores/session'
 import { doctrineInbox } from '../lib/doctrineInbox'
+import { scopeOwner } from '../lib/identityScope'
 
 // Settings groups share one frame; explicit grants gate Access, rules and accounts.
 // /settings/<section>#<card> deep-links to one card, which is ringed on arrival.
@@ -32,11 +33,21 @@ const admin = computed(() => can('settings.manage'))
 const liveSections = computed(() => visibleSections(admin.value, permission => can(permission)))
 const sections = ref(liveSections.value)
 watch(liveSections, now => { if (!permissionsRevoked()) sections.value = now })
-const shown = new Set<SectionId>()
+const shown = reactive(new Set<SectionId>())
+// This key owns only the mounted contents, never permission to act. A missing
+// session freezes those contents; a different authenticated owner replaces them.
+const mountedOwner = ref(scopeOwner(session.identity))
+watch(() => scopeOwner(session.identity), now => {
+  if (!now || now === mountedOwner.value) return
+  mountedOwner.value = now
+  shown.clear()
+  sections.value = liveSections.value
+  closePicker()
+}, { flush: 'sync' })
 const current = computed(() => sectionOf(route.params.section))
 const meta = computed(() => SETTINGS_SECTIONS.find(section => section.id === current.value)!)
 const granted = computed(() => meta.value.permission ? anyOf(meta.value.permission, permission => can(permission)) : !meta.value.admin || admin.value)
-watch(granted, ok => { if (ok) shown.add(current.value) }, { immediate: true })
+watch([current, granted, mountedOwner], ([section, ok]) => { if (ok) shown.add(section) }, { immediate: true })
 const allowed = computed(() => granted.value || (permissionsRevoked() && shown.has(current.value)))
 // A permission-gated section waits for my permissions before it says no.
 const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
@@ -73,7 +84,6 @@ watch(current, async () => {
   await nextTick()
   if (!disposed) closePicker(true)
 }, { flush: 'post' })
-watch(() => [session.identity?.tenant.id, session.identity?.principal.id], () => { shown.clear(); sections.value = liveSections.value; closePicker() })
 watch(sections, () => closePicker())
 onMounted(() => { document.addEventListener('pointerdown', outside); window.addEventListener('resize', resize) })
 onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', resize); clearTimeout(arrival); disposed = true })
@@ -131,7 +141,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
       <div class="body" :class="{ wide: current === 'access' || current === 'agent-rules' }">
         <p v-if="allowed" class="who"><AppIcon :name="meta.admin && !meta.permission ? 'shield' : 'eye'" :size="14" /><span>{{ meta.who }}</span></p>
         <nav v-if="allowed && current === 'theme'" class="theme-links" aria-label="Theme cards"><RouterLink to="/settings/theme#themes">Themes</RouterLink><RouterLink to="/settings/theme#colours">Colours</RouterLink><RouterLink to="/settings/theme#agents">Agents</RouterLink></nav>
-        <component :is="VIEW[current]" v-if="allowed" :key="`${session.identity?.tenant.id}/${session.identity?.principal.id}/${current}`" />
+        <component :is="VIEW[current]" v-if="allowed" :key="`${mountedOwner}/${current}`" />
         <div v-else-if="deciding" class="set-skeleton" role="status" aria-label="Loading"><span class="skeleton" /><span class="skeleton" /></div>
         <div v-else class="gate glass-card">
           <span class="gate-icon"><AppIcon name="shield" :size="18" /></span>

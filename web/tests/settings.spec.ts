@@ -205,6 +205,39 @@ test('old workspace policy bookmarks open the moved card', async ({ page }) => {
   await expect(page.locator('#status-autopilot')).toBeVisible()
 })
 
+test('old workspace bookmarks redirect during section and hash changes inside Settings', async ({ page }) => {
+  await setup(page)
+  await page.goto('/settings/personal')
+  // Bookmark arrival deliberately scrolls to its card. Compare sticky controls
+  // at the same scroll position, preserving the guard's full geometry checks.
+  async function resetScroll() {
+    await page.locator('main').evaluate(el => el.scrollTo(0, 0))
+    await expect.poll(() => page.locator('main').evaluate(el => el.scrollTop)).toBe(0)
+  }
+  const guard = await controlStability(page, { navigation: sections(page), personal: sections(page).getByRole('link', { name: /^Personal/ }) })
+  await guard.check(async () => {
+    await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/settings/workspace?source=bookmark#estimates')))
+    await expect(page).toHaveURL('/settings/agents?source=bookmark#estimates')
+    await expect(page.locator('#estimates')).toBeVisible()
+    await resetScroll()
+  })
+  await guard.check(async () => {
+    await sections(page).getByRole('link', { name: /^Workspace/ }).click()
+    await expect(page).toHaveURL('/settings/workspace')
+    await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push({ hash: '#status-autopilot' })))
+    await expect(page).toHaveURL('/settings/autopilot#status-autopilot')
+    await expect(page.locator('#status-autopilot')).toBeVisible()
+    await resetScroll()
+  })
+  await guard.check(async () => {
+    await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/settings/workspace#work-vocabulary')))
+    await expect(page).toHaveURL('/settings/vocabulary#work-vocabulary')
+    await expect(page.locator('#work-vocabulary')).toBeVisible()
+    await resetScroll()
+  })
+  guard.done()
+})
+
 test('settings layout evidence in light and dark at phone, tablet and desktop sizes', async ({ page }) => {
   await setup(page)
   await mockAccess(page, accessWorld(), { also: ['account.read', 'rules.read', 'models.read'] })

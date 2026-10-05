@@ -100,12 +100,7 @@ export const router = createRouter({
     { path: '/settings', redirect: '/settings/personal' },
     { path: '/settings/projects', redirect: to => ({ path: '/settings/vocabulary', query: to.query, hash: to.hash }) },
     { path: '/settings/business/profiles/:profileId?', component: () => import('./views/settings/DocumentProfilesView.vue'), props: true, meta: { title: 'Document profiles', fill: true } },
-    { path: '/settings/:section(personal|theme|developer|agent-rules|accounts|workspace|vocabulary|agents|autopilot|business|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' }, beforeEnter: to => {
-      if (to.params.section !== 'workspace') return
-      const moved: Record<string, string> = { '#work-vocabulary': 'vocabulary', '#ticket-types': 'vocabulary', '#models': 'agents', '#model-refresh': 'agents', '#estimates': 'agents', '#silent-sessions': 'agents', '#agent-activity': 'agents', '#quota-warnings': 'accounts', '#status-autopilot': 'autopilot', '#autopilot-projects': 'autopilot', '#autopilot-suggestions': 'autopilot', '#autopilot-recent': 'autopilot', '#autopilot-proposals': 'autopilot', '#autopilot-changes': 'autopilot', '#members': 'access' }
-      const section = moved[to.hash]
-      if (section) return { path: `/settings/${section}`, query: to.query, hash: to.hash === '#members' ? '' : to.hash }
-    } },
+    { path: '/settings/:section(personal|theme|developer|agent-rules|accounts|workspace|vocabulary|agents|autopilot|business|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     // Access: /settings/access/<tab>/<id> (a person, a role, a project).
     { path: '/settings/:section(access)/:tab(people|invites|roles|projects|agents|audit)?/:id?', component: () => import('./views/SettingsView.vue'), meta: { title: 'Access', keepsFocus: true } },
     { path: '/link', component: () => import('./views/LinkAccountView.vue'), meta: { title: 'Link an account' } },
@@ -149,6 +144,13 @@ router.beforeEach(async (to, from) => {
     const code = attachCodeFromHash(to.hash)
     if (code && to.path === '/agents') holdAttachCode(code, scopeOwner(useSession().identity))
     return { path: to.path, query: to.query, hash: '', replace: true }
+  }
+  // Section and hash changes reuse Settings' route record, so beforeEnter
+  // cannot normalize old card bookmarks during in-app navigation.
+  if (to.params.section === 'workspace') {
+    const moved: Record<string, string> = { '#work-vocabulary': 'vocabulary', '#ticket-types': 'vocabulary', '#models': 'agents', '#model-refresh': 'agents', '#estimates': 'agents', '#silent-sessions': 'agents', '#agent-activity': 'agents', '#quota-warnings': 'accounts', '#status-autopilot': 'autopilot', '#autopilot-projects': 'autopilot', '#autopilot-suggestions': 'autopilot', '#autopilot-recent': 'autopilot', '#autopilot-proposals': 'autopilot', '#autopilot-changes': 'autopilot', '#members': 'access' }
+    const section = moved[to.hash]
+    if (section) return { path: `/settings/${section}`, query: to.query, hash: to.hash === '#members' ? '' : to.hash }
   }
   // Canonical section URLs replace bookmarks without adding a history step.
   // Ticket addresses stay /p/KEY/TICKET; ?section= preserves a non-default background,
