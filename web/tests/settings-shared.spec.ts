@@ -240,6 +240,45 @@ for (const orientation of ['down', 'up']) for (const kind of ['form', 'confirmat
   await action.click(); await expect(writes(page)).toHaveText('0'); await expect(dialog).toBeVisible()
 })
 
+for (const orientation of ['down', 'up']) test(`tall ${orientation}-opening popovers stay separated from their trigger through keyboard viewport changes`, async ({ page }) => {
+  await page.addInitScript(() => {
+    const viewport = new EventTarget()
+    Object.assign(viewport, { width: 390, height: 900, offsetTop: 0, offsetLeft: 0, scale: 1 })
+    Object.defineProperty(window, 'visualViewport', { value: viewport, configurable: true })
+  })
+  await page.setViewportSize({ width: 390, height: 900 })
+  await page.goto('/tests/settings-shared-harness.html?overflow-content')
+  const trigger = page.getByRole('button', { name: orientation === 'up' ? 'Apply capacity' : 'Change quota' })
+  if (orientation === 'up') await page.locator('[data-row="1"]').click()
+  else await trigger.evaluate(el => {
+    // Keep the page trigger within the keyboard viewport; the footer trigger
+    // follows the sheet's visual viewport naturally in the upward case.
+    Object.assign((el as HTMLElement).style, { position: 'fixed', top: '100px', right: '24px' })
+  })
+  await trigger.click()
+  const form = page.getByRole('dialog', { name: 'Quota warnings' })
+  await form.getByRole('textbox', { name: 'Early notice' }).focus()
+  for (const viewport of [{ height: 900, offsetTop: 0 }, { height: 480, offsetTop: 0 }, { height: 300, offsetTop: 40 }, { height: 900, offsetTop: 0 }]) {
+    await page.evaluate(viewport => {
+      Object.assign(window.visualViewport!, viewport)
+      window.visualViewport!.dispatchEvent(new Event('resize'))
+      window.visualViewport!.dispatchEvent(new Event('scroll'))
+    }, viewport)
+    await expect.poll(() => form.evaluate(el => el.style.getPropertyValue('--vv-h'))).toBe(`${viewport.height}px`)
+    const separation = async () => {
+      const panel = (await form.boundingBox())!, anchor = (await trigger.boundingBox())!
+      return orientation === 'up' ? anchor.y - panel.y - panel.height : panel.y - anchor.y - anchor.height
+    }
+    await expect.poll(separation, `trigger-facing edge at visual height ${viewport.height}`).toBeCloseTo(4, 0)
+    expect(await form.evaluate(el => el.style.top === 'auto')).toBe(orientation === 'up')
+    const panel = (await form.boundingBox())!
+    expect(panel.height).toBeGreaterThan(0)
+    expect(panel.y).toBeGreaterThanOrEqual(viewport.offsetTop + 12 - .5)
+    expect(panel.y + panel.height).toBeLessThanOrEqual(viewport.offsetTop + viewport.height - 12 + .5)
+    await expect(form.getByRole('textbox', { name: 'Early notice' })).toBeFocused()
+  }
+})
+
 test('phone sheet and popover actions follow a keyboard-shrunken visual viewport', async ({ page }) => {
   await page.addInitScript(() => {
     const viewport = new EventTarget()

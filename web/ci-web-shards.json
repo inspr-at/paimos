@@ -2490,7 +2490,7 @@
           "file": "tests/settings-shared.spec.ts",
           "weightSeconds": 20,
           "weightSource": "unmeasured-test-count-estimate",
-          "listedTests": 19
+          "listedTests": 21
         }
       ]
     }

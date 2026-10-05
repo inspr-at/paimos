@@ -226,6 +226,8 @@
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"multiline confirmation errors keep down-opening actions stationary","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"multiline form errors keep up-opening actions stationary","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"multiline confirmation errors keep up-opening actions stationary","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"tall down-opening popovers stay separated from their trigger through keyboard viewport changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"tall up-opening popovers stay separated from their trigger through keyboard viewport changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"phone sheet and popover actions follow a keyboard-shrunken visual viewport","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"overflowing form content scrolls with pinned actions at visual height 900","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"overflowing confirmation content scrolls with pinned actions at visual height 900","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},

@@ -81,11 +81,15 @@ function place() {
   const bottom = Math.min(viewportBottom, frame?.bottom ?? viewportBottom) - 12
   const width = Math.max(0, Math.min(320, right - left))
   panel.value.style.width = `${width}px`
-  const height = Math.min(panel.value.scrollHeight + 2, Math.max(0, bottom - top))
-  const up = !!props.anchor.closest('.pane-foot') || (trigger.bottom + 4 + height > bottom && trigger.top - top > bottom - trigger.bottom)
+  const contentHeight = panel.value.scrollHeight + 2
+  const frameHeight = Math.max(0, bottom - top)
+  const up = !!props.anchor.closest('.pane-foot') || (trigger.bottom + 4 + Math.min(contentHeight, frameHeight) > bottom && trigger.top - top > bottom - trigger.bottom)
   opensUp.value = up
   const available = Math.max(0, up ? trigger.top - 4 - top : bottom - trigger.bottom - 4)
-  const maxHeight = Math.min(bottom - top, available || bottom - top)
+  const maxHeight = Math.min(frameHeight, available)
+  // Place the height that can actually fit on the chosen side. Using the full
+  // content height here would slide a constrained panel across its trigger.
+  const height = Math.min(contentHeight, maxHeight)
   const x = Math.max(left, Math.min(trigger.right - width, right - width))
   // Bottom anchoring lets a confirmation or validation message grow upward
   // when opened from a footer, without moving its trigger or the page.
