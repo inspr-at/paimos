@@ -48,7 +48,12 @@ for (const width of [390, 600, 720, 1024, 1440]) for (const theme of ['light', '
       controls.previous = header.getByRole('button', { name: 'Previous ticket', exact: true })
       controls.next = header.getByRole('button', { name: 'Next ticket', exact: true })
     }
-    if (width > 720) {
+    const headerWidth = await header.evaluate(el => {
+      const style = getComputedStyle(el)
+      return el.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+    })
+    const wideActions = width > 720 && headerWidth > 420
+    if (wideActions) {
       controls.expand = header.getByRole('button', { name: 'Open as full page', exact: true })
       controls.newTab = header.getByRole('button', { name: 'Open in a new tab', exact: true })
     }
@@ -60,6 +65,10 @@ for (const width of [390, 600, 720, 1024, 1440]) for (const theme of ['light', '
       name: 'open More actions', run: async () => {
         await more.click()
         await expect(page.getByRole('menuitem', { name: 'Work actions', exact: true })).toBeVisible()
+        for (const name of ['Open as full page', 'Open in a new tab']) {
+          await expect(page.getByRole('menuitem', { name, exact: true })).toBeVisible()
+          if (!wideActions) await expect(header.getByRole('button', { name, exact: true })).toBeHidden()
+        }
         await expectHeaderFits(panel)
       },
     }, {

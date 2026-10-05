@@ -407,7 +407,6 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         // Per-node preconditions (AEON-326): changed since the list showed it.
         const seen = input.if_unmodified_since?.[id]
         if (seen && Date.parse(seen) !== Date.parse(node.updated_at)) { skipped.push({ id, key: node.key, reason: 'changed since you loaded it', code: 'conflict' }); continue }
-        if (input.parent_id && node.kind_slug === 'task' && data.nodes.find(n => n.id === input.parent_id)?.kind_slug === 'epic') { skipped.push({ id, key: node.key, reason: 'a task cannot sit under an epic' }); continue }
         const old = JSON.parse(JSON.stringify(node)) as MockNode
         const fields = { ...node.fields }
         if ('priority' in input) fields.priority = input.priority
@@ -589,8 +588,11 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       }
       // ids (AEON-326): only those nodes, every other filter still applied.
       const onlyIds = listParam(query, 'ids')
+      // Shape is canonical even for old payloads that omit is_leaf. Count only
+      // work children, and retain explicit shape for fixtures with hidden work.
+      const workParents = new Set(data.nodes.filter(n => ['work', 'epic', 'ticket', 'task'].includes(n.kind_slug)).map(n => n.parent_id))
       let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
-        .filter(n => passes(listParam(query, 'shape'), v => v === (n.is_leaf === false ? 'parent' : 'leaf')))
+        .filter(n => passes(listParam(query, 'shape'), v => v === ((n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : 'parent')))
         .filter(n => passes(listParam(query, 'depth'), v => v === String(n.depth ?? 1)))
         .filter(n => !onlyIds.length || onlyIds.includes(n.id))
         .filter(n => passes(states, v => v === n.state))

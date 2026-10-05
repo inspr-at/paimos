@@ -30,7 +30,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await expect(moving).toHaveAttribute('aria-level', '1')
     const stable = await controlStability(page, { create: page.getByRole('button', { name: 'New work item', exact: true }), destination })
     await stable.check(async () => {
-      await moving.dragTo(row('group'))
+      // Start on the row's key-cell whitespace, away from native links and
+      // buttons whose hit targets depend on the column layout.
+      await moving.dragTo(row('group'), { sourcePosition: { x: 4, y: 8 }, targetPosition: { x: 4, y: 8 } })
       await expect(moving).toHaveAttribute('aria-level', '2')
     })
     const first = calls.filter(c => c.method === 'POST' && c.path === '/api/nodes/moving/move')
@@ -39,7 +41,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     expect(first[0].headers['if-unmodified-since']).toBe(template.updated_at)
     const nestedRevision = data.nodes.find(n => n.id === 'moving')!.updated_at
     await stable.check(async () => {
-      await moving.dragTo(destination)
+      await moving.dragTo(destination, { sourcePosition: { x: 4, y: 8 }, targetPosition: { x: 4, y: 8 } })
       await expect(moving).toHaveAttribute('aria-level', '1')
     })
     stable.done()
@@ -51,7 +53,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await expect(moving).toHaveCount(1)
     await expect(tree.getByText('No epic', { exact: true })).toHaveCount(0)
     // A root item already at this destination must not issue another write.
-    await moving.dragTo(destination)
+    await moving.dragTo(destination, { sourcePosition: { x: 4, y: 8 }, targetPosition: { x: 4, y: 8 } })
     expect(calls.filter(c => c.method === 'POST' && c.path === '/api/nodes/moving/move')).toHaveLength(2)
     expect(errors).toEqual([])
     await page.screenshot({ path: `test-results/aeon-655-wn-fix3/root-drop-${width}-${theme}.png`, fullPage: true })

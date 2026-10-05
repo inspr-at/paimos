@@ -22,6 +22,9 @@ async function world(page: Page, theme: string) {
   const calls = await mockWork(page, data, { admin: true })
   await mockBusiness(page, businessData({ role: 'admin' }), { role: 'admin' })
   await mockSettings(page, settingsData())
+  // Queue behavior has its own specs. An unmocked 404 introduces an unrelated
+  // error row that access refresh clears during search, moving every control.
+  await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], manual_order: false, capacity: { hours: null, total: 0 } } }))
   // Business fixtures freeze Date.now; Vue's event fence needs advancing time.
   await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z'))
   let vocabulary = { revision: 0, leaf: { name: 'Arbeitsschritt', icon: 'check' }, levels: [{ name: 'Arbeitsvorhaben mit ausführlicher Beschreibung', icon: 'tree' }, { name: 'Geschichte', icon: 'layers' }] }
