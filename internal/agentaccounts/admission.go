@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/jackc/pgx/v5"
 )
@@ -18,6 +19,7 @@ const vendorStopBackoff = time.Hour
 
 // CapacityWait is advisory. Reserve and claim always recheck the same policy.
 type CapacityWait struct {
+	HostReason    string     `json:"host_reason,omitempty"`
 	Code          string     `json:"code"`
 	Until         *time.Time `json:"until,omitempty"`
 	ReadAt        *time.Time `json:"read_at,omitempty"`
@@ -283,6 +285,13 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 	run, err := loadWaitRun(ctx, tx, id)
 	if err != nil || run.Status != "queued" || run.Purpose != "managed" {
 		return nil, err
+	}
+	host, err := agentpairing.HostCapacityForPrincipal(ctx, tx, run.AgentID)
+	if err != nil {
+		return nil, err
+	}
+	if host != nil && host.Reason != "" {
+		return &CapacityWait{Code: "capacity", HostReason: host.Reason}, nil
 	}
 	accounts, err := listAccounts(ctx, tx)
 	if err != nil {

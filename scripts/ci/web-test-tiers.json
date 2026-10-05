@@ -9702,6 +9702,17 @@
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > queries canonical leaves on every page and excludes parents and unknown shapes from mixed results","tier":"ESSENTIAL"},
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > refuses non-leaf selection and initial targets while keeping confirmed leaves launchable","tier":"ESSENTIAL"},
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > rechecks leaf eligibility at submission before remembering an account or launching","tier":"ESSENTIAL"},
-    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"canonical leaf search excludes mixed parent results and queues only the selected leaf","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"canonical leaf search excludes mixed parent results and queues only the selected leaf","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"node","file":"tests/accounts-overview.test.ts","name":"accounts overview merges only a canonical shared quota identity within one harness","tier":"ESSENTIAL"},
+    {"kind":"node","file":"tests/accounts-overview.test.ts","name":"host capacity parsing retains off defaults and rejects oversized history","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 390 light","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 390 dark","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1024 light","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1024 dark","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1440 light","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1440 dark","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"failed capacity apply stays unsaved and reports the actual failure","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"members see account and computer details without mutation controls","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""},
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"quota warning popover submits with platform modifier and Undo restores its snapshot","tier":"ESSENTIAL","config":"playwright.ui.config.ts","project":""}
   ]
 }

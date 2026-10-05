@@ -3892,6 +3892,13 @@
     {"kind":"go","package":"internal/db","name":"TestWorkTreeTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/ticketwork","name":"TestMigratedWorkSessionsAndCostsRespectVisibility","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/deliveryvote","name":"TestMigratedWorkRetainsDeliveryRatingsAndVisibility","tier":"GATED-FULL"},
-    {"kind":"go","package":"internal/releases","name":"TestReleaseMembershipTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/releases","name":"TestReleaseMembershipTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/hostcapacity","name":"TestHostCapacityAdmission","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/hostcapacity","name":"TestHostCapacityBounds","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestManagedStartWaitsForHostCapacityBeforeRouteAndClaim","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestManagedStartHostReportFailureNeverClaims","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentpairing","name":"TestHostCapacityOwnerRevisionRuntimeAndClaimFence","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentpairing","name":"TestSignOutEverywhereFencesCanonicalSetAndPreservesOtherAccounts","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaWarningSettingsUndoRejectsInterveningWrite","tier":"ESSENTIAL"}
   ]
 }

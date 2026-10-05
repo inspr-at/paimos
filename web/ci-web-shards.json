@@ -2491,6 +2491,12 @@
           "weightSeconds": 20,
           "weightSource": "unmeasured-test-count-estimate",
           "listedTests": 23
+        },
+        {
+          "file": "tests/settings-host-capacity.spec.ts",
+          "weightSeconds": 20,
+          "weightSource": "unmeasured-test-count-estimate",
+          "listedTests": 9
         }
       ]
     }
