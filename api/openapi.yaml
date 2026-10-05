@@ -7451,9 +7451,10 @@ paths:
                 required: [interval_minutes]
                 properties:
                   interval_minutes: {type: integer, minimum: 1, maximum: 240}
+                expected_interval_minutes: {type: integer, minimum: 1, maximum: 240, description: Optional current value required for a conditional reverse write}
     put:
       operationId: putEtaInterval
-      description: Sets how often working agents must refresh an estimate. Requires settings.manage. One through 240 minutes.
+      description: Sets how often working agents must refresh an estimate. Requires settings.manage. One through 240 minutes. Changed values append tenant.agent_work_settings_changed with before and after values.
       requestBody:
         required: true
         content:
@@ -7475,6 +7476,7 @@ paths:
                 properties:
                   interval_minutes: {type: integer, minimum: 1, maximum: 240}
         '400': {description: Interval outside 1 to 240 minutes}
+        '409': {description: Current interval differs from the expected value}
   /settings/brand:
     get:
       operationId: getBrandSettings
@@ -7564,17 +7566,24 @@ paths:
         '200': {description: Current policy, content: {application/json: {schema: {$ref: '#/components/schemas/AgentActivitySetting'}}}}
     put:
       operationId: putAgentActivityMode
-      description: Change the workspace policy. Off collects no summaries, tool activity or legacy notes and hides stored activity; tool_activity collects automatic activity only. Requires settings.manage.
+      description: Change the workspace policy. Off collects no summaries, tool activity or legacy notes and hides stored activity; tool_activity collects automatic activity only. Requires settings.manage. Changed values append tenant.agent_work_settings_changed with before and after values.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/AgentActivitySetting'}
+            schema:
+              type: object
+              additionalProperties: false
+              required: [mode]
+              properties:
+                mode: {type: string, enum: [off, tool_activity, agent_summary]}
+                expected_mode: {type: string, enum: [off, tool_activity, agent_summary], description: Optional current value required for a conditional reverse write}
       responses:
         '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Saved policy, content: {application/json: {schema: {$ref: '#/components/schemas/AgentActivitySetting'}}}}
         '400': {description: Unknown mode}
         '403': {description: Settings permission required}
+        '409': {description: Current policy differs from the expected value}
   /settings/heartbeat-lost:
     get:
       operationId: getHeartbeatLost
@@ -7589,9 +7598,10 @@ paths:
                 required: [heartbeat_lost_minutes]
                 properties:
                   heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
+                expected_heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440, description: Optional current value required for a conditional reverse write}
     put:
       operationId: putHeartbeatLost
-      description: Sets the lost-contact threshold for unmanaged sessions. Requires settings.manage. Five through 1440 minutes. The server sweeps once a minute; no process is signalled.
+      description: Sets the lost-contact threshold for unmanaged sessions. Requires settings.manage. Five through 1440 minutes. The server sweeps once a minute; no process is signalled. Changed values append tenant.agent_work_settings_changed with before and after values.
       requestBody:
         required: true
         content:
@@ -7613,6 +7623,7 @@ paths:
                 properties:
                   heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
         '400': {description: Threshold outside 5 to 1440 minutes}
+        '409': {description: Current threshold differs from the expected value}
   /nodes/{nodeId}/live-eta:
     parameters:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}

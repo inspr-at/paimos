@@ -4,7 +4,7 @@
 import { api } from './api.ts'
 import { sessionGone } from './authz.ts'
 
-export type SectionId = 'personal' | 'theme' | 'developer' | 'agent-rules' | 'accounts' | 'workspace' | 'access' | 'business' | 'projects' | 'portal'
+export type SectionId = 'personal' | 'theme' | 'developer' | 'agents' | 'agent-rules' | 'accounts' | 'workspace' | 'access' | 'business' | 'projects' | 'portal'
 // permission: the section shows to whoever holds it (can()), instead of by role.
 // permission: one, or any of several (Access opens for See members or, alone, the access log).
 export interface SettingsSection { id: SectionId; label: string; summary: string; admin: boolean; permission?: string | string[]; deniedTitle?: string; denied?: string }
@@ -13,9 +13,10 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'personal', label: 'Personal', summary: 'Appearance, greeting and keys', admin: false },
   { id: 'theme', label: 'Theme', summary: 'Colours and agent appearance', admin: false },
   { id: 'developer', label: 'Developer', summary: 'For people working on Paimos itself', admin: false },
+  { id: 'agents', label: 'Agents', summary: 'Activity, estimates and models', admin: true },
   { id: 'agent-rules', label: 'Agent rules', summary: 'Rules for every agent', admin: false, permission: 'rules.read', deniedTitle: 'Agent rules need permission to read them', denied: 'Reading agent rules needs the rules read permission. Project membership alone does not open this page.' },
   { id: 'accounts', label: 'Accounts', summary: 'Agent accounts and limits', admin: false, permission: 'account.read', deniedTitle: 'Accounts need permission to read them', denied: 'Agent accounts and their limits are visible to people who can read accounts.' },
-  { id: 'workspace', label: 'Workspace', summary: 'Name, brand, models and your role', admin: true },
+  { id: 'workspace', label: 'Workspace', summary: 'Name, brand and your role', admin: true },
   { id: 'access', label: 'Access', summary: 'People, roles and agents', admin: true, permission: ['members.read', 'audit.read'] },
   { id: 'business', label: 'Business', summary: 'Parts and quote settings', admin: true },
   { id: 'projects', label: 'Projects', summary: 'Ticket types', admin: true },

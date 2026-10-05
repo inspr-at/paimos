@@ -42,7 +42,7 @@ for (const width of [390, 1024, 1440]) for (const scheme of ['light', 'dark'] as
   })
 }
 
-test('timing failures restore confirmed values, keep both controls anchored and retry the requested value', async ({ page }) => {
+test('timing failures keep typed values and controls anchored, and save again on blur', async ({ page }) => {
   await mockWork(page, fixtures())
   await mockAccess(page, accessWorld())
   let failed = true
@@ -57,8 +57,8 @@ test('timing failures restore confirmed values, keep both controls anchored and 
     return route.fulfill({ json: { interval_minutes: 21 } })
   })
   await page.route('**/api/settings/heartbeat-lost', route => route.fulfill({ json: { heartbeat_lost_minutes: 15 } }))
-  await page.goto('/settings/workspace')
-  const estimates = page.getByLabel('Minutes between estimates'), lost = page.getByLabel('Minutes without a heartbeat')
+  await page.goto('/settings/agents')
+  const estimates = page.locator('#interval_minutes'), lost = page.locator('#heartbeat_lost_minutes')
   await expect(estimates).toHaveValue('10'); await expect(lost).toHaveValue('15')
   await estimates.fill('20'); await estimates.press('Tab')
   await expect(estimates).toBeDisabled()
@@ -67,13 +67,13 @@ test('timing failures restore confirmed values, keep both controls anchored and 
   const before = [await estimates.boundingBox(), await lost.boundingBox()]
   expect(writes).toBe(1)
   release()
-  await expect(estimates).toHaveValue('10')
-  await expect(page.getByRole('alert').filter({ hasText: 'Estimates:' })).toContainText('could not be confirmed')
+  await expect(estimates).toHaveValue('20')
+  await expect(page.locator('#interval_minutes-feedback')).toContainText('Could not save')
   for (const [i, control] of [estimates, lost].entries()) expect(await control.boundingBox()).toEqual(before[i])
   failed = false
-  await page.getByRole('button', { name: 'Retry 20 minutes' }).click()
+  await estimates.focus(); await estimates.press('Tab')
   await expect(estimates).toHaveValue('21')
-  await expect(page.locator('#eta-error')).toHaveCount(0)
+  await expect(page.locator('#interval_minutes-feedback')).toHaveText('')
   expect(writes).toBe(2)
 })
 

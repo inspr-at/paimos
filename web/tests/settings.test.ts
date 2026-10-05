@@ -5,7 +5,7 @@ import { keyState, sectionOf, senderLine, settingsLink, visibleSections, type Ag
 
 test('Personal and Developer are for everyone; workspace sections follow their grants', () => {
   assert.deepEqual(visibleSections(false).map(s => s.id), ['personal', 'theme', 'developer'])
-  assert.deepEqual(visibleSections(true).map(s => s.label), ['Personal', 'Theme', 'Developer', 'Workspace', 'Business', 'Projects', 'Product portal'])
+  assert.deepEqual(visibleSections(true).map(s => s.label), ['Personal', 'Theme', 'Developer', 'Agents', 'Workspace', 'Business', 'Projects', 'Product portal'])
   assert.equal(sectionOf('theme'), 'theme')
   assert.equal(sectionOf('business'), 'business')
   assert.equal(sectionOf('developer'), 'developer')
