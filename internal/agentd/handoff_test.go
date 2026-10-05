@@ -7,11 +7,15 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
 
@@ -24,6 +28,12 @@ type handoffFaultAPI struct {
 
 func (a *handoffFaultAPI) WorkOrder(context.Context, string) (WorkOrder, error) {
 	return WorkOrder{NodeID: "order", Status: "ready", Revision: 1}, nil
+}
+
+func (a *handoffFaultAPI) Route(ctx context.Context, id, daemon string, accounts []string, estimates map[string]int64) (Route, error) {
+	route, err := a.claimFaultAPI.Route(ctx, id, daemon, accounts, estimates)
+	route.DaemonID = daemon
+	return route, err
 }
 
 func (a *handoffFaultAPI) ClaimHandoff(ctx context.Context, id, daemon, generation string, ids []string, pickup WorkerPickup) error {
@@ -148,5 +158,196 @@ func TestWorkerAssignmentRemoteClaimCarriesExactPickup(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Fatal("claim repeated")
+	}
+}
+
+func TestWorkerAssignmentWorktreeIdentityIgnoresDaemon(t *testing.T) {
+	s, api, _ := assignedClaimFixture(t)
+	node, err := api.Node(t.Context(), api.run.WorkOrderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, err := api.WorkOrder(t.Context(), api.run.WorkOrderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.workerPickup(api.run, node, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.daemonID = "another-daemon"
+	second, err := s.workerPickup(api.run, node, order)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.WorktreeID != second.WorktreeID {
+		t.Fatal("same physical checkout changed identity with daemon")
+	}
+}
+
+func competingHandoffSupervisor(t *testing.T, s *Supervisor, api *handoffFaultAPI) (*Supervisor, *handoffFaultAPI, *verificationFakeAdapter) {
+	t.Helper()
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := filepath.Join(root, "state")
+	if err := os.Mkdir(state, 0700); err != nil {
+		t.Fatal(err)
+	}
+	base := &claimFaultAPI{fakeAPI: api.fakeAPI, server: api.run, accepted: map[int64]Telemetry{}}
+	adapter := &verificationFakeAdapter{fakeAdapter: fakeAdapter{proc: &fakeProcess{stopped: make(chan struct{})}}}
+	next, err := NewSupervisor(t.Context(), Config{API: base, StateRoot: state, DaemonID: "competing-daemon", Workspace: s.workspace, Adapters: []Adapter{adapter}, Accounts: s.accounts, EstimatedUnits: s.estimates})
+	if err != nil {
+		t.Fatal(err)
+	}
+	nextAPI := &handoffFaultAPI{claimFaultAPI: base, s: next, t: t}
+	next.api = nextAPI
+	t.Cleanup(func() {
+		_ = adapter.proc.Stop(context.Background())
+		for _, entry := range next.runs {
+			entry.mu.Lock()
+			done := entry.monitorDone
+			entry.mu.Unlock()
+			if done != nil {
+				select {
+				case <-done:
+				case <-time.After(10 * time.Second):
+					t.Error("competing fixture monitor did not finish")
+					return
+				}
+			}
+		}
+		if err := next.Close(context.Background()); err != nil {
+			t.Errorf("close competing fixture: %v", err)
+		}
+	})
+	return next, nextAPI, adapter
+}
+
+func TestWorkerAssignmentCompetingDaemonCannotClaimCheckout(t *testing.T) {
+	s, api, _ := assignedClaimFixture(t)
+	s.adapters[Codex] = &handoffLaunchError{}
+	if err := s.StartRun(t.Context(), api.run); err == nil {
+		t.Fatal("unknown fork hidden")
+	}
+	if err := s.Close(t.Context()); !errors.Is(err, ErrProcessesUnconfirmed) {
+		t.Fatalf("unknown writer released ownership: %v", err)
+	}
+	next, nextAPI, adapter := competingHandoffSupervisor(t, s, api)
+	err := next.StartRun(t.Context(), api.run)
+	if err == nil || !strings.Contains(err.Error(), "checkout") {
+		t.Fatalf("competing daemon crossed checkout fence: %v", err)
+	}
+	if nextAPI.routes != 0 || len(nextAPI.pickups) != 0 || adapter.starts != 0 {
+		t.Fatal("competing daemon reserved, claimed or launched in held checkout")
+	}
+}
+
+func TestWorkerAssignmentCheckoutFenceSurvivesDaemonLoss(t *testing.T) {
+	if os.Getenv("AEON_TEST_HANDOFF_EXIT_CHILD") == "1" {
+		s, api, _ := assignedClaimFixture(t)
+		// Parent supplied a private physical checkout. This test process exits with
+		// an unknown fork; no Close call may mark its checkout as safely stopped.
+		s.workspace = os.Args[len(os.Args)-1]
+		s.adapters[Codex] = &handoffLaunchError{}
+		if err := s.StartRun(t.Context(), api.run); err == nil {
+			t.Fatal("unknown fork hidden")
+		}
+		if err := s.Close(t.Context()); !errors.Is(err, ErrProcessesUnconfirmed) {
+			t.Fatal("unknown writer accepted as stopped")
+		}
+		return
+	}
+	s, api, _ := assignedClaimFixture(t)
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	child := exec.CommandContext(ctx, executable, "-test.run=^TestWorkerAssignmentCheckoutFenceSurvivesDaemonLoss$", "-test.timeout=10s", "--", s.workspace)
+	child.Env = append(os.Environ(), "AEON_TEST_HANDOFF_EXIT_CHILD=1")
+	if err := child.Run(); err != nil {
+		t.Fatalf("unknown-fork child fixture failed: %v", err)
+	}
+	next, nextAPI, adapter := competingHandoffSupervisor(t, s, api)
+	if err := next.StartRun(t.Context(), api.run); !errors.Is(err, ErrProcessesUnconfirmed) {
+		t.Fatalf("daemon loss released uncertain checkout: %v", err)
+	}
+	if nextAPI.routes != 0 || len(nextAPI.pickups) != 0 || adapter.starts != 0 {
+		t.Fatal("durable checkout owner was bypassed")
+	}
+}
+
+func TestWorkerAssignmentCheckoutReleasesAfterConfirmedExit(t *testing.T) {
+	s, api, adapter := assignedClaimFixture(t)
+	if err := s.StartRun(t.Context(), api.run); err != nil {
+		t.Fatal(err)
+	}
+	next, nextAPI, nextAdapter := competingHandoffSupervisor(t, s, api)
+	if err := next.StartRun(t.Context(), api.run); err == nil {
+		t.Fatal("live checkout allowed competing writer")
+	}
+	if err := adapter.proc.Stop(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	entry := s.runs[api.run.ID]
+	entry.mu.Lock()
+	done := entry.monitorDone
+	entry.mu.Unlock()
+	select {
+	case <-done:
+	case <-t.Context().Done():
+		t.Fatal("monitor did not observe exit")
+	}
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatalf("confirmed exit retained checkout: %v", err)
+	}
+	if err := next.StartRun(t.Context(), api.run); err != nil {
+		t.Fatal(err)
+	}
+	if len(nextAPI.pickups) != 1 || nextAdapter.starts != 1 {
+		t.Fatal("checkout did not transfer after confirmed exit")
+	}
+}
+
+func TestWorkerAssignmentRestartClearsOwnConfirmedCheckoutFence(t *testing.T) {
+	s, api, adapter := assignedClaimFixture(t)
+	if err := s.StartRun(t.Context(), api.run); err != nil {
+		t.Fatal(err)
+	}
+	if err := adapter.proc.Stop(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	awaitTelemetryMonitor(t, s.runs[api.run.ID])
+	if err := s.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	// A daemon crash after journaling confirmed exit, before clean shutdown,
+	// leaves this owner marker next to the already confirmed-exit journal.
+	store, err := agentsetup.OpenStore(filepath.Join(s.workspace, ".aeon-agentd"), true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	owner, err := json.Marshal([]string{s.tenantID, s.principalID, s.daemonID, s.journalDir()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Write("owner.json", owner, false); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := NewSupervisor(t.Context(), Config{API: api, StateRoot: s.journalDir(), DaemonID: s.daemonID, Workspace: s.workspace, Adapters: []Adapter{adapter}, Accounts: s.accounts, EstimatedUnits: s.estimates})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restarted.Close(context.Background())
+	if err := restarted.Close(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	marker, err := store.Read("owner.json", 4096)
+	if err != nil || string(marker) != "[]" {
+		t.Fatalf("confirmed-exit recovery retained its own checkout fence: %v", err)
 	}
 }

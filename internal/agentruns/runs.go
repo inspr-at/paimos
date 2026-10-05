@@ -447,7 +447,7 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err = queueClaimable(ctx, tx, v); err != nil {
 		return nil, err
 	}
-	if err = pickupHandoff(ctx, tx, p, v, o, in.Handoff); err != nil {
+	if err = validatePickupHandoff(ctx, tx, p, v, o, in.Handoff); err != nil {
 		return nil, err
 	}
 	if v.ReadOnlyReview && r.Header.Get(reviewgate.PolicyHeader) != reviewgate.Policy {
@@ -570,6 +570,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, err
 	}
 	if err = agentpairing.RunFence(ctx, tx, *v.AccountID, v.ID, true); err != nil {
+		return nil, err
+	}
+	if err = acceptPickupHandoff(ctx, tx, v, in.Handoff); err != nil {
 		return nil, err
 	}
 	before := v

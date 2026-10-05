@@ -292,12 +292,14 @@ func (m *module) queueAdd(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return nil, err
 	}
-	if err = requireWriterFree(ctx, tx, t.ID, ""); err != nil {
-		return nil, err
-	}
+	// Preserve the existing readiness refusal before writer exclusion. Both
+	// checks remain under the tenant/tree fence and precede every queue write.
 	ready := readiness(t)
 	if !ready.Ready {
 		return nil, &queueError{Status: 422, Message: "Not ready to queue: " + strings.Join(ready.Missing, ", "), Code: "queue_not_ready", Readiness: &ready}
+	}
+	if err = requireWriterFree(ctx, tx, t.ID, ""); err != nil {
+		return nil, err
 	}
 	if in.Agent != "" {
 		if err = queueValidateTarget(ctx, tx, in.queueTarget); err != nil {

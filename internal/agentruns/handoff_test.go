@@ -9,7 +9,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func handoffFixture(t *testing.T) (*fixture, string, qEntry, map[string]any) {
@@ -214,47 +215,182 @@ func TestWorkerHandoffUnknownExitBlocksRetryAndReconciles(t *testing.T) {
 	f.addQueue(t, e.NodeID, nil)
 }
 
-func TestWorkerHandoffConcurrentPickupOneWriter(t *testing.T) {
-	f, _, e, body := handoffFixture(t)
-	start := make(chan struct{})
-	ready := make(chan struct{}, 2)
-	results := make(chan *httptest.ResponseRecorder, 2)
-	var wg sync.WaitGroup
-	for _, worktree := range []string{"a", "b"} {
-		copyBody := claimBody(body["reservation_ids"].([]string))
-		pickup := body["handoff"].(agentruns.WorkerPickup)
-		pickup.WorktreeID = strings.Repeat(worktree, 64)
-		copyBody["handoff"] = pickup
-		raw := mustHandoffJSON(t, copyBody)
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			ready <- struct{}{}
-			<-start
-			results <- f.request(f.agent, "POST", "/api/runs/"+e.Run.ID+"/claim", raw, f.token)
-		}()
+// Pause only after the first transaction checked the checkout while holding
+// the tenant/tree fence. The competitor must be observed waiting in Postgres
+// before that transaction is allowed to persist acceptance and commit.
+type handoffClaimPause struct {
+	first  atomic.Bool
+	locked chan uint32
+	resume chan struct{}
+}
+type handoffClaimPauseKey struct{}
+
+func (p *handoffClaimPause) TraceQueryStart(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(q.SQL, "trace->'worker_assignment'->>'worktree_id'=$2") && p.first.CompareAndSwap(false, true) {
+		return context.WithValue(ctx, handoffClaimPauseKey{}, true)
 	}
-	<-ready
-	<-ready
-	close(start)
-	wg.Wait()
-	close(results)
-	wins, conflicts := 0, 0
-	for w := range results {
-		switch w.Code {
-		case 200:
-			wins++
-		case 409:
-			if !strings.Contains(w.Body.String(), "assignment pickup conflict") {
-				t.Fatalf("wrong conflict: %s", w.Body.String())
-			}
-			conflicts++
-		default:
-			t.Fatalf("pickup: %d %s", w.Code, w.Body.String())
+	return ctx
+}
+func (p *handoffClaimPause) TraceQueryEnd(ctx context.Context, conn *pgx.Conn, q pgx.TraceQueryEndData) {
+	if ctx.Value(handoffClaimPauseKey{}) == true && q.Err == nil {
+		p.locked <- conn.PgConn().PID()
+		select {
+		case <-p.resume:
+		case <-ctx.Done():
 		}
 	}
-	if wins != 1 || conflicts != 1 || f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.claimed'`) != 1 {
-		t.Fatal("pickup race admitted more than one writer")
+}
+
+func secondWorkerHandoff(t *testing.T, f *fixture, project string, first qEntry) (qEntry, map[string]any) {
+	t.Helper()
+	id := f.ticket(t, "open", "high", nil)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, id, project)
+		return err
+	})
+	second := f.addQueue(t, id, nil)
+	// This distinct worker also leads in the fixture. Give its live role an
+	// explicit claim grant; coordinator read/dispatch scopes alone cannot start.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,role_id,'run.claim' FROM role_bindings WHERE principal_id=$2 ON CONFLICT DO NOTHING`, f.person.TenantID, f.other.ID)
+		return err
+	})
+	account := f.queueAccount(t, 1000000)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET registered_by_principal_id=$2 WHERE id=$1`, account, f.other.ID)
+		return err
+	})
+	var lead agentruns.WorkerHandoff
+	f.call(t, f.person, "GET", "/api/runs/"+first.Run.ID+"/handoff", nil, 200, &lead)
+	coordinator := f.other
+	coordinator.Scopes = authz.CoordinatorKeyScopes
+	r := httptest.NewRequest("POST", "/api/queue/next", strings.NewReader(`{"agent_principal_id":"`+f.other.ID+`","model_profile_id":"`+f.profile+`"}`)).WithContext(tenant.WithPrincipal(t.Context(), coordinator))
+	r.Header.Set("X-Aeon-Lead-Session", lead.LeadSessionID)
+	r.Header.Set("X-Aeon-Lead-Generation", "1")
+	r.Header.Set("X-Aeon-Worker-Lease", "fixture-lead-lease-private-0000000000000")
+	w := httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("second route: %d %s", w.Code, w.Body.String())
+	}
+	var selected struct{ Entry qEntry }
+	if err := json.Unmarshal(w.Body.Bytes(), &selected); err != nil || selected.Entry.Run.ID != second.Run.ID {
+		t.Fatalf("fixture did not route distinct assignment: %s", w.Body.String())
+	}
+	var h agentruns.WorkerHandoff
+	f.call(t, f.person, "GET", "/api/runs/"+second.Run.ID+"/handoff", nil, 200, &h)
+	body := claimBody(f.reserve(t, second.Run))
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET registered_by_principal_id=$2 WHERE id=(SELECT account_id FROM agent_runs WHERE id=$1)`, second.Run.ID, f.other.ID)
+		return err
+	})
+	body["handoff"] = agentruns.WorkerPickup{TicketRevision: h.TicketRevision, WorkOrderRevision: h.WorkOrderRevision, BriefSHA256: h.BriefSHA256, WorktreeID: strings.Repeat("a", 64)}
+	return second, body
+}
+
+func TestWorkerHandoffConcurrentPickupOneWriter(t *testing.T) {
+	for _, distinct := range []bool{false, true} {
+		name := "same-run"
+		if distinct {
+			name = "distinct-runs-same-checkout"
+		}
+		t.Run(name, func(t *testing.T) {
+			f, project, first, body := handoffFixture(t)
+			second, competingBody, principal, token := first, claimBody(body["reservation_ids"].([]string)), f.agent, f.token
+			reason := "assignment pickup conflict"
+			if distinct {
+				second, competingBody = secondWorkerHandoff(t, f, project, first)
+				principal = f.other
+				principal.Scopes = []string{"run.claim"}
+				token = f.key(t, principal, principal.Scopes)
+				reason = "assignment worktree already has an unconfirmed writer"
+			} else {
+				pickup := body["handoff"].(agentruns.WorkerPickup)
+				pickup.WorktreeID = strings.Repeat("b", 64)
+				competingBody["handoff"] = pickup
+			}
+			pause := &handoffClaimPause{locked: make(chan uint32, 1), resume: make(chan struct{})}
+			cfg := f.d.App.Config()
+			cfg.ConnConfig.Tracer = pause
+			pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Remount the actual claim handler with its normal lead admission path.
+			f.mux = http.NewServeMux()
+			agentruns.NewWithLeadAdmission(pool, func(ctx context.Context, tx pgx.Tx, _ tenant.Principal, _ string, _ harness.Session) (harness.LeadChecks, error) {
+				var now time.Time
+				err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+				gate := harness.LeadGate{State: "available", CheckedAt: now}
+				return harness.LeadChecks{Dial: gate, Harness: gate, Account: gate, Host: gate}, err
+			}).Mount(f.mux)
+			ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+			firstDone, secondDone := make(chan *httptest.ResponseRecorder, 1), make(chan *httptest.ResponseRecorder, 1)
+			t.Cleanup(func() { cancel(); pool.Close() })
+			defer func() {
+				select {
+				case <-pause.resume:
+				default:
+					close(pause.resume)
+				}
+			}()
+			request := func(p tenant.Principal, run string, raw, key string) *httptest.ResponseRecorder {
+				r := httpRequest(ctx, p, "POST", "/api/runs/"+run+"/claim", raw)
+				r.Header.Set("Authorization", "Bearer "+key)
+				w := httptest.NewRecorder()
+				f.mux.ServeHTTP(w, r)
+				return w
+			}
+			firstRaw, secondRaw := mustHandoffJSON(t, body), mustHandoffJSON(t, competingBody)
+			go func() { firstDone <- request(f.agent, first.Run.ID, firstRaw, f.token) }()
+			var pid uint32
+			select {
+			case pid = <-pause.locked:
+			case w := <-firstDone:
+				t.Fatalf("first did not reach acceptance fence: %d %s", w.Code, w.Body.String())
+			case <-ctx.Done():
+				t.Fatal("first never reached fence")
+			}
+			go func() { secondDone <- request(principal, second.Run.ID, secondRaw, token) }()
+			for {
+				var waiting bool
+				err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)) AND query=$2)`, pid, `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`).Scan(&waiting)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if waiting {
+					break
+				}
+				select {
+				case w := <-secondDone:
+					t.Fatalf("competitor crossed held fence: %d %s", w.Code, w.Body.String())
+				case <-ctx.Done():
+					t.Fatal("competitor never waited for tenant fence")
+				default:
+				}
+			}
+			close(pause.resume)
+			for _, result := range []struct {
+				done   <-chan *httptest.ResponseRecorder
+				want   int
+				reason string
+			}{{firstDone, 200, ""}, {secondDone, 409, reason}} {
+				select {
+				case w := <-result.done:
+					if w.Code != result.want || !strings.Contains(w.Body.String(), result.reason) {
+						t.Fatalf("claim result: %d %s", w.Code, w.Body.String())
+					}
+				case <-ctx.Done():
+					t.Fatal("claims failed to finish")
+				}
+			}
+			if f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.claimed'`) != 1 || f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE trace->'worker_assignment'->>'state'='launch_unknown'`) != 1 {
+				t.Fatal("overlapping pickup admitted multiple writers")
+			}
+			if distinct && f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='queued' AND trace->'worker_assignment'->>'state'='assigned' AND NOT(trace->'worker_assignment' ? 'accepted_at')`, second.Run.ID) != 1 {
+				t.Fatal("rejected competing assignment partially accepted")
+			}
+		})
 	}
 }
 
@@ -303,4 +439,46 @@ func mustHandoffJSON(t *testing.T, v any) string {
 		t.Fatal(err)
 	}
 	return string(raw)
+}
+
+func TestWorkerHandoffObsoleteClaimDoesNotAcceptWriter(t *testing.T) {
+	for _, reason := range []string{"quota_pool_changed", "account_moved_out_of_group"} {
+		t.Run(reason, func(t *testing.T) {
+			f, _, e, body := handoffFixture(t)
+			f.tx(t, f.agent, func(tx pgx.Tx) error {
+				if reason == "account_moved_out_of_group" {
+					group := uuid()
+					if _, err := tx.Exec(t.Context(), `INSERT INTO account_groups(tenant_id,id,harness,name) VALUES($1,$2,'codex','Changed group')`, f.agent.TenantID, group); err != nil {
+						return err
+					}
+					_, err := tx.Exec(t.Context(), `INSERT INTO account_run_targets(tenant_id,run_id,group_id) VALUES($1,$2,$3)`, f.agent.TenantID, e.Run.ID, group)
+					return err
+				}
+				sibling := uuid()
+				if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label) VALUES($1,$2::uuid,$2::text,'codex','sibling',$3,'Sibling')`, f.agent.TenantID, sibling, f.other.ID); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET account_id=$2 WHERE id IN(SELECT window_id FROM account_reservations WHERE run_id=$1)`, e.Run.ID, sibling)
+				return err
+			})
+			path := "/api/runs/" + e.Run.ID
+			w := f.request(f.agent, "POST", path+"/claim", mustHandoffJSON(t, body), f.token)
+			if w.Code != 409 || !strings.Contains(w.Body.String(), reason) {
+				t.Fatalf("obsolete claim: %d %s", w.Code, w.Body.String())
+			}
+			var h agentruns.WorkerHandoff
+			f.call(t, f.person, "GET", path+"/handoff", nil, 200, &h)
+			if h.State != "assigned" || h.WorktreeID != "" || h.AcceptedAt != nil {
+				t.Fatalf("rejected claim persisted phantom writer: %+v", h)
+			}
+			if f.count(t, f.person, `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, e.Run.ID) != 0 || f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='queued' AND account_id IS NULL`, e.Run.ID) != 1 {
+				t.Fatal("obsolete reservation was not released")
+			}
+			if f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.claimed'`) != 0 {
+				t.Fatal("rejected claim wrote acceptance event")
+			}
+			f.call(t, f.person, "POST", path+"/cancel", map[string]any{}, 200, nil)
+			f.addQueue(t, e.NodeID, nil)
+		})
+	}
 }

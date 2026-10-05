@@ -163,6 +163,7 @@ type Supervisor struct {
 	profilePermissions     map[string]bool
 	harnessFailed          map[string]bool
 	dispatchMu             contextMutex
+	checkout               *agentsetup.Store
 	state                  *agentsetup.Store
 	closing                bool
 	blockedAccounts        map[string]bool
@@ -925,6 +926,11 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		entry.mu.Unlock()
 		if !same {
 			return errors.New("journaled assignment pickup changed")
+		}
+	}
+	if !review && !verification {
+		if err := s.acquireCheckout(run.ID); err != nil {
+			return err
 		}
 	}
 	duration := s.maxRunDuration
@@ -2132,6 +2138,9 @@ func (s *Supervisor) Close(ctx context.Context) error {
 				return ctx.Err()
 			}
 		}
+	}
+	if err := s.releaseCheckout(); err != nil {
+		return err
 	}
 	if s.lock != nil {
 		if err := s.lock.Close(); err != nil {

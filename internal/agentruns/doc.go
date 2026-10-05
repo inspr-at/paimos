@@ -9,7 +9,11 @@
 // trace. Routing freezes the project lead generation, ticket updated_at, order
 // revision and a bounded content digest. Claim requires an exact handoff pickup
 // with an opaque host-local worktree digest, and commits launch_unknown before
-// a child may start. The daemon persists this pickup before its network claim
+// a child may start, after all pickup and reservation checks pass. Committed
+// obsolete-route cleanup never accepts a writer. The checkout digest binds
+// host and physical path independently of the daemon. A shared durable local
+// checkout fence survives daemon loss and clears only on clean, confirmed
+// shutdown. The daemon persists this pickup before its network claim
 // and reuses its existing launch journal/outbox on response loss. A started
 // report records launch; finished needs not_attempted, exited or unconfirmed
 // local process evidence. Unconfirmed ownership never releases the writer or

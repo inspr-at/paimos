@@ -155,6 +155,12 @@
     "internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink"
   ],
   "tests": [
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentWorktreeIdentityIgnoresDaemon","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentCompetingDaemonCannotClaimCheckout","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentCheckoutFenceSurvivesDaemonLoss","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentCheckoutReleasesAfterConfirmedExit","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentRestartClearsOwnConfirmedCheckoutFence","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffObsoleteClaimDoesNotAcceptWriter","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffWorktreeIsHeldUntilExit","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentRemoteClaimCarriesExactPickup","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffReceiptsReplayAndSuccession","tier":"ESSENTIAL"},

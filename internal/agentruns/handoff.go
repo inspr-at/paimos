@@ -108,7 +108,7 @@ func orderBrief(ctx context.Context, tx pgx.Tx, o workorders.Order) (string, err
 	return workorders.BriefDigest(title, body, criteria)
 }
 
-func pickupHandoff(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, o workorders.Order, in *WorkerPickup) error {
+func validatePickupHandoff(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, o workorders.Order, in *WorkerPickup) error {
 	h, err := runHandoff(v)
 	if err != nil || h == nil {
 		if err == nil && in != nil {
@@ -158,6 +158,17 @@ func pickupHandoff(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, o 
 	}
 	if workspaceBusy {
 		return workorders.Fail(409, "assignment worktree already has an unconfirmed writer")
+	}
+	return nil
+}
+
+// Acceptance is written only after all claim checks have passed. Validation
+// above has no side effects, so a committed obsolete-route release cannot
+// retain a writer which was never accepted.
+func acceptPickupHandoff(ctx context.Context, tx pgx.Tx, v Run, in *WorkerPickup) error {
+	h, err := runHandoff(v)
+	if err != nil || h == nil {
+		return err
 	}
 	var now time.Time
 	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
