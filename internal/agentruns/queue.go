@@ -348,7 +348,7 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 		return queuePrepared{}, &queueError{Status: 422, Message: "Not ready to queue: " + strings.Join(ready.Missing, ", "), Code: "queue_not_ready", Readiness: &ready}
 	}
 	if err = requireWriterFree(ctx, tx, t.ID, ""); err != nil {
-		return nil, err
+		return queuePrepared{}, err
 	}
 	if in.Agent != "" {
 		if err = queueValidateTarget(ctx, tx, in); err != nil {
