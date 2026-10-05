@@ -187,13 +187,13 @@ func (m *Module) leadScheduleWait(ctx context.Context, tx pgx.Tx, p tenant.Princ
 				if err != nil {
 					return "", err
 				}
-				// Actual pickup authenticates the dispatching agent's live
-				// queue-coordinator grants in its project (queuePermission). A lead
-				// whose agent lost them is refused there and cannot hold a turn.
-				// Every dispatching key carries the coordinator ceiling; live role
-				// bindings decide, as in worker route readiness.
-				dispatcher := tenant.Principal{ID: candidate.AgentPrincipalID, TenantID: p.TenantID, Kind: tenant.Agent, Scopes: authz.CoordinatorKeyScopes}
-				if err = authz.RequireQueueCoordinatorTx(ctx, step, dispatcher, d.project); errors.Is(err, authz.ErrForbidden) {
+				// Actual pickup authenticates the dispatching agent's key and its
+				// live queue-coordinator grants in its project (queuePermission).
+				// Claiming and reporting need only harness.worker, so the lead's
+				// authority is proven through its own live keys, with their
+				// ceiling and creator bounds, never through an assumed ceiling. A
+				// lead that cannot dispatch is refused there and cannot hold a turn.
+				if err = authz.RequireQueueDispatcherTx(ctx, step, p.TenantID, candidate.AgentPrincipalID, d.project); errors.Is(err, authz.ErrForbidden) {
 					continue
 				} else if err != nil {
 					return "", err

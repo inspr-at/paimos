@@ -49,6 +49,12 @@ func fairWorking(t *testing.T, f *harnessFixture) (string, string, map[string]an
 	l := startLead(t, f, 0)
 	l = claimLead(t, f, session, lease, l["revision"])
 	expect(t, f.call(f.agent, "POST", "/api/projects/"+f.project+"/harness-sessions/"+session+"/heartbeat", map[string]any{"phase": "working", "activity": "idle", "activity_sequence": 1}, lease), 200)
+	// A working lead that competes for turns dispatches with its own live key.
+	// Fairness proves that key, so the fixture key carries the coordinator ceiling.
+	f.tx(t, f.agent, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=$2 WHERE principal_id=$1`, f.agent.ID, authz.CoordinatorKeyScopes)
+		return err
+	})
 	return session, lease, l
 }
 
