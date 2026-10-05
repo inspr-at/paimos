@@ -97,6 +97,7 @@ type releaseFacts struct {
 // facts are the durable inputs stage derivation is allowed to see.
 // Heartbeats, timers, forecasts and client stage strings are not inputs.
 type facts struct {
+	ReleasesMode               bool
 	ProjectID                  string
 	NodeKey                    string
 	ProjectKey                 string
@@ -204,6 +205,9 @@ func launchReadiness(f facts) LaunchReadiness {
 }
 
 func project(f facts) (stage, key string, available bool, reason, approvalID string, blocked bool) {
+	if f.ReleasesMode {
+		return stagePlan, actionPlanNext, false, "This project plans with releases", "", false
+	}
 	if f.ImportedStage != "" {
 		switch {
 		case f.Release != nil && f.Release.State == "candidate":

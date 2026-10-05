@@ -5,12 +5,14 @@ package nodes
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -229,6 +231,11 @@ func (m *Module) rewriteTagAssignments(ctx context.Context, tx pgx.Tx, p tenant.
 		return err
 	}
 	for _, id := range ids {
+		if err := delivery.RefuseReleaseNodes(ctx, tx, []string{id}); errors.Is(err, delivery.ErrReleaseAPI) {
+			continue
+		} else if err != nil {
+			return err
+		}
 		before, err := loadNode(ctx, tx, id, true)
 		if err != nil {
 			return err

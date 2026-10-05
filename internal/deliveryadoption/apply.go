@@ -1,0 +1,386 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package deliveryadoption
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"sort"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+)
+
+// apply has no network/storage effects. Every mapping is rebuilt inside its
+// final fenced transaction; only that exact verified source can switch mode.
+func (s *Service) apply(ctx context.Context, a Authority, j job) (bool, error) {
+	if !s.cfg.RecoveryReconciled {
+		return false, ErrPrerequisite
+	}
+	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(ctx, a.Executor), 120*time.Second)
+	defer cancel()
+	unchanged := false
+	err := db.InTenant(ctx, s.pool, a.Executor.TenantID, func(tx pgx.Tx) error {
+		if err := limits(ctx, tx, "60s"); err != nil {
+			return err
+		}
+		// Importer uses its namespace key before pairing/tree. Never upgrade a
+		// shared tree lock, nor acquire any importer/resource lock after events.
+		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,42))`, a.Executor.TenantID+":relation-backfill"); err != nil {
+			return err
+		}
+		if err := mutationFence(ctx, tx, a.Executor); err != nil {
+			return err
+		}
+		if err := authorize(ctx, tx, a, j.Identity.Project); err != nil {
+			return err
+		}
+		var adopted bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM project_delivery WHERE project_node_id=$1)`, j.Identity.Project).Scan(&adopted); err != nil {
+			return err
+		}
+		if adopted {
+			unchanged = true
+			return nil
+		}
+		current, err := s.loadJob(ctx, tx, a.Executor.TenantID, j.Identity.Project, false)
+		if err != nil {
+			return err
+		}
+		if current.recoveryUnknown() {
+			return capacityError("cleanup_blocked")
+		}
+		if current.Generation != j.Generation || current.Token != j.Token || current.Identity.Attempt != j.Identity.Attempt || !current.LeaseUntil.After(s.now()) || !current.Deadline.After(s.now()) || current.State != "applying" || current.Pin == "" || current.VerifiedAt == nil || current.ResourceAttempt != j.Identity.Attempt {
+			return ErrLease
+		}
+		var evidence bool
+		if err = tx.QueryRow(ctx, `SELECT evidence_attempt_id=attempt_id AND NOT report_incomplete AND report_ref IS NOT NULL AND instance_id=$2 AND rollout_artifact_ref=$3 AND rollout_authorization_ref=$4 AND executing_principal_id=$5 AND authorizing_principal_id=$6 FROM delivery_adoption_jobs WHERE project_node_id=$1`, j.Identity.Project, s.cfg.Instance, s.cfg.Artifact, a.Reference, a.Executor.ID, a.Authorizer.ID).Scan(&evidence); err != nil {
+			return err
+		}
+		if !evidence {
+			return ErrLease
+		}
+		protected := false
+		for _, op := range current.Journal.Operations {
+			if op.Kind == "pin" && op.Attempt == j.Identity.Attempt && op.Status == "complete" && op.Pin == current.Pin && op.Identity == current.Identity {
+				protected = true
+			}
+		}
+		if !protected {
+			return ErrPrerequisite
+		}
+		r, err := s.plan(ctx, tx, current.Identity)
+		if err != nil {
+			return err
+		}
+		if !r.Eligible || r.Incomplete {
+			return &failure{code: "eligibility"}
+		}
+		if r.Fingerprint != current.Fingerprint || r.Fingerprint != j.Fingerprint || current.ReportDigest != j.ReportDigest || current.Pin != j.Pin {
+			return ErrStale
+		}
+		// Lock target nodes in one sorted batch before the final checkpoint row.
+		ids := []string{j.Identity.Project}
+		for _, v := range r.Releases {
+			ids = append(ids, v.ID)
+		}
+		for _, v := range r.Members {
+			ids = append(ids, v.ID)
+		}
+		sort.Strings(ids)
+		rows, err := tx.Query(ctx, `SELECT id FROM nodes WHERE id=ANY($1::uuid[]) ORDER BY id FOR SHARE`, ids)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+		}
+		err = rows.Err()
+		rows.Close()
+		if err != nil {
+			return err
+		}
+		current, err = s.loadJob(ctx, tx, a.Executor.TenantID, j.Identity.Project, true)
+		if err != nil {
+			return err
+		}
+		if current.Generation != j.Generation || current.Token != j.Token || !current.Deadline.After(s.now()) {
+			return ErrLease
+		}
+		now := s.now()
+		if _, err = tx.Exec(ctx, `INSERT INTO project_delivery(tenant_id,project_node_id,adopted_at,adopted_by,next_sequence) VALUES($1,$2,$3,$4,$5)`, a.Executor.TenantID, j.Identity.Project, now, a.Executor.ID, r.NextSequence); err != nil {
+			return err
+		}
+		changes := []events.Change{}
+		for _, v := range r.Releases {
+			if _, err = tx.Exec(ctx, `INSERT INTO project_releases(tenant_id,project_node_id,release_node_id,visibility,sequence,state,rank,version_scheme,version,released_at,origin) VALUES($1,$2,$3,'published',$4,$5,$6,nullif($7,''),nullif($8,''),$9,$10)`, a.Executor.TenantID, j.Identity.Project, v.ID, v.Sequence, v.State, v.Rank, v.Scheme, v.Version, v.ReleasedAt, v.Origin); err != nil {
+				return err
+			}
+			if v.Sequence != v.OriginalSequence {
+				if v.DefaultTitle {
+					if _, err = tx.Exec(ctx, `UPDATE nodes SET title=$2,updated_at=greatest(clock_timestamp(),updated_at+interval '1 microsecond') WHERE id=$1`, v.ID, fmt.Sprintf("Release %d", v.Sequence)); err != nil {
+						return err
+					}
+				}
+				id := v.ID
+				changes = append(changes, events.Change{NodeID: &id, Type: "release.renumbered", Before: map[string]any{"sequence": v.OriginalSequence}, After: map[string]any{"sequence": v.Sequence, "origin": "adoption", "undo_available": false}})
+			}
+		}
+		for _, v := range r.Members {
+			var release any
+			if v.Release != "" {
+				release = v.Release
+			}
+			if _, err = tx.Exec(ctx, `INSERT INTO ships_in(tenant_id,project_node_id,item_node_id,release_node_id,rank,source,placed_by,placed_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8)`, a.Executor.TenantID, j.Identity.Project, v.ID, release, v.Rank, v.Source, a.Executor.ID, now); err != nil {
+				return err
+			}
+		}
+		if _, err = tx.Exec(ctx, `UPDATE delivery_adoption_jobs SET state='adopted',adopted_at=$2,lease_token=NULL,lease_until=NULL,reason_code=NULL,reason_message='',cleanup_state='pending',next_reconcile_at=$2,revision=revision+1,updated_at=$2 WHERE project_node_id=$1`, j.Identity.Project, now); err != nil {
+			return err
+		}
+		project := j.Identity.Project
+		changes = append(changes, events.Change{NodeID: &project, Type: "delivery.adopted", After: map[string]any{"counts": r.Counts, "migration_version": Migration, "instance_id": s.cfg.Instance, "rollout_artifact_ref": s.cfg.Artifact, "rollout_authorization_ref": a.Reference, "attempt_id": j.Identity.Attempt, "report_ref": j.ReportRef, "report_digest": j.ReportDigest, "backup_ref": j.BackupRef, "backup_digest": j.BackupDigest, "recovery_pin_manifest_ref": j.Pin, "undo_available": false}})
+		for _, change := range changes {
+			if _, err = events.Append(ctx, tx, a.Executor, change); err != nil {
+				return err
+			}
+		}
+		return ctx.Err()
+	})
+	return unchanged, err
+}
+
+type Verification struct {
+	Mode                      string `json:"mode"`
+	JourneyMembers            int    `json:"journey_members"`
+	AdoptedMembers            int    `json:"adopted_members"`
+	MissingArchiveMembers     int    `json:"missing_archive_members"`
+	PostAdoptionJourneyEvents int    `json:"post_adoption_journey_events"`
+	OverCapacity              bool   `json:"over_capacity"`
+	Incomplete                bool   `json:"incomplete"`
+	OK                        bool   `json:"ok"`
+}
+
+// Verify is read-only evidence. It does not un-adopt, hide unexpected journey
+// publications, or grant authority to boot a pre-E binary on an adopted DB.
+func (s *Service) Verify(ctx context.Context, p tenant.Principal, project string) (Verification, error) {
+	out := Verification{Mode: "journey"}
+	if !uuidRE.MatchString(project) {
+		return out, errors.New("invalid project")
+	}
+	err := s.snapshot(ctx, p, func(tx pgx.Tx) error {
+		if err := authz.RequireTx(ctx, tx, p, "releases.read", authz.Scope{ProjectID: project}); err != nil {
+			return err
+		}
+		var adoptedAt *time.Time
+		if err := tx.QueryRow(ctx, `SELECT (SELECT adopted_at FROM project_delivery WHERE project_node_id=$1)`, project).Scan(&adoptedAt); err != nil {
+			return err
+		}
+		if adoptedAt == nil {
+			out.OK = true
+			return nil
+		}
+		out.Mode = "releases"
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM journey_tickets WHERE project_node_id=$1 AND release_node_id IS NOT NULL LIMIT 5001) b`, project).Scan(&out.JourneyMembers); err != nil {
+			return err
+		}
+		if err := s.verifyMembers(ctx, tx, p, project, &out); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM events WHERE at>$2 AND type LIKE 'journey.%' AND (node_id=$1 OR node_id IN (SELECT release_node_id FROM journey_releases WHERE project_node_id=$1)) LIMIT 1001) b`, project, adoptedAt).Scan(&out.PostAdoptionJourneyEvents); err != nil {
+			return err
+		}
+		var releases, members int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM project_releases WHERE project_node_id=$1 AND state NOT IN ('released','abandoned') LIMIT 51) b`, project).Scan(&releases); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx, `SELECT coalesce(max(n),0) FROM (SELECT (SELECT count(*) FROM (SELECT 1 FROM ships_in s WHERE s.project_node_id=$1 AND s.release_node_id=r.release_node_id LIMIT 1001) b) n FROM project_releases r WHERE r.project_node_id=$1 ORDER BY r.release_node_id LIMIT 201) b`, project).Scan(&members); err != nil {
+			return err
+		}
+		out.OverCapacity = releases > 50 || members > 1000
+		out.Incomplete = out.Incomplete || out.JourneyMembers > 5000 || out.AdoptedMembers > 5000 || out.PostAdoptionJourneyEvents > 1000
+		out.OK = !out.Incomplete && !out.OverCapacity && out.MissingArchiveMembers == 0 && out.PostAdoptionJourneyEvents == 0
+		return nil
+	})
+	return out, err
+}
+
+func (s *Service) verifyMembers(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, out *Verification) error {
+	if out.JourneyMembers > 5000 {
+		out.Incomplete = true
+		return nil
+	}
+	// The request already passed releases.read for the original project. Its
+	// reader may no longer see a member or the destination references in move
+	// events. Bind the configured executor to this adopted job and check its
+	// current source permission in the same read-only snapshot. Even that
+	// executor may have project-only visibility; the bounded evidence step below
+	// uses service visibility. No destination data leaves this aggregate check,
+	// and the caller's visibility (including its key creator) is restored.
+	a, ok := s.authority(p.TenantID)
+	if !ok {
+		return ErrPrerequisite
+	}
+	var bound bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_adoption_jobs
+	 WHERE tenant_id=$1 AND project_node_id=$2 AND instance_id=$3 AND migration_version=$4
+	 AND state='adopted' AND executing_principal_id=$5 AND authorizing_principal_id=$6
+	 AND rollout_authorization_ref=$7)`, p.TenantID, project, s.cfg.Instance, Migration, a.Executor.ID, a.Authorizer.ID, a.Reference).Scan(&bound); err != nil {
+		return err
+	}
+	if !bound {
+		return ErrPrerequisite
+	}
+	var active bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE tenant_id=$1 AND id=$2 AND kind=$3 AND status='active')`, p.TenantID, a.Executor.ID, string(a.Executor.Kind)).Scan(&active); err != nil {
+		return err
+	}
+	if !active {
+		return authz.ErrForbidden
+	}
+	if err := enterSnapshotPrincipal(ctx, tx, a.Executor); err != nil {
+		return err
+	}
+	if err := authz.RequireTx(ctx, tx, a.Executor, "releases.read", authz.Scope{ProjectID: project}); err != nil {
+		return err
+	}
+	if err := s.verifyMembersWithAuthority(ctx, tx, a.Executor, project, out); err != nil {
+		return err
+	}
+	return enterSnapshotPrincipal(ctx, tx, p)
+}
+
+func (s *Service) verifyMembersWithAuthority(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, out *Verification) (err error) {
+	// The adoption event binds the immutable report. Placement.source describes
+	// the latest edit, so a legitimate rerank, move or rollover may replace it.
+	var ref, digest string
+	var adoptionEvent int64
+	if err := tx.QueryRow(ctx, `SELECT id,after->>'report_ref',after->>'report_digest' FROM events WHERE tenant_id=$2 AND node_id=$1 AND type='delivery.adopted' ORDER BY id DESC LIMIT 1`, project, p.TenantID).Scan(&adoptionEvent, &ref, &digest); err != nil {
+		return err
+	}
+	if s.reports == nil || !digestRE.MatchString(digest) {
+		return ErrPrerequisite
+	}
+	raw, err := s.reports.Get(ctx, ref)
+	if err != nil {
+		return err
+	}
+	if len(raw) > MaxReportBytes || sum(raw) != digest {
+		return errors.New("adoption report integrity verification failed")
+	}
+	var report Report
+	if err = json.Unmarshal(raw, &report); err != nil {
+		return err
+	}
+	if report.Identity.Tenant != p.TenantID || report.Identity.Project != project || report.Identity.Instance != s.cfg.Instance || report.Identity.Migration != Migration || !report.Eligible || report.Incomplete || len(report.Members) > 5000 {
+		return errors.New("invalid immutable adoption report")
+	}
+	adopted := map[string]string{}
+	for _, member := range report.Members {
+		if member.Source == "adopted" {
+			if !uuidRE.MatchString(member.ID) || !uuidRE.MatchString(member.Release) || adopted[member.ID] != "" {
+				return errors.New("invalid immutable adoption membership")
+			}
+			adopted[member.ID] = member.Release
+		}
+	}
+	// Only the source archive's bounded membership checks and latest matching
+	// mutation booleans need tenant-wide project visibility. Authorization and
+	// immutable-report loading above retain the executor's actual visibility.
+	// Preserve tenant/principal/key-creator context, read-only isolation and the
+	// exact visibility setting; no destination rows or event payloads escape.
+	var priorVisibility string
+	if err = tx.QueryRow(ctx, `SELECT current_setting('aeon.visible_projects')`).Scan(&priorVisibility); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `SELECT set_config('aeon.visible_projects','*',true)`); err != nil {
+		return err
+	}
+	defer func() {
+		_, restoreErr := tx.Exec(ctx, `SELECT set_config('aeon.visible_projects',$1,true)`, priorVisibility)
+		err = errors.Join(err, restoreErr)
+	}()
+	rows, err := tx.Query(ctx, `SELECT j.ticket_node_id::text,j.release_node_id::text,s.item_node_id IS NOT NULL FROM journey_tickets j LEFT JOIN ships_in s ON s.tenant_id=j.tenant_id AND s.item_node_id=j.ticket_node_id WHERE j.project_node_id=$1 AND j.tenant_id=$2 AND j.release_node_id IS NOT NULL ORDER BY j.ticket_node_id LIMIT 5001`, project, p.TenantID)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	missing := []string{}
+	for rows.Next() {
+		var id, release string
+		var retained bool
+		if err = rows.Scan(&id, &release, &retained); err != nil {
+			return err
+		}
+		if adopted[id] != release {
+			out.MissingArchiveMembers++
+		} else if !retained {
+			missing = append(missing, id)
+		} else {
+			out.AdoptedMembers++
+		}
+		delete(adopted, id)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	removed, err := verifyRemovedMembers(ctx, tx, p.TenantID, adoptionEvent, missing)
+	if err != nil {
+		return err
+	}
+	out.AdoptedMembers += removed
+	out.MissingArchiveMembers += len(missing) - removed
+	// A missing archive reference is also a lost part of the adoption evidence.
+	out.MissingArchiveMembers += len(adopted)
+	return nil
+}
+
+// A project move removes ranked backlog rows and Undo returns them unranked.
+// The latest membership mutation after the immutable adoption event must
+// explain each absent row; an old removal cannot excuse a later lost placement.
+// Move and Undo snapshots record actual removals, including descendants and
+// placements created after the original move. An Undo with no removals cannot
+// supersede an intervening placement for a descendant that left the subtree.
+// Placement Undo records a zero-revision after image.
+func verifyRemovedMembers(ctx context.Context, tx pgx.Tx, tenantID string, adoptionEvent int64, missing []string) (int, error) {
+	if len(missing) == 0 {
+		return 0, nil
+	}
+	// At most 5,000 candidates, one latest event per candidate, within the
+	// verification snapshot's statement and transaction deadlines. Only booleans
+	// leave SQL; arbitrary event snapshots are never decoded or copied into Go.
+	rows, err := tx.Query(ctx, `SELECT coalesce(latest.removed,false)
+	 FROM unnest($1::uuid[]) AS candidate(item_id)
+	 LEFT JOIN LATERAL (
+	   SELECT CASE WHEN e.type='ships_in.changed' THEN
+	     e.after->'members' @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text,'revision',0))
+	     ELSE true END AS removed
+	   FROM events e
+	   WHERE e.tenant_id=$3 AND e.id>$2 AND (
+	     (e.type='ships_in.changed' AND e.after->'members' @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text)))
+	     OR (e.type IN ('node.moved','node.project_moved','node.bulk_changed') AND
+	       e.before->'ships_in_before_move' @> jsonb_build_array(jsonb_build_object('item_id',candidate.item_id::text))))
+	   ORDER BY e.id DESC LIMIT 1
+	 ) latest ON true LIMIT 5000`, missing, adoptionEvent, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	defer rows.Close()
+	removed := 0
+	for rows.Next() {
+		var explained bool
+		if err = rows.Scan(&explained); err != nil {
+			return 0, err
+		}
+		if explained {
+			removed++
+		}
+	}
+	return removed, rows.Err()
+}

@@ -48,6 +48,8 @@ import (
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/decisiondesk"
+	"github.com/inspr-at/paimos/internal/delivery"
+	"github.com/inspr-at/paimos/internal/deliveryadoption"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/embedding"
 	"github.com/inspr-at/paimos/internal/events"
@@ -353,6 +355,11 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	reviewMod := crossreview.New(pool, reviewPublisher)
 	reviewMod.ConfigureWebhook(cfg.ReviewWebhookSecret)
 	go reviewMod.RunStatusReporter(ctx)
+	adoptionWorker, err := deliveryadoption.FromEnvironment(ctx, pool, cfg.PublicURL)
+	if err != nil {
+		closeListener()
+		return fmt.Errorf("delivery adoption: %w", err)
+	}
 	api := &httpapi.Server{
 		Pool:                    pool,
 		Brand:                   &productBrand,
@@ -376,7 +383,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			workspaceModels,
 			parentBenefits,
 			relations.New(pool),
-			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), events.WithCausalUndoHandlers(nodes.CausalUndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(themes.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(statusautopilot.UndoHandlers()), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
+			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), events.WithCausalUndoHandlers(nodes.CausalUndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(themes.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(statusautopilot.UndoHandlers()), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(delivery.NewStore(pool).UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
 			search.NewWithResolver(pool, workspaceModels.Embeddings),
 			views.New(pool),
 			activity.New(pool),
@@ -411,7 +418,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			// R3: journey
 			journey.New(pool),
 			requirements.New(pool),
-			releases.New(pool),
+			releases.New(pool, releases.WithAdoptionReporting(adoptionWorker), releases.WithProductProject(adoptionWorker.ProductProject())),
 			statusAuto,
 			recurringWork,
 			intake.NewDelegated(pool, tokenMod.Keys, aithemaHost),
@@ -438,6 +445,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if messagingMod != nil {
 		api.Modules = append(api.Modules, messagingMod)
 	}
+
 	if ln == nil {
 		listened, lerr := net.Listen("tcp", cfg.Addr)
 		if lerr != nil {
@@ -454,6 +462,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	errCh := make(chan error, 1)
 	go func() {
 		api.SetServing(true)
+		go adoptionWorker.Run(ctx)
 		err := srv.Serve(ln)
 		api.SetServing(false)
 		if errors.Is(err, http.ErrServerClosed) {

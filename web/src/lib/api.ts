@@ -229,6 +229,7 @@ export interface ListPerson { id: string; name: string; has_avatar?: boolean }
 export interface ListParent { id: string; key: string; title: string; kind_slug: string }
 export interface ListProject { id: string; key: string; title: string }
 export interface LeadWorker { name: string; key: string }
+export interface DeliveryOrder { release_id: string | null; release_rank: string | null; rank: string | null; expedite: boolean }
 export interface ListItem extends WorkNode {
   kind_slug: string; kind_label: string; priority: string | null; assignee: ListPerson | null
   parent: ListParent | null; children_count: number; project: ListProject | null
@@ -239,14 +240,17 @@ export interface ListItem extends WorkNode {
   lead_worker?: LeadWorker | null
   // Model, tokens and (with harness.read) cost for the planning columns (AEON-329).
   planning?: TicketPlanning
+  // Local null means a requested projection authoritatively has no placement;
+  // undefined means the request did not ask for it. The wire omits both.
+  delivery_order?: DeliveryOrder | null
 }
 export type Facets = Record<string, Record<string, number>>
-export interface ListPage extends Page<ListItem> { facets?: Facets }
+export interface ListPage extends Page<ListItem> { facets?: Facets; facet_labels?: Record<string, Record<string, string>> }
 export interface ListQuery {
  shape?: string[]; depth?: string[]
   human_check?: string[]
   within?: string; kind?: string[]; state?: string[]; priority?: string[]; assignee?: string[]
-  tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]
+  tag?: string[]; epic?: string[]; cost_unit?: string[]; release?: string[]; ships_in?: string[]
   date_field?: string; date_from?: string; date_to?: string
   q?: string; hide_closed?: boolean; hide_states?: string[]; facets?: string[]; sort?: string; cursor?: string; limit?: number; parent_id?: string
   work_state?: string[]; work_bucket?: WorkCountBucket[]
@@ -281,6 +285,9 @@ export const listNodes = async (params: ListQuery, options: { signal?: AbortSign
   const start = tick()
   let position: number | undefined
   const page = await json<ListPage>(`/nodes${listQuery(params)}`, 'GET', undefined, {}, options.signal, response => { position = parsePosition(response) })
+  const deliveryRequested = params.sort?.split(',').some(key => key.replace(/^-/, '') === 'order')
+    || !!params.ships_in?.length || params.facets?.includes('ships_in')
+  if (deliveryRequested) for (const item of page.items) item.delivery_order ??= null
   learnPictures(page.items.map(item => item.assignee))
   return stampAt(page, { position, start }, 2)
 }

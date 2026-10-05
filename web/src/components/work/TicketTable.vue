@@ -34,6 +34,9 @@ import { etaFromTicket, progressAccessibleName, progressReportedAt } from '../..
 const NO_WORKERS: LiveAgent[] = []
 
 const props = defineProps<{
+  // Read-only delivery expansion reuses the ticket row without a second toolbar.
+  embedded?: boolean
+  rowHref?: (row: { key: string }) => string
   // How many rows the first page will likely show, so the skeleton holds that height.
   expectedRows?: number
   groups: RowGroup[]
@@ -53,6 +56,7 @@ const props = defineProps<{
   hidingClosed: boolean
   collapsed: Set<string>
   total: number | null
+  externalCount?: boolean
   projectKey: string
   scrollRoot: HTMLElement | null
   now: number
@@ -132,7 +136,7 @@ const phone = ref(phoneQuery.matches)
 const live = useLiveAgents()
 const queue = useWorkQueue()
 const queued = (row: ListItem) => queueable(row) ? queue.entry(props.projectId, row.id) : null
-const mayAssign = computed(() => can('nodes.write', props.projectId) || can('run.create', props.projectId))
+const mayAssign = computed(() => !props.embedded && (can('nodes.write', props.projectId) || can('run.create', props.projectId)))
 const workersById = computed(() => ticketWorkers(live.forProject(props.projectId), props.projectId))
 function workersOf(row: ListItem) { return workersById.value.get(row.id) ?? NO_WORKERS }
 // The server names the lead. Other live workers stay in the feed's order after it.
@@ -163,7 +167,13 @@ function progressOf(row: ListItem): { pct: number; stale: boolean; label: string
   if (row.eta?.leaf_count && row.eta.leaf_count > 1) label += `; ${row.eta.estimated_leaves ?? 0} of ${row.eta.leaf_count} leaves estimated${row.eta.progress_basis === 'leaves' ? '; progress counts leaves' : ''}`
   return { pct, stale, label: props.liveStale ? `${label}. Showing the last successful update.` : label }
 }
-const layout = computed(() => visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false }))
+const layout = computed(() => {
+  if (props.embedded) {
+    const ids: ColumnId[] = ['key', 'title', 'status', 'estimate', 'progress', 'eta', 'assignee']
+    return { columns: ids.map(id => COLUMN_BY_ID.get(id)!), customised: false }
+  }
+  return visibleColumns(width.value, { phone: phone.value, present: present.value, prefs: props.prefs, costAllowed: props.costAllowed ?? false })
+})
 const columns = computed(() => layout.value.columns.map(def => ({ ...def, field: def.sort, cls: CLS[def.id] })))
 const ids = computed(() => columns.value.map(column => column.id))
 const has = (id: ColumnId) => ids.value.includes(id)
@@ -367,7 +377,7 @@ function ariaSort(field: SortField | null) {
   const current = sortOf(field)
   return current ? (current.desc ? 'descending' : 'ascending') : field ? 'none' : undefined
 }
-function href(row: { key: string }) { return `/p/${encodeURIComponent(props.projectKey)}/${encodeURIComponent(row.key)}` }
+function href(row: { key: string }) { return props.rowHref?.(row) ?? `/p/${encodeURIComponent(props.projectKey)}/${encodeURIComponent(row.key)}` }
 function parentOf(row: ListItem) {
   // Direct parents only: an epic, or the ticket a task belongs to. The project itself is implied.
   if (!row.parent || row.parent.kind_slug === 'project') return null
@@ -463,7 +473,10 @@ function longPress(event: Event, row: ListItem) {
   emit('select', row, 'toggle')
 }
 function linkClick(event: MouseEvent) {
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return // let the browser open a tab
+  if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) {
+    if (props.embedded) event.stopPropagation() // Keep the native link from also opening through the row handler.
+    return // let the browser open a tab
+  }
   event.preventDefault()
 }
 function groupEpicRow(group: RowGroup) { return group.epic ? props.rowsById.get(group.epic.id) : undefined }
@@ -494,12 +507,12 @@ defineExpose({
 </script>
 
 <template>
-  <div ref="card" class="table-card" :class="[density, { selectable, selecting, customised: layout.customised, overflowing: !phone && layoutWidth > width + 1 }]">
+  <div ref="card" class="table-card" :class="[density, { embedded, selectable, selecting, customised: layout.customised, overflowing: !phone && layoutWidth > width + 1 }]">
     <table :style="!phone && layout.customised ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="outline ? 'Ticket outline' : 'Tickets'" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
         <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
       </colgroup>
-      <thead>
+      <thead v-if="!embedded">
         <tr>
           <th v-for="column in columns" :key="column.label" scope="col" :class="[column.cls, { end: column.end }]" :aria-sort="ariaSort(column.field)">
             <input
@@ -678,6 +691,7 @@ defineExpose({
               stale: !!liveLabels?.has(entry.row.id), 'live-flash': !!liveFlash?.has(entry.row.id),
             }"
             :style="entry.tree ? { '--depth': entry.tree.depth } : undefined"
+            :data-planning-item="embedded ? entry.row.id : undefined"
             :aria-selected="cursorId === entry.row.id" :aria-level="entry.tree ? entry.tree.depth + 1 : undefined"
             :aria-describedby="planningDescribedBy(entry.row) || undefined"
             :aria-expanded="entry.tree?.hasChildren ? entry.tree.expanded : undefined"
@@ -697,6 +711,7 @@ defineExpose({
               </button>
             </td>
             <td class="c-key">
+              <slot v-if="embedded" name="planning-handle" :row="entry.row" />
               <div class="cell">
                 <input
                   v-if="selectable" type="checkbox" class="row-check" :checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" tabindex="-1"
@@ -716,7 +731,7 @@ defineExpose({
                   <span v-else class="twisty-spacer" />
                 </span>
                 <TicketTypeIcon :kind="entry.row.kind_slug" :level-name="workLabel(entry.row)" :level-icon="workIcon(entry.row)" :recurrence="entry.row.recurrence" />
-                <a class="title-link" :href="href(entry.row)" tabindex="-1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
+                <a class="title-link" :href="href(entry.row)" :tabindex="embedded ? 0 : -1" @click="linkClick"><span v-clip-tip="entry.row.title" class="title-text"><template v-for="(part, i) in highlight(entry.row.title, query)" :key="i"><mark v-if="part.match">{{ part.text }}</mark><template v-else>{{ part.text }}</template></template></span></a>
                 <span v-if="liveLabels?.has(entry.row.id)" class="live-label">{{ liveLabels.get(entry.row.id) }}</span>
                 <span v-if="childCount(entry)" class="child-count mono" :data-tip="plural(childCount(entry), 'child item')">{{ childCount(entry) }}</span>
                 <span v-if="!entry.tree && epicChip(entry.row)" class="parent-chip" :class="{ epic: epicChip(entry.row)!.kind_slug === 'epic' }" :data-tip="`${kindLabel(epicChip(entry.row)!.kind_slug)} ${epicChip(entry.row)!.key}\n${epicChip(entry.row)!.title}`">
@@ -732,14 +747,15 @@ defineExpose({
                   <span class="mono">{{ entry.tree.stats.done }}/{{ entry.tree.stats.scope }}</span>
                 </span>
               </div>
-              <span class="row-actions">
+              <slot v-if="embedded" name="planning-menu" :row="entry.row" />
+              <span v-if="!embedded" class="row-actions">
                 <QueueAction v-if="entry.row.is_leaf !== false" :row="entry.row" :project-id="projectId" />
                 <button type="button" class="icon-btn sm flat" :aria-label="`Open ${entry.row.key} in a new tab`" data-tip="Open in new tab" @click.stop="emit('newTab', entry.row)"><AppIcon name="external" :size="13" /></button>
               </span>
             </td>
             <template v-for="column in columns.slice(2)" :key="column.id">
               <td v-if="column.id === 'status'" class="c-status" :data-column-label="column.label">
-                <div class="cell"><button type="button" class="status-btn" :aria-label="`Status: ${statusMeta(entry.row.state).label}${queued(entry.row) ? `, queued #${queued(entry.row)!.position}` : ''}. Change status of ${entry.row.key}`" aria-haspopup="menu" @click.stop="statusClick($event, entry.row)">
+                <div class="cell"><button type="button" class="status-btn" :disabled="embedded" :aria-label="`Status: ${statusMeta(entry.row.state).label}${queued(entry.row) ? `, queued #${queued(entry.row)!.position}` : ''}${embedded ? '' : `. Change status of ${entry.row.key}`}`" aria-haspopup="menu" @click.stop="statusClick($event, entry.row)">
                   <StatusIcon :state="entry.row.state" />
                   <span>{{ statusMeta(entry.row.state).label }}</span><span v-if="queued(entry.row)" class="q-pos">· #{{ queued(entry.row)!.position }}</span>
                 </button><QueueStaleHint :row="entry.row" /></div>
@@ -751,11 +767,11 @@ defineExpose({
                 </div>
               </td>
               <td v-else-if="column.id === 'assignee'" class="c-assignee" :data-column-label="column.label">
-                <div class="cell"><button type="button" class="assignee-btn" :disabled="!mayAssign" :aria-label="`Assignee: ${queued(entry.row) ? `queued #${queued(entry.row)!.position}` : entry.row.assignee?.name ?? 'Unassigned'}. Change assignee of ${entry.row.key}`" aria-haspopup="menu" @click.stop="emit('assignee', entry.row, $event.currentTarget as HTMLElement)">
+                <div class="cell"><button type="button" class="assignee-btn" :disabled="!mayAssign" :aria-label="`Assignee: ${queued(entry.row) ? `queued #${queued(entry.row)!.position}` : entry.row.assignee?.name ?? (embedded ? 'Not reported' : 'Unassigned')}${embedded ? '' : `. Change assignee of ${entry.row.key}`}`" aria-haspopup="menu" @click.stop="emit('assignee', entry.row, $event.currentTarget as HTMLElement)">
                   <span v-if="entry.row.assignee" class="owner" :class="{ 'with-workers': assigneeWorkers(entry.row).length || queued(entry.row) }" :data-tip="entry.row.assignee.name"><PersonAvatar :id="entry.row.assignee.id" :name="entry.row.assignee.name" :size="20" /><span v-if="!queued(entry.row)" class="person-name">{{ entry.row.assignee.name }}</span></span>
                   <QueueIndicator v-if="queued(entry.row)" :entry="queued(entry.row)!" :manual="queue.snapshots[projectId]?.manual_order" />
                   <span v-else-if="assigneeWorkers(entry.row).length && !entry.row.assignee"><AppIcon name="chevron" :size="12" /></span>
-                  <span v-else-if="!entry.row.assignee" class="empty" aria-label="Unassigned">—</span>
+                  <span v-else-if="!entry.row.assignee" class="empty" :aria-label="embedded ? 'Assignee not reported' : 'Unassigned'">—</span>
                 </button><TicketWorkers v-if="!queued(entry.row) && assigneeWorkers(entry.row).length" :workers="assigneeWorkers(entry.row)" :ticket-key="entry.row.key" :stale="liveStale" /></div>
               </td>
               <td v-else-if="column.id === 'suggested'" class="c-suggested" :data-column-label="column.label"><div class="cell"><SuggestedReleaseCell :row="entry.row" :project-id="projectId" :now="now" /></div></td>
@@ -813,13 +829,13 @@ defineExpose({
       </tbody>
     </table>
 
-    <div v-if="error" class="state" role="alert">
+    <div v-if="!embedded && error" class="state" role="alert">
       <span class="state-icon danger"><AppIcon name="alert" :size="18" /></span>
       <h2>Tickets could not be loaded</h2>
       <p>{{ error }}</p>
       <button type="button" class="btn" @click="emit('retry')"><AppIcon name="refresh" :size="14" />Try again</button>
     </div>
-    <div v-else-if="!loading && !entries.length" class="state">
+    <div v-else-if="!embedded && !loading && !entries.length" class="state">
       <span class="state-icon"><AppIcon :name="filtered ? 'filter' : 'inbox'" :size="18" /></span>
       <template v-if="filtered">
         <h2>No tickets match these filters</h2>
@@ -838,10 +854,10 @@ defineExpose({
       </template>
     </div>
 
-    <div ref="sentinel" class="sentinel" aria-hidden="true" />
-    <div v-if="loadingMore" class="list-foot" role="status"><span class="spinner" aria-hidden="true" />Loading more tickets…</div>
-    <div v-else-if="moreError" class="list-foot error" role="alert">More tickets could not be loaded. <button type="button" class="btn sm" @click="emit('more')">Retry</button></div>
-    <div v-else-if="!loading && !error && total && !hasMore && entries.length" class="list-foot end phone-only">{{ plural(total, 'ticket') }}</div>
+    <div v-if="!embedded" ref="sentinel" class="sentinel" aria-hidden="true" />
+    <div v-if="!embedded && loadingMore" class="list-foot" role="status"><span class="spinner" aria-hidden="true" />Loading more tickets…</div>
+    <div v-else-if="!embedded && moreError" class="list-foot error" role="alert">More tickets could not be loaded. <button type="button" class="btn sm" @click="emit('more')">Retry</button></div>
+    <div v-else-if="!embedded && !externalCount && !loading && !error && total && !hasMore && entries.length" class="list-foot end phone-only">{{ plural(total, 'ticket') }}</div>
   </div>
 </template>
 
@@ -852,6 +868,10 @@ defineExpose({
   background: linear-gradient(165deg, var(--surface-raised-2), var(--glass) 60%); box-shadow: var(--shadow);
   container: tickets / inline-size;
 }
+.table-card.embedded { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+.embedded .status-btn:disabled, .embedded .assignee-btn:disabled { opacity: 1; cursor: default; }
+.embedded .ticket-row .c-key { padding-left: 28px; }
+.embedded .c-status .status-btn { padding: 0; }
 .table-card.compact { --row-h: 30px; }
 /* Touch tablets need a full 44px content line plus the row's hairline.
    Both densities keep hit targets inside their row; fine pointers stay dense. */
@@ -1010,6 +1030,8 @@ td.c-title { position: relative; overflow: hidden; }
 /* The parent chip steps out entirely while row actions show, so it is never clipped. */
 @media (hover: hover) { .ticket-row:hover .parent-chip { opacity: 0; } }
 .ticket-row.cursor .parent-chip, td.c-title:focus-within .parent-chip { opacity: 0; }
+/* Release work keeps its context visible; its rows have no inline action tray. */
+.embedded .ticket-row.cursor .parent-chip, .embedded .ticket-row:hover .parent-chip, .embedded td.c-title:focus-within .parent-chip { opacity: 1; }
 /* Hover actions float at the end of the title. Reserve their width on opening,
    so hovering or focusing the recurring marker never shrinks the title link (two 24px
    buttons, the 2px gap, and the 8px inset). With the cell's 12px padding that
@@ -1213,6 +1235,12 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .c-eta { grid-area: updated; justify-self: end; min-width: 0; }
   .c-title { grid-area: title; }
   .ticket-row .c-assignee { display: none !important; }
+  .embedded .ticket-row { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'key status' 'title title' 'estimate assignee' 'progress eta' !important; padding-left: 28px; }
+  .embedded .ticket-row .c-key { padding-left: 0; }
+  .embedded .ticket-row .c-assignee { display: block !important; grid-area: assignee; justify-self: end; }
+  .embedded .ticket-row .c-progress { display: block !important; justify-self: start; }
+  .embedded .ticket-row .c-estimate { display: block !important; justify-self: start; }
+  .embedded .ticket-row .c-eta { display: block !important; grid-area: eta; }
   .title-cell { align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; white-space: normal; }
   .title-cell .kind-glyph, .title-cell .ticket-type-icon { margin-top: 2px; }
   /* The link keeps its 44 px reach; the two-line clamp sits on the text inside it,
@@ -1279,4 +1307,10 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .table-card.overflowing { overflow-x: auto; overscroll-behavior-x: contain; }
   .table-card.overflowing thead th { top: 0; }
 }
+</style>
+
+<style scoped>
+.embedded .c-key { position: relative; }
+.embedded .c-title { padding-right: 44px; }
+@media (pointer: coarse) { .embedded .ticket-row .c-key { padding-left: 48px; } }
 </style>

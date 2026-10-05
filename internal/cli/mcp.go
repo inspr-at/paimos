@@ -50,6 +50,7 @@ func (rt *runtime) mcpServer() *mcp.Server {
 	addWorkTool(s, rt, "knowledge_create", "Create a knowledge entry.", knowledgeCreateArgs{})
 	addWorkTool(s, rt, "knowledge_update", "Update a knowledge entry.", knowledgeUpdateArgs{})
 	addWorkTool(s, rt, "search", "Search issues by free text.", searchArgs{})
+	rt.addReleaseTools(s)
 	return s
 }
 

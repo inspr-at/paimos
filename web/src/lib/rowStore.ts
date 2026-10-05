@@ -26,7 +26,7 @@
 //    optimistic), their projections (amend, for one revision and parent;
 //    child, once per child) and whether a node is gone (isDeleted).
 import { reactive, shallowReactive, toRaw } from 'vue'
-import type { Kind, ListItem, ListParent, NodeRecurrence, WorkNode } from './api.ts'
+import type { DeliveryOrder, Kind, ListItem, ListParent, NodeRecurrence, WorkNode } from './api.ts'
 import { compareRevision } from './liveUpdates.ts'
 import { positionOf } from './position.ts'
 
@@ -187,7 +187,13 @@ export class RowStore {
   // projectionFloor: the hint that triggered this batch. A page covering it may
   // advance the display while a newer hint still waits for the follow-up read.
   adopt(copy: ListItem, sent = this.clock, options: { show?: boolean; full?: boolean; projectionFloor?: number } = {}): ListItem | null {
-    const row = this.take(copy.id, sent, options.full ?? true, () => this.withRecurrence(this.entries.get(copy.id)!, frozen(copy)), copy.updated_at, !!copy.deleted_at, options.show ?? false, positionOf(copy), options.projectionFloor)
+    const row = this.take(copy.id, sent, options.full ?? true, () => {
+      const previous = this.entries.get(copy.id)?.latest
+      // A list read may not request placement. Keep the known projection in
+      // that case; listNodes supplies null for authoritative journey absence.
+      return this.withRecurrence(this.entries.get(copy.id)!, frozen(copy.delivery_order === undefined && previous?.delivery_order !== undefined
+        ? { ...copy, delivery_order: previous.delivery_order } : copy))
+    }, copy.updated_at, !!copy.deleted_at, options.show ?? false, positionOf(copy), options.projectionFloor)
     if (options.full !== false) this.readRecurrence(copy, sent)
     return row
   }
@@ -452,6 +458,22 @@ export class RowStore {
     if (shown === entry.shown) return
     entry.shown = shown
     if (entry.row) Object.assign(entry.row, clone(projection))
+  }
+  // A delivery receipt changes a projection, not the node revision. Fence old
+  // list answers by the exact event position and preserve the shared row object.
+  committedDelivery(id: string, order: DeliveryOrder, eventId?: number | null) {
+    const entry = this.entries.get(id)
+    if (!entry?.latest || entry.tomb) return
+    const at = ++this.clock
+    entry.projectionChangedAt = at
+    if (eventId) {
+      entry.projectionHintPosition = eventId
+      entry.projectionFloor = Math.max(entry.projectionFloor ?? 0, eventId)
+    }
+    entry.projectionRead = { position: eventId ?? undefined, sent: at, landed: at }
+    entry.latest = frozen({ ...entry.latest, delivery_order: order })
+    entry.shown = entry.shown && frozen({ ...entry.shown, delivery_order: order })
+    if (entry.row) entry.row.delivery_order = clone(order)
   }
   // A child this tab added under a node (present) or moved away from it:
   // the node's children count follows once per child, whichever view says

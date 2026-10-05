@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/requirements"
@@ -108,6 +109,13 @@ func ensureJourney(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID
 	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID).Scan(&tenantID); err != nil {
 		return err
 	}
+	adopted, modeErr := delivery.ReleasesMode(ctx, tx, projectID)
+	if modeErr != nil {
+		return modeErr
+	}
+	if adopted {
+		return nil
+	}
 	var one int
 	err := tx.QueryRow(ctx, `
 		SELECT 1
@@ -194,6 +202,11 @@ func lockJourney(ctx context.Context, tx pgx.Tx, projectID string) error {
 
 func loadFacts(ctx context.Context, tx pgx.Tx, projectID string, lockRelease bool) (facts, error) {
 	var f facts
+	var modeErr error
+	f.ReleasesMode, modeErr = delivery.ReleasesMode(ctx, tx, projectID)
+	if modeErr != nil {
+		return f, modeErr
+	}
 	var confirmed bool
 	var releaseID *string
 	f.ProjectID = projectID
@@ -229,6 +242,9 @@ func loadFacts(ctx context.Context, tx pgx.Tx, projectID string, lockRelease boo
 	f.CurrentReleaseRecorded = releaseID != nil
 	if err := loadImported(ctx, tx, &f, &releaseID); err != nil {
 		return facts{}, err
+	}
+	if f.ReleasesMode {
+		releaseID = nil
 	}
 	if releaseID != nil && *releaseID != "" {
 		rel, err := loadRelease(ctx, tx, *releaseID, lockRelease)

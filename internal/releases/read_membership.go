@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -78,8 +79,17 @@ func (m *module) readMemberships(w http.ResponseWriter, r *http.Request) {
  SELECT * FROM aeon_work_release_scope($2::uuid[]) WHERE project_id=$1
 ), assigned AS MATERIALIZED (
  SELECT s.root,s.id,r.release_node_id::text,rn.title AS release_title,r.state AS release_state
- FROM scope s JOIN journey_tickets t ON t.ticket_node_id=s.id AND t.project_node_id=$1 AND t.tenant_id=current_setting('aeon.tenant_id')::uuid
- JOIN journey_releases r ON r.tenant_id=t.tenant_id AND r.release_node_id=t.release_node_id AND r.project_node_id=$1
+ FROM scope s
+ LEFT JOIN project_delivery mode ON mode.tenant_id=current_setting('aeon.tenant_id')::uuid AND mode.project_node_id=$1
+ LEFT JOIN journey_tickets t ON t.ticket_node_id=s.id AND t.project_node_id=$1 AND t.tenant_id=current_setting('aeon.tenant_id')::uuid
+ LEFT JOIN `+delivery.Effective+` placed ON placed.tenant_id=current_setting('aeon.tenant_id')::uuid AND placed.item_node_id=s.id
+ JOIN (
+   SELECT r.tenant_id,r.project_node_id,r.release_node_id,r.state FROM journey_releases r
+   WHERE NOT EXISTS(SELECT 1 FROM project_delivery d WHERE d.tenant_id=r.tenant_id AND d.project_node_id=r.project_node_id)
+   UNION ALL
+   SELECT r.tenant_id,r.project_node_id,r.release_node_id,r.state FROM project_releases r
+ ) r ON r.tenant_id=current_setting('aeon.tenant_id')::uuid AND r.project_node_id=$1
+ AND r.release_node_id=CASE WHEN mode.project_node_id IS NULL THEN t.release_node_id ELSE placed.release_node_id END
  JOIN nodes rn ON rn.tenant_id=r.tenant_id AND rn.id=r.release_node_id AND rn.deleted_at IS NULL
  WHERE s.is_leaf
 ) SELECT n.id::text,NOT root.is_leaf,n.fields->>'release_inheritance_note',

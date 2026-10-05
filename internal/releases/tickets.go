@@ -87,6 +87,9 @@ func addTicket(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, rele
 	if err := lockMembership(ctx, tx, p, project); err != nil {
 		return out, err
 	}
+	if err := requireJourneyMode(ctx, tx, project); err != nil {
+		return out, err
+	}
 	var person bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE id=$1 AND kind='person')`, p.ID).Scan(&person); err != nil {
 		return out, err

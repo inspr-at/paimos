@@ -10,7 +10,7 @@ import StatusIcon from './StatusIcon.vue'
 const props = withDefaults(defineProps<{ anchor: HTMLElement | null; filters: ListFilters; dimensions?: Dimension[]; showDate?: boolean }>(), { showDate: true })
 const dimensions = computed(() => DIMENSIONS.filter(d => !props.dimensions || props.dimensions.includes(d.key)))
 const emit = defineEmits<{ choose: [dimension: Dimension | 'date']; close: [restoreFocus: boolean] }>()
-const ICONS: Record<Dimension, IconName> = { shape: 'tree', depth: 'layers', status: 'check', priority: 'gauge', assignee: 'user', type: 'ticket', tag: 'tag', epic: 'epic', cost: 'coin', release: 'box', human_check: 'person-check' }
+const ICONS: Record<Dimension, IconName> = { shape: 'tree', depth: 'layers', status: 'check', priority: 'gauge', assignee: 'user', type: 'ticket', tag: 'tag', epic: 'epic', cost: 'coin', release: 'box', ships_in: 'box', human_check: 'person-check' }
 const list = ref<HTMLElement>()
 function move(event: KeyboardEvent) {
   const items = [...(list.value?.querySelectorAll<HTMLButtonElement>('button') ?? [])]

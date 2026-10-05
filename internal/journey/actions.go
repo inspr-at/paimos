@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/releases"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -128,6 +129,12 @@ func (m *Module) actWithMode(ctx context.Context, p tenant.Principal, projectID 
 			}
 		}
 		if err := ensureJourney(ctx, tx, p, projectID); err != nil {
+			return err
+		}
+		if err := delivery.RequireJourney(ctx, tx, projectID); err != nil {
+			if errors.Is(err, delivery.ErrReleasesMode) {
+				return fail(409, err.Error())
+			}
 			return err
 		}
 		if err := lockJourney(ctx, tx, projectID); err != nil {

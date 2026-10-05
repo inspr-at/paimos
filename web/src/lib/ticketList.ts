@@ -7,14 +7,16 @@
 // Filter values may carry a leading "!" (excluded). Within one filter the plain
 // values are alternatives and every excluded value must not match; filters
 // combine with AND. That is classic Paimos's model, and the list API's.
+import { releaseScope, scopeParameter, scopeValuesFromQuery } from './releaseScope.ts'
 import { HIDE_STATES, hiddenStates, parseHiddenStates, type HideState } from './hideStates.ts'
 import { estimateHours } from './estimates.ts'
+import { compareRevision } from './liveUpdates.ts'
 import { compareModelSort, planningSortValue } from './planning.ts'
 import type { Facets, ListItem, ListQuery, WorkCountBucket } from './api.ts'
 import { normalizeColumnIds, PINNED, type ColumnId } from './columns.ts'
 import { DEFAULT_SORT, KINDS, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
 
-export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release' | 'human_check' | 'shape' | 'depth'
+export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release' | 'ships_in' | 'human_check' | 'shape' | 'depth'
 export type GroupBy = 'none' | 'status' | 'assignee' | 'priority' | 'type' | 'epic' | 'tag'
 export type DateField = 'updated' | 'created' | 'start' | 'end' | 'accepted'
 export type DatePreset = 'today' | '7d' | '30d' | '90d' | 'month' | 'year'
@@ -35,6 +37,7 @@ export interface ListFilters {
   epic: string[]
   cost: string[]
   release: string[]
+  ships_in: string[]
   human_check: string[]
   shape: string[]
   depth: string[]
@@ -144,6 +147,7 @@ export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
     epic: list(query.epic).filter(value => /^[\w-]{1,64}$/.test(bare(value))),
     cost: list(query.cost),
     release: list(query.release),
+    ships_in: scopeValuesFromQuery(query.ships_in),
     human_check: list(query.human_check).filter(value => ['pending', 'none'].includes(bare(value))),
     date: parseDate(query.date),
     showClosed: query.closed === '1',
@@ -160,6 +164,7 @@ export function filtersToQuery(filters: ListFilters): Record<string, string> {
   if (filters.status.length && filters.statusScope) out.status_scope = filters.statusScope
   if (filters.q.trim()) out.q = filters.q.trim()
   for (const key of DIMENSION_KEYS) if (filters[key].length) out[key] = filters[key].join(',')
+  if (filters.ships_in.length) out.ships_in = filters.ships_in.join(',')
   if (filters.date) out.date = serializeDate(filters.date)
   if (hiddenStates(filters.hideStates).length !== HIDE_STATES.length) out.hide_states = hiddenStates(filters.hideStates).join(',')
   if (filters.showClosed) out.closed = '1'
@@ -176,11 +181,11 @@ export function activeDimensions(filters: ListFilters): Dimension[] {
   return DIMENSION_KEYS.filter(key => filters[key].length > 0)
 }
 export function hasFilters(filters: ListFilters): boolean {
-  return !!filters.q.trim() || activeDimensions(filters).length > 0 || !!filters.date
+  return !!filters.q.trim() || activeDimensions(filters).length > 0 || !!filters.date || filters.ships_in.length > 0
 }
 // Everything a person can clear with "Clear all": search, filters and the date.
 export function clearedFilters(): Partial<ListFilters> {
-  return { q: '', status: [], statusScope: undefined, hideRestore: undefined, priority: [], assignee: [], type: [], tag: [], epic: [], cost: [], release: [], human_check: [], shape: [], depth: [], date: null }
+  return { q: '', status: [], statusScope: undefined, hideRestore: undefined, priority: [], assignee: [], type: [], tag: [], epic: [], cost: [], release: [], ships_in: [], human_check: [], shape: [], depth: [], date: null }
 }
 
 // ---------- Saved views: the same state, without the view marker ----------
@@ -294,7 +299,7 @@ export function effectiveSort(filters: ListFilters): SortKey[] {
     const index = keys.findIndex(key => key.field === lead)
     keys.unshift(index >= 0 ? keys.splice(index, 1)[0] : { field: lead, desc: false })
   }
-  if (!keys.some(key => key.field === 'updated_at')) keys.push({ field: 'updated_at', desc: true })
+  if (!keys.some(key => key.field === 'updated_at' || key.field === 'order')) keys.push({ field: 'updated_at', desc: true })
   return keys
 }
 export function apiParams(within: string, filters: ListFilters, options: { omit?: Dimension; facets?: string[]; limit?: number; cursor?: string; now?: Date } = {}): ListQuery {
@@ -316,6 +321,7 @@ export function apiParams(within: string, filters: ListFilters, options: { omit?
     epic: take('epic'),
     cost_unit: take('cost'),
     release: take('release'),
+    ...(omit !== 'ships_in' && scopeParameter(releaseScope(filters.ships_in)) ? { ships_in: [scopeParameter(releaseScope(filters.ships_in))!] } : {}),
     ...(take('human_check').length ? { human_check: take('human_check') } : {}),
     ...(filters.date ? { date_field: filters.date.field, date_from: bounds?.from ?? undefined, date_to: bounds?.to ?? undefined } : {}),
     q: filters.q.trim(),
@@ -335,7 +341,7 @@ export function totalFrom(facets: Facets | undefined): number | null {
 
 // ---------- Facet options ----------
 export interface EpicOption { id: string; key: string; title: string; state?: string }
-export interface OptionContext { names?: Map<string, string>; me?: string; colors?: Map<string, string>; epics?: EpicOption[]; workName?: string }
+export interface OptionContext { names?: Map<string, string>; me?: string; colors?: Map<string, string>; epics?: EpicOption[]; releases?: Record<string, string>; workName?: string }
 // Labels (tags, cost units, releases) are counted by spelling; one label is one option.
 function labelOptions(dimension: Dimension, counts: Record<string, number>, selected: string[], colors: Map<string, string> = new Map()): FacetOption[] {
   const byName = new Map<string, FacetOption>()
@@ -350,10 +356,16 @@ function labelOptions(dimension: Dimension, counts: Record<string, number>, sele
     if (value !== 'none' && !byName.has(value.toLowerCase())) byName.set(value.toLowerCase(), { value, label: value, count: 0, color: colors.get(value.toLowerCase()) })
   }
   const options = [...byName.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0) || a.label.localeCompare(b.label))
-  return [{ value: 'none', label: DIMENSION_BY_KEY.get(dimension)!.none, count: counts.none ?? 0 }, ...options]
+  return [{ value: 'none', label: (dimension === 'ships_in' ? 'Backlog' : DIMENSION_BY_KEY.get(dimension)!.none), count: counts.none ?? 0 }, ...options]
 }
 export function facetOptions(dimension: Dimension, counts: Record<string, number> = {}, selectedValues: string[] = [], names: Map<string, string> = new Map(), me?: string, context: OptionContext = {}): FacetOption[] {
   const selected = selectedValues.map(bare)
+  if (dimension === 'ships_in') {
+    // Counts changing after a click must never reorder these controls.
+    const ids = [...new Set([...Object.keys(counts), ...Object.keys(context.releases ?? {}), ...selected])].filter(id => id !== 'none').sort()
+    return [{ value: 'none', label: 'No release (backlog)', count: counts.none ?? 0 },
+      ...ids.map(id => ({ value: id, label: context.releases?.[id] ?? 'Release', count: counts[id] ?? 0 }))]
+  }
   if (dimension === 'human_check') return [{ value: 'pending', label: 'Needs a human check', count: counts.pending ?? 0 }, { value: 'none', label: 'No human check', count: counts.none ?? 0 }]
   if (dimension === 'status') {
     const byKey = new Map<string, FacetOption>()
@@ -404,8 +416,9 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
 }
 // The words a chip or a view name uses for one value.
 export function valueLabel(dimension: Dimension, value: string, context: OptionContext = {}): string {
-  if (value === 'none' && DIMENSION_BY_KEY.get(dimension)!.none) return DIMENSION_BY_KEY.get(dimension)!.none
+  if (value === 'none' && (dimension === 'ships_in' ? 'Backlog' : DIMENSION_BY_KEY.get(dimension)!.none)) return (dimension === 'ships_in' ? 'Backlog' : DIMENSION_BY_KEY.get(dimension)!.none)
   switch (dimension) {
+    case 'ships_in': return context.releases?.[value] ?? 'Release'
     case 'human_check': return value === 'pending' ? 'Needs a human check' : 'No human check'
     case 'status': return value === 'queued' ? 'Queued' : statusMeta(value).label
     case 'priority': return priorityLabel(value)
@@ -428,9 +441,24 @@ function lessThan(x: string | number | bigint, y: string | number | bigint): boo
   if (typeof x === 'string' && typeof y === 'string') return x < y
   return false
 }
+// Same tagged order as the server; rank bytes are base-62 C-collation keys.
+export function compareDeliveryOrder(a: ListItem, b: ListItem, desc = false): number {
+  const first = (row: ListItem) => row.delivery_order ? row.delivery_order.expedite ? -1 : 0 : PRIORITY_RANK[row.priority ?? ''] ?? (row.priority && row.priority !== 'none' ? 4 : 3)
+  const direction = desc ? -1 : 1
+  const lead = first(a) - first(b)
+  if (lead) return lead * direction
+  for (const field of ['release_rank', 'rank'] as const) {
+    const x = a.delivery_order?.[field] ?? null, y = b.delivery_order?.[field] ?? null
+    if ((x === null) !== (y === null)) return x === null ? 1 : -1
+    if (x !== null && y !== null && x !== y) return (x < y ? -1 : 1) * direction
+  }
+  const created = compareRevision(a.created_at, b.created_at)
+  return created ? Math.sign(created) * direction : a.id === b.id ? 0 : (a.id < b.id ? -1 : 1) * direction
+}
 export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => number {
   const value = (row: ListItem, field: SortKey['field']): string | number | bigint => {
     switch (field) {
+      case 'order': return 0 // compared as a complete delivery tuple below
       case 'state': return statusMeta(row.state).order
       case 'priority': return PRIORITY_RANK[row.priority ?? ''] ?? 3
       case 'updated_at': return Date.parse(row.updated_at) || 0
@@ -449,6 +477,11 @@ export function compareRows(keys: SortKey[]): (a: ListItem, b: ListItem) => numb
     : field === 'model' || field === 'tokens' || field === 'list_cost' || field === 'paid' ? planningSortValue(row, field) === null : false
   return (a, b) => {
     for (const key of keys) {
+      if (key.field === 'order') {
+        const delta = compareDeliveryOrder(a, b, key.desc)
+        if (delta !== 0) return delta
+        continue
+      }
       if (key.field === 'model') {
         const delta = compareModelSort(a, b, key.desc)
         if (delta !== 0) return delta

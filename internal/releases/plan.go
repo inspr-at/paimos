@@ -16,6 +16,9 @@ func replace(ctx context.Context, tx pgx.Tx, p tenant.Principal, project, releas
 	if err := lockMembership(ctx, tx, p, project); err != nil {
 		return out, err
 	}
+	if err := requireJourneyMode(ctx, tx, project); err != nil {
+		return out, err
+	}
 	var isPerson bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE id=$1 AND kind='person')`, p.ID).Scan(&isPerson); err != nil {
 		return out, err

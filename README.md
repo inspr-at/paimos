@@ -4,6 +4,106 @@ PAIMOS AEON is an open-source, self-hosted work platform for people and AI agent
 
 Agents-first and voice-first, Aeon gives people a web workspace and agents a CLI and API, with tenant isolation and scoped permissions. The stack is Go, Postgres 18 + pgvector and Vue 3, built around nodes, relations and an append-only event log.
 
+Project work has one release scope: omit `ships_in` for all work, send a single
+release UUID for that release, or `none` for ranked and unranked Backlog.
+Ticket URL state and saved views retain single UUID/`none` scopes; older multiple
+or excluded values show “Choose a release scope” and block the read. Ordinary
+filters still intersect scope. The selectable **In release** facet is removed;
+the separate **Imported release** label and compatible API facet counts remain.
+The breadcrumb/picker is owned by P6b.
+
+`GET /api/nodes?within=<project>&ships_in=<UUID|none>&sort=order` preserves
+release order, C-collated ranks, timestamp microseconds and placement identity.
+Journey projects keep their existing priority/creation-time ordering.
+
+Delivery overview, release list, item and Backlog reads accept `view=planning`,
+`q`, `hide_closed`, optional `hide_state`, and ordinary work filters (release
+lifecycle `state` stays separate from `work_state`). Search runs before paging;
+Hide runs after matching. `matches` reports whole-query pre/post-Hide counts,
+finished/exit breakdown and a lower-bound flag after 10,001 matches. Rollups
+remain unfiltered. Planning Backlog includes live completed/cancelled work in
+ranked and tail parts. Cursors bind principal/tenant/project/collection/query;
+changed queries refuse old cursors. Recovery/`through` combinations are refused.
+Product marketing names use P3's explicit runtime product binding; over-budget
+name inventories or sequences above 10,000 refuse without omitting later hits.
+
+The project’s **Releases** tab (`/p/<key>/releases`) shows Upcoming, Backlog,
+Abandoned and Shipped. Several releases can expand together; the chevron only
+opens work, while the name also sets the existing URL scope. Expansion is
+remembered separately from Outline per project/person. One overview supplies
+the first release pages without member requests; work loads lazily in ≤200-row
+pages, with at most four reads and 2,000 rendered child rows. Continuations
+stay above growing content. Search and Hide use P5’s whole-query server counts;
+changing scope/query/person invalidates cursors and late responses. Passive
+insertions above hovered/focused rows wait until those controls are left or
+**Show loaded** is chosen. Capped counts and stale/failed reads stay explicit.
+One header toggle collapses every open section, or expands loaded Upcoming
+releases and Backlog within the same queue and render bounds. Shipped releases
+remain individually expandable. Three clipped cards separate Upcoming,
+Backlog/Abandoned and Shipped, with sticky counted labels in the desktop gutter
+and group rows on phones. Collapsing clears that source’s pagination history before
+reopening. Delayed saved expansions use the passive-insertion guard too.
+Planning item pages batch authorized parent/epic and stored assignee summaries
+plus reported progress/ETA for the selected rows in the same read snapshot;
+unknown estimates stay absent and no per-ticket HTTP read is added. Legacy
+item reads omit these additive summaries.
+Drag handles and Move controls place a ticket directly in a release or ranked
+Backlog. The menu selects destination and append/top/before/after together and
+submits one write, with the exact event receipt offered for Undo. Visible gaps
+send one anchor; the server retains occupied hidden/tombstone ranks and validates
+direct anchors again inside the write fence. Explicit top is the physical top,
+including work omitted by filters or pages. Internal Upcoming releases can
+reorder; published order remains protected. Refused moves explain their reason
+in a reserved feedback slot without changing row layout. On phones, holding for
+500 ms picks up a row; quick swipes cancel pickup, and edge scrolling uses the
+existing list. Escape cancels pickup without a write. Single-letter g/t/m work
+outside fields; the header's g-place chord remains available through the move
+sheet. Save from a field uses the platform's Command/Ctrl+Enter.
+Release menus explain person/agent rights before an action. Settings use the
+captured release revision; the optional entry deadline can be set or cleared
+only while planned, independently of build limits. Override/reset controls
+stay in place. Lifecycle changes confirm before saving and offer no Undo;
+Cut defaults to the project's recorded scheme (Calendar v3 for the bound
+product) and reserves its explicit scheme/version permanently. Other projects require
+a person's reservation reference for Publish; the product checks its history.
+Freeze lists completed unplaced work and completed work in later uncut releases,
+with at most 200 checkboxes on screen. All follows keyset pages; unchecked
+rows stay out. Include is person-only, sends batches of at most 100 with
+captured item/project revisions, and carries each committed destination
+revision into the next page. It stops on refusal or the 1,000-item capacity
+and reports placed and remaining counts, including partial/unknown outcomes.
+Capacity counts all membership rows, including epics, cancelled work and
+tombstones. Planners may recover work from an uncut frozen source; adding or
+reordering within a frozen release and removing work after Cut remain closed.
+Cut sources are excluded from recovery pages, selection totals and warning counts.
+Write-only settings may introduce agent-count and ticket-size caps without
+project defaults; missing budget or window limits still require deployment
+permission. Include pages and lifecycle actions correlate their exact event
+receipts, including rollover, independently of Undo eligibility. Phone sheets
+pin the actions above the safe area. Rollover updates the
+source row immediately; Refresh explicitly reads destination membership/counts
+without automatically exposing held foreign edits. The journey adoption card
+remains assigned to P6e.
+
+`GET /api/knowledge?project_id=<project>&ships_in=none` reads deduplicated,
+one-hop visible `relates` context of effective Backlog work in either direction,
+including ranked and tail members. Its own type/status/search filters intersect
+before counts and keyset pages (limit ≤200, cursor ≤2048 bytes); capped counts
+are explicit lower bounds. Default/updated and created sorts encode timestamp
+cursors as RFC3339Nano, preserving microseconds and stable tie ordering.
+Unscoped callers retain their previous shape and
+behavior. **K1 remains open:** release-UUID Knowledge scopes validate current
+project/release visibility, then return `409 release_context_undecided` until the
+coordinator records the release-context definition; no all-work fallback.
+
+List reads discard stale project, person and query responses. The implementation
+uses shared work predicates and a single read snapshot per overview, without
+per-member HTTP requests. P3/P4a/P5 integration keeps pairing → tree → tenant as
+the canonical mutation fence prefix and mounts persisted adoption reporting.
+The read-only adoption verification route uses the same service as adoption
+reporting. Authorized generic title/body edits to adopted release nodes advance
+the release revision atomically; stale release API edits return
+`409 revision_changed`. Rejected node patches leave the revision unchanged.
 Project descriptions reveal their full text only when clipped. Desktop descriptions that fit a tooltip use the shared clip-tip; phones, touch devices and descriptions taller than the available tooltip space use **More** / **Less** with a bounded scrolling panel. The panel accepts touch scrolling and keyboard arrows, Home and End; Escape closes it and returns focus to **More**. Project controls stay in place while it is open.
 
 Ticket URLs select the record shown in the detail panel. A stale `peek` query is removed from a routed ticket URL; links followed inside that ticket reuse its panel and browser history. Desktop ticket panels leave room for the list, including at 1024 px and with a saved wider panel preference. Narrow ticket headers collapse breadcrumb text while keeping Back available. Phones retain the full-screen ticket sheet.
@@ -16,6 +116,77 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Automatic release-model adoption
+
+`internal/deliveryadoption` starts the instance-local discovery loop with the
+server. Projects remain in journey mode until a lossless copy, the mode switch
+and its event commit together. Ineligible projects retain their report and
+retry independently. There is no project opt-in or submitted apply payload.
+
+Deployment provisions `AEON_DELIVERY_ADOPTION_FILE`, an absolute path to a
+private, non-secret JSON evidence file. Its `rollout` describes `instance`
+(the public instance URL), immutable `artifact`, matching `rollback_floor`,
+`pre_first_adoption_pin`, `consumers_ready`, `writers_stopped`,
+`recovery_reconciled`, tenant-local `authorities` and `quota`. Each authority
+contains `executor`, `authorizer` principal identities and a recorded
+`reference`; both must still hold `releases.deploy` and `journey.manage` at
+apply. Product counters and source digests are resolved from the binary's
+embedded history/version and exact AEON project binding. Deployment JSON
+cannot replace those inputs. Missing evidence keeps activation closed.
+With recovery reconciliation suspended, passes neither claim attempts nor run
+provider cleanup. Unknown recovery pins remain fenced in their operation journal
+across failures, explicit retries and service restarts; retry does not validate
+restored recovery history.
+
+`provider_command` names an absolute executable, and `reports_directory` names
+private instance-local storage. The command receives `aeon-adoption-v1` as its
+only argument and a bounded JSON request on stdin: `capabilities`, `lookup`,
+`execute` or `list`. Requests and results use the exported types in
+`internal/deliveryadoption/types.go`. It must return quickly with durable
+`pending` operations when work continues asynchronously. Stable ownership
+keys precede every effect; cleanup uses the original attempt/generation.
+The adapter must independently enforce byte/compute quotas, 30-minute restore
+expiry, 24-hour unpinned failure retention and reference-aware protection of
+successful and pre-first-adoption base/WAL recovery chains. Calls run outside
+database mutation locks. A checksum or scheduled backup is insufficient:
+the proof must include an actual isolated restore of the exact source.
+Subprocess calls terminate their owned process group and bound output draining
+when a descendant retains descriptors after the command exits.
+
+The P4a HTTP/CLI module receives the same service as `delivery.AdoptionReporting`:
+`ReadReport` pages immutable metadata with tenant/project/digest-bound cursors;
+`RequestTx` queues preview/retry with revision CAS inside the caller's existing
+tree/access fences; `VerifyReport` provides read-only parity evidence. No backup
+reference is a download link. Current and latest-failed reports are bounded.
+Mapping starts from authoritative journey references; a node hidden by project
+visibility stays in the report with an incomplete-visibility refusal. Report
+storage recovers recognized interrupted atomic writes under the project lock
+while retaining committed payloads and refusing unexpected storage items.
+Verification binds retained memberships to the immutable adoption report, so
+later authorized reranking, release moves and rollover can change placement
+source without losing adoption evidence. Authorized project moves and Undo may
+remove the ranked backlog row while preserving its journey archive; verification
+requires the latest post-adoption membership event to explain that absence.
+The check authorizes the original project reader and the configured executor
+bound to the adoption job. Bounded membership and mutation checks then use
+tenant-scoped service visibility in the same read-only snapshot, including when
+that executor has only project access, and return only aggregate verification
+counts. The executor's visibility is restored before restoring the reader and
+its key-creator cap; project-only readers and executors gain no destination
+access.
+Undo records the placements it actually removes, including backlog
+rankings created after the original move and removals by bulk Undo. An ancestor
+Undo without a recorded removal cannot excuse a later missing placement for a
+descendant that left the subtree. Missing, unbound or revoked executor authority
+fails verification without broadening the reader's access.
+Unrecorded placement deletions and missing archive references still fail.
+
+Tests use durable fake providers and private PostgreSQL restore copies. Native
+provider acceptance and the instance release/rollback record remain deployment
+prerequisites; this package does not provision infrastructure or operate real
+backups. Once any project adopts, E is the supported image rollback floor.
+Pre-E boot requires restoring the protected pre-first-adoption database and
+proving zero adopted projects while automatic recovery remains suspended.
 ## Agent conversation foundation
 
 AEON-618 R1 introduces a separate `chat-v1` identity contract in
@@ -1195,9 +1366,11 @@ Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
-The Tickets project header defaults to Compact: project details, sections with
-saved views and Hide/Display, then the toolbar. Comfortable gives the title and
-description more reading room; Collapsed retains the toolbar. The centered
+The Tickets, Releases and Knowledge project headers default to Compact:
+project details and sections above the toolbar. Tickets retain their saved
+views and Hide/Display controls. Comfortable gives the title and
+description more reading room; Collapsed retains the toolbar and slides in an
+icon/chevron switcher for Releases, Tickets and Knowledge. The centered
 app-bar switch selects all three on desktop. Phones fold with the project badge
 and chevron, and choose Comfortable/Compact in the Filters sheet's Display
 section. Command+Shift+Period on macOS or Ctrl+Shift+Period elsewhere toggles
@@ -3848,6 +4021,30 @@ outcome writes never appear applied. Encoded Doctrine inputs exceeding the
 4096-byte persistence bound return 422 and are stored only for Doctrine.
 `source_handover_id` remains unavailable pending its verified ask-source adapter.
 
+AEON-596 P6b shares the `ships_in` project scope between Tickets and Knowledge:
+omitted means All work, one release UUID means that release, and `none` means
+ranked plus tail Backlog. Ordinary filters remain per tab. Saved multiple or
+excluded scope values require visible repair. Knowledge context contains
+same-project notes linked one hop by `relates` to effective ticket members or
+the selected release node; Backlog context uses backlog tickets. Scoped pages
+are bounded to 200, carry query-bound cursors and expose partial counts. The
+browser holds at most 2,000 entries; continuation requires a narrower search.
+
+Placement and release-rank responses return their exact `undo_event_id`;
+placement receipts also report touched release revisions and ordering keys.
+One placement action (up to 100 selected items plus one expedite displacement)
+has one all-or-nothing event. Undo returns the compensating placement/revisions,
+uses the existing permission/CAS checks, and never targets the latest event.
+`DELIVERY_ACTIONS` is the project-owned integration point for later drag/menu
+packages: begin captures project/person/scope identity, commit applies only the
+actual response, and failed releases the pending action. Lifecycle owners apply
+their authoritative results separately and never offer blanket Undo. Own receipt
+echoes are deduplicated even before the response; foreign structural and mode changes wait
+for the fixed toolbar Apply action. Tickets and Releases use the plain Search placeholder. Counts sit below the list at the right; Live freshness occupies
+the app footer centre. The toolbar gains glass only when stuck after scrolling.
+Header folding and measured density transitions respect reduced motion.
+Agent/wait summaries are batched in the loaded release-page snapshot, omitted without `harness.read`, and marked partial
+past 5,000 active sessions. Budget outlook stays unknown.
 ## Derived work-parent status (AEON-650)
 
 Migration `1225_work_parent_status.sql` installs the shared transaction engine.

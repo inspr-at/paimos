@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -86,6 +87,10 @@ func writeErr(w http.ResponseWriter, err error) {
 			body["ranges"] = ae.ranges
 		}
 		writeJSON(w, ae.status, body)
+	case errors.Is(err, authz.ErrForbidden):
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "permission denied", "code": "forbidden"})
+	case errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || db.IsStatementTimeout(err):
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "try again", "code": "read_timeout"})
 	case errors.Is(err, errNotFound), errors.Is(err, pgx.ErrNoRows):
 		writeJSON(w, http.StatusNotFound, map[string]any{"error": "knowledge entry not found", "code": "not_found"})
 	case errors.As(err, &pe) && pe.Code == "P0001" && strings.Contains(pe.Message, "child kind is not allowed"):
@@ -195,9 +200,20 @@ func (m *module) handleList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := r.URL.Query()
+	for _, key := range []string{"type", "status"} {
+		size, count := 0, 0
+		for _, raw := range v[key] {
+			size += len(raw)
+			count += strings.Count(raw, ",") + 1
+			if size > 6400 || count > 100 {
+				writeErr(w, fail(400, "invalid_request", "filter exceeds bounds"))
+				return
+			}
+		}
+	}
 	q := listQuery{Q: strings.TrimSpace(v.Get("q")), Sort: v.Get("sort"), Limit: 500}
-	if len(q.Q) > 200 {
-		writeErr(w, fail(http.StatusBadRequest, "invalid_request", "q is longer than 200 characters"))
+	if len(v.Get("q")) > 200 {
+		writeErr(w, fail(http.StatusBadRequest, "invalid_request", "q exceeds 200 UTF-8 bytes"))
 		return
 	}
 	if id := v.Get("project_id"); id != "" {
@@ -235,6 +251,49 @@ func (m *module) handleList(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		q.Limit = n
+	}
+	if v.Has("ships_in") {
+		for _, key := range []string{"project_id", "cursor", "sort", "q", "limit"} {
+			if len(v[key]) > 1 {
+				writeErr(w, fail(400, "invalid_request", "repeated "+key))
+				return
+			}
+		}
+		values := v["ships_in"]
+		if len(values) != 1 || (values[0] != "none" && !validUUID(values[0])) || q.ProjectID == "" {
+			writeErr(w, fail(400, "invalid_request", "ships_in requires project_id and one UUID or none"))
+			return
+		}
+		q.ShipsIn = values[0]
+		q.ProjectID = strings.ToLower(q.ProjectID)
+		q.ShipsIn = strings.ToLower(q.ShipsIn)
+		slices.Sort(q.Types)
+		q.Types = slices.Compact(q.Types)
+		slices.Sort(q.Statuses)
+		q.Statuses = slices.Compact(q.Statuses)
+		q.Cursor = v.Get("cursor")
+		if len(q.Cursor) > 2048 {
+			writeErr(w, fail(400, "invalid_request", "invalid cursor"))
+			return
+		}
+		if !v.Has("limit") {
+			q.Limit = 200
+		}
+		if q.Limit > 200 {
+			writeErr(w, fail(400, "invalid_request", "scoped limit is 1 to 200"))
+			return
+		}
+		page, err := m.readScopedKnowledge(r.Context(), p, q)
+		if err != nil {
+			writeErr(w, err)
+			return
+		}
+		writeJSON(w, 200, page)
+		return
+	}
+	if v.Has("cursor") {
+		writeErr(w, fail(400, "invalid_request", "cursor requires a release scope"))
+		return
 	}
 	var page ListPage
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {

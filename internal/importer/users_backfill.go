@@ -11,6 +11,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -144,6 +145,13 @@ func BackfillPrincipals(ctx context.Context, pool *pgxpool.Pool, tenantID string
 			return err
 		}
 		for _, a := range assignments {
+			if err := delivery.RefuseReleaseNodes(ctx, tx, []string{a.node}); errors.Is(err, delivery.ErrReleaseAPI) {
+				report.Conflicts = append(report.Conflicts, ImportConflict{Reason: "release_api"})
+				report.Counts["release_api_skipped"]++
+				continue
+			} else if err != nil {
+				return err
+			}
 			if err := ensureActor(); err != nil {
 				return err
 			}

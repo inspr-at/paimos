@@ -16,6 +16,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/principallink"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -88,7 +89,8 @@ type bulkSnap struct {
 }
 
 type bulkBatch struct {
-	Items []bulkSnap `json:"items"`
+	Items   []bulkSnap          `json:"items"`
+	ShipsIn []shipsMoveSnapshot `json:"ships_in_before_move,omitempty"`
 }
 
 type bulkSkip struct {
@@ -319,6 +321,9 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 				return err
 			}
 		}
+		if err := lockTree(ctx, tx); err != nil {
+			return err
+		}
 		if err := armPortalModeration(ctx, tx, p); err != nil {
 			return err
 		}
@@ -360,12 +365,25 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			parentAllowed = kind.AllowedChildKinds
 		}
 		found := map[string]bool{}
+		if plan.parentID != nil {
+			if err = lockShipsForMoves(ctx, tx, plan.ids); err != nil {
+				return err
+			}
+		}
 		var before, after []bulkSnap
+		var shipsMoved []shipsMoveSnapshot
 		for _, target := range targets {
 			found[target.node.ID] = true
 			current := target.node
 			skip := func(reason string) {
 				result.Skipped = append(result.Skipped, bulkSkip{ID: current.ID, Key: current.Key, Reason: reason})
+			}
+			if err := refuseReleaseNode(ctx, tx, current.ID); err != nil {
+				if he, ok := err.(*httpError); ok && he.status == 409 {
+					result.Skipped = append(result.Skipped, bulkSkip{ID: current.ID, Key: current.Key, Code: "release_api", Reason: he.msg})
+					continue
+				}
+				return err
 			}
 			// Compared under the row lock, exactly like PATCH's If-Unmodified-Since.
 			if expected, ok := plan.expected[current.ID]; ok && !current.UpdatedAt.Equal(expected) {
@@ -435,6 +453,18 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 				result.Unchanged = append(result.Unchanged, current.ID)
 				continue
 			}
+			var movedShips []shipsMoveSnapshot
+			if move {
+				movedShips, err = shipsInBeforeMove(ctx, tx, current.ID, plan.parentID)
+				if err != nil {
+					if he, ok := err.(*httpError); ok && he.status == 409 {
+						result.Skipped = append(result.Skipped, bulkSkip{ID: current.ID, Key: current.Key, Code: "release_api", Reason: he.msg})
+						continue
+					}
+					return err
+				}
+				shipsMoved = append(shipsMoved, movedShips...)
+			}
 			latest := current
 			if edit {
 				if plan.state != nil && workqueue.Terminal(state) {
@@ -479,7 +509,7 @@ func (m *Module) applyBulk(ctx context.Context, p tenant.Principal, plan bulkPla
 			return err
 		}
 		e, err := events.Append(ctx, tx, tenant.Principal{TenantID: p.TenantID, ID: actor}, events.Change{
-			Type: evNodeBulkChanged, Before: bulkBatch{before}, After: bulkBatch{after},
+			Type: evNodeBulkChanged, Before: bulkBatch{Items: before, ShipsIn: shipsMoved}, After: bulkBatch{Items: after},
 		})
 		if err != nil {
 			return err
@@ -632,6 +662,9 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 		}
 		ids[i] = item.ID
 	}
+	if err := delivery.RefuseReleaseNodes(ctx, tx, ids); err != nil {
+		return events.Change{}, events.ErrConflict
+	}
 	loaded, err := loadBulkTargets(ctx, tx, ids)
 	if err != nil {
 		return events.Change{}, err
@@ -679,6 +712,21 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 			}
 		}
 	}
+	var shipsMoved []shipsMoveSnapshot
+	for i, want := range after.Items {
+		old := before.Items[i]
+		now := current[want.ID]
+		if !sameString(old.ParentID, now.ParentID) {
+			removed, err := shipsInBeforeMove(ctx, tx, now.ID, old.ParentID)
+			if err != nil {
+				return events.Change{}, events.ErrConflict
+			}
+			shipsMoved = append(shipsMoved, removed...)
+			if len(shipsMoved) > 5000 {
+				return events.Change{}, events.ErrConflict
+			}
+		}
+	}
 	var was, restored []bulkSnap
 	for i, want := range after.Items {
 		now := current[want.ID]
@@ -715,5 +763,5 @@ func undoBulk(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event
 		was = append(was, snapOf(now))
 		restored = append(restored, snapOf(latest))
 	}
-	return events.Change{Type: evNodeBulkChanged, Before: bulkBatch{was}, After: bulkBatch{restored}}, nil
+	return events.Change{Type: evNodeBulkChanged, Before: bulkBatch{Items: was, ShipsIn: shipsMoved}, After: bulkBatch{Items: restored}}, nil
 }

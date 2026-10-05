@@ -13,6 +13,8 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/approvals"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -155,6 +157,15 @@ type dependency struct {
 }
 
 func (m *Module) create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in RequestWrite, plugin string, ceiling []string, gate string) (Handoff, error) {
+	if err := authz.LockProjectWrite(ctx, tx, p.TenantID); err != nil {
+		return Handoff{}, err
+	}
+	if err := delivery.RequireJourney(ctx, tx, in.ProjectNodeID); err != nil {
+		if errors.Is(err, delivery.ErrReleasesMode) {
+			return Handoff{}, fail(409, err.Error())
+		}
+		return Handoff{}, err
+	}
 	var h Handoff
 	h.ProjectNodeID = in.ProjectNodeID
 	h.ReleaseNodeID = in.ReleaseNodeID
@@ -278,10 +289,17 @@ func (m *Module) create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in R
 	return h, err
 }
 func current(ctx context.Context, tx pgx.Tx, h Handoff) (bool, error) {
+	adopted, err := delivery.ReleasesMode(ctx, tx, h.ProjectNodeID)
+	if err != nil {
+		return false, err
+	}
+	if adopted {
+		return false, nil
+	}
 	var revision int64
 	var releaseRevision int64
 	var accessRequired bool
-	err := tx.QueryRow(ctx, `SELECT j.revision,r.revision,r.access_required FROM journey_projects j JOIN journey_releases r ON r.tenant_id=j.tenant_id AND r.project_node_id=j.project_node_id WHERE j.project_node_id=$1::uuid AND r.release_node_id=$2::uuid AND j.current_release_node_id=r.release_node_id FOR UPDATE OF j,r`, h.ProjectNodeID, h.ReleaseNodeID).Scan(&revision, &releaseRevision, &accessRequired)
+	err = tx.QueryRow(ctx, `SELECT j.revision,r.revision,r.access_required FROM journey_projects j JOIN journey_releases r ON r.tenant_id=j.tenant_id AND r.project_node_id=j.project_node_id WHERE j.project_node_id=$1::uuid AND r.release_node_id=$2::uuid AND j.current_release_node_id=r.release_node_id FOR UPDATE OF j,r`, h.ProjectNodeID, h.ReleaseNodeID).Scan(&revision, &releaseRevision, &accessRequired)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

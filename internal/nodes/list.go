@@ -12,6 +12,7 @@ import (
 	"math"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workquery"
 	"github.com/inspr-at/paimos/internal/workqueue"
 )
 
@@ -51,6 +53,13 @@ type listEpic struct {
 	Key   string `json:"key"`
 	Title string `json:"title"`
 }
+type listDeliveryOrder struct {
+	ReleaseID   *string `json:"release_id"`
+	ReleaseRank *string `json:"release_rank"`
+	Rank        *string `json:"rank"`
+	Expedite    bool    `json:"expedite"`
+}
+
 type listItem struct {
 	nodeJSON
 	KindSlug      string       `json:"kind_slug"`
@@ -68,7 +77,8 @@ type listItem struct {
 	LeadWorker *leadWorker `json:"lead_worker,omitempty"`
 	// Planning is the resolved model, tokens and (with harness.read) cost of a
 	// ticket, task or epic (AEON-329). Absent when there is nothing to show.
-	Planning *planningView `json:"planning,omitempty"`
+	Planning      *planningView      `json:"planning,omitempty"`
+	DeliveryOrder *listDeliveryOrder `json:"delivery_order,omitempty"`
 }
 
 // leadWorker is one bound live session, chosen by the server.
@@ -77,9 +87,10 @@ type leadWorker struct {
 	Key  string `json:"key"`
 }
 type nodePage struct {
-	Items      []listItem                `json:"items"`
-	NextCursor *string                   `json:"next_cursor"`
-	Facets     map[string]map[string]int `json:"facets,omitempty"`
+	Items       []listItem                   `json:"items"`
+	NextCursor  *string                      `json:"next_cursor"`
+	Facets      map[string]map[string]int    `json:"facets,omitempty"`
+	FacetLabels map[string]map[string]string `json:"facet_labels,omitempty"`
 }
 type treeEntry struct {
 	Node  nodeJSON `json:"node"`
@@ -133,6 +144,8 @@ type listQuery struct {
 	CostUnitsNot   []string `json:"cost_units_not,omitempty"`
 	Releases       []string `json:"releases,omitempty"`
 	ReleasesNot    []string `json:"releases_not,omitempty"`
+	ShipsIn        []string `json:"ships_in,omitempty"`
+	ShipsInNot     []string `json:"ships_in_not,omitempty"`
 	HumanChecks    []string `json:"human_checks,omitempty"`
 	HumanChecksNot []string `json:"human_checks_not,omitempty"`
 	// Epics match everything below a named Work or legacy Epic ancestor;
@@ -172,8 +185,8 @@ type treeQuery struct {
 // maxListIDs bounds the ids filter: one live refetch covers at most a page.
 const maxListIDs = 200
 
-var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
-var validFacet = map[string]bool{"shape": true, "depth": true, "state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "human_check": true}
+var validSort = map[string]bool{"key": true, "title": true, "state": true, "priority": true, "kind": true, "updated_at": true, "created_at": true, "position": true, "order": true, "assignee": true, "eta_ready": true, "progress": true, "estimate": true, "model": true, "tokens": true, "list_cost": true, "paid": true}
+var validFacet = map[string]bool{"shape": true, "depth": true, "state": true, "kind": true, "priority": true, "assignee": true, "tag": true, "cost_unit": true, "release": true, "ships_in": true, "human_check": true}
 
 // dateFieldKeys maps date_field to the fields key of dates kept in node fields.
 var dateFieldKeys = map[string]string{"start": "start_date", "end": "end_date", "accepted": "accepted_at"}
@@ -264,6 +277,9 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 		out.KindID = &id
 	}
 	var err error
+	if err = workquery.Bounds(v); err != nil {
+		return out, badRequest(err.Error())
+	}
 	if out.Shapes, out.ShapesNot, err = negatedList(r, "shape", func(v string) (string, bool) { return v, v == "parent" || v == "leaf" }); err != nil {
 		return out, err
 	}
@@ -276,13 +292,14 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 	if len(out.Depths)+len(out.DepthsNot) > 32 {
 		return out, badRequest("too many depths")
 	}
-	if out.Kinds, out.KindsNot, err = negatedList(r, "kind", nil); err != nil {
-		return out, err
-	}
-	for _, kind := range append(append([]string{}, out.Kinds...), out.KindsNot...) {
-		if _, ok := parseUUID(kind); !ok && !slugOrID.MatchString(kind) {
-			return out, badRequest("invalid kind")
+	if out.Kinds, out.KindsNot, err = negatedList(r, "kind", func(s string) (string, bool) {
+		id, ok := parseUUID(s)
+		if ok {
+			return id, true
 		}
+		return s, slugOrID.MatchString(s)
+	}); err != nil {
+		return out, err
 	}
 	if out.States, out.StatesNot, err = negatedList(r, "state", nil); err != nil {
 		return out, err
@@ -345,6 +362,17 @@ func parseListQuery(r *http.Request) (listQuery, error) {
 		return out, err
 	}
 	if out.Releases, out.ReleasesNot, err = negatedList(r, "release", label); err != nil {
+		return out, err
+	}
+	// Count raw inputs before splitting/deduplicating them or querying placements.
+	shipsCount := 0
+	for _, raw := range v["ships_in"] {
+		shipsCount += strings.Count(raw, ",") + 1
+		if len(raw) > 6400 || shipsCount > 100 {
+			return out, badRequest("ships_in lists at most 100 values")
+		}
+	}
+	if out.ShipsIn, out.ShipsInNot, err = negatedList(r, "ships_in", personOrNone); err != nil {
 		return out, err
 	}
 	if out.HumanChecks, out.HumanChecksNot, err = negatedList(r, "human_check", func(value string) (string, bool) { return value, value == "pending" || value == "none" }); err != nil {
@@ -524,6 +552,15 @@ func listFingerprint(q listQuery) string {
 func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (nodePage, error) {
 	ctx, cancel := context.WithTimeout(ctx, eta.AggregateReadTimeout)
 	defer cancel()
+	identity := listFingerprint(q)
+	if len(q.ShipsIn)+len(q.ShipsInNot) > 0 {
+		p, _ := tenant.PrincipalFrom(ctx)
+		identity = workquery.Fingerprint(struct {
+			Tenant    string
+			Principal tenant.Principal
+			Query     string
+		}{tenantID, p, identity})
+	}
 	var mark *listCursor
 	if q.Cursor != "" {
 		env, err := openCursor(q.Cursor)
@@ -534,7 +571,7 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			return nodePage{}, badRequest("cursor does not match this query")
 		}
 		var c listCursor
-		if json.Unmarshal(env.P, &c) != nil || c.Hash != listFingerprint(q) {
+		if json.Unmarshal(env.P, &c) != nil || c.Hash != identity {
 			return nodePage{}, badRequest("cursor does not match this query")
 		}
 		if _, ok := parseUUID(c.ID); !ok {
@@ -544,6 +581,9 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 	}
 	page := nodePage{Items: []listItem{}}
 	err := m.tx(ctx, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		if err := validateReleaseScope(ctx, tx, q); err != nil {
+			return err
+		}
 		ctx = modelprefs.WithChainCache(ctx)
 		ctx = context.WithValue(ctx, planRouteCacheKey{}, map[string]*planRoute{})
 		var anchor any
@@ -595,6 +635,7 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 		for rows.Next() {
 			var item listItem
 			var fields, position string
+			var placement []byte
 			var assigneeID, assigneeName, parentID, parentKey, parentTitle, parentKind, projectID, projectKey, projectTitle, epicID, epicKey, epicTitle *string
 			var assigneeAvatar bool
 			var leadName, leadKey *string
@@ -614,6 +655,7 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 				break
 			}
 			dest := []any{&item.ID, &item.Key, &item.KindID, &item.Title, &item.Body, &fields, &item.State, &item.ParentID, &position, &item.CreatedAt, &item.UpdatedAt, &item.DeletedAt, &item.HumanCheck, &item.KindSlug, &item.KindLabel, &item.Priority, &assigneeID, &assigneeName, &assigneeAvatar, &parentID, &parentKey, &parentTitle, &parentKind, &item.ChildrenCount, &projectID, &projectKey, &projectTitle, &epicID, &epicKey, &epicTitle, &leadName, &leadKey}
+			dest = append(dest, &placement)
 			if money != nil {
 				dest = append(dest, &listSpent, &listEst, &paidSpent, &paidEst)
 			}
@@ -622,6 +664,12 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			if err != nil {
 				rows.Close()
 				return err
+			}
+			if len(placement) > 0 {
+				if err := json.Unmarshal(placement, &item.DeliveryOrder); err != nil {
+					rows.Close()
+					return err
+				}
 			}
 			if money != nil {
 				parsed, err := planMicrosFromText(listSpent, listEst, paidSpent, paidEst)
@@ -663,7 +711,7 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 		if len(page.Items) > q.Limit {
 			last := page.Items[q.Limit-1]
 			page.Items = page.Items[:q.Limit]
-			cursor, err := encodeTyped("list", listCursor{listFingerprint(q), last.ID})
+			cursor, err := encodeTyped("list", listCursor{identity, last.ID})
 			if err != nil {
 				return err
 			}
@@ -682,11 +730,21 @@ func (m *Module) listNodes(ctx context.Context, tenantID string, q listQuery) (n
 			for rows.Next() {
 				var name, value string
 				var count int
-				if err = rows.Scan(&name, &value, &count); err != nil {
+				var label *string
+				if err = rows.Scan(&name, &value, &count, &label); err != nil {
 					rows.Close()
 					return err
 				}
 				page.Facets[name][value] = count
+				if label != nil {
+					if page.FacetLabels == nil {
+						page.FacetLabels = map[string]map[string]string{}
+					}
+					if page.FacetLabels[name] == nil {
+						page.FacetLabels[name] = map[string]string{}
+					}
+					page.FacetLabels[name][value] = *label
+				}
 			}
 			err = rows.Err()
 			rows.Close()
@@ -1042,243 +1100,11 @@ const tagElems = `(SELECT btrim(CASE jsonb_typeof(t) WHEN 'string' THEN t#>>'{}'
 const tagNamesSQL = `(SELECT coalesce(array_agg(lower(e.name)),ARRAY[]::text[]) FROM ` + tagElems + ` e WHERE coalesce(e.name,'')<>'')`
 
 func listFilterSQL(q listQuery, sortFields bool) (string, []any) {
-	// One tenant transaction supplies RLS to every table in the CTE.
-	array := func(values []string) []string {
-		if values == nil {
-			return []string{}
-		}
-		return values
+	shared := workquery.Query{Shapes: q.Shapes, ShapesNot: q.ShapesNot, Depths: q.Depths, DepthsNot: q.DepthsNot, HideStates: q.HideStates, WorkStates: q.WorkStates, WorkStatesNot: q.WorkStatesNot, WorkBuckets: q.WorkBuckets, KindID: q.KindID, Kinds: q.Kinds, KindsNot: q.KindsNot, States: q.States, Priorities: q.Priorities, Assignees: q.Assignees, Q: q.Q, Within: q.Within, ParentSet: q.ParentSet, ParentID: q.ParentID, Descendants: q.Descendants, HideClosed: q.HideClosed, FacetNames: q.FacetNames, Limit: q.Limit, Cursor: q.Cursor, StatesNot: q.StatesNot, PrioritiesNot: q.PrioritiesNot, AssigneesNot: q.AssigneesNot, Tags: q.Tags, TagsNot: q.TagsNot, CostUnits: q.CostUnits, CostUnitsNot: q.CostUnitsNot, Releases: q.Releases, ReleasesNot: q.ReleasesNot, ShipsIn: q.ShipsIn, ShipsInNot: q.ShipsInNot, HumanChecks: q.HumanChecks, HumanChecksNot: q.HumanChecksNot, Epics: q.Epics, EpicsNot: q.EpicsNot, DateField: q.DateField, DateFrom: q.DateFrom, DateTo: q.DateTo, IDs: q.IDs}
+	for _, key := range q.Sort {
+		shared.Sort = append(shared.Sort, workquery.SortKey{Name: key.Name, Desc: key.Desc})
 	}
-	args := []any{q.KindID, array(q.Kinds), array(q.States), array(q.Priorities), array(q.Assignees), q.Q, q.Within, q.ParentSet, q.ParentID, q.Descendants, q.HideClosed}
-	arg := func(v any) string {
-		args = append(args, v)
-		return fmt.Sprintf("$%d", len(args))
-	}
-	// Optional filters join the query only when set, so an unfiltered list
-	// plans exactly as before.
-	conditions := ""
-	add := func(values []string, match func([]string) string) {
-		if len(values) > 0 {
-			conditions += "\n        AND " + match(values)
-		}
-	}
-	not := func(match func([]string) string) func([]string) string {
-		return func(values []string) string { return "NOT (" + match(values) + ")" }
-	}
-	add(q.IDs, func(v []string) string { return `n.id=ANY(` + arg(v) + `::uuid[])` })
-	add(q.StatesNot, func(v []string) string { return `NOT (n.state=ANY(` + arg(v) + `::text[]))` })
-	add(q.WorkStates, func(v []string) string { return workStatusSQL("n.state") + `=ANY(` + arg(v) + `::text[])` })
-	add(q.WorkStatesNot, func(v []string) string { return `NOT (` + workStatusSQL("n.state") + `=ANY(` + arg(v) + `::text[]))` })
-	add(q.WorkBuckets, func(v []string) string { return workCountBucketSQL("n.state", "cfg") + `=ANY(` + arg(v) + `::text[])` })
-	add(q.PrioritiesNot, func(v []string) string {
-		return `NOT (coalesce(nullif(n.fields->>'priority',''),'none')=ANY(` + arg(v) + `::text[]))`
-	})
-	add(q.AssigneesNot, func(v []string) string {
-		p := arg(v)
-		return `NOT (coalesce(assignee.id::text,'none')=ANY(` + p + `::text[])
-            OR coalesce(assignee.id IN (SELECT coalesce(linked_to,id) FROM principals WHERE id::text=ANY(` + p + `::text[])),false))`
-	})
-	tagMatch := func(values []string) string {
-		p := arg(values)
-		return `(SELECT names && ` + p + `::text[] OR ('none'=ANY(` + p + `::text[]) AND cardinality(names)=0) FROM (SELECT ` + tagNamesSQL + ` AS names) tn)`
-	}
-	add(q.Tags, tagMatch)
-	add(q.TagsNot, not(tagMatch))
-	labelMatch := func(field string) func([]string) string {
-		return func(values []string) string {
-			return `coalesce(nullif(lower(` + labelSQL(field) + `),''),'none')=ANY(` + arg(values) + `::text[])`
-		}
-	}
-	add(q.CostUnits, labelMatch("cost_unit"))
-	add(q.CostUnitsNot, not(labelMatch("cost_unit")))
-	add(q.Releases, labelMatch("release"))
-	add(q.ReleasesNot, not(labelMatch("release")))
-	checkMatch := func(values []string) string {
-		return `(CASE WHEN ` + pendingHumanCheckSQL + ` THEN 'pending' ELSE 'none' END)=ANY(` + arg(values) + `::text[])`
-	}
-	add(q.HumanChecks, checkMatch)
-	add(q.HumanChecksNot, not(checkMatch))
-	// Named parents retain their subtree membership. Parent absence needs only
-	// a set of descendant IDs, not one overlapping subtree per Work ancestor.
-	epicCTE := ""
-	if len(q.Epics)+len(q.EpicsNot) > 0 {
-		ids, absence := []string{}, false
-		for _, v := range append(append([]string{}, q.Epics...), q.EpicsNot...) {
-			if v == "none" {
-				absence = true
-			} else {
-				ids = append(ids, v)
-			}
-		}
-		if len(ids) > 0 {
-			epicCTE = `, epic_members(id, epic_id) AS (
-        SELECT c.id, e.id FROM nodes e
-        JOIN node_kinds ek ON ek.tenant_id=e.tenant_id AND ek.id=e.kind_id
-        CROSS JOIN LATERAL (SELECT id FROM nodes WHERE tenant_id=e.tenant_id AND parent_id=e.id AND deleted_at IS NULL OFFSET 0) c
-        WHERE e.tenant_id=current_setting('aeon.tenant_id')::uuid AND e.deleted_at IS NULL
-          AND ek.slug IN ('epic','work') AND e.id::text=ANY(` + arg(ids) + `::text[])
-          AND ($7::uuid IS NULL OR e.id IN (SELECT id FROM scope))
-        UNION ALL SELECT c.id, m.epic_id FROM epic_members m CROSS JOIN LATERAL (
-            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=m.id AND deleted_at IS NULL OFFSET 0
-        ) c
-    )`
-		}
-		if absence {
-			// UNION removes duplicate seeds and visits each descendant once, even
-			// when every ancestor is Work. Keep scope, visibility and live-row
-			// checks identical to the named-parent walk.
-			epicCTE += `, parented_work(id) AS (
-        SELECT c.id FROM nodes c
-        JOIN nodes e ON e.tenant_id=c.tenant_id AND e.id=c.parent_id
-        JOIN node_kinds ek ON ek.tenant_id=e.tenant_id AND ek.id=e.kind_id
-        WHERE c.tenant_id=current_setting('aeon.tenant_id')::uuid
-          AND c.deleted_at IS NULL AND e.deleted_at IS NULL AND ek.slug IN ('epic','work')
-          AND ($7::uuid IS NULL OR e.id IN (SELECT id FROM scope))
-        UNION SELECT c.id FROM parented_work m CROSS JOIN LATERAL (
-            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=m.id AND deleted_at IS NULL OFFSET 0
-        ) c
-    )`
-		}
-		epicMatch := func(values []string) string {
-			named, none := []string{}, false
-			for _, v := range values {
-				if v == "none" {
-					none = true
-				} else {
-					named = append(named, v)
-				}
-			}
-			matches := []string{}
-			if len(named) > 0 {
-				matches = append(matches, `n.id IN (SELECT id FROM epic_members WHERE epic_id::text=ANY(`+arg(named)+`::text[]))`)
-			}
-			if none {
-				matches = append(matches, `n.id NOT IN (SELECT id FROM parented_work)`)
-			}
-			return "(" + strings.Join(matches, " OR ") + ")"
-		}
-		add(q.Epics, epicMatch)
-		add(q.EpicsNot, not(epicMatch))
-	}
-	if q.DateField != "" {
-		var from, to any
-		if q.DateFrom != nil {
-			from = *q.DateFrom
-		}
-		if q.DateTo != nil {
-			to = *q.DateTo
-		}
-		switch q.DateField {
-		case "created", "updated":
-			column := "n." + q.DateField + "_at"
-			conditions += "\n        AND " + column + ">=coalesce(" + arg(from) + "::timestamptz,'-infinity') AND " + column + "<coalesce(" + arg(to) + "::timestamptz,'infinity')"
-		default:
-			day := func(t *time.Time) any {
-				if t == nil {
-					return nil
-				}
-				return t.Format("2006-01-02")
-			}
-			value := `aeon_field_date(n.fields->>'` + dateFieldKeys[q.DateField] + `')`
-			conditions += "\n        AND " + value + " IS NOT NULL AND " + value + ">=coalesce(" + arg(day(q.DateFrom)) + "::date,'-infinity') AND " + value + "<coalesce(" + arg(day(q.DateTo)) + "::date,'infinity')"
-		}
-	}
-
-	if len(q.KindsNot) > 0 {
-		p := arg(q.KindsNot)
-		conditions += " AND NOT (k.slug=ANY(" + p + "::text[]) OR (k.slug='work' AND " + p + "::text[] && ARRAY['epic','ticket','task']) OR n.kind_id::text=ANY(" + p + "::text[]))"
-	}
-	if len(q.Shapes)+len(q.ShapesNot)+len(q.Depths)+len(q.DepthsNot) > 0 {
-		shape := `(SELECT CASE WHEN s.is_leaf THEN 'leaf' ELSE 'parent' END FROM aeon_work_shape(n.id) s)`
-		depth := `(SELECT s.depth::text FROM aeon_work_shape(n.id) s)`
-		for _, f := range []struct {
-			expr    string
-			in, out []string
-		}{{shape, q.Shapes, q.ShapesNot}, {depth, q.Depths, q.DepthsNot}} {
-			if len(f.in) > 0 {
-				conditions += " AND " + f.expr + "=ANY(" + arg(f.in) + "::text[])"
-			}
-			if len(f.out) > 0 {
-				conditions += " AND NOT (" + f.expr + "=ANY(" + arg(f.out) + "::text[]))"
-			}
-		}
-	}
-	from, scopeCondition := "nodes n", ""
-	kindJoin := ` JOIN node_kinds k ON k.id=n.kind_id AND k.tenant_id=n.tenant_id `
-	kindCTE := ""
-	scopeRoot := `coalesce($7::uuid, CASE WHEN $8::bool AND $10::bool THEN $9::uuid ELSE NULL::uuid END)`
-	scopeSeed := ""
-	if q.Within != nil || (q.ParentSet && q.Descendants) {
-		if q.Within != nil {
-			scopeSeed = ` AND id=$7::uuid`
-		} else {
-			scopeSeed = ` AND id=$9::uuid`
-		}
-		// Drive scoped lists from the tree. A membership subquery can rescan
-		// every scope ID for every candidate when the bulk-import statistics
-		// change, while a lateral ID lookup stays bounded per tree row.
-		from = `scope s CROSS JOIN LATERAL (
-            SELECT * FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND id=s.id OFFSET 0
-        ) n`
-		// Keep kind lookup dependent on the node. Stale tenant statistics on
-		// node_kinds can otherwise put kinds before scope and repeat the entire
-		// scoped node lookup and its JSON filters once per kind (AEON-248).
-		// Read the tenant's visible kind catalog once. Keep the dependent
-		// lookup so stale kind statistics cannot repeat scope traversal.
-		kindCTE = `, list_kinds AS MATERIALIZED (
-            SELECT id,slug FROM node_kinds WHERE tenant_id=current_setting('aeon.tenant_id')::uuid
-        )`
-		kindJoin = ` JOIN LATERAL (
-            SELECT slug FROM list_kinds WHERE id=n.kind_id OFFSET 0
-        ) k ON true `
-		if q.Within != nil {
-			scopeCondition = ` AND n.id<>$7::uuid`
-		} else {
-			scopeCondition = ` AND n.id<>$9::uuid`
-		}
-	} else if q.ParentSet {
-		scopeCondition = ` AND n.parent_id IS NOT DISTINCT FROM $9::uuid`
-	}
-	projection := ""
-	if sortFields {
-		projection = `n.key,n.title,n.body,n.position,n.created_at,n.updated_at,
-            coalesce(n.fields->>'priority','') AS priority_raw,`
-	}
-	// Hide shares the kind-aware project-count buckets. Custom choices split
-	// the finished bucket without changing the default or unfiltered plans.
-	closedPred := `n.state NOT IN ('done','cancelled','archived','delivered','accepted')`
-	configuredCTE := ""
-	configuredJoin := ""
-	if q.HideClosed || len(q.WorkBuckets) > 0 {
-		configuredCTE = `, ` + workStateCategoryCTE()
-		configuredJoin = ` LEFT JOIN configured cfg ON cfg.kind_id=n.kind_id AND cfg.norm=` + workStateNormSQL("n.state")
-		closedPred = workNotClosedSQL("n.state", "cfg")
-		if q.HideClosed && len(q.HideStates) > 0 {
-			closedPred = workHideStateSQL("n.state", "cfg") + " <> ALL(" + arg(q.HideStates) + "::text[])"
-		}
-	}
-	return `WITH RECURSIVE scope(id) AS (
-        SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND deleted_at IS NULL AND id=` + scopeRoot + scopeSeed + `
-        UNION ALL SELECT c.id FROM scope s CROSS JOIN LATERAL (
-            SELECT id FROM nodes WHERE tenant_id=current_setting('aeon.tenant_id')::uuid AND parent_id=s.id AND deleted_at IS NULL
-            ORDER BY updated_at DESC OFFSET 0
-        ) c
-    )` + kindCTE + epicCTE + configuredCTE + `, filtered AS MATERIALIZED (
-		SELECT n.id,n.project_id,` + projection + `
-            assignee.id::text AS assignee_id,n.state,k.slug AS kind_slug,
-            coalesce(nullif(n.fields->>'priority',''),'none') AS priority FROM ` + from + kindJoin + configuredJoin + assigneeJoin + `
-        WHERE n.deleted_at IS NULL
-        AND ($1::uuid IS NULL OR n.kind_id=$1::uuid)
-        AND (cardinality($2::text[])=0 OR k.slug=ANY($2::text[]) OR (k.slug='work' AND $2::text[] && ARRAY['epic','ticket','task']) OR n.kind_id::text=ANY($2::text[]))
-        AND (cardinality($3::text[])=0 OR n.state=ANY($3::text[]))
-        AND (cardinality($4::text[])=0 OR coalesce(nullif(n.fields->>'priority',''),'none')=ANY($4::text[]))
-        AND (cardinality($5::text[])=0 OR coalesce(assignee.id::text,'none')=ANY($5::text[])
-            OR assignee.id IN (SELECT coalesce(linked_to,id) FROM principals WHERE id::text=ANY($5::text[])))
-        AND ($6::text='' OR n.key ILIKE '%'||$6::text||'%' OR n.title ILIKE '%'||$6::text||'%' OR n.body ILIKE '%'||$6::text||'%'
-            OR EXISTS(SELECT 1 FROM node_key_aliases a WHERE a.tenant_id=n.tenant_id AND a.node_id=n.id
-                AND a.key ILIKE '%'||$6::text||'%'))
-        AND (NOT $11::bool OR ` + closedPred + `)` + scopeCondition + conditions + `
-    )`, args
+	return workquery.SQL(shared, sortFields)
 }
 func listOrder(q listQuery) string {
 	parts := []string{}
@@ -1292,6 +1118,14 @@ func listOrder(q listQuery) string {
 			dir = "DESC"
 		}
 		switch key.Name {
+		case "order":
+			// All readers share delivery.Effective: release rows before backlog,
+			// ranked backlog before tail; completed/cancelled flags are ignored.
+			parts = append(parts,
+				`CASE WHEN f.delivery_project_id IS NOT NULL THEN CASE WHEN f.delivery_expedite THEN -1 ELSE 0 END ELSE CASE f.priority WHEN 'high' THEN 0 WHEN 'medium' THEN 1 WHEN 'low' THEN 2 WHEN 'none' THEN 3 ELSE 4 END END `+dir,
+				`f.delivery_release_rank COLLATE "C" `+dir+` NULLS LAST`,
+				`f.delivery_rank COLLATE "C" `+dir+` NULLS LAST`,
+				`f.created_at `+dir, `f.id `+dir)
 		case "key":
 			parts = append(parts, `regexp_replace(f.key,'-[0-9]+$','') `+dir, `substring(f.key from '-([0-9]+)$')::numeric `+dir)
 		case "state":
@@ -1332,6 +1166,9 @@ func listOrder(q listQuery) string {
 	}
 	return strings.Join(append(parts, "f.id ASC"), ",")
 }
+func wantsDelivery(q listQuery) bool {
+	return sortsBy(q, "order") || len(q.ShipsIn)+len(q.ShipsInNot) > 0 || slices.Contains(q.FacetNames, "ships_in")
+}
 func sortsBy(q listQuery, name string) bool {
 	for _, key := range q.Sort {
 		if key.Name == name {
@@ -1341,7 +1178,11 @@ func sortsBy(q listQuery, name string) bool {
 	return false
 }
 func listSQL(q listQuery, anchor any) (string, []any) {
-	prefix, args := listFilterSQL(q, true)
+	filteredQuery := q
+	filteredQuery.FacetNames = slices.DeleteFunc(slices.Clone(q.FacetNames), func(name string) bool { return name == "assignee" })
+	// Facets resolve assignees in their own query. The page needs them before
+	// selection only when they constrain filtering or ordering.
+	prefix, args := listFilterSQL(filteredQuery, true)
 	args = append(args, anchor, q.Limit+1)
 	anchorArg, limitArg := fmt.Sprintf("$%d", len(args)-1), fmt.Sprintf("$%d", len(args))
 	projects := q.seen.projects
@@ -1404,7 +1245,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
 	if etaJoin != "" || estimateJoin != "" {
 		aggregateCTE = `, work_values AS MATERIALIZED (SELECT * FROM aeon_work_aggregates(ARRAY(SELECT id FROM filtered)))`
 	}
-	sql := prefix + aggregateCTE + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
+	sql := prefix + aggregateCTE + planningCTE + `, ordered AS (SELECT f.id,row_number() OVER (ORDER BY ` + listOrder(q) + `) AS rn,f.delivery_order` + orderedLead + ` FROM filtered f` + people + etaJoin + estimateJoin + planningJoin + `),
     cursor_guard AS (SELECT (` + anchorArg + `::uuid IS NULL OR EXISTS(SELECT 1 FROM ordered WHERE id=` + anchorArg + `::uuid)) AS valid),
     selected AS (SELECT * FROM ordered WHERE (SELECT valid FROM cursor_guard) AND rn>coalesce((SELECT rn FROM ordered WHERE id=` + anchorArg + `::uuid),0) ORDER BY rn LIMIT ` + limitArg + `),
     -- Count visible children for the page once instead of rescanning nodes per row.
@@ -1419,7 +1260,7 @@ func listSQL(q listQuery, anchor any) (string, []any) {
            par.id::text,par.key,par.title,pk.slug,
            coalesce(cc.child_count,0),
            project.id::text,project.key,project.title,
-           epic.id::text,epic.key,epic.title,` + leadColumns + moneyCols + `,s.rn
+           epic.id::text,epic.key,epic.title,` + leadColumns + `,s.delivery_order` + moneyCols + `,s.rn
     FROM selected s JOIN nodes n ON n.id=s.id JOIN node_kinds k ON k.id=n.kind_id
     LEFT JOIN child_counts cc ON cc.parent_id=n.id
     ` + assigneeJoin + pageWorker + `
@@ -1483,6 +1324,15 @@ func facetSQL(q listQuery) (string, []any) {
 		extra += `
     UNION ALL SELECT 'release',coalesce(nullif(` + labelSQL("release") + `,''),'none') FROM filtered f JOIN nodes n ON n.id=f.id`
 	}
+	if want("ships_in") {
+		extra += `
+    UNION ALL SELECT 'ships_in',coalesce(f.delivery_order->>'release_id','none') FROM filtered f WHERE f.delivery_order IS NOT NULL`
+	}
+	labelColumn, labelJoin := "NULL::text", ""
+	if want("ships_in") {
+		labelColumn = "label.title"
+		labelJoin = ` LEFT JOIN nodes label ON c.name='ships_in' AND label.tenant_id=current_setting('aeon.tenant_id')::uuid AND label.id::text=c.value AND label.deleted_at IS NULL`
+	}
 	// Read visible work-parent identities once, rather than probing child
 	// rows and their RLS for every state facet row.
 	stateParents, stateJoin, stateWhere := "", "", ""
@@ -1501,7 +1351,8 @@ func facetSQL(q listQuery) (string, []any) {
     UNION ALL SELECT 'kind',f.kind_slug FROM filtered f
     UNION ALL SELECT 'priority',f.priority FROM filtered f
     UNION ALL SELECT 'assignee',coalesce(f.assignee_id,'none') FROM filtered f` + extra + `
-    ) SELECT name,value,count(*)::int FROM facet_values WHERE name=ANY(` + names + `::text[]) GROUP BY name,value`
+    ) , counted AS (SELECT name,value,count(*)::int AS count FROM facet_values WHERE name=ANY(` + names + `::text[]) GROUP BY name,value)
+    SELECT c.name,c.value,c.count,` + labelColumn + ` FROM counted c` + labelJoin
 	return sql, args
 }
 

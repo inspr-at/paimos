@@ -1,10 +1,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import '../../styles/crm.css'
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, inject, nextTick, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { brand } from '../../lib/brand'
 import { TYPES, cliCommand, createKnowledge, entryPath, KnowledgeError, slugProblem, suggestSlug, type KnowledgeEntry, type KnowledgeItem, type KnowledgeType } from '../../lib/knowledge'
+import { DELIVERY_ACTIONS } from '../../lib/deliveryChanges'
 import { keyPrefix } from '../../lib/useTicket'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
@@ -14,6 +15,7 @@ import KeyCap from '../KeyCap.vue'
 // the entry itself.
 const props = defineProps<{ project: { id: string; routeKey: string; title: string }; taken: (type: KnowledgeType) => string[] }>()
 const emit = defineEmits<{ created: [entry: KnowledgeEntry] }>()
+const deliveryActions = inject(DELIVERY_ACTIONS, undefined)
 const router = useRouter()
 const dialog = ref<HTMLDialogElement>()
 const titleInput = ref<HTMLInputElement>()
@@ -57,7 +59,7 @@ async function submit() {
   if (busy.value) return
   busy.value = true; error.value = ''; conflict.value = null
   try {
-    const entry = await createKnowledge({ project_id: props.project.id, type: type.value, slug: slug.value, title: title.value.trim(), key_prefix: keyPrefix(props.project.routeKey) })
+    const entry = await createKnowledge({ project_id: props.project.id, type: type.value, slug: slug.value, title: title.value.trim(), key_prefix: keyPrefix(props.project.routeKey) }, deliveryActions)
     dialog.value?.close()
     emit('created', entry)
   } catch (e) {

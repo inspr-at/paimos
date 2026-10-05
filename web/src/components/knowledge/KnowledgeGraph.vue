@@ -9,14 +9,14 @@ import KnowledgeGraphLegend from './KnowledgeGraphLegend.vue'
 import { useSession } from '../../stores/session'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
 import { normalKey } from '../../lib/ticketLinks'
-import { entryPath, type KnowledgeType } from '../../lib/knowledge'
+import { entryPath, type KnowledgeItem, type KnowledgeType } from '../../lib/knowledge'
 import { STATUS_VIEWS, type KnowledgeFilters } from '../../lib/useKnowledge'
 import { fetchKnowledgeGraph, filterGraph, graphEntry, graphMatches, graphTypeLabel, graphTypeTokens, type GraphNode, type KnowledgeGraphData } from '../../lib/knowledgeGraph'
 import { knowledgeGraphData } from '../../lib/knowledgeGraphRenderer'
 import type { GraphNode as CanvasNode } from '../../lib/graphRenderer'
 
 // Knowledge owns API data, URLs and reading cards; GraphCanvas owns presentation.
-const props = defineProps<{ project: { id: string; routeKey: string; title: string }; filters: KnowledgeFilters; canWrite: boolean; docked?: boolean }>()
+const props = defineProps<{ project: { id: string; routeKey: string; title: string }; filters: KnowledgeFilters; canWrite: boolean; docked?: boolean; scopedItems?: KnowledgeItem[]; scopedIncomplete?: boolean }>()
 const emit = defineEmits<{ create: []; reset: []; list: [] }>()
 const route = useRoute(), router = useRouter(), session = useSession()
 const peek = inject(TICKET_PEEK, null)
@@ -27,7 +27,20 @@ const data = shallowRef<KnowledgeGraphData>(empty)
 const loading = ref(true), error = ref(''), tickets = ref(false)
 const hovered = shallowRef<GraphNode | null>(null), ticketSelection = ref('')
 const pointer = ref({ x: 0, y: 0 })
-const visible = computed(() => filterGraph(data.value, props.filters.type))
+const visible = computed(() => {
+  if (props.scopedItems) {
+    const ids = new Set(props.scopedItems.map(it => it.id))
+    const satellites = new Set(tickets.value ? data.value.nodes.filter(it => it.kind === 'ticket').map(it => it.id) : [])
+    const edges = data.value.edges.filter(e => ids.has(e.source) && (ids.has(e.target) || satellites.has(e.target)) || ids.has(e.target) && satellites.has(e.source))
+    const attached = new Set(edges.flatMap(e => [e.source, e.target]))
+    const degrees = new Map<string, number>()
+    for (const edge of edges) for (const id of [edge.source, edge.target]) degrees.set(id, (degrees.get(id) ?? 0) + 1)
+    const entries = props.scopedItems.map(it => ({ ...it, kind: 'knowledge' as const, degree: degrees.get(it.id) ?? 0 }))
+    const contextTickets = data.value.nodes.filter(it => satellites.has(it.id) && attached.has(it.id)).map(it => ({ ...it, degree: degrees.get(it.id) ?? 0 }))
+    return filterGraph({ nodes: [...entries, ...contextTickets], edges, truncated: !!props.scopedIncomplete || data.value.truncated }, props.filters.type)
+  }
+  return filterGraph(data.value, props.filters.type)
+})
 const adapted = computed(() => knowledgeGraphData(visible.value, props.project.routeKey))
 const selected = computed(() => visible.value.nodes.find(n => n.kind === 'knowledge' ? graphEntry(n) === route.query.entry : n.id === ticketSelection.value) ?? null)
 const peekingTicket = computed(() => selected.value?.kind === 'ticket' && peek?.openKey.value === normalKey(selected.value.key))
@@ -94,10 +107,11 @@ function move(event: PointerEvent) {
   const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
   pointer.value = { x: Math.max(8, Math.min(event.clientX - rect.left + 18, rect.width - 280)), y: Math.max(8, Math.min(event.clientY - rect.top + 18, rect.height - 150)) }
 }
-watch([() => props.project.id, () => props.filters.status, tickets], () => { if (mounted) void load() })
+watch([viewer, () => props.project.id], () => { data.value = empty; ticketSelection.value = ''; hovered.value = null; loadController?.abort(); if (mounted) void load() }, { flush: 'sync' })
+watch([() => props.filters.status, tickets], () => { if (mounted) void load() })
 onMounted(() => { mounted = true; void load() })
 onBeforeUnmount(() => { mounted = false; loadController?.abort() })
-defineExpose({ focus: () => canvas.value?.focus() })
+defineExpose({ focus: () => canvas.value?.focus(), reload: load })
 </script>
 
 <template>

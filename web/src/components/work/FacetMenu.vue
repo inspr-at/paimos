@@ -6,7 +6,7 @@ import KeyCap from '../KeyCap.vue'
 import FloatingPanel from './FloatingPanel.vue'
 import FacetOptions from './FacetOptions.vue'
 
-const props = defineProps<{ anchor: HTMLElement | null; dimension: Dimension; title: string; options: FacetOption[]; selected: string[]; loading?: boolean }>()
+const props = defineProps<{ anchor: HTMLElement | null; dimension: Dimension; title: string; options: FacetOption[]; selected: string[]; loading?: boolean; error?: string }>()
 const emit = defineEmits<{ toggle: [value: string]; exclude: [value: string]; clear: []; close: [restoreFocus: boolean] }>()
 const term = ref('')
 const searchable = computed(() => props.options.length > 8)
@@ -24,7 +24,8 @@ const shown = computed(() => {
     </div>
     <input v-if="searchable" v-model="term" class="field facet-search" :placeholder="`Find ${title.toLowerCase()}…`" :aria-label="`Find ${title.toLowerCase()}`" data-autofocus />
     <FacetOptions :dimension="dimension" :options="shown" :selected="selected" @toggle="value => emit('toggle', value)" @exclude="value => emit('exclude', value)" />
-    <p v-if="loading && !options.length" class="none" role="status">Loading…</p>
+    <p v-if="error" class="none" role="alert">{{ error }}</p>
+    <p v-else-if="loading && !options.length" class="none" role="status">Loading…</p>
     <p v-else-if="!shown.length" class="none">Nothing matches.</p>
     <p class="keys" aria-hidden="true"><KeyCap k="Space" /> include <KeyCap k="minus" /> exclude</p>
   </FloatingPanel>
@@ -33,6 +34,7 @@ const shown = computed(() => {
 <style scoped>
 .facet-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 26px; padding: 2px 6px 4px 10px; }
 .clear { height: 24px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12px; font-weight: 600; }
+.clear.placeholder { visibility: hidden; }
 .clear:hover { background: var(--row-selected); }
 .clear:focus-visible { box-shadow: var(--focus-ring); }
 .facet-search { height: 30px; margin: 0 0 6px; font-size: 13px; }

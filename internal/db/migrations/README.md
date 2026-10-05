@@ -4,6 +4,42 @@
 session advisory lock, and records each completed filename in `schema_migrations`.
 Normally each file and its migration record share one transaction.
 
+AEON-596 P1 (1150–1152) adds release containers and private adoption checkpoints.
+It creates no mode rows, copies no journey data and performs no provider calls.
+Only the later atomic adoption store may insert `project_delivery`. The three
+read-only guards enforce release identity/lifecycle/numbered rank order, item
+admission and node identity (including project cascades). Item admission checks
+kind and liveness on insert or an explicit item-id assignment; normal rollover
+can maintain deleted members and members whose kind changed in the backlog.
+Adopted inserts exempt only liveness, preserving historical tombstones.
+Ordinary cuts set version, scheme and cut timestamp together; adopted released
+history may retain a version without a known cut timestamp. The immutable cut
+tuple cannot leave a versioned ordinary release stranded without its timestamp.
+
+The job's `operation_journal` has one `operations` array (at most eight entries,
+16 KiB), with required operation key, attempt identity, kind and status. It
+retains outstanding provider handles across lease generations; resource charges
+are independent of scheduling leases. P3 owns typed entry validation, immutable
+rollout/operation identities, generation CAS, cleanup-before-retry, provider
+expiry and instance/per-project resource admission. A recovery checkpoint
+requires complete, same-attempt report/backup/restore/pin references. No new
+locks are acquired by the guards: P2/P3 must use the globally reconciled
+AEON-586 lock order and final-transaction authorization. Snapshot immutability
+and released outcomes reuse the existing functions, including the `version`
+column expected by the outcome trigger. Store-side streaming and preflight
+bounds are still required before producing the database-bounded payloads.
+
+The `delivery_*migration_test.go` fixtures cover real migration/replay,
+unchanged journey rows and legacy writes, forced RLS with two tenants/project
+visibility, state transitions, tombstone maintenance, cascade atomicity,
+CHECK/unique/FK bounds and snapshot trigger reuse. The P1 inventory entries use
+AEON-490's registry format in `internal/dsar/inventory.json`; when integrating
+that independently developed kit, union these entries with its complete
+inventory rather than replacing either set. The P1 schema test checks every
+new column's classification on the five delivery tables, including when the
+inventory contains unrelated tables. `node --test scripts/delivery-migrations.test.mjs`
+probes the actual migration-policy classifier without any exception.
+
 AEON-452 keeps `1088_more_harnesses.sql` as one numbered migration but commits
 its CHECK installation, validation and replacement in three transactions.
 Installation uses `NOT VALID` and commits before validation scans, releasing its

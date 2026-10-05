@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import '../../styles/crm.css'
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, inject, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { brand, setPageTitle } from '../../lib/brand'
 import { confirmAction } from '../../lib/confirm'
@@ -11,6 +11,7 @@ import {
   resolveKnowledge, slugProblem, statusLabel, typeMeta, undoKnowledge, updateKnowledge, validUrl, wantsToc, withoutTitle,
   type Heading, type KnowledgeEntry, type KnowledgeLink, type KnowledgePatch, type KnowledgeStatus, type KnowledgeType,
 } from '../../lib/knowledge'
+import { DELIVERY_ACTIONS } from '../../lib/deliveryChanges'
 import type { KnowledgeState } from '../../lib/useKnowledge'
 import { toast } from '../../lib/toast'
 import { usePoller } from '../../lib/usePolledData'
@@ -41,6 +42,7 @@ const props = withDefaults(defineProps<{
 }>(), { mode: 'page' })
 const emit = defineEmits<{ close: [] }>()
 const dock = computed(() => props.mode === 'dock')
+const deliveryActions = inject(DELIVERY_ACTIONS, undefined)
 const route = useRoute()
 const router = useRouter()
 const projects = useProjects()
@@ -307,7 +309,7 @@ async function save() {
   const request = generation
   saving.value = true
   try {
-    const saved = await updateKnowledge(current.id, patch, stamp.value)
+    const saved = await updateKnowledge(current.id, patch, stamp.value, deliveryActions)
     if (request !== generation) return
     editing.value = false; conflict.value = null
     applySaved(saved, current.slug)
@@ -338,8 +340,10 @@ async function undo(eventId: number, entryId: string) {
   const current = entry.value, request = generation
   if (!current || current.id !== entryId || !currentEntry.value) return
   try {
-    await undoKnowledge(eventId)
+    await undoKnowledge(eventId, deliveryActions)
     if (request !== generation) return
+    const current = entry.value
+    if (!current) return
     const restored = await getKnowledge(current.id)
     if (request !== generation) return
     applySaved(restored, current.slug)
@@ -428,7 +432,7 @@ async function setArchived(archived: boolean) {
   const current = entry.value
   if (!current || !writable.value) return
   try {
-    const saved = await updateKnowledge(current.id, { status: archived ? 'archived' : 'active' }, current.updated_at)
+    const saved = await updateKnowledge(current.id, { status: archived ? 'archived' : 'active' }, current.updated_at, deliveryActions)
     if (request !== generation) return
     applySaved(saved, current.slug)
     toast(archived ? `Archived ${saved.slug}. Agents skip it now.` : `${saved.slug} is active again`, saved.event_id ? { action: { label: 'Undo', run: () => void undo(saved.event_id!, saved.id) } } : {})
@@ -443,7 +447,7 @@ async function confirmProposed() {
   const current = entry.value
   if (!current || !writable.value) return
   try {
-    const saved = await updateKnowledge(current.id, { status: 'active' }, current.updated_at)
+    const saved = await updateKnowledge(current.id, { status: 'active' }, current.updated_at, deliveryActions)
     if (request !== generation) return
     applySaved(saved, current.slug)
     toast(`${saved.slug} is confirmed. Agents rely on it now.`, saved.event_id ? { action: { label: 'Undo', run: () => void undo(saved.event_id!, saved.id) } } : {})
@@ -464,7 +468,7 @@ async function remove() {
   })
   if (!ok || request !== generation) return
   try {
-    const result = await deleteKnowledge(current.id, current.updated_at)
+    const result = await deleteKnowledge(current.id, current.updated_at, deliveryActions)
     if (request !== generation) return
     props.state.remove(current.id)
     skipGuard = true
@@ -479,7 +483,7 @@ async function remove() {
 }
 async function restore(eventId: number, gone: KnowledgeEntry) {
   try {
-    await undoKnowledge(eventId)
+    await undoKnowledge(eventId, deliveryActions)
     await props.state.load()
     toast(`${gone.slug} is back`, { action: { label: 'Open', run: () => void router.push(placeOf(gone.type, gone.slug, false)) } })
   } catch (e) { toast(e instanceof Error ? e.message : 'Undo did not work.', { tone: 'error' }) }

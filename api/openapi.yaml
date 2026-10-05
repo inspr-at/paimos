@@ -19,6 +19,393 @@ info:
 servers:
   - url: /api
 paths:
+  /projects/{projectId}/delivery:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectDelivery
+      description: Mode and persisted instance-local adoption progress; no dry run is performed.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryStatus'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+    patch:
+      security: [{session: []}, {agentKey: []}]
+      operationId: updateDeliveryDefaults
+      description: Person-only releases.deploy; closed-shape 2 KiB build defaults and revision CAS.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryDefaultsRequest'}}}}
+      responses:
+        '200': {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryStatus'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/verify:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: verifyProjectDelivery
+      security: [{session: []}, {agentKey: []}]
+      description: Read-only persisted adoption verification from the instance controller; never repairs or switches mode. Missing controller is a visible 503.
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Verification evidence, content: {application/json: {schema: {type: object}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /delivery/adoptions:
+    get:
+      operationId: listDeliveryAdoptions
+      description: Visible tenant projects only. Counts have an explicit completeness flag; a page never establishes all-adopted.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: cursor, in: query, schema: {type: string, maxLength: 2048}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50}}
+        - {name: state, in: query, schema: {type: string, enum: [pending, checking, backing_up, applying, adopted, refused, retry_wait]}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryAdoptionPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/adoption-report:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getDeliveryAdoptionReport
+      description: Persisted bounded mapping and refusals from the current job; no backup downloads.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 2048}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryAdoptionReport'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/adopt:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: requestDeliveryAdoption
+      description: Person with releases.deploy and journey.manage. Revision-fenced preview or retry of the automatic instance job; never applies caller mappings.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryAdoptionRequest'}}}}
+      responses:
+        '202': {description: Queued job and private status reference, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryAdoptionAccepted'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/delivery/overview:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getDeliveryOverview
+      description: One repeatable-read request for active and released rollups and backlog/abandoned counts. No item bodies or completion-event lookup.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {$ref: '#/components/parameters/DeliveryPlanningView'}
+        - {$ref: '#/components/parameters/DeliveryPlanningSearch'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideClosed'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningKind'}
+        - {$ref: '#/components/parameters/DeliveryPlanningPriority'}
+        - {$ref: '#/components/parameters/DeliveryPlanningAssignee'}
+        - {$ref: '#/components/parameters/DeliveryPlanningTag'}
+        - {$ref: '#/components/parameters/DeliveryPlanningCostUnit'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHumanCheck'}
+        - {$ref: '#/components/parameters/DeliveryPlanningEpic'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateField'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateFrom'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateTo'}
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: released_cursor, in: query, schema: {type: string, maxLength: 2048}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryOverview'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: listProjectReleases
+      description: Keyset page with rollups and resolved settings.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {$ref: '#/components/parameters/DeliveryPlanningView'}
+        - {$ref: '#/components/parameters/DeliveryPlanningSearch'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideClosed'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningKind'}
+        - {$ref: '#/components/parameters/DeliveryPlanningPriority'}
+        - {$ref: '#/components/parameters/DeliveryPlanningAssignee'}
+        - {$ref: '#/components/parameters/DeliveryPlanningTag'}
+        - {$ref: '#/components/parameters/DeliveryPlanningCostUnit'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHumanCheck'}
+        - {$ref: '#/components/parameters/DeliveryPlanningEpic'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateField'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateFrom'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateTo'}
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 2048}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50}}
+        - {name: state, in: query, schema: {type: string, enum: [planned, building, frozen, released, abandoned, active]}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryReleasePage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+    post:
+      security: [{session: []}, {agentKey: []}]
+      operationId: planProjectRelease
+      description: Person-only plan; durable creation_key replay, optional deadline and position, internal titles have no sequence.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPlanRequest'}}}}
+      responses:
+        '200': {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryReleaseRow'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectRelease
+      description: Authorized releases-mode release with progress and build summary.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRelease'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+    patch:
+      security: [{session: []}, {agentKey: []}]
+      operationId: updateProjectRelease
+      description: Atomic revision-fenced title/body, planned visibility/deadline and tightening-only build settings. Widening requires person releases.deploy.
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryUpdateRequest'}}}}
+      responses:
+        '200': {description: Updated, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryReleaseRow'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/items:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: listProjectReleaseItems
+      description: Effective placement, captured revisions and epic context. through is derived include-earlier; completed_later is mutually exclusive and uses bounded recovery candidates plus events. Recovery rows and counts exclude sources with a reserved version or cut timestamp.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {$ref: '#/components/parameters/DeliveryPlanningView'}
+        - {$ref: '#/components/parameters/DeliveryPlanningSearch'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideClosed'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningKind'}
+        - {$ref: '#/components/parameters/DeliveryPlanningPriority'}
+        - {$ref: '#/components/parameters/DeliveryPlanningAssignee'}
+        - {$ref: '#/components/parameters/DeliveryPlanningTag'}
+        - {$ref: '#/components/parameters/DeliveryPlanningCostUnit'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHumanCheck'}
+        - {$ref: '#/components/parameters/DeliveryPlanningEpic'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateField'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateFrom'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateTo'}
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 2048}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}
+        - {name: through, in: query, schema: {type: string, format: uuid}}
+        - {name: completed_later, in: query, schema: {type: boolean}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryItemPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/backlog:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: listProjectBacklog
+      description: Ranked backlog or oldest-first tail. completed_unplaced uses completion events after adoption; candidates cap at 5000 and expose incompleteness.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {$ref: '#/components/parameters/DeliveryPlanningView'}
+        - {$ref: '#/components/parameters/DeliveryPlanningSearch'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideClosed'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHideState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningState'}
+        - {$ref: '#/components/parameters/DeliveryPlanningKind'}
+        - {$ref: '#/components/parameters/DeliveryPlanningPriority'}
+        - {$ref: '#/components/parameters/DeliveryPlanningAssignee'}
+        - {$ref: '#/components/parameters/DeliveryPlanningTag'}
+        - {$ref: '#/components/parameters/DeliveryPlanningCostUnit'}
+        - {$ref: '#/components/parameters/DeliveryPlanningHumanCheck'}
+        - {$ref: '#/components/parameters/DeliveryPlanningEpic'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateField'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateFrom'}
+        - {$ref: '#/components/parameters/DeliveryPlanningDateTo'}
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 2048}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200}}
+        - {name: part, in: query, schema: {type: string, enum: [ranked, tail]}}
+        - {name: completed_unplaced, in: query, schema: {type: boolean}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryItemPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/rank:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      security: [{session: []}, {agentKey: []}]
+      operationId: rankProjectRelease
+      description: Person-only rank change; published rank must preserve sequence order. Direct anchors must still be Upcoming (planned, building or frozen) in the final transaction; terminal ranks remain occupied physical neighbours.
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRankRequest'}}}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryReleaseRow'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/state:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      security: [{session: []}, {agentKey: []}]
+      operationId: transitionProjectRelease
+      description: Lifecycle only. Never authorizes spending; never directly targets released.
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryStateRequest'}}}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryReleaseRow'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/cut:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      security: [{session: []}, {agentKey: []}]
+      operationId: cutProjectRelease
+      description: Frozen published release; scheme-tagged version, exact pair replay, sequence order and atomic rollover.
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryCutRequest'}}}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryReleaseRow'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/publish:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      security: [{session: []}, {agentKey: []}]
+      operationId: publishProjectRelease
+      description: Exact product history reservation or non-product person attestation; cumulative cut-window capture capped at 12 MiB. Calls PublishTx in this transaction.
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPublishRequest'}}}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryReleaseRow'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases/{releaseId}/close:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      security: [{session: []}, {agentKey: []}]
+      operationId: closeProjectRelease
+      description: Internal close atomically rolls unfinished rows into nearest open internal successor and checks remaining completion and pending-total cap.
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRevisionRequest'}}}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryReleaseRow'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/ships-in:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      security: [{session: []}, {agentKey: []}]
+      operationId: placeShipsIn
+      description: Final-transaction authorization, project/row/release CAS, no agent promotion, deadline/freeze checks and pending-total cap. Frozen releases refuse moves in, out or within them, including Undo.
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPlacementRequest'}}}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPlacementResult'}}}}
   /settings/work-vocabulary:
     get:
       summary: Read workspace work names and icons
@@ -516,6 +903,25 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/ships-in/batch:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      security: [{session: []}, {agentKey: []}]
+      operationId: batchPlaceShipsIn
+      description: All-or-nothing batch of at most 100. Captured project and destination release revision required; returns destination revision for the next Include page.
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPlacementBatch'}}}}
+      responses:
+        '200': {description: Bounded result, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPlacementResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Atomic batch refusal; zero rows placed, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryBatchRefusal'}}}}
+        '503': {$ref: '#/components/responses/Error'}
   /settings/features:
     get:
       operationId: listFeatureSettings
@@ -4044,7 +4450,7 @@ paths:
     get:
       operationId: releaseNoteSnapshot
       summary: Capture linked ticket benefit fields in one database snapshot
-      description: Read-only project-scoped export using journey_tickets membership, not Git mentions. Requires releases.read and node visibility (nodes.read). A published release with a stored snapshot returns that snapshot (frozen true), so later ticket edits do not change it. A published release with no stored snapshot was published before snapshots existed and returns ReleaseNotes with fallback historical-tag-headline; current ticket fields are not read. The release sheet labels that fallback "Historical tag headline". An operator backfill can insert one later, labelled backfilled, with the original released_at and captured_at set to that later time. The release sheet then says Notes written after release. Before publication the response is a live preview (frozen false). At reservation, review and freeze a ReleaseNoteSnapshot with internal/releasehistory/packnotes before tagging; package only its public projection, never raw hidden fields or the historical fallback. This request does not itself publish, freeze or backfill a release.
+      description: Mode-aware read-only project-scoped export. Journey membership is preserved; adopted projects use one read-only repeatable-read snapshot for cumulative ships_in preview, preflight and all pages, under a 60 second operation deadline and 12 MiB ceiling. Stored captures win and missing adopted historical captures return unavailable. Project versions retain explicit legacy/calendar scheme tags; product packing stays calendar-only. Requires releases.read and node visibility (nodes.read). A published release with a stored snapshot returns that snapshot (frozen true), so later ticket edits do not change it. A published release with no stored snapshot was published before snapshots existed and returns ReleaseNotes with fallback historical-tag-headline; current ticket fields are not read. The release sheet labels that fallback "Historical tag headline". An operator backfill can insert one later, labelled backfilled, with the original released_at and captured_at set to that later time. The release sheet then says Notes written after release. Before publication the response is a live preview (frozen false). At reservation, review and freeze a ReleaseNoteSnapshot with internal/releasehistory/packnotes before tagging; package only its public projection, never raw hidden fields or the historical fallback. This request does not itself publish, freeze or backfill a release.
       parameters:
         - {in: path, name: projectId, required: true, schema: {type: string, format: uuid}}
         - {in: path, name: releaseId, required: true, schema: {type: string, format: uuid}}
@@ -5010,6 +5416,7 @@ paths:
         - {name: tag, in: query, description: 'Tag names (case-insensitive) or none for untagged work; ! excludes. Tags are the name strings or {name} objects in fields.tags.', schema: {type: array, items: {type: string}}}
         - {name: cost_unit, in: query, description: 'Cost unit labels (case-insensitive) or none; ! excludes. Reads fields.cost_unit, else the imported fields.classic.cost_unit.', schema: {type: array, items: {type: string}}}
         - {name: release, in: query, description: 'Release labels (case-insensitive) or none; ! excludes. Reads fields.release.', schema: {type: array, items: {type: string}}}
+        - {name: ships_in, in: query, description: 'Release node UUIDs or none for releases-mode backlog (ranked and unranked); ! excludes. Journey-mode work has no placement and does not match none. At most 100 values; combines with every other list filter.', schema: {type: array, maxItems: 100, items: {type: string}}}
         - {name: human_check, in: query, description: 'pending or none; ! excludes. Pending means human_check contains non-empty text. Combines with other filters and applies to facets and pagination.', schema: {type: array, items: {type: string, enum: [pending, none, '!pending', '!none']}}}
         - {name: epic, in: query, description: 'Epic node IDs (matching their whole subtree, not the epic itself) or none for work under no epic; ! excludes.', schema: {type: array, items: {type: string}}}
         - {name: date_field, in: query, description: 'Which date date_from and date_to bound. created and updated compare instants; start, end and accepted read fields.start_date, end_date and accepted_at by the calendar day of the bounds in their own offset. Alone it keeps work that has that date.', schema: {type: string, enum: [created, updated, start, end, accepted]}}
@@ -5019,7 +5426,7 @@ paths:
         - {name: within, in: query, description: 'Descendants of this node, excluding itself', schema: {type: string, format: uuid}}
         - {name: hide_closed, in: query, description: 'When true, omits the hide_states choices, defaulting to nodes whose work bucket is done, cancelled or archived. The bucket is the same one project counts use: a category on that ticket, task or epic kind wins, and spellings such as canceled are recognised. Open and in progress stay.', schema: {type: boolean, default: false}}
         - {name: hide_states, in: query, description: 'Closed statuses omitted when hide_closed is true. Defaults to all five. Kind-aware buckets and canonical spellings match project counts: delivered and accepted keep their names inside the done bucket; other done-bucket statuses use done, and exit buckets use cancelled or archived. At least one and at most five choices; ignored when hide_closed is false.', style: form, explode: false, schema: {type: array, minItems: 1, maxItems: 5, uniqueItems: true, items: {type: string, enum: [done, delivered, accepted, cancelled, archived]}}}
-        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, human_check, shape, depth. State facets count work leaves only, so status-grid and Hide counts omit grouping parents. Other facets retain row semantics. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
+        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, ships_in, human_check, shape, depth. State facets count work leaves only; other facets retain row semantics. ships_in counts are keyed by release node UUID or none for releases-mode backlog, excluding journey-mode work; facet_labels supplies visible release titles. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
         - {name: ids, in: query, description: 'Repeatable or comma-separated node IDs, at most 200: only these nodes, with every other filter still applied. A live list refetches the rows that changed through its own query; a row that no longer matches is absent.', schema: {type: array, maxItems: 200, items: {type: string, format: uuid}}}
@@ -5813,8 +6220,17 @@ paths:
         slug, key and body (German and English full text plus word matches);
         the excerpt is plain text around the first match. counts cover the
         project and q scope before the type and status filters.
+        With ships_in, the visible linked-context population and own filters
+        intersect before keyset pagination/counts (maximum page 200). Counts
+        stop at 10,001 and report counts_incomplete. Release UUID context includes
+        same-project notes linked one hop by relates, in either direction, to
+        visible effective ticket members or the release node itself. Backlog
+        includes notes linked to visible effective backlog tickets (ranked or tail).
+        Entries are deduplicated; deleted, invisible and cross-project peers do not match.
       security: *auth
       parameters:
+        - {name: ships_in, in: query, description: "Single releases-mode project scope, UUID or none (ranked and tail Backlog). Requires project_id. Explicit linked context; no fallback to all work.", schema: {type: string, maxLength: 36}}
+        - {name: cursor, in: query, description: "Query-bound keyset cursor; scoped limit at most 200.", schema: {type: string, maxLength: 2048}}
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: type, in: query, description: Comma-separated knowledge types, schema: {type: string}}
         - {name: status, in: query, description: 'Comma-separated active, proposed, archived', schema: {type: string}}
@@ -5828,6 +6244,17 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/KnowledgePage'}
         '400':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: Knowledge context conflict
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/KnowledgeProblem'}
+        '503':
           $ref: '#/components/responses/Error'
     post:
       operationId: createKnowledge
@@ -13838,17 +14265,18 @@ components:
         short_name: {type: string, maxLength: 48}
     ReleaseNoteSnapshot:
       type: object
+      description: Stored captures retain their original membership provenance after project adoption. Historical journey and manifest captures keep the 16 MiB decoder ceiling; new ships_in captures are limited to 12 MiB and 5000 members.
       required: [schema, tenant_id, project_node_id, release_node_id, version, version_scheme, release_revision, captured_at, membership_source, field_source, tickets]
       properties:
         schema: {type: string, const: aeon.release-note-snapshot.v1}
         tenant_id: {type: string, format: uuid}
         project_node_id: {type: string, format: uuid}
-        release_node_id: {type: string, description: Journey release UUID; empty for a version-keyed manifest backfill}
+        release_node_id: {type: string, description: Release UUID in its original journey or ships_in provenance; empty for a version-keyed manifest backfill}
         version: {type: string, description: Empty until a version is assigned; tagged file path then declares the build binding and notes preserve that gap}
         version_scheme: {type: string}
         release_revision: {type: integer, minimum: 1}
         captured_at: {type: string, format: date-time}
-        membership_source: {type: string, enum: [journey_tickets.release_node_id, release-manifest-tickets]}
+        membership_source: {type: string, enum: [journey_tickets.release_node_id, release-manifest-tickets, ships_in.release_node_id]}
         backfilled: {type: boolean, description: True for an explicit post-publication capture}
         actor_principal_id: {type: string, format: uuid, description: Person who authorized the backfill}
         field_source: {type: string, const: nodes.fields}
@@ -18883,6 +19311,8 @@ components:
       type: object
       required: [items, total, truncated, counts]
       properties:
+        next_cursor: {type: string, maxLength: 2048}
+        counts_incomplete: {type: boolean, description: "Scoped counts stop at 10001 and are lower bounds when true."}
         items: {type: array, items: {$ref: '#/components/schemas/KnowledgeItem'}}
         total: {type: integer}
         truncated: {type: boolean}
@@ -19367,6 +19797,7 @@ components:
           description: Existing sibling; null appends
     NodePatch:
       type: object
+      description: Adopted release nodes allow title/body edits by an authorized person only. These edits atomically advance the release revision, so release API edits based on an older revision return 409 revision_changed.
       minProperties: 1
       properties:
         human_check: {type: [string, 'null'], maxLength: 500, description: 'Set a pending human check. Null marks it checked; only a person can clear a pending check. Server authors completion provenance; only a person can set a new pending check when it clears stored completion provenance. Writers, including agents, may set or edit a pending check without stored completion provenance. Existing revision preconditions apply.'}
@@ -19435,6 +19866,12 @@ components:
           additionalProperties:
             type: object
             additionalProperties: {type: integer}
+        facet_labels:
+          type: object
+          description: Visible release titles keyed by UUID for the requested ships_in facet; counts remain in facets.
+          additionalProperties:
+            type: object
+            additionalProperties: {type: string}
     NodeListItem:
       allOf:
         - $ref: '#/components/schemas/Node'
@@ -19481,6 +19918,15 @@ components:
               properties:
                 name: {type: string}
                 key: {type: string}
+            delivery_order:
+              type: object
+              description: Effective releases-mode placement, present when order or ships_in is requested; absent for journey-mode work. Null release_id means backlog and null rank means the unranked tail.
+              required: [release_id, release_rank, rank, expedite]
+              properties:
+                release_id: {type: [string, 'null'], format: uuid}
+                release_rank: {type: [string, 'null']}
+                rank: {type: [string, 'null']}
+                expedite: {type: boolean}
             planning:
               $ref: '#/components/schemas/TicketPlanning'
     TreeEntry:
@@ -19580,7 +20026,7 @@ components:
             affected_nodes: {type: array, maxItems: 1, items: {type: string, format: uuid}}
         node_changes:
           type: array
-          description: Set on node.*, status_autopilot.derived/changed/undone and import.node_created/node_updated/parent_changed events when read (history and stream), never stored. Import reparenting can retain updated_at; membership hints must refresh affected parent aggregates even when parent status and revision are unchanged. Also set on harness.usage_reported for the session's currently bound readable ticket, with estimate/planning fields and a null revision, to invalidate spend projections after late reports. Values are read through the authorized node routes.
+          description: Set on node.*, status_autopilot.derived/changed/undone and import.node_created/node_updated/parent_changed events when read (history and stream), never stored. Import reparenting can retain updated_at; membership hints must refresh affected parent aggregates even when parent status and revision are unchanged. Also set on harness.usage_reported for the session's currently bound readable ticket, with estimate/planning fields and a null revision, to invalidate spend projections after late reports. Values are read through the authorized node routes. Knowledge learning decisions also name their authorized source node with a null revision and learning field.
           items:
             $ref: '#/components/schemas/NodeChange'
     NodeChange:
@@ -19601,13 +20047,13 @@ components:
           description: A restored node reads as created
         fields:
           type: array
-          description: 'Changed attributes: key, kind_id, title, body, state, parent_id, position, deleted_at, project_id (a project move) and fields.<name> for custom fields. Empty for created. Usage invalidation hints name estimate and planning projections.'
+          description: 'Changed attributes: key, kind_id, title, body, state, parent_id, position, deleted_at, project_id (a project move) learning (a Knowledge learning decision) and fields.<name> for custom fields. Empty for created. Usage invalidation hints name estimate and planning projections.'
           items:
             type: string
         revision:
           type: [string, 'null']
           format: date-time
-          description: The node's updated_at after the change, the value If-Unmodified-Since takes; null for a projection-only usage invalidation
+          description: The node's updated_at after the change, the value If-Unmodified-Since takes; null for a projection-only usage invalidation or Knowledge learning decision
     EventPage:
       type: object
       required: [items, next_after]
@@ -19779,7 +20225,463 @@ components:
             $ref: '#/components/schemas/ImportJob'
         next_cursor:
           type: [string, 'null']
+    DeliveryMatchCounts:
+      type: object
+      required: [matched_count, shown_count, hidden_count, hidden_finished, hidden_exit, incomplete]
+      properties:
+        matched_count: {type: integer, minimum: 0, description: "Lower bound when incomplete; scan capped at 10001."}
+        shown_count: {type: integer, minimum: 0}
+        hidden_count: {type: integer, minimum: 0}
+        hidden_finished: {type: integer, minimum: 0}
+        hidden_exit: {type: integer, minimum: 0}
+        hidden_other: {type: integer, minimum: 0, description: "Custom Hide set matched an open/doing category; never counted as an exit."}
+        incomplete: {type: boolean}
+    DeliveryReleaseRow:
+      type: object
+      required: [project_id, release_id, visibility, state, rank, revision]
+      properties:
+        project_id: {type: string, format: uuid}
+        release_id: {type: string, format: uuid}
+        visibility: {type: string, enum: [internal, published]}
+        state: {type: string, enum: [planned, building, frozen, released, abandoned]}
+        rank: {type: string, maxLength: 32}
+        revision: {type: integer, minimum: 1}
+        undo_event_id: {type: [integer, 'null'], minimum: 1, description: "Exact committed release.reranked event for this action; null on reads or non-undoable actions. Never inferred from latest event."}
+        event_ids: {type: array, maxItems: 32, items: {type: integer, minimum: 1}, description: "Exact events committed by a lifecycle or settings action, including rollover and successor planning. Correlation only; these events grant no Undo. Absent on reads and no-op writes."}
+        sequence: {type: integer, minimum: 1}
+        recovery:
+          type: object
+          required: [completed_unplaced, completed_later, incomplete]
+          properties:
+            completed_unplaced: {type: integer, minimum: 0, maximum: 5000}
+            completed_later: {type: integer, minimum: 0, maximum: 5000}
+            incomplete: {type: boolean}
+        entry_closes_at: {type: [string, 'null'], format: date-time}
+        version_scheme: {type: string}
+        version: {type: string}
+        cut_at: {type: string, format: date-time}
+        released_at: {type: string, format: date-time}
+    DeliveryPlacement:
+      type: object
+      required: [item_id, project_id, revision, expedite, due_on]
+      properties:
+        item_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        release_id: {type: string, format: uuid}
+        rank: {type: string}
+        revision: {type: integer, minimum: 0}
+        expedite: {type: boolean}
+        due_on: {type: [string, 'null'], format: date}
+    DeliveryRevisionRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+    DeliveryBuildSettings:
+      type: object
+      additionalProperties: false
+      properties:
+        window:
+          type: [object, 'null']
+          additionalProperties: false
+          required: [timezone, slots]
+          properties:
+            timezone: {type: string, maxLength: 128}
+            slots:
+              type: array
+              maxItems: 32
+              items:
+                type: object
+                additionalProperties: false
+                required: [days, from, to]
+                properties:
+                  days: {type: array, minItems: 1, maxItems: 7, uniqueItems: true, items: {type: integer, minimum: 0, maximum: 6}}
+                  from: {type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'}
+                  to: {type: string, pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$'}
+        budget_agent_hours: {type: [number, 'null'], exclusiveMinimum: 0, maximum: 1000000}
+        max_agents: {type: [integer, 'null'], minimum: 1, maximum: 1000}
+        largest_ticket_hours: {type: [number, 'null'], exclusiveMinimum: 0, maximum: 1000000}
+    DeliveryPlanRequest:
+      type: object
+      additionalProperties: false
+      required: [visibility]
+      properties:
+        title: {type: string, minLength: 1, maxLength: 512}
+        visibility: {type: string, enum: [published, internal]}
+        creation_key: {type: string, minLength: 1, maxLength: 128}
+        entry_closes_at: {type: [string, 'null'], format: date-time}
+        after_release_id: {type: string, format: uuid}
+    DeliveryUpdateRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        title: {type: string, minLength: 1, maxLength: 512}
+        body: {type: string, maxLength: 65536}
+        visibility: {type: string, enum: [internal, published]}
+        entry_closes_at: {type: [string, 'null'], format: date-time}
+        build_settings: {$ref: '#/components/schemas/DeliveryBuildSettings'}
+    DeliveryDefaultsRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, build_defaults]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        build_defaults: {$ref: '#/components/schemas/DeliveryBuildSettings'}
+    DeliveryRankRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        before_id: {type: string, format: uuid}
+        after_id: {type: string, format: uuid}
+        position: {type: string, enum: [top, append], description: "Explicit extremum; exclusive with before_id and after_id. Rank extrema use Upcoming; placement extrema use all physical ranked members."}
+    DeliveryStateRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, to]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        to: {type: string, enum: [planned, building, frozen, abandoned]}
+    DeliveryCutRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision, version_scheme, version]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        version_scheme: {type: string, enum: [legacy, inspr-calendar-v1, inspr-calendar-v2, inspr-calver-3], maxLength: 64}
+        version: {type: string, minLength: 1, maxLength: 64}
+    DeliveryPublishRequest:
+      type: object
+      additionalProperties: false
+      required: [expected_revision]
+      properties:
+        expected_revision: {type: integer, minimum: 1}
+        reservation_ref: {type: string, maxLength: 512}
+    DeliveryPlacementRequest:
+      type: object
+      additionalProperties: false
+      required: [release_id, expected_revision, expected_project_id]
+      properties:
+        release_id: {type: [string, 'null'], format: uuid}
+        expected_revision: {type: integer, minimum: 0}
+        expected_project_id: {type: string, format: uuid}
+        expected_release_revision: {type: integer, minimum: 1}
+        before_id: {type: string, format: uuid}
+        after_id: {type: string, format: uuid}
+        position: {type: string, enum: [top, append], description: "Explicit extremum; exclusive with before_id and after_id. Rank extrema use Upcoming; placement extrema use all physical ranked members."}
+        expedite: {type: boolean}
+        due_on: {type: [string, 'null'], format: date}
+        reason: {type: string, maxLength: 2048}
+    DeliveryPlacementBatch:
+      type: object
+      additionalProperties: false
+      required: [items, release_id]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          maxItems: 100
+          items:
+            type: object
+            additionalProperties: false
+            required: [id, expected_revision]
+            properties:
+              id: {type: string, format: uuid}
+              expected_revision: {type: integer, minimum: 0}
+        release_id: {type: [string, 'null'], format: uuid}
+        expected_release_revision: {type: integer, minimum: 1}
+        position: {type: string, enum: [append, top]}
+        before_id: {type: string, format: uuid}
+        after_id: {type: string, format: uuid}
+    DeliveryAdoptionRequest:
+      type: object
+      additionalProperties: false
+      required: [action, expected_revision]
+      properties:
+        action: {type: string, enum: [preview, retry]}
+        expected_revision: {type: integer, minimum: 0}
+    DeliveryRollup:
+      type: object
+      required: [units, completed, open_hours]
+      properties:
+        units: {type: integer, minimum: 0}
+        completed: {type: integer, minimum: 0}
+        open_hours: {type: number, minimum: 0}
+    DeliveryRelease:
+      type: object
+      required: [project_id, release_id, visibility, state, rank, revision, title, rollup]
+      properties:
+        undo_event_id: {type: [integer, 'null'], minimum: 1, description: "Exact committed release.reranked event for this action; null on reads or non-undoable actions. Never inferred from latest event."}
+        display_name: {type: string, description: "Bound product marketing name or actual project/internal title. Product-name inventories exceeding 10000 entries or sequence 10000 refuse rather than omit matches."}
+        matches: {$ref: '#/components/schemas/DeliveryMatchCounts'}
+        project_id: {type: string, format: uuid}
+        release_id: {type: string, format: uuid}
+        title: {type: string}
+        body: {type: string}
+        visibility: {type: string, enum: [internal, published]}
+        sequence: {type: integer, minimum: 1}
+        state: {type: string, enum: [planned, building, frozen, released, abandoned]}
+        rank: {type: string, maxLength: 32}
+        revision: {type: integer, minimum: 1}
+        event_ids: {type: array, maxItems: 32, items: {type: integer, minimum: 1}, description: "Exact lifecycle/settings event receipts for own SSE correlation; never Undo authority."}
+        occupied_rows: {type: integer, minimum: 0, maximum: 1000, description: "Authoritative occupied membership slots, including epics, cancelled work and tombstones. Independent of progress rollup."}
+        entry_closes_at: {type: [string, 'null'], format: date-time}
+        version_scheme: {type: string}
+        version: {type: string}
+        cut_at: {type: string, format: date-time}
+        released_at: {type: string, format: date-time}
+        rollup: {$ref: '#/components/schemas/DeliveryRollup'}
+        build_settings: {$ref: '#/components/schemas/DeliveryBuildSettings'}
+        resolved_build_settings: {$ref: '#/components/schemas/DeliveryBuildSettings'}
+        setting_sources: {type: object, additionalProperties: {type: string, enum: [inherited, overridden, missing]}}
+        build_summary: {type: object, properties: {authorized: {type: boolean}, budget_outlook: {type: string, enum: [unknown]}, agents: {type: integer, minimum: 0, description: Distinct active agents on visible member tickets; absent without harness.read.}, waiting: {type: integer, minimum: 0, description: Distinct active agents whose bound run reports waiting.}, agents_incomplete: {type: boolean, description: Counts are lower bounds when the bounded 5000-session aggregate is exceeded.}}}
+        reservation_basis: {type: string, enum: [history, attested]}
+        reservation_ref: {type: string, maxLength: 512}
+        released_by: {type: string, format: uuid}
+    DeliveryReleasePage:
+      type: object
+      required: [items]
+      properties:
+        matches: {$ref: '#/components/schemas/DeliveryMatchCounts'}
+        items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/DeliveryRelease'}}
+        next_cursor: {type: string}
+    DeliveryItem:
+      type: object
+      required: [item_id, project_id, revision, key, title, kind, state]
+      properties:
+        item_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        release_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 0}
+        node_revision: {type: string, format: date-time}
+        key: {type: string}
+        title: {type: string}
+        kind: {type: string, enum: [epic, ticket, task]}
+        state: {type: string}
+        expedite: {type: boolean}
+        due_on: {type: [string, 'null'], format: date}
+        estimated_hours: {type: [number, 'null']}
+        epic_id: {type: string, format: uuid}
+        completed_at: {type: string, format: date-time}
+        parent:
+          description: Authorized direct parent from the planning page snapshot; null when absent or unavailable. Planning reads only.
+          type: [object, 'null']
+          required: [id, key, title, kind_slug]
+          properties:
+            id: {type: string, format: uuid}
+            key: {type: string}
+            title: {type: string}
+            kind_slug: {type: string}
+        epic:
+          description: Authorized nearest epic, including a task's ticket epic. Planning reads only; null when absent.
+          type: [object, 'null']
+          required: [id, key, title]
+          properties:
+            id: {type: string, format: uuid}
+            key: {type: string}
+            title: {type: string}
+        assignee:
+          description: Resolved stored assignee using the same native/unassignment and import mapping as the ticket list. Planning reads only; null when unassigned.
+          type: [object, 'null']
+          required: [id, name, has_avatar]
+          properties:
+            id: {type: string, format: uuid}
+            name: {type: string}
+            has_avatar: {type: boolean}
+        eta:
+          description: Reported progress and ready/live ETA for the bounded planning page, using the ticket-list projection. Absent when unknown.
+          $ref: '#/components/schemas/TicketEta'
+    DeliveryItemPage:
+      type: object
+      required: [items, count, incomplete]
+      properties:
+        matches: {$ref: '#/components/schemas/DeliveryMatchCounts'}
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/DeliveryItem'}}
+        next_cursor: {type: string}
+        count: {type: integer, minimum: 0}
+        incomplete: {type: boolean}
+    DeliveryBatchRefusal:
+      type: object
+      required: [error, code, placed, items]
+      properties:
+        error: {type: string}
+        code: {type: string}
+        placed: {type: integer, const: 0}
+        items:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [item_id, placed, code, reason]
+            properties:
+              item_id: {type: string, format: uuid}
+              placed: {type: boolean, const: false}
+              code: {type: string, const: batch_not_applied}
+              reason: {type: string}
+    DeliveryPlacementResult:
+      type: object
+      required: [items]
+      properties:
+        undo_event_id: {type: [integer, 'null'], minimum: 1, description: "Exact committed ships_in.changed event for the single/all-or-nothing batch; null for no-op. Items carry committed item/project/release identity and revision."}
+        items: {type: array, maxItems: 101, items: {$ref: '#/components/schemas/DeliveryPlacement'}}
+        release_revision: {type: integer, minimum: 1}
+        release_ranks: {type: object, maxProperties: 102, additionalProperties: {type: string}, description: Committed ordering keys of the touched releases.}
+        release_revisions: {type: object, maxProperties: 102, additionalProperties: {type: integer, minimum: 1}, description: Committed revisions of the touched source and destination releases.}
+    DeliveryAdoptionJob:
+      type: object
+      description: Private persisted summary; opaque report and backup references never authorize download. No provider journal or credential payloads.
+      required: [state, revision, attempts, report_incomplete, cleanup_state]
+      properties:
+        state: {type: string, enum: [pending, checking, backing_up, applying, adopted, refused, retry_wait]}
+        revision: {type: integer, minimum: 1}
+        attempts: {type: integer, minimum: 0}
+        reason_code: {type: string, maxLength: 64}
+        reason_message: {type: string, maxLength: 2048}
+        last_checked_at: {type: [string, 'null'], format: date-time}
+        next_attempt_at: {type: [string, 'null'], format: date-time}
+        lease_until: {type: [string, 'null'], format: date-time}
+        report_ref: {type: string, maxLength: 512}
+        report_digest: {type: string, pattern: '^[0-9a-f]{64}$'}
+        source_fingerprint: {type: string, pattern: '^[0-9a-f]{64}$'}
+        report_counts: {type: [object, 'null']}
+        report_incomplete: {type: boolean}
+        backup_ref: {type: string, maxLength: 512}
+        backup_verified_at: {type: [string, 'null'], format: date-time}
+        cleanup_state: {type: string, enum: [none, pending, checking, blocked, reclaimed]}
+        next_reconcile_at: {type: [string, 'null'], format: date-time}
+        reserved_backup_bytes: {type: integer, minimum: 0}
+        reserved_restore_slots: {type: integer, minimum: 0, maximum: 1}
+    DeliveryStatus:
+      type: object
+      required: [project_id, mode, revision]
+      properties:
+        project_id: {type: string, format: uuid}
+        product_project: {type: boolean, description: "True only for the server's explicit tenant/project product binding. Publication uses history verification there and person attestation elsewhere; branding and project titles do not define this authority."}
+        version_scheme: {type: string, description: "Current product scheme for the explicitly bound product; otherwise the project's latest explicitly recorded cut scheme, or empty when no scheme has been recorded. Never inferred from version text."}
+        mode: {type: string, enum: [journey, releases]}
+        revision: {type: integer, minimum: 0}
+        next_sequence: {type: integer, minimum: 1}
+        build_defaults: {$ref: '#/components/schemas/DeliveryBuildSettings'}
+        adoption: {oneOf: [{$ref: '#/components/schemas/DeliveryAdoptionJob'}, {type: 'null'}]}
+    DeliveryAdoptionAccepted:
+      type: object
+      required: [project_id, adoption, status_ref]
+      properties:
+        project_id: {type: string, format: uuid}
+        adoption: {$ref: '#/components/schemas/DeliveryAdoptionJob'}
+        status_ref: {type: string}
+    DeliveryAdoptionPage:
+      type: object
+      required: [items, counts, counts_complete, discovery_complete, status]
+      properties:
+        items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/DeliveryStatus'}}
+        next_cursor: {type: string}
+        counts: {type: object, additionalProperties: {type: integer, minimum: 0}}
+        counts_complete: {type: boolean}
+        discovery_complete: {type: boolean}
+        status: {type: string, enum: [running, needs_attention, complete]}
+    DeliveryAdoptionReport:
+      type: object
+      required: [items, incomplete]
+      properties:
+        items: {type: array, maxItems: 200, items: {type: object}}
+        next_cursor: {type: string}
+        incomplete: {type: boolean}
+        revision: {type: integer, minimum: 1}
+        source_fingerprint: {type: string, maxLength: 64}
+    DeliveryOverview:
+      type: object
+      required: [active, released, backlog, abandoned]
+      properties:
+        backlog_matches: {type: object, additionalProperties: {$ref: '#/components/schemas/DeliveryMatchCounts'}}
+        matches: {$ref: '#/components/schemas/DeliveryMatchCounts'}
+        active_next_cursor: {type: string}
+        counts_incomplete: {type: boolean}
+        active: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/DeliveryRelease'}}
+        released: {$ref: '#/components/schemas/DeliveryReleasePage'}
+        backlog: {type: object, required: [ranked, tail], properties: {ranked: {type: integer, minimum: 0}, tail: {type: integer, minimum: 0}}}
+        abandoned: {type: integer, minimum: 0}
+
   parameters:
+    DeliveryPlanningView:
+      name: view
+      in: query
+      description: "Full live effective population; incompatible with recovery/through. Omission preserves old defaults."
+      schema: {type: string, enum: [planning]}
+    DeliveryPlanningSearch:
+      name: q
+      in: query
+      description: "At most 200 UTF-8 bytes. Release name or visible work match before pagination."
+      schema: {type: string, maxLength: 200}
+    DeliveryPlanningHideClosed:
+      name: hide_closed
+      in: query
+      description: "Hide applies after search; counts include hidden hits."
+      schema: {type: boolean, default: true}
+    DeliveryPlanningHideState:
+      name: hide_state
+      in: query
+      description: "Tenant-taxonomy states; at most 100 raw values and 6400 bytes. Hide off removes no states."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningState:
+      name: work_state
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningKind:
+      name: kind
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningPriority:
+      name: priority
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningAssignee:
+      name: assignee
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningTag:
+      name: tag
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningCostUnit:
+      name: cost_unit
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningHumanCheck:
+      name: human_check
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningEpic:
+      name: epic
+      in: query
+      description: "Shared work predicates; positive alternatives and ! exclusions. At most 100 raw values and 6400 bytes."
+      schema: {type: array, maxItems: 100, items: {type: string}}
+    DeliveryPlanningDateField:
+      name: date_field
+      in: query
+      description: "Same date bounds as the ticket list."
+      schema: {type: string}
+    DeliveryPlanningDateFrom:
+      name: date_from
+      in: query
+      description: "Same date bounds as the ticket list."
+      schema: {type: string}
+    DeliveryPlanningDateTo:
+      name: date_to
+      in: query
+      description: "Same date bounds as the ticket list."
+      schema: {type: string}
     AeonStepUp:
       name: Aeon-Step-Up
       in: header
@@ -19854,7 +20756,7 @@ components:
       in: query
       schema:
         type: string
-        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, parent eligible-leaf sum, empty last in both directions), model (full model name and model version of the leading used model, otherwise the frozen plan or live registry route; unknown last in both directions; independent of Display preferences), tokens, list_cost and paid (spent over all historical sessions in the node subtree, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
+        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are order (releases-mode expedite first, release rank before backlog, item rank before unranked tail, created_at then id; journey-mode priority then created_at; rank keys use C collation), position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, parent eligible-leaf sum, empty last in both directions), model (full model name and model version of the leading used model, otherwise the frozen plan or live registry route; unknown last in both directions; independent of Display preferences), tokens, list_cost and paid (spent over all historical sessions in the node subtree, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
         default: position
     Direction:
       name: direction
@@ -19912,6 +20814,7 @@ components:
         application/json:
           schema:
             $ref: '#/components/schemas/ViewPatch'
+
   responses:
     OwnerWorkstationStepUpRequired:
       description: A marked owner workstation key needs local confirmation for this exact action.

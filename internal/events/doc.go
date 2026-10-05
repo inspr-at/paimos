@@ -10,8 +10,10 @@
 // with Last-Event-ID. Notifications contain only a tenant and event ID.
 // Live views open the stream with ?after=latest: it starts at the newest
 // event, and each connection first sends stream.ready naming its resume ID.
-// Reading attaches node_changes to node.* events (id, project, changed
+// Reading attaches node_changes to node.* and knowledge.* events (id, project, changed
 // attribute names, revision); nothing about them is stored.
+// Knowledge learning decisions name their source node and its authorized
+// project with a learning field and null revision, since the node is unchanged.
 // Late harness.usage_reported events attach a projection hint for the current
 // readable session binding, so spend can refresh after a session has stopped.
 //

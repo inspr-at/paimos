@@ -3,10 +3,13 @@
 package knowledge
 
 import (
+	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -19,6 +22,82 @@ import (
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
+
+func TestKnowledgeStreamCarriesAuthorizedProjectForArchiveDeleteAndUndo(t *testing.T) {
+	f := setup(t)
+	entry := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "stream-note", "title": "Stream note"})
+	w := call(t, f, f.a, "PATCH", "/api/knowledge/"+entry.ID, map[string]any{"status": "archived"})
+	expect(t, w, 200)
+	archived := decode[Entry](t, w)
+	w = call(t, f, f.a, "POST", fmt.Sprintf("/api/events/%d/undo", *archived.EventID), nil)
+	expect(t, w, 201)
+	restored := decode[events.Event](t, w)
+	w = call(t, f, f.a, "DELETE", "/api/knowledge/"+entry.ID, nil)
+	expect(t, w, 200)
+	deleted := decode[struct {
+		EventID int64 `json:"event_id"`
+	}](t, w)
+	w = call(t, f, f.a, "POST", fmt.Sprintf("/api/events/%d/undo", deleted.EventID), nil)
+	expect(t, w, 201)
+	undeleted := decode[events.Event](t, w)
+	// Another tenant's Knowledge event cannot enter this reader's stream.
+	createEntry(t, f, f.foreign, map[string]any{"project_id": f.elsewhere, "type": "runbook", "slug": "foreign-note", "title": "Foreign note"})
+	wants := []struct {
+		id     int64
+		change string
+		undoOf *int64
+	}{
+		{*entry.EventID, "created", nil}, {*archived.EventID, "updated", nil},
+		{restored.ID, "updated", archived.EventID}, {deleted.EventID, "deleted", nil}, {undeleted.ID, "created", &deleted.EventID},
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		f.handler.ServeHTTP(w, r.WithContext(tenant.WithPrincipal(r.Context(), f.b)))
+	}))
+	defer srv.Close()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", srv.URL+"/api/events/stream?after="+strconv.FormatInt(*entry.EventID-1, 10), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != 200 {
+		t.Fatalf("stream status %d", response.StatusCode)
+	}
+	scanner := bufio.NewScanner(response.Body)
+	for _, want := range wants {
+		found := false
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			var event events.Event
+			if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
+				t.Fatal(err)
+			}
+			if event.Type == "" {
+				continue
+			} // stream.ready carries no resource event
+			if event.ID != want.id || len(event.NodeChanges) != 1 {
+				t.Fatalf("missing Knowledge event/project summary: id=%d type=%s changes=%+v; want %d", event.ID, event.Type, event.NodeChanges, want.id)
+			}
+			change := event.NodeChanges[0]
+			if change.ID != entry.ID || change.ProjectID == nil || *change.ProjectID != f.project || change.Change != want.change || (event.UndoOf == nil) != (want.undoOf == nil) || want.undoOf != nil && *event.UndoOf != *want.undoOf {
+				t.Fatalf("wrong authorized Knowledge summary: changes=%+v undo_of=%v", event.NodeChanges, event.UndoOf)
+			}
+			found = true
+			break
+		}
+		if !found {
+			t.Fatalf("stream missed event %d: %v", want.id, scanner.Err())
+		}
+	}
+}
 
 type fixture struct {
 	db        *dbtest.DB

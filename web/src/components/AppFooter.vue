@@ -189,6 +189,7 @@ const label = computed(() => {
     <div v-if="pill" ref="slotEl" class="flow-slot" :class="{ placed: placed && pillOn, tight: tight && pillOn }" v-show="pillOn">
       <JourneyChip :key="pill.projectId" :project-id="pill.projectId" :active="pill.active" @go="openPill" @shown="onShown" />
     </div>
+    <span v-show="!pillOn" id="project-footer-live" class="footer-live" />
     <span class="spacer" />
     <button v-if="session.identity" ref="releaseControl" type="button" class="version-pill" :aria-label="label"
       @pointerenter="enterCard" @pointerleave="leaveCard" @focus="focusCard" @blur="blurCard" @keydown.esc="hideCard" @click="openReleases">
@@ -285,4 +286,5 @@ const label = computed(() => {
   .pill-version { font-size: 11.5px; }
 }
 @media (prefers-reduced-motion: reduce) { .app-footer, .pill-face { transition: none; } }
+.footer-live { position: absolute; left: 50%; transform: translateX(-50%); display: inline-flex; align-items: center; }
 </style>

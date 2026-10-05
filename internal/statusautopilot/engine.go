@@ -145,7 +145,7 @@ func loadCandidates(ctx context.Context, tx pgx.Tx, ids []string, now time.Time)
  OR (h.stop_reason='paused' AND h.pause_record->>'state' IN ('paused','resume_requested')))) live
  FROM harness_sessions h WHERE h.ticket_node_id=n.id AND h.tenant_id=n.tenant_id) work ON true
  LEFT JOIN LATERAL (SELECT max(r.created_at) at FROM work_order_reviews r WHERE r.ticket_node_id=n.id AND r.tenant_id=n.tenant_id AND r.pull_request IS NOT NULL) review ON true
- WHERE n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL ORDER BY n.id FOR UPDATE OF n`, ids, Job, now.Add(-15*time.Minute))
+ WHERE n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM project_releases r WHERE r.tenant_id=n.tenant_id AND r.release_node_id=n.id) ORDER BY n.id FOR UPDATE OF n`, ids, Job, now.Add(-15*time.Minute))
 	if err != nil {
 		return nil, err
 	}

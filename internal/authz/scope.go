@@ -27,6 +27,7 @@ import (
 // project-only principal never reaches workspace-wide data such as members,
 // quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
+	"GET /api/delivery/adoptions":                                   true,
 	"GET /api/chat-threads/{id}":                                    true,
 	"GET /api/me/phone-approvals":                                   true,
 	"PUT /api/me/phone-approvals/settings":                          true,

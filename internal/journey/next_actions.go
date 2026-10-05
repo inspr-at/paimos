@@ -83,7 +83,7 @@ func (m *Module) handleNextActions(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, snapshot := range snapshots {
 			f := snapshot.Facts
-			if f.CurrentReleaseRecorded && f.Release == nil {
+			if !f.ReleasesMode && f.CurrentReleaseRecorded && f.Release == nil {
 				return fail(409, "current release is missing")
 			}
 			foldActionSnapshot(&f, snapshot)
@@ -137,7 +137,7 @@ func loadActionSnapshots(ctx context.Context, tx pgx.Tx, ids []string) ([]action
  'ProjectID',p.id,'NodeKey',p.key,'ProjectKey',p.project_key,'Profile',p.profile,'Revision',p.revision,
  'BriefConfirmed',p.confirmed,'AcceptedBrief',p.accepted,'Decision',p.decision,
  'RequirementsRevision',p.req_revision,'AgreedRequirementsRevision',p.agreed_revision,
- 'CurrentReleaseRecorded',p.current_release_node_id IS NOT NULL,'Imported',p.imported,'ImportedStage',p.imported_stage,
+ 'ReleasesMode',EXISTS(SELECT 1 FROM project_delivery WHERE project_node_id=p.id),'CurrentReleaseRecorded',p.current_release_node_id IS NOT NULL,'Imported',p.imported,'ImportedStage',p.imported_stage,
  'RequirementsDigest',s.digest,
  'Release',CASE WHEN r.release_node_id IS NULL THEN NULL ELSE jsonb_build_object('ID',r.release_node_id,'Number',r.number,'State',r.state,'AccessRequired',r.access_required,'Revision',r.revision) END,
  'RequirementCount',(SELECT count(*) FROM journey_requirements q WHERE q.project_node_id=p.id),

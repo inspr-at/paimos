@@ -28,7 +28,7 @@ async function samples(controls: Record<string, Locator>) {
 }
 async function noSideways(controls: Record<string, Locator>, before: Awaited<ReturnType<typeof samples>>) {
   const after = await samples(controls)
-  for (const name of Object.keys(before)) {
+  for (const name of Object.keys(controls)) {
     expect(after[name]!.x - before[name]!.x, `${name} sideways movement`).toBe(0)
     expect(after[name]!.width - before[name]!.width, `${name} width change`).toBe(0)
     expect(after[name]!.height - before[name]!.height, `${name} height change`).toBe(0)
@@ -62,7 +62,7 @@ for (const width of [390, 1024, 1440]) {
       await settled(page)
       const toolbar = page.getByRole('toolbar', { name: 'Ticket list controls' })
       const controls: Record<string, Locator> = {
-        views: toolbar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), count: toolbar.locator('.count-live'), new: page.getByRole('button', { name: 'New ticket', exact: true }),
+        views: toolbar.getByRole('tablist', { name: 'Ticket views' }), search: search(page), new: page.getByRole('button', { name: 'New ticket', exact: true }),
         ...(width === 390 ? { filters: page.getByRole('button', { name: 'Filters', exact: true }) } : { status: toolbar.locator('.facet-control[data-dim="status"]'), filters: toolbar.locator('.facets'), clear: toolbar.getByRole('button', { name: 'Clear all', exact: true }) }),
       }
       const before = await samples(controls)
@@ -82,7 +82,8 @@ for (const width of [390, 1024, 1440]) {
         await expectStableControls({ controls: { fold: fold(page), appbar: page.locator('.app-header') }, interactions: ['collapsed', 'comfortable', 'collapsed'].map(mode => ({ name: mode, run: async () => { await fold(page).click(); await expect(page.locator('.project-page')).toHaveClass(new RegExp(`header-${mode}`)) } })) })
       } else await density(page, 'Collapsed').click()
       await expect(page.locator('#project-header-fold')).toBeHidden()
-      await settled(page); await noSideways(controls, before)
+      // r6 intentionally slides the section switcher into Collapsed; New stays in place.
+      await settled(page); await noSideways({ new: controls.new! }, before)
       await capture(page, `${width}-${theme}-collapsed`)
       await search(page).focus(); await search(page).press('Escape')
       await expect(page.locator('.project-page')).toHaveClass(/header-collapsed/)
@@ -94,6 +95,8 @@ for (const width of [390, 1024, 1440]) {
       if (width === 390) await phoneRoomy(page, 'Compact'); else await density(page, 'Compact').click()
       await settled(page); await noSideways(controls, before)
       await expect(page.locator('.chips')).toHaveCount(0)
+      await expect(page.locator('.list-count')).toHaveCount(1)
+      await expect(page.locator('.list-foot.end')).toHaveCount(0)
       if (width !== 390) {
         await expect(page.locator('.project-navigation').getByRole('button', { name: 'Display: Display', exact: true })).toBeVisible()
         await expect(toolbar.getByRole('button', { name: 'Display: Display', exact: true })).toHaveCount(0)
@@ -266,7 +269,7 @@ test('scrolling leaves density alone and section changes keep the view settings 
   await density(page, 'Compact').click()
   await main.evaluate(el => { el.scrollTop = 0 })
   await page.getByRole('tab', { name: 'Knowledge', exact: true }).click()
-  await expect(page.getByRole('radiogroup', { name: 'Project header', exact: true })).toBeHidden()
+  await expect(page.getByRole('radiogroup', { name: 'Project header', exact: true })).toBeVisible()
   await page.getByRole('tab', { name: 'Tickets', exact: true }).click()
   await page.getByRole('button', { name: 'Display: Display', exact: true }).click()
   await expect(page.getByRole('dialog', { name: 'Display options' })).toBeVisible()
@@ -279,4 +282,31 @@ test('phone Graph retains header density in the Display sheet', async ({ page })
   const sheet = page.getByRole('dialog', { name: 'Filters', exact: true })
   const group = sheet.getByRole('radiogroup', { name: 'Project header density' })
   await expectStableControls({ controls: { group, compact: group.getByRole('radio', { name: 'Compact' }), comfortable: group.getByRole('radio', { name: 'Comfortable' }), action: sheet.locator('footer button') }, scrollAreas: { body: sheet.locator('.sheet-scroll') }, interactions: ['Comfortable', 'Compact'].map(name => ({ name, run: async () => { await group.getByRole('radio', { name }).click(); await expect(group.getByRole('radio', { name })).toHaveAttribute('aria-checked', 'true') } })) })
+})
+
+test('Collapsed section switcher owns room only when visible and reduced motion is instant', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const data = fixtures(); data.preferences['list:display'] = { headerGraph: false }
+  await mockWork(page, data)
+  await page.goto('/p/PHAROS/tickets')
+  const switcher = page.locator('.section-switch')
+  await expect(page.locator('.project-page')).toHaveClass(/header-compact/)
+  expect((await switcher.boundingBox())?.width ?? 0).toBe(0)
+  await density(page, 'Collapsed').click()
+  await expect(switcher).toBeVisible()
+  await switcher.click()
+  const menu = page.getByRole('menu', { name: 'Project sections', exact: true })
+  await expect(menu.getByRole('menuitem')).toHaveText(['Releases', 'Tickets', 'Knowledge'])
+  await menu.getByRole('menuitem', { name: 'Knowledge', exact: true }).click()
+  await expect(page).toHaveURL('/p/PHAROS/knowledge')
+  await expect(switcher).toHaveAccessibleName('Section: Knowledge. Switch section')
+  await switcher.click()
+  await menu.getByRole('menuitem', { name: 'Tickets', exact: true }).click()
+  await expect(page).toHaveURL('/p/PHAROS/tickets')
+  await density(page, 'Comfortable').click()
+  await expect(page.locator('#project-header-fold')).toBeVisible()
+  await density(page, 'Compact').click()
+  expect(await page.locator('#project-header-fold').evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0)
+  expect((await switcher.boundingBox())?.width ?? 0).toBe(0)
 })

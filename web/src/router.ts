@@ -33,6 +33,7 @@ export const router = createRouter({
     {
       path: '/p/:projectKey', component: () => import('./views/ProjectView.vue'), meta: { title: 'Project' },
       children: [
+        { path: 'releases', component: RouteMarker, meta: { title: 'Releases', projectSection: 'releases' } },
         { path: 'tickets', component: RouteMarker, meta: { projectSection: 'tickets' } },
         { path: 'journey', component: RouteMarker, meta: { title: 'Journey', projectSection: 'journey' } },
         { path: 'settings', component: RouteMarker, meta: { title: 'Project settings', projectSection: 'settings' } },

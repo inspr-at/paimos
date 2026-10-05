@@ -114,6 +114,29 @@ func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(
 	return tx.Commit(ctx)
 }
 
+// ReadSnapshot keeps preflight and every page in one read-only repeatable-read
+// snapshot. A parent savepoint cannot provide that guarantee; reject it.
+func ReadSnapshot(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
+	if ctx.Value(transactionContextKey{}) != nil {
+		return fmt.Errorf("read snapshot cannot reuse a parent transaction")
+	}
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	if err = enterTenant(ctx, tx, tenantID); err != nil {
+		return fmt.Errorf("set tenant: %w", err)
+	}
+	if err = fn(tx); err != nil {
+		return err
+	}
+	if err = ctx.Err(); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
 // TenantGuard fences a request's authorization at the start of each transaction,
 // before a handler can take resource locks. It must only use the supplied tx.
 type TenantGuard func(context.Context, pgx.Tx, string) error

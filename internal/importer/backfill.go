@@ -76,6 +76,11 @@ func BackfillRelations(ctx context.Context, pool *pgxpool.Pool, tenantID string)
 				continue
 			}
 			wrote, err := applyClassicRelation(ctx, tx, tenantID, actor, rel)
+			if errors.Is(err, errReleasesModeSkipped) {
+				report.Counts["release_links_skipped"]++
+				report.Counts["skipped"]++
+				continue
+			}
 			if err != nil {
 				return fmt.Errorf("backfill %s: %w", rel.ClassicRef, err)
 			}

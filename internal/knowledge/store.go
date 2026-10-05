@@ -49,6 +49,8 @@ const itemColumns = `n.id::text, n.key, k.slug, coalesce(n.fields->>'slug',''), 
     coalesce(lwt.id, lwp.id)::text, coalesce(lwt.name, lwp.name), coalesce(lw.type,''), ` + linkCount
 
 type listQuery struct {
+	ShipsIn   string
+	Cursor    string
 	ProjectID string
 	Types     []string // kind slugs; empty = all
 	Statuses  []string
@@ -59,10 +61,12 @@ type listQuery struct {
 
 // ListPage is GET /api/knowledge.
 type ListPage struct {
-	Items     []Item                    `json:"items"`
-	Total     int                       `json:"total"`
-	Truncated bool                      `json:"truncated"`
-	Counts    map[string]map[string]int `json:"counts"`
+	NextCursor       string                    `json:"next_cursor,omitempty"`
+	CountsIncomplete bool                      `json:"counts_incomplete,omitempty"`
+	Items            []Item                    `json:"items"`
+	Total            int                       `json:"total"`
+	Truncated        bool                      `json:"truncated"`
+	Counts           map[string]map[string]int `json:"counts"`
 }
 
 // scanLimit bounds the rows a list reads; knowledge is small next to work.

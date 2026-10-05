@@ -4,6 +4,7 @@
 // and what the screens derive from them (groups, filters, slugs, headings, the
 // agent command). Free of Vue for unit tests.
 import { api } from './api.ts'
+import type { DeliveryActions } from './deliveryChanges'
 
 export type KnowledgeType = 'runbook' | 'guideline' | 'memory' | 'external-system' | 'related-project' | 'decision'
 export type KnowledgeStatus = 'active' | 'proposed' | 'archived'
@@ -23,7 +24,7 @@ export interface KnowledgeEntry extends KnowledgeItem {
   renamed_from?: string; event_id?: number
 }
 export interface KnowledgePage {
-  items: KnowledgeItem[]; total: number; truncated: boolean
+  items: KnowledgeItem[]; total: number; truncated: boolean; next_cursor?: string; counts_incomplete?: boolean
   counts: { type: Partial<Record<KnowledgeType, number>>; status: Partial<Record<KnowledgeStatus, number>> }
 }
 
@@ -85,7 +86,7 @@ export function plainError(status: number, code: string, message: string): strin
 async function send<T>(path: string, init: { method?: string; body?: unknown; headers?: Record<string, string>; signal?: AbortSignal } = {}): Promise<T> {
   const response = await api(`/knowledge${path}`, {
     method: init.method ?? 'GET',
-    ...(init.signal ? { signal: AbortSignal.any([init.signal, AbortSignal.timeout(10_000)]) } : {}),
+    signal: init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
     headers: { ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }), ...init.headers },
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
   })
@@ -96,26 +97,39 @@ async function send<T>(path: string, init: { method?: string; body?: unknown; he
   }
   return await response.json() as T
 }
+// Begin before sending: the live echo can arrive before the HTTP receipt.
+// Knowledge keeps its own toast Undo; correlation must preserve move Undo.
+async function correlate<T extends { event_id?: number }>(write: () => Promise<T>, actions?: DeliveryActions): Promise<T> {
+  const captured = actions?.begin()
+  try {
+    const result = await write()
+    if (actions && captured !== undefined && !actions.receipt(captured, result.event_id ?? null)) throw new Error('The project or person changed; the Knowledge result was discarded')
+    return result
+  } catch (e) {
+    if (actions && captured !== undefined) actions.failed(captured)
+    throw e
+  }
+}
 function query(values: Record<string, string | number | undefined>): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(values)) if (value !== undefined && value !== '') params.set(key, String(value))
   const text = params.toString()
   return text ? `?${text}` : ''
 }
-export interface ListParams { project_id?: string; q?: string; type?: KnowledgeType[]; status?: KnowledgeStatus[]; sort?: string; limit?: number }
+export interface ListParams { ships_in?: string; cursor?: string; project_id?: string; q?: string; type?: KnowledgeType[]; status?: KnowledgeStatus[]; sort?: string; limit?: number }
 export const listKnowledge = (params: ListParams = {}, signal?: AbortSignal) =>
-  send<KnowledgePage>(query({ project_id: params.project_id, q: params.q?.trim(), type: params.type?.join(','), status: params.status?.join(','), sort: params.sort, limit: params.limit }), { signal })
+  send<KnowledgePage>(query({ ships_in: params.ships_in, cursor: params.cursor, project_id: params.project_id, q: params.q?.trim(), type: params.type?.join(','), status: params.status?.join(','), sort: params.sort, limit: params.limit }), { signal })
 export const getKnowledge = (id: string) => send<KnowledgeEntry>(`/${encodeURIComponent(id)}`)
 export const resolveKnowledge = (projectId: string, type: KnowledgeType, slug: string) =>
   send<KnowledgeEntry>(`/resolve${query({ project_id: projectId, type, slug })}`)
 export interface KnowledgeCreate { project_id: string; type: KnowledgeType; slug: string; title: string; body?: string; status?: KnowledgeStatus; metadata?: Record<string, unknown>; key_prefix?: string }
-export const createKnowledge = (body: KnowledgeCreate) => send<KnowledgeEntry>('', { method: 'POST', body })
+export const createKnowledge = (body: KnowledgeCreate, actions?: DeliveryActions) => correlate(() => send<KnowledgeEntry>('', { method: 'POST', body }), actions)
 export interface KnowledgePatch { title?: string; body?: string; status?: KnowledgeStatus; slug?: string; metadata?: Record<string, unknown> }
 // ifUnmodifiedSince is updated_at as read; a newer copy answers 412 with the current entry.
-export const updateKnowledge = (id: string, patch: KnowledgePatch, ifUnmodifiedSince?: string) =>
-  send<KnowledgeEntry>(`/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch, headers: ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {} })
-export const deleteKnowledge = (id: string, ifUnmodifiedSince?: string) =>
-  send<{ id: string; event_id: number }>(`/${encodeURIComponent(id)}`, { method: 'DELETE', headers: ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {} })
+export const updateKnowledge = (id: string, patch: KnowledgePatch, ifUnmodifiedSince?: string, actions?: DeliveryActions) =>
+  correlate(() => send<KnowledgeEntry>(`/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch, headers: ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {} }), actions)
+export const deleteKnowledge = (id: string, ifUnmodifiedSince?: string, actions?: DeliveryActions) =>
+  correlate(() => send<{ id: string; event_id: number }>(`/${encodeURIComponent(id)}`, { method: 'DELETE', headers: ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {} }), actions)
 
 // ---------- Method learnings (AEON-275) ----------
 export interface MethodLearning {
@@ -131,19 +145,25 @@ export interface MethodLearningDecision {
 export const listLearnings = (projectId: string, signal?: AbortSignal) =>
   send<MethodLearningPage>(`/learnings${query({ project_id: projectId })}`, { signal })
 // confirmNotSensitive: a person confirms that text flagged as a credential is not one.
-export const acceptLearning = (id: string, knowledgeId: string, ifUnmodifiedSince?: string, confirmNotSensitive = false) =>
-  send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/accept`, {
+export const acceptLearning = (id: string, knowledgeId: string, ifUnmodifiedSince?: string, confirmNotSensitive = false, actions?: DeliveryActions) =>
+  correlate(() => send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/accept`, {
     method: 'POST', body: confirmNotSensitive ? { knowledge_id: knowledgeId, confirm_not_sensitive: true } : { knowledge_id: knowledgeId },
     headers: ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {},
-  })
-export const dismissLearning = (id: string) =>
-  send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/dismiss`, { method: 'POST', body: {} })
-export const draftLearning = (id: string, body: { layer_id: string; set_id: string; confirm_not_sensitive?: true }) =>
-  send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/draft`, { method: 'POST', body })
+  }), actions)
+export const dismissLearning = (id: string, actions?: DeliveryActions) =>
+  correlate(() => send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/dismiss`, { method: 'POST', body: {} }), actions)
+export const draftLearning = (id: string, body: { layer_id: string; set_id: string; confirm_not_sensitive?: true }, actions?: DeliveryActions) =>
+  correlate(() => send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/draft`, { method: 'POST', body }), actions)
 // Undo one knowledge write through the event log.
-export async function undoKnowledge(eventId: number): Promise<void> {
-  const response = await api(`/events/${eventId}/undo`, { method: 'POST' })
-  if (!response.ok) throw new Error(response.status === 409 ? 'It changed again since, so it cannot be undone.' : response.status === 403 ? 'Only the person who made the change, or an admin, can undo it.' : 'Undo did not work. Please try again.')
+export async function undoKnowledge(eventId: number, actions?: DeliveryActions): Promise<void> {
+  await correlate(async () => {
+    const response = await api(`/events/${eventId}/undo`, { method: 'POST', signal: AbortSignal.timeout(10_000) })
+    if (!response.ok) throw new Error(response.status === 409 ? 'It changed again since, so it cannot be undone.' : response.status === 403 ? 'Only the person who made the change, or an admin, can undo it.' : 'Undo did not work. Please try again.')
+    if (!actions) return {}
+    const body = await response.json()
+    if (body.undo_of !== eventId || !Number.isSafeInteger(body.id) || body.id < 1) throw new Error('Undo returned an invalid event receipt')
+    return { event_id: body.id as number }
+  }, actions)
 }
 
 // ---------- Slugs ----------

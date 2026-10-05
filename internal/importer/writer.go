@@ -18,6 +18,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
@@ -213,6 +214,10 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 					TargetNodeID: issueIDs[targetID],
 					ClassicRef:   ref,
 				})
+				if errors.Is(err, errReleasesModeSkipped) {
+					r.Counts["release_links_skipped"]++
+					continue
+				}
 				if err != nil {
 					return fmt.Errorf("relation %s %d→%d: %w", typ, sourceID, targetID, err)
 				}
@@ -476,6 +481,13 @@ func upsertNode(ctx context.Context, tx pgx.Tx, tenantID, sourceID, kindID, key,
 			*conflicts = appendConflict(*conflicts, ImportConflict{ClassicID: classicID, Key: key, Reason: "Aeon node changed since last import"})
 			return id, false, false, nil
 		}
+		if err = delivery.RefuseReleaseNodes(ctx, tx, []string{id}); errors.Is(err, delivery.ErrReleaseAPI) {
+			classicID, _ := intField(original, "id")
+			*conflicts = appendConflict(*conflicts, ImportConflict{ClassicID: classicID, Key: key, Reason: "release_api"})
+			return id, false, false, nil
+		} else if err != nil {
+			return "", false, false, err
+		}
 		_, err = tx.Exec(ctx, `UPDATE nodes SET title=$3,body=$4,state=$5,fields=$6::jsonb,updated_at=coalesce($7::timestamptz,now()) WHERE tenant_id=$1 AND id=$2`, tenantID, id, title, body, state, string(bodyJSON), parseClassicTime(stringField(original, "updated_at")))
 		if err != nil {
 			return "", false, false, forbidPortal(err)
@@ -586,6 +598,11 @@ func rawSnapshot(b []byte) any {
 }
 
 func setParent(ctx context.Context, tx pgx.Tx, tenantID, actor, childID, parentID string) (bool, error) {
+	if err := delivery.RefuseReleaseNodes(ctx, tx, []string{childID}); errors.Is(err, delivery.ErrReleaseAPI) {
+		return false, nil
+	} else if err != nil {
+		return false, err
+	}
 	var before, after []byte
 	if err := tx.QueryRow(ctx, `SELECT to_jsonb(nodes) FROM nodes WHERE tenant_id=$1 AND id=$2`, tenantID, childID).Scan(&before); err != nil {
 		return false, err

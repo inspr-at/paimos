@@ -17,8 +17,8 @@ import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
 
 // Phones and small tablets share every filter and display preference with the toolbar.
 const props = withDefaults(defineProps<{
-  summary?: ProjectSummary | null; filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null
-  view?: 'list' | 'outline' | 'graph'; canSave?: boolean; density: 'comfortable' | 'compact'; headerGraph?: boolean; projectHeader?: boolean
+  summary?: ProjectSummary | null; filters: ListFilters; options: (dimension: Dimension) => FacetOption[]; total: number | null; totalIncomplete?: boolean; facetErrors?: Record<string, string>
+  view?: 'list' | 'outline' | 'graph' | 'releases'; canSave?: boolean; density: 'comfortable' | 'compact'; headerGraph?: boolean; projectHeader?: boolean
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
 }>(), { view: 'list' })
 const emit = defineEmits<{
@@ -29,7 +29,7 @@ const emit = defineEmits<{
 }>()
 const hideName = computed(() => hideLabel(props.filters.hideStates))
 const hideNames = computed(() => hiddenStates(props.filters.hideStates).map(state => statusMeta(state).label).join(', '))
-const dimensions = computed(() => DIMENSIONS.filter(d => props.view !== 'graph' || TICKET_GRAPH_FILTERS.includes(d.key)))
+const dimensions = computed(() => DIMENSIONS.filter(d => props.view === 'releases' ? d.key !== 'release' : props.view !== 'graph' || TICKET_GRAPH_FILTERS.includes(d.key)))
 const dialog = ref<HTMLDialogElement>()
 const doneButton = ref<HTMLButtonElement>()
 const dateField = ref<DateField>('updated')
@@ -68,6 +68,7 @@ defineExpose({ open, close })
         </div>
       </header>
       <div class="sheet-scroll">
+        <slot name="scope" />
         <div class="sheet-row">
           <label class="switch">
             <input type="checkbox" :aria-label="`${hideName === 'Hide' ? `Hide ${hideNames}` : hideName} tickets`" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
@@ -75,7 +76,7 @@ defineExpose({ open, close })
           </label>
         </div>
         <HideOptions :states="filters.hideStates" :summary="summary" :show-closed="filters.showClosed" @change="states => emit('hideStates', states)" />
-        <section v-if="view !== 'graph'" class="sheet-section" aria-labelledby="sheet-display-title">
+        <section v-if="view !== 'graph' && view !== 'releases'" class="sheet-section" aria-labelledby="sheet-display-title">
           <h3 id="sheet-display-title" class="eyebrow">Display</h3>
           <DisplayPanel
             sheet :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns"
@@ -97,6 +98,7 @@ defineExpose({ open, close })
             :dimension="dimension.key" :options="options(dimension.key)" :selected="filters[dimension.key]"
             @toggle="value => emit('toggle', dimension.key, value)" @exclude="value => emit('exclude', dimension.key, value)"
           />
+          <p v-if="facetErrors?.[dimension.key]" role="alert">{{ facetErrors[dimension.key] }}</p>
         </section>
         <section v-if="view !== 'graph'" class="sheet-section">
           <p class="eyebrow">Date</p>
@@ -110,7 +112,7 @@ defineExpose({ open, close })
       </div>
       <footer>
         <button ref="doneButton" type="button" class="btn primary done" @click="close">
-          <AppIcon name="check" :size="14" />Show {{ total === null ? 'tickets' : plural(total, 'ticket') }}
+          <AppIcon name="check" :size="14" />Show {{ totalIncomplete && total !== null ? '≥ ' : '' }}{{ total === null ? 'tickets' : plural(total, 'ticket') }}
         </button>
       </footer>
     </div>

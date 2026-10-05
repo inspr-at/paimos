@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { reactive, ref, shallowRef, type Ref } from 'vue'
+import { reactive, ref, shallowRef, watch, type Ref } from 'vue'
 import { APIError, bulkChange, getNode, listNodes, undoEvent, updateNode, type BulkChange, type BulkResult, type Facets, type ListItem, type ListPage, type ListQuery } from './api'
+import type { PlacementReceipt } from './deliveryChanges'
+import { releaseScope } from './releaseScope'
 import { rowStore } from './rowStore'
 import type { ListRead } from './useLiveList'
-import { activeDimensions, apiParams, DIMENSION_BY_KEY, LIST_FACETS, rowTags, WORK_KINDS, type Dimension, type EpicOption, type ListFilters } from './ticketList'
+import { activeDimensions, apiParams, compareRows, effectiveSort, filtersToQuery, DIMENSION_BY_KEY, LIST_FACETS, rowTags, WORK_KINDS, type Dimension, type EpicOption, type ListFilters } from './ticketList'
 import { askDoneGate } from './doneGateAsk'
 import { benefitGateError, benefitRetryFields, completionFields, needsBenefitPrompt } from './doneGate'
 import { toast } from './toast'
 import { normaliseState, statusMeta } from './work'
 
 const FACETS = LIST_FACETS
-const facetOf = (dimension: Dimension) => DIMENSION_BY_KEY.get(dimension)!.facet
+const facetOf = (dimension: Dimension) => dimension === 'ships_in' ? 'ships_in' : DIMENSION_BY_KEY.get(dimension)?.facet
 function message(error: unknown) { return error instanceof Error ? error.message : 'Something went wrong' }
 
 // Loads one project's ticket list page by page (cursor paging, 200 rows),
@@ -18,7 +20,7 @@ function message(error: unknown) { return error instanceof Error ? error.message
 // from a second, one-row request without that filter, so its menu still
 // shows what else could be chosen.
 // review: a change that met someone else's newer version offers to show it.
-export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFilters>, listOptions: { review?: (row: ListItem) => void; fetchList?: (query: ListQuery) => Promise<ListPage> } = {}) {
+export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFilters>, listOptions: { review?: (row: ListItem) => void; identity?: () => string; fetchList?: (query: ListQuery) => Promise<ListPage> } = {}) {
   const fetchList = listOptions.fetchList ?? listNodes
   const rows = ref<ListItem[]>([])
   const cursor = ref<string | null>(null)
@@ -28,6 +30,12 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   const moreError = ref('')
   const facets = ref<Facets>({})
   const dimensionFacets = ref<Partial<Record<Dimension, Record<string, number>>>>({})
+  const releaseNames = ref<Record<string, string>>({})
+  const facetErrors = reactive<Record<string, string>>({})
+  let labelsProject: string | null = null
+  function learnLabels(page: ListPage) {
+    releaseNames.value = { ...releaseNames.value, ...page.facet_labels?.ships_in }
+  }
   const names = reactive(new Map<string, string>())
   // Label colours seen on loaded rows (tag facets carry names only).
   const colors = reactive(new Map<string, string>())
@@ -39,7 +47,19 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   const edge = shallowRef<ListItem | null>(null)
   // Counts asked for when a menu opens (labels, cost units, releases), per query.
   const extraFacets = ref<Record<string, Record<string, number>>>({})
+  const deliveryRows = new Map<string, ListItem>()
   let generation = 0
+  let identityGeneration = 0
+  let epicsGeneration = 0
+  watch([projectId, () => JSON.stringify(filtersToQuery(filters.value)), () => listOptions.identity?.() ?? ''], (next, previous) => {
+    deliveryRows.clear(); generation++; identityGeneration++; rows.value = []; cursor.value = null; edge.value = null; reads.value = null
+    facets.value = {}; dimensionFacets.value = {}; extraFacets.value = {}; error.value = ''; moreError.value = ''
+    loading.value = false; loadingMore.value = false; releaseNames.value = {}; names.clear(); colors.clear()
+    loadedOnce.value = false
+    if (next[0] !== previous[0] || next[2] !== previous[2]) {
+      epicsGeneration++; epics.value = []; epicsFor = ''; epicsLoad = null
+    }
+  }, { flush: 'sync' })
 
   function learn(items: ListItem[]) {
     for (const item of items) {
@@ -64,13 +84,18 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   // A page read before a gap may miss a change the stream did not deliver (a
   // deletion, say): like every other read, it is read again before any of
   // its rows can show. stale: a newer load replaced this one (no page); what
-  // it found still goes to the row store.
+  // a same-query refresh still teaches the store newer revisions. A changed
+  // project/person/scope/query discards the response before it reaches the store.
   async function trusted(read: () => Promise<ListPage>, stale: () => boolean): Promise<{ page: ListPage | null; sent: number }> {
+    const identity = identityGeneration
     for (;;) {
       const sent = rowStore.mark()
       const page = await read()
       const doubtful = rowStore.gapSince(sent)
-      if (stale()) { if (!doubtful) for (const item of page.items) rowStore.adopt(item, sent); return { page: null, sent } }
+      if (stale()) {
+        if (identity === identityGeneration && !doubtful) for (const item of page.items) rowStore.adopt(item, sent)
+        return { page: null, sent }
+      }
       if (!doubtful) return { page, sent }
     }
   }
@@ -80,21 +105,26 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   async function load(options: { pageSize?: number } = {}) {
     const within = projectId.value
     if (!within) return
+    if (releaseScope(filters.value.ships_in).kind === 'repair') { generation++; rows.value = []; facets.value = {}; cursor.value = null; error.value = 'Choose a release scope'; loadedOnce.value = true; return }
+    if (labelsProject !== within) { releaseNames.value = {}; labelsProject = within }
+    delete facetErrors.ships_in
     pageSize = options.pageSize ?? 200
     const request = ++generation
     const current = filters.value
     loading.value = true; loadingMore.value = false; error.value = ''; moreError.value = ''
     extraFacets.value = {}
-    // Own optional rejections immediately, including when the primary read is
-    // still pending or this generation returns early after being superseded.
-    const extras = Promise.allSettled(activeDimensions(current).filter(dimension => facetOf(dimension)).map(async dimension => {
+    const countedDimensions = activeDimensions(current).filter(dimension => facetOf(dimension))
+    const extras = countedDimensions.map(async dimension => {
       const facet = facetOf(dimension)!
       const page = await fetchList(apiParams(within, current, { omit: dimension, facets: [facet], limit: 1 }))
+      if (request === generation) learnLabels(page)
       return [dimension, page.facets?.[facet] ?? {}] as const
-    }))
+    })
+    const settledExtras = Promise.allSettled(extras)
     try {
       const { page, sent } = await trusted(() => fetchList(apiParams(within, current, { facets: FACETS, limit: pageSize })), () => request !== generation)
       if (!page) return
+      learnLabels(page)
       learn(page.items)
       const read = take(page.items, sent)
       rows.value = read.rows
@@ -108,8 +138,11 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     } finally {
       if (request === generation) loading.value = false
     }
-    const settled = await extras
+    const settled = await settledExtras
     if (request !== generation) return
+    for (let index = 0; index < settled.length; index++) {
+      if (settled[index].status === 'rejected' && countedDimensions[index] === 'ships_in') facetErrors.ships_in = 'Release counts could not be loaded. Try again.'
+    }
     dimensionFacets.value = Object.fromEntries(settled.flatMap(result => result.status === 'fulfilled' ? [result.value] : []))
   }
 
@@ -117,17 +150,19 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   let moreRequest: Promise<void> | null = null
   function loadMore(): Promise<void> {
     if (loadingMore.value && moreRequest) return moreRequest
-    moreRequest = fetchMore().finally(() => { moreRequest = null })
+    const pending = fetchMore().finally(() => { if (moreRequest === pending) moreRequest = null })
+    moreRequest = pending
     return moreRequest
   }
   async function fetchMore() {
     const within = projectId.value
     if (!within || !cursor.value || loading.value) return
     const request = generation
+    const current = filters.value
     loadingMore.value = true; moreError.value = ''
     try {
       const after = cursor.value
-      const { page, sent } = await trusted(() => fetchList(apiParams(within, filters.value, { facets: FACETS, cursor: after, limit: pageSize })), () => request !== generation)
+      const { page, sent } = await trusted(() => fetchList(apiParams(within, current, { facets: FACETS, cursor: after, limit: pageSize })), () => request !== generation)
       if (!page) return
       const seen = new Set(rows.value.map(row => row.id))
       learn(page.items)
@@ -163,13 +198,15 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
   const asked = new Map<string, Promise<void>>()
   function requestFacet(facet: string): Promise<void> {
     const within = projectId.value
-    if (!within || facets.value[facet] || extraFacets.value[facet]) return Promise.resolve()
+    if (!within || releaseScope(filters.value.ships_in).kind === 'repair' || facets.value[facet] || extraFacets.value[facet]) return Promise.resolve()
     const request = generation
     const key = `${request}:${facet}`
     if (asked.has(key)) return asked.get(key)!
-    const run = fetchList(apiParams(within, filters.value, { facets: [facet], limit: 1 }))
-      .then(page => { if (request === generation) extraFacets.value = { ...extraFacets.value, [facet]: page.facets?.[facet] ?? {} } })
-      .catch(() => { /* the menu shows what the loaded rows have */ })
+    delete facetErrors[facet]
+    const run = fetchList(apiParams(within, filters.value, { omit: facet === 'ships_in' ? 'ships_in' : undefined, facets: [facet], limit: 1 }))
+      .then(page => { if (request === generation) { learnLabels(page); extraFacets.value = { ...extraFacets.value, [facet]: page.facets?.[facet] ?? {} } } })
+      .catch(() => { if (request === generation && facet === 'ships_in') facetErrors[facet] = 'Release counts could not be loaded. Try again.' })
+      .finally(() => { asked.delete(key) })
     asked.set(key, run)
     return run
   }
@@ -186,20 +223,22 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     if (!within) return Promise.resolve()
     if (epicsFor === within && epicsLoad) return epicsLoad
     epicsFor = within
+    const request = epicsGeneration
     epicsLoad = listNodes({ within, kind: ['work', 'epic'], shape: ['parent'], sort: 'key', limit: 500 })
-      .then(page => { if (epicsFor === within) epics.value = page.items.map(item => ({ id: item.id, key: item.key, title: item.title, state: item.state })) })
-      .catch(() => { epicsLoad = null })
+      .then(page => { if (epicsFor === within && request === epicsGeneration) epics.value = page.items.map(item => ({ id: item.id, key: item.key, title: item.title, state: item.state })) })
+      .catch(() => { if (request === epicsGeneration) epicsLoad = null })
     return epicsLoad
   }
 
   async function resolveNames(ids: string[]) {
     const within = projectId.value
     if (!within) return
+    const request = generation
     await Promise.all(ids.filter(id => id !== 'none' && !names.has(id)).map(async id => {
       try {
         const page = await listNodes({ within, kind: WORK_KINDS, assignee: [id], limit: 1 })
         const person = page.items[0]?.assignee
-        if (person) names.set(id, person.name)
+        if (person && request === generation) names.set(id, person.name)
       } catch { /* the menu shows "Unknown person" */ }
     }))
   }
@@ -319,6 +358,36 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     while (cursor.value && rows.value.length < cap && request === generation && !moreError.value) await loadMore()
     return !cursor.value
   }
+  function committedDelivery(result: PlacementReceipt) {
+    // In-flight pages cannot put the old placement back after this own commit.
+    generation++; identityGeneration++; loading.value = false; loadingMore.value = false
+    const scope = releaseScope(filters.value.ships_in)
+    const compare = compareRows(effectiveSort(filters.value))
+    for (const placement of result.items) {
+      if (placement.project_id !== projectId.value) continue
+      const row = rows.value.find(it => it.id === placement.item_id) ?? deliveryRows.get(placement.item_id)
+      if (!row) continue
+      if (deliveryRows.size >= 101 && !deliveryRows.has(row.id)) deliveryRows.delete(deliveryRows.keys().next().value!)
+      deliveryRows.set(row.id, row)
+      const order = { release_id: placement.release_id || null, release_rank: placement.release_id ? result.release_ranks?.[placement.release_id] ?? row.delivery_order?.release_rank ?? null : null, rank: placement.rank || null, expedite: placement.expedite }
+      rowStore.committedDelivery(row.id, order, result.undo_event_id)
+      const matches = scope.kind === 'all' || scope.kind === 'backlog' && !placement.release_id || scope.kind === 'release' && placement.release_id === scope.id
+      const present = rows.value.some(it => it.id === row.id)
+      // Reposition only the committed row against the displayed layout. Foreign
+      // revisions remain held; the cursor, page edge and row object stay intact.
+      const next = rows.value.filter(it => it.id !== row.id)
+      if (matches) {
+        const at = next.findIndex(it => compare(row, it) < 0)
+        next.splice(at < 0 ? next.length : at, 0, row)
+      }
+      rows.value = next
+      if (present === matches) continue
+      for (const [facet, key] of [['kind', row.kind_slug], ['state', row.state]] as const) {
+        const values = facets.value[facet]
+        if (values) values[key] = Math.max(0, (values[key] ?? 0) + (matches ? 1 : -1))
+      }
+    }
+  }
   // Created and deleted work shows up at once, before the next reload.
   function insertRow(item: ListItem) {
     if (rows.value.some(row => row.id === item.id)) return
@@ -341,5 +410,5 @@ export function useTicketList(projectId: Ref<string | null>, filters: Ref<ListFi
     if (state?.[row.state] && !row.estimate?.is_parent) state[row.state]--
   }
 
-  return { rows, cursor, edge, loading, loadingMore, error, moreError, facets, names, colors, loadedOnce, reads, load, loadMore, loadAll, counts, refreshCounts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }
+  return { committedDelivery, rows, cursor, edge, loading, loadingMore, error, moreError, facets, names, releaseNames, facetErrors, colors, loadedOnce, reads, load, loadMore, loadAll, counts, refreshCounts, requestFacet, facetCounts, epics, loadEpics, resolveNames, setStatus, invalidate, insertRow, removeRow, applyBulk, undoBulk }
 }

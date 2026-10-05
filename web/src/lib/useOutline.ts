@@ -11,7 +11,7 @@ import { placeKey, useLiveList, type ListRead, type LiveListOptions, type LiveRe
 
 interface Block { ids: string[]; cursor: string | null; loading: boolean; error: string; paged?: Set<string> }
 type ListApi = { rows: Ref<ListItem[]>; loading: Ref<boolean>; names: Map<string, string>; reads?: Ref<ListRead | null>; load?: () => unknown }
-type LiveOptions = Partial<Pick<LiveListOptions, 'me' | 'quiet' | 'holds' | 'blockers' | 'around' | 'applied' | 'env'>> & { store?: LiveNodeStore; fetchList?: (query: ListQuery) => Promise<ListPage> }
+type LiveOptions = Partial<Pick<LiveListOptions, 'autoApply' | 'me' | 'quiet' | 'holds' | 'blockers' | 'around' | 'applied' | 'env'>> & { store?: LiveNodeStore; fetchList?: (query: ListQuery) => Promise<ListPage> }
 
 // Expansion is remembered per project for the session (memory, not device storage).
 const expandedByProject = new Map<string, Set<string>>()
@@ -430,7 +430,7 @@ export function useOutline(projectId: Ref<string | null>, filters: Ref<ListFilte
     projectId, filters, rows: liveRows, loading,
     reads: computed(() => matchMode.value ? list.reads?.value ?? null : lazyRead.value),
     loadedOnce: computed(() => matchMode.value ? !list.loading.value : loadedOnce.value),
-    active, more: () => false, store: options.store, fetchList: fetchLive,
+    active, autoApply: options.autoApply, more: () => false, store: options.store, fetchList: fetchLive,
     me: options.me ?? (() => null), quiet: options.quiet, holds: options.holds,
     blockers: options.blockers ?? (() => ({ selected: 0, editing: false, menuOpen: false, dialogOpen: false, dragging: false })),
     around: options.around, env: options.env, applied,

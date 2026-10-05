@@ -15,6 +15,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/ticketbenefits"
@@ -357,6 +358,11 @@ func (m *Module) createNode(ctx context.Context, p tenant.Principal, in nodeCrea
 		if scanErr != nil {
 			return dbErr("insert node", scanErr)
 		}
+		if kind.Slug == "project" {
+			if err := delivery.QueueAdoptionForProject(ctx, tx, loaded.ID); err != nil {
+				return err
+			}
+		}
 		if err := m.record(ctx, tx, p.ID, &loaded.ID, evNodeCreated, nil, loaded); err != nil {
 			return err
 		}
@@ -415,6 +421,9 @@ func (m *Module) updateNode(ctx context.Context, p tenant.Principal, id string, 
 			return err
 		}
 		if err := armPortalModeration(ctx, tx, p); err != nil {
+			return err
+		}
+		if err := guardReleasePatch(ctx, tx, p, id, raw); err != nil {
 			return err
 		}
 		current, err := loadNode(ctx, tx, id, true)
@@ -610,6 +619,9 @@ func (m *Module) deleteNode(ctx context.Context, p tenant.Principal, id string) 
 		if err := lockTree(ctx, tx); err != nil {
 			return err
 		}
+		if err := refuseReleaseNode(ctx, tx, id); err != nil {
+			return err
+		}
 		current, err := loadNode(ctx, tx, id, true)
 		if err != nil {
 			return err
@@ -652,6 +664,9 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 		if err := lockTree(ctx, tx); err != nil {
 			return err
 		}
+		if err := refuseReleaseNode(ctx, tx, id); err != nil {
+			return err
+		}
 		current, err := loadNode(ctx, tx, id, true)
 		if err != nil {
 			return err
@@ -688,6 +703,10 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 		if err != nil {
 			return err
 		}
+		shipsBefore, err := shipsInBeforeMove(ctx, tx, id, parentID)
+		if err != nil {
+			return err
+		}
 		siblings, err := loadSiblings(ctx, tx, parentID)
 		if err != nil {
 			return err
@@ -716,9 +735,12 @@ func (m *Module) moveNode(ctx context.Context, p tenant.Principal, id string, pa
 			return err
 		}
 		var beforeEvent, afterEvent any = current, loaded
-		if len(changedBefore) > 0 {
-			beforeEvent = movedNodeSnapshot{nodeJSON: current, JourneyTickets: changedBefore}
+		if len(changedBefore) > 0 || len(shipsBefore) > 0 {
+			beforeEvent = movedNodeSnapshot{nodeJSON: current, JourneyTickets: changedBefore, ShipsIn: shipsBefore}
 			afterEvent = movedNodeSnapshot{nodeJSON: loaded, JourneyTickets: changedAfter}
+			if len(shipsBefore) > 0 {
+				loaded.Warnings = append(loaded.Warnings, "Backlog rank was removed; Undo returns the item to its original project tail.")
+			}
 		}
 		if err := m.record(ctx, tx, p.ID, &loaded.ID, evNodeMoved, beforeEvent, afterEvent); err != nil {
 			return err

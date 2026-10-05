@@ -24,6 +24,28 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/projects/{projectId}/delivery/verify":               "releases.read",
+	"GET /api/projects/{projectId}/delivery":                      "releases.read",
+	"GET /api/projects/{projectId}/delivery/overview":             "releases.read",
+	"GET /api/projects/{projectId}/delivery/adoption-report":      "releases.read",
+	"GET /api/projects/{projectId}/releases":                      "releases.read",
+	"GET /api/projects/{projectId}/releases/{releaseId}":          "releases.read",
+	"GET /api/projects/{projectId}/releases/{releaseId}/items":    "releases.read",
+	"GET /api/projects/{projectId}/backlog":                       "releases.read",
+	"GET /api/delivery/adoptions":                                 "releases.read",
+	"PATCH /api/projects/{projectId}/delivery":                    "releases.deploy",
+	"POST /api/projects/{projectId}/delivery/adopt":               "releases.deploy",
+	"POST /api/projects/{projectId}/releases":                     "releases.write",
+	"PATCH /api/projects/{projectId}/releases/{releaseId}":        "releases.write",
+	"PUT /api/nodes/{nodeId}/ships-in":                            "releases.read|releases.write|roles.manage",
+	"POST /api/projects/{projectId}/ships-in/batch":               "releases.read|releases.write|roles.manage",
+	"POST /api/projects/{projectId}/releases/{releaseId}/rank":    "releases.write",
+	"POST /api/projects/{projectId}/releases/{releaseId}/state":   "releases.read|releases.write|releases.deploy",
+	"POST /api/projects/{projectId}/releases/{releaseId}/cut":     "releases.read|releases.write|releases.deploy",
+	"POST /api/projects/{projectId}/releases/{releaseId}/close":   "releases.read|releases.write|releases.deploy",
+	"POST /api/projects/{projectId}/releases/{releaseId}/publish": "releases.read|releases.write|releases.deploy",
+
+	"GET /api/model-preferences":                                    "models.read",
 	"POST /api/projects/{projectId}/chat-roles":                     "chat.bind",
 	"POST /api/projects/{projectId}/chat-threads/resolve":           "chat.read",
 	"GET /api/chat-threads/{id}":                                    "chat.read",
@@ -45,7 +67,6 @@ var RoutePermissions = map[string]string{
 	"PUT /api/settings/features/{key}":           "settings.manage",
 	"GET /api/agentd/step-ups/{challenge_id}":    "harness.worker",
 	"PUT /api/agent-keys/{id}/owner-workstation": "keys.manage",
-	"GET /api/model-preferences":                 "models.read",
 	// Theme handlers decide person ownership or workspace settings authority
 	// again inside the final fenced mutation transaction.
 	"GET /api/themes":                      "profile.read|profile.portal_read",

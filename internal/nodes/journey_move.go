@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -26,6 +27,7 @@ type journeyTicketSnapshot struct {
 type movedNodeSnapshot struct {
 	nodeJSON
 	JourneyTickets []journeyTicketSnapshot `json:"journey_tickets,omitempty"`
+	ShipsIn        []shipsMoveSnapshot     `json:"ships_in_before_move,omitempty"`
 }
 
 // subtreeJourneyTickets is called before reparenting while the tree is locked.
@@ -35,6 +37,7 @@ func subtreeJourneyTickets(ctx context.Context, tx pgx.Tx, id string) ([]journey
 	 UNION ALL SELECT n.id FROM nodes n JOIN subtree s ON n.parent_id=s.id WHERE n.deleted_at IS NULL
 	) SELECT jt.ticket_node_id::text,n.project_id::text FROM journey_tickets jt
 	 JOIN subtree s ON s.id=jt.ticket_node_id JOIN nodes n ON n.id=jt.ticket_node_id
+ WHERE NOT EXISTS(SELECT 1 FROM project_delivery d WHERE d.project_node_id=jt.project_node_id)
 	 ORDER BY jt.ticket_node_id`, id)
 	if err != nil {
 		return nil, err
@@ -83,7 +86,7 @@ func transferJourneyMembership(ctx context.Context, tx pgx.Tx, ticketID, sourceP
 	}
 	var targetJourney bool
 	if targetProject != "" {
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_projects WHERE project_node_id=$1::uuid)`, targetProject).Scan(&targetJourney); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM journey_projects WHERE project_node_id=$1::uuid AND NOT EXISTS(SELECT 1 FROM project_delivery WHERE project_node_id=$1::uuid))`, targetProject).Scan(&targetJourney); err != nil {
 			return nil, err
 		}
 	}
@@ -110,13 +113,20 @@ func bumpJourneyProjects(ctx context.Context, tx pgx.Tx, sourceProject, targetPr
 		target = targetProject
 	}
 	_, err := tx.Exec(ctx, `UPDATE journey_projects SET revision=revision+1,updated_at=now()
-	 WHERE project_node_id=$1::uuid OR project_node_id=$2::uuid`, sourceProject, target)
+	 WHERE (project_node_id=$1::uuid OR project_node_id=$2::uuid) AND NOT EXISTS(SELECT 1 FROM project_delivery d WHERE d.project_node_id=journey_projects.project_node_id)`, sourceProject, target)
 	return err
 }
 
 // restoreJourneyMembership checks the saved projection and restores it in the
 // same transaction as the node undo. P2's project permission checks remain.
 func restoreJourneyMembership(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticketID string, before, after *journeyMembership) error {
+	for _, membership := range []*journeyMembership{before, after} {
+		if membership != nil {
+			if err := delivery.RequireJourney(ctx, tx, membership.ProjectID); err != nil {
+				return events.ErrConflict
+			}
+		}
+	}
 	current, err := loadJourneyMembership(ctx, tx, ticketID)
 	if err != nil {
 		return err

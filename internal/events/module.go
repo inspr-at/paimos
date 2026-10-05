@@ -107,7 +107,12 @@ func failure(w http.ResponseWriter, err error) {
 	case errors.Is(err, ErrForbidden), PortalCatalogDenied(err):
 		writeError(w, 403, "forbidden", "undo is not permitted")
 	case errors.Is(err, ErrConflict):
-		writeError(w, 409, "conflict", ErrConflict.Error())
+		message := ErrConflict.Error()
+		var reason interface{ ConflictReason() string }
+		if errors.As(err, &reason) {
+			message = reason.ConflictReason()
+		}
+		writeError(w, 409, "conflict", message)
 	case errors.As(err, &pe) && (strings.HasPrefix(pe.Code, "23") || pe.Code == "P0001" || pe.Code == "40001" || pe.Code == "40P01"):
 		writeError(w, 409, "conflict", "change conflicts with current resource state")
 	default:
