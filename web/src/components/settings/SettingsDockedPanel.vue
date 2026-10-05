@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import { useVisualViewport } from '../../lib/visualViewport'
-import { isSettingsField } from '../../lib/settingsOverlays'
+import { isSettingsField, modalDialogOpen } from '../../lib/settingsOverlays'
 
 // Owns the Settings layout, so a section list keeps its column when a pane
 // opens. Consumers supply navigation, page content, pane content and its one
@@ -114,8 +114,9 @@ function close(restore = true) {
 }
 function keys(event: KeyboardEvent) {
   if (!props.open || event.defaultPrevented) return
-  // An active shared popover owns the innermost Escape and Tab handling.
-  if (document.querySelector('.popover')) return
+  // The topmost layer owns Escape and Tab: an active shared popover, or a
+  // modal dialog whose native cancel and focus scope must stay intact.
+  if (document.querySelector('.popover') || modalDialogOpen()) return
   if (event.key === 'Escape') {
     event.preventDefault(); event.stopImmediatePropagation()
     if (isSettingsField(event.target) && panel.value?.contains(event.target)) {

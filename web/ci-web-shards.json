@@ -2360,7 +2360,7 @@
           "file": "tests/settings-accounts.spec.ts",
           "weightSeconds": 46.609756,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 21
+          "listedTests": 24
         },
         {
           "file": "tests/stability.spec.ts",

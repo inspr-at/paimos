@@ -394,6 +394,51 @@ test('phone: Name it is reachable and opens the rename', async ({ page }) => {
   expect(await noScroll(page)).toBe(true)
 })
 
+// AEON-686: confirmations opened from the account panel are modal dialogs above
+// it. In every layout they own Tab and Escape: focus moves between their own
+// buttons, Escape cancels without a write, and the account panel stays open.
+for (const [width, mode] of [[1600, 'dock'], [1100, 'side'], [390, 'sheet']] as const) {
+  test(`${mode}: drain and pool confirmations keep Tab and Escape`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const { capacity } = await setup(page)
+    for (const a of capacity.accounts.filter(a => a.harness === 'codex')) Object.assign(a, { quota_fingerprint: 'ab'.repeat(32), quota_pool_fingerprint: '' })
+    const writes: string[] = []
+    page.on('request', request => { if (request.method() !== 'GET' && new URL(request.url()).pathname.startsWith('/api/agent-accounts')) writes.push(`${request.method()} ${new URL(request.url()).pathname}`) })
+    await open(page)
+    const detail = await details(page, ACCOUNTS.main)
+    await expect(page.locator(`.settings-frame.mode-${mode}`)).toHaveCount(1)
+    const confirmations = [
+      { open: row(page, ACCOUNTS.main).getByRole('switch', { name: 'Agents may use it · Main' }), name: 'Drain Main?', confirm: 'Drain account' },
+      { open: detail.getByRole('button', { name: 'Pool with Spare · mbp2607', exact: true }), name: 'Same login — pool them?', confirm: 'Pool accounts' },
+    ]
+    for (const c of confirmations) {
+      await c.open.click()
+      const dialog = page.getByRole('dialog', { name: c.name })
+      const confirm = dialog.getByRole('button', { name: c.confirm, exact: true }), cancel = dialog.getByRole('button', { name: 'Cancel' })
+      await expect(confirm).toBeFocused()
+      await page.keyboard.press('Shift+Tab')
+      await expect(cancel).toBeFocused()
+      await page.keyboard.press('Tab')
+      await expect(confirm).toBeFocused()
+      await page.keyboard.press('Escape')
+      await expect(dialog).toHaveCount(0)
+      await expect(panel(page)).toBeVisible()
+      await expect(c.open).toBeFocused()
+    }
+    // Keep separate is a native modal inside the panel: Escape closes it alone.
+    const separate = row(page, ACCOUNTS.main).getByRole('button', { name: 'Keep separate…' })
+    await separate.click()
+    const form = page.getByRole('dialog', { name: 'Keep separate' })
+    await expect(form.getByRole('textbox', { name: 'Name' })).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(form).toBeHidden()
+    await expect(panel(page)).toBeVisible()
+    await expect(separate).toBeFocused()
+    await expect(row(page, ACCOUNTS.main).getByRole('switch', { name: 'Agents may use it · Main' })).toHaveAttribute('aria-checked', 'true')
+    expect(writes).toEqual([])
+  })
+}
+
 // ---------------------------------------------------------------- screenshots
 const SHOTS = process.env.AEON384_SHOTS
 type Shot = { name: string; options?: Setup; act?: (page: Page) => Promise<void> }
