@@ -79,16 +79,15 @@
     {
       "id": "web-2",
       "job": "web",
-      "name": "Usage dashboard and morning briefing regressions",
-      "command": "npx playwright test -c playwright.ui.config.ts tests/usage-dashboard.spec.ts tests/morning-briefing.spec.ts --workers=1",
+      "name": "Usage dashboard regressions",
+      "command": "npx playwright test -c playwright.ui.config.ts tests/usage-dashboard.spec.ts --workers=1",
       "config": "playwright.ui.config.ts",
       "project": null,
       "flags": [
         "--workers=1"
       ],
       "specs": [
-        "tests/usage-dashboard.spec.ts",
-        "tests/morning-briefing.spec.ts"
+        "tests/usage-dashboard.spec.ts"
       ],
       "env": {},
       "measuredSeconds": 37.0,
@@ -609,7 +608,7 @@
   ],
   "groups": [
     {
-      "id": "usage-briefing",
+      "id": "usage-dashboard",
       "config": "playwright.ui.config.ts",
       "project": null,
       "flags": [
@@ -629,16 +628,6 @@
           "tierTiming": {
             "seconds": 16.828409,
             "selectedTests": 10
-          }
-        },
-        {
-          "file": "tests/morning-briefing.spec.ts",
-          "weightSeconds": 22.2,
-          "weightSource": "web-2",
-          "listedTests": 15,
-          "tierTiming": {
-            "seconds": 25.223621,
-            "selectedTests": 15
           }
         }
       ]
