@@ -46,6 +46,7 @@ async function request<T>(path: string, method = 'GET', body?: unknown): Promise
 export async function startAgent(selection: StartSelection, admission: RunAdmission): Promise<{ run: AgentRun; reused: boolean }> {
   const { agentId, profileId, accountId } = selection
   const ticket = await getNode(selection.ticket.id)
+  if (ticket.is_leaf !== true) throw new Error('Select a work leaf before starting an agent.')
   const orders: WorkOrder[] = []
   let cursor: string | undefined
   do {
