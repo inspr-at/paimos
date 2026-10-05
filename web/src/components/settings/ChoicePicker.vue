@@ -4,19 +4,27 @@ import type { ModelEstimateHistory } from '../../lib/modelEstimates'
 export interface Choice { estimate?: ModelEstimateHistory; value: string; label: string; hint?: string; detail?: string }
 </script>
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { vClipTip } from '../../directives/clipTip'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import ModelEstimateHint from './ModelEstimateHint.vue'
 
 // A searchable single choice in a popover (time zone, language): type to narrow,
-// arrows to move, Enter to choose, Esc to close.
+// arrows to move, Enter to choose, Esc to close. A remote list's next page is the
+// last arrow stop, after the options; the next page then focuses its first option.
 const props = withDefaults(defineProps<{ estimateKind?: string; estimateBucket?: 'normal' | 'complex'; anchor: HTMLElement | null; label: string; choices: Choice[]; current: string; match?: (choice: Choice, needle: string) => boolean; limit?: number; placeholder?: string; settingsKeys?: boolean; remote?: boolean; loading?: boolean; hasMore?: boolean; error?: string }>(), { match: undefined, limit: 80, placeholder: 'Search…' })
 const emit = defineEmits<{ choose: [value: string]; close: [restoreFocus: boolean]; search: [term: string]; more: [] }>()
 const term = ref('')
-const list = ref<HTMLElement>()
-watch(term, value => { if (props.remote) emit('search', value) })
+const list = ref<HTMLElement>(), nextPage = ref<HTMLButtonElement>()
+let pageFocus = false
+watch(term, value => { pageFocus = false; if (props.remote) emit('search', value) })
+watch(() => props.loading, async (loading, was) => {
+  if (loading || !was || !pageFocus) return
+  pageFocus = false; await nextTick()
+  ;(list.value?.querySelector<HTMLButtonElement>('button') ?? list.value?.parentElement?.querySelector<HTMLInputElement>('input'))?.focus()
+})
+function nextPageClick() { pageFocus = document.activeElement === nextPage.value; emit('more') }
 const hits = computed(() => {
   const needle = term.value.trim().toLowerCase()
   if (!needle || props.remote) return props.choices
@@ -25,14 +33,15 @@ const hits = computed(() => {
 const shown = computed(() => hits.value.slice(0, props.limit))
 const more = computed(() => hits.value.length - shown.value.length)
 function move(event: KeyboardEvent) {
-  const items = [...(list.value?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+  const options = [...(list.value?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+  const items = nextPage.value && !nextPage.value.disabled ? [...options, nextPage.value] : options
   const index = items.indexOf(document.activeElement as HTMLButtonElement)
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault(); event.stopPropagation()
     const next = event.key === 'ArrowDown' ? Math.min(items.length - 1, index + 1) : index <= 0 ? -1 : index - 1
     if (next === -1) list.value?.parentElement?.querySelector<HTMLInputElement>('input')?.focus()
     else items[next]?.focus()
-  } else if (event.key === 'Enter' && document.activeElement?.tagName === 'INPUT' && items[0]) { event.preventDefault(); items[0].click() }
+  } else if (event.key === 'Enter' && document.activeElement?.tagName === 'INPUT' && options[0]) { event.preventDefault(); options[0].click() }
 }
 </script>
 
@@ -43,7 +52,7 @@ function move(event: KeyboardEvent) {
         <AppIcon name="search" :size="13" />
         <input v-model="term" class="field" type="search" :placeholder="placeholder" :aria-label="`Search ${label.toLowerCase()}`" data-autofocus autocomplete="off" spellcheck="false" />
       </label>
-      <button v-if="remote" type="button" class="choice next-page" :disabled="loading || !hasMore" @click="emit('more')">Next projects</button>
+      <button v-if="remote" ref="nextPage" type="button" class="choice next-page" :disabled="loading || !hasMore" @click="nextPageClick">Next projects</button>
       <div ref="list" class="menu" role="listbox" :aria-label="label">
         <button
           v-for="choice in shown" :key="choice.value" type="button" role="option" class="choice" :class="{ 'model-choice': estimateKind, 'project-choice': remote }" :aria-selected="choice.value === current"

@@ -1164,9 +1164,9 @@
       "specs": [
         {
           "file": "tests/status-autopilot.spec.ts",
-          "weightSeconds": 26.051282,
+          "weightSeconds": 35.820513,
           "weightSource": "AEON-696 proportional estimate from status-autopilot-ui-2",
-          "listedTests": 8
+          "listedTests": 11
         },
         {
           "file": "tests/settings.spec.ts",

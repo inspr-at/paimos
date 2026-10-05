@@ -66,11 +66,15 @@ function load() {
   }), { failed, settled: () => { loading.value = false } })
 }
 function recent() { void recentReads.run(({ after, signal }) => after(getLatestAutomaticChanges(signal), c => { changes.value = c.items.slice(0, 5) }), { failed }) }
-function projectPage(cursor = '') {
+// Reloads one page from the server, so its rows, cursor and count stay authoritative.
+// `focus` puts the keyboard back on that project's row, or on Add when it lives on another page.
+function projectPage(cursor = '', focus = '') {
   void projectReads.run(({ after, signal }) => after(listAutopilotProjects('overrides', signal, '', cursor), p => {
     projects.value = p.items; projectNext.value = p.next_cursor; inherited.value = p.inherited_count; projectAfter.value = cursor
+    if (focus) return after(nextTick(), () => focusProject(focus))
   }), { failed })
 }
+function focusProject(id: string) { (document.querySelector<HTMLButtonElement>(`[data-project="${id}"] [aria-checked="true"]`) ?? addButton.value)?.focus({ preventScroll: true }) }
 watch(scope.owner, owner => {
   closePicker(); intent.value = null; pending.value = false; saved.value = false; fresh.value = ''; error.value = ''
   clearTimeout(freshTimer); clearTimeout(savedTimer); syncDays()
@@ -116,13 +120,13 @@ function mode(project: AutopilotProject, value: ProjectOverride['mode'], isUndo 
     else {
       const row = projects.value.find(p => p.id === snapshot.id)
       if (row) row.override = result
-      else { fresh.value = snapshot.id; projects.value = [{ ...snapshot, override: result }, ...projects.value].slice(0, 51); inherited.value = Math.max(0, inherited.value - 1); clearTimeout(freshTimer); freshTimer = setTimeout(() => { fresh.value = '' }, 2000) }
+      else { fresh.value = snapshot.id; clearTimeout(freshTimer); freshTimer = setTimeout(() => { fresh.value = '' }, 2000); projectPage(projectAfter.value, snapshot.id) }
     }
     toast(value === 'inherit' ? `${snapshot.title} follows the workspace again.` : `${snapshot.title} now sets its own: ${value === 'on' ? 'On' : 'Off'}.`, { timeout: 10_000, ...(!isUndo ? { action: { label: 'Undo', run: () => {
       if (scope.owner.value === owner && can('settings.manage')) mode({ ...snapshot, override: result }, snapshot.override.mode, true)
     } } } : {}) })
     pending.value = false
-    return after(nextTick(), () => { if (value !== 'inherit') document.querySelector<HTMLButtonElement>(`[data-project="${snapshot.id}"] [aria-checked="true"]`)?.focus({ preventScroll: true }) })
+    if (value !== 'inherit' && projects.value.some(p => p.id === snapshot.id)) return after(nextTick(), () => focusProject(snapshot.id))
   }), { failed, settled: () => { pending.value = false; intent.value = null } })
 }
 function modeKey(event: KeyboardEvent, project: AutopilotProject) { if (event.metaKey || event.ctrlKey || event.altKey || !['ArrowLeft', 'ArrowRight'].includes(event.key)) return; event.preventDefault(); mode(project, project.override.mode === 'on' ? 'off' : 'on') }

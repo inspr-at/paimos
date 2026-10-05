@@ -40,10 +40,12 @@ async function setup(page: Page, role: 'admin' | 'member' = 'admin') {
     o.effective_enabled = o.mode === 'on' || o.mode === 'inherit' && settings.enabled
     return route.fulfill({ json: o })
   })
+  // Keyset pages by id like the server: 50 overrides per page; the picker gets one per page so paging is exercised.
   await page.route('**/api/status-autopilot/projects*', route => {
-    const q = new URL(route.request().url()).searchParams, term = q.get('q')?.toLowerCase() ?? ''
-    const rows = projectRows.map(p => ({ ...p, override: overrides[p.id] ?? { mode: 'inherit', effective_enabled: settings.enabled, revision: 0 } })).filter(p => (q.get('mode') === 'inherit' ? p.override.mode === 'inherit' : p.override.mode !== 'inherit') && `${p.key} ${p.title}`.toLowerCase().includes(term))
-    return route.fulfill({ json: { items: q.get('mode') === 'inherit' && !term ? rows.slice(0, 1) : rows, inherited_count: projectRows.filter(p => !overrides[p.id] || overrides[p.id]!.mode === 'inherit').length, next_cursor: q.get('mode') === 'inherit' && !term && rows.length > 1 ? 'next' : null } })
+    const q = new URL(route.request().url()).searchParams, term = q.get('q')?.toLowerCase() ?? '', after = q.get('after') ?? '', size = q.get('mode') === 'inherit' ? 1 : 50
+    const rows = projectRows.map(p => ({ ...p, override: overrides[p.id] ?? { mode: 'inherit', effective_enabled: settings.enabled, revision: 0 } })).filter(p => (q.get('mode') === 'inherit' ? p.override.mode === 'inherit' : p.override.mode !== 'inherit') && `${p.key} ${p.title}`.toLowerCase().includes(term) && p.id > after).sort((a, b) => a.id < b.id ? -1 : 1)
+    const items = rows.slice(0, size)
+    return route.fulfill({ json: { items, inherited_count: projectRows.filter(p => !overrides[p.id] || overrides[p.id]!.mode === 'inherit').length, next_cursor: rows.length > size ? items.at(-1)!.id : null } })
   })
   await page.route('**/api/status-autopilot/attention*', route => {
     const counts = { proposed: proposals.length, triage: suggestions.filter(i => i.to === 'triage_list').length, cancel: suggestions.filter(i => i.to === 'cancel_suggested').length, blocked: suggestions.filter(i => i.to === 'blocked_reminder').length, missed: suggestions.filter(i => i.to === 'missed_release').length }
@@ -59,7 +61,7 @@ async function setup(page: Page, role: 'admin' | 'member' = 'admin') {
     return route.fulfill({ json: {} })
   })
   await page.route('**/api/events/41/undo', route => { undo++; changes[0]!.undone = true; changes[0]!.undoable = false; return route.fulfill({ status: 201, json: { id: 42 } }) })
-  return { settings, suggestions, proposals, resolutions, writes, changes, projectWrites, overrides, conflict: () => { conflict = true }, undos: () => undo }
+  return { settings, suggestions, proposals, resolutions, writes, changes, projectWrites, projectRows, overrides, conflict: () => { conflict = true }, undos: () => undo }
 }
 
 test('large queues become five exact counts and filtered links, with only five latest changes', async ({ page }, testInfo) => {
@@ -124,6 +126,69 @@ test('project picker searches inheriting projects, adds the opposite value and r
   expect(world.projectWrites.at(-1)).toMatchObject({ id: 'p-search', mode: 'off', expected_revision: 2 })
   await add.click(); await search.press('Escape'); await expect(search).not.toBeFocused()
   await page.keyboard.press('Escape'); await expect(search).toHaveCount(0); await expect(add).toBeFocused()
+})
+
+test('Show all opens the automatic changes in workspace Activity', async ({ page }) => {
+  const world = await setup(page)
+  const change = world.changes[0]!, views: string[] = []
+  await page.route('**/api/events/activity?*', route => {
+    const view = new URL(route.request().url()).searchParams.get('view') ?? ''; views.push(view)
+    return route.fulfill({ json: { items: view === 'automatic' ? [{ ...change, project_id: 'p-own', type: 'status_autopilot.changed', revision: change.at, automatic: true, changed_since: false, requires_preview: false }] : [], next_cursor: null } })
+  })
+  await page.goto('/settings/autopilot')
+  await page.getByRole('region', { name: 'Latest automatic changes' }).getByRole('link', { name: 'Show all' }).click()
+  await expect(page).toHaveURL('/activity?view=automatic')
+  await expect(page.getByRole('heading', { name: 'Activity', level: 1, exact: true })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Activity views' }).getByRole('button', { name: 'Automatic changes', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.locator('[data-event-id="41"]')).toContainText(change.reason)
+  expect(views).toContain('automatic'); expect(views.filter(view => view !== 'automatic')).toEqual([])
+})
+
+test('adding overrides to a full page keeps every override reachable through the pages', async ({ page }) => {
+  const world = await setup(page)
+  for (let i = 0; i < 49; i++) { const id = `p-o${String(i).padStart(2, '0')}`; world.projectRows.push({ id, key: `O${i}`, title: `Override ${i}` }); world.overrides[id] = { mode: 'on', effective_enabled: true, revision: 1 } }
+  await page.goto('/settings/autopilot')
+  const card = page.getByRole('region', { name: 'Project overrides' })
+  const add = card.getByRole('button', { name: 'Add an override' }), search = page.getByRole('searchbox', { name: 'Search choose a project' })
+  const ids = () => card.locator('[data-project]').evaluateAll(rows => rows.map(row => (row as HTMLElement).dataset.project!))
+  await expect(card.getByRole('radiogroup')).toHaveCount(50)
+  await expect(card.getByRole('button', { name: 'Next overrides' })).toHaveCount(0)
+  // p-search sorts after the full first page; p-follow sorts onto it.
+  await add.click(); await search.fill('SEARCH'); await page.getByRole('option', { name: /Hidden beyond/ }).click()
+  await expect(card.getByRole('button', { name: 'Next overrides' })).toBeEnabled()
+  await expect(add).toBeFocused()
+  await add.click(); await search.fill('FOLLOW'); await page.getByRole('option').filter({ hasText: 'FOLLOW' }).click()
+  await expect(card.locator('[data-project="p-follow"]').getByRole('radio', { name: 'Off', exact: true })).toBeFocused()
+  expect(world.projectWrites.map(w => w.id)).toEqual(['p-search', 'p-follow'])
+  await expect(card.getByRole('radiogroup')).toHaveCount(50)
+  await expect(card.getByText('0 other projects follow the workspace (On).')).toBeVisible()
+  const first = await ids()
+  await card.getByRole('button', { name: 'Next overrides' }).click()
+  await expect(card.locator('[data-project="p-search"]')).toBeVisible()
+  const second = await ids()
+  await expect(card.getByRole('button', { name: 'Next overrides' })).toBeDisabled()
+  const expected = world.projectRows.map(p => p.id).filter(id => world.overrides[id]?.mode !== 'inherit').sort()
+  expect(expected).toHaveLength(52)
+  expect([...first, ...second]).toEqual(expected)
+})
+
+test('picker pages are reachable with arrow keys alone', async ({ page }) => {
+  const world = await setup(page)
+  await page.goto('/settings/autopilot')
+  const add = page.getByRole('region', { name: 'Project overrides' }).getByRole('button', { name: 'Add an override' })
+  await add.focus(); await page.keyboard.press('Enter')
+  const search = page.getByRole('searchbox', { name: 'Search choose a project' }), next = page.getByRole('button', { name: 'Next projects', exact: true })
+  await expect(search).toBeFocused()
+  await expect(page.getByRole('option')).toHaveCount(1); await expect(next).toBeEnabled()
+  await page.keyboard.press('ArrowDown'); await expect(page.getByRole('option').first()).toBeFocused()
+  await page.keyboard.press('ArrowDown'); await expect(next).toBeFocused()
+  await page.keyboard.press('ArrowUp'); await expect(page.getByRole('option').first()).toBeFocused()
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter')
+  const hidden = page.getByRole('option', { name: /Hidden beyond/ })
+  await expect(hidden).toBeFocused(); await expect(next).toBeHidden()
+  await page.keyboard.press('ArrowDown'); await expect(hidden).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect.poll(() => world.projectWrites.map(w => w.id)).toEqual(['p-search'])
 })
 
 test('owner explicitly confirms upgrade while server Suggest remains the cap', async ({ page }) => {
