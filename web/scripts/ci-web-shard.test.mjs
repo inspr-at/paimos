@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { spawnSync } from 'node:child_process'
+import { select, validate, key } from '../../scripts/test-tiers/core.mjs'
+import { flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
@@ -434,4 +437,27 @@ test('a source manifest cannot declare the reserved unlisted group', () => {
     writeFileSync(file, JSON.stringify({ version: 1, groups: [group('unlisted', [1])] }))
     assert.throws(() => loadManifest(file), /reserved group id: unlisted/)
   } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('normal CI gates every shared Settings case and records the collected shard count', () => {
+  const file = 'tests/settings-shared.spec.ts', config = 'playwright.ui.config.ts'
+  // Native collection expands loops without launching a server or browser.
+  const result = spawnSync(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '-c', config, file, '--list', '--reporter=json'], {
+    cwd: webRoot, encoding: 'utf8', timeout: 30_000, maxBuffer: 4 * 1024 * 1024,
+  })
+  assert.equal(result.error, undefined)
+  assert.equal(result.status, 0, result.stderr)
+  const collected = flattenBrowser(JSON.parse(result.stdout), config)
+  assert.ok(collected.length > 15, 'collect original cases and short-viewport regressions')
+  const stored = JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json', import.meta.url), 'utf8'))
+  const manifest = { version: stored.version, tests: stored.tests.filter(row => row.file === file) }
+  const rows = validate(manifest, collected, undefined, { strict: true })
+  for (const event of ['pull_request', 'merge_group']) {
+    // Shared inputs and unknown impact use this full gate, which used to omit
+    // the nine fix-round cases because they silently defaulted to NIGHTLY.
+    const selected = select(rows, { event, paths: ['web/tests/fixtures/SettingsSharedHarness.vue'] }).tests
+    assert.deepEqual(selected.map(key), collected.map(key), `${event} must gate every Settings regression`)
+  }
+  const group = loadManifest().groups.find(row => row.id === 'settings-shared')
+  assert.equal(group.specs.find(row => row.file === file).listedTests, collected.length)
 })
