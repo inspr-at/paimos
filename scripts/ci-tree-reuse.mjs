@@ -24,6 +24,7 @@ export const requiredJobs = [
   'runner-route / route', 'go', 'web', 'release-check', 'e2e',
   ...Object.keys(executionSteps),
   ...Array.from({ length: 7 }, (_, i) => `go-test (${i + 1})`),
+  ...Array.from({ length: 4 }, (_, i) => `web-unit (${i + 1})`),
   ...Array.from({ length: 12 }, (_, i) => `web-shard (${i + 1})`),
 ];
 
@@ -79,12 +80,12 @@ export async function verifyRun(repository, runID, api, sha) {
   for (const name of requiredJobs) {
     const job = jobs.jobs.find(job => job.name === name);
     ensure(job?.conclusion === 'success', 'missing or failed suite job');
-    const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard (essential plus changed area, or full on main)' : name.startsWith('web-shard (') ? 'Run selected UI cases without retries' : undefined);
+    const stepName = executionSteps[name] || (name.startsWith('go-test (') ? 'Test this shard (essential plus changed area, or full on main)' : name.startsWith('web-unit (') ? 'Run selected web units without retries' : name.startsWith('web-shard (') ? 'Run selected UI cases without retries' : undefined);
     if (stepName) {
       const steps = job.steps?.filter(step => step.name === stepName);
       ensure(steps?.length === 1 && steps[0].status === 'completed' && steps[0].conclusion === 'success', 'missing full execution evidence');
     }
-    if(name==='web-setup'||/^(go-test|web-shard) \(/.test(name)) {
+    if(/^(go-test|web-unit|web-shard) \(/.test(name)) {
       const full=job.steps?.filter(step=>step.name==='Confirm full tier execution');
       ensure(full?.length===1&&full[0].status==='completed'&&full[0].conclusion==='success','missing full tier execution evidence');
     }
