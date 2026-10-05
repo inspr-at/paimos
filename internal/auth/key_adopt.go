@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -51,6 +52,9 @@ func (m *Module) adoptAgentKey(ctx context.Context, p tenant.Principal, id strin
 	if p.Kind != tenant.Person || p.ID == "" {
 		return key, authz.ErrForbidden
 	}
+	// Ownership changes share the key-use admission fence. Acquire it before
+	// the tenant access fence, so no admitted request outlives adoption.
+	ctx = db.WithKeyScopeUse(tenant.WithPrincipal(ctx, p), p.TenantID, id)
 	err := m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var locked string
 		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID).Scan(&locked); err != nil {

@@ -19,8 +19,8 @@ func TestScopeUsageDebounceKeyIsolationAndDeniedGrant(t *testing.T) {
 	if err := d.Admin.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('scope-use','Scope use') RETURNING id::text`).Scan(&tid); err != nil {
 		t.Fatal(err)
 	}
-	dbtest.KeyPerson(t, d.App, tid)
-	p := tenant.Principal{TenantID: tid, Kind: tenant.Agent, Scopes: []string{"nodes.read"}}
+	creator := dbtest.KeyPerson(t, d.App, tid)
+	p := tenant.Principal{TenantID: tid, Kind: tenant.Agent, Scopes: []string{"nodes.read"}, KeyCreatorID: creator}
 	var otherKey string
 	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'agent','Usage',ARRAY['admin']) RETURNING id::text`, tid).Scan(&p.ID); err != nil {
