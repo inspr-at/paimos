@@ -84,15 +84,16 @@ narrowQuery?.addEventListener('change', onNarrow)
 const accountLabel = (label: string) => narrow.value ? label.split(' · ').slice(0, 2).join(' · ') : label
 const selectedWait = computed(() => catalog.value?.hosts.find(h => h.daemon_id === choice.value.hostId)?.harnesses.find(h => h.harness === choice.value.harness)?.accounts.find(a => a.id === choice.value.accountId)?.wait)
 const mayRunNow = computed(() => permitted.value && session.identity?.principal.kind === 'person')
-const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && !!ticket.value && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
+const canSubmit = computed(() => permitted.value && !loading.value && !busy.value && !run.value && ticket.value?.is_leaf === true && !catalogGap.value && !!view.value.agentId && selectionVisible.value)
 
 async function search(more = false) {
   const turn = ++searchGeneration
   searching.value = true; searchError.value = ''
   try {
-    const page = await listNodes({ kind: ['ticket'], q: query.value.trim(), limit: 30, sort: '-updated_at', ...(more && nextCursor.value ? { cursor: nextCursor.value } : {}) })
+    const page = await listNodes({ kind: ['work'], shape: ['leaf'], q: query.value.trim(), limit: 30, sort: '-updated_at', ...(more && nextCursor.value ? { cursor: nextCursor.value } : {}) })
     if (turn !== searchGeneration || !visible.value) return
-    tickets.value = more ? [...tickets.value, ...page.items] : page.items
+    const leaves = page.items.filter(item => item.is_leaf === true)
+    tickets.value = more ? [...tickets.value, ...leaves] : leaves
     nextCursor.value = page.next_cursor
   } catch (e) { if (turn === searchGeneration) { searchError.value = message(e); tickets.value = []; nextCursor.value = null } }
   finally { if (turn === searchGeneration) searching.value = false }
@@ -126,6 +127,7 @@ function setFamily(value: string) {
   void loadCatalog()
 }
 function selectTicket(item: WorkNode) {
+  if (item.is_leaf !== true) return
   ticket.value = item
   authorFamily.value = authorFamilyFor(item)
   touch.value = emptyTouch()
@@ -154,8 +156,8 @@ async function open(initial?: WorkNode) {
   if (busy.value) return
   opener = document.activeElement as HTMLElement
   generation++; visible.value = true
-  ticket.value = initial ?? null; query.value = ''; tickets.value = []; nextCursor.value = null
-  authorFamily.value = authorFamilyFor(initial ?? null)
+  ticket.value = initial?.is_leaf === true ? initial : null; query.value = ''; tickets.value = []; nextCursor.value = null
+  authorFamily.value = authorFamilyFor(ticket.value)
   catalog.value = null; catalogGap.value = null; catalogMessage.value = ''
   choice.value = emptyChoice(); touch.value = emptyTouch()
   remember.value = false; remembered.value = ''
@@ -163,10 +165,10 @@ async function open(initial?: WorkNode) {
   error.value = ''; checkError.value = ''; searchError.value = ''; grantStale.value = false
   dialog.value?.showModal()
   void loadCatalog()
-  if (!initial) void search()
+  if (!ticket.value) void search()
   poll.start()
   await nextTick()
-  if (initial) hostSelect.value?.focus()
+  if (ticket.value) hostSelect.value?.focus()
   else searchInput.value?.focus()
 }
 function close() {
