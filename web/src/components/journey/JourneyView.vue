@@ -52,12 +52,13 @@ const viewed = computed<Stage>(() => isStage(props.stage) ? props.stage : journe
 const data = useJourneyData(computed(() => projectId.value), journey)
 // A stage shows once what it reads has arrived the first time (later refreshes
 // keep what is shown), so nothing reads as empty or "not started" while loading.
-const loadedOnce = { intake: ref(false), origin: ref(false), work: ref(false) }
+const loadedOnce = { intake: ref(false), origin: ref(false), work: ref(false), releases: ref(false) }
 watch(projectId, () => { for (const flag of Object.values(loadedOnce)) flag.value = false })
 const settled = (status: string) => status === 'ready' || status === 'error'
 watch(data.intake.status, status => { if (settled(status)) loadedOnce.intake.value = true })
 watch(data.origin.status, status => { if (settled(status)) loadedOnce.origin.value = true })
 watch(data.work.status, status => { if (settled(status)) loadedOnce.work.value = true })
+watch(data.releaseNodes.status, status => { if (settled(status)) loadedOnce.releases.value = true })
 const imported = computed(() => !!journey.value && isImported(journey.value))
 const loadingStage = computed(() => {
   const j = journey.value
@@ -65,7 +66,7 @@ const loadingStage = computed(() => {
   const stage = viewed.value
   if (['inspire', 'shape', 'requirements'].includes(stage) && !loadedOnce.intake.value) return true
   if (['inspire', 'shape'].includes(stage) && imported.value && !loadedOnce.origin.value) return true
-  if (['plan', 'build', 'deploy', 'access', 'live'].includes(stage) && !!j.current_release_id && !settled(data.releaseNodes.status.value)) return true
+  if (['plan', 'build', 'deploy', 'access', 'live'].includes(stage) && !!j.current_release_id && !loadedOnce.releases.value) return true
   // Tickets are counted and grouped by their state and epic: wait for them.
   if (['requirements', 'plan', 'build', 'live'].includes(stage) && (imported.value || stage !== 'requirements') && !loadedOnce.work.value) return true
   return false

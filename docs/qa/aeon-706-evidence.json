@@ -11,7 +11,7 @@
     "Explicit owner passed to plan writes and ticket creation; expected_revision remains server precondition.",
     "Queued writes recheck owner and editability before transport; stale operations resolve false/null.",
     "Owner generations fence GET/write adoption, rollback, conflict reload, refresh callbacks and scope disposal, including same-release reload and A-B-A navigation.",
-    "Owner changes reset feature memory, pending chain/busy state, add-ticket drafts and picker visibility. Late results cannot clear a new owner busy state or drafts.",
+    "Project/release navigation resets feature memory, add-ticket drafts and picker visibility; every owner generation still resets pending chain/busy state. Same-record refreshes preserve drafts, picker and partial selection, pruning obsolete membership. Late results cannot clear a new owner busy state or drafts.",
     "Release selection invalidates synchronously; after-save project refresh uses captured project. Foreign membership walkers cannot trigger success feedback."
   ],
   "validation": [
@@ -71,5 +71,65 @@
     "the ticket form discards late failure feedback after release navigation",
     "the ticket form rechecks editability before submitting its captured draft",
     "a foreign-release membership result cannot patch the plan or report success"
-  ]
+  ],
+  "fix_round_2": {
+    "baseline": "bc5ecb1d7",
+    "findings_fixed": [
+      "Same-release refresh erased unsaved title, feature and picker state.",
+      "Same-release refresh erased partial selection memory and broke the some → all → none → previous partial cycle."
+    ],
+    "changes": [
+      "Keep record-owned draft/picker/memory state across generation-only refreshes; retain navigation resets and stale-request fences.",
+      "Prune remembered IDs against the refreshed feature membership and remove vanished features.",
+      "Use the existing loaded-once stage pattern for release-list reads; refreshing releases no longer unmounts PlanStage and destroys its draft. Initial/project-navigation loading still waits for release data."
+    ],
+    "regression_evidence": [
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/plan-owner.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "before": "Against bc5ecb1d7 source: four new behavior regressions failed at exact draft/memory preservation assertions; 21 tests passed, including the new project-navigation reset control.",
+        "after": "25 passed; all pre-fix assertions retained. Deferred ticket creation tests prove generation and busy-state fences during same-record refresh."
+      },
+      {
+        "command": "npm test -- tests/journey.spec.ts --grep 'the plan: ticked|a stale plan write|Plan adds a ticket|adding a ticket on a server' --workers=1 --retries=0",
+        "before_stage_retention_fix": "Strengthened feature-cycle test failed because the real stage unmounted during release-list refresh and erased the draft; other three targeted browser cases passed.",
+        "after": "4 passed. Feature-cycle case waits for each real walker GET refresh before asserting unchanged draft/feature and restored partial selection. Supervised local macOS bundled Chromium; zero browser/owned processes remained after shutdown."
+      },
+      {
+        "command": "npm run typecheck",
+        "result": "passed after final source edits"
+      },
+      {
+        "command": "node node_modules/eslint/bin/eslint.js src/lib/usePlan.ts src/components/journey/PlanStage.vue src/components/journey/JourneyView.vue",
+        "result": "passed"
+      },
+      {
+        "command": "python3 -m unittest discover -s scripts/audit",
+        "result": "33 passed; existing source/test files retain their ownership slices."
+      },
+      {
+        "command": "Native focused Vitest collection + strict tier validation + full/push selection",
+        "result": "25 collected/classified: 22 ESSENTIAL, 3 GATED-FULL; all 25 selected by full/push."
+      },
+      {
+        "command": "git diff --check",
+        "result": "passed"
+      },
+      {
+        "command": "git fetch origin main && git merge-tree --write-tree --name-only HEAD origin/main",
+        "result": "Latest origin/main fetched; merge simulation completed without conflicts, so the conditional merge-main instruction did not require a merge."
+      }
+    ],
+    "limits": [
+      "Specific fix-round instructions require local focused tests and forbid mbp2606; remote-test.sh was not invoked despite the generic remote-first line.",
+      "Full just test/build/unit/browser suites and Linux CI-equivalent Chromium remain coordinator CI gates. No affected Go package, API, migration, visual design, template, CSS or keyboard change.",
+      "Local commit only: no push, deploy, merge, production access, model review or ticket-status changes."
+    ],
+    "new_tests": [
+      "same-release save refreshes preserve ticket drafts and the open picker",
+      "same-release refreshes preserve the partial selection through the feature cycle",
+      "same-release refreshes fence old ticket creation without erasing drafts or current busy state",
+      "same-release refreshes prune removed tickets and features from partial selection memory",
+      "project navigation clears drafts picker and selection memory even for the same release id"
+    ]
+  }
 }

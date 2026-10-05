@@ -7463,6 +7463,11 @@
     {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the ticket form preserves a new release draft and busy state after an old success","tier":"ESSENTIAL"},
     {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the ticket form discards late failure feedback after release navigation","tier":"ESSENTIAL"},
     {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the ticket form rechecks editability before submitting its captured draft","tier":"ESSENTIAL"},
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a foreign-release membership result cannot patch the plan or report success","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a foreign-release membership result cannot patch the plan or report success","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release save refreshes preserve ticket drafts and the open picker","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release refreshes preserve the partial selection through the feature cycle","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release refreshes fence old ticket creation without erasing drafts or current busy state","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release refreshes prune removed tickets and features from partial selection memory","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"project navigation clears drafts picker and selection memory even for the same release id","tier":"ESSENTIAL"}
   ]
 }

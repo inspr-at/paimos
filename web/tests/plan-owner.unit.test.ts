@@ -330,3 +330,103 @@ it('a foreign-release membership result cannot patch the plan or report success'
   expect(form.store.load).not.toHaveBeenCalled()
   expect(toast).not.toHaveBeenCalled()
 })
+
+it('same-release save refreshes preserve ticket drafts and the open picker', async () => {
+  const context = await setup(), form = planForm(context)
+  form.state.newTitle = 'Unsaved ticket'; form.state.newFeature = 'shared-feature'; form.state.picking = true
+  const owner = context.data.capturePlanOwner()!
+  let refreshed: Promise<void> | undefined
+  context.afterSave.mockImplementation(savedOwner => {
+    transport.getWalker.mockResolvedValueOnce(context.data.walker.value.value)
+    refreshed = context.data.loadWalker(savedOwner.releaseId, true)
+  })
+  expect(await context.plan.toggleTicket('release-a-1')).toBe(true)
+  await refreshed
+  expect(context.afterSave).toHaveBeenCalledWith(owner)
+  expect(context.data.capturePlanOwner()!.generation).toBeGreaterThan(owner.generation)
+  expect(form.state.newTitle).toBe('Unsaved ticket')
+  expect(form.state.newFeature).toBe('shared-feature')
+  expect(form.state.picking).toBe(true)
+  expect(form.state.adding).toBe(false)
+})
+
+it('same-release refreshes preserve the partial selection through the feature cycle', async () => {
+  const { data, plan, afterSave } = await setup()
+  let refreshed: Promise<void> | undefined
+  afterSave.mockImplementation(owner => {
+    transport.getWalker.mockResolvedValueOnce(data.walker.value.value)
+    refreshed = data.loadWalker(owner.releaseId, true)
+  })
+  for (const expected of [['release-a-0', 'release-a-1'], [], ['release-a-0']]) {
+    expect(await plan.toggleFeature('shared-feature')).toBe(true)
+    await refreshed
+    expect([...plan.included.value]).toEqual(expected)
+    expect(plan.memory.value.get('shared-feature')).toEqual(['release-a-0'])
+  }
+  expect(transport.putPlan.mock.calls.map(([, , body]) => body.expected_revision)).toEqual([7, 8, 9])
+  expect(transport.putPlan.mock.calls.map(([, , body]) => body.included_ticket_ids)).toEqual([['release-a-0', 'release-a-1'], [], ['release-a-0']])
+})
+
+it('same-release refreshes fence old ticket creation without erasing drafts or current busy state', async () => {
+  const context = await setup(), form = planForm(context)
+  const old = deferred<Walker>(), current = deferred<Walker>()
+  transport.addPlanTicket.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
+  form.state.newTitle = 'Draft to retain'; form.state.newFeature = 'shared-feature'; form.state.picking = true
+  const first = form.submit()
+  expect(form.state.adding).toBe(true)
+  await context.data.loadWalker('release-a', true)
+  expect(form.state.adding).toBe(false)
+  expect(form.state.newTitle).toBe('Draft to retain')
+  expect(form.state.newFeature).toBe('shared-feature')
+  expect(form.state.picking).toBe(true)
+  form.state.newTitle = 'Newer draft'
+  const second = form.submit()
+  old.resolve(walker('project-a', 'release-a', 8))
+  await first
+  expect(form.state.newTitle).toBe('Newer draft')
+  expect(form.state.adding).toBe(true)
+  expect(toast).not.toHaveBeenCalled()
+  expect(form.store.load).not.toHaveBeenCalled()
+  current.resolve(walker('project-a', 'release-a', 9))
+  await second
+  expect(form.state.newTitle).toBe('')
+  expect(form.state.adding).toBe(false)
+  expect(form.store.load).toHaveBeenCalledWith('project-a', true)
+})
+
+it('same-release refreshes prune removed tickets and features from partial selection memory', async () => {
+  const { data, plan } = await setup()
+  const expanded = walker()
+  expanded.tickets.push({ ...expanded.tickets[1], ticket_node_id: 'release-a-2', key: 'T-2', position: 2, included: true })
+  data.patchWalker(expanded)
+  transport.putPlan.mockResolvedValueOnce({ ...expanded, revision: 8, tickets: expanded.tickets.map(t => ({ ...t, included: true })) })
+  expect(await plan.toggleFeature('shared-feature')).toBe(true)
+  expect(plan.memory.value.get('shared-feature')).toEqual(['release-a-0', 'release-a-2'])
+  const refreshed = walker('project-a', 'release-a', 9)
+  refreshed.tickets = refreshed.tickets.map(t => ({ ...t, included: true }))
+  refreshed.tickets.push({ ...refreshed.tickets[1], ticket_node_id: 'release-a-3', key: 'T-3', position: 2 })
+  transport.getWalker.mockResolvedValueOnce(refreshed)
+  await data.loadWalker('release-a', true)
+  expect(plan.memory.value.get('shared-feature')).toEqual(['release-a-0'])
+  // Retain the new membership in later server answers as well.
+  transport.putPlan.mockImplementation(async (_project, _release, body) => ({ ...refreshed, revision: body.expected_revision + 1, tickets: refreshed.tickets.map(t => ({ ...t, included: body.included_ticket_ids.includes(t.ticket_node_id) })) }))
+  expect(await plan.toggleFeature('shared-feature')).toBe(true)
+  expect([...plan.included.value]).toEqual([])
+  expect(await plan.toggleFeature('shared-feature')).toBe(true)
+  expect([...plan.included.value]).toEqual(['release-a-0'])
+  transport.getWalker.mockResolvedValueOnce({ ...refreshed, features: [], tickets: [] })
+  await data.loadWalker('release-a', true)
+  expect(plan.memory.value.size).toBe(0)
+})
+
+it('project navigation clears drafts picker and selection memory even for the same release id', async () => {
+  const context = await setup(), form = planForm(context)
+  expect(await context.plan.toggleFeature('shared-feature')).toBe(true)
+  form.state.newTitle = 'Project A draft'; form.state.newFeature = 'shared-feature'; form.state.picking = true
+  context.project.value = 'project-b'
+  await context.data.loadWalker('release-a')
+  expect(form.state.newTitle).toBe('')
+  expect(form.state.newFeature).toBe('')
+  expect(form.state.picking).toBe(false)
+  expect(context.plan.memory.value.size).toBe(0)
+})

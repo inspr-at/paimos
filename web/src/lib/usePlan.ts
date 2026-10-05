@@ -18,7 +18,23 @@ export function usePlan(data: JourneyData, editable: Ref<boolean>, afterSave: (o
   const memory = ref(new Map<string, string[]>())
   const saving = ref(false)
   let chain: Promise<unknown> = Promise.resolve()
-  watch(data.planOwner, () => { memory.value = new Map(); saving.value = false; chain = Promise.resolve() }, { flush: 'sync' })
+  watch(data.planOwner, (owner, previous) => {
+    // A refresh fences pending writes, but the partial pick belongs to the
+    // project/release and survives new request generations for that record.
+    if (owner?.projectId !== previous?.projectId || owner?.releaseId !== previous?.releaseId) memory.value = new Map()
+    saving.value = false; chain = Promise.resolve()
+  }, { flush: 'sync' })
+  watch([groups, data.walker.status], () => {
+    if (!data.capturePlanOwner()) return
+    const copy = new Map<string, string[]>()
+    for (const group of groups.value) {
+      if (!group.feature) continue
+      const ids = new Set(group.tickets.map(t => t.ticket_node_id))
+      const remembered = memory.value.get(group.id)?.filter(id => ids.has(id))
+      if (remembered?.length) copy.set(group.id, remembered)
+    }
+    memory.value = copy
+  }, { flush: 'sync' })
 
   function remember(next: Set<string>) {
     const copy = new Map(memory.value)

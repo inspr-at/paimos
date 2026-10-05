@@ -47,7 +47,13 @@ const newTitle = ref('')
 const newFeature = ref<string>('')
 const adding = ref(false)
 const picking = ref(false)
-watch(ctx.data.planOwner, () => { newTitle.value = ''; newFeature.value = ''; adding.value = false; picking.value = false }, { flush: 'sync' })
+watch(ctx.data.planOwner, (owner, previous) => {
+  // Drafts and the picker belong to the displayed record, not its load generation.
+  if (owner?.projectId !== previous?.projectId || owner?.releaseId !== previous?.releaseId) {
+    newTitle.value = ''; newFeature.value = ''; picking.value = false
+  }
+  adding.value = false
+}, { flush: 'sync' })
 const epics = computed(() => ctx.plan.groups.value.flatMap(group => group.feature ? [{ id: group.feature.id, key: group.feature.key, title: group.feature.title }] : []))
 async function addTicket() {
   const title = newTitle.value.trim()

@@ -52,15 +52,32 @@ test('Journey is a third view of the project, with the stage and next action in 
 
 test('the plan: ticked tickets form the release; features cycle all, none and the last partial pick', async ({ page }) => {
   const { calls } = await open(page)
+  const draft = page.getByLabel('New ticket for this release')
+  const draftFeature = page.getByLabel('Feature of the new ticket')
+  await draft.fill('Keep this unsaved ticket')
+  await draftFeature.selectOption('n-epic')
+  const refresh = () => page.waitForResponse(response => response.request().method() === 'GET' && response.url().endsWith('/releases/r-2/walker'))
   const feature = page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 2 of 3 in the release/ })
   await expect(feature).toHaveAttribute('aria-checked', 'mixed')
+  const firstRefresh = refresh()
   await feature.click()
+  await firstRefresh
   await expect(page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 3 of 3/ })).toHaveAttribute('aria-checked', 'true')
+  await expect(draft).toHaveValue('Keep this unsaved ticket')
+  await expect(draftFeature).toHaveValue('n-epic')
+  const secondRefresh = refresh()
   await page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 3 of 3/ }).click()
+  await secondRefresh
   await expect(page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 0 of 3/ })).toHaveAttribute('aria-checked', 'false')
+  await expect(draft).toHaveValue('Keep this unsaved ticket')
+  await expect(draftFeature).toHaveValue('n-epic')
   // The third click restores the earlier partial pick (PHAROS-11 and PHAROS-13).
+  const thirdRefresh = refresh()
   await page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 0 of 3.*restore the earlier 2/ }).click()
+  await thirdRefresh
   await expect(page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 2 of 3/ })).toHaveAttribute('aria-checked', 'mixed')
+  await expect(draft).toHaveValue('Keep this unsaved ticket')
+  await expect(draftFeature).toHaveValue('n-epic')
   await expect.poll(() => writes(calls, '/plan').length).toBe(3)
   const plans = writes(calls, '/plan').map(c => c.body as { expected_revision: number; ordered_ticket_ids: string[]; included_ticket_ids: string[] })
   expect(plans.map(p => p.expected_revision)).toEqual([7, 8, 9])
