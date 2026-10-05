@@ -76,7 +76,7 @@ func watchFixtureWithHarness(t *testing.T, publicKey, harness string) (*fixture,
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id) SELECT $1,$2,id,'WATCH-2','Watch ticket',$3 FROM node_kinds WHERE slug='ticket'`, f.tenantID, ticket, project)
+		_, err = tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,parent_id) SELECT $1,$2,id,'WATCH-2','Watch ticket',$3 FROM node_kinds WHERE slug='work'`, f.tenantID, ticket, project)
 		return err
 	})
 	if err != nil {
@@ -311,7 +311,10 @@ func TestAttachCannotRenewChangedSession(t *testing.T) {
 		t.Run(change, func(t *testing.T) {
 			f, key, in := watchFixture(t)
 			v := activateWatch(t, f, key, &in)
-			if _, err := f.db.Admin.Exec(t.Context(), "UPDATE harness_sessions SET "+change+" WHERE id=$1", *v.SessionID); err != nil {
+			if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), "UPDATE harness_sessions SET "+change+" WHERE id=$1", *v.SessionID)
+				return err
+			}); err != nil {
 				t.Fatal(err)
 			}
 			in.Sequence++

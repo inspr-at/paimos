@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { movedQueue, queueable, queueProjection, readyGaps, type QueueWireSnapshot } from '../src/lib/workQueue.ts'
-import { releaseCadence, suggestedRelease, visibleQueueTiming } from '../src/lib/suggestedRelease.ts'
+import { releaseCadence, suggestedRelease, visibleQueueTiming, type SuggestionInput } from '../src/lib/suggestedRelease.ts'
 import type { QueueSnapshot } from '../src/lib/workQueue.ts'
 import type { Release } from '../src/lib/releases.ts'
 const hour = 3_600_000, now = Date.parse('2026-10-01T18:00:00Z')
@@ -11,6 +11,12 @@ test('definition of ready rejects missing, invalid and unnamed inputs without ad
   assert.equal(queueable({ kind_slug: 'ticket', state: 'open' }), true)
   for (const state of ['queued', 'in_progress', 'qa', 'done', 'delivered', 'accepted']) assert.equal(queueable({ kind_slug: 'ticket', state }), false)
   assert.equal(queueable({ kind_slug: 'epic', state: 'open' }), false)
+  assert.equal(queueable({ kind_slug: 'work', state: 'open' }), false)
+  assert.equal(queueable({ kind_slug: 'work', state: 'open', is_leaf: true }), true)
+  assert.equal(queueable({ kind_slug: 'work', state: 'open', estimate: { is_parent: false } }), true)
+  assert.equal(queueable({ kind_slug: 'work', state: 'open', is_leaf: false, estimate: { is_parent: false } }), false)
+  assert.equal(queueable({ kind_slug: 'work', state: 'open', estimate: { is_parent: true } }), false)
+  assert.equal(queueable({ kind_slug: 'work', state: 'done', is_leaf: true }), false)
   assert.deepEqual(readyGaps({ state: 'blocked', fields: {} }), ['estimate', 'criteria', 'blocker'])
   assert.deepEqual(readyGaps({ state: 'blocked', fields: { estimate_hours: 2, acceptance_criteria: '- Verified', blocker: 'unnamed' } }), ['blocker'])
   assert.deepEqual(readyGaps({ state: 'blocked', fields: { estimate_hours: 2, acceptance_criteria: ['Verified'], blocker: 'AEON-2' } }), [])
@@ -36,6 +42,42 @@ test('release suggestions use observed cadence, actual membership, ETA and queue
   assert.equal(suggestedRelease({ ...input, state: 'in_progress', eta: { eta_ready_at: new Date(now + hour).toISOString(), ready_stale: true } }, history, now).text, '—')
   assert.equal(suggestedRelease({ ...input, state: 'in_progress', eta: { ready_stale: true } }, history, now, { expected_start: new Date(now).toISOString() }).text, '—')
   assert.equal(suggestedRelease(input, [history[0]!], now, { expected_start: new Date(now).toISOString() }).text, '—')
+})
+test('canonical work parents have no release suggestion even when done or named in a release', () => {
+  const shapes = [
+    { is_leaf: false },
+    { estimate: { is_parent: true } },
+    { is_leaf: false, estimate: { is_parent: false } },
+  ]
+  for (const kind_slug of ['work', 'ticket', 'task', 'epic']) for (const shape of shapes) {
+    for (const state of ['done', 'Done', 'qa', 'in_progress', 'open', 'delivered', 'accepted']) {
+      const input: SuggestionInput = { key: 'AEON-1', kind_slug, state, fields: { estimate_hours: 3 }, eta: { eta_ready_at: new Date(now + hour).toISOString() }, ...shape }
+      const view = suggestedRelease(input, history, now, { expected_start: new Date(now + 2 * hour).toISOString() })
+      assert.deepEqual(view, { text: '—', kind: 'empty', tip: 'Releases are suggested for leaf work; a parent’s leaves can span releases' }, `${kind_slug} ${state} ${JSON.stringify(shape)}`)
+    }
+  }
+  assert.equal(suggestedRelease({ key: 'AEON-1', kind_slug: 'epic', state: 'done', fields: {} }, history, now).kind, 'empty')
+})
+test('canonical work leaves retain release membership, cadence, ETA and queue predictions', () => {
+  const cases = [
+    { state: 'done', text: 'Next release', kind: 'planned' },
+    { state: 'Done', text: 'Next release', kind: 'planned' },
+    { state: 'qa', text: 'Next', kind: 'planned' },
+    { state: 'in_progress', text: 'Next', kind: 'planned' },
+    { state: 'open', text: 'Next', kind: 'planned' },
+    { state: 'delivered', text: 'Cut 1', kind: 'shipped' },
+    { state: 'accepted', text: 'Cut 1', kind: 'shipped' },
+  ]
+  for (const shape of [{ is_leaf: true }, { estimate: { is_parent: false } }, { is_leaf: true, estimate: { is_parent: true } }]) {
+    for (const { state, text, kind } of cases) {
+      const input: SuggestionInput = { key: 'AEON-1', kind_slug: 'work', state, fields: { estimate_hours: 3 }, eta: { eta_ready_at: new Date(now + hour).toISOString() }, ...shape }
+      const view = suggestedRelease(input, history, now, { expected_start: new Date(now + 2 * hour).toISOString() })
+      assert.equal(view.text, text, `${state} ${JSON.stringify(shape)}`)
+      assert.equal(view.kind, kind)
+      if (kind === 'shipped') assert.equal(view.version, history[1]!.version)
+    }
+  }
+  assert.equal(suggestedRelease({ key: 'AEON-1', kind_slug: 'work', is_leaf: true, state: 'done', fields: {} }, [], now).text, 'Next release')
 })
 test('adapts Part A ticket projection without retaining an unadmitted run or inventing capacity', () => {
   const raw: QueueWireSnapshot = { manual_order: true, capacity: { queued_hours: 3, parallel_runs: 0, work_hours: null, warning: true }, items: [{

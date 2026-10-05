@@ -16,7 +16,7 @@ import (
 
 func TestNodeRecurrenceProvenance(t *testing.T) {
 	p := newPrincipal(t, "recurrence-marker")
-	project, ticket := kindBySlug(t, p, "project"), kindBySlug(t, p, "ticket")
+	project, ticket := kindBySlug(t, p, "project"), kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Visible"}`)
 	hidden := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Hidden source"}`)
 	create := func(title, fields string) nodeJSON {

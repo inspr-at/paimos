@@ -187,7 +187,8 @@ func TestLateVendorAliasRechecksAccessBeforeHierarchyLock(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	if _, err = tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.alice.TenantID); err != nil {
+	var blocker int
+	if err = tx.QueryRow(ctx, `SELECT pg_backend_pid() FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.alice.TenantID).Scan(&blocker); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = tx.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, f.alice.ID); err != nil {
@@ -202,12 +203,20 @@ func TestLateVendorAliasRechecksAccessBeforeHierarchyLock(t *testing.T) {
 		default:
 		}
 		var waiting bool
-		if err = f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%FROM tenants WHERE id=$1 FOR NO KEY UPDATE%')`).Scan(&waiting); err != nil {
+		// The shared work writer fences the tenant before the handler's own
+		// fence. Observe this transaction's blocker, independent of SQL casts.
+		if err = f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'
+		 AND $1::int=ANY(pg_blocking_pids(pid)) AND query LIKE '%FROM tenants%' AND query LIKE '%FOR NO KEY UPDATE%')`, blocker).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting {
 			break
 		}
+	}
+	var earlyAdvisory bool
+	if err = f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE granted AND locktype='advisory'
+	 AND $1::int=ANY(pg_blocking_pids(pid)))`, blocker).Scan(&earlyAdvisory); err != nil || earlyAdvisory {
+		t.Fatalf("replay acquired an advisory lock before tenant: held=%v err=%v", earlyAdvisory, err)
 	}
 	var free bool
 	if err = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1::text,0))`, f.project).Scan(&free); err != nil || !free {

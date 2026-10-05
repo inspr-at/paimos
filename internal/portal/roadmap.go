@@ -98,7 +98,7 @@ func loadPublicRoadmap(ctx context.Context, tx pgx.Tx) ([]publicRoadmapItem, err
 		         WHEN 'string' THEN n.fields->>'release'
 		       END
 		FROM nodes n
-		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id AND k.slug = 'ticket'
+		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id AND k.slug IN ('work','ticket')
 		JOIN portal_product_pace pace ON pace.tenant_id = n.tenant_id AND pace.project_node_id = n.project_id
 		WHERE pace.product_id=$1::uuid AND n.deleted_at IS NULL
 		  AND lower(n.state) NOT IN ('cancelled', 'canceled', 'archived', 'deleted')

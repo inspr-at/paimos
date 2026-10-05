@@ -1,0 +1,177 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix23",
+  "recorded_at": "2026-10-05T04:47:54.565423+00:00",
+  "branch": "work/aeon-648-int",
+  "base_commit": "523d16338ca878fba8c0ceff553139afcb8446da",
+  "review": "review-int648r22.out",
+  "summary": "Resolved the remaining P2 finding: canonical work parents no longer receive a single release suggestion. Explicit is_leaf metadata takes precedence; estimate.is_parent supports older responses without shape metadata, and legacy epics remain excluded. Leaf Done, QA, ETA, queue and published-membership behavior is preserved. No assertion was relaxed.",
+  "ownership": {
+    "account": "PPM / INSPR / workstation-agents (agent)",
+    "attribution": "Coordinator recorded worker marker before dispatch, per worker-common.md. Account verified with paimos --instance ppm whoami. No tracker writes or status changes."
+  },
+  "main": {
+    "fetched": true,
+    "commit": "a3ca8c475a94ce1de6da1398182abe3dfe98eb9f",
+    "already_ancestor": true,
+    "merge_tree_conflicts": false,
+    "merge_needed": false
+  },
+  "findings": [
+    {
+      "severity": "P2",
+      "finding": "Migrated parents receive misleading release predictions",
+      "status": "fixed",
+      "changes": "Extend SuggestionInput with parent/leaf metadata; return the existing empty suggestion before evaluating Done, ETA, queue or published membership. The explanation says that a parent’s leaves can span releases. Existing SuggestedReleaseCell and layout are reused.",
+      "regression": {
+        "node": "84 parent combinations across work/ticket/task/epic, three metadata shapes and seven status spellings, plus the legacy epic fallback. Canonical leaves cover 21 metadata/state combinations with published version assertions and a Done leaf without measured cadence. Explicit leaf metadata wins over estimate metadata.",
+        "browser": "Six cases across 390/1024/1440 px and light/dark render a Done canonical parent, a Done leaf and a delivered leaf. Require empty parent text/class and accessible reason, unchanged Next release and published codename for leaves, positive-size control samples within 0.5 px, no horizontal overflow, no request writes and no browser errors."
+      }
+    }
+  ],
+  "validation": {
+    "node": {
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0,
+      "workers": 1,
+      "file": "web/tests/work-queue.test.ts"
+    },
+    "baseline": {
+      "commit": "523d16338ca878fba8c0ceff553139afcb8446da",
+      "passed": 7,
+      "failed": 1,
+      "method": "Final unchanged test file executed with a Node registerHooks load hook substituting only the exact baseline suggestedRelease.ts from git show. All tracked production/test files remained unchanged.",
+      "failure": "The canonical work parent with is_leaf:false and state:done returns planned / Next release on baseline rather than empty / em dash. Existing and new leaf assertions pass on baseline."
+    },
+    "browser": {
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "workers": 1,
+      "file": "web/tests/work-queue.spec.ts",
+      "selection": "Six new canonical parent cases plus existing shared queued leaf prediction case. No full spec or full suite run.",
+      "platform": "macOS, pinned Playwright Chromium 153 headless shell",
+      "owned_browser_cleanup": {
+        "after": 0,
+        "remaining_processes": 0
+      },
+      "stability": "All six new cases measure parent row and its open action after parent/leaf tooltip interactions, with document overflow checks.",
+      "fixture_correction": "Initial browser run reached all UI and stability assertions but failed the no-write assertion on unrelated first-visit release preference initialization. Set the fixture last_seen preference; every assertion was retained and the final run passes."
+    },
+    "remote_browser": {
+      "exit_code": 3,
+      "reason": "Approved scripts/playwright-remote.mjs refused OPS-247 bootstrap/launcher unavailable before SSH or transfer. Permitted single-file local fallback used one worker."
+    },
+    "remote_test_sh": "Not invoked: it transfers HEAD with git push to a temporary ref. Preserved direct user instruction not to push. No Go package changed in this round.",
+    "strict_affected_inventory": {
+      "strict": true,
+      "node_cases": 8,
+      "browser_cases": 24,
+      "preserved_classifications": 7224,
+      "added_classifications": [
+        {
+          "kind": "node",
+          "file": "tests/work-queue.test.ts",
+          "name": "canonical work parents have no release suggestion even when done or named in a release",
+          "tier": "ESSENTIAL"
+        },
+        {
+          "kind": "node",
+          "file": "tests/work-queue.test.ts",
+          "name": "canonical work leaves retain release membership, cadence, ETA and queue predictions",
+          "tier": "GATED-FULL"
+        },
+        {
+          "kind": "browser",
+          "file": "tests/work-queue.spec.ts",
+          "name": "canonical parent release suggestions stay empty while leaves retain predictions 390 light",
+          "config": "playwright.ui.config.ts",
+          "project": "",
+          "tier": "GATED-FULL"
+        },
+        {
+          "kind": "browser",
+          "file": "tests/work-queue.spec.ts",
+          "name": "canonical parent release suggestions stay empty while leaves retain predictions 1024 light",
+          "config": "playwright.ui.config.ts",
+          "project": "",
+          "tier": "GATED-FULL"
+        },
+        {
+          "kind": "browser",
+          "file": "tests/work-queue.spec.ts",
+          "name": "canonical parent release suggestions stay empty while leaves retain predictions 1440 light",
+          "config": "playwright.ui.config.ts",
+          "project": "",
+          "tier": "GATED-FULL"
+        },
+        {
+          "kind": "browser",
+          "file": "tests/work-queue.spec.ts",
+          "name": "canonical parent release suggestions stay empty while leaves retain predictions 390 dark",
+          "config": "playwright.ui.config.ts",
+          "project": "",
+          "tier": "GATED-FULL"
+        },
+        {
+          "kind": "browser",
+          "file": "tests/work-queue.spec.ts",
+          "name": "canonical parent release suggestions stay empty while leaves retain predictions 1024 dark",
+          "config": "playwright.ui.config.ts",
+          "project": "",
+          "tier": "GATED-FULL"
+        },
+        {
+          "kind": "browser",
+          "file": "tests/work-queue.spec.ts",
+          "name": "canonical parent release suggestions stay empty while leaves retain predictions 1440 dark",
+          "config": "playwright.ui.config.ts",
+          "project": "",
+          "tier": "GATED-FULL"
+        }
+      ]
+    },
+    "ci_web_shard_check": "pass: 78 specs, 12 shards, 166 ungated registrations",
+    "git_diff_check": "pass",
+    "visual_verification": "Inspected the 390 px light and 1440 px dark screenshots: empty parent prediction, preserved leaf suggestion, established list/card layout. All six screenshots were generated; no new layout or controls.",
+    "full_suites": "No fresh full Go/DB suite, npm build/typecheck, full web unit suite, Linux Chromium or hosted CI rerun claimed. Remote/CI validation remains coordinator-owned under the no-push instruction."
+  },
+  "screenshots": [
+    {
+      "path": "web/test-results/aeon-648-int-fix23/release-suggestions-1024-dark.png",
+      "sha256": "319dca079e0c80f885e3c5c7c1aea429b560f1e3076656c3a53f6aa470fd006e"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix23/release-suggestions-1024-light.png",
+      "sha256": "967c1ce453e5f55f10b94335112b9e7f86544bfa64f3d3904a4f3849d58c5d49"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix23/release-suggestions-1440-dark.png",
+      "sha256": "9ef7048bdd6db878f56803d7240dd205bcd5b2bd9dbe0c6b99b226fa8bd6f0ea"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix23/release-suggestions-1440-light.png",
+      "sha256": "0181d5b0dfd6eee4191129b8d6bc385c987fead7821bc2cdf498cc289005305d"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix23/release-suggestions-390-dark.png",
+      "sha256": "dd36f4032e06a23e8391101616d428affd276cb7e848c9ff648477db9ddf7e47"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix23/release-suggestions-390-light.png",
+      "sha256": "293105ddd5a225f93ca1187edd8bd279416094e76475ca9998c970a4c730d5b9"
+    }
+  ],
+  "design_decisions": "No conflict with approved design fragments or Markus decisions. This changes eligibility and explanation within existing UI, with no layout or new control. No new UI design is introduced.",
+  "constraints": "Assigned worktree and branch only; no push, deploy, production mutation, tracker status/version/migration change, secrets or credentials, foreign-worktree edits, subagents or model review gates.",
+  "logs_sha256": {
+    "browser-local-initial-failure.log": "170e8cb265de0a86e81788da41576c96953325a890f8f6dc96594ded4de31a79",
+    "browser-local.log": "ed4db930be68cd3b13b056220ecd902ff9db131aaa53e70a5c7d7256c0220916",
+    "remote-browser.log": "773e28199e77ad2bac9a833bff42ef9ee0e895acc3fd79d293ced00421a420e2",
+    "shards.log": "3d0ceba3b131c8554450efd8530332d1c2ef47911d7c0431977f783d42a2b86d",
+    "tier-check.log": "2993a97ddebb8bf66de419025aa86e8adc4822352327b97f82a7915888303b4c",
+    "unit-after.log": "e7100e444d50c8759fef59a9ace69ea657f287b97681fd3892cb124fa78172e6",
+    "unit-baseline.log": "b83df981dd19ccd8d547362ebcab970b4be98eb979bf6af692ee0ab73afaf46e"
+  }
+}

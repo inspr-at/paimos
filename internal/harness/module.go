@@ -156,6 +156,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}", "harness.read", false, 200, m.control},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete", "harness.worker", true, 200, m.completeControl},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/stop", "harness.worker", true, 200, m.markStopped},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/confirm-exit", "harness.worker", true, 200, m.confirmExit},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/recovery", "harness.read", false, 200, m.recovery},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/remove", "harness.read", false, 200, m.remove},
 		{"POST /api/projects/{projectId}/harness-sessions/remove-stale", "harness.read", false, 200, m.removeStale},
@@ -573,12 +574,15 @@ func validateTicket(ctx context.Context, tx pgx.Tx, projectID, ticketID string) 
 		return workorders.Fail(400, "invalid ticket id")
 	}
 	var ok bool
-	err := tx.QueryRow(ctx, `WITH RECURSIVE chain AS (SELECT id,parent_id,kind_id,deleted_at FROM nodes WHERE id=$1 UNION ALL SELECT n.id,n.parent_id,n.kind_id,n.deleted_at FROM nodes n JOIN chain c ON n.id=c.parent_id) SELECT EXISTS(SELECT 1 FROM chain c JOIN node_kinds k ON k.id=c.kind_id WHERE c.id=$1 AND c.deleted_at IS NULL AND k.slug IN ('ticket','task','work_order')) AND EXISTS(SELECT 1 FROM chain WHERE id=$2 AND deleted_at IS NULL)`, ticketID, projectID).Scan(&ok)
+	err := tx.QueryRow(ctx, `WITH RECURSIVE chain AS (SELECT id,parent_id,kind_id,deleted_at FROM nodes WHERE id=$1 UNION ALL SELECT n.id,n.parent_id,n.kind_id,n.deleted_at FROM nodes n JOIN chain c ON n.id=c.parent_id) SELECT EXISTS(SELECT 1 FROM chain c JOIN node_kinds k ON k.id=c.kind_id WHERE c.id=$1 AND c.deleted_at IS NULL AND k.slug IN ('ticket','task','work','work_order')) AND EXISTS(SELECT 1 FROM chain WHERE id=$2 AND deleted_at IS NULL)`, ticketID, projectID).Scan(&ok)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return workorders.Fail(400, "ticket must be a live node under project")
+	}
+	if _, err := tx.Exec(ctx, `SELECT aeon_require_work_leaf($1::uuid)`, ticketID); err != nil {
+		return err
 	}
 	return nil
 }
@@ -649,13 +653,15 @@ type registration struct {
 	WorkerLease      string   `json:"worker_lease"`
 }
 
-func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+func (m *Module) register(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
 	return m.registerBeforeEvents(r, tx, p, nil)
 }
 
 // Inline resume prepares its predecessor in the same transaction. Its event
 // must wait for native ownership validation, just like registration events.
-func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Principal, beforeEvents func() error) (any, error) {
+func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Principal, beforeEvents func() error) (result any, err error) {
+	r, flush := deferControlEvents(r, tx)
+	defer flush(&err)
 	ctx := r.Context()
 	projectID := r.PathValue("projectId")
 	var in registration
@@ -1238,7 +1244,9 @@ func (m *Module) bind(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, erro
 	}
 	return s, record(ctx, tx, p, s, "bound", before, s)
 }
-func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (result any, err error) {
+	r, flush := deferControlEvents(r, tx)
+	defer flush(&err)
 	var in struct {
 		ModelReports []modelregistry.Observation `json:"model_reports"`
 		pauseProgressReport

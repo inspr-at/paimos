@@ -39,7 +39,7 @@ func setup(t *testing.T) (*dbtest.DB, tenant.Principal, string) {
 			return err
 		}
 		var kind, node string
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='ticket'`, p.TenantID).Scan(&kind); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='work'`, p.TenantID).Scan(&kind); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) VALUES($1,'ATT-1',$2,'Ticket') RETURNING id::text`, p.TenantID, kind).Scan(&node); err != nil {

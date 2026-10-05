@@ -18,6 +18,7 @@ export interface TreeMeta {
 }
 export type OutlineEntry =
   | { type: 'row'; key: string; row: ListItem; tree: TreeMeta }
+  | { type: 'root'; key: string; label: string; parentId: string }
   | { type: 'group'; key: string; label: string; count: number; collapsed: boolean }
   | { type: 'skeleton'; key: string; depth: number; guides: boolean[]; last: boolean }
   | { type: 'more'; key: string; depth: number; guides: boolean[]; parentId: string; loading: boolean }
@@ -42,27 +43,39 @@ export interface OutlineSource {
 export function flattenOutline(source: OutlineSource): OutlineEntry[] {
   const out: OutlineEntry[] = []
   const walk = (ids: string[], depth: number, guides: boolean[], parentId: string, trailing: boolean) => {
-    ids.forEach((id, index) => {
+    // Paths admitted by the ancestor budget can exceed the JS call stack.
+    // Keep sibling cursors and post-child pagination on explicit frames.
+    type Frame = { ids: string[]; index: number; depth: number; guides: boolean[]; parentId: string; trailing: boolean; after?: OutlineEntry }
+    const stack: Frame[] = [{ ids, index: 0, depth, guides, parentId, trailing }]
+    while (stack.length) {
+      const frame = stack[stack.length - 1]!
+      if (frame.index === frame.ids.length) {
+        if (frame.after) out.push(frame.after)
+        stack.pop()
+        continue
+      }
+      const { depth, guides, parentId, trailing } = frame
+      const index = frame.index++, id = frame.ids[index]!
       const row = source.node(id)
-      if (!row) return
-      const last = index === ids.length - 1 && !trailing
+      if (!row) continue
+      const last = index === frame.ids.length - 1 && !trailing
       const creatingHere = source.createUnder === id
       const hasChildren = source.hasChildren(id) || creatingHere
       const expanded = hasChildren && (source.expanded(id) || creatingHere)
       const block = expanded ? source.children(id) : null
       const loading = expanded && (!block || (block.loading && !block.ids.length))
-      out.push({ type: 'row', key: id, row, tree: { depth, guides, last, hasChildren, expanded, loading, dimmed: source.dimmed(id), stats: row.kind_slug === 'epic' ? source.stats(id) : null, parentId } })
-      if (!expanded) return
+      out.push({ type: 'row', key: id, row, tree: { depth, guides, last, hasChildren, expanded, loading, dimmed: source.dimmed(id), stats: (row.is_leaf === false || row.kind_slug === 'epic') ? source.stats(id) : null, parentId } })
+      if (!expanded) continue
       const childGuides = depth === 0 ? [] : [...guides, !last]
       if (creatingHere) out.push({ type: 'create', key: `create-${id}`, depth: depth + 1, guides: childGuides, epic: { id, key: row.key, title: row.title } })
       if (loading) {
         const count = Math.max(1, Math.min(row.children_count || 2, 3))
         for (let i = 0; i < count; i++) out.push({ type: 'skeleton', key: `skeleton-${id}-${i}`, depth: depth + 1, guides: childGuides, last: i === count - 1 })
-        return
+        continue
       }
-      walk(block?.ids ?? [], depth + 1, childGuides, id, !!block?.hasMore)
-      if (block?.hasMore) out.push({ type: 'more', key: `more-${id}`, depth: depth + 1, guides: childGuides, parentId: id, loading: block.loading })
-    })
+      stack.push({ ids: block?.ids ?? [], index: 0, depth: depth + 1, guides: childGuides, parentId: id, trailing: !!block?.hasMore,
+        after: block?.hasMore ? { type: 'more', key: `more-${id}`, depth: depth + 1, guides: childGuides, parentId: id, loading: block.loading } : undefined })
+    }
   }
   walk(source.epics, 0, [], source.rootId, false)
   if (source.loose.length || source.looseHasMore) {

@@ -93,7 +93,10 @@ func (w *world) ticket(t *testing.T, p tenant.Principal, project, key, title str
 	t.Helper()
 	id := uid()
 	w.tx(t, p, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,$3,id,$4,$5 FROM node_kinds WHERE slug='ticket'`, p.TenantID, id, key, title, project)
+		rows, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title,parent_id) SELECT $1,$2,$3,id,$4,$5 FROM node_kinds WHERE tenant_id=$1 AND slug='work'`, p.TenantID, id, key, title, project)
+		if err == nil && rows.RowsAffected() != 1 {
+			t.Fatalf("usage work fixture inserted %d nodes, want 1", rows.RowsAffected())
+		}
 		return err
 	})
 	return id

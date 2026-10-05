@@ -118,7 +118,7 @@ async function read(window: BriefingRange, signal: AbortSignal, initialEvents: B
     if (page) rows.push(...page.items)
   }
   // A recorded work-order change uses its ticket parent for the item link.
-  const parentIds = [...new Set(rows.filter(n => logIds.has(n.id) && n.kind_slug === 'work_order' && n.parent?.kind_slug === 'ticket').map(n => n.parent!.id))].filter(id => !rows.some(n => n.id === id))
+  const parentIds = [...new Set(rows.filter(n => logIds.has(n.id) && n.kind_slug === 'work_order' && ['work', 'ticket'].includes(n.parent?.kind_slug ?? '')).map(n => n.parent!.id))].filter(id => !rows.some(n => n.id === id))
   for (let i = 0; i < parentIds.length; i += 200) {
     const page = await source('Ticket details', listNodes({ ids: parentIds.slice(i, i + 200), limit: 200 }, { signal }), true)
     if (page) rows.push(...page.items)
@@ -131,8 +131,8 @@ async function read(window: BriefingRange, signal: AbortSignal, initialEvents: B
   }
   for (const event of events?.items ?? []) {
     const bound = nodeById.get(event.node_id ?? '')
-    const node = bound?.kind_slug === 'work_order' && bound.parent?.kind_slug === 'ticket' ? nodeById.get(bound.parent.id) : bound
-    if (!node || !['ticket', 'work_order'].includes(node.kind_slug)) continue
+    const node = bound?.kind_slug === 'work_order' && ['work', 'ticket'].includes(bound.parent?.kind_slug ?? '') ? nodeById.get(bound.parent!.id) : bound
+    if (!node || !['work', 'ticket', 'work_order'].includes(node.kind_slug)) continue
     const fact = eventFact(event, byProject.get(node.project?.id ?? '')?.routeKey ?? '', node.key)
     // Both logs may capture the initial delivered transition. Keep the outcome source once.
     const alreadyDelivered = outcomes?.items.some(o => o.ticket_node_id === node.id && o.kind === 'ticket_done' && o.payload.to_state === 'delivered')

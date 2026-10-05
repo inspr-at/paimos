@@ -9,11 +9,16 @@ import (
 	"reflect"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 type estimateView struct {
+	PlannedHours      *float64        `json:"planned_hours"`
+	IsParent          bool            `json:"is_parent"`
+	LeafCount         int             `json:"leaf_count"`
+	EstimatedLeaves   int             `json:"estimated_leaves"`
 	Hours             *float64        `json:"hours"`
 	EstimatedChildren int             `json:"estimated_children"`
 	OpenChildren      int             `json:"open_children"`
@@ -103,46 +108,29 @@ func estimateHoursSQL(fields string) string {
 	return `CASE WHEN jsonb_typeof(` + fields + `->'estimate_hours')='number' THEN CASE WHEN (` + fields + `->>'estimate_hours')::numeric>0 AND (` + fields + `->>'estimate_hours')::numeric<=200 THEN (` + fields + `->>'estimate_hours')::numeric END END`
 }
 
-// source selects id, fields, kind_slug inside the tenant transaction. Direct
-// ticket/task children avoid counting both a ticket and its nested tasks.
-func estimateSQL(source string) string {
-	return `WITH ` + workStateCategoryCTE() + `
- SELECT n.id, CASE WHEN n.kind_slug='epic' THEN roll.hours ELSE ` + estimateHoursSQL("n.fields") + ` END AS hours,
- coalesce(roll.estimated,0)::int AS estimated_children,coalesce(roll.total,0)::int AS open_children,
- author.id::text,author.name
- FROM (` + source + `) n
- LEFT JOIN LATERAL (
-  SELECT sum(v.hours) AS hours,count(v.hours) AS estimated,count(*) AS total
-  FROM (SELECT ` + estimateHoursSQL("c.fields") + ` AS hours FROM nodes c
-   JOIN node_kinds ck ON ck.id=c.kind_id AND ck.tenant_id=c.tenant_id
-   LEFT JOIN configured cfg ON cfg.kind_id=c.kind_id AND cfg.norm=` + workStateNormSQL("c.state") + `
-   WHERE n.kind_slug='epic' AND c.tenant_id=current_setting('aeon.tenant_id')::uuid AND c.parent_id=n.id AND c.deleted_at IS NULL
-   AND ck.slug IN ('ticket','task') AND ` + workNotClosedSQL("c.state", "cfg") + `) v
- ) roll ON n.kind_slug='epic'
- LEFT JOIN principals author ON n.kind_slug<>'epic' AND author.tenant_id=current_setting('aeon.tenant_id')::uuid
- AND author.id=CASE WHEN n.fields->>'estimate_by' ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN (n.fields->>'estimate_by')::uuid END`
-}
-
-func loadEstimates(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*estimateView, error) {
-	rows, err := tx.Query(ctx, estimateSQL(`SELECT n.id,n.fields,k.slug AS kind_slug FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=ANY($1::uuid[]) AND n.deleted_at IS NULL`), ids)
+// loadWorkTotals shares the ETA/estimate traversal for a selected list page.
+func loadWorkTotals(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*estimateView, map[string]eta.View, error) {
+	aggregates, err := eta.LoadAggregates(ctx, tx, ids)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	defer rows.Close()
-	out := map[string]*estimateView{}
-	for rows.Next() {
-		var id string
-		var byID, byName *string
-		view := &estimateView{}
-		if err := rows.Scan(&id, &view.Hours, &view.EstimatedChildren, &view.OpenChildren, &byID, &byName); err != nil {
-			return nil, err
+	estimates := map[string]*estimateView{}
+	views := map[string]eta.View{}
+	for id, a := range aggregates {
+		view := &estimateView{Hours: a.Hours, PlannedHours: a.PlannedHours, IsParent: a.IsParent, LeafCount: a.LeafCount, EstimatedLeaves: a.EstimatedLeaves, EstimatedChildren: a.EstimatedLeaves, OpenChildren: a.LeafCount}
+		if a.EstimateByID != nil && a.EstimateByName != nil {
+			view.By = &estimatePerson{*a.EstimateByID, *a.EstimateByName}
 		}
-		if byID != nil && byName != nil {
-			view.By = &estimatePerson{*byID, *byName}
+		if view.Hours != nil || view.PlannedHours != nil || view.IsParent || view.LeafCount > 0 {
+			estimates[id] = view
 		}
-		if view.Hours != nil || view.OpenChildren > 0 {
-			out[id] = view
+		if !a.Blank() {
+			views[id] = a.View
 		}
 	}
-	return out, rows.Err()
+	return estimates, views, nil
+}
+func loadEstimates(ctx context.Context, tx pgx.Tx, ids []string) (map[string]*estimateView, error) {
+	estimates, _, err := loadWorkTotals(ctx, tx, ids)
+	return estimates, err
 }

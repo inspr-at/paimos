@@ -91,8 +91,8 @@ func TestPlanningLearningEpicExcludesDefaultChildren(t *testing.T) {
 		seedLearningTicket(t, w, i+1, int64(3600000), false)
 	}
 	epic := w.node(t, "PARTIAL-1", "epic", w.root.ID, "open", nil)
-	good := w.node(t, "PARTIAL-2", "ticket", epic.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "complexity": "L", "estimate_hours": 2})
-	missing := w.node(t, "PARTIAL-3", "ticket", epic.ID, "open", map[string]any{"route_role": "build", "area": "frontend", "estimate_hours": 9})
+	good := w.node(t, "PARTIAL-2", "work", epic.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "complexity": "L", "estimate_hours": 2})
+	missing := w.node(t, "PARTIAL-3", "work", epic.ID, "open", map[string]any{"route_role": "build", "area": "frontend", "estimate_hours": 9})
 	// Also a default-only ticket with a tiny size: it must still sort last.
 	tiny := placementNode(t, w, "PARTIAL-4", map[string]any{"route_role": "build", "area": "frontend", "estimate_hours": 0.001})
 	for _, sort := range []string{"tokens", "-tokens", "list_cost", "-list_cost", "paid", "-paid"} {
@@ -154,7 +154,7 @@ func TestPlanningLearningSnapshotSpeedReproducesFrozenTokens(t *testing.T) {
 func TestPlanningLearningEpicKeepsAllUncalibratedEvidence(t *testing.T) {
 	w := planningSetup(t)
 	epic := w.node(t, "ALLPARTIAL-1", "epic", w.root.ID, "open", nil)
-	w.node(t, "ALLPARTIAL-2", "ticket", epic.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 2})
+	w.node(t, "ALLPARTIAL-2", "work", epic.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 2})
 	for _, order := range []string{"key", "tokens", "list_cost"} {
 		v := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&sort="+order)[epic.Key]
 		if v == nil || v.Children == nil || v.Children.Total != 1 || v.Children.Estimated != 0 || v.Tokens.Estimated != nil || v.Cost != nil {

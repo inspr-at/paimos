@@ -281,7 +281,7 @@ func tagClosedTickets(ctx context.Context, tx pgx.Tx, tenantID string, cursor ta
 	rows, err := tx.Query(ctx, `SELECT n.id::text, n.title, n.updated_at, n.project_id::text
 		FROM nodes n
 		JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-		WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND k.slug='ticket'
+		WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND k.slug IN ('work','ticket')
 		  AND n.state = ANY($2::text[])
 		  AND n.project_id IS NOT NULL
 		  AND (($5::uuid IS NULL AND n.updated_at > $3) OR (n.updated_at, n.id) > ($3, $5::uuid))

@@ -333,7 +333,8 @@ func TestRegistrationAliasInlineResumeFencesBeforeHierarchyAndEvents(t *testing.
 		t.Fatal(err)
 	}
 	defer tx.Rollback(context.Background())
-	if _, err = tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.alice.TenantID); err != nil {
+	var blocker int
+	if err = tx.QueryRow(ctx, `SELECT pg_backend_pid() FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.alice.TenantID).Scan(&blocker); err != nil {
 		t.Fatal(err)
 	}
 	done := make(chan *httptest.ResponseRecorder, 1)
@@ -347,12 +348,19 @@ func TestRegistrationAliasInlineResumeFencesBeforeHierarchyAndEvents(t *testing.
 		default:
 		}
 		var waiting bool
-		if err = f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND query LIKE '%FROM tenants WHERE id=$1 FOR NO KEY UPDATE%')`).Scan(&waiting); err != nil {
+		// Admission now uses the shared work tenant fence before this handler.
+		if err = f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock'
+		 AND $1::int=ANY(pg_blocking_pids(pid)) AND query LIKE '%FROM tenants%' AND query LIKE '%FOR NO KEY UPDATE%')`, blocker).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting {
 			break
 		}
+	}
+	var earlyAdvisory bool
+	if err = f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE granted AND locktype='advisory'
+	 AND $1::int=ANY(pg_blocking_pids(pid)))`, blocker).Scan(&earlyAdvisory); err != nil || earlyAdvisory {
+		t.Fatalf("inline resume acquired an advisory lock before tenant: held=%v err=%v", earlyAdvisory, err)
 	}
 	var free bool
 	if err = tx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1::text,0))`, f.project).Scan(&free); err != nil || !free {

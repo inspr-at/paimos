@@ -126,7 +126,7 @@ func TestPlanningSortedListSharesLearningRead(t *testing.T) {
 	}
 	n := placementNode(t, w, "SORTREAD-1", map[string]any{"route_role": "build-hard", "area": "backend", "complexity": "L", "estimate_hours": 2})
 	mod, trace := planningTracedModule(t)
-	status, raw := callAs(t, mod, &w.admin, http.MethodGet, "/api/nodes?within="+w.root.ID+"&state=open&kind=ticket&sort=-tokens", "")
+	status, raw := callAs(t, mod, &w.admin, http.MethodGet, "/api/nodes?within="+w.root.ID+"&state=open&kind=work&sort=-tokens", "")
 	page := decode[nodePage](t, status, raw, http.StatusOK)
 	if len(page.Items) != 1 || page.Items[0].ID != n.ID || page.Items[0].Planning.Tokens.Calibration.Level != "cell" || trace.profiles.Load() != 1 || trace.candidates.Load() != 1 || trace.aggregates.Load() != 1 {
 		t.Fatalf("sorted list did not share its planner: profiles=%d candidates=%d aggregates=%d response=%s", trace.profiles.Load(), trace.candidates.Load(), trace.aggregates.Load(), raw)
@@ -138,7 +138,7 @@ func TestPlanningTruncatedHistoryListFixture(t *testing.T) {
 	// Independent legacy history is measured and bounded, even when the model
 	// registry makes the new learning query hit its real 4096-profile cap.
 	for i := range 5 {
-		n := w.node(t, fmt.Sprintf("LEGACY-%d", i+1), "ticket", w.root.ID, "done", nil)
+		n := w.node(t, fmt.Sprintf("LEGACY-%d", i+1), "work", w.root.ID, "done", nil)
 		w.session(t, n.ID, "codex", "gpt-6-astra", "xhigh", "gpt-6-astra", 60, 4_000_000, 0, 0, "api", "")
 		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 			_, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET created_at='2026-09-01T12:00:00Z',heartbeat_at='2026-09-01T13:00:00Z',stopped_at='2026-09-01T13:00:00Z' WHERE ticket_node_id=$1`, n.ID)
@@ -156,7 +156,7 @@ func TestPlanningTruncatedHistoryListFixture(t *testing.T) {
 	}
 	target := placementNode(t, w, "TRUNCATED-1", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 2})
 	mod, trace := planningTracedModule(t)
-	status, raw := callAs(t, mod, &w.admin, http.MethodGet, "/api/nodes?within="+w.root.ID+"&state=open&kind=ticket&sort=-tokens", "")
+	status, raw := callAs(t, mod, &w.admin, http.MethodGet, "/api/nodes?within="+w.root.ID+"&state=open&kind=work&sort=-tokens", "")
 	page := decode[nodePage](t, status, raw, http.StatusOK)
 	if len(page.Items) != 1 || page.Items[0].ID != target.ID {
 		t.Fatalf("truncated list: %s", raw)

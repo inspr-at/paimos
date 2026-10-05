@@ -263,7 +263,7 @@ func loadGraph(ctx context.Context, tx pgx.Tx, tenantID string, q graphQuery) (G
 		sort.Strings(keyList)
 		// Only ticket metadata: neither SELECT nor the mention parser reads its body.
 		rows, err = tx.Query(ctx, `SELECT n.id::text,n.key,n.title,n.state,n.updated_at FROM nodes n
-   JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug='ticket'
+   JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id AND k.slug IN ('work','ticket')
    WHERE n.tenant_id=$1 AND n.deleted_at IS NULL AND (n.key=ANY($3::text[]) OR EXISTS (
     SELECT 1 FROM node_relations r WHERE r.tenant_id=$1 AND
      ((r.source_node_id=ANY($2::uuid[]) AND r.target_node_id=n.id) OR (r.target_node_id=ANY($2::uuid[]) AND r.source_node_id=n.id))))

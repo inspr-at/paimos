@@ -7,6 +7,7 @@ import { can, myWorkspaceRole, permissionsAvailable } from '../../lib/authz'
 import { canFeature } from '../../lib/features'
 import { useSession } from '../../stores/session'
 import AppIcon from '../AppIcon.vue'
+import WorkVocabularyCard from './WorkVocabularyCard.vue'
 import BrandCard from './BrandCard.vue'
 import ModelProviderCard from './ModelProviderCard.vue'
 import SettingsCard from './SettingsCard.vue'
@@ -74,6 +75,7 @@ const saveLost = () => lost.save()
     <SettingsCard v-if="can('nodes.read') && canFeature('workspace-summary')" title="Workspace summary" icon="folder" anchor="workspace-summary">
       <WorkspaceSummary />
     </SettingsCard>
+    <WorkVocabularyCard v-if="can('settings.manage')" />
     <ModelRefreshSettings v-if="can('models.read')" />
     <BrandCard v-if="can('settings.manage')" />
     <ModelProviderCard v-if="can('settings.manage')" />

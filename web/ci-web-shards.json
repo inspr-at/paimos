@@ -2278,6 +2278,11 @@
           "weightSeconds": 17.756098,
           "weightSource": "unmeasured-test-rate",
           "listedTests": 8
+        },
+        {
+          "file": "tests/work-integration.spec.ts",
+          "weightSeconds": 70,
+          "weightSource": "estimate"
         }
       ]
     },
@@ -2409,6 +2414,63 @@
           "weightSeconds": 12,
           "weightSource": "unmeasured-test-count-estimate",
           "listedTests": 4
+        }
+      ]
+    },
+    {
+      "id": "work-node-integration",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "specs": [
+        {
+          "file": "tests/parent-benefits.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-aggregates.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-history-fix5.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-lifecycle-header.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-lifecycle.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-parent-releases.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-parent-status.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-surfaces-fix2.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-surfaces-fix3.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-surfaces-fix4.spec.ts",
+          "weightSeconds": 60
+        },
+        {
+          "file": "tests/work-vocabulary.spec.ts",
+          "weightSeconds": 60
         }
       ]
     }

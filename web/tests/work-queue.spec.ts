@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { expectStableControls } from './helpers/stable'
-import { fixtures, me, mockWork } from './work-fixtures'
+import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { readyGaps } from '../src/lib/workQueue'
 import type { QueueWireEntry } from '../src/lib/workQueue'
@@ -258,6 +258,44 @@ test('shared queued rows without expected start show a labeled local release pre
   await expect(suggested).toHaveAccessibleDescription(/Other projects not included/)
   await expect(row(page, 'PHAROS-14').locator('.c-suggested .plan-rel')).toHaveText('—')
 })
+for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
+  test(`canonical parent release suggestions stay empty while leaves retain predictions ${width} ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.clock.setSystemTime(new Date(now))
+    const errors = watchErrors(page), data = fixtures()
+    const template = data.nodes.find(node => node.id === 'n-5')!
+    data.nodes = [
+      { ...template, kind_slug: 'work', is_leaf: false, work_children_count: 2, title: 'Abgeschlossene Arbeitsgruppe mit Lieferungen in unterschiedlichen Veröffentlichungen' },
+      { ...template, id: 'n-3', key: 'PHAROS-13', parent_id: template.id, kind_slug: 'work', is_leaf: true, work_children_count: 0, title: 'Abgeschlossener Arbeitsschritt für die nächste Veröffentlichung' },
+      { ...template, id: 'n-6', key: 'PHAROS-16', parent_id: template.id, state: 'delivered', kind_slug: 'work', is_leaf: true, work_children_count: 0, title: 'Bereits gelieferter Arbeitsschritt mit nachgewiesener Veröffentlichung' },
+    ]
+    data.preferences.theme = { choice: theme }
+    data.preferences.releases = { last_seen: '261001180000.0.0' }
+    data.preferences['list:p-pharos'] = { visible: ['key', 'title', 'status', 'suggested'] }
+    const calls = await mockWork(page, data)
+    await page.route('**/api/releases', route => route.fulfill({ json: { schema: 'inspr.release-history.v1', current: '261001180000.0.0', releases: [{
+      state: 'published', version: '261001180000.0.0', codename: 'Cloud City', published_at: now, tickets: ['PHAROS-16'], changes: [],
+    }] } }))
+    await page.route('**/api/queue?*', route => route.fulfill({ json: { items: [], manual_order: false, capacity: { queued_hours: 0, parallel_runs: 1, work_hours: 0, warning: false } } }))
+    await page.goto('/p/PHAROS?sort=key&closed=1')
+    const parent = row(page, 'PHAROS-15'), parentSuggestion = parent.locator('.c-suggested .plan-rel')
+    const done = row(page, 'PHAROS-13').locator('.c-suggested .plan-rel')
+    const shipped = row(page, 'PHAROS-16').locator('.c-suggested .plan-rel')
+    await expect(parentSuggestion).toHaveText('—')
+    await expect(parentSuggestion).toHaveAccessibleDescription('Releases are suggested for leaf work; a parent’s leaves can span releases')
+    await expect(parentSuggestion).toHaveClass(/empty/)
+    await expect(done).toHaveText('~Next release')
+    await expect(shipped).toContainText('Cloud City')
+    await expect(shipped).toHaveClass(/shipped/)
+    await expectStableControls({ controls: { 'parent row': parent, 'open parent': parent.locator('.title-text') }, scrollAreas: { document: page.locator('html') }, interactions: [
+      { name: 'read parent release eligibility', run: async () => { await parentSuggestion.hover(); await expect(parentSuggestion).toHaveAttribute('data-tip', /leaves can span releases/); await page.mouse.move(0, 0) } },
+      { name: 'read leaf prediction', run: async () => { await done.hover(); await expect(done).toHaveAccessibleDescription(/Done; ships with the next release/); await page.mouse.move(0, 0) } },
+    ] })
+    await page.screenshot({ path: `test-results/aeon-648-int-fix23/release-suggestions-${width}-${theme}.png`, fullPage: true })
+    expect(calls.filter(call => call.method !== 'GET')).toEqual([])
+    expect(errors).toEqual([])
+  })
+}
 test('failed writes preserve membership and viewer shortcuts cannot dispatch', async ({ page }) => {
   const { state } = await world(page)
   state.failWrite = true
