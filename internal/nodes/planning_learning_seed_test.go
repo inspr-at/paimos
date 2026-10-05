@@ -28,8 +28,8 @@ func seedLearningTicket(t *testing.T, w planningWorld, index int, active any, pr
 			return err
 		}
 		var run, session string
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,active_ms,started_at,ended_at)
- SELECT $1,$2,$3,id,'completed',$4,$5::timestamptz,$5::timestamptz+interval '8 hours' FROM model_profiles WHERE slug='codex-astra-xhigh' RETURNING id::text`, w.admin.TenantID, order.ID, w.agent, active, start).Scan(&run); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,active_ms,waiting_ms,started_at,ended_at)
+ SELECT $1,$2,$3,id,'completed',$4,28800000-$4::bigint,$5::timestamptz,$5::timestamptz+interval '8 hours' FROM model_profiles WHERE slug='codex-astra-xhigh' RETURNING id::text`, w.admin.TenantID, order.ID, w.agent, active, start).Scan(&run); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `UPDATE harness_sessions SET run_id=$2::uuid,model_profile_id=(SELECT id FROM model_profiles WHERE slug='codex-astra-xhigh'),
@@ -61,6 +61,27 @@ func TestPlanningLearningSeededActiveTimeSortAndSnapshot(t *testing.T) {
 	}
 	seedLearningTicket(t, w, 6, nil, false)
 	seedLearningTicket(t, w, 7, int64(4*3600000), true)
+	legacy := seedLearningTicket(t, w, 20, int64(7*3600000), false)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET waiting_ms=NULL WHERE id IN (SELECT run_id FROM harness_sessions WHERE ticket_node_id=$1)`, legacy.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	badTiming := seedLearningTicket(t, w, 21, int64(7*3600000), false)
+	reopened := seedLearningTicket(t, w, 22, int64(7*3600000), false)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET waiting_ms=0 WHERE id IN (SELECT run_id FROM harness_sessions WHERE ticket_node_id=$1)`, badTiming.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE ticket_estimate_snapshots SET closed_at=started_at+interval '9 hours' WHERE ticket_node_id=$1`, reopened.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO ticket_estimate_snapshots(tenant_id,ticket_node_id,source_project_id,started_at,snapshot) SELECT tenant_id,ticket_node_id,source_project_id,started_at+interval '10 hours',snapshot FROM ticket_estimate_snapshots WHERE ticket_node_id=$1`, reopened.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	target := placementNode(t, w, "LEARNOPEN-1", map[string]any{"route_role": "build-hard", "area": "backend", "complexity": "L", "estimate_hours": 3})
 	other := placementNode(t, w, "LEARNOPEN-2", map[string]any{"route_role": "build-hard", "area": "backend", "complexity": "L", "estimate_hours": 1})
 	path := "/api/nodes?within=" + w.root.ID + "&kind=work&state=open&sort=-tokens"
@@ -125,13 +146,20 @@ func TestPlanningLearningSeededActiveTimeSortAndSnapshot(t *testing.T) {
 	if view.Snapshot.RateBasis.Speed != 2 || float64(*view.Snapshot.Tokens) != *view.Snapshot.Hours*float64(view.Snapshot.RateBasis.TokensPerHour)*view.Snapshot.RateBasis.Speed {
 		t.Fatalf("frozen rate cannot reproduce estimate: %+v", view.Snapshot)
 	}
-	code, raw := call(t, &w.admin, "PATCH", "/api/nodes/"+target.ID, `{"fields":{"estimate_hours":5}}`)
+	code, raw := call(t, &w.admin, "PATCH", "/api/nodes/"+target.ID, `{"fields":{"estimate_hours":5,"area":"docs","complexity":"S"}}`)
 	if code != 200 {
 		t.Fatalf("update: %d %s", code, raw)
 	}
 	view = planningOf(t, w.admin, path)[target.Key]
 	if *view.Snapshot.Hours != 3 || *view.Snapshot.ModelEstimate.Hours != 6 || *view.Snapshot.Tokens != 6_000_000 {
 		t.Fatal("work-start snapshot changed", view.Snapshot)
+	}
+	var frozen map[string]string
+	if err := json.Unmarshal(view.Snapshot.WorkClassification, &frozen); err != nil {
+		t.Fatal(err)
+	}
+	if frozen["area"] != "backend" || frozen["complexity"] != "L" || frozen["route_role"] != "build-hard" {
+		t.Fatal("classification baseline changed", frozen)
 	}
 	// A caller who can read nodes workspace-wide still sees learning only
 	// from the project where harness.read is granted.
@@ -176,6 +204,64 @@ func TestPlanningLearningSeededActiveTimeSortAndSnapshot(t *testing.T) {
 		}
 		return err
 	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Registration inserts its session before calling CapturePlanningStart, in
+// the same transaction. Real insertion clocks must not lose that first worker.
+func TestPlanningWorkStartIncludesInitiatingMeasuredRun(t *testing.T) {
+	w := planningSetup(t)
+	n := placementNode(t, w, "LFIRST-1", map[string]any{"area": "backend", "route_role": "build-hard", "complexity": "L", "estimate_hours": 2})
+	order := w.node(t, "LFORD-1", "work_order", w.root.ID, "open", nil)
+	err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, w.admin.TenantID, order.ID, w.admin.ID); err != nil {
+			return err
+		}
+		var run, session, profile string
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='codex-astra-xhigh'`).Scan(&profile); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,active_ms,waiting_ms,started_at,ended_at)
+ VALUES($1,$2,$3,$4,'completed',14400000,14400000,transaction_timestamp(),transaction_timestamp()+interval '8 hours') RETURNING id::text`, w.admin.TenantID, order.ID, w.agent, profile).Scan(&run); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,ticket_node_id,agent_principal_id,run_id,harness,host,management,role,work_shape,ref_digest,lease_digest,model,model_raw,model_profile_id,reasoning_effort,phase,stopped_at,work_placement)
+ VALUES($1,$2,$3,$4,$5,'codex','test','managed','worker','ship',decode(md5('first-ref'),'hex'),decode(md5('first-lease'),'hex'),'gpt-6-astra','gpt-6-astra',$6,'xhigh','stopped',transaction_timestamp()+interval '8 hours','{"kind":"backend","bucket":"complex"}') RETURNING id::text`, w.admin.TenantID, w.root.ID, n.ID, w.agent, run, profile).Scan(&session); err != nil {
+			return err
+		}
+		if err := CapturePlanningStart(t.Context(), tx, n.ID, "session"); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO harness_session_usage(tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,provisional,billing_mode)
+ VALUES($1,$2,'gpt-6-astra',1,4000000,0,0,false,'unknown')`, w.admin.TenantID, session); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO outcome_events(tenant_id,kind,project_id,ticket_node_id,session_id,idempotency_key,actor_principal_id,source,payload,request_digest,recorded_at)
+ VALUES($1,'ticket_done',$2,$3,$4,'first-registration',$5,'recorded','{}',decode(md5('first-registration'),'hex'),transaction_timestamp()+interval '9 hours')`, w.admin.TenantID, w.root.ID, n.ID, session, w.admin.ID); err != nil {
+			return err
+		}
+		target := usagedashboard.LearningCell{ProfileID: profile, Family: "openai", Line: "astra", Version: "6", Effort: "xhigh", Kind: "backend", Bucket: "complex"}
+		samples, truncated, err := usagedashboard.LoadLearningHistory(t.Context(), tx, []usagedashboard.LearningCell{target}, "", func(string) bool { return true })
+		if err != nil {
+			return err
+		}
+		if truncated || len(samples) != 1 || samples[0].Hours != 4 || samples[0].EstimateHours == nil || *samples[0].EstimateHours != 2 {
+			t.Fatalf("first registered run lost: samples=%+v truncated=%v", samples, truncated)
+		}
+		if _, err := tx.Exec(t.Context(), `SELECT set_config('aeon.visible_projects',$1,true)`, "{"+w.root.ID+"}"); err != nil {
+			return err
+		}
+		restricted, truncated, err := usagedashboard.LoadLearningHistory(t.Context(), tx, []usagedashboard.LearningCell{target}, "", func(string) bool { return true })
+		if err != nil {
+			return err
+		}
+		if len(restricted) != 0 || truncated {
+			t.Fatal("RLS subset supplied learning evidence", restricted, truncated)
+		}
+		return nil
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 }

@@ -1829,7 +1829,7 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.7`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. 2.7 adds optional response-only `owner_principal_id` for the reviewed pause and wind-down ownership projection and optional `desk_answers` references for durable Decision Desk handovers. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.8`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. 2.8 adds optional commit diff counts. 2.7 adds optional response-only `owner_principal_id` for the reviewed pause and wind-down ownership projection and optional `desk_answers` references for durable Decision Desk handovers. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
 
 Pause levels (AEON-524 part A2) add `--level stop_now|pause_quickly|pause|wrap_up`
 and an optional `--note` to pause one or all sessions. Omitted levels use the
@@ -3994,3 +3994,32 @@ Vocabulary writes require a person with `settings.manage`, check the current per
 AEON-655 Outline roots load incrementally with one unified cursor. Page sizes remain fixed even when inserted or expanded work consumes retention capacity. The browser retains at most 5000 lazy work items and reports an incomplete Outline at that limit; filtered paths resolve at most 2000 ancestor reads in batches of eight, with cycle detection and explicit incomplete-result messages for unreadable ancestors, resource limits or interrupted reads. Drag nested work onto the Project root destination above the rows to return it to the project level. Reload and Save vocabulary are serialized, and person/tenant changes discard old responses. Detail-panel completion uses canonical descendant-leaf state facets, excluding cancelled leaves; failed aggregate reads show unavailable progress instead of direct-child counts. CLI/MCP type aliases resolve kinds only and never inject provenance into strict user field schemas.
 
 AEON-655 completion validation covers migrated `work` and legacy `ticket` records. Creating or moving a work item into Done, Accepted or Delivered requires both pill and benefit texts in English and German, including when hidden from release notes. Already completed history remains editable; reopening restores the next-completion requirement. The workspace offers the same benefit reading section, editor and completion prompt for work items. Outline rendering traverses explicit frames rather than the JavaScript call stack; a 3600-row path (1800 ancestors plus 1800 matches) has regression coverage.
+
+### Ticket work measurement (AEON-503)
+
+Terminal managed runs expose `waiting_ms` alongside `active_ms`: waiting spans
+are clipped to the run lifetime and closed at the terminal timestamp, including
+finished reports without a status. More than 10,000 status readings leave both
+measurements unknown without rejecting completion or usage. Existing rows keep
+their recorded active time and have null waiting time; no history is rebuilt.
+New work-start estimate snapshots freeze area, role and complexity as well as
+size and rate. Later estimate edits cannot change that baseline.
+
+`GET /api/outcomes/measurement?ticket_node_id=AEON-503` requires `outcome.read`
+and `harness.read`. It returns lifetime recorded completion, review-verdict and
+fix-round counts, and distinct retained commit diff totals from current session
+bindings. It is a live evidence view, not an episode receipt or proof of complete
+contributor coverage. Project restrictions and bounded/truncated evidence are
+reported in `gaps`; missing diff totals are null, never zero. File changes sum
+per commit, not unique paths. Heartbeats collect content-free numstat counts
+with byte, file and time bounds; binary/failed reads remain unknown. Session
+responses add optional diff fields under `harness-session/2.8`.
+
+AEON-502e remains the only model/kind/complexity estimator. Its existing learning
+query now requires paired measured active/waiting time, final token evidence,
+a frozen source-project baseline and a single baseline per ticket. Legacy,
+missing timing, provisional tokens, moved sources and reopened/multiple-baseline
+work do not train this path. Restricted node visibility also excludes samples
+so an RLS subset cannot certify whole-ticket effort. Episode boundaries, retained
+contributor ownership, completion receipts and interval rebinding remain a
+separate concept decision.

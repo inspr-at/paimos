@@ -447,10 +447,18 @@ test('three-tier manifests allow new NIGHTLY cases and never promote ungated bro
   const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
   const go=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
   const web=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
+  // Cases first classified after the old gate retain the NIGHTLY default.
+  // An explicit inventory keeps the assertion strict for every legacy case.
+  const postGateCases=new Set([...(go.postGateCases??[]),...(web.postGateCases??[])])
+  assert.equal(postGateCases.size,(go.postGateCases??[]).length+(web.postGateCases??[]).length)
+  for(const id of postGateCases) {
+    const row=[...go.tests,...web.tests].find(row=>key(row)===id)
+    assert.ok(row,`Unknown post-gate case: ${id}`)
+    assert.equal(row.tier,'NIGHTLY',id)
+  }
   for(const row of [...go.tests,...web.tests]) {
-    // New cases default to NIGHTLY even inside an already gated file/package.
-    // Gate membership cannot be inferred from the owner alone.
-    if(row.tier==='ESSENTIAL'||row.tier==='NIGHTLY')continue
+    if(postGateCases.has(key(row)))continue
+    if(row.tier==='ESSENTIAL')continue
     assert.equal(row.tier,row.kind!=='browser'||gated.has(row.file)?'GATED-FULL':'NIGHTLY',key(row))
   }
   // This established Knowledge registration caused the merge-group regression:
