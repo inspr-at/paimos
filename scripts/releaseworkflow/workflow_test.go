@@ -22,7 +22,6 @@ type step struct {
 	With            map[string]string
 	Env             map[string]string
 	ContinueOnError bool `yaml:"continue-on-error"`
-	TimeoutMinutes  int  `yaml:"timeout-minutes"`
 }
 
 type job struct {

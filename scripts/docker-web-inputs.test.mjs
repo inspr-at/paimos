@@ -71,6 +71,12 @@ test('assembly Dockerfile only copies prebuilt production artifacts into the fro
     assert.ok(runtime.includes(pin));
     assert.ok(dockerfile.includes(pin), 'quote evidence pin annotation drifted');
   }
+  // Every build prepares the closure from these two instructions alone: no
+  // build argument or variable may make its bytes depend on anything else.
+  const instructions = runtime.replaceAll('\\\n', ' ').split('\n').filter(line => line && !line.startsWith('#'));
+  assert.equal(instructions.length, 2);
+  assert.match(instructions[0], /^FROM alpine:3\.24@sha256:[a-f0-9]{64}$/);
+  assert.match(instructions[1], /^RUN apk add --no-cache [^$]+$/);
 });
 
 // The release keeps the restored npm cache only because npm ci verifies every

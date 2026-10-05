@@ -15,7 +15,7 @@ import (
 func TestExternalImageAssemblyAndEvidence(t *testing.T) {
 	release := readWorkflow(t, "release.yml").Jobs["image-platform"]
 	dry := readWorkflow(t, "release-image-check.yml").Jobs["image-dry-run"]
-	for _, name := range []string{"Freeze external build inputs", "Compile web and Go outside Docker", "Resolve runtime closure cache", "Prepare pinned runtime closure", "Bind runtime closure digest", "Start assembly and smoke timing", "Record assembly and smoke timing", "Prove two clean image rebuilds", "Upload image assembly evidence"} {
+	for _, name := range []string{"Freeze external build inputs", "Compile web and Go outside Docker", "Prepare pinned runtime closure", "Bind runtime closure digest", "Start assembly and smoke timing", "Record assembly and smoke timing", "Prove two clean image rebuilds", "Upload image assembly evidence"} {
 		_, source := named(t, release, name)
 		_, counterpart := named(t, dry, name)
 		if !reflect.DeepEqual(source, counterpart) {
@@ -24,7 +24,7 @@ func TestExternalImageAssemblyAndEvidence(t *testing.T) {
 	}
 	for _, j := range []job{release, dry} {
 		last := -1
-		for _, name := range []string{"Require native platform", "Freeze external build inputs", "Compile web and Go outside Docker", "Resolve runtime closure cache", "Prepare pinned runtime closure", "Bind runtime closure digest", "Start assembly and smoke timing", "Build cached smoke image", "Resolve loaded smoke image", "Smoke production image", "Record assembly and smoke timing", "Prove two clean image rebuilds"} {
+		for _, name := range []string{"Require native platform", "Freeze external build inputs", "Compile web and Go outside Docker", "Prepare pinned runtime closure", "Bind runtime closure digest", "Start assembly and smoke timing", "Build cached smoke image", "Resolve loaded smoke image", "Smoke production image", "Record assembly and smoke timing", "Prove two clean image rebuilds"} {
 			index, s := named(t, j, name)
 			if index <= last || s.ContinueOnError {
 				t.Fatalf("assembly order/gate changed at %s", name)
@@ -35,36 +35,13 @@ func TestExternalImageAssemblyAndEvidence(t *testing.T) {
 		if compile.Run != "node scripts/build-image-inputs.mjs build" || compile.Env["SOURCE_DATE_EPOCH"] != "${{ steps.inputs.outputs.epoch }}" || compile.Env["VERSION"] != "${{ steps.version.outputs.version }}" || compile.Env["ARCH"] != "${{ matrix.arch }}" {
 			t.Fatal("host build inputs are not fixed")
 		}
-		// The saved closure is addressed by recipe hash and refresh key, never
-		// by a fixed tag: the resolve step alone decides between the re-wrap of
-		// a saved image and a cold build of the recipe.
-		_, resolve := named(t, j, "Resolve runtime closure cache")
-		if resolve.ID != "runtime-cache" || resolve.If != "" || resolve.Uses != "" || len(resolve.Env) != 0 || resolve.Run != "node scripts/runtime-closure.mjs resolve linux/${{ matrix.arch }} ${{ matrix.cache }}" {
-			t.Fatal("runtime cache reference is not derived from the recipe for this architecture")
-		}
 		_, runtime := named(t, j, "Prepare pinned runtime closure")
-		if runtime.If != "" || runtime.With["file"] != "${{ steps.runtime-cache.outputs.file }}" || runtime.With["build-contexts"] != "${{ steps.runtime-cache.outputs.build_contexts }}" || runtime.With["provenance"] != "false" || !strings.Contains(runtime.With["build-args"], "SOURCE_DATE_EPOCH=0") || !strings.Contains(runtime.With["outputs"], "tar=false,rewrite-timestamp=true") {
+		if runtime.If != "" || runtime.With["file"] != "scripts/Dockerfile.runtime" || runtime.With["provenance"] != "false" || !strings.Contains(runtime.With["build-args"], "SOURCE_DATE_EPOCH=0") || !strings.Contains(runtime.With["outputs"], "tar=false,rewrite-timestamp=true") {
 			t.Fatal("runtime preparation is not a separately frozen closure")
 		}
-		if runtime.With["cache-from"] != "" || runtime.With["cache-to"] != "" || runtime.With["push"] == "true" {
-			t.Fatal("runtime preparation must not read or write a registry build cache")
-		}
 		_, bind := named(t, j, "Bind runtime closure digest")
-		if bind.ID != "runtime" || bind.If != "" || bind.Run != `node scripts/runtime-closure.mjs bind "$RUNNER_TEMP/aeon-runtime" linux/${{ matrix.arch }}` {
+		if bind.ID != "runtime" || bind.If != "" || len(bind.Env) != 0 || bind.Run != `node scripts/image-evidence.mjs runtime "$RUNNER_TEMP/aeon-runtime" linux/${{ matrix.arch }}` {
 			t.Fatal("runtime closure digest is not bound from the prepared layout")
-		}
-		_, proofStep := named(t, j, "Prove two clean image rebuilds")
-		for _, s := range []step{bind, proofStep} {
-			for key, output := range map[string]string{"RUNTIME_CACHE_REF": "ref", "RUNTIME_CACHE_HIT": "hit", "RUNTIME_CACHE_MANIFEST": "manifest_sha256"} {
-				if s.Env[key] != "${{ steps.runtime-cache.outputs."+output+" }}" {
-					t.Fatalf("%s does not record where the runtime closure came from: %s", s.Name, key)
-				}
-			}
-		}
-		for _, s := range j.Steps {
-			if strings.Contains(s.With["cache-from"]+s.With["cache-to"], "-runtime") {
-				t.Fatalf("%s still uses the fixed runtime cache tag", s.Name)
-			}
 		}
 		_, build := named(t, j, "Build cached smoke image")
 		if build.With["load"] != "true" || build.With["provenance"] != "false" || strings.Contains(build.With["build-args"], "BUILDKIT_MULTI_PLATFORM") {
@@ -119,86 +96,114 @@ func TestSinglePlatformProvenanceExport(t *testing.T) {
 	}
 }
 
-// The closure is saved from the verified layout, after the digest handoff and
-// without rebuilding anything; a registry problem there never fails a release.
-func TestRuntimeCacheSavedAfterSmoke(t *testing.T) {
-	j := readWorkflow(t, "release.yml").Jobs["image-platform"]
-	bindAt, _ := named(t, j, "Bind runtime closure digest")
-	proofAt, _ := named(t, j, "Prove two clean image rebuilds")
-	pushAt, _ := named(t, j, "Build and push")
-	verifyAt, _ := named(t, j, "Verify pushed image attestation")
-	recordAt, _ := named(t, j, "Record platform digest")
-	saveAt, save := named(t, j, "Save verified runtime closure")
-	reportAt, report := named(t, j, "Report runtime closure cache")
-	handoffAt := -1
-	for i, s := range j.Steps {
-		if strings.HasPrefix(s.Uses, "actions/upload-artifact@") && s.With["name"] == "image-digest-${{ matrix.arch }}" {
-			handoffAt = i
-		}
-	}
-	if !(proofAt < pushAt && pushAt < verifyAt && verifyAt < recordAt && recordAt < handoffAt && handoffAt < saveAt && reportAt == saveAt+1 && reportAt == len(j.Steps)-1) {
-		t.Fatal("runtime closure must be saved last, after the verified digest was handed over")
-	}
-	if save.Uses != "" || save.ID != "runtime-save" || save.If != "" || !save.ContinueOnError || save.TimeoutMinutes < 1 || save.TimeoutMinutes > 10 ||
-		save.Run != `node scripts/runtime-closure.mjs save "$RUNNER_TEMP/aeon-runtime" linux/${{ matrix.arch }} ${{ matrix.cache }}` {
-		t.Fatal("runtime closure save must push the verified layout, bounded and without blocking the release")
-	}
-	if !reflect.DeepEqual(save.Env, map[string]string{
-		"RUNTIME_DIGEST":    "${{ steps.runtime.outputs.digest }}",
-		"RUNTIME_CACHE_REF": "${{ steps.runtime-cache.outputs.ref }}",
-		"RUNTIME_CACHE_HIT": "${{ steps.runtime-cache.outputs.hit }}",
-	}) {
-		t.Fatal("runtime closure save is not bound to the verified digest and the resolved reference")
-	}
-	for i, s := range j.Steps {
-		if s.ContinueOnError && i != saveAt {
-			t.Fatalf("%s may not ignore a failure", s.Name)
-		}
-		if i > bindAt && (strings.Contains(s.With["file"], "Dockerfile.runtime") || strings.Contains(s.Run, "Dockerfile.runtime")) {
-			t.Fatalf("%s rebuilds the runtime recipe after it was verified", s.Name)
-		}
-	}
-	if report.If != "always()" || !reflect.DeepEqual(report.Env, map[string]string{"OUTCOME": "${{ steps.runtime-save.outcome }}"}) {
-		t.Fatal("the save outcome must always be reported")
-	}
-	for _, bash := range digestTestShells(t) {
-		for _, tc := range []struct {
-			outcome string
-			silent  bool
-		}{{"success", true}, {"failure", false}, {"cancelled", false}, {"skipped", false}, {"", false}} {
-			t.Run(bash+"/"+tc.outcome, func(t *testing.T) {
-				summary := filepath.Join(t.TempDir(), "summary")
-				cmd := exec.Command(bash, "-c", report.Run)
-				cmd.Env = append(os.Environ(), "OUTCOME="+tc.outcome, "GITHUB_STEP_SUMMARY="+summary)
-				output, err := cmd.CombinedOutput()
-				if err != nil {
-					t.Fatalf("reporting the save outcome must never fail the job: %v: %s", err, output)
+// Every tag build and rehearsal prepares the runtime closure for itself: from
+// the pinned recipe, once, without a registry or builder cache, and saves it
+// nowhere. The tag build's platform job ends with the digest handoff, so no
+// later step can delay or fail publication.
+func runtimeClosureProblems(release, dry workflow) []string {
+	const assembly = "type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}"
+	var problems []string
+	for name, w := range map[string]workflow{"release": release, "rehearsal": dry} {
+		for id, j := range w.Jobs {
+			prepared := 0
+			for _, s := range j.Steps {
+				label := name + " " + id + "/" + s.Name
+				if s.Name == "" {
+					label += s.Uses
 				}
-				body, err := os.ReadFile(summary)
-				if tc.silent {
-					if !os.IsNotExist(err) || len(output) != 0 {
-						t.Fatalf("a successful save needs no warning: %q %q", output, body)
+				if s.With["file"] == "scripts/Dockerfile.runtime" {
+					prepared++
+					if (id != "image-platform" && id != "image-dry-run") || s.Name != "Prepare pinned runtime closure" || prepared > 1 {
+						problems = append(problems, label+": prepares the runtime closure a second time")
 					}
-					return
+					if s.With["no-cache"] != "true" || s.With["cache-from"] != "" || s.With["cache-to"] != "" || s.With["build-contexts"] != "" {
+						problems = append(problems, label+": runtime closure is not prepared cold from the pinned recipe alone")
+					}
+					if s.With["push"] != "" || s.With["load"] != "" || s.With["tags"] != "" || s.With["outputs"] != "type=oci,dest=${{ runner.temp }}/aeon-runtime,tar=false,rewrite-timestamp=true" {
+						problems = append(problems, label+": runtime closure must only be written to the local layout")
+					}
+				} else if strings.Contains(s.With["file"]+s.With["build-contexts"]+s.Run, "Dockerfile.runtime") || strings.Contains(s.Run, "runtime-closure") {
+					problems = append(problems, label+": runtime closure has a second source")
 				}
-				label := tc.outcome
-				if label == "" {
-					label = "not run"
+				if from := s.With["cache-from"]; from != "" && from != assembly {
+					problems = append(problems, label+": reads a registry cache other than the assembly cache")
 				}
-				if err != nil || !strings.Contains(string(body), "Runtime closure cache save: **"+label+"**") || !strings.Contains(string(output), "::warning::Runtime closure cache save: "+label+".") {
-					t.Fatalf("outcome %q is not visible: %q %q %v", tc.outcome, output, body, err)
+				to := s.With["cache-to"]
+				if to != "" && (name != "release" || s.Name != "Build and push" || to != assembly+",mode=max") {
+					problems = append(problems, label+": writes a registry cache other than the assembly cache")
 				}
-			})
-		}
-	}
-	dry := readWorkflow(t, "release-image-check.yml")
-	for _, j := range dry.Jobs {
-		for _, s := range j.Steps {
-			if s.Name == "Save verified runtime closure" || strings.Contains(s.Run, "runtime-closure.mjs save") || s.With["cache-to"] != "" ||
-				s.With["push"] == "true" || strings.Contains(s.With["outputs"], "push=true") || strings.Contains(s.With["outputs"], "type=registry") {
-				t.Fatal("rehearsal must not save a runtime closure")
+				if name == "rehearsal" && (s.With["push"] == "true" || strings.Contains(s.With["outputs"], "push=true") || strings.Contains(s.With["outputs"], "type=registry")) {
+					problems = append(problems, label+": rehearsal writes to a registry")
+				}
+			}
+			if (id == "image-platform" || id == "image-dry-run") && prepared != 1 {
+				problems = append(problems, name+" "+id+": runtime closure is not prepared from the pinned recipe")
 			}
 		}
+	}
+	steps := release.Jobs["image-platform"].Steps
+	for _, s := range steps {
+		if s.ContinueOnError {
+			problems = append(problems, "release image-platform/"+s.Name+": may not ignore a failure")
+		}
+	}
+	if last := len(steps) - 1; last < 0 || !strings.HasPrefix(steps[last].Uses, "actions/upload-artifact@") || steps[last].With["name"] != "image-digest-${{ matrix.arch }}" || steps[last].If != "" {
+		problems = append(problems, "release image-platform: the digest handoff must be the last step")
+	}
+	return problems
+}
+
+func TestRuntimeClosurePreparedColdAndNeverCached(t *testing.T) {
+	read := func(name string) string {
+		data, err := os.ReadFile(filepath.Join(root(t), ".github/workflows", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	release, dry := read("release.yml"), read("release-image-check.yml")
+	if problems := runtimeClosureProblems(parseWorkflow(t, release), parseWorkflow(t, dry)); len(problems) != 0 {
+		t.Fatal(strings.Join(problems, "\n"))
+	}
+	const prepare = "          file: scripts/Dockerfile.runtime\n"
+	const noCache = "          no-cache: true\n"
+	const handoff = "          path: ${{ runner.temp }}/image-digests/${{ matrix.arch }}.txt\n          if-no-files-found: error\n          retention-days: 1\n"
+	// Each mutation must be rejected for its own reason.
+	for _, tc := range []struct {
+		name, file, old, replacement, want string
+	}{
+		{"builder cache allowed", "release", noCache, "", "release image-platform/Prepare pinned runtime closure: runtime closure is not prepared cold"},
+		{"rehearsal builder cache allowed", "dry", noCache, "", "rehearsal image-dry-run/Prepare pinned runtime closure: runtime closure is not prepared cold"},
+		{"fixed registry cache read", "release", noCache, noCache + "          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}-runtime\n", "Prepare pinned runtime closure: runtime closure is not prepared cold"},
+		{"rehearsal registry cache read", "dry", noCache, noCache + "          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}-runtime\n", "rehearsal image-dry-run/Prepare pinned runtime closure: reads a registry cache"},
+		{"restored through a named context", "release", noCache, noCache + "          build-contexts: aeon-runtime-closure=docker-image://ghcr.io/inspr-at/aeon:buildcache-runtime\n", "Prepare pinned runtime closure: runtime closure is not prepared cold"},
+		{"restore recipe", "release", prepare, "          file: scripts/Dockerfile.runtime-cache\n", "runtime closure has a second source"},
+		{"other recipe", "release", prepare, "          file: Dockerfile\n", "release image-platform: runtime closure is not prepared from the pinned recipe"},
+		{"closure pushed", "release", noCache, noCache + "          push: true\n", "runtime closure must only be written to the local layout"},
+		{"closure exported to the registry", "release", "type=oci,dest=${{ runner.temp }}/aeon-runtime,tar=false,rewrite-timestamp=true", "type=image,name=ghcr.io/inspr-at/aeon:buildcache-runtime,push=true", "runtime closure must only be written to the local layout"},
+		{"saved as a build cache", "release", handoff, handoff + "      - name: Save verified runtime closure\n        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc\n        with:\n          file: scripts/Dockerfile.runtime\n          outputs: type=cacheonly\n          cache-to: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}-runtime,mode=max\n", "writes a registry cache other than the assembly cache"},
+		{"prepared twice", "release", handoff, handoff + "      - name: Save verified runtime closure\n        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc\n        with:\n          file: scripts/Dockerfile.runtime\n", "prepares the runtime closure a second time"},
+		{"saved by a script", "release", handoff, handoff + "      - name: Save verified runtime closure\n        continue-on-error: true\n        run: node scripts/runtime-closure.mjs save \"$RUNNER_TEMP/aeon-runtime\"\n", "runtime closure has a second source"},
+		{"step after the handoff", "release", handoff, handoff + "      - name: Report\n        if: always()\n        run: echo done\n", "the digest handoff must be the last step"},
+		{"ignored failure", "release", "      - name: Bind runtime closure digest\n        id: runtime\n", "      - name: Bind runtime closure digest\n        id: runtime\n        continue-on-error: true\n", "Bind runtime closure digest: may not ignore a failure"},
+		{"rehearsal saves a cache", "dry", "          cache-from: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }}\n", "          cache-to: type=registry,ref=ghcr.io/inspr-at/aeon:${{ matrix.cache }},mode=max\n", "writes a registry cache other than the assembly cache"},
+		{"rehearsal pushes", "dry", "tar=true,rewrite-timestamp=true,oci-mediatypes=true", "push=true,rewrite-timestamp=true,oci-mediatypes=true", "rehearsal writes to a registry"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r, d := release, dry
+			if tc.file == "release" {
+				r = strings.Replace(r, tc.old, tc.replacement, 1)
+			} else {
+				d = strings.Replace(d, tc.old, tc.replacement, 1)
+			}
+			if r == release && d == dry {
+				t.Fatal("mutation did not change a workflow")
+			}
+			problems := strings.Join(runtimeClosureProblems(parseWorkflow(t, r), parseWorkflow(t, d)), "\n")
+			if !strings.Contains(problems, tc.want) {
+				t.Fatalf("want rejection %q, got %q", tc.want, problems)
+			}
+		})
 	}
 }
 

@@ -8,7 +8,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { assemble } from './assemble-image.mjs';
 import { buildInputs, compile, epoch, filesIn, goCaches, sha256 } from './build-image-inputs.mjs';
-import { digest, inspectRaw, runtimeClosure, runtimeManifest, timingEvidence } from './image-evidence.mjs';
+import { digest, inspectRaw, runtimeClosure, runtimeEvidence, runtimeManifest, runtimeRecipe, runtimeSummary, timingEvidence } from './image-evidence.mjs';
 import { assemblyArgs, compareRuns, reproduce } from './reproduce-image.mjs';
 
 const version = '261005120000.0.0';
@@ -17,7 +17,7 @@ function fixture() {
   const path = mkdtempSync(join(tmpdir(), 'aeon-image-test-'));
   for (const [name, bytes] of Object.entries({
     'version.json': JSON.stringify({ version }), 'NOTICE': 'AGPL fixture', 'Dockerfile': 'FROM aeon-runtime',
-    'scripts/Dockerfile.runtime': `FROM alpine:3.24@sha256:${'f'.repeat(64)}\nARG RUNTIME_REFRESH=2026-10-01\n`,
+    'scripts/Dockerfile.runtime': `FROM alpine:3.24@sha256:${'f'.repeat(64)}\n`,
     'internal/releasehistory/data/history.json': '{"generated_at":"fixed","releases":[]}',
   })) { mkdirSync(dirname(join(path, name)), { recursive: true }); writeFileSync(join(path, name), bytes); }
   return path;
@@ -186,6 +186,54 @@ test('runtime closure identity includes layer diff IDs and rejects a config with
     writeFileSync(join(bare, 'index.json'), JSON.stringify({ manifests: [blob({ config: blob({ architecture: 'arm64', os: 'linux', rootfs }), layers: [] })] }));
     assert.throws(() => runtimeClosure(bare, 'linux/arm64'), /diff IDs|invalid OCI digest/);
   }
+});
+
+test('runtime evidence names the prepared bytes and their recipe, and nothing else', () => {
+  const path = fixture(), layout = join(path, 'runtime'), closure = oci(layout, { token: 'evidence' });
+  const recipe = join(path, runtimeRecipe);
+  const evidence = runtimeEvidence(layout, 'linux/arm64', path);
+  // Exactly these fields: no cache reference, key or origin is recorded.
+  assert.deepEqual(evidence, { platform: 'linux/arm64', ...closure, diff_ids: [`sha256:${sha256('evidence')}`], recipe_sha256: sha256(readFileSync(recipe)) });
+  writeFileSync(recipe, readFileSync(recipe, 'utf8') + 'RUN apk add --no-cache tini\n');
+  const changed = runtimeEvidence(layout, 'linux/arm64', path);
+  assert.notEqual(changed.recipe_sha256, evidence.recipe_sha256);
+  assert.deepEqual({ ...changed, recipe_sha256: evidence.recipe_sha256 }, evidence);
+  assert.throws(() => runtimeEvidence(layout, 'linux/amd64', path), /exactly one runtime platform manifest/);
+  assert.throws(() => runtimeEvidence(layout, 'linux/arm64', join(path, 'absent')), { code: 'ENOENT' });
+  assert.equal(runtimeSummary(evidence), ['', '### Runtime closure (linux/arm64)', '',
+    `- runtime manifest: \`${closure.digest}\``, `- config: \`${closure.config_digest}\``,
+    `- layer diff IDs: \`sha256:${sha256('evidence')}\``,
+    `- recipe \`scripts/Dockerfile.runtime\` sha256 \`${evidence.recipe_sha256}\``, ''].join('\n'));
+});
+
+test('runtime CLI hands the digest to later steps and the job output, and prints the closure', () => {
+  const script = fileURLToPath(new URL('./image-evidence.mjs', import.meta.url));
+  const committed = sha256(readFileSync(fileURLToPath(new URL('./Dockerfile.runtime', import.meta.url))));
+  function cli(arch, platform) {
+    const directory = mkdtempSync(join(tmpdir(), 'aeon-runtime-bind-test-'));
+    const closure = oci(join(directory, 'layout'), { arch });
+    const output = join(directory, 'output'), summary = join(directory, 'summary');
+    const run = spawnSync(process.execPath, [script, 'runtime', join(directory, 'layout'), platform], {
+      encoding: 'utf8', timeout: 10_000, env: { GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: summary },
+    });
+    assert.ifError(run.error);
+    const read = file => existsSync(file) ? readFileSync(file, 'utf8') : null;
+    return { run, closure, output: read(output), summary: read(summary) };
+  }
+  for (const arch of ['amd64', 'arm64']) {
+    const bound = cli(arch, `linux/${arch}`);
+    assert.equal(bound.run.status, 0, bound.run.stderr);
+    // Each matrix leg sets the shared step output and only its own job output.
+    assert.equal(bound.output, `digest=${bound.closure.digest}\nruntime_${arch}=${bound.closure.digest}\n`);
+    const evidence = { platform: `linux/${arch}`, ...bound.closure, diff_ids: [`sha256:${sha256('same')}`], recipe_sha256: committed };
+    assert.deepEqual(JSON.parse(bound.run.stdout), evidence);
+    assert.equal(bound.summary, runtimeSummary(evidence));
+  }
+  // A layout for another platform binds nothing and reports nothing.
+  const wrong = cli('amd64', 'linux/arm64');
+  assert.equal(wrong.run.status, 1);
+  assert.match(wrong.run.stderr, /exactly one runtime platform manifest/);
+  assert.deepEqual([wrong.output, wrong.summary], [null, null]);
 });
 
 test('registry reads are bounded, argument-safe and report why they failed', () => {
@@ -367,10 +415,8 @@ test('proof uses two fresh source snapshots, frozen generated history and detect
     return inputs;
   };
   const out = join(path, 'proof.json');
-  const cacheRef = 'ghcr.io/inspr-at/aeon:buildcache-arm64-runtime-2026-10-01-' + 'a'.repeat(16);
   // A build cache passed by the caller (the smoked compilation's) is never reused by a proof run.
-  const proofValues = { ...values, RUNTIME_DIGEST: base.digest, SMOKE_CONFIG_DIGEST: base.config_digest, GOCACHE: join(path, 'smoked-go-build'), GOMODCACHE: '/fixture/go-mod',
-    RUNTIME_CACHE_REF: cacheRef, RUNTIME_CACHE_HIT: 'true', RUNTIME_CACHE_MANIFEST: 'b'.repeat(64) };
+  const proofValues = { ...values, RUNTIME_DIGEST: base.digest, SMOKE_CONFIG_DIGEST: base.config_digest, GOCACHE: join(path, 'smoked-go-build'), GOMODCACHE: '/fixture/go-mod' };
   const result = reproduce(runtime, out, path, proofValues, runner, builder);
   assert.equal(result.reproducible, true);
   assert.equal(snapshots.length, 2);
@@ -378,10 +424,9 @@ test('proof uses two fresh source snapshots, frozen generated history and detect
   assert.equal(new Set([...buildCaches, proofValues.GOCACHE]).size, 3);
   assert.deepEqual(result.runs.map(run => run.go_build_cache), buildCaches);
   assert.match(result.proof_scope, /Same runner, same frozen runtime closure, same history fixture/);
-  // The evidence names the runtime bytes and where this run got them.
+  // The evidence names the runtime bytes this build prepared and their recipe.
   assert.deepEqual(result.runtime_base, { platform: 'linux/arm64', ...base, diff_ids: [`sha256:${sha256('same')}`],
-    recipe_sha256: sha256(readFileSync(join(path, 'scripts/Dockerfile.runtime'))), refresh: '2026-10-01', source: 'restored',
-    cache: { ref: cacheRef, hit: true, manifest_sha256: 'b'.repeat(64) } });
+    recipe_sha256: sha256(readFileSync(join(path, 'scripts/Dockerfile.runtime'))) });
   assert.deepEqual(JSON.parse(readFileSync(out)).runtime_base, result.runtime_base);
   assert.equal(calls.filter(call => call.file === 'git' && call.args[0] === 'archive').length, 1);
   assert.equal(calls.filter(call => call.file === 'docker' && call.args[1] === 'build').length, 2);

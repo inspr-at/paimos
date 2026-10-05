@@ -3,8 +3,10 @@ import { spawnSync } from 'node:child_process';
 import { lstatSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { sha256 } from './build-image-inputs.mjs';
+import { root, sha256 } from './build-image-inputs.mjs';
 import { secondsBetween } from './release-timing.mjs';
+
+export const runtimeRecipe = 'scripts/Dockerfile.runtime';
 
 export function digest(value) {
   if (typeof value !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(value)) throw new Error('invalid OCI digest');
@@ -52,6 +54,18 @@ export function runtimeClosure(directory, platform) {
   if (!Array.isArray(layers) || !layers.length || layers.length > 127) throw new Error('OCI config lacks layer diff IDs');
   return { ...manifest, diff_ids: layers.map(digest) };
 }
+// What this build's runtime consists of: the bytes of the prepared layout and
+// the recipe they came from. Every build prepares its own closure, so these
+// digests are the record of what one release shipped.
+export function runtimeEvidence(directory, platform, cwd = root) {
+  return { platform, ...runtimeClosure(directory, platform), recipe_sha256: sha256(readFileSync(join(cwd, runtimeRecipe))) };
+}
+export function runtimeSummary(evidence) {
+  return ['', `### Runtime closure (${evidence.platform})`, '',
+    `- runtime manifest: \`${evidence.digest}\``, `- config: \`${evidence.config_digest}\``,
+    `- layer diff IDs: ${evidence.diff_ids.map(id => `\`${id}\``).join(', ')}`,
+    `- recipe \`${runtimeRecipe}\` sha256 \`${evidence.recipe_sha256}\``, ''].join('\n');
+}
 // Raw registry manifest bytes, bounded in size and time. Read-only.
 export function inspectRaw(reference, spawn = spawnSync) {
   if (typeof reference !== 'string' || !/^[a-z0-9][a-z0-9./_-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(@sha256:[a-f0-9]{64})?$/.test(reference)) throw new Error('invalid image reference');
@@ -91,8 +105,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   try {
     const [mode, path, platform] = process.argv.slice(2);
     if (mode === 'runtime') {
-      const result = runtimeManifest(path, platform);
-      if (process.env.GITHUB_OUTPUT) writeFileSync(process.env.GITHUB_OUTPUT, `digest=${result.digest}\n`, { flag: 'a' });
+      const result = runtimeEvidence(path, platform);
+      // digest binds the later steps; runtime_<arch> is this leg's job output.
+      if (process.env.GITHUB_OUTPUT) writeFileSync(process.env.GITHUB_OUTPUT, `digest=${result.digest}\nruntime_${platform.split('/')[1]}=${result.digest}\n`, { flag: 'a' });
+      if (process.env.GITHUB_STEP_SUMMARY) writeFileSync(process.env.GITHUB_STEP_SUMMARY, runtimeSummary(result), { flag: 'a' });
       console.log(JSON.stringify(result));
     } else if (mode === 'start') writeFileSync(path, new Date().toISOString() + '\n');
     else if (mode === 'timing') {

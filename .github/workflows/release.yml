@@ -148,8 +148,9 @@ jobs:
             cache: buildcache-arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    # Three cold Go compilations (smoked build and both proof runs) replace
-    # the former warm cache; the timeout only guards against a hang.
+    # 30 instead of the former 20 minutes: three cold Go compilations (the
+    # smoked build and both proof runs) and a cold runtime closure preparation
+    # replace the former warm caches. The timeout only guards against a hang.
     timeout-minutes: 30
     permissions:
       # Preserve push access for the draft-aware release immutability lookup.
@@ -289,41 +290,30 @@ jobs:
             exit 1
           fi
 
-      # The saved closure is an image named after the recipe hash and its
-      # refresh key (scripts/runtime-closure.mjs). A changed recipe or a bumped
-      # key cannot find it and prepares cold; so does any failed read. Warns,
-      # never fails, when the refresh key is older than 35 days. Until a tag
-      # build has saved a closure under the current key every run takes the
-      # cold path, so the restore path first runs after that tag build.
-      - name: Resolve runtime closure cache
-        id: runtime-cache
-        run: node scripts/runtime-closure.mjs resolve linux/${{ matrix.arch }} ${{ matrix.cache }}
+      # Prepared cold in every tag build and rehearsal, from the digest-pinned
+      # Alpine base and the pinned chromium/tini. No registry cache is read or
+      # written for it and no-cache excludes a builder-local layer, so the APK
+      # repositories are resolved exactly once per build.
       # Keep one platform result: BUILDKIT_MULTI_PLATFORM=1 forces a manifest
       # list that the Docker exporter rejects even for one target. Load without
       # provenance, then export the same builder/context/args with provenance.
-      # Hit: re-wrap the saved image (scripts/Dockerfile.runtime-cache).
-      # Miss: build scripts/Dockerfile.runtime; build-contexts is then empty.
       - name: Prepare pinned runtime closure
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
         with:
           context: .
-          file: ${{ steps.runtime-cache.outputs.file }}
+          file: scripts/Dockerfile.runtime
           platforms: linux/${{ matrix.arch }}
           provenance: false
+          no-cache: true
           outputs: type=oci,dest=${{ runner.temp }}/aeon-runtime,tar=false,rewrite-timestamp=true
-          build-contexts: ${{ steps.runtime-cache.outputs.build_contexts }}
           build-args: |
             SOURCE_DATE_EPOCH=0
       # Everything after this step uses the closure by this digest only. The
-      # summary and the proof evidence record it, so a release's runtime bytes
-      # stay traceable even though the cache tag itself is mutable.
+      # summary, the proof evidence and the draft release notes record it: the
+      # traceability record for the runtime bytes of this release.
       - name: Bind runtime closure digest
         id: runtime
-        env:
-          RUNTIME_CACHE_REF: ${{ steps.runtime-cache.outputs.ref }}
-          RUNTIME_CACHE_HIT: ${{ steps.runtime-cache.outputs.hit }}
-          RUNTIME_CACHE_MANIFEST: ${{ steps.runtime-cache.outputs.manifest_sha256 }}
-        run: node scripts/runtime-closure.mjs bind "$RUNNER_TEMP/aeon-runtime" linux/${{ matrix.arch }}
+        run: node scripts/image-evidence.mjs runtime "$RUNNER_TEMP/aeon-runtime" linux/${{ matrix.arch }}
       - name: Start assembly and smoke timing
         run: node scripts/image-evidence.mjs start "$RUNNER_TEMP/image-timing"
       - name: Build cached smoke image
@@ -380,9 +370,6 @@ jobs:
           RUNTIME_DIGEST: ${{ steps.runtime.outputs.digest }}
           SMOKE_IMAGE: ${{ steps.smoke-image.outputs.image }}
           SMOKE_CONFIG_DIGEST: ${{ steps.build.outputs.imageid }}
-          RUNTIME_CACHE_REF: ${{ steps.runtime-cache.outputs.ref }}
-          RUNTIME_CACHE_HIT: ${{ steps.runtime-cache.outputs.hit }}
-          RUNTIME_CACHE_MANIFEST: ${{ steps.runtime-cache.outputs.manifest_sha256 }}
           # Each proof run creates its own empty GOCACHE; none is passed here.
           GOMODCACHE: ${{ runner.temp }}/go-mod
           GOFLAGS: -mod=readonly
@@ -476,37 +463,6 @@ jobs:
           path: ${{ runner.temp }}/image-digests/${{ matrix.arch }}.txt
           if-no-files-found: error
           retention-days: 1
-
-      # Last, off the critical path: the digest is already attested and handed
-      # over, and continue-on-error keeps a registry problem from failing the
-      # release. Nothing is rebuilt. The script requires the layout to still
-      # have the verified digest, then pushes that layout with
-      # `docker buildx build`, the one tool certain to exist on both hosted
-      # runner images (skopeo/crane/oras are not guaranteed on the arm image);
-      # it uses the existing packages: write token. A closure restored from the
-      # cache, or one already saved under this key, is never rewritten.
-      # Never part of the rehearsal, which has no registry write; its first
-      # execution is the first tag build after this change.
-      - name: Save verified runtime closure
-        id: runtime-save
-        continue-on-error: true
-        timeout-minutes: 5
-        env:
-          RUNTIME_DIGEST: ${{ steps.runtime.outputs.digest }}
-          RUNTIME_CACHE_REF: ${{ steps.runtime-cache.outputs.ref }}
-          RUNTIME_CACHE_HIT: ${{ steps.runtime-cache.outputs.hit }}
-        run: node scripts/runtime-closure.mjs save "$RUNNER_TEMP/aeon-runtime" linux/${{ matrix.arch }} ${{ matrix.cache }}
-      # A failed or timed-out save is green by design; say so where it is read.
-      - name: Report runtime closure cache
-        if: always()
-        env:
-          OUTCOME: ${{ steps.runtime-save.outcome }}
-        run: |
-          set -euo pipefail
-          if [ "$OUTCOME" != success ]; then
-            echo "::warning::Runtime closure cache save: ${OUTCOME:-not run}. The release is unaffected; the next run prepares the closure cold."
-            echo "Runtime closure cache save: **${OUTCOME:-not run}**. The release is unaffected; the next run prepares the closure cold." >> "$GITHUB_STEP_SUMMARY"
-          fi
 
   # Both native smoke and platform attestation gates must finish successfully.
   # Preserve the image job/output contract: deploy pins this multi-arch index.

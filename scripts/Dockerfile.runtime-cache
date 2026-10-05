@@ -1,6 +1,0 @@
-# SPDX-License-Identifier: AGPL-3.0-only
-# Re-wraps a prepared runtime closure without changing its layers. The named
-# context is the verified local OCI layout when saving and the saved image when
-# restoring (scripts/runtime-closure.mjs). Nothing may follow FROM: this file
-# must never add, remove or rebuild runtime bytes.
-FROM aeon-runtime-closure

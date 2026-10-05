@@ -8,8 +8,7 @@ import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } fro
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { buildInputs, command, compile, root } from './build-image-inputs.mjs';
-import { digest, runtimeManifest } from './image-evidence.mjs';
-import { runtimeEvidence } from './runtime-closure.mjs';
+import { digest, runtimeEvidence, runtimeManifest } from './image-evidence.mjs';
 
 export function compareRuns(expected, runs) {
   if (runs.length !== 2) throw new Error('exactly two clean runs required');
@@ -36,7 +35,7 @@ export function reproduce(runtimePath, output, cwd = root, values = process.env,
   if (run('git', ['status', '--porcelain', '--untracked-files=no'], cwd, {}, true)) throw new Error('proof requires a clean tracked checkout');
   const sourceSHA = run('git', ['rev-parse', 'HEAD'], cwd, {}, true);
   const tree = run('git', ['rev-parse', 'HEAD^{tree}'], cwd, {}, true);
-  const runtime = runtimeEvidence(runtimePath, inputs.platform, values, cwd);
+  const runtime = runtimeEvidence(runtimePath, inputs.platform, cwd);
   if (values.RUNTIME_DIGEST && runtime.digest !== digest(values.RUNTIME_DIGEST)) throw new Error('runtime closure changed');
   const expected = JSON.parse(readFileSync(join(cwd, 'dist/image-input/inputs.json'), 'utf8'));
   const parent = join(cwd, 'tmp');

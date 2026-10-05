@@ -271,21 +271,15 @@
       "step": "Reject an existing image tag"
     },
     {
-      "counterpart": "image-dry-run/Resolve runtime closure cache",
-      "mode": "step",
-      "sha256": "ad0c14a280655ae1e96c8a23b4c4f1996e4c30cb56d7e25c4561b8221a907a34",
-      "step": "Resolve runtime closure cache"
-    },
-    {
       "counterpart": "image-dry-run/Prepare pinned runtime closure",
       "mode": "step",
-      "sha256": "210649f951b53e6e03b0c4977071a04282520e18b89f7f849e7fb8e2ab87b0f2",
+      "sha256": "ee9224f109b05b42853cd8aea29507100edacce4c74057939e4f2b29c0305d0d",
       "step": "Prepare pinned runtime closure"
     },
     {
       "counterpart": "image-dry-run/Bind runtime closure digest",
       "mode": "step",
-      "sha256": "31232483c334cdcfa29b662462359b89e36aba6cee4927ec456c8ef413b81367",
+      "sha256": "7fe5746782093069dd07b82e1619240099e608f880d8e30cc552b81741500cf6",
       "step": "Bind runtime closure digest"
     },
     {
@@ -321,7 +315,7 @@
     {
       "counterpart": "image-dry-run/Prove two clean image rebuilds",
       "mode": "step",
-      "sha256": "dd10a7b82077cead8f1519bb3d009956d74c350c006340b778390ae1a2bc09b0",
+      "sha256": "76c7dfe732b5baf8b80310db5ad0c28b27d23bf055111cb979cbf32ad9dace6b",
       "step": "Prove two clean image rebuilds"
     },
     {
@@ -365,18 +359,6 @@
       "mode": "action",
       "sha256": "1d99810496c7e3ff30e1389315ce822b68825c632ed91374bb4b084de513f15a",
       "step": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
-    },
-    {
-      "counterpart": "TestRuntimeCacheSavedAfterSmoke",
-      "mode": "test",
-      "sha256": "43d06e0a11d3edfd5153ca1878a8e72a23f6b9dadeb33fec697c9892a5db3723",
-      "step": "Save verified runtime closure"
-    },
-    {
-      "counterpart": "TestRuntimeCacheSavedAfterSmoke",
-      "mode": "test",
-      "sha256": "b5bc01c3cfbf828941d0fc3eb3d2f556d874a9019c616910d4406c4371971628",
-      "step": "Report runtime closure cache"
     }
   ]
 }
