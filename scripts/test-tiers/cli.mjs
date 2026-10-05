@@ -7,7 +7,7 @@ import { collectGo, collectWeb, command, root, web, evidence, saveJSON, saveMani
 import { validate, select, shard, key, counts, exactPattern, webGraph } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { runPlaywright } from '../playwright-safe.mjs'
-import { loadManifest as loadBrowserPolicy } from '../../web/scripts/ci-web-shard.mjs'
+import { loadManifest as loadBrowserPolicy, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import { changedPaths, schedulingMode } from './diff.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
@@ -23,7 +23,7 @@ export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',p
     webImports:kind==='web'?webGraph(web):{}})
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}
-  if(kind==='web') for(const group of browserPolicy.groups) for(const spec of group.specs) weights[spec.file]=spec.weightSeconds
+  if(kind==='web'&&!unit) Object.assign(weights,tierWeights(browserPolicy))
   if(kind==='go') {
     for(const line of readFileSync(resolve(root,'scripts/ci/go-shards.txt'),'utf8').split('\n')) {
       const match=/^\d+ (\d+) github\.com\/inspr-at\/paimos\/(\S+)/.exec(line)

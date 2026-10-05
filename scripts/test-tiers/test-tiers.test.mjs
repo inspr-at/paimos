@@ -6,9 +6,10 @@ import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { validate, select, shard, key, exactPattern, webGraph, counts } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
-import { aggregate, jobMinutes } from './measure.mjs'
+import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
 import { changedPaths, schedulingMode } from './diff.mjs'
+import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
 const w=(file,name,tier='NIGHTLY')=>({kind:'node',file,name,tier})
@@ -300,6 +301,103 @@ test('job accounting includes setup in minutes and reports missing artifacts rat
   assert.deepEqual(measurement.missingEvidence,['go-test-1'])
 })
 
+test('Actions skipped jobs with zero completed_at never invalidate PR, queue, push or nightly accounting',()=>{
+  // Exact shape returned for tree-reuse on the failing PR/merge-group runs.
+  const skipped={name:'tree-reuse',status:'completed',conclusion:'skipped',
+    started_at:'2026-10-05T10:00:00Z',completed_at:'0001-01-01T00:00:00Z',steps:[]}
+  const lanes={
+    pull_request:['tree-reuse','cache-prime','go-test (1)','go-timing','web-setup','web-shard (1)'],
+    merge_group:['tree-reuse','cache-prime'],
+    push:['go-test (1)','go-timing','web-setup','web-shard (1)','release-check-run','e2e-run'],
+    workflow_dispatch:['tree-reuse','cache-prime'],
+    schedule:['nightly-go-test (1)','nightly-go-timing','nightly-web-setup','nightly-web-shard (1)'],
+  }
+  for(const [event,names] of Object.entries(lanes)) for(const timestamps of [
+    {},{started_at:'0001-01-01T00:00:00Z'},
+    {started_at:null,completed_at:null},{started_at:0,completed_at:0},
+  ]) {
+    const jobs=names.map(name=>({...skipped,name,...timestamps}))
+    const report=aggregate([],jobs)
+    assert.ok(report.jobs.every(job=>job.conclusion==='skipped'&&job.runnerMinutes===null),event)
+    assert.deepEqual(report.missingEvidence,[],event)
+    assert.equal(report.measured.goRunnerMinutes,0,event)
+    assert.equal(report.measured.webRunnerMinutes,0,event)
+    assert.deepEqual(report.classes,{},'Skipped jobs must not fabricate case passes')
+  }
+  assert.equal(jobMinutes({...skipped,status:'queued',conclusion:null}),null)
+  assert.equal(jobMinutes({...skipped,conclusion:'cancelled',runner_id:0}),null)
+  assert.throws(()=>jobMinutes({...skipped,conclusion:'cancelled',runner_id:1}),/Invalid job timestamps/)
+  assert.throws(()=>jobMinutes({...skipped,conclusion:'cancelled',runner_id:0,steps:[{name:'Checkout',conclusion:'success'}]}),/Invalid job timestamps/)
+})
+
+test('completed jobs that ran still reject absent, zero, invalid and reversed timestamps',()=>{
+  const job={name:'go-test (1)',status:'completed',started_at:'2026-10-05T10:00:00Z',completed_at:'2026-10-05T10:02:00Z'}
+  for(const conclusion of ['success','failure','cancelled']) for(const timestamps of [
+    {started_at:null},{completed_at:null},{started_at:undefined},{completed_at:undefined},
+    {started_at:''},{completed_at:''},{started_at:0},{completed_at:0},
+    {started_at:'0001-01-01T00:00:00Z'},{completed_at:'0001-01-01T00:00:00Z'},
+    {started_at:'invalid'},{completed_at:'2026-10-05T09:59:59Z'},
+  ]) assert.throws(()=>aggregate([], [{...job,conclusion,...timestamps}]),/Invalid job timestamps: go-test \(1\)/)
+})
+
+test('four unit shards partition the existing ledger by file with every identity selected once',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
+  for(const event of ['pull_request','merge_group','push','workflow_dispatch','schedule']) {
+    const selected=select(manifest.tests,{event,paths:['.github/workflows/ci.yml']}).tests.filter(row=>row.kind!=='browser')
+    const bins=Array.from({length:4},(_,i)=>shard(selected,i+1,4))
+    assert.deepEqual(bins.flat().map(key).sort(),selected.map(key).sort(),event)
+    const owners=new Map()
+    bins.forEach((rows,i)=>rows.forEach(row=>{
+      if(owners.has(row.file))assert.equal(owners.get(row.file),i,'A file must not run twice')
+      owners.set(row.file,i)
+    }))
+    const sizes=bins.map(rows=>rows.length).sort((a,b)=>a-b)
+    // Nightly retains a large parameterized file; it is intentionally kept
+    // whole and does not participate in the four full-gate unit jobs.
+    if(event!=='schedule')assert.ok(sizes[3]<=1.3*(sizes[1]+sizes[2])/2,`Unit registration balance: ${sizes}`)
+  }
+})
+
+test('serial tier weights rebalance the twelve browser shards without changing full or changed-area coverage',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url)))
+  const rows=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests
+  const weights=tierWeights(manifest)
+  const graph=Object.fromEntries([...new Set(rows.map(row=>row.file))].map(file=>[file,[]]))
+  for(const options of [
+    {event:'pull_request',paths:['.github/workflows/ci.yml']},
+    {event:'merge_group',paths:['web/tests/clip-tip.spec.ts'],webImports:graph},
+    {event:'push'}, {event:'workflow_dispatch'}, {event:'schedule'},
+  ]) {
+    const selected=select(rows,options).tests.filter(row=>row.kind==='browser')
+    const bins=Array.from({length:12},(_,i)=>shard(selected,i+1,12,weights))
+    assert.deepEqual(bins.flat().map(key).sort(),selected.map(key).sort(),options.event)
+    if(options.paths?.[0]==='.github/workflows/ci.yml'||options.event==='push') {
+      const loads=bins.map(bin=>[...new Set(bin.map(row=>row.file))].reduce((n,file)=>n+weights[file],0)).sort((a,b)=>a-b)
+      assert.ok(loads[11]<=1.3*(loads[5]+loads[6])/2,`Serial scheduling estimates: ${loads}`)
+    }
+  }
+})
+
+test('unit measurement artifacts are required for every executed shard and legacy nightly units',()=>{
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-unit-measurements-'))
+  const job=name=>({name,status:'completed',conclusion:'success',started_at:'2026-10-05T10:00:00Z',completed_at:'2026-10-05T10:02:00Z'})
+  const names=['web-unit-1','web-unit-2','web-unit-3','web-unit-4']
+  for(const name of names)writeFileSync(resolve(directory,`${name}-measurement.json`),JSON.stringify(reportCases([],[],0,name)))
+  const jobs=names.map((_,i)=>job(`web-unit (${i+1})`))
+  const reports=readReports(directory)
+  assert.equal(reports.length,4)
+  assert.equal(aggregate(reports,jobs).coverage,'reported')
+  for(const name of names)assert.deepEqual(aggregate(reports.filter(r=>r.job!==name),jobs).missingEvidence,[name])
+  assert.deepEqual(aggregate([], [job('nightly-web-setup')]).missingEvidence,['web-unit'])
+  assert.deepEqual(aggregate([], [job('web-setup')]).missingEvidence,[],'Main setup no longer executes units')
+  const exact=aggregate([], [job('web-unit (1)'),job('web-shard (1)')],{lane:'spec-only'})
+  assert.equal(exact.coverage,'untiered')
+  assert.deepEqual(exact.classes,{})
+  assert.deepEqual(exact.missingEvidence,[])
+  assert.match(exact.caseScope,/no tier passes are claimed/)
+  assert.deepEqual(aggregate([], [job('web-unit (1)'),job('web-shard (1)')],{lane:'full'}).missingEvidence,['web-unit-1','web-shard-1'])
+})
+
 test('rerun measurements reject earlier-attempt artifacts instead of replaying case passes',()=>{
   const job={name:'go-test (1)',status:'completed',started_at:'2026-10-04T01:00:00Z',completed_at:'2026-10-04T01:01:00Z'}
   const earlier={...reportCases([cases[0]],[{key:key(cases[0]),status:'passed',started:true}],1,'go-test-1'),runId:'123',attempt:'1',sha:'a'}
@@ -358,7 +456,7 @@ test('nightly runs every tier and fixed gate; PR/MQ aggregates and compatibility
   for(const command of ['run go --all --shard','run web --all --unit','run web --all --shard'])assert.ok(nightly.includes(command))
   for(const id of ['go-static','go-timing','migration-compat','e2e','release-check'])assert.ok(nightly.includes(`  nightly-${id}:`))
   assert.match(ci,/  go:\n\s+if: always\(\)\n\s+needs: \[ci-plan, go-test, go-static, go-timing, tree-reuse, cache-prime, tier-plan\]/)
-  assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[ci-plan, web-setup, web-shard, tree-reuse, cache-prime, tier-plan\]/)
+  assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[ci-plan, web-setup, web-unit, web-shard, tree-reuse, cache-prime, tier-plan\]/)
   assert.match(ci,/  migration-compat:\n\s+permissions:/)
   assert.doesNotMatch(ci,/ci-flake-guard\.mjs --kind/)
 })

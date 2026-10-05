@@ -84,6 +84,21 @@ export function loadManifest(path = manifestPath) {
 // Groups with gate:false are declared (so drift is still caught) but only run with all:true.
 export const gatedGroups = (manifest, all = false) => manifest.groups.filter(group => all || group.gate !== false)
 
+// The tier runner executes with one worker, while some historical measured
+// steps used two. Convert those file allocations to serial scheduling estimates
+// without changing the original weights used by the exact-spec runner. Local
+// serial timings and unmeasured/test-count estimates already use a serial basis.
+export function tierWeights(manifest) {
+  const sources = new Map((manifest.ciInventory ?? []).map(source => [source.id, source]))
+  return Object.fromEntries(manifest.groups.flatMap(group => group.specs.map(spec => {
+    const source = sources.get(spec.weightSource)
+    const workers = source?.flags?.map(flag => /^--workers=(\d+)$/.exec(flag)).find(Boolean)
+    const factor = source?.kind === 'browser-test' && source.measuredSeconds > 0 && workers ? Number(workers[1]) : 1
+    if (!Number.isSafeInteger(factor) || factor < 1 || factor > 64) throw new Error(`Invalid measured worker count: ${spec.file}`)
+    return [spec.file, spec.weightSeconds * factor]
+  })))
+}
+
 export function balanceShards(manifest, count, { all = false } = {}) {
   validateManifest(manifest)
   parseShard(`1/${count}`)

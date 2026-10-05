@@ -255,20 +255,38 @@ router and small Go/Node checks. Go tests use four pool shards when routing
 admits the batch, otherwise the existing seven hosted shards. Timing budgets,
 static checks and the required `go` aggregate always run hosted.
 
-**Web CI (OPS-257):** hosted `web-setup` runs typecheck, lint, unit tests and
-browser-runner safety once, builds the current web, and shares its dependencies
-and build through the run's `web-runtime` artifact. Dependency and Chromium
+**Web CI (OPS-257):** hosted `web-setup` runs typecheck and lint, builds the
+current web, and shares its dependencies and build through the run's
+`web-runtime` artifact. Four file-preserving `web-unit` shards start beside
+the browser shards from that runtime; shell preparation and unit checks no longer
+delay browser fan-out. Unit shard 1 also runs shard-policy regressions and
+browser-runner safety once. Spec-only PRs retain one unit job with the existing
+unit command; docs-only PRs skip all three web job families. Dependency and Chromium
 caches are keyed by the lockfile hash and resolved Playwright version; each of
 12 hosted `web-shard` jobs restores that runtime and installs only Chromium's
 system libraries. The shard command is `npm --prefix web run ci:web:shard --
-i/12`, wrapped by `scripts/ci-flake-guard.mjs --kind playwright`; traces and
+i/12` for exact-spec inspection; full-lane execution uses
+`scripts/test-tiers/cli.mjs run web --shard i/12` with zero retries. Traces and
 screenshots are retained in `web-shard-i-evidence` for seven days. The required
 check remains exactly `web`: its unconditional aggregate rejects failed,
-cancelled or skipped setup/shards. The shards select 53 gated specs: the original
+cancelled or skipped setup, unit shards or browser shards in the full lane.
+All four unit measurements and twelve browser measurements feed the tier report;
+nightly retains its existing once-only `web-unit` evidence. Skipped Actions jobs
+with zero timestamps report absent duration; executed jobs with invalid timestamps
+still fail accounting. Spec-only reports explicitly use `untiered` coverage and
+claim no tier case passes; its native checks still block `web`.
+The historical shard inventory selected 53 gated specs: the original
 49 measured specs plus `clip-tip`, `aeon-632b-clip`, `key-trim` and `model-prefs`, whose
 weights are scheduling estimates. `clip-tip` uses its complete local serial
 runtime plus a 20 percent margin; the other three use listed test counts.
-These are not hosted runtime measurements. The 164 specs of the
+These are not hosted runtime measurements. The one-worker tier runner now uses
+serial estimates for historical N-worker steps (`N * weightSeconds`); it retains
+local serial and unmeasured estimates. The committed full-gate ledger estimates
+368–372 seconds per browser shard (max/median 1.01), versus 266–497 seconds with
+the old allocation evaluated under the same serial model. Original exact-spec
+weights, launch policies, tier classifications and optional catalogue membership
+stay unchanged. These estimates exclude collection, launch and runner overhead;
+the 12–13 minute PR target still requires hosted measurement. The 164 specs of the
 `remaining-ui` group are declared in
 `web/ci-web-shards.json` with `gate: false` and run only with `--all`, until a
 follow-up ticket measures them. Unit CI checks the source manifest before

@@ -64,6 +64,25 @@ test('LPT balancing distributes a known fixture optimally and covers it exactly 
   assert.deepEqual(checkCoverage(manifest, shards, files(manifest)), { specs: 6, shards: 3 })
 })
 
+test('one-worker tier weights convert measured parallel steps but retain serial and unmeasured estimates', async () => {
+  const { tierWeights } = await import('./ci-web-shard.mjs')
+  const manifest = fixture()
+  manifest.ciInventory = [{ id: 'measured', kind: 'browser-test', measuredSeconds: 42, flags: ['--workers=2'] }]
+  const specs = manifest.groups.flatMap(group => group.specs)
+  specs[0].weightSource = 'measured'
+  specs[1].weightSource = 'local-serial-runtime-estimate'
+  specs[2].weightSource = 'unmeasured-test-rate'
+  const before = structuredClone(manifest)
+  const weights = tierWeights(manifest)
+  assert.equal(weights[specs[0].file], specs[0].weightSeconds * 2)
+  for (const spec of specs.slice(1)) assert.equal(weights[spec.file], spec.weightSeconds)
+  assert.deepEqual(manifest, before, 'Historical weights and gate policy must stay unchanged')
+  for (const value of [0, 65]) {
+    manifest.ciInventory[0].flags = [`--workers=${value}`]
+    assert.throws(() => tierWeights(manifest), /Invalid measured worker count/)
+  }
+})
+
 test('assignment is deterministic despite manifest group/spec order and breaks ties by path', () => {
   const manifest = fixture(), reordered = structuredClone(manifest)
   reordered.groups.reverse().forEach(g => g.specs.reverse())
