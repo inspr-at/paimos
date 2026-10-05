@@ -20,19 +20,20 @@ import (
 // adapter confirmation, or queued → failed on a terminal failure. Neither
 // terminal state moves again, and handed_off_at is written once.
 type Receipt struct {
-	MessageID            string  `json:"message_id"`
-	IdempotencyKey       string  `json:"idempotency_key"`
-	Tenant               string  `json:"tenant"`
-	SenderPrincipalID    string  `json:"sender_principal_id"`
-	RecipientPrincipalID string  `json:"recipient_principal_id"`
-	TargetID             *string `json:"target_id"`
-	TargetVersion        *int    `json:"target_version"`
-	Adapter              string  `json:"adapter"`
-	Address              string  `json:"address"`
-	EffectiveLevel       string  `json:"effective_level"`
-	State                string  `json:"state"`
-	HandedOffAt          *string `json:"handed_off_at"`
-	FailureReason        string  `json:"failure_reason"`
+	Attached             *AttachedStatus `json:"attached,omitempty"`
+	MessageID            string          `json:"message_id"`
+	IdempotencyKey       string          `json:"idempotency_key"`
+	Tenant               string          `json:"tenant"`
+	SenderPrincipalID    string          `json:"sender_principal_id"`
+	RecipientPrincipalID string          `json:"recipient_principal_id"`
+	TargetID             *string         `json:"target_id"`
+	TargetVersion        *int            `json:"target_version"`
+	Adapter              string          `json:"adapter"`
+	Address              string          `json:"address"`
+	EffectiveLevel       string          `json:"effective_level"`
+	State                string          `json:"state"`
+	HandedOffAt          *string         `json:"handed_off_at"`
+	FailureReason        string          `json:"failure_reason"`
 }
 
 type receiptTarget struct {
@@ -64,12 +65,14 @@ func (m *module) receipt(ctx context.Context, p tenant.Principal, id string) (Re
 	var out Receipt
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var at *time.Time
+		var mode string
+		var outcome, generation *string
 		err := tx.QueryRow(ctx, `
 			SELECT m.id::text, m.idempotency_key, t.slug,
 			       m.sender_principal_id::text, m.recipient_principal_id::text,
 			       r.target_id::text, r.target_version, COALESCE(r.adapter, ''),
 			       COALESCE(r.address, ''), COALESCE(r.effective_level, ''),
-			       r.state, r.handed_off_at, r.failure_reason
+			       r.state, r.handed_off_at, r.failure_reason,m.content_mode,m.attached_outcome,m.recipient_message_generation::text
 			FROM inbox_messages m
 			JOIN tenants t ON t.id = m.tenant_id
 			JOIN inbox_receipts r ON r.tenant_id = m.tenant_id AND r.message_id = m.id
@@ -77,7 +80,7 @@ func (m *module) receipt(ctx context.Context, p tenant.Principal, id string) (Re
 			&out.MessageID, &out.IdempotencyKey, &out.Tenant,
 			&out.SenderPrincipalID, &out.RecipientPrincipalID,
 			&out.TargetID, &out.TargetVersion, &out.Adapter, &out.Address, &out.EffectiveLevel,
-			&out.State, &at, &out.FailureReason)
+			&out.State, &at, &out.FailureReason, &mode, &outcome, &generation)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
@@ -87,6 +90,16 @@ func (m *module) receipt(ctx context.Context, p tenant.Principal, id string) (Re
 		if at != nil {
 			s := at.UTC().Format(time.RFC3339)
 			out.HandedOffAt = &s
+		}
+		if mode != "durable" {
+			out.Attached = &AttachedStatus{Protocol: "attached_messages_v1", ContentMode: mode, Generation: generation}
+			if outcome != nil {
+				out.Attached.Outcome = *outcome
+			}
+			out.HandedOffAt = nil
+			if out.State == "handed_off" {
+				out.State = "queued"
+			}
 		}
 		return nil
 	})
@@ -157,6 +170,13 @@ func insertReceiptWith(ctx context.Context, tx pgx.Tx, p tenant.Principal, messa
 // advanceReceipt moves a queued receipt forward. A missing row is inserted.
 // A receipt already handed_off or failed is left untouched.
 func advanceReceipt(ctx context.Context, tx pgx.Tx, p tenant.Principal, messageID, state, level, reason string, target receiptTarget) error {
+	var attached bool
+	if err := tx.QueryRow(ctx, `SELECT content_mode<>'durable' FROM inbox_messages WHERE id=$1::uuid`, messageID).Scan(&attached); err != nil {
+		return err
+	}
+	if attached {
+		return errForbidden
+	}
 	targetID, version := receiptArgs(target)
 	tag, err := tx.Exec(ctx, `
 		UPDATE inbox_receipts SET

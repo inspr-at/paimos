@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -33,6 +34,7 @@ type watchPollKey struct {
 	hash         string
 	protocol     int
 	proofVersion int
+	messages     bool
 }
 
 func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in attachwatch.DeviceRequest) error {
@@ -92,7 +94,7 @@ func (m *Module) registerWatchKey(ctx context.Context, p tenant.Principal, in at
 		if m.watchKeys.keys == nil {
 			m.watchKeys.keys = make(map[string]watchPollKey)
 		}
-		m.watchKeys.keys[key] = watchPollKey{hash: digest(in.PollKey), protocol: protocol, proofVersion: in.LocalConsentProofVersion}
+		m.watchKeys.keys[key] = watchPollKey{hash: digest(in.PollKey), protocol: protocol, proofVersion: in.LocalConsentProofVersion, messages: in.MessageProtocol == attachedmsg.Protocol}
 	}
 	return err
 }
@@ -228,6 +230,10 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 		WriteError(w, fail(400, "invalid_request", "invalid local confirmation proof"))
 		return
 	}
+	if len(in.MessageLocalAuthSignature) > 144 || in.MessageLocalAuthNonce != "" && !attachwatch.LocalAuthNonceValid(in.MessageLocalAuthNonce) || in.Operation != "message_activate" && (in.MessageLocalAuthSignature != "" || in.MessageLocalAuthNonce != "") {
+		WriteError(w, fail(400, "invalid_request", "invalid messaging confirmation proof"))
+		return
+	}
 	if in.Operation == "register" {
 		if err := m.registerWatchKey(r.Context(), p, in); err != nil {
 			WriteError(w, err)
@@ -251,6 +257,10 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 	}
 	if !uuidRE.MatchString(in.RequestID) {
 		WriteError(w, fail(400, "invalid_request", "invalid attach request"))
+		return
+	}
+	if in.Operation == "message_request" || in.Operation == "message_activate" || in.Operation == "message_observed" {
+		m.messageDevice(w, r, p, in, expected)
 		return
 	}
 	if in.Operation != "request" && in.Operation != "poll" && in.Operation != "detach" && in.Operation != "exited" {

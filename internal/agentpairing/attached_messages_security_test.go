@@ -1,0 +1,352 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package agentpairing_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/inspr-at/paimos/internal/attachedmsg"
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Each request reaches the real pairing fence before any contender proceeds.
+// A timeout guards a hang; it is never evidence that requests overlapped.
+type notesFenceBarrier struct {
+	arrived chan struct{}
+	release chan struct{}
+	gate    bool
+}
+
+func (b *notesFenceBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(d.SQL, "'aeon-pairing:'") {
+		select {
+		case b.arrived <- struct{}{}:
+		case <-ctx.Done():
+			return ctx
+		}
+		if b.gate {
+			select {
+			case <-b.release:
+			case <-ctx.Done():
+			}
+		}
+	}
+	return ctx
+}
+func (*notesFenceBarrier) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func fencedNotesHandler(t *testing.T, n notesFixture, participants int, gate bool) (http.Handler, *notesFenceBarrier) {
+	t.Helper()
+	b := &notesFenceBarrier{arrived: make(chan struct{}, participants), release: make(chan struct{}), gate: gate}
+	cfg := n.f.db.App.Config()
+	cfg.MaxConns = int32(participants + 1)
+	cfg.ConnConfig.Tracer = b
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	mux := http.NewServeMux()
+	inbox.New(pool, n.s).Mount(mux)
+	compat, err := inbox.NewMessaging(pool, make([]byte, 32), n.s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compat.Mount(mux)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := tenant.Principal{ID: n.f.person, TenantID: n.f.tenantID, Kind: tenant.Person, BrowserSession: true, Name: "Owner"}
+		mux.ServeHTTP(w, r.WithContext(tenant.WithPrincipal(r.Context(), p)))
+	}), b
+}
+
+func awaitNoteFences(t *testing.T, b *notesFenceBarrier, n int) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	for i := 0; i < n; i++ {
+		select {
+		case <-b.arrived:
+		case <-ctx.Done():
+			t.Fatal("request did not reach authorization fence")
+		}
+	}
+}
+
+func TestAttachedFinalWriteSeesRevokedOwner(t *testing.T) {
+	n := readyNotes(t)
+	h, b := fencedNotesHandler(t, n, 1, false)
+	tx, err := n.f.db.Admin.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err = tx.Exec(t.Context(), `SELECT set_config('aeon.tenant_id',$1,true)`, n.f.tenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err = attachedmsg.Lock(t.Context(), tx); err != nil {
+		t.Fatal(err)
+	}
+	canary := "revoked-owner-canary-" + attachedmsg.UUID()
+	result := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, n.f.request("POST", n.path(false), n.body("revoked-final-write", canary, false), true, ""))
+		result <- w
+	}()
+	awaitNoteFences(t, b, 1)
+	// Revocation wins while the accepted browser identity is waiting for the
+	// same fence used by grants and the final send transaction.
+	if _, err = tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2`, n.f.tenantID, n.f.person); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case w := <-result:
+		var refusal struct{ Code string }
+		decodeResult(t, w, &refusal)
+		if w.Code != 403 || refusal.Code != "owner_authority_lost" {
+			t.Fatalf("wrong revoke result: %d %s", w.Code, refusal.Code)
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("send stuck after fence release")
+	}
+	assertNoCanary(t, n.f, canary)
+}
+
+// Used by both concurrency tests so every contender is at the lock boundary
+// before release, rather than relying on goroutine scheduling or sleeps.
+func concurrentNoteRequests(t *testing.T, n notesFixture, count int, key func(int) string, body func(int) string) []*httptest.ResponseRecorder {
+	t.Helper()
+	h, b := fencedNotesHandler(t, n, count, true)
+	defer close(b.release)
+	out := make([]*httptest.ResponseRecorder, count)
+	var wg sync.WaitGroup
+	for i := 0; i < count; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			w := httptest.NewRecorder()
+			h.ServeHTTP(w, n.f.request("POST", n.path(i%2 == 0), n.body(key(i), body(i), i%2 == 0), true, ""))
+			out[i] = w
+		}(i)
+	}
+	awaitNoteFences(t, b, count)
+	// Let all blocked traces execute their actual transaction lock together.
+	for i := 0; i < count; i++ {
+		b.release <- struct{}{}
+	}
+	wg.Wait()
+	return out
+}
+
+func TestAttachedDisabledExplicitNotesNeverPersist(t *testing.T) {
+	for _, mode := range []string{"nil", "disabled", "unqualified"} {
+		t.Run(mode, func(t *testing.T) {
+			n := readyNotes(t)
+			var disabled *attachedmsg.Service
+			if mode != "nil" {
+				disabled = attachedmsg.New(attachedmsg.Options{Enabled: mode == "unqualified", Origin: origin})
+			}
+			n.f.messages = []*attachedmsg.Service{disabled}
+			n.f.rebuildHandler()
+			for _, compat := range []bool{false, true} {
+				// Start with the detached case: weakening the explicit-note refusal
+				// must prove a durable body leak, rather than a different live fence error.
+				for _, route := range []string{"detached", "live", "omitted-session", "wrong-session"} {
+					canary := "disabled-note-canary-" + attachedmsg.UUID()
+					body := n.body(attachedmsg.UUID(), canary, compat)
+					state := "active"
+					if route == "detached" {
+						state = "detached"
+					}
+					if _, err := n.f.db.Admin.Exec(t.Context(), `UPDATE harness_attach_requests SET state=$2 WHERE id=$1`, n.in.RequestID, state); err != nil {
+						t.Fatal(err)
+					}
+					switch route {
+					case "omitted-session":
+						delete(body, "recipient_session_id")
+					case "wrong-session":
+						body["recipient_session_id"] = attachedmsg.UUID()
+					}
+					w := httptest.NewRecorder()
+					n.f.h.ServeHTTP(w, n.f.request("POST", n.path(compat), body, true, ""))
+					assertNoCanary(t, n.f, canary)
+					if w.Code != 409 {
+						t.Fatalf("explicit disabled note status %d want 409", w.Code)
+					}
+					var refusal struct{ Code string }
+					decodeResult(t, w, &refusal)
+					if refusal.Code != "feature_disabled" {
+						t.Fatalf("wrong refusal: %s", refusal.Code)
+					}
+				}
+			}
+			// An unrelated ordinary recipient retains its durable inbox behavior.
+			var recipient string
+			if err := n.f.db.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Ordinary recipient') RETURNING id::text`, n.f.tenantID).Scan(&recipient); err != nil {
+				t.Fatal(err)
+			}
+			for _, compat := range []bool{false, true} {
+				body := map[string]any{"body": "ordinary message", "idempotency_key": fmt.Sprint("ordinary-", compat)}
+				if compat {
+					body["to"] = recipient
+				} else {
+					body["recipient_principal_id"] = recipient
+				}
+				var msg inbox.Message
+				decodeResult(t, n.f.call("POST", n.path(compat), body, true, "", 201), &msg)
+				if msg.Body != "ordinary message" || msg.ContentMode != "" {
+					t.Fatal("ordinary message changed")
+				}
+			}
+		})
+	}
+}
+
+// Both acceptance and the exported broker contract must retain the session
+// binding and active-state lock until the final transaction commits.
+func TestAttachedSessionValidityLockedThroughCommit(t *testing.T) {
+	for _, entry := range []string{"authorize", "validate-grant"} {
+		for _, change := range []string{"archive", "stop", "project", "principal", "harness", "host", "ticket"} {
+			t.Run(entry+"/"+change, func(t *testing.T) {
+				n := readyNotes(t)
+				mutation := noteSessionMutation(t, n, change)
+				pool, barrier, ctx := dbtest.BarrierPool(t, n.f.db.App, func(sql string) bool {
+					return strings.Contains(sql, "SELECT EXISTS(SELECT 1 FROM harness_sessions")
+				})
+				first := make(chan error, 1)
+				go func() { first <- validateNoteSession(ctx, pool, n, entry) }()
+				pid := barrier.Wait(t, ctx)
+				second := make(chan error, 1)
+				done := make(chan struct{})
+				go func() {
+					_, err := n.f.db.Admin.Exec(ctx, mutation, n.grant.Binding.SessionID)
+					second <- err
+					close(done)
+				}()
+				lock := dbtest.BlockedOrDone(t, ctx, n.f.db.Admin, pid, done)
+				barrier.Release()
+				if err := dbtest.Await(t, ctx, first); err != nil {
+					t.Fatal("valid session refused: ", err)
+				}
+				if err := dbtest.Await(t, ctx, second); err != nil {
+					t.Fatal("session mutation failed: ", err)
+				}
+				if lock != "transactionid" && lock != "tuple" {
+					t.Fatalf("session validity was not protected by a row lock (%q)", lock)
+				}
+				assertNoteSessionChanged(t, validateNoteSession(ctx, n.f.db.App, n, entry))
+			})
+		}
+	}
+}
+
+// A mutation that owns the row first must be observed after the lock wait.
+// An earlier unlocked snapshot cannot authorize acceptance or a broker offer.
+func TestAttachedSessionValidityRecheckedAfterConcurrentMutation(t *testing.T) {
+	for _, entry := range []string{"authorize", "validate-grant"} {
+		for _, change := range []string{"archive", "host"} {
+			t.Run(entry+"/"+change, func(t *testing.T) {
+				n := readyNotes(t)
+				ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+				defer cancel()
+				tx, err := n.f.db.Admin.Begin(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer tx.Rollback(context.Background())
+				if _, err = tx.Exec(ctx, noteSessionMutation(t, n, change), n.grant.Binding.SessionID); err != nil {
+					t.Fatal(err)
+				}
+				pid := tx.Conn().PgConn().PID()
+				result := make(chan error, 1)
+				done := make(chan struct{})
+				go func() {
+					result <- validateNoteSession(ctx, n.f.db.App, n, entry)
+					close(done)
+				}()
+				lock := dbtest.BlockedOrDone(t, ctx, n.f.db.Admin, pid, done)
+				if err = tx.Commit(ctx); err != nil {
+					t.Fatal(err)
+				}
+				err = dbtest.Await(t, ctx, result)
+				if lock != "transactionid" && lock != "tuple" {
+					t.Fatalf("validation did not wait for the session mutation (%q)", lock)
+				}
+				assertNoteSessionChanged(t, err)
+			})
+		}
+	}
+}
+
+func validateNoteSession(ctx context.Context, pool *pgxpool.Pool, n notesFixture, entry string) error {
+	owner := tenant.Principal{ID: n.f.person, TenantID: n.f.tenantID, Kind: tenant.Person, BrowserSession: true, Name: "Owner"}
+	r := httptest.NewRequest("POST", origin+"/api/inbox/messages", nil).WithContext(tenant.WithPrincipal(ctx, owner))
+	r.Header.Set("Origin", origin)
+	ctx = attachedmsg.BrowserContext(r, origin, owner)
+	return db.InTenant(ctx, pool, owner.TenantID, func(tx pgx.Tx) error {
+		if err := attachedmsg.Lock(ctx, tx); err != nil {
+			return err
+		}
+		if entry == "validate-grant" {
+			_, err := n.s.ValidateGrant(ctx, tx, n.grant.Binding)
+			return err
+		}
+		_, err := n.s.Authorize(ctx, tx, owner, n.in.RequestID, attachedmsg.Send{Recipient: n.recipient, Project: n.grant.Binding.ProjectID, Session: &n.grant.Binding.SessionID, Generation: n.grant.Binding.Generation, Body: "validity test"})
+		return err
+	})
+}
+
+func assertNoteSessionChanged(t *testing.T, err error) {
+	t.Helper()
+	var refusal *attachedmsg.Error
+	if !errors.As(err, &refusal) || refusal.Status != 409 || refusal.Code != "attachment_binding_changed" {
+		t.Fatalf("changed session was not refused for its binding: %v", err)
+	}
+}
+
+func noteSessionMutation(t *testing.T, n notesFixture, change string) string {
+	t.Helper()
+	assignment := ""
+	switch change {
+	case "archive":
+		assignment = "archived_at=clock_timestamp(),stopped_at=clock_timestamp(),phase='stopped',recovery_process_state='unknown',recovery_request_id=gen_random_uuid(),recovery_request_digest='fixture'::bytea,recovery_actor_id=agent_principal_id,recovery_reason='fixture'"
+	case "stop":
+		assignment = "stopped_at=clock_timestamp(),phase='stopped'"
+	case "host":
+		assignment = "host=host||'-changed'"
+	case "harness":
+		assignment = "harness=CASE WHEN harness='claude' THEN 'codex' ELSE 'claude' END"
+	case "ticket":
+		assignment = "ticket_node_id=NULL,work_shape='unknown'"
+	case "principal":
+		assignment = "agent_principal_id='" + n.f.person + "'::uuid"
+	case "project":
+		project := attachedmsg.UUID()
+		err := db.InTenant(dbtest.Seed(t.Context()), n.f.db.App, n.f.tenantID, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title) SELECT $1,$2,id,'OTHER-1','Other project' FROM node_kinds WHERE slug='project'`, n.f.tenantID, project)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		assignment = "project_id='" + project + "'::uuid"
+	default:
+		t.Fatal("unknown session mutation: ", change)
+	}
+	return "UPDATE harness_sessions SET " + assignment + " WHERE id=$1"
+}

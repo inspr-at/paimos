@@ -115,24 +115,32 @@ func (s Snapshot) Valid() bool {
 }
 
 type DeviceRequest struct {
-	Doing                    *string                 `json:"doing,omitempty"`
-	ToolActivity             *agentactivity.Activity `json:"tool_activity,omitempty"`
-	LocalConsentProofVersion int                     `json:"local_consent_proof_version,omitempty"`
-	LocalAuthNonce           string                  `json:"local_auth_nonce,omitempty"`
-	LocalAuthSignature       string                  `json:"local_auth_signature,omitempty"`
-	AttachProtocol           int                     `json:"attach_protocol,omitempty"`
-	ConsentDigest            string                  `json:"consent_digest,omitempty"`
-	LocalConfirmed           bool                    `json:"local_confirmed,omitempty"`
-	Operation                string                  `json:"operation"`
-	RequestID                string                  `json:"request_id"`
-	ComputerID               string                  `json:"computer_id"`
-	DeviceProof              string                  `json:"device_proof,omitempty"`
-	PollKey                  string                  `json:"poll_key"`
-	Snapshot                 Snapshot                `json:"snapshot"`
-	Digest                   string                  `json:"request_digest"`
-	Sequence                 int64                   `json:"sequence,omitempty"`
-	Text                     string                  `json:"text,omitempty"`
-	LocalAuthCapability      string                  `json:"local_auth_capability,omitempty"`
+	Doing                     *string                 `json:"doing,omitempty"`
+	ToolActivity              *agentactivity.Activity `json:"tool_activity,omitempty"`
+	LocalConsentProofVersion  int                     `json:"local_consent_proof_version,omitempty"`
+	LocalAuthNonce            string                  `json:"local_auth_nonce,omitempty"`
+	LocalAuthSignature        string                  `json:"local_auth_signature,omitempty"`
+	AttachProtocol            int                     `json:"attach_protocol,omitempty"`
+	ConsentDigest             string                  `json:"consent_digest,omitempty"`
+	LocalConfirmed            bool                    `json:"local_confirmed,omitempty"`
+	Operation                 string                  `json:"operation"`
+	RequestID                 string                  `json:"request_id"`
+	ComputerID                string                  `json:"computer_id"`
+	DeviceProof               string                  `json:"device_proof,omitempty"`
+	PollKey                   string                  `json:"poll_key"`
+	Snapshot                  Snapshot                `json:"snapshot"`
+	Digest                    string                  `json:"request_digest"`
+	Sequence                  int64                   `json:"sequence,omitempty"`
+	Text                      string                  `json:"text,omitempty"`
+	LocalAuthCapability       string                  `json:"local_auth_capability,omitempty"`
+	MessageProtocol           string                  `json:"message_protocol,omitempty"`
+	MessageGeneration         string                  `json:"message_generation,omitempty"`
+	MessageConsentDigest      string                  `json:"message_consent_digest,omitempty"`
+	HookReleaseDigest         string                  `json:"hook_release_digest,omitempty"`
+	HookConfigDigest          string                  `json:"hook_config_digest,omitempty"`
+	QualifiedHarnessVersion   string                  `json:"qualified_harness_version,omitempty"`
+	MessageLocalAuthNonce     string                  `json:"message_local_auth_nonce,omitempty"`
+	MessageLocalAuthSignature string                  `json:"message_local_auth_signature,omitempty"`
 }
 
 // ConsentDigest binds approval to this request, its snapshot (including the

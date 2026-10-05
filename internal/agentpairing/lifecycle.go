@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/hookcap"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -306,6 +307,37 @@ WHERE c.id=$1`, computer).Scan(&principal, &tenantID, &audience)
 }
 func (m *Module) cleanup(ctx context.Context, tx pgx.Tx, computer string, in proofRequest) error {
 	changed := false
+	if in.HookCapabilities != nil {
+		if len(in.HookCapabilities) > 5 {
+			return fail(400, "invalid_request", "invalid hook capabilities")
+		}
+		rec, err := computerRecord(ctx, tx, computer)
+		if err != nil {
+			return err
+		}
+		seen := map[string]bool{}
+		for i, c := range in.HookCapabilities {
+			if !hookcap.Valid(c) || seen[c.Harness] {
+				return fail(400, "invalid_request", "invalid hook capabilities")
+			}
+			if c.OS != rec.Details.Platform {
+				return fail(400, "invalid_request", "invalid hook capability platform")
+			}
+			var enrolled bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id WHERE e.computer_id=$1 AND a.harness=$2)`, computer, c.Harness).Scan(&enrolled); err != nil {
+				return err
+			}
+			if !enrolled {
+				return fail(400, "invalid_request", "invalid hook capability enrollment")
+			}
+			seen[c.Harness] = true
+			in.HookCapabilities[i] = hookcap.Project(c)
+		}
+		raw, _ := json.Marshal(in.HookCapabilities)
+		if _, err := tx.Exec(ctx, `UPDATE agent_pairing_computers SET hook_capabilities=$2 WHERE id=$1 AND state='connected'`, computer, raw); err != nil {
+			return err
+		}
+	}
 	if in.Progress != nil {
 		switch in.Progress.State {
 		case "provisioning", "login_required", "service_conflict", "connected", "setup_failed":

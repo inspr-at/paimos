@@ -27,13 +27,13 @@
     {
       "counterpart": "agentd-rehearsal/Build darwin paimos-agentd with LocalAuthentication",
       "mode": "step",
-      "sha256": "e4228f5fed4a2391d05bf550c22ddbddde8dcac46b9066c1a51fb96a9c695332",
+      "sha256": "fab5442dd14e9b67ab4c3414a0253879794187777e355ad5d7b1226f232acce9",
       "step": "Build darwin paimos-agentd with LocalAuthentication"
     },
     {
       "counterpart": "Apple credentials and notarization stay in the tag-only signing environment; native unsigned build and signing-shell syntax run in rehearsal.",
       "mode": "disabled",
-      "sha256": "ffeb3de273e79426b33268e00432a160f159358a6ed7f168b0ec6bb8161b3576",
+      "sha256": "1b10677d1bb9571e494b495522c3aa19e0a1bdcedf2fc172cc00140214425307",
       "step": "Sign and notarize paimos-agentd"
     },
     {
@@ -45,7 +45,7 @@
     {
       "counterpart": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
       "mode": "action",
-      "sha256": "2cd9a03d5936656e31ec2449705786a1355a9b927e37b71d863d9e5164ca2b1f",
+      "sha256": "bd3fbfe9ca7e09247d39292d3f75d9ad7e44557e9ecdfad1d881f32d8a6b208f",
       "step": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
     }
   ],
@@ -77,7 +77,7 @@
     {
       "counterpart": "assets-rehearsal/Exact production assets assembly",
       "mode": "step",
-      "sha256": "3f23684a69da046128765efa604f225488fd248a14e7a909d6f59abe50627066",
+      "sha256": "0cf03eebde55ecad3c62023ac65ff5a32d8edf190f921352d2091391e30a15a6",
       "step": "Build linux paimos-agentd and aeon-cli"
     },
     {

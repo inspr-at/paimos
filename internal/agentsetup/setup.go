@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/grokprobe"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/hookcap"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -87,6 +88,8 @@ type RuntimeConfig struct {
 }
 
 type snapshot struct {
+	HookHome           string                `json:"hook_home,omitempty"`
+	HookCapabilities   []hookcap.Capability  `json:"hook_capabilities,omitempty"`
 	LocalAuthKeyID     string                `json:"local_auth_key_id,omitempty"`
 	BoundComputer      string                `json:"bound_computer_id,omitempty"`
 	BoundDaemon        string                `json:"bound_daemon_id,omitempty"`
@@ -118,6 +121,7 @@ type snapshot struct {
 // Only Progress is printable. The snapshot and HTTP request bodies contain
 // private capabilities and must never be returned as status or diagnostics.
 type Progress struct {
+	HookCapabilities      []hookcap.Capability     `json:"hook_capabilities,omitempty"`
 	TouchIDConfirmation   string                   `json:"touch_id_confirmation,omitempty"`
 	TouchIDUpgradeCommand string                   `json:"touch_id_upgrade_command,omitempty"`
 	BlockedAccounts       []BlockedAccount         `json:"blocked_accounts,omitempty"`
@@ -183,6 +187,7 @@ type LocalDaemon interface {
 	Status(context.Context, string) (LocalStatus, error)
 }
 type Engine struct {
+	Hooks              *HookInstaller
 	Enclave            agentsecurity.Signer
 	Store              *Store
 	API                PairingAPI
@@ -245,7 +250,8 @@ func (e *Engine) save(s *snapshot, first bool) error {
 	return e.Store.Write(snapshotName, raw, first)
 }
 func (e *Engine) progress(s *snapshot) Progress {
-	p := Progress{Schema: "aeon.agent-setup.v1", Stage: s.Phase, RequestID: s.Request.RequestID, ComputerID: s.View.ComputerID, Accounts: s.View.Enrollments, LocalProcesses: "unconfirmed"}
+	refreshHookCapabilities(s)
+	p := Progress{HookCapabilities: s.HookCapabilities, Schema: "aeon.agent-setup.v1", Stage: s.Phase, RequestID: s.Request.RequestID, ComputerID: s.View.ComputerID, Accounts: s.View.Enrollments, LocalProcesses: "unconfirmed"}
 	if s.View.ComputerID != "" {
 		p.TouchIDConfirmation = "needs pairing upgrade"
 		if s.Request.Platform != "darwin" {
@@ -730,6 +736,12 @@ func (e *Engine) provision(ctx context.Context, s *snapshot) (result Progress, r
 		if err != nil {
 			return e.progress(s), err
 		}
+	}
+	if err := e.setupHooks(ctx, s, false); err != nil {
+		return e.progress(s), err
+	}
+	if _, err := e.API.Reconcile(ctx, e.proof(s)); err != nil {
+		return e.progress(s), err
 	}
 	s.Phase = "connected"
 	if s.View.Verification.Mode == "one_per_harness" {

@@ -2134,6 +2134,20 @@ set `Client.ConfirmStepUp` to their authenticated local-daemon callback.
 
 To remove a pairing, run `aeon-agentd disconnect` and wait for `disconnected` before uninstalling. This freezes new work, requests server revocation, waits for owned processes to drain, then stops and removes its own service. `--once` reports one resumable step; interruption or lost connectivity leaves cleanup pending, and the same command resumes it. Vendor sign-ins and project files are preserved. Homebrew users then run `brew uninstall aeon-agentd`; checksum-installer users remove the `~/.local/bin/aeon-agentd` link and downloaded versions under `~/.local/lib/aeon`. Nix users disable/remove the service and package through their owning configuration's review path. Retain private pairing state until cleanup and any accounting recovery are complete; `--state-root` selects a nondefault pairing.
 
+Attached-session user hooks (AEON-391) ship **disabled by default**. An explicit `aeon-agentd pair --install-user-hooks --hook-executable /absolute/path/to/aeon` requests installation after browser approval; existing connected computers use `aeon-agentd repair --install-user-hooks --hook-executable /absolute/path/to/aeon --json`. Add `--state-root` for an existing nondefault pairing. `aeon hook install|uninstall --paired --harness claude --setup-root /absolute/approved/pairing` uses the same repair path. Project scope is refused. These commands report `hook_capabilities` through pairing reconciliation and status; they never enable messages or upgrade watch consent.
+
+The installer authenticates the CLI, copies the exact artifact into a private digest-named executable (independent of PATH/profile upgrades and Nix garbage collection), and records its digest and file identity for the daemon's loaded-image check. Both installation and runtime identity checks require an independently authenticated release that is also in the compiled, reviewed release ceiling for that exact digest/OS/architecture. An install receipt alone cannot establish trust, and a newer artifact from the same signer cannot approve itself. The ceiling is currently empty pending native qualification. Runtime rechecks bytes and inode after verification, and refuses settings changed during the check. Darwin release jobs sign/notarize `aeon-cli` under the independently pinned Developer ID identity; the unsigned native rehearsal builds and hands off the same CLI before assets assembly. Linux requires an Ed25519-authenticated `aeon.hook-release.v1` manifest declaring the reviewed version and version scheme, plus a reviewed compiled-in public key; its public manifest/signature are retained beside the pin for independent runtime verification. No key is configured yet, so checksum-only Linux artifacts stay untrusted. No credential, network URL or API config path is written into the installed command. Runtime paired mode currently returns a bounded, content-free no-op pending S2-4; it cannot fall back to HTTP inbox delivery.
+
+No harness/version/OS combination is advertised as qualified until native launch-chain, effective-settings and event-output evidence is reviewed with S2-4/S2-5. Both Claude and Codex currently report `qualification_pending` on explicit installation; normal pairing reports `feature_disabled`. Filesystem fixtures exercise the installation engine with test-only qualification, not a production enable switch. Project/ancestor overrides, environment-selected config roots and uncertain configuration provenance remain blockers. Qualification must account for every effective source, including managed settings, plugins and launch flags listed in the [Claude settings reference](https://code.claude.com/docs/en/settings) and [hook locations](https://code.claude.com/docs/en/hooks#hook-locations).
+
+Settings are merged atomically with private backups, a cooperating-writer lock and concurrent-change detection. Ownership requires the complete saved hook group, including its matcher/timeout; a comment suffix alone is insufficient. Exact owned duplicates collapse to one integration. Hook reports match connected enrollment account keys and collapse to one conservative report per harness; different active versions cannot claim qualification, and reconciliation repairs duplicate reports from older snapshots. Unknown v1/v2 entries or locally changed groups are preserved with `ownership_unknown` for local repair. Selective disconnect retains a shared integration until the last enrollment finishes local cleanup, including accounts still draining. Successful uninstall confirms the settings removal before retiring the exact ownership receipt, so a newly approved computer can install; conflicts retain the receipt for repair. Other settings and project files are preserved. Processes running as your OS user are not isolated; these pins and checks do not claim full protection against unrestricted same-user tampering.
+
+AEON-391 validation (implementation `08378631`): the approved Mac runner passed `go test ./internal/... ./cmd/...`; local `scripts/...` tests and affected-package `go vet` passed. The paired installer fixtures passed on macOS (including `-race`) and a local Linux container. Four removed-check mutations—source identity, manifest signature, project scope and ownership—each made the security tests fail. Release metadata and shell syntax checks passed. This evidence validates the installer and conservative reporting; it does not qualify a real harness or provision a Linux signing trust anchor.
+
+Runtime hardening `f7165a9e` (after merging main at `38306cc5`) passed the full `go test ./...` suite on the approved Mac runner, focused Mac race tests, affected-package `go vet`, and the hook filesystem/manifest fixtures in an isolated Linux container on that runner. The unsigned-receipt regression failed before the fix. Removing runtime authentication, the release ceiling, the manifest signature check or the post-verification image check each made its targeted regression fail. Release metadata, shell syntax, release workflow coverage and 28 exact-SHA rehearsal gate tests passed. Native harness qualification, reviewed published artifact digests and the independent Linux signing key/manifest publication remain coordinator prerequisites; messaging remains disabled.
+
+Lifecycle fixes `f5578caa` passed the affected `agentsetup`, `agentpairing`, `hookcap`, `cli` and `cmd/aeon-agentd` Go suites on the approved remote runner, focused race tests including HTTP re-enrollment and actual revoked-account fence synchronization, affected-package `go vet`, and the web build and complete `npm run test:unit` command. Regression commit `ee8873c9` retains `c625f8c7` behavior with only a private fixture-home resolver added: it fails on the HTTP duplicate-report rejection, removal of hooks needed by connected or draining accounts, and retained ownership after uninstall. Concurrent receipt changes and persisted duplicate reports also go red there. The `agent-pairing.spec.ts` browser attempt was refused by the explicit OPS-247 bootstrap/launcher gate in `scripts/playwright-remote.mjs`; hosted CI remains a coordinator check under the no-push freeze. No assertions were weakened, activation gates were changed, or messaging enabled.
+
 Claude dependency pins preserve stable Node and SDK links, including Home Manager links. Each probe and start checks the full link chain, ownership, directory permissions, workspace exclusion and the SDK's declared package entry, then launches the resolved physical paths. Existing physical pins remain supported. To replace old pins after an update, run `aeon-agentd repin --harness claude --node-path /absolute/stable/bin/node --claude-sdk-path /absolute/stable/lib/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs` (add `--state-root` for a nondefault pairing). Omit the dependency flags to discover the current global installation. The command shows old and new paths and versions; `--yes` confirms without prompting, including with `--json` in Home Manager activation. Missing old versions show as unavailable.
 
 On macOS, these checks accept user- or root-owned directories writable by the `admin` group (gid 80), including Homebrew's `bin` and `Cellar`; group-writable files, other writable groups and non-sticky world-writable directories remain unsafe. Linux retains its group-write refusal. The known Homebrew repositories `/opt/homebrew`, `/usr/local/Homebrew` and `/home/linuxbrew/.linuxbrew` qualify as installed package prefixes for executable and dependency pins only when both the prefix and `.git` have trusted ownership and permissions. Private pairing state (`--state-root`) must remain outside every repository, including these Homebrew prefixes. The configured workspace and other repository ancestors remain excluded. Unsafe dependency errors name the offending component and explain how to fix it.
@@ -3315,6 +3329,109 @@ this is not a provider billing cap. Existing wall-clock deadlines remain.
 People with `harness.recover` permission can open **Recover** in a session’s details and archive its registration after confirming the exact session and host. Archive preserves ticket links, outcomes and audit history, revokes the old worker generation, and records process state as unknown. It never signals a process. Late heartbeats, control completions and registration replays cannot reopen an archived generation; a new session needs a new reference and lease. The recovery dialog refreshes on stale observations. Recovery-aware daemons detach their harness registration without stopping the run. Active older managed daemons must stop normally before archive is available, because they cannot detach safely. Archive waits for any already-authorized force request to finish or expire.
 
 Managed daemons report a per-launch process identity and generation. **Force stop** additionally requires human `harness.force_stop` permission, an ownership report no more than 45 seconds old, and exact session/host/process-group confirmation. Ownership recording and freshness checks use the Postgres clock, so API-host clock skew does not reject a fresh report; future-dated observations still fail closed. The daemon rejects a changed identity, restart, expired request or lost ownership; deadline and cancellation are rechecked under the final signal lock. Local transport and inbox credentials cannot authorize force stop. Expiry uses the database-derived monotonic budget above; archive cannot retract a signal that was already authorized or delivered, and always retains unknown process state. It signals only the owned process group (including children in that group), and reports root exit separately from queue acceptance; escaped descendants are outside its scope. Linux and macOS keep the group leader unreaped while signaling, preventing PID reuse. Unsupported adapters, legacy unmanaged sessions and offline ownership cannot be force stopped. Legacy normal user **Stop** sends TERM and reports timeout without escalating; the qualified Claude managed control uses native close as described above. Daemon cleanup retains its existing bounded force cleanup.
+
+### Attached owner notes (AEON-392, disabled)
+
+The server contract adds separate, single-use messaging consent to protocol-2
+attachments. Watching never grants sending. The independent helper prepares a
+snapshot/pin-bound grant; only the computer owner's same-origin browser session
+can approve it. Policy B additionally requires a fresh messaging nonce and a P-256 signature
+verified against the browser-pinned pairing key. Its signed digest includes the
+full attachment, owner, session, generation, daemon and hook tuple plus the
+canonical local prompt. Watch signatures and boolean confirmations are refused;
+activation consumes the messaging challenge atomically. Each
+re-enablement gets a fresh message generation. Turning messages off preserves
+the watch lease; message operations never renew that lease.
+
+`AEON_ATTACHED_MESSAGES=true` also requires the deployment-owner qualification
+`AEON_ATTACHED_MESSAGES_SINGLE_INSTANCE=true`. Both default off. This is an
+operator attestation, not a distributed lock or automatically verified lease:
+exactly one serving/sweeping Aeon process may use the database while enabled.
+There must be no sibling replica, overlapping rolling restart, second service,
+or separately running sweeper. Stop the old process before starting its
+replacement; disable the feature if that invariant cannot be maintained.
+The production hook-capability projection remains fail-closed until native qualification
+work lands. `internal/attachedmsg/store.go` narrows every pairing capability
+report through AEON-391's release-owned `hookcap.Project` ceiling. Tests
+inject qualified fixtures; those fixtures are not production qualification.
+
+An explicit `recipient_message_generation` always selects an attached note,
+including when messaging is disabled or its attachment has ended. Such a send
+is volatile or refused; it never falls back to durable chat. When messaging is
+fully enabled, active attachments also enforce the policy when a caller omits
+the generation or session. When disabled or unqualified, requests without a
+message generation retain ordinary inbox routing, including live watched
+attachments. The final durable write rechecks attachment status under the same
+fence as activation while messaging is enabled, closing the lookup gap.
+Session identity, project, principal, harness, host, ticket and active state are
+validated under a shared session row lock retained through commit. That lock
+is acquired before attachment and grant row locks; acceptance and broker
+validation use that same protected predicate.
+Both inbox send APIs (therefore CLI and MCP) use one attached-recipient policy.
+A person needs the exact computer ownership, live project permissions, current
+grant and `recipient_message_generation`. Agents can create only bounded
+notification metadata; their labels and sender-session fields confer no owner
+authority. Attached v1 rejects steering, action requests and reply/thread modes.
+The capability route is `/api/agent-pairing/attach/{requestId}/messages`; its
+`approve` and `revoke` subroutes are owner-only. Ordinary inbox reads, streams,
+acks, adapter claims and managed drains cannot consume these rows.
+
+Note bodies live only in the shared inbox payload service. Both message tables
+store “Attached-session note; text not retained”, with database constraints.
+Idempotency comparison uses a keyed in-memory digest; after payload loss an old
+key returns existing metadata and never recreates a note. Events are private
+metadata, and failure settlement does not copy a note to a coordinator or a
+notice. Request/SQL logging never receives the raw body. A five-minute deadline,
+a live attach lease, a 4 KiB body limit, an 8,000-character escaped frame limit,
+a session burst of three (one token per ten seconds), 30 sends/minute/computer,
+five pending notes/session, and 1 MiB/tenant plus 16 MiB/process payload ceilings
+are enforced server-side. Notifications use separate session/computer rate
+counters (the same burst/refill and 30/minute limits) and separate in-memory
+metadata limits (5/session, 1,024/tenant, 16,384/process). Their text is cleared
+before reservation. They never consume any owner-note rate or memory capacity.
+Quota failures return 429 with `Retry-After`.
+
+S2-3 must use the exported exact `Binding`/`Offer` contract, recheck
+`ValidateGrant` under the pairing fence, commit its one attempt, then use the
+single-use payload `Take`; it must never replay a body. Pass
+`Take(binding, grantID, messageID, TakeTransaction{Context: ctx, Tx: tx})` in the
+transaction that holds the pairing fence and revalidates the grant. `Take`
+locks and re-reads the exact message tuple, accepting only queued/offered rows
+before their deadline; a sibling's `content_lost` settlement denies release even
+while the old process retains RAM. Missing transaction or any SQL error fails
+closed. Existing three-argument calls still compile but return no body. Never
+expose the result before that transaction commits; a rollback loses the taken
+body rather than replaying it. Lock order is pairing
+fence → tree → tenant, then compat advisory lock, session, attachment/grant, message,
+delivery, receipt, event counter. Publication follows the metadata commit;
+rollback discards the reservation. The service epoch binds the owning process.
+Restart/disabled/expired/revoked notes settle without automatic retry. Status
+adds `attached` evidence and never treats a legacy fetch/ack as model reading.
+Negative controls run with `nix develop -c python3 scripts/check-attached-policy-mutations.py`
+and `AEON_TEST_DATABASE_URL` pointing at a disposable test database; the script
+restores exact source bytes after each owner/tuple/digest/replay mutation.
+The local credential-free hook and offer/receipt broker are separate dependent
+packages; this change does not activate delivery or managed controls.
+
+Package validation (2026-10-03): the approved remote `go test -count=1 ./...`
+run passed 123 packages; its only failure was a new unquoted OpenAPI description.
+After correction, the payload, inbox and reporter-contract packages passed.
+The final attachment run passed all 16 tests and killed all 15 security
+mutations at their intended assertions, including an actual durable-body leak
+when the disabled-note guard was removed. Exact source bytes were restored.
+The migration guard passed against `v261003065316.0.0`: 230 unique migration
+numbers, immutable published files, and expand-safe additions 1210–1212.
+
+Fix-round validation (2026-10-03): all 18 attachment tests and the inbox package
+passed locally. Barrier tests prove session row protection through commit and
+revalidation after concurrent archive/binding changes for acceptance and
+`ValidateGrant`. Removing the fixes on `424af4e9` makes the session-lock and
+disabled-routing regressions fail at their intended assertions. Web build,
+656 Node tests, 741 Vitest tests and all 17 `session-messages.spec.ts` Chromium
+checks passed; the browser checks used one supervised worker on macOS.
+The remote test host was off limits; Linux browser qualification and the
+consolidated release review remain with the coordinator.
+
 
 ### Removing ghost sessions (AEON-265)
 
