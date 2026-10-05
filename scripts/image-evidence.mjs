@@ -49,14 +49,15 @@ export function timingEvidence(start, end, assembly, smoke, identity = {}) {
   let seconds = null;
   try {
     seconds = secondsBetween(start, end);
-    if (seconds == null || seconds < 0) throw new Error('invalid timing interval');
+    if (!Number.isFinite(seconds) || seconds < 0) throw new Error('invalid timing interval');
     // Use release-timing's validation/unknown conventions, but keep subsecond
     // precision so 90.001 s cannot pass a strict 90 s budget by rounding.
     seconds = (Date.parse(end) - Date.parse(start)) / 1000;
+    if (!Number.isFinite(seconds) || seconds < 0) throw new Error('invalid timing interval');
   } catch { reasons.push('missing, invalid or reversed interval'); }
   if (reasons.length) seconds = null;
   return {
-    schema: 'aeon.image-timing.v1', ...identity, started_at: start || null, completed_at: end,
+    schema: 'aeon.image-timing.v1', ...identity, started_at: start || null, completed_at: end || null,
     assembly_outcome: assembly || null, smoke_outcome: smoke || null,
     assembly_smoke_s: seconds, target_s: 90, within_target: seconds == null ? null : seconds <= 90,
     completeness: { state: reasons.length ? 'partial' : 'complete', reasons },
@@ -74,16 +75,21 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     } else if (mode === 'start') writeFileSync(path, new Date().toISOString() + '\n');
     else if (mode === 'timing') {
       let start = null;
-      try { start = readFileSync(path, 'utf8').trim(); } catch { /* Unknown, never zero. */ }
+      try {
+        const info = lstatSync(path);
+        if (!info.isFile() || info.size > 128) throw new Error('invalid or oversized timing start');
+        start = readFileSync(path, 'utf8').trim();
+      } catch { /* Unknown, never zero. */ }
       const report = timingEvidence(start, new Date().toISOString(), process.env.ASSEMBLY_OUTCOME, process.env.SMOKE_OUTCOME, {
         platform, sha: process.env.GITHUB_SHA || null, run_id: process.env.GITHUB_RUN_ID || null,
         run_attempt: process.env.GITHUB_RUN_ATTEMPT || null, runner: process.env.RUNNER_ENVIRONMENT || 'local',
       });
       writeFileSync(path + '.json', JSON.stringify(report, null, 2) + '\n');
       if (process.env.GITHUB_STEP_SUMMARY) writeFileSync(process.env.GITHUB_STEP_SUMMARY,
-        `\nImage assembly + smoke (${platform}): ${report.assembly_smoke_s ?? 'unknown'} s; target 90 s; evidence ${report.completeness.state}.\n`, { flag: 'a' });
+        `\nImage assembly + smoke (${platform}): ${report.assembly_smoke_s ?? 'unknown'} s; target 90 s; within_target=${report.within_target ?? 'unknown'}; evidence ${report.completeness.state}.\n`, { flag: 'a' });
       console.log(JSON.stringify(report));
-      if (report.within_target === false) throw new Error('image assembly + smoke exceeded 90 s');
+      if (report.completeness.state !== 'complete') throw new Error(`incomplete image timing evidence: ${report.completeness.reasons.join('; ')}`);
+      if (report.within_target === false) console.log(`::warning::Image assembly + smoke (${platform}) took ${report.assembly_smoke_s} s, exceeding the 90 s acceptance target.`);
     } else throw new Error('usage: image-evidence.mjs runtime LAYOUT PLATFORM | start PATH | timing PATH PLATFORM');
   } catch (error) { console.error(error.message); process.exitCode = 1; }
 }

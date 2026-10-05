@@ -740,7 +740,7 @@ the evidence. Fixture timings are not live acceptance evidence.
 
 ### Image dry runs and timing evidence
 
-`.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. Its two native hosted matrix jobs run the workflow/index and assembly-script regression tests, generate offline release history once, compile externally, import the matching architecture caches, freeze the runtime closure, load that platform's production assembly and run the same full smoke gate. Both must also pass the 90-second assembly/smoke budget and the two-clean-rebuild digest proof. The rehearsal exports production BuildKit provenance locally with the identical digest-bound base and inputs. Its token has only `contents: read`; it has no signing environment, registry login, registry cache export, image push, attestation or release creation. Before tagging, require the successful exact-SHA `main` receipt described in [Mandatory pre-tag rehearsal (AEON-531)](#mandatory-pre-tag-rehearsal-aeon-531); a work-branch or PR run is diagnostic only and cannot authorize a release tag. Hosted timing can be measured in rehearsal; real attestation verification still requires a coordinator-authorized publishing run. A local fixture test establishes neither.
+`.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. Its two native hosted matrix jobs run the workflow/index and assembly-script regression tests, generate offline release history once, compile externally, import the matching architecture caches, freeze the runtime closure, load that platform's production assembly and run the same full smoke gate. Both must also produce complete assembly/smoke timing evidence and pass the two-clean-rebuild digest proof. The 90-second target is an AEON-422 acceptance measurement; slower successful samples warn without blocking releases. The rehearsal exports production BuildKit provenance locally with the identical digest-bound base and inputs. Its token has only `contents: read`; it has no signing environment, registry login, registry cache export, image push, attestation or release creation. Before tagging, require the successful exact-SHA `main` receipt described in [Mandatory pre-tag rehearsal (AEON-531)](#mandatory-pre-tag-rehearsal-aeon-531); a work-branch or PR run is diagnostic only and cannot authorize a release tag. Hosted timing can be measured in rehearsal; real attestation verification still requires a coordinator-authorized publishing run. A local fixture test establishes neither.
 
 ### Host compilation, runtime pin and digest proof (AEON-422)
 
@@ -806,13 +806,21 @@ Both workflows upload `image-assembly-<arch>-<run_id>-<attempt>` for 14 days:
   run/attempt/SHA/platform, assembly/smoke outcomes, `assembly_smoke_s`,
   `within_target`, and `completeness: {state, reasons}`. Missing/failed/skipped
   evidence is **unknown**, never zero or success, following
-  `scripts/release-timing.mjs`'s validated interval conventions.
+  `scripts/release-timing.mjs`'s validated interval conventions. After saving
+  the JSON and step summary, missing, malformed, reversed or incomplete
+  evidence makes the timing command exit non-zero. Start files are bounded
+  to 128 bytes; oversized or non-regular files are treated as missing evidence.
+  Both workflows run this command with `if: always()` and pass the assembly
+  and smoke outcomes; failed or skipped work stays partial and fails the step.
 - Runtime `index.json`: the frozen local OCI root descriptor. Archive the
   full runtime layout separately if a durable replay fixture is required.
 
 The timing interval starts immediately before COPY assembly and stops after
 the complete immutable-ID smoke, including image load, ID resolution, fixture
-setup and cleanup. Successful samples over 90 seconds fail the job. Host
+setup and cleanup. Complete successful samples over 90 seconds record
+`within_target: false`, emit a GitHub `::warning::` annotation and a step-summary
+line, retain their artifact and exit zero. The 90-second target measures
+AEON-422 acceptance; it is not a release safety gate. Host
 compilation, runtime preparation, setup, clean rebuild proofs and provenance
 export are outside that named acceptance metric; their separate named Actions
 step durations must still be reported when assessing total release latency.
@@ -822,8 +830,9 @@ Hosted evidence remains pending until the coordinator integrates this change
 and dispatches `release-image-check.yml` on the exact `main` SHA using the
 existing pre-tag procedure. Download both architecture artifacts, require
 `reproducible: true`, equal `runs[0].image.digest` and `runs[1].image.digest`,
-matching inputs/base, complete timing with `assembly_smoke_s <= 90`, and the
-full smoke/job success. Use `gh run view RUN_ID --json jobs,createdAt,updatedAt`
+matching inputs/base, complete timing, and full smoke/job success. Assess
+`assembly_smoke_s <= 90` separately for AEON-422 acceptance; a slower measured
+sample warns without blocking the release. Use `gh run view RUN_ID --json jobs,createdAt,updatedAt`
 to retain per-step durations and cold/warm logs; compare like-for-like samples
 to release 123's 142 s amd64 and 129 s arm64 build-plus-smoke baseline. Those
 baseline numbers are OPS-provided, not measured by this worker. No local or

@@ -42,7 +42,7 @@ func TestExternalImageAssemblyAndEvidence(t *testing.T) {
 			t.Fatal("assembly lacks immutable base or timestamp normalization")
 		}
 		_, timing := named(t, j, "Record assembly and smoke timing")
-		if timing.If != "always()" || timing.Env["ASSEMBLY_OUTCOME"] != "${{ steps.build.outcome }}" || timing.Env["SMOKE_OUTCOME"] != "${{ steps.smoke.outcome }}" || !strings.Contains(timing.Run, "image-evidence.mjs timing") {
+		if timing.If != "always()" || timing.Env["ASSEMBLY_OUTCOME"] != "${{ steps.build.outcome }}" || timing.Env["SMOKE_OUTCOME"] != "${{ steps.smoke.outcome }}" || timing.Run != `node scripts/image-evidence.mjs timing "$RUNNER_TEMP/image-timing" linux/${{ matrix.arch }}` {
 			t.Fatal("timing conceals incomplete evidence")
 		}
 		_, proof := named(t, j, "Prove two clean image rebuilds")

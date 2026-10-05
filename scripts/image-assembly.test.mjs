@@ -1,9 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { assemble } from './assemble-image.mjs';
 import { buildInputs, compile, epoch, filesIn, sha256 } from './build-image-inputs.mjs';
 import { digest, runtimeManifest, timingEvidence } from './image-evidence.mjs';
@@ -131,13 +133,87 @@ test('timing reports only successful bounded evidence; failures/skips/missing ti
   assert.equal(timingEvidence(start, '2026-10-05T12:01:31Z', 'success', 'success').within_target, false);
   assert.equal(timingEvidence(start, '2026-10-05T12:01:30.001Z', 'success', 'success').within_target, false);
   for (const args of [[null, end, 'success', 'success'], [start, end, 'success', 'skipped'],
-    [start, end, 'failure', 'success'], [end, start, 'success', 'success'], [start, '2026-10-05T12:01:00', 'success', 'success']]) {
+    [start, end, 'failure', 'success'], [end, start, 'success', 'success'], [start, '2026-10-05T12:01:00', 'success', 'success'],
+    [start, null, 'success', 'success'], [start, 'InfinityZ', 'success', 'success']]) {
     const result = timingEvidence(...args);
     assert.equal(result.assembly_smoke_s, null);
     assert.equal(result.within_target, null);
     assert.equal(result.completeness.state, 'partial');
   }
 });
+
+// Freeze only the child process clock; CLI assertions never depend on runner speed.
+function timingCLI(start, assembly = 'success', smoke = 'success') {
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-image-timing-test-'));
+  const path = join(directory, 'image-timing'), summary = join(directory, 'summary');
+  if (start !== null) writeFileSync(path, start);
+  const end = '2026-10-05T12:01:30.000Z';
+  const clock = `const RealDate = Date;
+    globalThis.Date = class extends RealDate {
+      constructor(...args) { super(...(args.length ? args : [${JSON.stringify(end)}])); }
+      static now() { return RealDate.parse(${JSON.stringify(end)}); }
+    };`;
+  const run = spawnSync(process.execPath, ['--import', `data:text/javascript,${encodeURIComponent(clock)}`,
+    fileURLToPath(new URL('./image-evidence.mjs', import.meta.url)), 'timing', path, 'linux/arm64'], {
+    encoding: 'utf8', timeout: 10_000,
+    env: { ASSEMBLY_OUTCOME: assembly, SMOKE_OUTCOME: smoke, GITHUB_STEP_SUMMARY: summary },
+  });
+  assert.ifError(run.error);
+  assert.equal(run.signal, null);
+  const report = JSON.parse(readFileSync(path + '.json', 'utf8'));
+  assert.equal(report.platform, 'linux/arm64');
+  assert.equal(report.assembly_outcome, assembly || null);
+  assert.equal(report.smoke_outcome, smoke || null);
+  assert.equal(report.completed_at, end);
+  assert.deepEqual(JSON.parse(run.stdout.split('\n')[0]), report);
+  return { run, report, summary: readFileSync(summary, 'utf8') };
+}
+
+for (const [name, start, assembly, smoke, reason] of [
+  ['missing start file', null, 'success', 'success', 'missing, invalid or reversed interval'],
+  ['malformed JSON', '{"started_at":', 'success', 'success', 'missing, invalid or reversed interval'],
+  ['malformed timestamp', 'not-a-timeZ', 'success', 'success', 'missing, invalid or reversed interval'],
+  ['missing timezone', '2026-10-05T12:00:00', 'success', 'success', 'missing, invalid or reversed interval'],
+  ['end before start', '2026-10-05T12:01:31Z', 'success', 'success', 'missing, invalid or reversed interval'],
+  ['oversized start file', ' '.repeat(129) + '2026-10-05T12:00:00Z', 'success', 'success', 'missing, invalid or reversed interval'],
+  ['failed assembly', '2026-10-05T12:00:00Z', 'failure', 'success', 'assembly failure'],
+  ['failed smoke', '2026-10-05T12:00:00Z', 'success', 'failure', 'smoke failure'],
+  ['skipped smoke', '2026-10-05T12:00:00Z', 'success', 'skipped', 'smoke skipped'],
+  ['cancelled smoke', '2026-10-05T12:00:00Z', 'success', 'cancelled', 'smoke cancelled'],
+  ['missing assembly outcome', '2026-10-05T12:00:00Z', '', 'success', 'assembly missing'],
+  ['missing smoke outcome', '2026-10-05T12:00:00Z', 'success', '', 'smoke missing'],
+]) {
+  test(`timing CLI fails and retains partial evidence: ${name}`, () => {
+    const { run, report, summary } = timingCLI(start, assembly, smoke);
+    assert.equal(run.status, 1);
+    assert.match(run.stderr, /incomplete image timing evidence:/);
+    assert.ok(report.completeness.reasons.includes(reason));
+    assert.equal(report.completeness.state, 'partial');
+    assert.equal(report.assembly_smoke_s, null);
+    assert.equal(report.within_target, null);
+    assert.match(summary, /unknown s; target 90 s; within_target=unknown; evidence partial/);
+    assert.doesNotMatch(run.stdout, /::warning::/);
+  });
+}
+
+for (const [name, start, seconds, withinTarget] of [
+  ['within target', '2026-10-05T12:00:30Z', 60, true],
+  ['exactly at target', '2026-10-05T12:00:00Z', 90, true],
+  ['over target', '2026-10-05T11:59:59Z', 91, false],
+  ['fractionally over target', '2026-10-05T11:59:59.999Z', 90.001, false],
+]) {
+  test(`timing CLI succeeds with measured evidence: ${name}`, () => {
+    const { run, report, summary } = timingCLI(start);
+    assert.equal(run.status, 0);
+    assert.equal(run.stderr, '');
+    assert.deepEqual(report.completeness, { state: 'complete', reasons: [] });
+    assert.equal(report.assembly_smoke_s, seconds);
+    assert.equal(report.within_target, withinTarget);
+    assert.ok(summary.includes(`${seconds} s; target 90 s; within_target=${withinTarget}; evidence complete`));
+    if (withinTarget) assert.doesNotMatch(run.stdout, /::warning::/);
+    else assert.match(run.stdout, /::warning::Image assembly \+ smoke \(linux\/arm64\) took .* exceeding the 90 s acceptance target/);
+  });
+}
 
 test('same-input proof rejects changed version/history/epoch/toolchain/web/binary and image digests', () => {
   const inputs = compile(fixture(), values, compilerStub());
