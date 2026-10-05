@@ -133,10 +133,16 @@ func EndpointPrepared(pool *pgxpool.Pool, scope string, agentOnly bool, status i
 			if err != nil {
 				return err
 			}
-			p = current
-			if err := RefreshPrincipal(r.Context(), tx, p); err != nil {
-				return err
+			if prepare != nil {
+				p = current
+				if err := RefreshPrincipal(r.Context(), tx, p); err != nil {
+					return err
+				}
 			}
+			// Ordinary endpoints retain their authenticated caller's narrowed
+			// principal and visibility until their own final authorization check.
+			// Replacing it with the bearer row can widen secondary permissions or
+			// hide the target before that check reports a revoked grant.
 			result, err = fn(r, tx, p)
 			return err
 		})

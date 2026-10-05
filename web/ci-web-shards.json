@@ -1132,6 +1132,12 @@
       ],
       "specs": [
         {
+          "file": "tests/policy-editors.spec.ts",
+          "weightSeconds": 114.485,
+          "weightSource": "local-chromium-single-worker-AEON-633-fix6",
+          "listedTests": 64
+        },
+        {
           "file": "tests/model-provider.spec.ts",
           "weightSeconds": 10.5,
           "weightSource": "e2e-4",
@@ -2454,7 +2460,9 @@
         },
         {
           "file": "tests/work-parent-status.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 16.082,
+          "weightSource": "hosted-CI-37321154870",
+          "listedTests": 6
         },
         {
           "file": "tests/work-surfaces-fix2.spec.ts",
@@ -2462,7 +2470,9 @@
         },
         {
           "file": "tests/work-surfaces-fix3.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 16.211,
+          "weightSource": "hosted-CI-37321154870",
+          "listedTests": 6
         },
         {
           "file": "tests/work-surfaces-fix4.spec.ts",

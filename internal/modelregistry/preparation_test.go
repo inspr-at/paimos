@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -110,6 +111,36 @@ func TestInjectedResolverRefusesUnreadyWithoutCatalogWrites(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRetainedCatalogReadRequiresReadyAndCurrentAuthority(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "retained-ready", "person", "Owner", []string{"admin"})
+	in := CatalogPreparation{Operation: CatalogRead, Request: httptest.NewRequest("GET", "/api/models", nil)}
+	if err := PrepareCatalog(t.Context(), appPool, p, in); err != nil {
+		t.Fatal(err)
+	}
+	before := catalogSetupState(t, p)
+	if err := db.InTransaction(t.Context(), appPool, func(ctx context.Context) error {
+		if err := PrepareCatalog(ctx, appPool, p, in); err != nil {
+			t.Fatalf("ready catalog read rejected the retained transaction: %v", err)
+		}
+		if err := db.InTenant(dbtest.Seed(ctx), appPool, p.TenantID, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `DELETE FROM role_bindings WHERE principal_id=$1`, p.ID)
+			return err
+		}); err != nil {
+			return err
+		}
+		if err := PrepareCatalog(ctx, appPool, p, in); !errors.Is(err, authz.ErrForbidden) {
+			t.Fatalf("ready retained read missed current authority loss: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if after := catalogSetupState(t, p); after != before {
+		t.Fatal("retained ready read changed catalog or event state")
 	}
 }
 

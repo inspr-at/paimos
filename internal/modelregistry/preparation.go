@@ -59,20 +59,50 @@ func requireCatalog(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
-// PrepareCatalog owns a standalone transaction. Call before beginning the final
-// operation, never from a callback holding resource/event locks. Ordinary reads
-// and review keys retain their existing authority; no models.manage expansion.
+// PrepareCatalog owns a standalone setup transaction. Call before beginning
+// the final operation, never from a callback holding resource/event locks.
+// Retained bootstrap transactions may only consume an already ready catalog;
+// they never initialize or upgrade it here. Ordinary reads and review keys
+// retain their existing authority; no models.manage expansion.
 func PrepareCatalog(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, in CatalogPreparation) error {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	if db.HasTransaction(ctx) {
-		return errors.New("catalog preparation requires an independent transaction")
-	}
 	if in.Operation > CatalogCompletion {
 		return errors.New("unknown catalog initiating operation")
 	}
 	if in.Request == nil {
 		return errors.New("catalog preparation requires initiating request")
+	}
+	if db.HasTransaction(ctx) {
+		// Atomic bootstrap callers may consume an already prepared catalog.
+		// Never initialize or upgrade through a retained savepoint: its setup
+		// would not be independently committed before the initiating operation.
+		if (in.Operation != CatalogRead && in.Operation != CatalogManage) || in.Authorize != nil {
+			return errors.New("catalog preparation requires an independent transaction")
+		}
+		return db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
+			if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+				return err
+			}
+			if err := requireCatalog(ctx, tx); err != nil {
+				if errors.Is(err, ErrCatalogNotReady) {
+					return errors.New("catalog preparation requires an independent transaction")
+				}
+				return err
+			}
+			scope := "models.read"
+			if in.Operation == CatalogManage {
+				if p.Kind != tenant.Person {
+					return authz.ErrForbidden
+				}
+				scope = "models.manage"
+			}
+			current, err := workorders.CurrentKeyPrincipal(in.Request.WithContext(ctx), tx, p, scope)
+			if err != nil {
+				return err
+			}
+			return authz.RequireTx(ctx, tx, current, scope, authz.Scope{})
+		})
 	}
 	return db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','5s',true),set_config('statement_timeout','5s',true)`); err != nil {
@@ -175,4 +205,24 @@ func PrepareCatalog(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal,
 		_, err = keyPrincipal(scope)
 		return err
 	})
+}
+
+// BootstrapCatalogTx prepares the catalog for an atomic operator bootstrap,
+// before any principal/resource events. The caller owns the tenant transaction,
+// its operator authorization and the eventual event actor. No HTTP path uses
+// this entry, and all returned events must remain in that same transaction.
+func BootstrapCatalogTx(ctx context.Context, tx pgx.Tx) ([]events.Change, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	var tenantID string
+	if err := tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')`).Scan(&tenantID); err != nil {
+		return nil, err
+	}
+	if err := agentpairing.Lock(ctx, tx); err != nil {
+		return nil, err
+	}
+	if err := catalogLock(ctx, tx); err != nil {
+		return nil, err
+	}
+	return prepareCatalogDeferred(ctx, tx, tenant.Principal{TenantID: tenantID})
 }
