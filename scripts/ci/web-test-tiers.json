@@ -7449,6 +7449,7 @@
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Node reporter preserves assertion details and console output without changing terminal events","tier":"NIGHTLY"},
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Node tier runner logs a real failure once and retains failure accounting and exit code","tier":"NIGHTLY"},
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Vitest diagnostics name failed assertions and bounded output cannot escape summary fences","tier":"NIGHTLY"},
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Vitest diagnostics retain assertion details and captured stdout stderr within bounds in logs and summary","tier":"NIGHTLY"},
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Go tier runner consumes one failing jsonl execution and preserves the original exit code","tier":"NIGHTLY"}
   ]
 }

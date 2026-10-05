@@ -145,6 +145,42 @@ process.exitCode=7;
   assert.equal(measurement.classes.NIGHTLY.run,1)
 })
 
+test('Vitest diagnostics retain assertion details and captured stdout stderr within bounds in logs and summary', () => {
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-vitest-output-'))
+  const cases=[
+    {details:'assertion detail',captured:'captured stdout\ncaptured stderr'},
+    {details:'assertion detail',captured:[...Array.from({length:50},(_,i)=>`stdout line ${i}`),'captured stderr'].join('\n')},
+    {details:[...Array.from({length:50},(_,i)=>`assertion line ${i}`),'assertion detail'].join('\n'),captured:'captured stdout\ncaptured stderr'},
+    {details:`${'a'.repeat(20_000)}\nassertion detail`,captured:`${'c'.repeat(20_000)}\ncaptured stderr`},
+  ]
+  for(const [index,{details,captured}] of cases.entries()) {
+    const report={testResults:[{assertionResults:[
+      {ancestorTitles:['scope'],title:'rejects',status:'failed',failureMessages:[details]},
+    ]}]}
+    const failures=vitestFailures(report,'tests/scope.unit.test.ts',captured)
+    assert.equal(failures.length,1)
+    assert.ok(failures[0].output.split('\n').length<=40)
+    assert.ok(failures[0].output.length<=16_384)
+    const summary=resolve(directory,`summary-${index}.txt`),logs: string[]=[]
+    printFailures(failures,{summary,log:(text: string)=>logs.push(text)})
+    for(const text of [logs.join('\n'),readFileSync(summary,'utf8')]) {
+      assert.match(text,/FAIL vitest: "tests\/scope.unit.test.ts" — "scope > rejects"/)
+      assert.match(text,/assertion detail/)
+      assert.match(text,/captured stderr/)
+      if(index===0||index===2)assert.match(text,/captured stdout/)
+      if(index===1) {
+        assert.match(text,/stdout line 49/)
+        assert.doesNotMatch(text,/stdout line 0\n/)
+      }
+    }
+  }
+  assert.deepEqual(vitestFailures({testResults:[{assertionResults:[
+    {ancestorTitles:[],title:'rejects',status:'failed',failureMessages:[]},
+  ]}]},'tests/scope.unit.test.ts','captured stdout\ncaptured stderr'),[
+    {kind:'vitest',owner:'tests/scope.unit.test.ts',name:'rejects',output:'captured stdout\ncaptured stderr'},
+  ])
+})
+
 test('Vitest diagnostics name failed assertions and bounded output cannot escape summary fences', () => {
   const report={testResults:[{assertionResults:[
     {ancestorTitles:['scope'],title:'rejects',status:'failed',failureMessages:['assertion details\n```\n::error::untrusted']},

@@ -2,8 +2,8 @@
 import { appendFileSync } from 'node:fs'
 
 // Keep diagnostics small even when an assertion emits a single enormous line.
-export function outputTail(text) {
-  return String(text ?? '').trimEnd().split('\n').slice(-40).join('\n').slice(-16_384)
+export function outputTail(text,{lines=40,characters=16_384}={}) {
+  return String(text ?? '').trimEnd().split('\n').slice(-lines).join('\n').slice(-characters)
 }
 
 export function goFailures(text) {
@@ -37,12 +37,18 @@ export function nodeFailures(text,owner,stderr='') {
   }))
 }
 
-export function vitestFailures(report,owner,fallback='') {
+export function vitestFailures(report,owner,capturedOutput='') {
   return (report.testResults??[]).flatMap(file=>(file.assertionResults??[])
-    .filter(result=>result.status==='failed').map(result=>({kind:'vitest',owner,
-      name:[...result.ancestorTitles,result.title].join(' > '),
-      output:outputTail(result.failureMessages?.join('\n')||fallback),
-    })))
+    .filter(result=>result.status==='failed').map(result=>{
+      const details=result.failureMessages?.join('\n')??''
+      // Reserve half the total budget for each source so neither a verbose
+      // assertion nor captured stdout/stderr can displace the other entirely.
+      const budget={lines:20,characters:8_191}
+      const output=details&&capturedOutput
+        ? [outputTail(details,budget),outputTail(capturedOutput,budget)].join('\n')
+        : outputTail(details||capturedOutput)
+      return {kind:'vitest',owner,name:[...result.ancestorTitles,result.title].join(' > '),output}
+    }))
 }
 
 export function printFailures(failures,{summary,log=console.log}={}) {
