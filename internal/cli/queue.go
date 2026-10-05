@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/workqueue"
 )
@@ -35,8 +36,8 @@ type cliQueuePage struct {
 }
 
 func (rt *runtime) cmdQueue() *Command {
-	return &Command{Name: "queue", Short: "Manage the ticket work queue", Use: "queue <list|add|remove|move|reset|next|readiness>", subs: []*Command{
-		rt.queueListCommand(), rt.queueAddCommand(), rt.queueNodeCommand("remove"), rt.queueNodeCommand("move"), rt.queueNodeCommand("readiness"), rt.queueNextCommand(),
+	return &Command{Name: "queue", Short: "Manage the ticket work queue", Use: "queue <list|add|remove|move|reset|next|readiness|snapshot>", subs: []*Command{
+		rt.queueSnapshotCommand(), rt.queueListCommand(), rt.queueAddCommand(), rt.queueNodeCommand("remove"), rt.queueNodeCommand("move"), rt.queueNodeCommand("readiness"), rt.queueNextCommand(),
 		{Name: "reset", Short: "Restore priority then FIFO order", Use: "queue reset", maxArgs: 0, run: func([]string) error {
 			var out cliQueuePage
 			if err := rt.do(http.MethodPost, "/api/queue/reset", map[string]any{}, &out); err != nil {
@@ -209,4 +210,68 @@ func (rt *runtime) printQueueEntry(e cliQueueEntry) error {
 	}
 	_, err := fmt.Fprintf(rt.stdout, "#%d %s %s · queued by %s\n", e.Queued.Position, e.Key, e.Title, e.Queued.By.Name)
 	return err
+}
+
+func (rt *runtime) queueSnapshotCommand() *Command {
+	var revision string
+	capture := &Command{Name: "capture", Short: "Capture open leaves of a parent without launching work", Use: "queue snapshot capture <parent-ref> --revision RFC3339", minArgs: 1, maxArgs: 1,
+		addFlags: func(fs *flagSet) { fs.string(&revision, "revision", 0, "parent revision reviewed by the caller") },
+		run: func(args []string) error {
+			if _, err := time.Parse(time.RFC3339Nano, revision); err != nil {
+				return usagef("--revision must be an RFC3339 timestamp")
+			}
+			n, err := rt.nodeRef(args[0])
+			if err != nil {
+				return err
+			}
+			return rt.queueSnapshotRequest(http.MethodPost, "/api/queue/"+n.ID+"/snapshots", map[string]string{"expected_revision": revision})
+		}}
+	subs := []*Command{capture}
+	for _, action := range []string{"show", "apply", "cancel"} {
+		subs = append(subs, &Command{Name: action, Short: action + " an owned queue snapshot", Use: "queue snapshot " + action + " <snapshot-UUID>", minArgs: 1, maxArgs: 1, run: func(args []string) error {
+			if !validUUID(args[0]) {
+				return usagef("snapshot id must be a UUID")
+			}
+			method, path := http.MethodGet, "/api/queue-snapshots/"+args[0]
+			if action == "apply" {
+				method = http.MethodPost
+				path += "/apply"
+			}
+			if action == "cancel" {
+				method = http.MethodDelete
+			}
+			return rt.queueSnapshotRequest(method, path, nil)
+		}})
+	}
+	return &Command{Name: "snapshot", Short: "Capture, inspect, apply or cancel parent queue snapshots", Use: "queue snapshot <capture|show|apply|cancel>", subs: subs}
+}
+func (rt *runtime) queueSnapshotRequest(method, path string, body any) error {
+	var raw json.RawMessage
+	if err := rt.do(method, path, body, &raw); err != nil {
+		return err
+	}
+	if rt.jsonOut {
+		return rt.printJSON(raw)
+	}
+	var s struct {
+		ID, State          string
+		Partial, Truncated bool
+		TreeChanged        bool `json:"tree_changed"`
+		Items              []struct {
+			NodeID  string `json:"node_id"`
+			Outcome string
+		}
+	}
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(rt.stdout, "Snapshot %s: %s; partial=%t truncated=%t tree_changed=%t\n", s.ID, s.State, s.Partial, s.Truncated, s.TreeChanged); err != nil {
+		return err
+	}
+	for _, item := range s.Items {
+		if _, err := fmt.Fprintf(rt.stdout, "%s %s\n", item.NodeID, item.Outcome); err != nil {
+			return err
+		}
+	}
+	return nil
 }

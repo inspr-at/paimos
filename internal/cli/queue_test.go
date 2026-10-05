@@ -29,6 +29,10 @@ func TestQueueCLIContract(t *testing.T) {
 		{[]string{"queue", "next"}, "POST", "/api/queue/next", map[string]any{}},
 		{[]string{"queue", "next", "--agent", agent, "--profile", profile}, "POST", "/api/queue/next", map[string]any{"agent_principal_id": agent, "model_profile_id": profile}},
 		{[]string{"queue", "readiness", id}, "GET", "/api/queue/" + id + "/readiness", nil},
+		{[]string{"queue", "snapshot", "capture", id, "--revision", "2026-10-05T21:00:00Z"}, "POST", "/api/queue/" + id + "/snapshots", map[string]any{"expected_revision": "2026-10-05T21:00:00Z"}},
+		{[]string{"queue", "snapshot", "show", id}, "GET", "/api/queue-snapshots/" + id, nil},
+		{[]string{"queue", "snapshot", "apply", id}, "POST", "/api/queue-snapshots/" + id + "/apply", nil},
+		{[]string{"queue", "snapshot", "cancel", id}, "DELETE", "/api/queue-snapshots/" + id, nil},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			isolate(t)
@@ -71,7 +75,7 @@ func TestQueueCLIContract(t *testing.T) {
 }
 func TestQueueCLILocalValidationAndIssueProjection(t *testing.T) {
 	isolate(t)
-	for _, args := range [][]string{{"queue", "move", "QUE-1", "0"}, {"queue", "add", "QUE-1", "--agent", "bad"}, {"queue", "next", "--agent", "11111111-1111-1111-1111-111111111111"}} {
+	for _, args := range [][]string{{"queue", "snapshot", "capture", "QUE-1"}, {"queue", "snapshot", "apply", "bad"}, {"queue", "move", "QUE-1", "0"}, {"queue", "add", "QUE-1", "--agent", "bad"}, {"queue", "next", "--agent", "11111111-1111-1111-1111-111111111111"}} {
 		code, _, _ := runCLI(append([]string{"aeon"}, args...), "")
 		if code != 2 {
 			t.Fatalf("validation returned %d for %v", code, args)

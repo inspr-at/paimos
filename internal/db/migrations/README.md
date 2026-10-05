@@ -618,3 +618,11 @@ Go suites, Linux Chromium and the previous-binary runtime compatibility probe
 remain unverified in this round and need the coordinator's working test lane or
 hosted CI. No assertions were loosened, origin push, deployment, ticket status
 change or model review ran.
+
+AEON-740 reserves **1259** for owner-bound parent queue snapshots, replacing
+the colliding unpublished 1258 reservation (AEON-734). `parent_queue_snapshots`
+contains personal work activity (`owner_id`, captured node identities/revisions,
+queue results and creation time), located by `(tenant_id,id)`. Classify it as
+personal in the AEON-490 DSAR inventory when that package is integrated;
+`internal/dsar/inventory.json` is absent from this branch and its pinned
+`origin/main`. Snapshots contain no credentials, prompts or account details.
