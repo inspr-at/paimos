@@ -9,7 +9,7 @@
     {
       "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
       "mode": "action",
-      "sha256": "97de3d412db28700923f9679ef3303455aadc97cdeb4a315617ff4c31ec0a629",
+      "sha256": "5b339059aa562d791cec4176ce4e5f792af97de8ac805e0bf4d5ca3217d89d61",
       "step": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
     },
     {
@@ -27,7 +27,7 @@
     {
       "counterpart": "agentd-rehearsal/Build darwin paimos-agentd with LocalAuthentication",
       "mode": "step",
-      "sha256": "fab5442dd14e9b67ab4c3414a0253879794187777e355ad5d7b1226f232acce9",
+      "sha256": "7a71771e1831e359d536be9169c59e9cb341255b3e2781f5865f074e33b001e7",
       "step": "Build darwin paimos-agentd with LocalAuthentication"
     },
     {
@@ -65,7 +65,7 @@
     {
       "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
       "mode": "action",
-      "sha256": "97de3d412db28700923f9679ef3303455aadc97cdeb4a315617ff4c31ec0a629",
+      "sha256": "5b339059aa562d791cec4176ce4e5f792af97de8ac805e0bf4d5ca3217d89d61",
       "step": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
     },
     {
@@ -77,7 +77,7 @@
     {
       "counterpart": "assets-rehearsal/Exact production assets assembly",
       "mode": "step",
-      "sha256": "0cf03eebde55ecad3c62023ac65ff5a32d8edf190f921352d2091391e30a15a6",
+      "sha256": "8c90d8ea5147283e9bff25b8321cd0d597d7320342df7943be75a7b042364e1f",
       "step": "Build linux paimos-agentd and aeon-cli"
     },
     {
@@ -89,7 +89,7 @@
     {
       "counterpart": "assets-rehearsal/Exact production index, attestation and gh draft invocations",
       "mode": "step",
-      "sha256": "d4a19ddd98d6c0ecd94e4496c500ec52fdcdbc4fda2d18657c28d747d9c31e45",
+      "sha256": "dd2becd66cb6a0682151720fa22ab3ac4e5ee14deefe3d0ca1641ae1982b69c7",
       "step": "Create draft GitHub release with signed assets"
     }
   ],
@@ -225,13 +225,13 @@
     {
       "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
       "mode": "action",
-      "sha256": "97de3d412db28700923f9679ef3303455aadc97cdeb4a315617ff4c31ec0a629",
+      "sha256": "5b339059aa562d791cec4176ce4e5f792af97de8ac805e0bf4d5ca3217d89d61",
       "step": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
     },
     {
       "counterpart": "image-dry-run/Release history fixture",
       "mode": "step",
-      "sha256": "75c43f99ed77eb48ea35cbdf2bae16182a4695aa7c4917eeb9bf7abda7673aa1",
+      "sha256": "b404c9d20a515f932dcb076863d7297cdad1645b7e9c5cd5a3ff17071fca6f1e",
       "step": "Release history"
     },
     {
@@ -249,7 +249,7 @@
     {
       "counterpart": "image-dry-run/Compile web and Go outside Docker",
       "mode": "step",
-      "sha256": "cd96c1fef9ef4b4abedd087c00916828999f48e6394e72b128fbbd04f2078adb",
+      "sha256": "0f7df7356637070a1370277c7f687dd2fd1fac96f778b753589d6d83495c29fa",
       "step": "Compile web and Go outside Docker"
     },
     {
@@ -273,7 +273,7 @@
     {
       "counterpart": "image-dry-run/Prepare pinned runtime closure",
       "mode": "step",
-      "sha256": "834fe5434efc36d7a3e2fe56d004f10ca886fefec85232a4dc41773c63ed3c63",
+      "sha256": "ee9224f109b05b42853cd8aea29507100edacce4c74057939e4f2b29c0305d0d",
       "step": "Prepare pinned runtime closure"
     },
     {
@@ -315,7 +315,7 @@
     {
       "counterpart": "image-dry-run/Prove two clean image rebuilds",
       "mode": "step",
-      "sha256": "ab5402c0a4a103c115d045bdd66305b8537c42e25ee30fef5b045bc27c26f93c",
+      "sha256": "76c7dfe732b5baf8b80310db5ad0c28b27d23bf055111cb979cbf32ad9dace6b",
       "step": "Prove two clean image rebuilds"
     },
     {
@@ -325,16 +325,16 @@
       "step": "Upload image assembly evidence"
     },
     {
-      "counterpart": "TestRuntimeCacheSavedAfterSmoke",
-      "mode": "test",
-      "sha256": "dc4c8be400ebc1e82081df228e8841a1e89f70f71925fade5b741a38a47e2f2a",
-      "step": "Save verified runtime closure"
-    },
-    {
       "counterpart": "image-dry-run/Export production image with provenance locally",
       "mode": "step",
       "sha256": "9399716ab107ecc2e0b7dfc212a1d3816b134ae89506de65dc8e6b2fca25a344",
       "step": "Build and push"
+    },
+    {
+      "counterpart": "image-dry-run/Require exported image to equal the smoked build",
+      "mode": "step",
+      "sha256": "a745edc42147722f2f40f7bd66f176f6bb9bd116c89eccfeb8896858f94f58a7",
+      "step": "Require pushed image to equal the smoked build"
     },
     {
       "counterpart": "No OCI or GitHub attestation is published before tagging; local BuildKit provenance export and real gh argument parsing run instead.",

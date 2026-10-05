@@ -337,7 +337,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/inbox/stream":                                                  "inbox.read",
 	"GET /api/inbox/targets":                                                 "inbox.read",
 	"GET /api/kinds":                                                         "nodes.read",
-	"GET /api/status/help":                                                   "nodes.read",
+	"GET /api/status/help":                                                   "nodes.read", // Authenticated agents have a read-only exception in RequirePattern.
 	"GET /api/kinds/{kindId}":                                                "nodes.read",
 	"GET /api/knowledge":                                                     "knowledge.read",
 	"GET /api/knowledge/graph":                                               "knowledge.read",
@@ -714,6 +714,7 @@ func PatternIsPublic(pattern string) bool {
 // route's own capability or login checks in place. An authenticated declaration
 // requires the trusted principal set by authentication. Quote portal declarations
 // allow either staff or customer authority; the handler checks ownership.
+// Status help is scope-free tenant metadata for agents; people retain nodes.read.
 func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	declaration, ok := PermissionForPattern(pattern)
 	if !ok {
@@ -721,6 +722,15 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	}
 	if declaration == PublicRoute {
 		return nil
+	}
+	if pattern == "GET /api/status/help" {
+		p, ok := tenant.PrincipalFrom(ctx)
+		if !ok || p.ID == "" || p.TenantID == "" {
+			return ErrForbidden
+		}
+		if p.Kind == tenant.Agent {
+			return nil
+		}
 	}
 	if declaration == AuthenticatedRoute {
 		if p, ok := tenant.PrincipalFrom(ctx); ok && p.ID != "" && p.TenantID != "" {

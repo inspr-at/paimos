@@ -3,8 +3,10 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -63,6 +65,84 @@ func TestDockerfileRuntimeUserIs65532(t *testing.T) {
 			}
 		})
 	}
+}
+
+// tini must stay PID 1 in front of `paimos serve` (it reaps the Chromium
+// children of PDF rendering), and NOTICE must ship at the path the smoke gate
+// and the licence notes name. The last ENTRYPOINT of the final stage is the one
+// the image starts; a CMD there would be appended to it as arguments.
+func TestDockerfileEntrypointAndNotice(t *testing.T) {
+	assembly, err := os.ReadFile("../../Dockerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := checkDockerfileEntrypointAndNotice(string(assembly)); err != nil {
+		t.Fatal(err)
+	}
+	const entrypoint, notice = `ENTRYPOINT ["/sbin/tini", "--", "/paimos", "serve"]`, "COPY NOTICE /usr/share/doc/aeon/NOTICE"
+	for _, tc := range []struct {
+		name, old, replacement, want string
+	}{
+		{"missing entrypoint", entrypoint, "", "ENTRYPOINT"},
+		{"commented entrypoint", entrypoint, "# " + entrypoint, "ENTRYPOINT"},
+		{"without tini", entrypoint, `ENTRYPOINT ["/paimos", "serve"]`, "ENTRYPOINT"},
+		{"other init path", entrypoint, `ENTRYPOINT ["/usr/bin/tini", "--", "/paimos", "serve"]`, "ENTRYPOINT"},
+		{"missing separator", entrypoint, `ENTRYPOINT ["/sbin/tini", "/paimos", "serve"]`, "ENTRYPOINT"},
+		{"other command", entrypoint, `ENTRYPOINT ["/sbin/tini", "--", "/paimos", "migrate"]`, "ENTRYPOINT"},
+		{"extra argument", entrypoint, `ENTRYPOINT ["/sbin/tini", "--", "/paimos", "serve", "--debug"]`, "ENTRYPOINT"},
+		{"shell form", entrypoint, "ENTRYPOINT /sbin/tini -- /paimos serve", "ENTRYPOINT"},
+		{"later entrypoint wins", entrypoint, entrypoint + "\nENTRYPOINT [\"/paimos\", \"serve\"]", "ENTRYPOINT"},
+		{"entrypoint in dead stage", entrypoint, entrypoint + "\nFROM aeon-runtime", "ENTRYPOINT"},
+		{"appended arguments", entrypoint, entrypoint + "\nCMD [\"--debug\"]", "CMD"},
+		{"missing notice", notice, "", "COPY NOTICE"},
+		{"commented notice", notice, "# " + notice, "COPY NOTICE"},
+		{"other destination", notice, "COPY NOTICE /NOTICE", "COPY NOTICE"},
+		{"destination directory", notice, "COPY NOTICE /usr/share/doc/aeon/", "COPY NOTICE"},
+		{"other source", notice, "COPY LICENSE /usr/share/doc/aeon/NOTICE", "COPY NOTICE"},
+		{"from another stage", notice, "COPY --from=aeon-runtime NOTICE /usr/share/doc/aeon/NOTICE", "COPY NOTICE"},
+		{"notice in dead stage", "FROM aeon-runtime", "FROM aeon-runtime\n" + notice + "\nFROM aeon-runtime", "COPY NOTICE"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Remove the real instruction for the dead-stage case; otherwise mutate it in place.
+			mutated := string(assembly)
+			if tc.name == "notice in dead stage" {
+				mutated = strings.Replace(mutated, notice+"\n", "", 1)
+			}
+			mutated = strings.Replace(mutated, tc.old, tc.replacement, 1)
+			if mutated == string(assembly) {
+				t.Fatal("mutation did not change the recipe")
+			}
+			if err := checkDockerfileEntrypointAndNotice(mutated); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("want rejection %q, got %v", tc.want, err)
+			}
+		})
+	}
+}
+
+func checkDockerfileEntrypointAndNotice(assembly string) error {
+	var entrypoint []string
+	var notice bool
+	for _, instruction := range dockerfileFinalInstructions(assembly) {
+		switch strings.ToUpper(instruction[0]) {
+		case "ENTRYPOINT":
+			// Exec form only: the shell form would put /bin/sh in front of tini.
+			entrypoint = nil
+			if err := json.Unmarshal([]byte(strings.Join(instruction[1:], " ")), &entrypoint); err != nil {
+				return fmt.Errorf("ENTRYPOINT must use the exec form: %v", err)
+			}
+		case "CMD":
+			return fmt.Errorf("CMD would append arguments to paimos serve")
+		case "COPY":
+			notice = notice || reflect.DeepEqual(instruction[1:], []string{"NOTICE", "/usr/share/doc/aeon/NOTICE"})
+		}
+	}
+	if !reflect.DeepEqual(entrypoint, []string{"/sbin/tini", "--", "/paimos", "serve"}) {
+		return fmt.Errorf(`ENTRYPOINT %q, want ["/sbin/tini","--","/paimos","serve"]`, entrypoint)
+	}
+	if !notice {
+		return fmt.Errorf("final stage must COPY NOTICE to /usr/share/doc/aeon/NOTICE")
+	}
+	return nil
 }
 
 // This guard deliberately checks executable instructions in the final stages,
