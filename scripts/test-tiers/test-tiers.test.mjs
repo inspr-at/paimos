@@ -609,6 +609,23 @@ test('three-tier validation and reports retain GATED-FULL results and deletion c
   assert.throws(()=>validate({version:1,tests:promoted},rows,known),/Known-flaky case cannot be ESSENTIAL/)
 })
 
+test('AEON-686 host-capacity bound and fence cases run in every PR gate',()=>{
+  // Unlisted cases default to NIGHTLY, so new Go tests in these files would
+  // silently leave the PR gate; derive the list from source, not by hand.
+  const go=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
+  const sources=[['internal/hostcapacity','policy_test.go'],['internal/agentpairing','host_capacity_test.go']]
+  const rows=sources.flatMap(([pkg,file])=>[...readFileSync(new URL(`../../${pkg}/${file}`,import.meta.url),'utf8')
+    .matchAll(/^func (Test\w+)\(t \*testing\.T\)/gm)].map(match=>`${pkg}:${match[1]}`))
+  for(const required of ['internal/hostcapacity:TestHostCapacityLargestEncodingsStayBounded',
+    'internal/agentpairing:TestHostCapacityBoundsHeldByWritersWithoutDatabaseChecks'])assert.ok(rows.includes(required),required)
+  for(const id of rows) {
+    const row=go.tests.find(row=>key(row)===id)
+    assert.equal(row?.tier,'ESSENTIAL',id)
+    for(const event of ['pull_request','merge_group'])
+      assert.ok(select(go.tests,{event,paths:['README.md']}).tests.some(selected=>key(selected)===id),`${event}: ${id}`)
+  }
+})
+
 test('three-tier manifests allow new NIGHTLY cases and never promote ungated browser cases',()=>{
   const policy=JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url)))
   const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
