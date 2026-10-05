@@ -183,16 +183,27 @@ func (m *Module) leadScheduleWait(ctx context.Context, tx pgx.Tx, p tenant.Princ
 				if other.State != "working" || other.SessionID == nil {
 					continue
 				}
+				candidate, err := load(ctx, step, d.project, *other.SessionID, false)
+				if err != nil {
+					return "", err
+				}
+				// Actual pickup authenticates the dispatching agent's live
+				// queue-coordinator grants in its project (queuePermission). A lead
+				// whose agent lost them is refused there and cannot hold a turn.
+				// Every dispatching key carries the coordinator ceiling; live role
+				// bindings decide, as in worker route readiness.
+				dispatcher := tenant.Principal{ID: candidate.AgentPrincipalID, TenantID: p.TenantID, Kind: tenant.Agent, Scopes: authz.CoordinatorKeyScopes}
+				if err = authz.RequireQueueCoordinatorTx(ctx, step, dispatcher, d.project); errors.Is(err, authz.ErrForbidden) {
+					continue
+				} else if err != nil {
+					return "", err
+				}
 				ready, err := workqueue.RunRouteReadyTx(ctx, step, p.TenantID, d.project, d.run, d.fields)
 				if err != nil {
 					return "", err
 				}
 				if !ready {
 					continue
-				}
-				candidate, err := load(ctx, step, d.project, *other.SessionID, false)
-				if err != nil {
-					return "", err
 				}
 				reason, err := m.checkLeadAdmission(ctx, step, p, other.owner, candidate)
 				if err != nil {
