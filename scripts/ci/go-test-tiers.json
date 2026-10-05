@@ -155,6 +155,7 @@
     "internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink"
   ],
   "tests": [
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageSharedRunNeverAddsLeadAndWorkerCounters","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/auth","name":"TestLeadUsageAgentRouteCeiling","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageStableAttemptsAndReplay","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageCounterRejectsInvalidEvidence","tier":"ESSENTIAL"},

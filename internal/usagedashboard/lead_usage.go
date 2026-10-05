@@ -303,7 +303,7 @@ func loadLeadSessions(ctx context.Context, tx pgx.Tx, project string, generation
  WHERE g.project_id=$1 AND ($2::bigint IS NULL OR g.generation=$2) AND s.created_at >= $3 AND s.created_at < $4
  ORDER BY s.created_at,s.id LIMIT $5
  ) SELECT s.id::text,s.project_id::text,s.run_id::text,s.id=s.lead_session,
-  u.tokens::text,CASE WHEN NOT EXISTS(SELECT 1 FROM harness_sessions other WHERE other.run_id=s.run_id AND other.id<>s.id) THEN r.active_ms::text END,
+  CASE WHEN NOT EXISTS(SELECT 1 FROM harness_sessions other WHERE other.run_id=s.run_id AND other.id<>s.id) THEN u.tokens::text END,CASE WHEN NOT EXISTS(SELECT 1 FROM harness_sessions other WHERE other.run_id=s.run_id AND other.id<>s.id) THEN r.active_ms::text END,
   CASE WHEN NOT EXISTS(SELECT 1 FROM harness_sessions other WHERE other.run_id=s.run_id AND other.id<>s.id) THEN r.waiting_ms::text END,
   coalesce(u.complete,false),coalesce(u.truncated,false)
  FROM selected s

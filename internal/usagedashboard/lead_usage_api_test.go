@@ -103,7 +103,16 @@ func (w *world) leadEpisode(t *testing.T, project, ticket string) string {
 	t.Helper()
 	id := uid()
 	w.tx(t, w.home, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO ticket_work_episodes(tenant_id,id,ticket_node_id,source_project_id) VALUES($1,$2,$3,$4)`, w.home.TenantID, id, ticket, project)
+		var existing string
+		err := tx.QueryRow(t.Context(), `SELECT id::text FROM ticket_work_episodes WHERE ticket_node_id=$1 ORDER BY id DESC LIMIT 1`, ticket).Scan(&existing)
+		if err == nil {
+			id = existing
+			return nil
+		}
+		if err != pgx.ErrNoRows {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO ticket_work_episodes(tenant_id,id,ticket_node_id,source_project_id) VALUES($1,$2,$3,$4)`, w.home.TenantID, id, ticket, project)
 		return err
 	})
 	return id
@@ -162,6 +171,10 @@ func TestLeadUsageGenerationSuccessionAndUnknownEvidence(t *testing.T) {
 	code, out, body := w.getLeadUsage(t, w.home, project, "&generation=2")
 	if code != 200 || out.Worker.Contributions != 0 || out.Total.Tokens.Measured != nil || out.Total.Contributions != 1 {
 		t.Fatalf("succession %d %s", code, body)
+	}
+	code, out, body = w.getLeadUsage(t, w.home, project, "")
+	if code != 200 || out.Total.Contributions != 7 || *out.Total.Tokens.Measured != "77" || out.Lead.Contributions != 2 || strings.Contains(body, "private-plan-beacon") {
+		t.Fatalf("project roll-up %d %s", code, body)
 	}
 	// Retained fixture evidence must still exist after replay and succession.
 	var count int
@@ -288,5 +301,26 @@ func TestLeadUsageContributionLimitIsHonest(t *testing.T) {
 	var retained int
 	if err := w.db.Admin.QueryRow(t.Context(), `SELECT count(*) FROM ticket_work_contributions WHERE episode_id=$1`, episode).Scan(&retained); err != nil || retained != 5001 {
 		t.Fatalf("fixture was pruned: %d %v", retained, err)
+	}
+}
+
+func TestLeadUsageSharedRunNeverAddsLeadAndWorkerCounters(t *testing.T) {
+	w := newWorld(t)
+	w.leadContracts(t)
+	project := w.project(t, w.home, "SHARED-1", "Shared run")
+	run := w.managedRun(t, w.home, project)
+	lead := w.leadSession(t, project, nil, &run, "coordinator", 1)
+	w.leadGeneration(t, project, lead, 1)
+	worker := w.leadSession(t, project, &lead, &run, "worker", 2)
+	ticket := w.ticket(t, w.home, project, "SHARED-2", "Work")
+	episode := w.leadEpisode(t, project, ticket)
+	w.leadContribution(t, project, episode, worker, "built", &run, true, 30)
+	w.tx(t, w.home, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO harness_session_usage(tenant_id,session_id,model,sequence,input_tokens,output_tokens,cached_input_tokens,provisional,billing_mode) VALUES($1,$2,'shared-model',1,1000,10,0,false,'subscription')`, w.home.TenantID, lead)
+		return err
+	})
+	code, out, body := w.getLeadUsage(t, w.home, project, "")
+	if code != 200 || !out.Partial || out.Total.Attempts != 1 || out.Lead.Tokens.Measured != nil || out.Lead.Tokens.Unknown != 1 || out.Total.Tokens.Measured == nil || *out.Total.Tokens.Measured != "30" {
+		t.Fatalf("overlapping attempt %d %s", code, body)
 	}
 }
