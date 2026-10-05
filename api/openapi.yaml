@@ -7804,6 +7804,53 @@ paths:
         '403': {description: Worker proof or context binding rejected}
         '409': {description: Expected receipt revision conflict or divergent request reuse}
         '410': {description: Authenticated archived generation; receipt history remains readable}
+  /projects/{projectId}/lead-decisions:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: listLeadDecisions
+      description: Project-visible, prompt-free reports from coordinator generations, oldest first. Replays immutable evidence rather than reevaluating current policy or gates. No account identities, quota values, prompts or execution authority. Uses the existing append-only event log; history survives generation stop/archive. Reports do not prove a launch or a review verdict.
+      parameters:
+        - {name: after, in: query, schema: {type: integer, minimum: 0}, description: Exclusive tenant-local event ID cursor.}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: session_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Bounded decision history, content: {application/json: {schema: {$ref: '#/components/schemas/LeadDecisionPage'}}}}
+        '400': {description: Invalid query}
+        '403': {description: Missing project read permission}
+        '404': {description: Project is not visible}
+  /projects/{projectId}/harness-sessions/{sessionId}/lead-decisions:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: recordLeadDecision
+      description: >-
+        Requires harness.worker, the owning active coordinator generation and its exact lease.
+        Authority is rechecked under the existing tenant/pairing/tree fence before append or replay.
+        Fixed enums, bounded numeric revisions/attempts, gate timestamps and same-project result IDs only;
+        unknown fields, prompts, account details and arbitrary URLs are rejected. Reports grant no authority
+        and do not launch, merge, deploy, change policy or open review gates. Admission reports must include
+        all four gates; unreadable, missing timestamps, future timestamps or readings older than 120 seconds
+        turn a reported success into wait. Gate freshness is frozen at server recording time.
+        request_id is idempotent within the project: exact metadata replays the original evidence, divergent
+        reuse returns 409. A different, stopped, archived or revoked generation cannot replay the request.
+        Tenant/project/request identity remains unique even when a referenced node moves out of visibility;
+        conflicts never return hidden evidence or bypass event visibility.
+        Review links are checked against the existing exact-commit binding and freeze its base/head hashes.
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LeadDecisionWrite'}
+      responses:
+        '200': {description: Appended or replayed evidence, content: {application/json: {schema: {$ref: '#/components/schemas/LeadDecisionRecorded'}}}}
+        '400': {description: Invalid or unbounded evidence}
+        '403': {description: Worker ownership or authorization rejected}
+        '409': {description: Request identity or result binding conflict}
+        '410': {description: Authenticated archived generation}
   /projects/{projectId}/instruction-provenance:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -17155,6 +17202,92 @@ components:
           required: [replayed]
           properties:
             replayed: {type: boolean, description: True when the latest revision already had this set digest.}
+    LeadDecisionGate:
+      type: object
+      additionalProperties: false
+      required: [kind, state]
+      properties:
+        kind: {type: string, enum: [dial, harness, account_room, host_load]}
+        state: {type: string, enum: [ready, full, unreadable]}
+        observed_at: {type: [string, 'null'], format: date-time}
+    LeadDecisionLink:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind: {type: string, enum: [run, review, release]}
+        id: {type: string, format: uuid}
+        head_sha: {type: string, pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$', description: Required for review; must match the existing pinned review binding.}
+    LeadDecisionWrite:
+      type: object
+      additionalProperties: false
+      required: [request_id, stage, outcome, reason_codes, policy_source, policy_revision, attempt]
+      properties:
+        request_id: {type: string, format: uuid}
+        ticket_node_id: {type: string, format: uuid}
+        stage: {type: string, enum: [queue, admission, review, release_handoff]}
+        outcome: {type: string, enum: [selected, wait, requested, passed, failed, handoff, partial]}
+        reason_codes:
+          type: array
+          minItems: 1
+          maxItems: 8
+          uniqueItems: true
+          items: {type: string, enum: [oldest_eligible, manual_order, dependency_wait, criteria_wait, no_work, policy_wait, gates_ready, review_requested, review_passed, review_failed, attempt_limit, release_handoff, person_gate_required, forecast_unavailable, model_escalated, login_selected, connection_broken, process_broken, capacity_unavailable, capacity_full, partial_result, dial_full, dial_unreadable, dial_stale, harness_full, harness_unreadable, harness_stale, account_room_full, account_room_unreadable, account_room_stale, host_load_full, host_load_unreadable, host_load_stale]}
+        policy_source: {type: string, enum: [workspace, project], description: Reported effective policy scope; no new permission source.}
+        policy_revision: {type: integer, minimum: 1, maximum: 2147483647, description: Reported revision frozen as evidence; never authorizes execution.}
+        attempt: {type: integer, minimum: 1, maximum: 32}
+        previous_event_id: {type: integer, minimum: 1, description: Optional prior decision in the same visible project and ticket. Attempt may stay the same or advance by one. Allows succession without inventing an assignment store; run result links identify existing assignments.}
+        gates: {type: array, maxItems: 4, items: {$ref: '#/components/schemas/LeadDecisionGate'}}
+        results: {type: array, maxItems: 8, items: {$ref: '#/components/schemas/LeadDecisionLink'}}
+    LeadDecision:
+      type: object
+      required: [event_id, project_id, session_id, recorded_at, evidence, authority_granted, request, outcome, reason_codes, gate_freshness, results]
+      properties:
+        event_id: {type: integer, minimum: 1}
+        project_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        evidence: {type: string, const: coordinator_reported}
+        authority_granted: {type: boolean, const: false}
+        request: {$ref: '#/components/schemas/LeadDecisionWrite'}
+        outcome: {type: string, enum: [selected, wait, requested, passed, failed, handoff, partial]}
+        reason_codes: {type: array, maxItems: 13, items: {type: string}}
+        gate_freshness:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [kind, freshness]
+            properties:
+              kind: {type: string, enum: [dial, harness, account_room, host_load]}
+              freshness: {type: string, enum: [fresh, stale, unreadable]}
+        results:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            required: [kind, id]
+            properties:
+              kind: {type: string, enum: [run, review, release]}
+              id: {type: string, format: uuid}
+              head_sha: {type: string, pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$'}
+              base_sha: {type: string, pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$'}
+              author_run_id: {type: string, format: uuid}
+              review_run_id: {type: string, format: uuid}
+              author_family: {type: string, enum: [openai, anthropic, xai, cursor]}
+              reviewer_family: {type: string, enum: [openai, anthropic, xai, cursor]}
+    LeadDecisionRecorded:
+      type: object
+      required: [decision, replayed]
+      properties:
+        decision: {$ref: '#/components/schemas/LeadDecision'}
+        replayed: {type: boolean}
+    LeadDecisionPage:
+      type: object
+      required: [items, next_after]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/LeadDecision'}}
+        next_after: {type: [integer, 'null'], minimum: 1}
     HarnessProvenancePage:
       type: object
       required: [session_id, revisions, truncated]
