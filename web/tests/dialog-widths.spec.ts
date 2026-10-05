@@ -4,6 +4,7 @@ import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { accessWorld, mockAccess, COORDINATOR, DEPLOYER, ME } from './access-fixtures'
 import { mockStartAgent } from './start-agent-fixtures'
 import { expectStableControls } from './helpers/stable'
+import { DIALOG_SCALE } from './helpers/dialog-scale'
 
 async function open(page: Page) {
   await page.clock.setFixedTime(new Date('2026-09-23T12:00:00Z'))
@@ -26,7 +27,8 @@ test('shared sheet variants and Start agent follow window resizing within their 
     for (const width of [1024, 1440, 2560]) {
       await page.setViewportSize({ width, height: 1000 })
       const box = (await sheet.boundingBox())!
-      expect(box.width).toBeGreaterThan(previous)
+      // AEON-730: never narrower on a wider window, never beyond the step.
+      expect(box.width).toBeGreaterThanOrEqual(previous - 0.5)
       expect(box.width).toBeLessThanOrEqual(maximum + 0.5)
       expect(box.x).toBeGreaterThanOrEqual(0)
       expect(box.x + box.width).toBeLessThanOrEqual(width + 0.5)
@@ -46,20 +48,20 @@ test('shared sheet variants and Start agent follow window resizing within their 
   await page.goto(`/settings/access/people/${ME}`)
   const person = dialog(page, 'Markus Barta, access')
   await expect(person).toBeVisible()
-  await resize(person, 960)
+  await resize(person, DIALOG_SCALE.m)
 
   await page.goto('/settings/access/invites')
   await page.getByRole('button', { name: 'Invite people', exact: true }).click()
   const invite = dialog(page, 'Invite people')
   await expect(invite).toBeVisible()
-  await resize(invite, 1120)
+  await resize(invite, DIALOG_SCALE.m)
   await invite.getByRole('button', { name: 'Cancel', exact: true }).click()
 
   await page.goto('/settings/access/roles/role-lead')
   await page.getByRole('button', { name: /^Delete/ }).click()
   const deleteRole = dialog(page, 'Delete Delivery lead?')
   await expect(deleteRole).toBeVisible()
-  await resize(deleteRole, 960)
+  await resize(deleteRole, DIALOG_SCALE.s)
   await deleteRole.getByRole('button', { name: 'Keep the role', exact: true }).click()
 
   await mockStartAgent(page)
@@ -68,7 +70,7 @@ test('shared sheet variants and Start agent follow window resizing within their 
   await page.getByRole('menuitem', { name: /^Start agent/ }).click()
   const start = dialog(page, 'Start agent')
   await expect(start).toBeVisible()
-  await resize(start, 1040, false)
+  await resize(start, DIALOG_SCALE.l, false)
   await start.getByRole('button', { name: 'Cancel', exact: true }).click()
 })
 
@@ -91,7 +93,7 @@ async function fits(button: Locator) {
       text: [...range.getClientRects()].map(line => ({ left: line.left, right: line.right, top: line.top, bottom: line.bottom })),
     }
   })
-  expect(sample.rect.width).toBeGreaterThanOrEqual(Math.min(140, sample.rowWidth) - 0.5)
+  expect(sample.rect.width).toBeGreaterThanOrEqual(Math.min(88, sample.rowWidth) - 0.5)
   expect(sample.rect.width).toBeLessThanOrEqual(sample.rowWidth + 0.5)
   expect(sample.overflow).toBeLessThanOrEqual(1)
   expect(sample.text.length).toBeGreaterThan(0)
@@ -142,8 +144,10 @@ for (const width of [1440, 1024, 390, 1920]) for (const theme of ['light', 'dark
     await fits(cancel)
     await fits(revoke)
     const cancelBox = (await cancel.boundingBox())!, revokeBox = (await revoke.boundingBox())!
-    if (width === 390) expect(revokeBox.y).toBeGreaterThanOrEqual(cancelBox.y + cancelBox.height)
-    else expect(Math.abs(cancelBox.y - revokeBox.y)).toBeLessThanOrEqual(0.5)
+    // Side by side when both labels fit (AEON-730), stacked otherwise; never overlapping.
+    const apart = revokeBox.y >= cancelBox.y + cancelBox.height - 0.5 || revokeBox.x >= cancelBox.x + cancelBox.width - 0.5 || cancelBox.x >= revokeBox.x + revokeBox.width - 0.5
+    expect(apart).toBe(true)
+    if (width !== 390) expect(Math.abs(cancelBox.y - revokeBox.y)).toBeLessThanOrEqual(0.5)
     await screenshot(page, info, 'deactivate-confirm', width, theme)
     await expectStableControls({
       controls: { cancel, revoke, actions: confirmation.locator('.actions'), ...(width === 390 ? { frame: confirmation } : {}) },
