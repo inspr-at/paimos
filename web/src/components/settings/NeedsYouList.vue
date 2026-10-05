@@ -53,3 +53,4 @@ const title = computed(() => count.value === 0 ? 'Nothing needs you' : props.hea
 @container needs-you (max-width: 520px) { .att-row { grid-template-columns: 32px minmax(0, 1fr); padding: 14px; }.att-row > .btn { grid-column: 2; grid-row: auto; justify-self: start; margin-top: 10px; min-height: 44px; } }
 @media (pointer: coarse) { .btn, a.att-name { min-height: 44px; } a.att-name { display: flex; align-items: center; } }
 </style>
+<style scoped src="../../styles/settingsButtons.css"></style>

@@ -272,3 +272,4 @@ onBeforeUnmount(() => { stageObserver?.disconnect(); cleanup() })
 @media (pointer: coarse), (max-width: 720px) { .mi, .btn, .qform :deep(.field) { min-height: 44px; } }
 @media (prefers-reduced-motion: no-preference) { .popover { animation: appear .14s ease-out; } @keyframes appear { from { opacity: 0; } to { opacity: 1; } } }
 </style>
+<style scoped src="../../styles/settingsButtons.css"></style>

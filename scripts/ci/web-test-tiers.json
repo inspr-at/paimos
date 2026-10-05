@@ -212,6 +212,8 @@
     }
   ],
   "tests": [
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"Settings primary actions have no glow and retain keyboard focus in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"Settings primary actions have no glow and retain keyboard focus in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"needs-you counts problems, keeps calm kinds and uses the container for narrow actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"dock keeps navigation and the clicked row; sheets isolate focus and pin actions through content and series changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"popover menus navigate, confirm destructive effects and return focus without moving the trigger","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},

@@ -217,3 +217,4 @@ defineExpose({ frame, close })
 @media (pointer: coarse) { .pane-bar :deep(button), .pane-foot :deep(button) { min-height: 44px; } }
 @media (prefers-reduced-motion: no-preference) { .modal .panel { animation: pane-in .18s ease-out; } @keyframes pane-in { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } } }
 </style>
+<style scoped src="../../styles/settingsButtons.css"></style>

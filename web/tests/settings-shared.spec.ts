@@ -28,6 +28,49 @@ test('needs-you counts problems, keeps calm kinds and uses the container for nar
   await expect(page.locator('.attention')).toHaveCount(0)
 })
 
+for (const theme of ['light', 'dark']) test(`Settings primary actions have no glow and retain keyboard focus in ${theme}`, async ({ page }) => {
+  for (const width of [390, 1024, 1440]) {
+    await open(page, width)
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    const verify = page.getByRole('button', { name: 'Verify again' })
+    const checkAction = async (action: typeof verify) => {
+      await expect(action).toBeVisible()
+      await action.evaluate(el => (el as HTMLElement).blur())
+      await page.mouse.move(0, 0)
+      await expect(action).toHaveCSS('box-shadow', 'none')
+      await expectStableControls({ controls: { action }, interactions: [
+        { name: 'hover without glow', run: async () => {
+          await action.hover()
+          await expect(action).toHaveCSS('box-shadow', 'none')
+        } },
+        { name: 'keyboard focus indicator', run: async () => {
+          await page.mouse.move(0, 0)
+          // Enter keyboard modality, then focus this action without activating it.
+          await page.keyboard.press('Tab')
+          await action.focus()
+          await expect(action).toBeFocused()
+          expect(await action.evaluate(el => el.matches(':focus-visible'))).toBe(true)
+          const style = await action.evaluate(el => {
+            const css = getComputedStyle(el)
+            return { shadow: css.boxShadow, outline: css.outlineStyle, width: css.outlineWidth, color: css.outlineColor, offset: css.outlineOffset }
+          })
+          expect(style.shadow).toBe('none')
+          expect(style.outline).toBe('solid')
+          expect(parseFloat(style.width)).toBeGreaterThanOrEqual(2)
+          expect(style.color).not.toBe('rgba(0, 0, 0, 0)')
+          expect(parseFloat(style.offset)).toBeGreaterThanOrEqual(2)
+        } },
+      ] })
+    }
+    await checkAction(verify)
+    await page.locator('[data-row="1"]').click()
+    const apply = page.getByRole('button', { name: 'Apply capacity' })
+    await checkAction(apply) // Consumer-owned primary action in the footer slot.
+    await apply.click()
+    await checkAction(page.getByRole('dialog', { name: 'Quota warnings' }).getByRole('button', { name: /^Save/ }))
+  }
+})
+
 test('dock keeps navigation and the clicked row; sheets isolate focus and pin actions through content and series changes', async ({ page }) => {
   for (const width of [1440, 1232, 1231, 1024, 753, 752, 390]) {
     await open(page, width)
