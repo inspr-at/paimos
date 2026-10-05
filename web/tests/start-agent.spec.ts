@@ -77,6 +77,42 @@ test('advanced launch retains its selected ticket and retry reuses the created w
   expect(mock.calls.filter(c => c.method === 'POST' && c.path === '/api/work-orders')).toHaveLength(1)
 })
 
+test('canonical leaf search excludes mixed parent results and queues only the selected leaf', async ({ page }) => {
+  const mock = await mockStartAgent(page)
+  const reads: URLSearchParams[] = []
+  const leaf = { id: 'n-1', key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning', is_leaf: true, fields: {}, kind_slug: 'work' }
+  await page.route('**/api/nodes?**', route => {
+    const query = new URL(route.request().url()).searchParams
+    if (query.get('limit') !== '30' || query.get('sort') !== '-updated_at') return route.fallback()
+    reads.push(query)
+    // Deliberately include an ineligible row even when shape was requested.
+    return route.fulfill({ json: { items: [{ ...leaf, id: 'parent', key: 'PHAROS-10', title: 'Work parent', is_leaf: false }, leaf], next_cursor: null } })
+  })
+  await open(page)
+  const search = dialog(page).getByRole('searchbox')
+  await expect(dialog(page).getByRole('button', { name: /PHAROS-11 Connect Hetzner/ })).toBeVisible()
+  await expectStableControls({
+    controls: { search },
+    interactions: [{ name: 'filter leaf results', run: async () => {
+      await search.fill('PHAROS')
+      await expect.poll(() => reads.at(-1)?.get('q')).toBe('PHAROS')
+    } }],
+    scrollAreas: { results: dialog(page).locator('.ticket-results') },
+  })
+  expect(reads.length).toBeGreaterThan(0)
+  for (const query of reads) {
+    expect(query.get('kind')).toBe('work')
+    expect(query.get('shape')).toBe('leaf')
+  }
+  await expect(dialog(page).getByRole('button', { name: /PHAROS-10 Work parent/ })).toHaveCount(0)
+  await expect(dialog(page).getByRole('button', { name: 'Queue run', exact: true })).toBeDisabled()
+  await dialog(page).getByRole('button', { name: /PHAROS-11 Connect Hetzner/ }).click()
+  await ready(page, true)
+  await dialog(page).getByRole('button', { name: 'Queue run', exact: true }).click()
+  await expect(dialog(page).getByRole('heading', { name: 'Queued', exact: true })).toBeVisible()
+  expect(mock.calls.filter(c => c.method === 'POST' && c.path === '/api/work-orders').map(c => c.body?.parent_id)).toEqual(['n-1'])
+})
+
 test('a queue that fails after the work order was written still reads the lists again', async ({ page }) => {
   const mock = await mockStartAgent(page, { failQueue: true })
   await open(page)
