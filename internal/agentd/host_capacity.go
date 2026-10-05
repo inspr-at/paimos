@@ -170,6 +170,7 @@ func readHostFile(path string) (string, error) {
 	}
 	return string(buf[:n]), nil
 }
+
 // ErrHostCapacityUnsupported marks a server that predates host capacity (or a
 // key without a paired computer). Starts then follow the legacy path; the
 // server has no host fence to enforce either.
