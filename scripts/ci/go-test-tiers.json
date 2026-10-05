@@ -155,6 +155,7 @@
     "internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink"
   ],
   "tests": [
+    {"kind":"go","package":"internal/cli","name":"TestLeadSettingsCLIUsesExplicitPersonSession","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsConcurrentRevisionHasOneWinner","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/modelregistry","name":"TestLeadPolicyInheritanceAndBounds","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsRevisionsOwnershipInheritanceAndRedaction","tier":"GATED-FULL"},

@@ -12,11 +12,12 @@ import (
 func (rt *runtime) cmdProjectLeadSettings() *Command {
 	c := &Command{Name: "lead-settings", Short: "Read or revision-check inherited lead policy", Use: "project lead-settings <get|set|reset>"}
 	for _, action := range []string{"get", "set", "reset"} {
-		var file, revision string
+		var file, revision, sessionCookieFile string
 		var workspace bool
 		sub := &Command{Name: action, Short: action + " lead settings (edits require a person session)", Use: "project lead-settings " + action + " [PROJECT] [--workspace]", maxArgs: 1}
 		sub.addFlags = func(fs *flagSet) {
 			fs.bool(&workspace, "workspace", 0, "workspace execution defaults")
+			fs.string(&sessionCookieFile, "session-cookie-file", 0, "existing person session cookie file; omits bearer authentication")
 			if action != "get" {
 				fs.string(&revision, "revision", 0, "expected policy revision")
 			}
@@ -63,6 +64,14 @@ func (rt *runtime) cmdProjectLeadSettings() *Command {
 			} else if action == "reset" {
 				method = http.MethodDelete
 			}
+			if sessionCookieFile != "" {
+				if rt.agentName != "" {
+					return usagef("--session-cookie-file cannot use agent attribution")
+				}
+				if err := rt.usePersonSession(sessionCookieFile); err != nil {
+					return err
+				}
+			}
 			if !workspace {
 				id := args[0]
 				if !validUUID(id) {
@@ -78,7 +87,11 @@ func (rt *runtime) cmdProjectLeadSettings() *Command {
 				path += "?revision=" + strconv.FormatInt(rev, 10)
 			}
 			var out json.RawMessage
-			if err := rt.do(method, path, body, &out); err != nil {
+			var headers map[string]string
+			if rt.personClient != nil {
+				headers = map[string]string{"Origin": rt.personClient.BaseURL}
+			}
+			if err := rt.doHeaders(method, path, body, &out, headers); err != nil {
 				return err
 			}
 			if rt.jsonOut {

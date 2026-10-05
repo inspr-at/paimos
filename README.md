@@ -657,8 +657,12 @@ false on error. **Flags never grant permissions or bypass approval gates.**
 `aeon project lead-settings get PROJECT` reads the lead policy. Use `set
 PROJECT --revision N --from FILE` with a sparse override JSON object, or `reset
 PROJECT --revision N` to inherit again. `--workspace` selects execution defaults
-instead of a project. These commands use the configured caller; edits require
-an active person with `model_prefs.manage`. A project's first edit records that
+instead of a project. Pass `--session-cookie-file FILE` to use an existing
+person session through the
+CLI's bounded session transport, without bearer authentication or storing the
+session. Otherwise these commands use the configured agent caller, and the
+server refuses its edits. Edits require an active person with
+`model_prefs.manage`. A project's first edit records that
 person as owner; subsequent edits require that same canonical person. Reset
 retains the owner and advances the revision, preventing stale saves and takeover.
 

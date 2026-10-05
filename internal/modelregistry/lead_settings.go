@@ -27,6 +27,26 @@ type LeadRecovery struct {
 	AgentHours  float64 `json:"agent_hours"`
 }
 
+// UnmarshalJSON keeps the wire contract explicit: both ceilings are required,
+// including when the person disables recovery with zeroes.
+func (r *LeadRecovery) UnmarshalJSON(raw []byte) error {
+	var in struct {
+		MaxAttempts *int     `json:"max_attempts"`
+		AgentHours  *float64 `json:"agent_hours"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&in); err != nil {
+		return err
+	}
+	if in.MaxAttempts == nil || in.AgentHours == nil {
+		return errors.New("recovery ceilings required")
+	}
+	r.MaxAttempts = *in.MaxAttempts
+	r.AgentHours = *in.AgentHours
+	return nil
+}
+
 // LeadPolicy is sparse: nil inherits; a nonnil empty target list denies all.
 // Model selection references the existing preference matrix, never a new route.
 type LeadPolicy struct {

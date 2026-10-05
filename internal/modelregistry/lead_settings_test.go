@@ -59,6 +59,8 @@ func TestLeadSettingsRevisionsOwnershipInheritanceAndRedaction(t *testing.T) {
 	member := addPrincipal(t, owner.TenantID, "person", "Member", []string{"member"})
 	agent := addPrincipal(t, owner.TenantID, "agent", "Agent", []string{"admin"})
 	agent.Scopes = []string{"nodes.read", "models.read", "model_prefs.manage"}
+	dbtest.BindRole(t, testDB, owner.TenantID, agent.ID, "member")
+	agent.KeyCreatorID = owner.ID
 	foreign := makePrincipal(t, "foreign-lead", "person", "Foreign", []string{"admin"})
 	project := leadProject(t, owner)
 	path := "/api/projects/" + project + "/lead-settings"
@@ -125,6 +127,7 @@ func TestLeadSettingsInputAndCurrentBindings(t *testing.T) {
 	expectPrefError(t, owner, "PUT", path, `{"revision":0,"overrides":{"allowed_account_ids":["`+account+`"]}}`, 422, "invalid_owner_binding")
 	expectPrefError(t, owner, "PUT", path, `{"revision":0,"overrides":{"allowed_host_ids":["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]}}`, 422, "invalid_owner_binding")
 	expectPrefError(t, owner, "PUT", path, `{"revision":0,"overrides":{"parallel_limit":100}}`, 400, "invalid_json")
+	expectPrefError(t, owner, "PUT", path, `{"revision":0,"overrides":{"recovery":{}}}`, 400, "invalid_json")
 	expectPrefError(t, owner, "PUT", path, `{"revision":0,"overrides":{"bucket":"`+strings.Repeat("a", 17<<10)+`"}}`, 400, "invalid_json")
 	expectPrefError(t, owner, "PUT", path, `{"overrides":{}}`, 400, "revision_required")
 	expectPrefError(t, owner, "PUT", path, `{"revision":0}`, 400, "overrides_required")
@@ -146,11 +149,29 @@ func TestLeadSettingsInputAndCurrentBindings(t *testing.T) {
 		}
 		return nil
 	})
+
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2 WHERE id=$1`, account, other.ID)
+		return err
+	})
+	relinked := decode[LeadSettings](t, &owner, "GET", path, "", 200)
+	if !relinked.DetailsRedacted || relinked.Effective.AllowedAccountIDs != nil || relinked.Overrides != nil {
+		t.Fatal("relinked account selectors leaked", relinked)
+	}
 	inRegistry(t, owner, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='archived' WHERE id=$1`, project)
 		return err
 	})
 	expectPrefError(t, owner, "PUT", path, `{"revision":1,"overrides":{}}`, 409, "project_unavailable")
+	inRegistry(t, owner, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='member') WHERE principal_id=$1 AND scope_type='workspace'`, owner.ID)
+		return err
+	})
+	revoked := decode[LeadSettings](t, &other, "GET", path, "", 200)
+	if revoked.WaitReason != "owner_unavailable" || revoked.AutomaticLaunchEnabled {
+		t.Fatal("revoked owner did not wait", revoked)
+	}
+
 }
 
 func TestLeadSettingsWriteRechecksRevocation(t *testing.T) {
