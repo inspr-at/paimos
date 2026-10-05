@@ -117,6 +117,8 @@ func (f *fixture) completion(t *testing.T, profileless ...bool) (string, agentru
 	return run, agentruns.Telemetry{Sequence: 1, Kind: "finished", Status: "completed", Input: 20, Cost: 1, ReviewRange: &reviewgate.CommitRange{Repository: "example/review-fixture", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40)}}
 }
 
+// Catalog seed/upgrade events commit in the independently authorized setup,
+// so the rollback comparison covers only the final resource/event unit.
 func (f *fixture) completionState(t *testing.T) string {
 	t.Helper()
 	var state string
@@ -138,7 +140,7 @@ func (f *fixture) completionState(t *testing.T) string {
    'pairing_requests',(SELECT jsonb_agg(jsonb_build_object('id',id,'state',state) ORDER BY id) FROM agent_pairing_requests),
    'keys',(SELECT jsonb_agg(jsonb_build_object('id',id,'revoked_at',revoked_at) ORDER BY id) FROM agent_keys),
    'links',(SELECT jsonb_agg(jsonb_build_object('id',id,'state',state,'person_id',person_id) ORDER BY id) FROM account_person_link_requests),
-   'events',(SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM events e WHERE type<>'model.registry_seeded'))::text`).Scan(&state)
+   'events',(SELECT jsonb_agg(to_jsonb(e) ORDER BY id) FROM events e WHERE type NOT IN ('model.registry_seeded','model.catalog_upgraded')))::text`).Scan(&state)
 	})
 	return state
 }
@@ -292,6 +294,13 @@ func TestCompletionEventFailureRollsBackWholeUnitButKeepsAuthorizedSetup(t *test
 		}
 		if seed != 1 {
 			t.Fatal("authorized standalone setup was lost")
+		}
+		var upgraded int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM events WHERE type='model.catalog_upgraded'`).Scan(&upgraded); err != nil {
+			return err
+		}
+		if upgraded != 1 {
+			t.Fatal("authorized standalone catalog upgrade was lost")
 		}
 		return nil
 	})

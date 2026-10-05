@@ -479,8 +479,9 @@ func TestWorkStatusNodeLimitRecoveryAndTombstones(t *testing.T) {
 func TestWorkStatusReadSnapshotWithDerivationEnabled(t *testing.T) {
 	f := newStatusFixture(t)
 	f.node("WK-1", "PRJ-1", "open")
-	f.node("WK-2", "WK-1", "in_progress")
+	f.node("WK-2", "WK-1", "open")
 	f.enable()
+	f.change("WK-2", "in_progress")
 	if err := db.InTenantReadSnapshot(dbtest.Seed(t.Context()), f.d.App, f.tid, func(tx pgx.Tx) error {
 		var state, access, isolation string
 		if err := tx.QueryRow(t.Context(), `SELECT state,current_setting('transaction_read_only'),current_setting('transaction_isolation') FROM nodes WHERE key='WK-1'`).Scan(&state, &access, &isolation); err != nil {
