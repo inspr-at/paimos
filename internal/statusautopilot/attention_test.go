@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -361,5 +362,77 @@ func TestAttentionMissedReleaseUsesPlanningMembershipAndUndo(t *testing.T) {
 	})
 	if !f.state(id).Marks["missed_release"] {
 		t.Fatal("undo did not restore the queue flag")
+	}
+}
+
+func TestAttentionResolutionVisibilityPreservesHiddenReferences(t *testing.T) {
+	f := setup(t)
+	id := f.add("AUT-2", "work", "new", 8, nil)
+	hidden := f.add("AUT-20", "project", "open", 0, nil)
+	f.run(f.now)
+	reader := attentionMember(f)
+	item := attentionRead(f, f.p, "").Items[0]
+	result := attentionWrite(f, f.p, "apply", item.attentionInput)[0]
+	if !result.OK {
+		t.Fatalf("apply %+v", result)
+	}
+	applied := result.Resolution
+	item.Resolution, item.Revision = result.Resolution, *result.Revision
+	if undone := attentionWrite(f, f.p, "undo", item.attentionInput)[0]; !undone.OK {
+		t.Fatalf("undo %+v", undone)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		for _, change := range []events.Change{
+			{NodeID: &id, Type: "status_autopilot.attention_private", After: map[string]any{"id": id}},
+			{NodeID: &hidden, Type: "status_autopilot.attention_apply", After: map[string]any{"id": hidden}},
+			{NodeID: &id, Type: "status_autopilot.attention_dismiss", After: map[string]any{"id": id, "fields": map[string]any{"dependency": hidden}}},
+			{NodeID: &id, Type: "status_autopilot.attention_undone", After: map[string]any{"id": id, "fields": map[string]any{"dependency": hidden}}},
+			{NodeID: &id, Type: "status_autopilot.proposed", After: map[string]any{"id": id, "fields": map[string]any{"dependency": hidden}}},
+		} {
+			if _, err := events.Append(t.Context(), tx, f.p, change); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	var page struct {
+		Items []events.Event `json:"items"`
+	}
+	if err := json.Unmarshal(f.call(reader, "GET", fmt.Sprintf("/api/events?after=%d", applied-1), "", 200).Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 || page.Items[0].ID != applied || page.Items[0].Type != "status_autopilot.attention_apply" || page.Items[1].Type != "status_autopilot.attention_undone" {
+		t.Fatalf("public resolutions or hidden reference boundaries: %+v", page)
+	}
+	for _, event := range page.Items {
+		if event.ActorPrincipalID != f.p.ID || event.NodeID == nil || *event.NodeID != id || len(event.NodeChanges) != 1 || event.NodeChanges[0].ID != id {
+			t.Fatalf("missing visible node projection: %+v", event)
+		}
+	}
+}
+
+func TestAttentionApplyAndUndoDeriveParentStatuses(t *testing.T) {
+	f := setup(t)
+	parent := f.add("AUT-2", "work", "blocked", 0, nil)
+	leaf := f.add("AUT-3", "work", "blocked", 15, nil)
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$1 WHERE id=$2`, parent, leaf)
+		return err
+	})
+	dbtest.EnableWorkParentStatus(t, f.d, f.p.TenantID)
+	f.run(f.now)
+	page := attentionRead(f, f.p, "")
+	if len(page.Items) != 1 || page.Items[0].NodeID != leaf || f.state(parent).State != "blocked" {
+		t.Fatalf("leaf-only queue: %+v", page)
+	}
+	item := page.Items[0]
+	result := attentionWrite(f, f.p, "apply", item.attentionInput)[0]
+	if !result.OK || f.state(leaf).State != "open" || f.state(parent).State != "open" {
+		t.Fatalf("Apply did not derive parent from leaf: %+v", result)
+	}
+	item.Resolution, item.Revision = result.Resolution, *result.Revision
+	result = attentionWrite(f, f.p, "undo", item.attentionInput)[0]
+	if !result.OK || f.state(leaf).State != "blocked" || f.state(parent).State != "blocked" {
+		t.Fatalf("Undo did not derive parent from leaf: %+v", result)
 	}
 }

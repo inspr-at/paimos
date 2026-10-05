@@ -401,6 +401,7 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 		return events.ErrConflict
 	}
 	resolution := attentionResolution{Original: in.EventID, Proposal: item.Kind == "proposed", Action: action}
+	var membershipChange *events.Change
 	var d decision
 	if resolution.Proposal {
 		var raw []byte
@@ -456,10 +457,11 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 					return err
 				}
 			}
-			resolution.Membership, err = releases.AddMissedReleaseTx(ctx, tx, p, *c.Node.ProjectID, item.ReleaseID, in.NodeID, item.ReleaseRevision)
+			change, err := releases.AddMissedReleaseTx(ctx, tx, p, *c.Node.ProjectID, item.ReleaseID, in.NodeID, item.ReleaseRevision)
 			if err != nil {
 				return err
 			}
+			membershipChange = &change
 		} else {
 			if item.To == "delivered" || item.To == "accepted" {
 				if pending(c.Node) {
@@ -494,6 +496,14 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 		if _, err = tx.Exec(ctx, `INSERT INTO status_autopilot_receipts(tenant_id,node_id,rule,anchor,event_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT DO NOTHING`, p.TenantID, in.NodeID, resolution.Rule, resolution.Anchor, in.EventID); err != nil {
 			return err
 		}
+	}
+	// Membership, node, proposal and receipt writes precede the event counter.
+	if membershipChange != nil {
+		e, err := events.Append(ctx, tx, p, *membershipChange)
+		if err != nil {
+			return err
+		}
+		resolution.Membership = e.ID
 	}
 	meta, err := json.Marshal(map[string]any{"job": Job, "reason": item.Reason, "rule": resolution.Rule, "resolution": resolution})
 	if err != nil {

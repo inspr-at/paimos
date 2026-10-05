@@ -1,5 +1,6 @@
 -- SPDX-License-Identifier: AGPL-3.0-only
 -- AEON-697: public attention resolutions use ordinary visible-node snapshots.
+-- The released proposal schema is retained; visibility adds only named public events.
 -- Preserve every hidden-reference check and derive parent statuses from leaves.
 SET LOCAL lock_timeout = '5s';
 ALTER POLICY events_project_visibility ON events

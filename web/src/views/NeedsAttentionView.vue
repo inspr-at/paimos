@@ -101,8 +101,15 @@ function act(action: 'apply' | 'dismiss' | 'undo', targets: Row[], focusID?: num
       } } })
     }
     if (failures.length) toast(failures.join('\n'), { tone: 'error', key: 'attention-errors' })
-    if (focusID) void nextTick(() => { if (generation === visit) document.getElementById(`${action === 'undo' ? 'apply' : 'undo'}-${focusID}`)?.focus({ preventScroll: true }) })
-  }), { failed: e => { if (visit === generation) toast(e instanceof Error ? e.message : 'The change could not be confirmed.', { tone: 'error' }) }, settled: () => { if (visit === generation) busy.value = false } })
+  }), { failed: e => { if (visit === generation) toast(e instanceof Error ? e.message : 'The change could not be confirmed.', { tone: 'error' }) }, settled: () => {
+    if (visit !== generation) return
+    busy.value = false
+    if (focusID) void nextTick(() => {
+      if (generation !== visit) return
+      const current = rows.value.find(row => row.event_id === focusID)
+      document.getElementById(`${current?.resolved ? 'undo' : 'apply'}-${focusID}`)?.focus({ preventScroll: true })
+    })
+  } })
 }
 function menuKeys(event: KeyboardEvent) {
   if (event.altKey || event.ctrlKey || event.metaKey) return
@@ -209,6 +216,7 @@ a.active { background: var(--row-selected); color: var(--teal-ink); box-shadow: 
 .list-mode { display: flex; align-items: center; gap: 6px; font-size: 13px; }
 .search-field { display: flex; align-items: center; gap: 6px; width: clamp(140px, 20vw, 280px); min-width: 0; padding: 0 10px; min-height: 34px; border-radius: 8px; box-shadow: inset 0 0 0 1px var(--line-2); background: var(--surface); }
 .search-field input { width: 100%; min-width: 0; padding: 0; border: 0; background: transparent; color: var(--ink); font-size: 13px; outline: none; }
+.search-field > svg { position: static; flex-shrink: 0; }
 .search-field:focus-within { box-shadow: var(--focus-ring); }.search-field :deep(.keycap) { flex-shrink: 0; }
 .facets { display: flex; flex-wrap: wrap; gap: 8px; }.facet-button.filtered { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--teal); }.reset { margin-left: auto; }
 .table-card { border-radius: 14px; box-shadow: var(--shadow), inset 0 0 0 1px var(--line); background: var(--surface-raised); overflow: clip; }
