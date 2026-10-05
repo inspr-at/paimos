@@ -101,6 +101,19 @@ func TestRouteDeclarationsFailClosed(t *testing.T) {
 	if err := RequirePattern(context.Background(), undo, Scope{}); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("anonymous queue Undo: %v", err)
 	}
+	for _, route := range []string{
+		"POST /api/queue/{nodeId}/snapshots", "GET /api/queue-snapshots/{snapshotId}",
+		"POST /api/queue-snapshots/{snapshotId}/apply", "DELETE /api/queue-snapshots/{snapshotId}",
+	} {
+		permission, declared := PermissionForPattern(route)
+		if !declared || permission != "nodes.read" || !ProjectDecidedRoutes[route] {
+			t.Fatalf("snapshot route has no project-scoped handler authorization: %s (%q)", route, permission)
+		}
+		if err := RequirePattern(context.Background(), route, Scope{}); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("anonymous snapshot route: %s: %v", route, err)
+		}
+	}
+
 }
 
 func TestMeRequiresAuthenticationOnly(t *testing.T) {
