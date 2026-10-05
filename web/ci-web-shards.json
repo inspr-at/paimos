@@ -2484,6 +2484,12 @@
           "listedTests": 9
         },
         {
+          "file": "tests/dialog-scale.spec.ts",
+          "weightSeconds": 17.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 8
+        },
+        {
           "file": "tests/dialog-full-text.spec.ts",
           "weightSeconds": 115.414634,
           "weightSource": "unmeasured-test-rate",
