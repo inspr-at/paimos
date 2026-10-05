@@ -294,7 +294,7 @@ func TestPreferenceTicketResolutionUsesStoredPlacement(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'TKT-1','Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID).Scan(&project); err != nil {
 			return err
 		}
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id,fields) SELECT $1,id,'TKT-2','Complex backend',$2,$2,'{"area":"backend","complexity":"L","complexity_source":"manual","route_role":"build-hard","residency":"eu"}'::jsonb FROM node_kinds WHERE slug='ticket' RETURNING id::text`, admin.TenantID, project).Scan(&ticket)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,project_id,fields) SELECT $1,id,'TKT-2','Complex backend',$2,$2,'{"area":"backend","complexity":"L","complexity_source":"manual","route_role":"build-hard","residency":"eu"}'::jsonb FROM node_kinds WHERE slug='work' RETURNING id::text`, admin.TenantID, project).Scan(&ticket)
 	}); err != nil {
 		t.Fatal(err)
 	}

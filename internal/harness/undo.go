@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -38,6 +39,9 @@ func undoRemoval(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Ev
 	if len(e.Before) == 0 || json.Unmarshal(e.Before, &previous) != nil || json.Unmarshal(e.After, &removed) != nil ||
 		!workorders.UUID(previous.ID) || previous.ID != removed.Session.ID || !workorders.UUID(previous.ProjectID) {
 		return events.Change{}, events.ErrConflict
+	}
+	if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+		return events.Change{}, err
 	}
 	err := authz.RequireTx(ctx, tx, p, "harness.read", authz.Scope{ProjectID: previous.ProjectID})
 	if errors.Is(err, authz.ErrForbidden) {

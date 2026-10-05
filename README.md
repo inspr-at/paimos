@@ -248,6 +248,71 @@ Undo restores availability without replacing later choices. The default itself
 cannot be deleted. This package supplies the API; Settings and applying its
 values are delivered by AEON-642–644.
 
+## Work leaves and graceful lifecycle actions
+
+Agents bind to work leaves: only live work children make a parent. New dispatch,
+claims, session registration/binding and work-order placement share the tree
+fence with child creation. A busy leaf cannot gain work children; historical
+sessions keep their original IDs and bindings.
+
+Busy work does not prevent adding siblings to its project or existing work
+parent. Coordinator live ETA writes accept work leaves, reject work parents,
+and recheck current authority under the tree fence. Work leaves also retain
+missing-estimate guidance and their saved dispatch model placement.
+
+In a work item's **Work actions** sheet, **Split into children** saves up to
+20 child titles and requests an AEON-479 cooperative handover before creating
+them. **Cancel with its open children** previews up to 100 open leaves, cancels
+idle leaves, and waits for running leaves to report stopped. Finished leaves
+stay finished. These requests never send process signals or treat heartbeat loss
+as a confirmed stop. The saved action continues after closing the sheet or
+restarting the server, with the original person's current permissions checked
+inside every write. A changed split target requires abandoning the saved request
+and reviewing a fresh preview; abandoning keeps earlier completed writes and
+handover requests intact. Heartbeat loss, lost process ownership and administrative
+removal keep the stop fence; they require recovery or an explicit process-stop
+report. Bindings of an unconfirmed generation cannot detach or move away while
+its work action is pending. The same generation may revive and finish handover.
+Cooperative wrap-up delivery expires after ten minutes. **Check handover** and
+the background worker retry expired delivery under the original person's current
+authority, with an audit trail, while retaining the fence. Retries never escalate
+to force stop and reuse any still-active delivery.
+
+After an uncertain stop, the owned executor can report a later confirmed exit
+through `POST /api/projects/{projectId}/harness-sessions/{sessionId}/confirm-exit`
+with its exact worker lease and current `harness.worker` authority. Only
+`process_exited`, `process_failed` and `force_stopped` are accepted. Confirmation
+releases the work fence, records `harness.stop_confirmed` once and preserves
+closure timestamps, archive receipts and historical bindings. Archived servicing
+remains revoked; the administrative recovery observation stays unchanged.
+Work-order, harness and lifecycle action requests buffer bodies up to 1 MiB under a
+ten-second network read deadline before opening their tenant transaction.
+Failed reads retain the deadline so draining the body cannot stall indefinitely.
+Stalled uploads cannot hold the work-tree or tenant fences; key scopes and
+target permissions are still checked inside the final mutation transaction.
+Coordinator registration and resume adopt up to 1000 direct live/paused children
+atomically. Larger scopes return 409; buffered audit snapshots have a 32 MiB cap
+(429 on excess), and flush only after all generation and child mutations finish.
+
+The additive API is `GET/POST /api/nodes/{id}/work-lifecycle`,
+`POST /api/nodes/{id}/work-lifecycle/{action}/continue`, and
+`DELETE /api/nodes/{id}/work-lifecycle/{action}`. Requests bind a UUID, the node
+revision and the preview's scope digest. Waiting and completed responses are
+explicit; replaying a request creates no extra children or cancellation events.
+Builder completion with a review range still commits during pending handover:
+automatic review records `review.unavailable` and leaves the review gate closed,
+without starting new work or preventing the original generation from finishing.
+Work-order cancellation rechecks `work_orders.write` and queued reservation
+release rechecks `run.create`, alongside `nodes.write` and session control.
+
+Integration seams: AEON-655's work surfaces can supply `is_leaf` to the shared
+queue helper; this package also accepts the existing estimate's `is_parent`
+projection and otherwise fails closed. The AEON-429 `work-parent-status` rollout
+continues to govern derived parent states from AEON-650. No sibling package is
+required for the lifecycle API or sheet. When the DSAR inventory lands, classify
+`work_lifecycle_actions.children` as personal drafts and targets/results/requester
+as tenant identifiers; that inventory is absent from this stacked checkout.
+
 ## Code health audits
 
 AEON-571 defines the ongoing code-health workflow. Each run belongs to a child
@@ -795,6 +860,29 @@ name and notes. The result is a revision-bound draft: a person reviews and
 applies it separately. A changed customer or provider configuration refuses the
 stale generation. Delegated agent runs and Aithema intake retain their existing
 harness, plugin and approval controls; this setting does not select their models.
+
+**Generate parent benefits from leaves** is a separate opt-in (AEON-654), behind
+`work-parent-status` (AEON-429). Completing a parent queues an asynchronous English
+and German pill/benefit summary; its Done never waits for the model. The parent
+shows pending/running, generated provenance, or a safe failure with **Retry
+generation**. **Edit benefit** preserves human text and cancels stale attempts.
+The worker uses the saved chat model; it never launches a harness or falls back to
+a vendor. The person who saved the provider must still have `settings.manage`,
+`nodes.read` and `nodes.write` for the current parent when a result is applied.
+It summarises up to 200 leaves / 64 KB of benefit data, excludes cancelled/archived
+leaves, refuses incomplete or cross-project sources, and never silently truncates.
+Provider changes, moved/reopened parents, changed leaves and edited benefits fence
+in-flight results. Leases recover after restart. Leaves keep the bilingual Done
+gate; published snapshots remain immutable. Migration `1239` stores only job and
+provenance metadata on existing nodes. `GET /api/nodes/{id}/benefit-generation`
+reports status; the person-only retry POST requires the displayed generation and
+node revision. Retry bodies have a 4 KiB limit and a five-second HTTP read deadline
+before decoding and mutation locks. A generated write emits
+`node.benefits_generated` for live refresh; it has no generic node Undo, which
+could overwrite unrelated fields.
+Leaf completion checks use the same tenant state categories as parent derivation,
+including custom Done states. Cancellation and archival do not require benefits,
+and edits to already-completed historical records remain available.
 
 API keys are optional and encrypted through the existing tenant-bound AES-GCM
 vault, separate from JSON settings and event data. Reads reveal only whether a
@@ -1964,7 +2052,9 @@ New required properties on these shared components still require a major bump.
 Changed existing properties, newly requiring an existing optional property, and adding a required
 property to a previously closed response schema also remain major changes.
 
-Agent drafts show `est.` until a person or a working agent bound to the ticket confirms or changes them. Resubmitting the hours through the estimate command confirms them; provenance is recorded again. The ticket's Estimate control also edits or clears the value. Epics show the sum of direct, visible, open ticket/task children, with estimated-child coverage in the tooltip; nested tasks are not counted twice. The Estimate sort keeps empty values last in either direction. Imported points remain visible as points, not converted to hours.
+Agent drafts show `est.` until a person or a working agent bound to the ticket confirms or changes them. Resubmitting the hours through the estimate command confirms them; provenance is recorded again. The ticket's Estimate control also edits or clears the value. Parents show the sum of their visible, non-archived, non-cancelled leaves at any depth, including done leaves. A typed parent estimate stays alongside as “planned” and never enters the leaf sum. Progress weights estimated leaves by hours and shows coverage; with no estimates it counts leaves. Regrouping the same leaves does not change project progress. Ready/live ETA is the latest report among open leaves, labelled partial when some have no report. Weighted or rounded 100% does not suppress that ETA or staleness while leaves remain open. Project-scoped readers receive authorized Autopilot Undo facts so these projections refresh even when parent status stays unchanged. Headline and state-facet counts (including Hide) count leaves only; parents group work. Historical spend stays on former leaves and each session counts once per scope, including cancelled/archived work; exact-money visibility still requires access to both the row and source projects. The invoker-rights `aeon_work_scope` traversal deduplicates requested roots and has no depth cutoff; `aeon_work_aggregates` shares leaf facts/session reads and returns explicit coverage. Migration 1230 preserves both old `aeon_node_eta` and `aeon_node_eta_progress` signatures for previous binaries. The Estimate sort keeps empty values last in either direction. Imported points remain visible as points, not converted to hours.
+
+Ticket details show the same progress, ETA and leaf coverage below the controls. A disconnected event feed labels the ETA as the last reported estimate. People with write access open **More actions → Work actions** to split or cancel work; closing the sheet returns keyboard focus to More actions.
 
 For a backfill, an agent drafts a JSON plan such as `[{"key":"AEON-317","hours":2},{"key":"AEON-318","hours":0.5}]`, then runs:
 
@@ -1978,6 +2068,8 @@ Both modes validate every plan entry and project membership before any write. Ap
 ## Independent commit reviews
 
 The ticket panel's **Cross-family review** section requests a review of a repository and two full commit hashes. A completed managed builder run also requests one automatically when its daemon reports a produced commit range and its key already permits `work_orders.write` and `run.create`. The reviewer receives the ticket snapshot, acceptance criteria and exact bounded diff through the existing managed-run queue. This slice never merges.
+
+Both request paths support migrated `work` leaves as well as legacy tickets and tasks. Work parents cannot receive new review work orders; replaying a request retains its original order and run.
 
 Review work orders have immutable author, reviewer, repository and range bindings. The registry's `review-gate` profiles provide model/version pins; eligible strong or frontier profiles require `xhigh`, exclude the author family, and follow Codex → Grok → Claude. Only qualified adapters with tools, hooks, plugins and inherited settings disabled can launch a review. Today that means the Claude bridge or a qualified native Grok enrollment on arm64 macOS; unsupported adapters, unavailable accounts, exhausted capacity and missing approvals remain visible fallback reasons. Profile families must match their fixed harness provider or a supported explicit provider/model binding. Unknown providers cannot establish review independence. Inconsistent legacy pins remain immutable history but are excluded from routing, evidence and approval; replace them with a correctly labelled profile. Legacy daemons cannot receive or claim review runs. The daemon uses scratch space outside the repository and supplies a bounded text diff without credential paths or known credential forms. Binary or oversized changes require another review path; they cannot pass this gate.
 
@@ -3829,3 +3921,150 @@ Permanent conflicts expose `retryable: false` and require a reviewed new decisio
 outcome writes never appear applied. Encoded Doctrine inputs exceeding the
 4096-byte persistence bound return 422 and are stored only for Doctrine.
 `source_handover_id` remains unavailable pending its verified ask-source adapter.
+
+## Derived work-parent status (AEON-650)
+
+Migration `1225_work_parent_status.sql` installs the shared transaction engine.
+`db.InTenant` enters pairing → tree → tenant → sorted work rows before a writer;
+`db.InTransaction` coalesces nested writes before the outer commit. Both old and
+new ancestor chains participate in moves. Canonical reads temporarily raise
+project visibility only inside the SQL functions, restoring it on every return;
+normal authorization remains in each writer's final transaction. Derived parent
+updates preserve `updated_at`, so they do not invalidate an unrelated title/body
+edit. Live views consume `status_autopilot.derived` at that unchanged revision.
+At that revision, the row store rejects node responses sent before a newer
+accepted read or derived hint. Late list responses preserve status from newer
+node reads while still supplying list-only projections. List snapshots retain
+their server-position ordering; cross-source status uses request order when
+positions cannot be compared. Status and its ordering fence form one snapshot:
+an accepted node payload applies before its fence advances, including when a
+full cache was already confirmed. A post-gap read applies the recovered status
+before confirming freshness. Named regressions and 300 reproducible seeded
+node/list/stream-gap interleavings check this against a small reference model.
+
+Rollout remains OFF until AEON-429's `features` table and service merge. Its
+catalog must register `work-parent-status` (label: “Parents follow their work”),
+using its existing tenant/project inheritance, explicit project OFF and default
+OFF behavior. Before enabling it, provision the existing System actor in a
+separate committed transaction while the flag is OFF (`systemactor.Ensure` /
+`aeon_authz_system_actor`); activation without that actor fails closed.
+Activation plumbing must validate the row/depth bounds before saving ON. A tenant
+already above the live-row limit can still read and disable the flag; flagged
+work mutations fail closed until recovery. This checkout does not substitute a
+second flag API. The coordinator owns catalog
+registration, activation plumbing and the AEON-429 integration check. Existing
+parents reconcile when their children or state-category configuration change;
+activation itself does not rewrite historical states. Package AEON-655 owns the
+parent status controls and preview-confirmation UI.
+
+Live work children make a parent; other kinds do not. Doing/QA wins, then
+Blocked, then Open. With only finished children, any Done gives Done; only
+Cancelled gives Cancelled; all Accepted gives Accepted; Delivered/Accepted gives
+Delivered; other finished mixtures give Done. Custom categories use these same
+buckets. Archived children are ignored. No remaining active work children keeps
+the last state and records a retention reason, including when the last work
+child converts to another kind. PATCH rejects an explicit parent
+status with `409 parent_status_derived`, including the current value; bulk reports
+such parents as skipped while applying authorized leaf changes. Imports retain
+canonical parent status and report `parent_status_derived` as a source conflict.
+Requirements generation and release quick-create emit work nodes.
+
+History and SSE expose safe `derivation` context: rule version, generic reason,
+affected parent ID, and cause event ID only when that event is visible. No hidden
+child identity or count is included. The private audit metadata retains
+selected cause IDs for grouped writes; ambiguous causes offer no causal Undo.
+Derived changes use Status autopilot's audit
+surface. The existing single-click Undo stays unavailable for them. Fetch
+`GET /api/events/{id}/undo-preview`; confirm its visible `change_type`, message
+and affected children, then POST `/api/events/{id}/undo` with
+`{"confirmed_cause_event_id":123}` using the returned cause ID. The write
+decodes its bounded confirmation before taking any transaction locks, then
+re-checks permissions and original child revisions under access-change fences
+even if the flag was disabled, and reverses the cause once. Parents are derived
+again while the feature is enabled. Ordinary Undo also takes pairing, tree and
+tenant access fences before its event fence in both flag states, including
+across activation and concurrent knowledge writes.
+Later child edits, hidden/ambiguous causes, active work and unsupported reverse
+operations refuse the action atomically.
+Causal preview and confirmed Undo enforce the leaf’s bilingual benefits when restoring
+completion, using current tenant state categories, including custom Done.
+
+The initial implementation deliberately serializes flagged tenant transactions
+and prelocks their work rows to avoid taking ancestor locks after the event
+counter. Reads also enter that protocol within capacity. Limits fail the entire
+work mutation transaction: 50,000 live work rows (tombstones are excluded, and
+restoration counts toward the limit), 1,000 changed nodes, depth 1,000, 10,000
+cause events, and 10-second entry/derivation deadlines. Causal previews accept
+at most 200 children and 4 MiB of combined cause snapshots, checked on their
+expanded JSON in Postgres before transfer to the application. Confirmation
+bodies are limited to 1 KiB with a 10-second HTTP read deadline. Shared work-order,
+harness, run, hours and review endpoints, queue writes and brand settings buffer
+their existing bounded request bodies before transaction admission, with the
+same 10-second HTTP read deadline. Event-position buffering preserves that
+connection deadline on harness and run GET routes without flushing responses
+before their position is known. The live-row limit is
+checked again against the final tree before commit, so crossing creates,
+restores and kind conversions roll back atomically. Direct work writes outside
+`db.InTenant` fail closed when the flag is enabled. These bounds and tenant-wide read serialization require
+load validation before enabling large tenants; the local deep/wide regression
+covers 64 ancestor levels and 300 leaves, not a production load claim.
+
+No version, release pin, session/Decision Desk identity or historical event is
+rewritten by this package. AEON-649's backup-only kind migration rollback still
+applies. No permanent tables or columns are added; only transaction-local queues,
+SQL functions/triggers, and existing append-only event metadata are used.
+
+## Work leaf aggregates (AEON-651)
+
+Default and live work lists include migrated `work` nodes. Parents show the sum
+of eligible leaf estimates separately from their editable planned estimate;
+cancelled and archived leaves retain their own displayed estimate and sort by it,
+but contribute nothing to ancestor totals. Descendant node and session events
+invalidate loaded parent projections in the affected project even when parent
+status and revision stay unchanged. Membership changes also refresh former leaves.
+When an uncached descendant moves, its source project is unknown; held work rows
+across projects are conservatively refreshed through authorized reads. Reads still
+respect pinned editors and reject responses overtaken by newer hints.
+Late usage reports also invalidate the session's currently bound readable work
+node and held parents, including after a session stops. Planning sorts resolve
+displayed work rows as well as eligible descendant leaves, preserving a closed
+leaf's route, token and cost projections across sort changes.
+Current `work` nodes keep route provenance, human checks, completion benefits,
+project moves, graph links and person-only roadmap publication. Future frozen
+release notes capture work members using the existing public-field whitelist.
+Tests use the current starter catalog; historic mixed-kind cases define their own
+tenant kinds.
+Lists without sized work skip calibration reads that cannot produce an estimate,
+while still resolving displayed routes and retaining historical usage.
+Progress tooltips and accessibility labels share ETA's completion rule: weighted
+or rounded 100% still says “work remains” while leaves are open or their completion
+is unknown. The displayed percentage and estimate coverage remain visible.
+
+The unreleased 1230 migration bounds every shared scope traversal to 4096 input
+roots and 50000 distinct root/node pairs, counting overlapping roots against the
+expansion budget before leaf facts or sessions are read. Cycles are deduplicated
+and depth is not silently truncated. Aggregate readers and node detail reads use
+five-second context deadlines, preserving shorter caller deadlines. Exceeding a
+budget or deadline returns an explicit failure (node APIs: 503), never a partial
+aggregate. Larger lists should narrow their scope. RLS, exact-money permissions,
+historical spend and session identities are unchanged.
+
+Work vocabulary (AEON-655) is managed in Workspace settings, independently of appearance. A leaf always uses the leaf name (default Ticket); parents use their project-relative level (Epic, Story, then Level N). Only live work children make a parent; a project resets depth. Naming and the parent status explanation use the existing `work-parent-status` flag, whose production activation remains owned by AEON-429. Create a work item; nesting decides its name. Lead status scripts must write leaves only.
+
+| Surface | Before migration | After work-kind migration |
+| --- | --- | --- |
+| REST `kind_id` | Configured Epic/Ticket/Task UUID | Canonical Work UUID; retired UUIDs are rejected, never guessed |
+| REST list `kind=epic,ticket,task` | Requested old kinds | Each old slug also matches Work (including exclusions); use `shape=parent` / `shape=leaf` and `depth=N` for structure |
+| REST `epic` projection/filter | Nearest Epic/subtree | Nearest Work ancestor/subtree; property name retained for compatibility |
+| Outcomes and cross-family reviews | Ticket outcomes; Ticket/Task reviews | Work retains existing history, outcome recording and review requests; routes and payload field names stay compatible |
+| REST node/list/tree/Graph | Existing fields retained | Additive `is_leaf`, `depth`, `level_name`, `level_icon`; non-work nodes omit shape fields |
+| CLI `issue --type work,epic,ticket,task` | Old types remain accepted | Old type names resolve to canonical Work for creation/listing; same-kind updates are no-ops |
+| CLI JSON | Original `type` | Canonical `type=work`, plus `is_leaf`, `depth`, `level_name`, `level_icon` |
+| MCP `issue_list`, `issue_get`, `issue_create` | Same configured-kind paths as CLI | Same aliases and JSON as CLI; `parent` on creation decides nesting |
+| Saved views | Existing kind filters retained | Old kind slugs match Work; Parents/Leaves and depth round-trip through URL and saved filters |
+
+Vocabulary writes require a person with `settings.manage`, check the current permission under the tenant fence, compare the supplied revision, and append an event. At most 32 parent levels and 60 characters per name are accepted. Empty values keep stable names and icons. Historical sessions, event snapshots and Decision Desk identities are unchanged. Integration seam: AEON-429 must provide its feature storage/service; AEON-652 owns server-side lifecycle enforcement. This package does not activate flags or change external lead scripts.
+
+AEON-655 Outline roots load incrementally with one unified cursor. Page sizes remain fixed even when inserted or expanded work consumes retention capacity. The browser retains at most 5000 lazy work items and reports an incomplete Outline at that limit; filtered paths resolve at most 2000 ancestor reads in batches of eight, with cycle detection and explicit incomplete-result messages for unreadable ancestors, resource limits or interrupted reads. Drag nested work onto the Project root destination above the rows to return it to the project level. Reload and Save vocabulary are serialized, and person/tenant changes discard old responses. Detail-panel completion uses canonical descendant-leaf state facets, excluding cancelled leaves; failed aggregate reads show unavailable progress instead of direct-child counts. CLI/MCP type aliases resolve kinds only and never inject provenance into strict user field schemas.
+
+AEON-655 completion validation covers migrated `work` and legacy `ticket` records. Creating or moving a work item into Done, Accepted or Delivered requires both pill and benefit texts in English and German, including when hidden from release notes. Already completed history remains editable; reopening restores the next-completion requirement. The workspace offers the same benefit reading section, editor and completion prompt for work items. Outline rendering traverses explicit frames rather than the JavaScript call stack; a 3600-row path (1800 ancestors plus 1800 matches) has regression coverage.

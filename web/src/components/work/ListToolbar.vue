@@ -18,6 +18,11 @@ import { statusMeta } from '../../lib/work'
 import HideLabel from './HideLabel.vue'
 import HideOptions from './HideOptions.vue'
 import type { ColumnId } from '../../lib/columns'
+import { workNoun } from '../../lib/workVocabulary'
+import { useWorkVocabulary } from '../../stores/workVocabulary'
+
+const vocabulary = useWorkVocabulary()
+const createLabel = computed(() => `New ${workNoun(vocabulary.leaf.name)}`)
 
 const props = defineProps<{
   filters: ListFilters
@@ -244,7 +249,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
 
     </div>
     </Teleport>
-    <button v-if="!graph" type="button" class="btn primary new-btn" aria-label="New ticket" aria-keyshortcuts="n" data-tip="New ticket · n" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
+    <button v-if="!graph" type="button" class="btn primary new-btn" :aria-label="createLabel" aria-keyshortcuts="n" :data-tip="`${createLabel} · n`" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
     <button type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" aria-haspopup="dialog" data-tip="Filters and display options" @click="emit('openSheet')">
       <AppIcon name="sliders" :size="14" /><span class="filters-label">Filters</span><span v-if="filterCount" class="facet-count mono">{{ filterCount }}</span>
     </button>

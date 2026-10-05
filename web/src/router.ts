@@ -4,6 +4,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { setPageTitle } from './lib/brand'
 import { useProjects } from './stores/projects'
 import { useSession } from './stores/session'
+import { useWorkVocabulary } from './stores/workVocabulary'
 import { sessionEnded } from './lib/api'
 import { can, ensurePermissions, permissionsRevoked } from './lib/authz'
 import { toast } from './lib/toast'
@@ -211,6 +212,14 @@ router.beforeEach(async (to, from) => {
       delete query.new
       return { path: to.path, query, hash: to.hash, replace: true }
     }
+  }
+  // Resolve workspace names before project controls appear, so a late read
+  // cannot change a type chip's width under the pointer.
+  if (session.identity && to.params.projectKey) {
+    const vocabulary = useWorkVocabulary()
+    await vocabulary.load()
+    if (!session.identity || session.requiresSignIn) return signInAgain(to.fullPath)
+    if (vocabulary.error) toast(vocabulary.error, { tone: 'error' })
   }
 })
 // A held attach code is offered once the navigation that cleaned the address bar has settled.

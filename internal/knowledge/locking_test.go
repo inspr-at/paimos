@@ -157,3 +157,102 @@ func TestKnowledgeLockedEligibilityAfterConcurrentDelete(t *testing.T) {
 	expect(t, call(t, f, f.a, "POST", fmt.Sprintf("/api/events/%d/undo", eventID), nil), 201)
 	expect(t, call(t, f, f.a, "GET", "/api/knowledge/"+e.ID, nil), 200)
 }
+
+// Ordinary Knowledge Undo takes the tenant fence before advisory/event locks
+// even with work-parent-status OFF. Pause a PATCH after its shared tree/pairing
+// entry, observe Undo's tenant wait, and probe the owned tree and free event fence.
+func TestKnowledgeUndoTenantBeforeSharedFencesWithWorkStatusOff(t *testing.T) {
+	// This fixture needs only a project and knowledge.
+	f := fixture{db: dbtest.Open(t)}
+	f.a = tenant.Principal{Kind: tenant.Person, Name: "Markus Barta"}
+	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO tenants(slug,name) VALUES('undo-pairing','Undo pairing') RETURNING id::text`).Scan(&f.a.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person',$2) RETURNING id::text`, f.a.TenantID, f.a.Name).Scan(&f.a.ID); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title)
+		 SELECT $1,'PRJ-1',id,'Project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.a.TenantID).Scan(&f.project)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, f.db, f.a.TenantID, f.a.ID, "member")
+	fixtureMux := http.NewServeMux()
+	New(f.db.App).Mount(fixtureMux)
+	f.handler = fixtureMux
+	dbtest.EnableWorkParentStatus(t, f.db, f.a.TenantID)
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE features SET enabled=false WHERE tenant_id=$1 AND key='work-parent-status'`, f.a.TenantID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	entry := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "undo-pairing", "title": "Undo target"})
+	other := createEntry(t, f, f.a, map[string]any{"type": "runbook", "slug": "write-pairing", "title": "Write target"})
+	if entry.EventID == nil {
+		t.Fatal("created entry has no event")
+	}
+	pool, barrier, ctx := dbtest.BarrierPool(t, f.db.App, func(sql string) bool {
+		return sql == `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id'),0))`
+	})
+	mux := http.NewServeMux()
+	New(pool).Mount(mux)
+	write := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		r := httptest.NewRequest("PATCH", "/api/knowledge/"+other.ID, strings.NewReader(`{"title":"Concurrent write"}`)).WithContext(tenant.WithPrincipal(ctx, f.a))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		write <- w
+	}()
+	writerPID := barrier.Wait(t, ctx)
+	undo := make(chan *httptest.ResponseRecorder, 1)
+	done := make(chan struct{})
+	go func() {
+		m := http.NewServeMux()
+		events.New(f.db.App, events.WithUndoHandlers(UndoHandlers())).Mount(m)
+		r := httptest.NewRequest("POST", fmt.Sprintf("/api/events/%d/undo", *entry.EventID), nil).WithContext(tenant.WithPrincipal(ctx, f.a))
+		w := httptest.NewRecorder()
+		m.ServeHTTP(w, r)
+		undo <- w
+		close(done)
+	}()
+	lock := dbtest.BlockedOrDone(t, ctx, f.db.Admin, writerPID, done)
+	var tenantWait bool
+	if err := f.db.Admin.QueryRow(ctx, `SELECT EXISTS(
+ SELECT 1 FROM pg_stat_activity a WHERE $1::int=ANY(pg_blocking_pids(a.pid))
+ AND strpos(a.query,'SELECT id FROM tenants')>0
+ AND NOT EXISTS(SELECT 1 FROM pg_locks l WHERE l.pid=a.pid AND l.locktype='advisory' AND l.granted))`, writerPID).Scan(&tenantWait); err != nil {
+		t.Fatal(err)
+	}
+	probe, err := f.db.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var treeFree, eventFree bool
+	err = probe.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock(hashtextextended($1,0)),
+	 pg_try_advisory_xact_lock(hashtextextended($2,12))`, f.a.TenantID, f.a.TenantID+":"+fmt.Sprint(*entry.EventID)).Scan(&treeFree, &eventFree)
+	rollbackErr := probe.Rollback(ctx)
+	barrier.Release()
+	// Drain before assertions, also on the original lock-inverting code.
+	writeResult := dbtest.Await(t, ctx, write)
+	undoResult := dbtest.Await(t, ctx, undo)
+	if err != nil || rollbackErr != nil {
+		t.Fatalf("fence probe: %v; rollback: %v", err, rollbackErr)
+	}
+	if lock != "transactionid" || !tenantWait || treeFree || !eventFree {
+		t.Fatalf("Undo must wait on tenant while PATCH owns tree and event remains free: lock=%q tenantWait=%v treeFree=%v eventFree=%v; PATCH=%d Undo=%d", lock, tenantWait, treeFree, eventFree, writeResult.Code, undoResult.Code)
+	}
+	expect(t, writeResult, http.StatusOK)
+	expect(t, undoResult, http.StatusCreated)
+	var deleted bool
+	var title string
+	var undoEvents int
+	err = f.db.Admin.QueryRow(ctx, `SELECT
+	 (SELECT deleted_at IS NOT NULL FROM nodes WHERE tenant_id=$1 AND id=$2),
+	 (SELECT title FROM nodes WHERE tenant_id=$1 AND id=$3),
+	 (SELECT count(*) FROM events WHERE tenant_id=$1 AND undo_of=$4)`, f.a.TenantID, entry.ID, other.ID, *entry.EventID).Scan(&deleted, &title, &undoEvents)
+	if err != nil || !deleted || title != "Concurrent write" || undoEvents != 1 {
+		t.Fatalf("deleted=%v title=%q undoEvents=%d: %v", deleted, title, undoEvents, err)
+	}
+}

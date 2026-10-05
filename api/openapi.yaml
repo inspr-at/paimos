@@ -19,6 +19,123 @@ info:
 servers:
   - url: /api
 paths:
+  /settings/work-vocabulary:
+    get:
+      summary: Read workspace work names and icons
+      description: Requires nodes.read in the workspace or any bound project. Names and icons are tenant configuration needed to display and create work in visible projects.
+      operationId: getWorkVocabulary
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200':
+          description: Vocabulary and revision; empty names use stable fallbacks
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkVocabulary'}
+        '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+    put:
+      summary: Replace workspace vocabulary (person with settings.manage)
+      operationId: putWorkVocabulary
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/WorkVocabulary'}
+      responses:
+        '200':
+          description: Saved vocabulary
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkVocabulary'}
+        '400': {$ref: '#/components/responses/BadRequest'}
+        '403': {$ref: '#/components/responses/Forbidden'}
+        '409':
+          description: Revision changed; reload before saving
+  /nodes/{nodeId}/work-lifecycle/{actionId}/continue:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: actionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: continueWorkLifecycle
+      summary: Recheck permissions and confirmed stops, then apply the saved intent atomically
+      security: [{session: []}]
+      responses:
+        '200':
+          description: Waiting or completed; expired cooperative handovers are retried without force or releasing the stop fence. Repeat requests cannot create children or cancel a leaf twice
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkLifecycleAction'}
+        '403': {description: Original requester with current target permissions required}
+        '409': {description: Split target changed or original targets no longer form the previewed scope}
+  /nodes/{nodeId}/work-lifecycle/{actionId}:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: actionId, in: path, required: true, schema: {type: string, format: uuid}}
+    delete:
+      operationId: abandonWorkLifecycle
+      summary: Release this person's pending intent without killing or resuming any agent
+      security: [{session: []}]
+      responses:
+        '200':
+          description: Abandoned intent; existing handover requests and completed leaf writes remain
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkLifecycleAction'}
+        '403': {description: Original requester with current nodes.write required}
+  /nodes/{nodeId}/work-lifecycle:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: previewWorkLifecycle
+      summary: Leaf shape, open leaf count, and this person's pending action
+      security: [{session: []}]
+      responses:
+        '200':
+          description: Bounded preview; only work children make a parent
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkLifecyclePreview'}
+        '403': {description: Person with nodes.read required}
+    post:
+      operationId: requestWorkLifecycle
+      summary: Split into children or cancel with its open children after graceful handover
+      security: [{session: []}]
+      requestBody:
+        required: true
+        description: At most 1 MiB, read within ten seconds before opening the mutation transaction.
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [request_id, kind, expected_updated_at, expected_open_leaves, expected_scope_revision]
+              additionalProperties: false
+              properties:
+                request_id: {type: string, format: uuid}
+                kind: {type: string, enum: [split, cancel]}
+                expected_updated_at: {type: string, format: date-time}
+                expected_open_leaves: {type: integer, minimum: 0, maximum: 100}
+                expected_scope_revision: {type: string, pattern: "^[a-f0-9]{64}$"}
+                children:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    required: [title]
+                    additionalProperties: false
+                    properties:
+                      title: {type: string, minLength: 1, maxLength: 500}
+                      body: {type: string, maxLength: 16000}
+      responses:
+        '200':
+          description: Waiting or completed action; waiting never means success. Replays preserve the original action.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/WorkLifecycleAction'}
+        '400': {description: Invalid request or bounded scope exceeded}
+        '403': {description: Person with current nodes.write and any required harness.control/run.create/work_orders.write permissions}
+        '408': {description: Request body read timed out}
+        '409': {description: 'Stale preview, another pending intent, or a run without cooperative handover delivery'}
   /chat/offline-wait-policy:
     get:
       operationId: getChatOfflineWaitPolicy
@@ -4735,7 +4852,7 @@ paths:
         - {name: include_archived, in: query, schema: {type: boolean, default: false}}
       responses:
         '200':
-          description: Projects with counts of live descendant ticket, task and epic nodes (including descendants below non-work kinds) and last activity. A category on that kind's field_schema.states wins (open, doing or in_progress, done, cancelled, archived). Otherwise open is every state that is not in progress, done, cancelled or archived, including open, blocked and unknown states; in_progress is in_progress, active and qa; done is done, delivered and accepted; cancelled is cancelled. Archived work is in total and archived_count. Existing fields retain their meanings; bounded status_counts and status_counts_truncated are additive.
+          description: Projects with counts of live descendant work leaves (including descendants below non-work kinds) and last activity. A category on that kind's field_schema.states wins (open, doing or in_progress, done, cancelled, archived). Otherwise open is every state that is not in progress, done, cancelled or archived, including open, blocked and unknown states; in_progress is in_progress, active and qa; done is done, delivered and accepted; cancelled is cancelled. Archived work is in total and archived_count. Existing fields retain their meanings; bounded status_counts and status_counts_truncated are additive.
           content:
             application/json:
               schema:
@@ -4894,11 +5011,13 @@ paths:
   /nodes:
     get:
       operationId: listNodes
-      description: 'A cursor whose anchor was deleted or no longer matches the filters returns 409 cursor_expired; restart from the first page.'
+      description: 'Work aggregate reads reject more than 4096 roots or 50000 expanded root/node pairs before computing facts. Over-budget scopes fail explicitly; results are never silently truncated. A cursor whose anchor was deleted or no longer matches the filters returns 409 cursor_expired; restart from the first page.'
       security: *auth
       parameters:
+        - {name: shape, in: query, description: 'parent or leaf; supports ! exclusions', schema: {type: array, items: {type: string, enum: [parent, leaf, '!parent', '!leaf']}}}
+        - {name: depth, in: query, description: 'Project-relative work levels; supports ! exclusions', schema: {type: array, items: {type: string}}}
         - {name: kind_id, in: query, schema: {type: string, format: uuid}}
-        - {name: kind, in: query, description: Repeatable or comma-separated kind slugs or IDs, schema: {type: array, items: {type: string}}}
+        - {name: kind, in: query, description: 'Repeatable or comma-separated kind slugs or IDs. epic, ticket and task also match work after migration; a leading ! excludes the alias', schema: {type: array, items: {type: string}}}
         - {name: state, in: query, description: 'Repeatable or comma-separated states. In every list filter a leading ! excludes a value: plain values of one filter are alternatives, excluded values must all not match, and filters combine with AND.', schema: {type: array, items: {type: string}}}
         - {name: work_state, in: query, description: 'Canonical work statuses as in project status_counts. Recognises all stored spelling variants. Repeatable or comma-separated, with ! exclusions; at most 64 values of 64 characters each. Combines with other filters.', schema: {type: array, maxItems: 64, items: {type: string, maxLength: 64}}}
         - {name: work_bucket, in: query, description: 'Work buckets using the same kind categories and fallback as project counts and Hide. Repeatable or comma-separated; at most five values. Combines with other filters.', schema: {type: array, maxItems: 5, items: {type: string, enum: [open, in_progress, done, cancelled, archived]}}}
@@ -4916,7 +5035,7 @@ paths:
         - {name: within, in: query, description: 'Descendants of this node, excluding itself', schema: {type: string, format: uuid}}
         - {name: hide_closed, in: query, description: 'When true, omits the hide_states choices, defaulting to nodes whose work bucket is done, cancelled or archived. The bucket is the same one project counts use: a category on that ticket, task or epic kind wins, and spellings such as canceled are recognised. Open and in progress stay.', schema: {type: boolean, default: false}}
         - {name: hide_states, in: query, description: 'Closed statuses omitted when hide_closed is true. Defaults to all five. Kind-aware buckets and canonical spellings match project counts: delivered and accepted keep their names inside the done bucket; other done-bucket statuses use done, and exit buckets use cancelled or archived. At least one and at most five choices; ignored when hide_closed is false.', style: form, explode: false, schema: {type: array, minItems: 1, maxItems: 5, uniqueItems: true, items: {type: string, enum: [done, delivered, accepted, cancelled, archived]}}}
-        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, human_check. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
+        - {name: facets, in: query, description: 'Repeatable or comma-separated state, kind, priority, assignee, tag, cost_unit, release, human_check, shape, depth. State facets count work leaves only, so status-grid and Hide counts omit grouping parents. Other facets retain row semantics. Human check counts use pending and none. Tag, cost unit and release counts are keyed by their display spelling; none counts work without one.', schema: {type: array, items: {type: string}}}
         - {name: parent_id, in: query, schema: {type: string, format: uuid}}
         - {name: include_descendants, in: query, schema: {type: boolean, default: false}}
         - {name: ids, in: query, description: 'Repeatable or comma-separated node IDs, at most 200: only these nodes, with every other filter still applied. A live list refetches the rows that changed through its own query; a row that no longer matches is absent.', schema: {type: array, maxItems: 200, items: {type: string, format: uuid}}}
@@ -4930,6 +5049,7 @@ paths:
           $ref: '#/components/responses/Nodes'
         '400':
           $ref: '#/components/responses/Error'
+        '503': {description: 'Read deadline or work aggregate budget exceeded; narrow the scope or retry. No partial aggregate is returned.'}
     post:
       operationId: createNode
       description: |
@@ -4951,7 +5071,7 @@ paths:
           $ref: '#/components/responses/Error'
         '422':
           description: |
-            Unprocessable node. A ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+            Unprocessable node. A work item or legacy ticket entering a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
           content:
             application/json:
               schema:
@@ -5059,7 +5179,7 @@ paths:
                         reason: {type: string}
                         code:
                           type: string
-                          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
+                          description: benefit_required when a work item or legacy ticket enters a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. conflict when the node changed since the revision named in if_unmodified_since. Omitted for other skips.
         '400':
           $ref: '#/components/responses/Error'
         '403':
@@ -5130,6 +5250,7 @@ paths:
           $ref: '#/components/responses/Node'
         '404':
           $ref: '#/components/responses/Error'
+        '503': {description: 'Work aggregate read exceeded its five-second deadline or scope budget. No partial aggregate is returned.'}
     patch:
       operationId: updateNode
       description: |
@@ -5173,7 +5294,7 @@ paths:
           $ref: '#/components/responses/Error'
         '422':
           description: |
-            Unprocessable node. A ticket entering done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
+            Unprocessable node. A work item or legacy ticket entering a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de returns code benefit_required. hide_from_release_notes does not waive that. Other 422s omit code.
           content:
             application/json:
               schema:
@@ -5195,6 +5316,39 @@ paths:
           $ref: '#/components/responses/Error'
         '409':
           $ref: '#/components/responses/Error'
+  /nodes/{nodeId}/benefit-generation:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    get:
+      operationId: getParentBenefitGeneration
+      security: *auth
+      description: Parent-only asynchronous bilingual benefit status. Done never waits for generation. Leaf completion gates and published note snapshots are unchanged.
+      responses:
+        '200': {description: Current generation status, content: {application/json: {schema: {$ref: '#/components/schemas/ParentBenefitGeneration'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/benefit-generation/retry:
+    parameters: [{$ref: '#/components/parameters/NodeId'}]
+    post:
+      operationId: retryParentBenefitGeneration
+      security: *auth
+      description: Person-only retry requiring nodes.write in the current project. Request bodies are limited to 4 KiB with a five-second read deadline before decoding or mutation locks. Queues work; never changes status or published notes. Stale identity/revision and active jobs return 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_generation, expected_revision]
+              properties:
+                expected_generation: {type: string, format: uuid}
+                expected_revision: {type: string, format: date-time}
+      responses:
+        '202': {description: Queued, content: {application/json: {schema: {$ref: '#/components/schemas/ParentBenefitGeneration'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /nodes/{nodeId}/attachments:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     get:
@@ -5493,13 +5647,13 @@ paths:
     get:
       operationId: getTicketGraph
       description: |
-        Read-only graph of one project's live tickets and epics. Closed work
+        Read-only graph of one project's live work items and legacy tickets and epics. Closed work
         (status category done: accepted, delivered, done, cancelled, archived)
         is left out unless include_closed is true, and a link that would touch
         a left-out node is left out with it. Relation links are blocks, relates,
         implements and duplicates. blocks stays directed; relates keeps the
         stored order, smaller id as source. A parent link points from a child
-        to its parent ticket or epic when that parent is also in the answer.
+        to its parent work item, ticket or epic when that parent is also in the answer.
         At most 1500 nodes, newest updated_at first. Bodies are not read.
         Project visibility applies: a relation into a project the caller cannot
         see does not appear, not even as an id.
@@ -5509,7 +5663,7 @@ paths:
         - {name: include_closed, in: query, schema: {type: boolean, default: false}}
       responses:
         '200':
-          description: Bounded graph, without ticket or epic bodies
+          description: Bounded graph, without work item, ticket or epic bodies
           content:
             application/json:
               schema: {$ref: '#/components/schemas/TicketGraph'}
@@ -5607,11 +5761,55 @@ paths:
                 type: string
         '400':
           $ref: '#/components/responses/Error'
+  /events/{eventId}/undo-preview:
+    parameters:
+      - {name: eventId, in: path, required: true, schema: {type: integer, minimum: 1}}
+    get:
+      operationId: previewCausalUndo
+      description: Preview the visible child change that caused a derived parent status. Checks the same current child revision, mutation permissions and bilingual benefit completion requirements as Undo without committing writes, including tenant-defined Done categories. Reversing roadmap publication, a human-check completion or its person provenance requires a person, including for imported child changes. Hidden causes, later child edits, ambiguous causes and unsupported reversals are refused. Requires events.undo on the child and events.undo_other for another actor's event.
+      security: *auth
+      responses:
+        '200':
+          description: A preview to confirm before causal Undo
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [event_id, cause_event_id, change_type, affected_nodes, message]
+                properties:
+                  event_id: {type: integer}
+                  cause_event_id: {type: integer}
+                  change_type: {type: string, description: The visible triggering event type to reverse.}
+                  affected_nodes:
+                    type: array
+                    maxItems: 200
+                    items:
+                      type: object
+                      required: [id, key, from, to]
+                      properties:
+                        id: {type: string, format: uuid}
+                        key: {type: string}
+                        from: {type: string}
+                        to: {type: string}
+                  message: {type: string}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /events/{eventId}/undo:
     parameters: [{$ref: '#/components/parameters/EventId'}]
     post:
       operationId: undoEvent
-      description: Append one compensating event and restore the prior resource snapshot atomically. Only reversible events can be undone; an event can be undone once. Undoing a change to a portal_product, portal_feature or portal_wish, or a move into or out of a portal parent, requires a person with settings.manage. Agents are refused.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirmed_cause_event_id]
+              properties:
+                confirmed_cause_event_id: {type: integer, minimum: 1, description: Must match the cause_event_id returned by undo-preview. Required only for derived parent events.}
+      description: For status_autopilot.derived, confirmation from undo-preview is required and Undo reverses the visible triggering child change, refusing later child edits. Confirmation is limited to 1 KiB and read with a 10-second deadline before mutation locks; its cause and permissions are rechecked inside the final transaction even after the derivation feature is disabled. Callers lacking events.undo in the workspace or any project are refused before event lookup; final permission checks use the current target's project. Reversing roadmap publication, a human-check completion or its person provenance requires a person; an authorized reversal preserves the historical snapshot attribution. Append one compensating event and restore the prior resource snapshot atomically. Only reversible events can be undone; an event can be undone once. Undoing a change to a portal_product, portal_feature or portal_wish, or a move into or out of a portal parent, requires a person with settings.manage. Agents are refused.
       security: *auth
       responses:
         '201':
@@ -6289,7 +6487,7 @@ paths:
     get:
       operationId: listTicketReviews
       summary: Cross-family review results for this ticket
-      description: Newest first, bounded to 50 reviews. A gate opens only for a completed, vendor-reported, other-family review of the exact commit range. No merge is performed.
+      description: Work and legacy Ticket/Task nodes retain their existing review history. Newest first, bounded to 50 reviews. A gate opens only for a completed, vendor-reported, other-family review of the exact commit range. No merge is performed.
       security: *auth
       parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
@@ -6299,7 +6497,7 @@ paths:
     post:
       operationId: requestTicketReview
       summary: Queue an independent managed review of a commit range
-      description: Requires work_orders.write and run.create on the ticket. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection. Catalog preparation repeats current initiating-key and target permissions in its own fenced transaction. Review resources and their ordered events then commit atomically; replay retains the original immutable binding.
+      description: Requires work_orders.write and run.create on the work leaf (legacy tickets and tasks remain supported). Work parents cannot receive new review work orders. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection. Catalog preparation repeats current initiating-key and target permissions in its own fenced transaction. Review resources and their ordered events then commit atomically; replay retains the original immutable binding.
       security: *auth
       parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TicketReviewCreate'}}}}
@@ -6410,7 +6608,7 @@ paths:
         '200': {description: Public generations, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/HarnessSessionHierarchy'}}}}}
     post:
       operationId: registerHarnessSession
-      description: Agent callers must also hold harness.worker in the target project and on their key, so every registered generation can heartbeat and stop. Registers a generation or returns an exact active replay. A restarted coordinator with the same principal, harness and native reference adopts live children from its stopped or heartbeat-lost predecessor atomically. succeeds_session_id selects a same-principal predecessor with a different native reference. A healthy predecessor is never replaced. Emits harness.adopted per child and harness.handed_over on the predecessor, with public lineage fields. Emits harness.registered on the existing events stream after commit; stopping emits harness.stopped. Labels are public display metadata, never identity or authority.
+      description: Agent callers must also hold harness.worker in the target project and on their key, so every registered generation can heartbeat and stop. Registers a generation or returns an exact active replay. A restarted coordinator with the same principal, harness and native reference adopts live children from its stopped or heartbeat-lost predecessor atomically. succeeds_session_id selects a same-principal predecessor with a different native reference. A healthy predecessor is never replaced. At most 1000 direct children may be adopted in one handover, including paused children on resume; larger scopes return 409 atomically. Audit buffering is capped at 32 MiB; excess returns 429 atomically. Emits harness.adopted per child and harness.handed_over on the predecessor, with public lineage fields. Emits harness.registered on the existing events stream after commit; stopping emits harness.stopped. Labels are public display metadata, never identity or authority.
       requestBody:
         required: true
         content:
@@ -7151,6 +7349,30 @@ paths:
         '403': {description: Exact worker proof required}
         '409': {description: Missing planned pause or divergent replay}
         '410': {description: Archived generation}
+  /projects/{projectId}/harness-sessions/{sessionId}/confirm-exit:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}, description: Private exact generation proof}
+    post:
+      operationId: confirmHarnessExit
+      security: *auth
+      description: Requires current harness.worker authority and the exact generation's agent and lease. The owned executor reports confirmed process exit after an uncertain stop, including lost ownership, heartbeat loss or administrative archive/removal. Active generations are rejected. Persists the confirmed reason and emits harness.stop_confirmed; exact replay is idempotent and divergent replay returns 409. Retains stopped_at, archived_at, recovery receipts and historical bindings; archived worker APIs still return 410. No process is signalled or generation revived. The original recovery_process_state remains the administrative action's observation, not this later executor report.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [reason]
+              properties:
+                reason: {type: string, enum: [process_exited, process_failed, force_stopped]}
+      responses:
+        '200': {description: Confirmed closed generation, content: {application/json: {schema: {$ref: '#/components/schemas/HarnessSession'}}}}
+        '400': {description: Invalid exit reason}
+        '403': {description: Exact worker proof and current harness.worker authority required}
+        '409': {description: Generation is active or exit confirmation conflicts}
   /projects/{projectId}/harness-sessions/{sessionId}/yield:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -7412,7 +7634,7 @@ paths:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
     put:
       operationId: putNodeLiveEta
-      description: A coordinator session reports when a ticket or task in its project is live. Epics roll up from children and reject this write. Null clears the live estimate. Requires the worker lease of an active coordinator session in the node's project.
+      description: A coordinator session reports when a work leaf in its project is live. Work parents roll up from children and reject this write. Existing ticket and task kinds remain supported. Null clears the live estimate. Requires current harness.worker authority and the worker lease of an active coordinator session in the node's project.
       requestBody:
         required: true
         content:
@@ -7424,7 +7646,7 @@ paths:
                 eta_live_at: {type: [string, 'null'], format: date-time}
       responses:
         '200': {description: The ticket estimate after the write, content: {application/json: {schema: {$ref: '#/components/schemas/TicketEta'}}}}
-        '400': {description: 'Not a ticket or task, or the timestamp is not RFC3339'}
+        '400': {description: 'Not a work leaf or supported legacy ticket or task, or the timestamp is not RFC3339'}
         '403': {description: No active coordinator session for this agent in the project}
         '404': {description: Node not found}
   /projects/{projectId}/harness-sessions/{sessionId}/rules-receipts:
@@ -8328,7 +8550,7 @@ paths:
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
         - {name: project_id, in: query, description: Optional project for the starter's residency preference trace., schema: {type: string, format: uuid}}
         - {name: mode, in: query, description: Explicitly enable placement resolution when only role and project_id are supplied., schema: {type: string, enum: [placement]}}
-        - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
+        - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible work item or legacy ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
         - {name: area, in: query, schema: {type: string, maxLength: 48}}
         - {name: complexity, in: query, schema: {type: string, enum: [S, M, L]}}
         - {name: person_id, in: query, schema: {type: string, format: uuid}, description: Must map to the canonical caller or key creator. Operator keys cannot supply it.}
@@ -8992,8 +9214,8 @@ paths:
   /projects/{projectId}/release-memberships:
     get:
       operationId: readReleaseMemberships
-      summary: Read native release membership for visible project tickets
-      description: Returns up to 100 requested ticket or task nodes in request order. Membership comes from journey_tickets and live release nodes, never fields.release. Null release values mean no live native membership (including backlog and unprojected tickets); missing, deleted or foreign nodes are omitted. No journey initialization or writes. Clients refresh this projection for list/detail loads and after membership changes or Undo; imported release metadata remains separate. Requires releases.read.
+      summary: Read native release membership for visible project work
+      description: Returns up to 100 requested work nodes (parents or leaves, including legacy ticket/task aliases) in request order. Membership comes from journey_tickets and live release nodes, never fields.release. Parents summarize actual current leaves; compare assigned_leaf_count with leaf_node_ids to verify full coverage, since a single distinct release can coexist with backlog leaves. Null release values mean no single live native membership (including backlog, unprojected work and split parent scope); missing, deleted or foreign nodes are omitted. No journey initialization or writes. Clients refresh this projection for list/detail loads and after membership changes or Undo; imported release metadata remains separate. Requires releases.read.
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -9012,7 +9234,7 @@ paths:
     get:
       operationId: listReleaseTicketOptions
       summary: Find existing project tickets eligible for release planning
-      description: Returns at most 100 project tickets, including unprojected ticket nodes. Only addable and other_release are selectable; other_release means a live planning source and requires confirm_move. active_release covers nonplanning or unavailable sources and cannot move. The target must be the current planning release.
+      description: Returns at most 100 project tickets, including unprojected ticket nodes. Parent availability follows current leaf memberships, never the parent's historical membership. All leaves already in the target means included; any released or active source prevents placement; otherwise another planning source requires confirm_move. Parent release identity is returned only when all current leaves share one release. Parent summaries are bounded to 1000 leaves and fail with 409 above that limit. Only addable and other_release are selectable; active_release covers nonplanning or unavailable sources. The target must be the current planning release.
       security: [{session: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -9020,7 +9242,7 @@ paths:
         - {name: q, in: query, schema: {type: string, maxLength: 256}}
         - {name: status, in: query, schema: {type: string}}
         - {name: epic, in: query, schema: {type: string, format: uuid}}
-        - {name: type, in: query, schema: {type: string, enum: [ticket, task]}}
+        - {name: type, in: query, schema: {type: string, enum: [work, ticket, task]}}
         - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
       responses:
         '200': {description: Ticket options, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseTicketOptions'}}}}
@@ -9030,7 +9252,7 @@ paths:
     post:
       operationId: addReleaseMembership
       summary: Add or explicitly move existing tickets into the current planning release
-      description: Adds 1–100 project tickets atomically. Closed tickets and tickets in active or released releases are excluded. Moving from another planning release requires confirm_move. The event_id can be undone through the events API while the result remains current.
+      description: Accepts 1–100 work node IDs and expands parents into their current leaves, bounded to 1000 leaves. Parent placement is remembered for future leaves. A new leaf inherits while the release is planning; otherwise it enters the backlog with release_inheritance_note=parent_release_closed. Directly selected closed leaves are excluded; parent placement includes its current closed leaves too. Leaves in active or released releases cannot move. Moving from another planning release requires confirm_move. The event_id can be undone through the events API while the result remains current.
       security: [{session: []}]
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -10460,7 +10682,7 @@ paths:
     get:
       operationId: readPublicPortalRoadmap
       summary: Read the public roadmap for the portal product
-      description: Anonymous and cacheable. A ticket appears only when it is tagged roadmap, not hidden, has a public target (roadmap-rN, roadmap-later, a release assignment, or a release label that is rN or later) and a person has set roadmap_public. Agents cannot publish. The document carries pill and benefit in English and German, the target, and status planned, in progress, or shipped. Ticket keys, node ids, titles, assignees and internal notes are omitted. A shipped ticket already visible on the public release history is omitted. Release history being off keeps that shipped item here. Ordered by target, then priority. A disabled portal and an unknown tenant both answer 404. An open portal with no published product returns product null and an empty items list. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved. Success responses are public, max-age 60. Errors stay uncached. The public page is /portal/{tenantSlug}/roadmap.
+      description: Anonymous and cacheable. A work item or legacy ticket appears only when it is tagged roadmap, not hidden, has a public target (roadmap-rN, roadmap-later, a release assignment, or a release label that is rN or later) and a person has set roadmap_public. Agents cannot publish. The document carries pill and benefit in English and German, the target, and status planned, in progress, or shipped. Ticket keys, node ids, titles, assignees and internal notes are omitted. A shipped ticket already visible on the public release history is omitted. Release history being off keeps that shipped item here. Ordered by target, then priority. A disabled portal and an unknown tenant both answer 404. An open portal with no published product returns product null and an empty items list. Shares the catalog read limit of 120 per minute, counted before the tenant is resolved. Success responses are public, max-age 60. Errors stay uncached. The public page is /portal/{tenantSlug}/roadmap.
       security: []
       parameters: [{name: tenantSlug, in: path, required: true, schema: {type: string, pattern: '^[a-z][a-z0-9-]{0,62}$'}}]
       responses:
@@ -10786,9 +11008,9 @@ paths:
   /nodes/{nodeId}/agent-work:
     get:
       operationId: getTicketAgentWork
-      summary: Agent sessions, tokens, estimated cost and time for a ticket or epic
+      summary: Agent sessions, tokens, estimated cost and time for a work item
       description: >
-        Sessions whose ticket is this live ticket, epic or task, or a visible descendant.
+        Sessions whose ticket is this live work item (or legacy ticket, epic or task), or a visible descendant.
         Filtered by the caller's tenant and visible projects. Each session is listed once.
         Token counts and list-price estimates are summed from the current
         harness_session_usage rows for that session, one row per model. Cost is an exact
@@ -10807,9 +11029,10 @@ paths:
   /nodes/{nodeId}/delivery-ratings:
     get:
       operationId: listDeliveryRatings
-      summary: Rework marks and objective signals for sessions on a ticket, epic or task
+      summary: Rework marks and objective signals for sessions on a work item
       description: >
-        Person session only. One row per visible session whose ticket is this node
+        Person session only. Supports work and legacy ticket, epic and task nodes.
+        One row per visible session whose ticket is this node
         or a visible descendant, newest first, at most 80. A vote row is an exception:
         silence is not stored. mine is the caller's mark, or null. votes counts
         exception rows. average is the mean of optional scores, null when none were
@@ -10894,7 +11117,7 @@ paths:
       description: Returns append-only outcome events visible in the caller's projects. At least one of ticket_node_id, session_id, rules_version or a paired from/to range is required. from/to selects recorded timestamps in [from, to), spanning at most 366 days. cursor continues the same filters in descending timestamp/ID order. Filters combine. rules_version matches exactly and skips rows with no rules version. Ticket completion and release publication are included; they are recorded automatically.
       security: *auth
       parameters:
-        - {name: ticket_node_id, in: query, schema: {type: string}, description: Ticket node id or issue key}
+        - {name: ticket_node_id, in: query, schema: {type: string}, description: Work or legacy Ticket node id or issue key; property name retained for compatibility}
         - {name: session_id, in: query, schema: {type: string, format: uuid}}
         - {name: outcome_id, in: query, schema: {type: string, format: uuid}, description: Exact source outcome within the other filters.}
         - {name: rules_version, in: query, schema: {type: string, maxLength: 128}}
@@ -10910,7 +11133,7 @@ paths:
     post:
       operationId: recordOutcome
       summary: Record a review, fix round, CI result or revert
-      description: "Requires outcome.write in the ticket's project. Agents also need that scope on the key. Idempotency-Key replays the same outcome when the body matches and conflicts when it does not. Keys starting with auto: are reserved. ticket_done and released cannot be posted."
+      description: "Accepts Work and legacy Ticket nodes. Requires outcome.write in the ticket's project. Agents also need that scope on the key. Idempotency-Key replays the same outcome when the body matches and conflicts when it does not. Keys starting with auto: are reserved. ticket_done and released cannot be posted."
       security: *auth
       parameters:
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, minLength: 8, maxLength: 200}}
@@ -10958,6 +11181,27 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    WorkLifecyclePreview:
+      type: object
+      required: [is_leaf, busy, open_leaves, updated_at, scope_revision, pending]
+      properties:
+        is_leaf: {type: boolean}
+        busy: {type: boolean}
+        open_leaves: {type: integer, minimum: 0, maximum: 100}
+        updated_at: {type: string, format: date-time}
+        scope_revision: {type: string, pattern: "^[a-f0-9]{64}$"}
+        pending: {oneOf: [{$ref: '#/components/schemas/WorkLifecycleAction'}, {type: 'null'}]}
+    WorkLifecycleAction:
+      type: object
+      required: [id, node_id, kind, state, target_count, waiting_count, result]
+      properties:
+        id: {type: string, format: uuid}
+        node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [split, cancel]}
+        state: {type: string, enum: [waiting, completed, abandoned]}
+        target_count: {type: integer, minimum: 0, maximum: 100}
+        waiting_count: {type: integer, minimum: 0, maximum: 100}
+        result: {type: array, maxItems: 100, items: {type: string, format: uuid}}
     ChatSendRequest:
       type: "object"
       additionalProperties: false
@@ -11697,7 +11941,7 @@ components:
         estimate_hours: {type: number, minimum: 0, maximum: 200}
         priority: {type: string, enum: [critical, high, medium, low]}
         tags: {type: array, maxItems: 50, uniqueItems: true, items: {type: string, format: uuid}, description: Existing tag-node UUIDs in this project or workspace; stored as current tag names in ordinary node fields.tags.}
-        type: {type: string, enum: [ticket, task], default: ticket}
+        type: {type: string, enum: [work, ticket, task, epic], default: work, description: Legacy kinds normalize to work; recurrences create leaves.}
       description: 'Variables in title, description and criteria: {{occurrence}}, {{date}}, {{release_name}}, {{release_version}}. Unknown variables are rejected. Release variables are empty for time and manual runs. queue_each requires positive estimate_hours and non-empty acceptance_criteria.'
     RecurrenceInput:
       type: object
@@ -11819,13 +12063,14 @@ components:
         key: {type: string}
         title: {type: string}
         actor: {type: string, const: Status autopilot}
-        rule: {type: string, enum: [new, backlog, blocked, progress, done, publish, accept]}
+        rule: {type: string, enum: [new, backlog, blocked, progress, done, publish, accept, work_parent]}
         reason: {type: string}
         from: {type: string}
         to: {type: string}
         at: {type: string, format: date-time}
         undone: {type: boolean}
         changed_since: {type: boolean, description: A later ticket edit made the original change stale}
+        requires_preview: {type: boolean, description: A derived parent change uses the causal Undo preview and confirmation API.}
         undoable: {type: boolean, description: Revision and state still match; Undo requires events.undo_other and nodes.update}
     StatusAutopilotProposal:
       type: object
@@ -11842,6 +12087,16 @@ components:
         at: {type: string, format: date-time}
         changed_since: {type: boolean}
         applicable: {type: boolean, description: 'Caller can apply, ticket revision matches and server is not Off; eligibility is rechecked on Apply.'}
+    ParentBenefitGeneration:
+      type: object
+      required: [is_parent, status, generation, revision, generated]
+      properties:
+        is_parent: {type: boolean}
+        status: {type: string, enum: [none, queued, running, failed, generated, edited, cancelled]}
+        generation: {type: string, description: Opaque attempt identity; empty when no attempt exists.}
+        revision: {type: string, format: date-time}
+        generated: {type: boolean, description: Current text was generated; becomes false after a human edits a benefit field.}
+        error: {type: string, description: Safe actionable failure message; never raw provider output.}
     WorkspaceModelProviderSettings:
       type: object
       required: [enabled, base_url, chat_model, embedding_model, features]
@@ -11856,6 +12111,7 @@ components:
           required: [crm_note_rewrite, embeddings]
           properties:
             crm_note_rewrite: {type: boolean, default: false, description: Also requires the business_crm plugin and tools.invoke grant; generation creates a draft for human review.}
+            parent_benefits: {type: boolean, default: false, description: Summarises completed parents from their leaves in English and German behind work-parent-status. Never delays Done or edits published snapshots.}
             embeddings: {type: boolean, default: false, description: Allows background node indexing and semantic search queries for this workspace.}
     WorkspaceModelProvider:
       allOf:
@@ -14012,6 +14268,21 @@ components:
               release_node_id: {type: [string, 'null'], format: uuid}
               release_title: {type: [string, 'null']}
               release_state: {type: [string, 'null'], enum: [planning, building, candidate, deploying, refused, access, released, superseded, null]}
+              leaf_node_ids: {type: array, maxItems: 1000, uniqueItems: true, items: {type: string, format: uuid}, description: "Current leaves, deduplicated by the client across overlapping parents."}
+              assigned_leaf_count: {type: integer, minimum: 0, maximum: 1000, description: Current leaves with a live native release membership. A single distinct release does not imply full coverage; compare with leaf_node_ids before confirming placement.}
+              is_parent: {type: boolean, description: Only live work children make a parent.}
+              release_count: {type: integer, minimum: 0, description: Distinct releases of current leaves; parent placement intent is excluded.}
+              releases:
+                type: array
+                maxItems: 1000
+                items:
+                  type: object
+                  required: [release_node_id, release_title, release_state]
+                  properties:
+                    release_node_id: {type: string, format: uuid}
+                    release_title: {type: string}
+                    release_state: {type: string}
+              inheritance_note: {type: [string, 'null'], description: parent_release_closed means the leaf went to the backlog because the placed release was no longer planning.}
     ReleaseTicketOptions:
       type: object
       required: [expected_revision, tickets]
@@ -14026,7 +14297,8 @@ components:
         key: {type: string}
         title: {type: string}
         status: {type: string}
-        type: {type: string, enum: [ticket, task]}
+        is_parent: {type: boolean}
+        type: {type: string, enum: [work, ticket, task]}
         feature_node_id: {type: [string, 'null'], format: uuid}
         release_node_id: {type: [string, 'null'], format: uuid}
         release_title: {type: [string, 'null']}
@@ -14037,13 +14309,14 @@ components:
       required: [expected_revision, ticket_node_ids]
       properties:
         expected_revision: {type: integer, minimum: 1}
-        ticket_node_ids: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}}
+        ticket_node_ids: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}, description: Leaves or parents; overlapping descendants are deduplicated.}
         confirm_move: {type: boolean, default: false}
     ReleaseMembershipResult:
       type: object
       required: [walker, event_id]
       properties:
         walker: {$ref: '#/components/schemas/ReleaseWalker'}
+        leaf_node_ids: {type: array, maxItems: 1000, uniqueItems: true, items: {type: string, format: uuid}}
         event_id: {type: integer, minimum: 1}
     IntakeSourceWrite:
       type: object
@@ -15339,7 +15612,7 @@ components:
       required: [node_id, kind, currency, usage_available, includes_descendants, scope_truncated, list_truncated, sessions, totals]
       properties:
         node_id: {type: string, format: uuid}
-        kind: {type: string, enum: [ticket, epic, task]}
+        kind: {type: string, enum: [work, ticket, epic, task]}
         currency: {type: string, enum: [USD]}
         usage_available: {type: boolean, description: 'True when harness_session_usage was read. A missing relation is an error, not an empty cost. Null figures are unreported, not zero.'}
         includes_descendants: {type: boolean}
@@ -16384,7 +16657,7 @@ components:
         continuation: {$ref: '#/components/schemas/HarnessContinuation', description: Handover brief inherited by a new generation registered with succeeds_session_id.}
         warnings:
           type: array
-          description: Non-blocking guidance returned on heartbeats, including an empty array when satisfied or guidance cannot be computed; absent on other session responses. Working workers get missing_progress after three consecutive accepted beats without a non-null progress_pct, even if an older value is stored. Working sessions with a bound ticket_node_id get missing_eta for their role's absent ETA (ready for workers, live for coordinators); unbound sessions do not. A visible bound ticket/task without valid hours gets ticket_without_estimate. Clients print each code at most once per ten minutes. Status-file diagnostics such as stale_progress are local CLI warnings, not response codes.
+          description: Non-blocking guidance returned on heartbeats, including an empty array when satisfied or guidance cannot be computed; absent on other session responses. Working workers get missing_progress after three consecutive accepted beats without a non-null progress_pct, even if an older value is stored. Working sessions with a bound ticket_node_id get missing_eta for their role's absent ETA (ready for workers, live for coordinators); unbound sessions do not. A visible bound work item or legacy ticket/task without valid hours gets ticket_without_estimate. Clients print each code at most once per ten minutes. Status-file diagnostics such as stale_progress are local CLI warnings, not response codes.
           items: {$ref: '#/components/schemas/HarnessEstimateWarning'}
         vendor_limited: {type: boolean, description: The bound run ended at a vendor quota limit.}
         limit_window: {type: string, enum: [5h, weekly, monthly, other], description: Omitted unless current account owner sharing permits reset details.}
@@ -16530,14 +16803,14 @@ components:
           type: object
           required: [spent, input, output, cached, sessions, unreported, estimated]
           properties:
-            spent: {type: [integer, 'null'], description: 'Input plus output tokens over the node''s sessions and those of its open or done ticket and task children and grandchildren (cached input is part of input). Null when nothing was reported.'}
+            spent: {type: [integer, 'null'], description: 'Input plus output tokens over all historical sessions in the node subtree, including sessions from former leaves and closed or archived work; each session is counted once (cached input is part of input). Null when nothing was reported.'}
             input: {type: integer, minimum: 0}
             output: {type: integer, minimum: 0}
             cached: {type: integer, minimum: 0}
             sessions: {type: integer, minimum: 0}
             running: {type: integer, minimum: 0, description: 'Visible sessions that have not stopped, including those with no model or usage yet.'}
             unreported: {type: integer, minimum: 0, description: Sessions without a complete usage report; spent is then a lower bound.}
-            estimated: {type: [integer, 'null'], description: 'estimate_hours × the route''s tokens per hour × the measured exact-cell speed factor when available. Ticket and task rows also return default-rate figures with calibration.basis=default; clients must label or hide these uncalibrated figures. An epic sums only calibrated open and done children; excluded default estimates are counted in children.uncalibrated. Null without a contributing estimate.'}
+            estimated: {type: [integer, 'null'], description: 'estimate_hours × the route''s tokens per hour × the measured exact-cell speed factor when available. Ticket and task rows also return default-rate figures with calibration.basis=default; clients must label or hide these uncalibrated figures. A parent sums only calibrated eligible work leaves at any depth; excluded default estimates are counted in children.uncalibrated. Its own typed planned estimate is separate from the sum. Null without a contributing estimate.'}
             calibration:
               description: The rate behind a ticket's estimate.
               type: object
@@ -16555,7 +16828,7 @@ components:
           required: [list_spent, list_estimated, list_unpriced, paid_spent, paid_estimated, paid_unknown, plans]
           properties:
             list_spent: {type: [string, 'null'], description: 'Spent tokens at API list prices, whatever the billing.'}
-            list_estimated: {type: [string, 'null'], description: 'Ticket and task rows also return uncalibrated default-rate figures when tokens.calibration.basis=default; clients must label or hide them. Epics include only calibrated children. The estimate at list prices: the route''s median list price per hour, or its tokens priced with a 90% cached, 8% input, 2% output mix.'}
+            list_estimated: {type: [string, 'null'], description: 'Ticket and task rows also return uncalibrated default-rate figures when tokens.calibration.basis=default; clients must label or hide them. Parents include only calibrated eligible work leaves. The estimate at list prices: the route''s median list price per hour, or its tokens priced with a 90% cached, 8% input, 2% output mix.'}
             list_unpriced: {type: boolean, description: 'Some reported usage or the route''s model has no list price. A session without a usage row does not set this flag.'}
             paid_spent: {type: [string, 'null'], description: Pay-per-use charges; subscription usage counts 0.}
             paid_estimated: {type: [string, 'null'], description: 'Follows how the route''s harness was billed most recently in a source project the caller may read: 0 for a subscription pool, the list estimate for pay-per-use.'}
@@ -16567,7 +16840,7 @@ components:
         model_estimate: {$ref: '#/components/schemas/ModelEstimateHistory'}
         estimate_snapshot: {$ref: '#/components/schemas/TicketEstimateSnapshot'}
         children:
-          description: 'Epics only: open and done ticket and task children, how many contribute calibrated estimates, and how many uncalibrated estimates are excluded. A nonzero uncalibrated count makes the sum partial.'
+          description: 'Parents only: eligible work leaves at any depth, how many contribute calibrated estimates, and how many uncalibrated estimates are excluded. A nonzero uncalibrated count makes the sum partial.'
           type: object
           required: [total, estimated]
           properties:
@@ -16609,7 +16882,7 @@ components:
             output_mix: {type: number}
     TicketEta:
       type: object
-      description: Ready and live estimates for one ticket. Epics roll up the latest child instant and the average percent of direct children that have a percent. Unknown stays absent, except finished, which is always stated.
+      description: Ready and live estimates for a work node. Parents use the latest ETA of open leaves and estimate-weighted leaf progress. Missing estimates are explicit coverage; without estimates progress counts leaves. Deleted and archived work is excluded; cancelled leaves are excluded from progress and ETA. Traversal has no depth cutoff. Historical worker completion remains separate from workflow status.
       required: [finished]
       properties:
         has_working_session: {type: boolean, description: True when a visible working session is bound to this ticket in its current project. Omitted when false; enables a quiet no ETA hint even before the first estimate.}
@@ -16618,6 +16891,14 @@ components:
         finished_by: {type: string, description: 'Name of that worker, when known. Present with finished.'}
         eta_ready_at: {type: string, format: date-time}
         eta_live_at: {type: string, format: date-time}
+        leaf_count: {type: integer, minimum: 0, description: Non-archived non-cancelled leaves contributing to progress.}
+        estimated_leaves: {type: integer, minimum: 0}
+        progress_basis: {type: string, enum: [estimate, leaves]}
+        open_leaves: {type: integer, minimum: 0, description: Leaves whose workflow status is not complete. A parent retains its ETA and staleness while this is positive even when estimate-weighted or rounded progress_pct is 100.}
+        ready_leaves: {type: integer, minimum: 0}
+        live_leaves: {type: integer, minimum: 0}
+        ready_partial: {type: boolean, description: Some open leaves have no ready ETA.}
+        live_partial: {type: boolean, description: Some open leaves have no live ETA.}
         progress_pct: {type: integer, minimum: 0, maximum: 100}
         ready_reported_at: {type: string, format: date-time}
         live_reported_at: {type: string, format: date-time}
@@ -17007,7 +17288,7 @@ components:
         limit_resets_at: {type: string, format: date-time, description: Present only when reported by the vendor.}
         review_range:
           type: object
-          description: Optional exact range produced by a completed builder run. Automatically requests an independent review of that run's parent ticket, subject to the caller's existing work_orders.write and run.create permissions. Reviewer runs cannot request recursive reviews.
+          description: Optional exact range produced by a completed builder run. Automatically requests an independent review of that run's parent work leaf (or legacy ticket/task), subject to the caller's existing work_orders.write and run.create permissions. Reviewer runs cannot request recursive reviews.
           required: [repository, base_sha, head_sha]
           properties:
             repository: {type: string, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'}
@@ -18238,7 +18519,7 @@ components:
       required: [kind, ticket, payload]
       properties:
         kind: {type: string, enum: [review_verdict, fix_round, ci_result, revert]}
-        ticket: {type: string, description: Ticket node id or issue key}
+        ticket: {type: string, description: Work or legacy Ticket node id or issue key; property name retained for compatibility}
         session_id: {type: [string, "null"], format: uuid}
         rules_version: {type: [string, "null"], maxLength: 128, description: Optional until a rules version is recorded.}
         payload:
@@ -18274,7 +18555,7 @@ components:
           type: string
         code:
           type: string
-          description: benefit_required when a ticket enters done, accepted or delivered without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch or convert names a different kind that this route will not apply. kind_conversion_blocked when convert is refused because of the parent, children, or fields. Omitted for other errors.
+          description: benefit_required when a work item or legacy ticket enters a successful Done category (including tenant-defined states, accepted and delivered) without pill_en, pill_de, benefit_en and benefit_de. Hidden tickets are not exempt. kind_change_not_allowed when a patch or convert names a different kind that this route will not apply. kind_conversion_blocked when convert is refused because of the parent, children, or fields. Omitted for other errors.
         children:
           type: array
           description: Direct children that cannot stay under the target kind. Present for kind_conversion_blocked.
@@ -18537,7 +18818,13 @@ components:
               id: {type: string, format: uuid}
               key: {type: string}
               title: {type: string}
-              type: {type: string, enum: [ticket, epic]}
+              is_leaf: {type: boolean}
+              depth: {type: integer, minimum: 1}
+              level_name: {type: string}
+              level_icon: {type: string}
+              work_children_count: {type: integer, minimum: 0}
+              status_derived: {type: boolean}
+              type: {type: string, enum: [work, ticket, epic, task]}
               status: {type: string, description: Stored workflow state}
               status_category: {type: string, enum: [open, doing, done]}
               priority:
@@ -18545,7 +18832,7 @@ components:
               parent_id:
                 type: [string, 'null']
                 format: uuid
-                description: Parent ticket or epic when that parent is visible. Null when the parent is a project, another kind, or not visible.
+                description: Parent work item when that parent is visible. Null when the parent is a project, another kind, or not visible.
               release_id:
                 type: [string, 'null']
                 format: uuid
@@ -18968,11 +19255,35 @@ components:
           properties:
             mode: {type: string, enum: [off, suggest, apply]}
             available: {type: boolean}
+    WorkVocabulary:
+      type: object
+      additionalProperties: false
+      required: [revision, leaf, levels]
+      properties:
+        revision: {type: integer, minimum: 0}
+        leaf: {$ref: '#/components/schemas/WorkLevel'}
+        levels:
+          type: array
+          maxItems: 32
+          items: {$ref: '#/components/schemas/WorkLevel'}
+    WorkLevel:
+      type: object
+      additionalProperties: false
+      required: [name, icon]
+      properties:
+        name: {type: string, maxLength: 60, description: 'Empty uses Ticket, Epic, Story or Level N.'}
+        icon: {type: string, enum: ['', ticket, epic, task, layers, tree, folder, check, box]}
     Node:
       description: Ticket creation may return benefit warnings. Entering a built-in completed state (done, accepted, delivered) from outside that set requires both pills and benefits, including on creation and when hidden from release notes. Already-completed records remain editable, including transitions within that set.
       type: object
       required: [id, key, kind_id, title, body, fields, state, parent_id, position, created_at, updated_at]
       properties:
+        is_leaf: {type: boolean, description: 'Work shape; only live work children make a parent. Absent for non-work nodes.'}
+        depth: {type: integer, minimum: 1, description: 'Work level, starting at 1 after every project.'}
+        level_name: {type: string, description: 'Workspace name, behind work-parent-status rollout. Leaf name wins over depth.'}
+        level_icon: {type: string, description: 'Workspace SVG icon token; stable fallback.'}
+        work_children_count: {type: integer, minimum: 0, description: 'Visible direct work children; never includes non-work children.'}
+        status_derived: {type: boolean, description: 'Parent status follows children while rollout is enabled.'}
         queued: {$ref: '#/components/schemas/QueuedTicket'}
         recurrence:
           $ref: '#/components/schemas/NodeRecurrence'
@@ -19036,9 +19347,13 @@ components:
     TicketEstimate:
       type: object
       required: [hours, estimated_children, open_children]
-      description: Read-only estimate view on node creates, reads and lists, omitted when there are no hours and no open children. Epics sum direct visible open ticket/task children using configured state categories, excluding deleted children. Null hours means no child has an estimate. Other work uses fields.estimate_hours; legacy invalid values are unknown. Counts are zero outside epics.
+      description: Read-only leaf estimate sum. A parent's own typed estimate is planned_hours and is never added to the sum. Archived, cancelled and deleted leaves are excluded. Existing estimated_children/open_children fields remain compatibility aliases for estimated_leaves/leaf_count. Counts include done leaves so regrouping cannot alter the total.
       properties:
         hours: {type: [number, 'null'], exclusiveMinimum: 0}
+        planned_hours: {type: [number, 'null'], exclusiveMinimum: 0}
+        is_parent: {type: boolean}
+        estimated_leaves: {type: integer, minimum: 0}
+        leaf_count: {type: integer, minimum: 0}
         estimated_children: {type: integer, minimum: 0}
         open_children: {type: integer, minimum: 0}
         by: {type: object, properties: {id: {type: string, format: uuid}, name: {type: string}}}
@@ -19060,7 +19375,7 @@ components:
       type: object
       additionalProperties: true
       description: >-
-        Classification of tickets and tasks. Creating an estimate or changing its hours or provenance fills missing route_role, area and complexity from title/labels, ancestor defaults, then build/backend. A changed route_role also refreshes suggestions. These changes are compared with the stored fields under the node lock; resending an unchanged estimate with an unrelated fields edit leaves missing hints absent.
+        Classification of work items, tickets and tasks. Creating an estimate or changing its hours or provenance fills missing route_role, area and complexity from title/labels, ancestor defaults, then build/backend. A changed route_role also refreshes suggestions. These changes are compared with the stored fields under the node lock; resending an unchanged estimate with an unrelated fields edit leaves missing hints absent.
         Server suggestions have source suggested and confirmed false; by is the acting principal and at is UTC. Explicit values are stamped person or agent; only a person confirms classifications.
         To confirm an unchanged suggestion or an unconfirmed agent classification, a person resubmits its value without source/by/at. Other unchanged values retain stored provenance. Clients cannot forge confirmation or attribution.
         Complexity is S for up to 2 hours, M for up to 8, L above 8; build-hard promotes S to M and M to L. Only unconfirmed server-derived complexity follows estimate/role changes.
@@ -19329,9 +19644,18 @@ components:
         undo_of:
           type: [integer, 'null']
           format: int64
+        derivation:
+          type: object
+          description: Safe Status autopilot derivation and causal-Undo context; cause_event_id is omitted unless the cause event is visible and never exposed in a causal-Undo snapshot. Automatic parent writes preserve the parent edit revision.
+          required: [rule_version, reason, affected_nodes]
+          properties:
+            rule_version: {type: integer, minimum: 1}
+            reason: {type: string}
+            cause_event_id: {type: integer, minimum: 1}
+            affected_nodes: {type: array, maxItems: 1, items: {type: string, format: uuid}}
         node_changes:
           type: array
-          description: Set on node.* events when read (history and stream), never stored. The nodes the event changed, for live views; values are read through the node routes.
+          description: Set on node.*, status_autopilot.derived/changed/undone and import.node_created/node_updated/parent_changed events when read (history and stream), never stored. Import reparenting can retain updated_at; membership hints must refresh affected parent aggregates even when parent status and revision are unchanged. Also set on harness.usage_reported for the session's currently bound readable ticket, with estimate/planning fields and a null revision, to invalidate spend projections after late reports. Values are read through the authorized node routes.
           items:
             $ref: '#/components/schemas/NodeChange'
     NodeChange:
@@ -19352,13 +19676,13 @@ components:
           description: A restored node reads as created
         fields:
           type: array
-          description: 'Changed attributes: key, kind_id, title, body, state, parent_id, position, deleted_at, project_id (a project move) and fields.<name> for custom fields. Empty for created.'
+          description: 'Changed attributes: key, kind_id, title, body, state, parent_id, position, deleted_at, project_id (a project move) and fields.<name> for custom fields. Empty for created. Usage invalidation hints name estimate and planning projections.'
           items:
             type: string
         revision:
           type: [string, 'null']
           format: date-time
-          description: The node's updated_at after the change, the value If-Unmodified-Since takes
+          description: The node's updated_at after the change, the value If-Unmodified-Since takes; null for a projection-only usage invalidation
     EventPage:
       type: object
       required: [items, next_after]
@@ -19605,7 +19929,7 @@ components:
       in: query
       schema:
         type: string
-        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, epic open-child sum, empty last in both directions), model (full model name and model version of the leading used model, otherwise the frozen plan or live registry route; unknown last in both directions; independent of Display preferences), tokens, list_cost and paid (spent over the sessions of the node and its open or done children, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
+        description: 'Comma-separated sort keys; prefix a key with - for descending order. Keys are position, updated_at, created_at, key, title, state (workflow order: open, new, backlog, blocked, in progress and active, qa, accepted, delivered, done, cancelled, archived, then any other state), priority, kind, assignee (stored person, otherwise the lead live worker, unassigned work last in both directions), eta_ready (unknown last in both directions), progress (unknown last in both directions), estimate (agent hours, parent eligible-leaf sum, empty last in both directions), model (full model name and model version of the leading used model, otherwise the frozen plan or live registry route; unknown last in both directions; independent of Display preferences), tokens, list_cost and paid (spent over all historical sessions in the node subtree, then the estimate; unknown last in both directions; list_cost and paid are unknown for rows on projects where the caller lacks harness.read).'
         default: position
     Direction:
       name: direction

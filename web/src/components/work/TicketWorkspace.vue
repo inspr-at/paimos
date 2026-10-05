@@ -5,12 +5,17 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, useId, w
 import { APIError, getRecurrence, undoEvent, type ListItem } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
 import { rowStore } from '../../lib/rowStore'
+import { liveNodes } from '../../lib/liveNodes'
+import { etaFromTicket } from '../../lib/eta'
 import { toast } from '../../lib/toast'
 import { queueable } from '../../lib/workQueue'
 import SuggestedReleaseCell from './SuggestedReleaseCell.vue'
+import EtaCell from './EtaCell.vue'
 import { useActivity } from '../../lib/useActivity'
 import { useTicket, type RelatedNode, type TicketChange } from '../../lib/useTicket'
-import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta, statusOptions } from '../../lib/work'
+import { absoluteTime, priorityLabel, relativeTime, statusMeta, statusOptions } from '../../lib/work'
+import { workLabel, workNoun } from '../../lib/workVocabulary'
+import { useWorkVocabulary } from '../../stores/workVocabulary'
 import { useAttachments } from '../../lib/useAttachments'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
@@ -43,10 +48,11 @@ import { needsBenefitPrompt } from '../../lib/doneGate'
 import { benefitDraft, benefitTextKeys, completedTicketState, firstBenefitGap } from '../../lib/ticketBenefits'
 import { can } from '../../lib/authz'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
-import { openedMembershipMessage, type NativeReleaseView } from '../../lib/releaseMembership'
+import { openedMembershipMessage, releaseViewIsParent, type NativeReleaseView } from '../../lib/releaseMembership'
 import ReleasePicker from './ReleasePicker.vue'
 import { useJourney } from '../../stores/journey'
 import QueueAction from './QueueAction.vue'
+import WorkLifecycleSheet from './WorkLifecycleSheet.vue'
 import QueueDetails from './QueueDetails.vue'
 import QueueView from './QueueView.vue'
 import AssigneeMenu from './AssigneeMenu.vue'
@@ -109,11 +115,21 @@ const record = computed(() => {
     addComment: (body: string) => activity.add(body, id ?? null),
   }
 })
+const eta = computed(() => etaFromTicket(item.value?.eta))
+const etaConnectionStale = ref(liveNodes.state !== 'live')
+onBeforeUnmount(liveNodes.onState(state => { etaConnectionStale.value = state !== 'live' }))
 const convertOpen = ref(false)
+const workActionsOpen = ref(false)
+watch(() => [props.item?.id, props.me?.id], () => { workActionsOpen.value = false })
+function workLifecycleCompleted() { void ticket.refresh(); activity.load() }
 const header = ref<{ focusMore: () => void } | null>(null)
+function closeWorkActions() {
+  workActionsOpen.value = false
+  void nextTick(() => header.value?.focusMore())
+}
 function finishConvert() {
   convertOpen.value = false
-  if (item.value) toast(`${item.value.key} is now ${kindLabel(item.value.kind_slug).toLowerCase()}`)
+  if (item.value) toast(`${item.value.key} is now ${workNoun(workLabel(item.value, vocabulary.value))}`)
   activity.load()
 }
 function closeConvert() {
@@ -122,9 +138,10 @@ function closeConvert() {
 }
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
 const session = useSession()
+const vocabulary = useWorkVocabulary()
 const repeatSource = ref<ListItem | null>(null)
 const originRecurrence = ref<Recurrence | null>(null), recurrenceEdit = ref<Recurrence | null>(null)
-const mayRepeat = computed(() => !!item.value && ['epic', 'ticket', 'task'].includes(item.value.kind_slug) && !ticket.gone.value && !ticket.readOnly.value && can('recurrences.manage', props.project.id))
+const mayRepeat = computed(() => !!item.value && ['work', 'epic', 'ticket', 'task'].includes(item.value.kind_slug) && !ticket.gone.value && !ticket.readOnly.value && can('recurrences.manage', props.project.id))
 const sourceProject = computed(() => item.value?.recurrence ? { id: item.value.recurrence.project_id, routeKey: item.value.recurrence.project_key } : null)
 const mayEditRecurrence = computed(() => !!item.value?.recurrence && !item.value.recurrence.retired && can('recurrences.manage', item.value.recurrence.project_id))
 const recurrenceScope = useIdentityScope()
@@ -172,9 +189,9 @@ const queuePoller = usePoller(() => queue.load(props.project.id), 20_000)
 watch(() => props.project.id, id => { void queue.load(id) }, { immediate: true })
 onMounted(() => queuePoller.start())
 onBeforeUnmount(() => queuePoller.stop())
-const canQueue = computed(() => !ticket.readOnly.value && !ticket.gone.value && can('run.create', props.project.id))
-const canRelease = computed(() => editable.value && !!props.item && props.item.kind_slug !== 'epic' && can('releases.write', props.project.id))
-const releaseView = computed(() => props.item?.kind_slug === 'epic' ? { status: 'none' as const } : props.nativeReleases?.get(props.item?.id ?? ''))
+const canQueue = computed(() => props.item?.is_leaf !== false && !ticket.readOnly.value && !ticket.gone.value && can('run.create', props.project.id))
+const canRelease = computed(() => editable.value && !!props.item && can('releases.write', props.project.id))
+const releaseView = computed(() => props.nativeReleases?.get(props.item?.id ?? ''))
 const journeys = useJourney()
 
 // ---------- Following links: a modified click opens a new tab ----------
@@ -235,7 +252,7 @@ function focusBenefit(key: string) {
 function refreshBenefitNotice() {
   const target = item.value
   if (!benefitNotice.value || !target) return
-  if (!needsBenefitPrompt({ kind_slug: target.kind_slug, state: base.state, fields: draft }, draft.state)) {
+  if (!needsBenefitPrompt({ kind_id: target.kind_id, kind_slug: target.kind_slug, estimate: target.estimate, state: base.state, fields: draft }, draft.state)) {
     benefitNotice.value = ''
     benefitInvalidKey.value = ''
     return
@@ -290,7 +307,7 @@ async function saveEdit() {
   setField('notes', draft.notes, base.notes)
   setField('priority', draft.priority, base.priority)
   setField('assignee', draft.assignee, base.assignee)
-  if (target.kind_slug === 'ticket') {
+  if (['ticket', 'work'].includes(target.kind_slug)) {
     for (const key of benefitTextKeys) setField(key, draft[key], base[key])
     if (draft.hide_from_release_notes !== base.hide_from_release_notes) changed.hide_from_release_notes = draft.hide_from_release_notes
   }
@@ -299,7 +316,7 @@ async function saveEdit() {
   const fields: Record<string, unknown> = { ...(ticket.base()?.fields ?? target.fields) }
   for (const [key, value] of Object.entries(changed)) { if (value === undefined) delete fields[key]; else fields[key] = value }
   // The benefit editor is already on this form. Point at the first incomplete field.
-  if (needsBenefitPrompt({ kind_slug: target.kind_slug, state: base.state, fields }, draft.state)) {
+  if (needsBenefitPrompt({ kind_id: target.kind_id, kind_slug: target.kind_slug, estimate: target.estimate, state: base.state, fields }, draft.state)) {
     const gap = firstBenefitGap(fields)
     benefitNotice.value = gap?.line ?? 'A 2–4 word pill and a benefit, in both languages, are required.'
     benefitInvalidKey.value = gap?.key ?? 'pill_en'
@@ -453,7 +470,7 @@ async function chooseRelease(target: ReleaseTarget) {
   const it = item.value
   const projectId = props.project.id
   if (!it || !canRelease.value) return
-  const ticket = { id: it.id, key: it.key, title: it.title, state: it.state, kind: it.kind_slug }
+  const ticket = { id: it.id, key: it.key, title: it.title, state: it.state, kind: it.kind_slug, isParent: releaseViewIsParent(releaseView.value) }
   menu.value = null
   try {
     const outcome = await assignToRelease(projectId, [ticket], target)
@@ -469,7 +486,11 @@ async function chooseRelease(target: ReleaseTarget) {
     const title = outcome.opened?.status === 'added' ? outcome.opened.releaseTitle : outcome.releaseTitle
     const skipped = outcome.skipped.length ? ` ${outcome.skipped[0].reason}` : ''
     const eventId = outcome.result?.event_id
-    toast(`Added ${ticket.key} to ${title}.${skipped}`, {
+    const count = outcome.opened?.status === 'added' ? outcome.opened.count : outcome.result?.leaf_node_ids?.length
+    const message = ticket.isParent
+      ? count === undefined ? `Release placement for ${ticket.key} could not be confirmed. Refresh to check its leaves.` : `Added ${count} ${count === 1 ? 'leaf' : 'leaves'} under ${ticket.key} to ${title}.${skipped}`
+      : `Added ${ticket.key} to ${title}.${skipped}`
+    toast(message, {
       timeout: 8000,
       action: eventId ? { label: 'Undo', run: () => void undoRelease(eventId, ticket.key) } : undefined,
     })
@@ -531,7 +552,7 @@ async function remove() {
   const ok = await confirmAction({
     title: `Delete ${target.key}?`,
     body: `“${target.title}” leaves the project list. ${target.children_count ? 'Its children must be moved or deleted first.' : 'The history stays in the audit log.'}`,
-    confirmLabel: `Delete ${kindLabel(target.kind_slug).toLowerCase()}`, danger: true,
+    confirmLabel: `Delete ${workNoun(workLabel(target, vocabulary.value))}`, danger: true,
   })
   if (ok) await ticket.remove(target)
 }
@@ -582,8 +603,9 @@ defineExpose({
   >
     <TicketHeaderBar
       ref="header"
-      :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :position="position" :mode="mode" :can-write="editable"
-      :can-delete="deletable" :can-move="movable && item?.kind_slug === 'ticket'" :can-repeat="mayRepeat" :can-edit-recurrence="mayEditRecurrence" :recurrence-label="originRecurrence && item?.recurrence && !item.recurrence.retired ? recurrenceName(originRecurrence) : undefined" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
+      :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :level-name="item ? workLabel(item, vocabulary.value) : undefined" :level-icon="item?.level_icon" :position="position" :mode="mode" :can-write="editable"
+      :can-delete="deletable" :can-move="movable && ['work','ticket'].includes(item?.kind_slug ?? '')" :can-repeat="mayRepeat" :can-edit-recurrence="mayEditRecurrence" :recurrence-label="originRecurrence && item?.recurrence && !item.recurrence.retired ? recurrenceName(originRecurrence) : undefined" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
+      :can-work-actions="item?.kind_slug === 'work' && editable && humanCheckPerson"
        :open-in-project="openInProject" :back-label="backLabel"
       @copy-key="copy(item?.key ?? ticketKey, item?.key ?? ticketKey)" @copy-link="copy(link(), 'link')" @prev="emit('prev')" @next="emit('next')"
       @expand="emit('expand')" @collapse="emit('collapse')" @new-tab="emit('newTab')" @close="emit('close')" @open-in-project="emit('openInProject')"
@@ -591,6 +613,7 @@ defineExpose({
       @edit="startEdit()" @save="saveEdit" @cancel="cancelEdit"
       @repeat="repeat"
       @edit-recurrence="editRecurrence"
+      @work-actions="workActionsOpen = true"
     >
       <template #queue><QueueAction v-if="item && canQueue" ref="queueAction" :row="item" :project-id="project.id" label /></template>
       <template v-if="item?.recurrence" #marker><RecurringPill :recurrence="item.recurrence" /></template>
@@ -598,6 +621,7 @@ defineExpose({
     <p class="sr-only" role="status" aria-live="polite">{{ ticket.liveMessage.value }}</p>
     <RecurrenceEditor v-if="repeatSource" :project="project" :source="repeatSource" @close="repeatSource = null" @saved="recurrenceSaved" />
     <RecurrenceEditor v-if="recurrenceEdit && sourceProject && mayEditRecurrence" :project="sourceProject" :recurrence="recurrenceEdit" @close="recurrenceEdit = null" @saved="recurrenceSaved" />
+    <WorkLifecycleSheet v-if="workActionsOpen && item && me" :node-id="item.id" :node-key="item.key" :person-id="me.id" @close="closeWorkActions" @completed="workLifecycleCompleted" />
     <ConvertKindSheet v-if="convertOpen && item" :item="item" :children="ticket.children.value" :children-loading="ticket.childrenLoading.value" :convert="ticket.convert" @close="closeConvert" @converted="finishConvert" />
 
     <div ref="scroller" class="ws-scroll">
@@ -631,7 +655,7 @@ defineExpose({
             <button
               type="button" class="field field-pick" aria-haspopup="menu" :aria-expanded="editMenu?.kind === 'status'" :aria-labelledby="`${uid}-status ${uid}-status-value`"
               @click="openEditMenu('status', $event)" @keydown="editMenuKeys('status', $event)"
-            ><StatusIcon :state="draft.state" /><span :id="`${uid}-status-value`" class="pick-value">{{ statusMeta(draft.state).label }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
+            ><StatusIcon :state="draft.state" /><span :id="`${uid}-status-value`" class="pick-value">{{ item.status_derived ? (item.work_children_count ? `Follows its ${item.work_children_count} children` : 'Follows its children') : statusMeta(draft.state).label }}</span><AppIcon name="chevron" :size="12" class="pick-chev" /></button>
           </div>
           <div class="edit-prop"><span :id="`${uid}-priority`" class="prop-label">Priority</span>
             <button
@@ -652,17 +676,17 @@ defineExpose({
         <section class="edit-section" aria-labelledby="edit-ac"><h3 id="edit-ac" class="eyebrow">Acceptance criteria</h3>
           <MarkdownEditor v-model="draft.acceptance" label="Acceptance criteria" bare :split="mode === 'full'" :min-rows="4" :attachment-id="attachmentId" placeholder="- [ ] What must be true when this is done" @save="saveEdit" @cancel="cancelEdit" />
         </section>
-        <section v-if="['ticket', 'task'].includes(item.kind_slug)" class="edit-section"><label :for="`${uid}-human-check`" class="eyebrow">Needs a human check</label><input :id="`${uid}-human-check`" v-model="draft.humanCheck" class="field edit-human-check" :disabled="!humanCheckEditable" maxlength="500" placeholder="What only a person can confirm" /><p class="hc-edit-hint">Automatic moves to Delivered and Accepted skip this ticket until it is checked.<template v-if="!humanCheckPerson"> {{ humanCheckEditable ? 'Only a person can mark it checked.' : 'Only a person can undo the completed check.' }}</template></p></section>
+        <section v-if="['work','ticket', 'task'].includes(item.kind_slug)" class="edit-section"><label :for="`${uid}-human-check`" class="eyebrow">Needs a human check</label><input :id="`${uid}-human-check`" v-model="draft.humanCheck" class="field edit-human-check" :disabled="!humanCheckEditable" maxlength="500" placeholder="What only a person can confirm" /><p class="hc-edit-hint">Automatic moves to Delivered and Accepted skip this ticket until it is checked.<template v-if="!humanCheckPerson"> {{ humanCheckEditable ? 'Only a person can mark it checked.' : 'Only a person can undo the completed check.' }}</template></p></section>
         <section class="edit-section" aria-labelledby="edit-notes"><h3 id="edit-notes" class="eyebrow">Notes</h3>
           <MarkdownEditor v-model="draft.notes" label="Notes" bare :split="mode === 'full'" :min-rows="3" :attachment-id="attachmentId" @save="saveEdit" @cancel="cancelEdit" />
         </section>
-        <TicketBenefits v-if="item.kind_slug === 'ticket'" class="edit-benefits" :fields="draft" editing :disabled="saving" :done="completedTicketState(item.state)" :notice="benefitNotice" :invalid-key="benefitInvalidKey" @change="changeBenefit" />
+        <TicketBenefits v-if="['ticket', 'work'].includes(item.kind_slug)" class="edit-benefits" :fields="draft" :parent="item.estimate?.is_parent" editing :disabled="saving" :done="completedTicketState(item.state, rowStore.kindSchema(item.kind_id))" :notice="benefitNotice" :invalid-key="benefitInvalidKey" @change="changeBenefit" />
         <p class="edit-hint"><KeyCap k="mod" /><KeyCap k="enter" /> save · <kbd class="keycap">esc</kbd> cancel · paste or drop images to attach them</p>
       </form>
 
       <div v-else class="ws-grid">
         <div class="ws-main">
-          <p v-if="!editable" class="read-only" role="note"><AppIcon name="alert" :size="13" />You can read this {{ kindLabel(item.kind_slug).toLowerCase() }} but not change it.</p>
+          <p v-if="!editable" class="read-only" role="note"><AppIcon name="alert" :size="13" />You can read this {{ workNoun(workLabel(item, vocabulary.value)) }} but not change it.</p>
           <InlineTitle :record-id="item.id" ref="title" :class="{ 'live-tint': liveTint.title }" :value="item.title" :editable="editable" :large="mode === 'full'" :save="record.setTitle" />
           <TicketProperties
             class="ws-props" :class="{ 'only-narrow': mode === 'full', 'live-tint': liveTint.props }" :item="item" :editable="editable" layout="row" :now="now"
@@ -674,7 +698,7 @@ defineExpose({
             <QueueDetails :entry="queueEntry" :manual="queue.snapshots[project.id]?.manual_order" />
             <div class="q-card-acts">
               <button v-if="!queueEntry.target_agent_id" type="button" class="btn sm" :disabled="!canQueue || queue.busy || queue.firstShared(project.id)?.ticket_id === item.id" @click="queue.move(project.id, item.id, 'top').catch(e => toast(e.message, { tone: 'error' }))"><AppIcon name="to-top" :size="13" />Move to top</button>
-              <button type="button" class="btn sm" :disabled="!canQueue" @click="openMenu('assignee', $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="12" />Start now on…</button>
+              <button v-if="item.is_leaf !== false" type="button" class="btn sm" :disabled="!canQueue" @click="openMenu('assignee', $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="12" />Start now on…</button>
               <button type="button" class="btn sm ghost" :disabled="!canQueue || queue.busy" @click="queue.remove(project.id, item.id).catch(e => toast(e.message, { tone: 'error' }))"><AppIcon name="close" :size="13" />Remove</button>
               <button type="button" class="btn sm ghost" @click="queueAnchor = $event.currentTarget as HTMLElement"><AppIcon name="queue" :size="13" />Open the queue</button>
             </div>
@@ -687,6 +711,7 @@ defineExpose({
           <p v-if="item.kind_slug !== 'epic'" class="meta">Suggested release <SuggestedReleaseCell :row="item" :project-id="project.id" :now="now" :description-id="`drawer-suggested-${item.id}`" /></p>
           <RecurrenceProvenance v-if="item.recurrence" :key="item.id" :node-id="item.id" :recurrence="item.recurrence" @loaded="originLoaded" />
           <HumanCheck :item="item" :editable="editable" :save="saveHumanCheck" :names="names" />
+          <p v-if="eta" class="meta ws-eta"><span>Progress and ETA</span><EtaCell :eta="eta" :now="now" align="start" labelled :connection-stale="etaConnectionStale" /></p>
           <p class="meta" :class="{ 'only-narrow': mode === 'full' }">
             Updated <time :datetime="item.updated_at" :data-tip="absoluteTime(item.updated_at)">{{ relativeTime(item.updated_at, { now, long: true }) }}</time>
             · Created <time :datetime="item.created_at" :data-tip="absoluteTime(item.created_at)">{{ relativeTime(item.created_at, { now, long: true }) }}</time>
@@ -708,15 +733,15 @@ defineExpose({
               <button v-if="!(acceptance.trim() || showAcceptance)" type="button" class="add-section" @click="addSection('acceptance')"><AppIcon name="plus" :size="12" />Acceptance criteria</button>
               <button v-if="!(notes.trim() || showNotes)" type="button" class="add-section" @click="addSection('notes')"><AppIcon name="plus" :size="12" />Notes</button>
             </div>
-            <TicketBenefits v-if="item.kind_slug === 'ticket'" class="ws-benefits" :fields="item.fields" :done="completedTicketState(item.state)" :editable="editable" @edit="startEdit('benefit')" />
+            <TicketBenefits v-if="['ticket', 'work'].includes(item.kind_slug)" class="ws-benefits" :fields="item.fields" :parent="item.estimate?.is_parent" :node-id="item.id" @generated="ticket.refresh()" :done="completedTicketState(item.state, rowStore.kindSchema(item.kind_id))" :editable="editable" @edit="startEdit('benefit')" />
           </div>
 
-          <TicketAgentWork v-if="item.kind_slug === 'ticket' || item.kind_slug === 'epic' || item.kind_slug === 'task'" class="ws-block" :node-id="item.id" :kind="item.kind_slug" />
-          <TicketOutcomes v-if="item.kind_slug === 'ticket'" class="ws-block" :node-id="item.id" />
-          <TicketReviews v-if="item.kind_slug === 'ticket' || item.kind_slug === 'task'" :key="item.id" class="ws-block" :node-id="item.id" :project-id="project.id" />
+          <TicketAgentWork v-if="['work','ticket','epic','task'].includes(item.kind_slug)" class="ws-block" :node-id="item.id" :kind="item.kind_slug" :level-name="workLabel(item, vocabulary.value)" />
+          <TicketOutcomes v-if="['work', 'ticket'].includes(item.kind_slug)" class="ws-block" :node-id="item.id" />
+          <TicketReviews v-if="['work', 'ticket', 'task'].includes(item.kind_slug)" :key="item.id" class="ws-block" :node-id="item.id" :project-id="project.id" />
           <ChildList
             v-if="hasChildren" class="ws-block" :children="ticket.children.value" :loading="ticket.childrenLoading.value" :editable="editable"
-            :child-label="item.kind_slug === 'epic' ? 'ticket' : 'task'" :progress="ticket.childProgress()" :add="title => ticket.addChild(title, project.routeKey)"
+            :child-label="item.kind_slug === 'work' ? workNoun(vocabulary.leaf.name) : item.kind_slug === 'epic' ? 'ticket' : 'task'" :parent-label="workNoun(workLabel(item, vocabulary.value))" :progress="ticket.childProgress()" :progress-error="ticket.progressError.value" :add="title => ticket.addChild(title, project.routeKey)"
             @open="openLinked"
           />
           <!-- Relations, then activity: both wait for the relations, so neither jumps. -->
@@ -776,14 +801,14 @@ defineExpose({
     <OptionMenu v-if="menu?.kind === 'priority' && item" :anchor="menu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="item.priority ?? ''" @choose="choosePriority" @close="closeMenu" />
     <AssigneeMenu v-if="menu?.kind === 'assignee' && item" :row="item" :project-id="project.id" :anchor="menu.anchor" :people="assigneeOptions" :can-assign="editable" @choose="chooseAssignee" @changed="emit('assigned')" @close="closeMenu" />
     <QueueView v-if="queueAnchor" :project-id="project.id" :anchor="queueAnchor" @close="restore => { const anchor = queueAnchor; queueAnchor = null; if (restore) anchor?.focus() }" @open="key => { queueAnchor = null; openLinked(key) }" @filter="() => { queueAnchor = null; void routerToQueued() }" />
-    <StatusMenu :project-id="project.id" v-if="editMenu?.kind === 'status' && item" :anchor="editMenu.anchor" :current="draft.state" :known-states="editStatusOptions.map(option => option.value)" :ticket-key="item.key" @choose="value => chooseEdit('status', value)" @close="closeEditMenu" />
+    <StatusMenu :project-id="project.id" v-if="editMenu?.kind === 'status' && item" :anchor="editMenu.anchor" :derived="item.status_derived" :children-count="item.work_children_count" :current="draft.state" :known-states="editStatusOptions.map(option => option.value)" :ticket-key="item.key" @choose="value => chooseEdit('status', value)" @close="closeEditMenu" />
     <OptionMenu v-if="editMenu?.kind === 'priority' && item" :anchor="editMenu.anchor" title="Priority" :subject="item.key" kind="priority" :options="priorityOptions" :current="draft.priority" @choose="value => chooseEdit('priority', value)" @close="closeEditMenu" />
     <OptionMenu v-if="editMenu?.kind === 'assignee' && item" :anchor="editMenu.anchor" title="Assignee" :subject="item.key" kind="assignee" :options="assigneeOptions" :current="draft.assignee" searchable @choose="value => chooseEdit('assignee', value)" @close="closeEditMenu" />
     <RelationPicker
       v-if="linkAnchor && item" :anchor="linkAnchor" :subject="item.key" :self-id="item.id" :project-key="project.routeKey"
       :related="ticket.related.value" :link="ticket.link" @close="closeLink"
     />
-    <EpicPicker v-if="menu?.kind === 'epic' && item" :anchor="menu.anchor" :project-id="project.id" :current="item.parent?.kind_slug === 'epic' ? item.parent.id : null" :subject="item.key" @choose="chooseEpic" @close="closeMenu" />
+    <EpicPicker v-if="menu?.kind === 'epic' && item" :anchor="menu.anchor" :project-id="project.id" :current="['work','epic'].includes(item.parent?.kind_slug ?? '') ? item.parent!.id : null" :subject="item.key" @choose="chooseEpic" @close="closeMenu" />
     <ReleasePicker v-if="menu?.kind === 'release' && item" :anchor="menu.anchor" :project-id="project.id" :subject="item.key" @choose="chooseRelease" @close="closeMenu" />
   </component>
 </template>
@@ -805,6 +830,7 @@ defineExpose({
 .ws-props { margin-top: 14px; }
 .meta { margin-top: 12px; font-size: 12.5px; color: var(--ink-3); }
 .meta time { color: var(--ink-2); }
+.ws-eta { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .divider { height: 1px; margin: 18px 0 20px; background: linear-gradient(90deg, var(--line-2), transparent); }
 .read-only { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; padding: 8px 12px; border-radius: 10px; background: var(--code-bg); font-size: 12.5px; color: var(--ink-2); }
 .ws-benefits { margin-top: 26px; }

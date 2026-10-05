@@ -25,7 +25,7 @@ func TestImportAttachmentsFixtureIdempotent(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Importer') RETURNING id::text`, tenantID).Scan(&actorID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='ticket'`, tenantID).Scan(&kindID); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='work'`, tenantID).Scan(&kindID); err != nil {
 			return err
 		}
 		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,fields) VALUES($1,'IMP-11',$2,'Imported','{"classic":{"id":11,"source_id":"fixture"}}') RETURNING id::text`, tenantID, kindID).Scan(&nodeID)

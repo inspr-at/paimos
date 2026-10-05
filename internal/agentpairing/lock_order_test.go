@@ -65,6 +65,8 @@ func TestTenantTreePairingLockOrder(t *testing.T) {
 
 		"nodes/bulk.go:applyBulk":                     "pairing.Lock",
 		"nodes/module.go:lockTree":                    "tree.Mutation",
+		"nodes/causal_undo.go:undoWorkChild":          "project.Write",
+		"nodes/vocabulary.go:handlePutVocabulary":     "tenant:NO KEY UPDATE",
 		"nodes/nodes.go:updateNode":                   "pairing.Lock",
 		"nodes/nodes.go:deleteNode":                   "pairing.Lock",
 		"nodes/portal_publish.go:armPortalModeration": "project.Write",

@@ -28,6 +28,7 @@ type Event struct {
 	// NodeChanges is set when the event is read (history and stream), never
 	// stored: the nodes a node.* event changed, for live views.
 	NodeChanges []NodeChange `json:"node_changes,omitempty"`
+	Derivation  *Derivation  `json:"derivation,omitempty"`
 }
 
 // Change describes complete resource snapshots. A nil snapshot is SQL NULL.

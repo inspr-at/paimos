@@ -23,7 +23,7 @@ func (f *fixture) apiQueueTicket(t *testing.T, parent *string) string {
 	var kinds struct{ Items []struct{ ID, Slug string } }
 	f.call(t, f.person, "GET", "/api/kinds", nil, 200, &kinds)
 	for _, kind := range kinds.Items {
-		if kind.Slug != "ticket" {
+		if kind.Slug != "work" {
 			continue
 		}
 		var node struct{ ID string }
@@ -33,7 +33,7 @@ func (f *fixture) apiQueueTicket(t *testing.T, parent *string) string {
 		}, 201, &node)
 		return node.ID
 	}
-	t.Fatal("ticket kind missing")
+	t.Fatal("work kind missing")
 	return ""
 }
 
@@ -71,23 +71,84 @@ func TestTicketQueueDeleteCommitsWithGeneratedChild(t *testing.T) {
 	}
 }
 
-func TestTicketQueueDeleteWithOtherLiveChildRollsBack(t *testing.T) {
+func TestWorkParentQueueRefusedWithLiveWorkChild(t *testing.T) {
 	f := setup(t)
 	nodes.New(f.d.App, nil).Mount(f.mux)
 	id := f.apiQueueTicket(t, nil)
 	child := f.apiQueueTicket(t, &id)
-	e := f.addQueue(t, id, nil)
+	// Work with a live work child is a parent, so queueing is refused before
+	// creating an order/run. Failed deletion must retain both original nodes.
+	var rejected struct {
+		Code      string `json:"code"`
+		Readiness struct {
+			Queueable bool     `json:"queueable"`
+			Missing   []string `json:"missing"`
+		} `json:"readiness"`
+	}
+	f.call(t, f.person, "POST", "/api/queue", map[string]any{"node_id": id}, 422, &rejected)
+	if rejected.Code != "queue_not_ready" || rejected.Readiness.Queueable || len(rejected.Readiness.Missing) != 1 || rejected.Readiness.Missing[0] != "status" {
+		t.Fatalf("parent refused for the wrong reason: %+v", rejected)
+	}
 	f.call(t, f.person, "DELETE", "/api/nodes/"+id, nil, 409, nil)
-	for _, live := range []string{id, child, e.Run.OrderID} {
+	for _, live := range []string{id, child} {
 		f.call(t, f.person, "GET", "/api/nodes/"+live, nil, 200, nil)
 	}
-	if n := f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='queued'`, e.Run.ID); n != 1 {
-		t.Fatal("failed deletion cancelled queued work")
+	if n := f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE queue_node_id=$1`, id); n != 0 {
+		t.Fatal("parent queue refusal created a run")
+	}
+	if f.queuePage(t).Count != 0 {
+		t.Fatal("parent queue refusal created a projection")
 	}
 	if n := f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='queue.removed'`, id); n != 0 {
 		t.Fatal("failed deletion retained removal audit")
 	}
 	f.call(t, f.person, "DELETE", "/api/nodes/"+child, nil, 204, nil)
+	f.call(t, f.person, "DELETE", "/api/nodes/"+id, nil, 204, nil)
+}
+
+func TestTicketQueueDeleteWithOtherLiveChildRollsBack(t *testing.T) {
+	f := setup(t)
+	nodes.New(f.d.App, nil).Mount(f.mux)
+	f.queueAccount(t, 1000000)
+	id := f.apiQueueTicket(t, nil)
+	queued := f.addQueue(t, id, map[string]any{"agent_principal_id": f.agent.ID, "model_profile_id": f.profile})
+	f.reserve(t, queued.Run)
+	var kinds struct{ Items []struct{ ID, Slug string } }
+	f.call(t, f.person, "GET", "/api/kinds", nil, 200, &kinds)
+	var child struct{ ID string }
+	for _, kind := range kinds.Items {
+		if kind.Slug == "guideline" {
+			f.call(t, f.person, "POST", "/api/nodes", map[string]any{"kind_id": kind.ID, "title": "Live non-work child", "parent_id": id}, 201, &child)
+			break
+		}
+	}
+	if child.ID == "" {
+		t.Fatal("guideline kind missing")
+	}
+	var rejected struct {
+		Code  string `json:"code"`
+		Error string `json:"error"`
+	}
+	f.call(t, f.person, "DELETE", "/api/nodes/"+id, nil, 409, &rejected)
+	if !strings.Contains(rejected.Error, "children") {
+		t.Fatalf("deletion failed for wrong reason: %+v", rejected)
+	}
+	for _, live := range []string{id, child.ID, queued.Run.OrderID} {
+		f.call(t, f.person, "GET", "/api/nodes/"+live, nil, 200, nil)
+	}
+	if n := f.count(t, f.person, `SELECT count(*) FROM agent_runs WHERE id=$1 AND status='queued'`, queued.Run.ID); n != 1 {
+		t.Fatal("failed deletion changed the existing queued run")
+	}
+	if n := f.count(t, f.person, `SELECT count(*) FROM account_reservations WHERE run_id=$1 AND state='active'`, queued.Run.ID); n != 1 {
+		t.Fatal("failed deletion released the existing capacity hold", n)
+	}
+	if f.queuePage(t).Count != 1 {
+		t.Fatal("failed deletion removed the queue projection")
+	}
+	if n := f.count(t, f.person, `SELECT count(*) FROM events WHERE node_id=$1 AND type='queue.removed'`, id); n != 0 {
+		t.Fatal("failed deletion committed queue removal audit")
+	}
+	f.call(t, f.person, "DELETE", "/api/nodes/"+child.ID, nil, 204, nil)
 	f.call(t, f.person, "DELETE", "/api/nodes/"+id, nil, 204, nil)
 }
 

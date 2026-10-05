@@ -100,10 +100,60 @@
       "reason": "Additive public CAS generation on theme selections; globally unique bounded sequence and UPDATE trigger cover current and previous-binary writers. Existing physical revisions, ownership and append-only audit remain unchanged. FORCE-RLS tenant scan fences legacy writers and starts generations above cached physical revisions; volatile-default backfill has 5-second lock and 30-second statement bounds. No existing table, column, route or policy is removed. Classifier flags sequence DDL, LOCK TABLE, tenant-loop DO and volatile-default ALTER TABLE. This exact-byte exception requires coordinator review and previous-binary compatibility probes before merge/release, and grants no approval or release authority."
     },
     {
+      "file": "1215_one_work_kind.sql",
+      "sha256": "3c2353cc11a31d0a26c7465fe12f4e562ec5fdd0f695d62ba720520d0a75713b",
+      "ticket": "AEON-649",
+      "reason": "Owner-accepted AEON-648 concept Q4 explicitly retires epic/ticket/task in one atomic migration, with verified pre-migration backup as the only rollback. The starter, schema-extension and historical journey kind guards switch to work; the same-file Go hook reconciles schemas, refuses busy parents, rewrites allowed-child references, preserves node IDs/content and historical sessions/Decision Desk identities, then deletes legacy definitions and appends provenance events. This is a contract change and is incompatible with older binaries that assume retired kinds. Exact bytes are prepared for the coordinator consolidated review, not a package-worker approval or release waiver. Deployment requires release 122 published, drained merge/work queues, stopped writers, instance-specific verified backup/restore and the completed downstream work-node packages; it precedes AEON-596 ship adoption. No production backup, push or deployment is claimed by this local fixture drill."
+    },
+    {
+      "file": "1225_work_parent_status.sql",
+      "sha256": "c4fa959974f47c65c64ff5d2129fd4c0af770d6c4f83d4c7468aa8792d64d733",
+      "sourceCommit": "63c1ee730037b7852d687bb6d571f0a00f5278ee",
+      "ticket": "AEON-650",
+      "reason": "AEON-648 owner-accepted Q5-Q7 and Q17, with the lead's concept review recorded on that ticket, require canonical derived parent status behind AEON-429. The classifier flags bounded dynamic feature lookup and transaction-local work buffers in function bodies, plus ALTER POLICY admitting only status_autopilot.derived, status_autopilot.retained and status_autopilot.causal_undo. Existing target and referenced-node visibility predicates stay intact; permanent rows, historical sessions and existing schema are not rewritten. The engine defaults OFF, does not backfill or activate flags, and requires System provisioning while OFF plus capacity/activation integration. Exact bytes and source provenance are prepared for coordinator consolidated review before merge/release, under AEON-649 stopped-writer maintenance and instance-specific verified backup/restore after release 122 and drained queues. This record does not waive previous-binary compatibility or whole-chain validation; it grants no release authority. No coordinator byte approval, production backup, push or deployment is claimed. AEON-648 integration preserves main\u2019s recurrence event domain in the replaced policy; all reference checks stay intact. Integration also aligns parent-status entry with the release-123 tenant -> pairing -> tree writer order; the PostgreSQL wait-graph regression proves no advisory lock is held while waiting for the tenant fence."
+    },
+    {
+      "file": "1230_work_leaf_aggregates.sql",
+      "sha256": "aa6927d47c330b84fc904634f59e1b1a0fc7c870d471bc7453677c882e451df8",
+      "sourceCommit": "5084691604ef79f513de6a9f142925f7ec82d5ee",
+      "ticket": "AEON-651",
+      "reason": "AEON-648 owner-accepted Q10-Q12 and Q17, with the lead's concept review recorded on that ticket, require bounded leaf aggregates, planned estimates and latest open-leaf ETA. The classifier flags CREATE OR REPLACE of aeon_node_eta_progress, aeon_node_eta and aeon_release_note_snapshot, plus ALTER POLICY admitting status_autopilot.undone. Both historical ETA signatures retain the optional depth argument; invoker tenant/project RLS, the existing public-note whitelist, immutable frozen snapshots and target/referenced-node visibility predicates stay intact. No stored spend, session or Decision Desk identity is rewritten. Exact bytes and source provenance are prepared for coordinator consolidated review before merge/release, under AEON-649 stopped-writer maintenance and instance-specific verified backup/restore after release 122 and drained queues. This record does not waive previous-binary compatibility or whole-chain validation; it does not make the incompatible AEON-649 kind retirement safe for older binaries and grants no release authority. No coordinator byte approval, production backup, push or deployment is claimed. AEON-648 integration preserves main\u2019s recurrence event domain in the replaced policy; all reference checks stay intact."
+    },
+    {
+      "file": "1232_work_lifecycle_actions.sql",
+      "sha256": "a782b1ce60511cf07ecf6c0bc2d996db88d30ca770075b444f05e22f77c75d09",
+      "ticket": "AEON-652",
+      "reason": "AEON-648 graceful handover installs bounded durable intents and replaces the work-leaf admission helper to refuse pending handovers. Existing bindings, historical sessions and FORCE tenant/project RLS remain intact; no process signal authority is granted. Exact unpublished bytes require coordinator consolidated review before merge/release under stopped-writer maintenance and instance-specific verified backup/restore; this worker grants no acceptance or deployment authority."
+    },
+    {
+      "file": "1233_work_parent_releases.sql",
+      "sha256": "2f844411751cb98a95579b79f4dcd18c392f185e00a3c1b3eda69e4c8f6d86fe",
+      "ticket": "AEON-653",
+      "reason": "Additive parent placement metadata, FORCE tenant/project RLS, bounded work-edge scope and ordinary-create inheritance. The classifier conservatively flags replacement of the existing release-note capture helper to admit work leaves; all already-frozen snapshots remain immutable and unchanged. Exact bytes require coordinator consolidated review and whole-chain previous-binary/backup gates before merge or deployment; this worker grants no acceptance or release authority."
+    },
+    {
+      "file": "1234_recurrence_work_templates.sql",
+      "sha256": "c201abb265fddb5f5bf42c967a3073043f43d998dad8dcb58763db586a074929",
+      "ticket": "AEON-653",
+      "reason": "Owner-accepted AEON-648 Q14 migrates stored epic/ticket/task template kind references to work under per-tenant FORCE RLS. The classifier conservatively flags the tenant-loop DO block. Definitions retain content, schedules and identity; receipts and historical sessions are unchanged. Exact bytes require coordinator consolidated review under the AEON-649 verified-backup and downstream integration gates; no deployment approval is claimed."
+    },
+    {
       "file": "1235_agent_appearance_themes.sql",
       "sha256": "7af6fafd5c777ac98de0767d756589b5f26d2bab5c5b978027f9df07b0fe7e2c",
       "ticket": "AEON-643",
       "reason": "One-time tenant-scoped private appearance backfill into additive themes and selections. Snapshots existing explicit choices across linked identities before backfill, preserving effective themes/defaults and selection generations. Legacy-only physical identities in explicitly selected groups, and every linked alias, retain lower-priority selections via the existing unsaved-revision marker; a canonical account without a selection row records its absence so no alias backfill wins while linked; unlink restores each alias's own appearance without displacing linked explicit choices or what the canonical account showed. Selection audit snapshots retain that marker for undo. Retains all legacy preference rows and append-only history for rollback and previous binaries. Bounded locks fence appearance/theme writes and principal links; temporarily disabling only the theme creation guard preserves physical alias owners through unlink, with constraints and RLS unchanged. The guard is restored before event appends; private audience metadata protects migration events. Classifier flags LOCK, temporary audit table, trigger toggles and tenant-loop DO. Exact bytes require coordinator review and previous-binary compatibility probes before merge/release; this exception grants no approval or release authority."
+    },
+    {
+      "file": "1237_work_release_leaf_lifecycle.sql",
+      "sha256": "cae59d099482b126fe367639074a468025b59a3b350ba53d00bb6d130ea0fd43",
+      "ticket": "AEON-653",
+      "reason": "Reconcile planning/backlog members when live leaf shape changes; retain the complete bounded membership projection and synchronize explicit placement changes including Undo. Future-child inheritance prefers current parent intent, including explicit backlog, over preserved historical membership; without intent it falls back to membership. Add live leaf filtering and coverage while preserving frozen membership rows, published snapshots and historical identities. Replacement helpers, nullable backlog intent and the tenant-scoped repair block are conservatively outside the expansion allowlist. These unshipped branch bytes require coordinator consolidated review, paused structural writers and the existing whole-chain backup/previous-binary gates; this local worker grants no release approval."
+    },
+    {
+      "file": "1240_work_account_pins.sql",
+      "sha256": "009afe1caec0684ca46ceeba5aca4a4c38021fc7ea248f388b826098e417c38d",
+      "ticket": "AEON-648",
+      "reason": "Forward repair of the account pin guard after canonical work migration. CREATE OR REPLACE FUNCTION is conservatively outside the expand-safe allowlist. The guard only adds canonical work as a valid pin target; existing ticket pins, tenant matching, soft-delete rejection and account/group harness checks are preserved. Existing tables, columns, rows and wire names are unchanged. Pre-1215 upgrade and account routing/API regressions cover retained pins, editing, harness mismatch and non-work rejection. This exact-byte exception requires coordinator review before merge/release and grants no acceptance, deployment authority or waiver of previous-binary probes."
     }
   ]
 }

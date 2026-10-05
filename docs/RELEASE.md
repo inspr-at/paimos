@@ -1411,3 +1411,55 @@ keeps New/Backlog suggestions. Human checks pause only delivery and acceptance.
 Progress inactivity uses actual harness/session-branch and review-PR timestamps,
 so a title edit or comment does not keep stalled work in progress. Triage
 autopilot's judgement modes are a separate phase.
+
+
+### Work-node maintenance switch (AEON-648 / AEON-684)
+
+Before stopping the release-122 container, run the candidate binary's
+`paimos migrate --check` (or `aeon-server migrate --check`) with the existing
+server database configuration. This command opens a read-only repeatable
+snapshot, pages every tenant under FORCE RLS, prints each busy parent key and
+reason using the same predicate as migration 1215, and applies no migrations.
+Exit 78 means a live legacy work parent has a live direct work child and a
+bound unstopped session, queued/starting/running/waiting claim, or running child
+work order. Keep the old container running while claims drain and cooperative
+handovers complete. Rerun the check before the switch; a clean snapshot is not
+an execution permit and 1215 still rechecks under its maintenance locks.
+Preflight errors or timeouts are failures, never clean results. Large reports
+stream in bounded pages; the stderr summary explicitly truncates after 100.
+
+Boot refuses the same blockers with one diagnostic naming their keys and the
+remedy, exits 78, and performs no internal retry. OPS must not stop the old
+container while this check fails. Existing schema-conflict, backup, human
+approval, paused-writer and release gates remain authoritative; the worker's
+preflight does not grant deployment approval.
+
+OPS's 2026-10-04 csb1 real-data rehearsal (AEON-684) migrated 241 files from
+schema 1148 through 1230 in 8 seconds. Epic 317 + task 811 + ticket 5239 became
+6367 work nodes; keys, parents, titles, counters and relations were
+byte-identical. These are OPS-provided facts, not a rehearsal performed by this
+integration worker, and do not claim later migrations were rehearsed.
+Release 122's server boots on that migrated database despite not knowing the
+`work` kind. Boot success therefore does not prove rollback correctness.
+**Rollback requires restoring the matching verified pre-switch database and
+file/blob dump plus the exact old artifact; merely repinning release 122 is
+unsupported.** A partial later migration failure can leave 1215 committed;
+never delete ledger rows or modify published migration bytes to retry.
+
+Integration retains ledger-owned 1237 for release-leaf lifecycle and renumbers
+only the unpublished colliding parent-benefit generation file to reserved
+1239. No published migration or release coordinate changes.
+
+AEON-648 integration fix round 1 retains per-work residency floors in admission
+and live routing, saved account/group pins, canonical Repeat actions/templates,
+and upgraded imported issue links. Reserved forward migration
+`1240_work_account_pins.sql` widens only the pin guard's target kinds and retains
+its tenant, live-target and harness checks. It has a pinned policy exception
+requiring consolidated coordinator review; historical SQL stays unchanged.
+Regression and validation evidence is in
+[aeon-648-int-fix1-evidence.json](qa/aeon-648-int-fix1-evidence.json).
+The deletion regression again retains a real queued run, generated order and
+capacity hold through a failed deletion. Migration 1238's retrospective
+AEON-655 ledger entry remains a coordinator action. Linux browser CI and
+OPS-247 remain unverified; local single-file Chromium evidence is not a
+replacement release gate. This fix round neither pushes to origin nor deploys.

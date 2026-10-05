@@ -184,9 +184,9 @@ func OrderRequirementTrace(ctx context.Context, tx pgx.Tx, orderID string, perso
   JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid
   UNION ALL SELECT n.id,n.parent_id,n.project_id,n.fields,k.slug,up.depth+1 FROM up
   JOIN nodes n ON n.id=up.parent_id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-  WHERE up.slug<>'ticket' AND up.depth<32)
+  WHERE up.slug NOT IN ('work','ticket') AND up.depth<32)
  SELECT (SELECT project_id::text FROM up ORDER BY depth LIMIT 1),
- coalesce((SELECT fields FROM up WHERE slug='ticket' ORDER BY depth LIMIT 1),'{}'::jsonb)`, orderID).Scan(&project, &fields)
+ coalesce((SELECT fields FROM up WHERE slug IN ('work','ticket') ORDER BY depth LIMIT 1),'{}'::jsonb)`, orderID).Scan(&project, &fields)
 	if err != nil {
 		return "", RequirementTrace{}, err
 	}
@@ -216,13 +216,13 @@ func RunRequirement(ctx context.Context, tx pgx.Tx, runID string) (RunPolicy, er
    JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE r.id=$1::uuid
    UNION ALL SELECT n.id,n.parent_id,n.project_id,n.fields,k.slug,up.depth+1 FROM up
    JOIN nodes n ON n.id=up.parent_id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-   WHERE up.slug<>'ticket' AND up.depth<32), keys AS (
+   WHERE up.slug NOT IN ('work','ticket') AND up.depth<32), keys AS (
    SELECT `+CanonicalPersonSQL("r.prefs_person_id")+` AS person_id,
    (SELECT n.id FROM up JOIN nodes n ON n.id=up.project_id JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
     WHERE k.slug='project' AND n.deleted_at IS NULL ORDER BY up.depth LIMIT 1) AS project_id,
    r.residency,r.prefs_person_id FROM agent_runs r WHERE r.id=$1::uuid)
   SELECT coalesce(keys.residency,'any'),keys.prefs_person_id::text,keys.person_id::text,
-   coalesce((SELECT fields FROM up WHERE slug='ticket' ORDER BY depth LIMIT 1),'{}'::jsonb),`+scopesJSON+` FROM keys`, runID).
+   coalesce((SELECT fields FROM up WHERE slug IN ('work','ticket') ORDER BY depth LIMIT 1),'{}'::jsonb),`+scopesJSON+` FROM keys`, runID).
 			Scan(&stamp, &out.PersonID, &out.CanonicalPersonID, &fields, &raw)
 	})
 	if err != nil {

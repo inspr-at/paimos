@@ -17,32 +17,35 @@ import (
 
 func TestProjectStatusCountsAndSelectors(t *testing.T) {
 	p := newPrincipal(t, "header-status-counts")
+	// Explicit tenant kinds retain per-kind category coverage beside canonical work.
+	customKind(t, p, "task", "task")
+	customKind(t, p, "epic", "epic")
 	root := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "project").ID+`","title":"Project","state":"active"}`)
 	folder := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "release").ID+`","title":"Folder","state":"done","parent_id":"`+root.ID+`"}`)
 	create := func(kind, state string) nodeJSON {
 		t.Helper()
 		body := map[string]any{"kind_id": kindBySlug(t, p, kind).ID, "title": kind + " " + state, "state": state, "parent_id": folder.ID}
-		if kind == "ticket" {
+		if kind == "work" {
 			body["fields"] = json.RawMessage(benefitFields)
 		}
 		raw, _ := json.Marshal(body)
 		return mustNode(t, p, string(raw))
 	}
 	for _, state := range []string{"new", "backlog", "open", "blocked", "mystery", "in_progress", "in-progress", "in progress", "inprogress", "active", "qa", " QA ", "done", "delivered", "accepted", "cancelled", "canceled", "archived"} {
-		create("ticket", state)
+		create("work", state)
 	}
 	create("task", "qa")
 	create("epic", "blocked")
 	create("memory", "done")
-	deleted := create("ticket", "done")
+	deleted := create("work", "done")
 	if status, body := call(t, &p, "DELETE", "/api/nodes/"+deleted.ID, ""); status != 204 {
 		t.Fatalf("delete fixture: %d %s", status, body)
 	}
 	// A foreign tenant's identical statuses must not contribute.
 	other := addPrincipal(t, "header-foreign")
 	foreign := mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "project").ID+`","title":"Foreign","state":"active"}`)
-	mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "task").ID+`","title":"Foreign work","state":"done","parent_id":"`+foreign.ID+`"}`)
-	ticket := kindBySlug(t, p, "ticket")
+	mustNode(t, other, `{"kind_id":"`+kindBySlug(t, other, "work").ID+`","title":"Foreign work","state":"done","parent_id":"`+foreign.ID+`","fields":`+benefitFields+`}`)
+	ticket := kindBySlug(t, p, "work")
 	var schema map[string]any
 	if err := json.Unmarshal(ticket.FieldSchema, &schema); err != nil {
 		t.Fatal(err)
@@ -130,7 +133,7 @@ func TestProjectStatusCountsBoundAndEmpty(t *testing.T) {
 	p := newPrincipal(t, "header-count-bound")
 	root := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "project").ID+`","title":"Many states"}`)
 	empty := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "project").ID+`","title":"Empty"}`)
-	kind := kindBySlug(t, p, "task")
+	kind := kindBySlug(t, p, "work")
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO nodes (tenant_id,kind_id,parent_id,key,title,state) SELECT $1,$2,$3,'COUNT-' || i,'Status ' || i,'state_' || i FROM generate_series(1,$4) i`, p.TenantID, kind.ID, root.ID, maxProjectStatusCounts+1)
 		return err

@@ -38,8 +38,9 @@ func Issues(raw json.RawMessage) []string {
 	return issues
 }
 
-// Completed matches the product's successful ticket completion states, excluding
-// cancellation and archival. Tenant-defined states are not inferred.
+// Completed matches resolved successful completion categories, excluding
+// cancellation and archival. Mutation callers resolve tenant-defined states
+// with aeon_work_status_category before checking the transition.
 func Completed(state string) bool {
 	switch state {
 	case "done", "accepted", "delivered":
@@ -52,7 +53,7 @@ func Completed(state string) bool {
 // Transition checks only entering completion. Historical completed records stay
 // editable; reopening them subjects the next completion to today's requirements.
 func Transition(kind, before, after string, fields json.RawMessage) []string {
-	if kind != "ticket" || Completed(before) || !Completed(after) {
+	if kind != "work" && kind != "ticket" || Completed(before) || !Completed(after) {
 		return nil
 	}
 	return Issues(fields)

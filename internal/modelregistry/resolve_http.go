@@ -195,9 +195,9 @@ func authorizedPlacement(ctx context.Context, tx pgx.Tx, p tenant.Principal, q W
 		var fields []byte
 		var ticketProject *string
 		if uuidRE.MatchString(ticket) {
-			err = tx.QueryRow(ctx, `SELECT n.id::text,n.fields,n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND n.deleted_at IS NULL AND k.slug IN ('ticket','task')`, ticket).Scan(&q.TicketID, &fields, &ticketProject)
+			err = tx.QueryRow(ctx, `SELECT n.id::text,n.fields,n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND n.deleted_at IS NULL AND k.slug IN ('work','ticket','task')`, ticket).Scan(&q.TicketID, &fields, &ticketProject)
 		} else {
-			err = tx.QueryRow(ctx, `SELECT n.id::text,n.fields,n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.deleted_at IS NULL AND k.slug IN ('ticket','task') AND (n.key=$1 OR n.id=(SELECT node_id FROM node_key_aliases WHERE key=$1 LIMIT 1)) ORDER BY (n.key=$1) DESC LIMIT 1`, ticket).Scan(&q.TicketID, &fields, &ticketProject)
+			err = tx.QueryRow(ctx, `SELECT n.id::text,n.fields,n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.deleted_at IS NULL AND k.slug IN ('work','ticket','task') AND (n.key=$1 OR n.id=(SELECT node_id FROM node_key_aliases WHERE key=$1 LIMIT 1)) ORDER BY (n.key=$1) DESC LIMIT 1`, ticket).Scan(&q.TicketID, &fields, &ticketProject)
 		}
 		if err != nil {
 			return q, err

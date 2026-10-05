@@ -508,6 +508,11 @@ func readReconcileTarget(ctx context.Context, tx pgx.Tx, tenantID, sourceID, sel
 			rows.Close()
 			return err
 		}
+		// Legacy work types are provenance, while the native projection uses
+		// work. Other kind changes remain visible reconciliation differences.
+		if n.Kind != "project" && canonicalType(stringField(Record(classic), "type")) != n.Kind {
+			hash += ":kind-projection-mismatch"
+		}
 		target.put(n.Project, category, strconv.FormatInt(n.ClassicID, 10), hash)
 	}
 	if err := rows.Err(); err != nil {

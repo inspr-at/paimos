@@ -56,7 +56,7 @@ func newMatrixWorld(t *testing.T) *matrixWorld {
 			return id
 		}
 		w.projectA, w.projectB = node("project", "PA-1", nil), node("project", "PB-1", nil)
-		w.ticketA, w.ticketB = node("ticket", "TA-1", &w.projectA), node("ticket", "TB-1", &w.projectB)
+		w.ticketA, w.ticketB = node("work", "TA-1", &w.projectA), node("work", "TB-1", &w.projectB)
 		w.knowledgeA, w.knowledgeB = node("guideline", "GA-1", &w.projectA), node("guideline", "GB-1", &w.projectB)
 		w.org = node("organisation", "ORG-1", nil)
 		var writer string

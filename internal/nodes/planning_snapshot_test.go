@@ -17,7 +17,7 @@ import (
 
 func TestWorkStartSnapshotBaselineHistoryAndCostScope(t *testing.T) {
 	w := planningSetup(t)
-	n := w.node(t, "SNAP-1", "ticket", w.root.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 2})
+	n := w.node(t, "SNAP-1", "work", w.root.ID, "open", map[string]any{"route_role": "build-hard", "area": "backend", "estimate_hours": 2})
 	capture := func() {
 		t.Helper()
 		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error { return CapturePlanningStart(t.Context(), tx, n.ID, "session") }); err != nil {
@@ -82,7 +82,7 @@ func TestWorkStartSnapshotBaselineHistoryAndCostScope(t *testing.T) {
 
 func TestWorkStartSnapshotConcurrentUnknownAndTenantIsolation(t *testing.T) {
 	w := planningSetup(t)
-	n := w.node(t, "SNAP-2", "ticket", w.root.ID, "open", nil)
+	n := w.node(t, "SNAP-2", "work", w.root.ID, "open", nil)
 	var workers sync.WaitGroup
 	errs := make(chan error, 4)
 	for range 4 {
@@ -126,7 +126,7 @@ func TestWorkStartSnapshotFixedProgressBuckets(t *testing.T) {
 	w := planningSetup(t)
 	for i, state := range []string{"in_progress", "inprogress", "active", "qa", " IN--PROGRESS "} {
 		t.Run(state, func(t *testing.T) {
-			n := w.node(t, fmt.Sprintf("START-%d", i+1), "ticket", w.root.ID, state, map[string]any{"estimate_hours": 2})
+			n := w.node(t, fmt.Sprintf("START-%d", i+1), "work", w.root.ID, state, map[string]any{"estimate_hours": 2})
 			snap := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&q="+n.Key)[n.Key].Snapshot
 			if snap == nil || snap.Source != "status" || snap.Hours == nil || *snap.Hours != 2 {
 				t.Fatalf("%q did not capture a status baseline: %+v", state, snap)
@@ -137,7 +137,7 @@ func TestWorkStartSnapshotFixedProgressBuckets(t *testing.T) {
 
 func TestWorkStartSnapshotUsesKindCategoriesAndClosesSessionFirstEpisodes(t *testing.T) {
 	w := planningSetup(t)
-	kind := kindBySlug(t, w.admin, "ticket")
+	kind := kindBySlug(t, w.admin, "work")
 	var schema map[string]any
 	if err := json.Unmarshal(kind.FieldSchema, &schema); err != nil {
 		t.Fatal(err)
@@ -161,7 +161,7 @@ func TestWorkStartSnapshotUsesKindCategoriesAndClosesSessionFirstEpisodes(t *tes
 
 	for i, state := range []string{"building", "working", "executing"} {
 		t.Run(state, func(t *testing.T) {
-			n := w.node(t, fmt.Sprintf("CATEGORY-%d", i+1), "ticket", w.root.ID, "open", map[string]any{"estimate_hours": 2})
+			n := w.node(t, fmt.Sprintf("CATEGORY-%d", i+1), "work", w.root.ID, "open", map[string]any{"estimate_hours": 2})
 			code, body := call(t, &w.admin, "PATCH", "/api/nodes/"+n.ID, fmt.Sprintf(`{"state":%q}`, state))
 			decode[nodeJSON](t, code, body, 200)
 			snap := planningOf(t, w.admin, "/api/nodes?within="+w.root.ID+"&q="+n.Key)[n.Key].Snapshot
@@ -177,7 +177,7 @@ func TestWorkStartSnapshotUsesKindCategoriesAndClosesSessionFirstEpisodes(t *tes
 				"estimate_hours": 2, "pill_en": "Planning works now", "pill_de": "Planung geht jetzt",
 				"benefit_en": "Planning shows real numbers.", "benefit_de": "Die Planung zeigt echte Zahlen.",
 			}
-			n := w.node(t, fmt.Sprintf("CLOSE-%d", i+1), "ticket", w.root.ID, "open", fields)
+			n := w.node(t, fmt.Sprintf("CLOSE-%d", i+1), "work", w.root.ID, "open", fields)
 			if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 				return CapturePlanningStart(t.Context(), tx, n.ID, "session")
 			}); err != nil {
@@ -224,9 +224,9 @@ func assertPlanningEpisodeRows(t *testing.T, tenantID, nodeID string, wantTotal,
 func TestWorkStartSnapshotProjectVisibilityFollowsTicket(t *testing.T) {
 	w := planningSetup(t)
 	other := mustNode(t, w.admin, `{"kind_id":"`+kindBySlug(t, w.admin, "project").ID+`","title":"Other snapshot project"}`)
-	a := w.node(t, "VISIBLE-1", "ticket", w.root.ID, "in_progress", map[string]any{"estimate_hours": 2, "route_role": "build-hard"})
-	b := w.node(t, "HIDDEN-1", "ticket", other.ID, "in_progress", map[string]any{"estimate_hours": 4, "route_role": "build-hard"})
-	unstarted := w.node(t, "HIDDEN-2", "ticket", other.ID, "open", nil)
+	a := w.node(t, "VISIBLE-1", "work", w.root.ID, "in_progress", map[string]any{"estimate_hours": 2, "route_role": "build-hard"})
+	b := w.node(t, "HIDDEN-1", "work", other.ID, "in_progress", map[string]any{"estimate_hours": 4, "route_role": "build-hard"})
+	unstarted := w.node(t, "HIDDEN-2", "work", other.ID, "open", nil)
 	for _, tc := range []struct {
 		name     string
 		projects []string

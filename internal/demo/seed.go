@@ -182,7 +182,7 @@ func (s *seeder) tree() error {
 			s.lumenID = id
 		}
 		for _, epic := range project.epics {
-			epicID, err := s.node(s.kinds["epic"], epic.key, epic.title, "Fictional epic for screenshots.", "open", id, nil)
+			epicID, err := s.node(s.kinds["work"], epic.key, epic.title, "Fictional epic for screenshots.", "open", id, nil)
 			if err != nil {
 				return err
 			}
@@ -210,7 +210,7 @@ func (s *seeder) tree() error {
 					fields["assignee"] = s.nia.ID
 					who = s.nia
 				}
-				ticketID, err := s.node(s.kinds["ticket"], ticket.key, ticket.title, body, ticket.state, epicID, fields)
+				ticketID, err := s.node(s.kinds["work"], ticket.key, ticket.title, body, ticket.state, epicID, fields)
 				if err != nil {
 					return err
 				}
@@ -267,7 +267,7 @@ func (s *seeder) loadKinds() error {
 	for _, row := range page.Items {
 		s.kinds[row.Slug] = row.ID
 	}
-	for _, slug := range []string{"project", "epic", "ticket"} {
+	for _, slug := range []string{"project", "work"} {
 		if s.kinds[slug] == "" {
 			return fmt.Errorf("kind %s is not seeded", slug)
 		}
@@ -334,7 +334,9 @@ func (s *seeder) finish(already bool) error {
 		if err := tx.QueryRow(s.ctx, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='project' AND n.deleted_at IS NULL`).Scan(&projects); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(s.ctx, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='ticket' AND n.deleted_at IS NULL`).Scan(&tickets); err != nil {
+		if err := tx.QueryRow(s.ctx, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
+		 WHERE k.slug='work' AND n.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM nodes c JOIN node_kinds ck ON ck.tenant_id=c.tenant_id AND ck.id=c.kind_id
+		 WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work')`).Scan(&tickets); err != nil {
 			return err
 		}
 		return tx.QueryRow(s.ctx, `SELECT coalesce(r.state,'') FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.project_node_id WHERE n.key=$1`, markerKey).Scan(&stage)

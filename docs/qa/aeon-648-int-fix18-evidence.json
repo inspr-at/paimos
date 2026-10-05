@@ -1,0 +1,229 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix18",
+  "recorded_at": "2026-10-05T03:05:44.622499+00:00",
+  "branch": "work/aeon-648-int",
+  "base_commit": "8be5553fd26af29aa96d6abc0e11385c9c7765e1",
+  "review": "review-ci272c.out",
+  "result": "All 50 reported browser failure causes have corresponding spec/fixture changes; final browser execution is pending, not claimed green.",
+  "ci_provenance": {
+    "run": 37252115343,
+    "url": "https://github.com/inspr-at/paimos/actions/runs/37252115343",
+    "head_sha": "8be5553fd26af29aa96d6abc0e11385c9c7765e1",
+    "event": "pull_request",
+    "conclusion": "failure",
+    "failed_cases": 50,
+    "affected_specs": 8,
+    "retrieval": "gh run view --log-failed; downloaded shard 2 and 10 evidence artifacts read-only to inspect existing error contexts, trace actions, queue 404s and screenshots. No new browser or desktop session used.",
+    "artifact_ids": [
+      11322798210,
+      11322912526
+    ]
+  },
+  "decisions": {
+    "vocabulary": "Keep Q16 workspace names and approved AEON-655 defaults. Flag-off shape enrichment retains the stored kind label/icon; flag-on uses the existing workspace vocabulary and fallback. There is no default-name seed in migration 1238. All production source, API and migrations remain byte-identical to the baseline.",
+    "nesting": "Keep the accepted one-work-node dynamic tree. The retired kind-based fixture rejection is removed; real revision refusal is exercised instead.",
+    "ui": "Approved product layout is unchanged. Header specs now assert the existing container-dependent More replacements. No new visual design was invented."
+  },
+  "fixes": [
+    {
+      "file": "web/tests/work-aggregates.spec.ts",
+      "original_failed_cases": 18,
+      "original_titles": [
+        "tests/work-aggregates.spec.ts:140:3 › unfinished weighted 100% parent retains ETA and honest Progress at 390 light",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished weighted 100% parent retains ETA and honest Progress at 1024 light",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished weighted 100% parent retains ETA and honest Progress at 1440 light",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished weighted 100% parent retains ETA and honest Progress at 390 dark",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished weighted 100% parent retains ETA and honest Progress at 1024 dark",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished weighted 100% parent retains ETA and honest Progress at 1440 dark",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished server-rounded 100% parent retains ETA and honest Progress at 390 light",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished server-rounded 100% parent retains ETA and honest Progress at 1024 light",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished server-rounded 100% parent retains ETA and honest Progress at 1440 light",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished server-rounded 100% parent retains ETA and honest Progress at 390 dark",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished server-rounded 100% parent retains ETA and honest Progress at 1024 dark",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished server-rounded 100% parent retains ETA and honest Progress at 1440 dark",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished formatter-rounded 100% parent retains ETA and honest Progress at 390 light",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished formatter-rounded 100% parent retains ETA and honest Progress at 1024 light",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished formatter-rounded 100% parent retains ETA and honest Progress at 1440 light",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished formatter-rounded 100% parent retains ETA and honest Progress at 390 dark",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished formatter-rounded 100% parent retains ETA and honest Progress at 1024 dark",
+        "tests/work-aggregates.spec.ts:140:3 › unfinished formatter-rounded 100% parent retains ETA and honest Progress at 1440 dark"
+      ],
+      "cause": "The scenario-level HealthySource overwrote the beforeEach EventSource; disconnectAggregateStream controlled the now-unused QuietSource registry, so the actual feed never disconnected.",
+      "change": "Use the existing beforeEach feed in every scenario. Retain all Last ETA, stale tooltip, table/panel equality and ±0.5 px stability assertions.",
+      "regression": "18 unchanged disconnect assertions failed on the hosted baseline. Browser rerun remains pending."
+    },
+    {
+      "file": "web/tests/clip-tip.spec.ts",
+      "original_failed_cases": 16,
+      "original_titles": [
+        "tests/clip-tip.spec.ts:64:5 › 390px light › clipped work and agent names reveal without moving controls; phone pickers reserve two lines",
+        "tests/clip-tip.spec.ts:135:5 › 390px light › lifecycle: delayed single epic discloses while search keeps focus",
+        "tests/clip-tip.spec.ts:64:5 › 390px dark › clipped work and agent names reveal without moving controls; phone pickers reserve two lines",
+        "tests/clip-tip.spec.ts:135:5 › 390px dark › lifecycle: delayed single epic discloses while search keeps focus",
+        "tests/clip-tip.spec.ts:135:5 › 768px light › lifecycle: delayed single epic discloses while search keeps focus",
+        "tests/clip-tip.spec.ts:135:5 › 768px dark › lifecycle: delayed single epic discloses while search keeps focus",
+        "tests/clip-tip.spec.ts:135:5 › 1024px light › lifecycle: delayed single epic discloses while search keeps focus",
+        "tests/clip-tip.spec.ts:135:5 › 1024px dark › lifecycle: delayed single epic discloses while search keeps focus",
+        "tests/clip-tip.spec.ts:135:5 › 1440px light › lifecycle: delayed single epic discloses while search keeps focus",
+        "tests/clip-tip.spec.ts:135:5 › 1440px dark › lifecycle: delayed single epic discloses while search keeps focus",
+        "tests/clip-tip.spec.ts:560:5 › touch fix5: 390px light › long press reads a production epic picker before a tap selects and closes it",
+        "tests/clip-tip.spec.ts:560:5 › touch fix5: 390px dark › long press reads a production epic picker before a tap selects and closes it",
+        "tests/clip-tip.spec.ts:560:5 › touch fix5: 1024px light › long press reads a production epic picker before a tap selects and closes it",
+        "tests/clip-tip.spec.ts:560:5 › touch fix5: 1024px dark › long press reads a production epic picker before a tap selects and closes it",
+        "tests/clip-tip.spec.ts:560:5 › touch fix5: 1440px light › long press reads a production epic picker before a tap selects and closes it",
+        "tests/clip-tip.spec.ts:560:5 › touch fix5: 1440px dark › long press reads a production epic picker before a tap selects and closes it"
+      ],
+      "cause": "Parent picker labels replaced Epic labels; phones intentionally render AccessSheet rather than a FloatingPanel.",
+      "change": "Use Parent labels and the accessible dialog role for both existing hosts. Keep focus, clipping, long-press thresholds, write counts and bounds assertions.",
+      "regression": "16 original hosted failures; no disclosure or touch assertion removed."
+    },
+    {
+      "file": "web/tests/ticket-panel.spec.ts",
+      "original_failed_cases": 4,
+      "original_titles": [
+        "tests/ticket-panel.spec.ts:139:1 › an epic lists its tickets with progress and adds new ones inline",
+        "tests/ticket-panel.spec.ts:213:1 › move to another epic uses a searchable picker; delete asks and then leaves the list",
+        "tests/ticket-panel.spec.ts:239:1 › n opens a quick-create row; Enter creates and keeps going; Esc closes",
+        "tests/ticket-panel.spec.ts:333:1 › quick create shows unset priority and epic as dimmed values"
+      ],
+      "cause": "The old fixture counted a nested parent as a leaf. Creation now uses work, Parent controls and modifier submission; field Escape blurs before closing.",
+      "change": "Fix fixture shape filtering, update control labels and k-work payload expectations, require plain Enter to write nothing and verify two-step Escape.",
+      "regression": "Four original hosted failures. New leaf facet unit fails against the exact baseline fixture and passes with the fix; 0/2 remains unchanged."
+    },
+    {
+      "file": "web/tests/work-surfaces-fix3.spec.ts",
+      "original_failed_cases": 2,
+      "original_titles": [
+        "tests/work-surfaces-fix3.spec.ts:7:3 › unified Outline nests and unnests work 1024 light ──────",
+        "tests/work-surfaces-fix3.spec.ts:7:3 › unified Outline nests and unnests work 1024 dark ───────"
+      ],
+      "cause": "A row-center native drag can start on a nested link or control at the 1024px column layout; trace shows no resulting move.",
+      "change": "Start and finish real drags on key-cell whitespace. Retain nesting levels, exact request counts/payloads, revisions, idempotent root move and bounds checks.",
+      "regression": "Two original hosted failures. Corrected gesture execution needs hosted Linux Chromium verification; no pass is claimed."
+    },
+    {
+      "file": "web/tests/views-filters.spec.ts",
+      "original_failed_cases": 5,
+      "original_titles": [
+        "tests/views-filters.spec.ts:63:1 › Shift F opens every filter: labels, epic, cost unit and release by name, and a relative date",
+        "tests/views-filters.spec.ts:392:3 › at 1920px the view bar and toolbar never overflow the page",
+        "tests/views-filters.spec.ts:392:3 › at 1440px the view bar and toolbar never overflow the page",
+        "tests/views-filters.spec.ts:392:3 › at 1280px the view bar and toolbar never overflow the page",
+        "tests/views-filters.spec.ts:392:3 › at 1024px the view bar and toolbar never overflow the page"
+      ],
+      "cause": "Old labels and filter inventory omitted the new shape/depth and Human check controls.",
+      "change": "Assert the complete current filter inventory, Parent filter labels and New work item action. Keep URL, result-set and geometry assertions.",
+      "regression": "Five original hosted failures."
+    },
+    {
+      "file": "web/tests/bulk.spec.ts",
+      "original_failed_cases": 1,
+      "original_titles": [
+        "tests/bulk.spec.ts:77:1 › assignee, priority, labels and epic change in one request each; skipped tickets say why"
+      ],
+      "cause": "The picker is now Parent; the fixture imposed a retired task-under-epic prohibition contrary to the accepted dynamic work tree.",
+      "change": "Remove the obsolete fixture restriction and exercise a genuine stale revision instead, retaining exact mutation payload checks and asserting the newer record remains unchanged and its reason is visible.",
+      "regression": "One original hosted failure. New bulk unit fails against the baseline because it rejects the permitted nesting; it passes with the fix, while independently refusing the stale item."
+    },
+    {
+      "file": "web/tests/work-lifecycle-header.spec.ts",
+      "original_failed_cases": 2,
+      "original_titles": [
+        "tests/work-lifecycle-header.spec.ts:24:3 › work actions fit the ticket panel at 1024 light ────",
+        "tests/work-lifecycle-header.spec.ts:24:3 › work actions fit the ticket panel at 1024 dark ─────"
+      ],
+      "cause": "Wide header buttons fold into More at a 420px container width, including a narrow dock inside a 1024px viewport.",
+      "change": "Choose measured actions by the actual header content width and require both folded actions to remain available in More. Assert hidden header buttons and measure every visible named action.",
+      "regression": "Two original hosted failures. Existing stability tolerance, size samples and fit checks are unchanged."
+    },
+    {
+      "file": "web/tests/work-vocabulary.spec.ts",
+      "original_failed_cases": 2,
+      "original_titles": [
+        "tests/work-vocabulary.spec.ts:43:3 › work vocabulary and surfaces 390 light ───────────────────",
+        "tests/work-vocabulary.spec.ts:43:3 › work vocabulary and surfaces 390 dark ────────────────────"
+      ],
+      "cause": "The unrelated unmocked /api/queue read returned 404. Its Queue unavailable row disappeared during same-person access refresh, moving the search control 44px; confirmed by the hosted trace and screenshots.",
+      "change": "Provide a deterministic empty queue in this vocabulary world. Retain unchanged search, graph result, selector and ±0.5 px bounds assertions.",
+      "regression": "Two original hosted failures. No product toolbar or header layout changed."
+    }
+  ],
+  "validation": {
+    "merge": {
+      "live_main": "a3ca8c475a94ce1de6da1398182abe3dfe98eb9f",
+      "main_is_ancestor": true,
+      "pr_mergeable": "MERGEABLE",
+      "merge_required": false
+    },
+    "web_unit": {
+      "file": "web/tests/work-fixtures.unit.test.ts",
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "command": "node node_modules/vitest/vitest.mjs run tests/work-fixtures.unit.test.ts --maxWorkers=1",
+      "tiers": "Three new units registered ESSENTIAL. Five renamed browser entries retain GATED-FULL."
+    },
+    "baseline_regression": {
+      "method": "Copied the exact git-show baseline fixture to a temporary module inside this worktree and pointed an identical temporary copy of the regression file at it; no baseline source or assertion was edited. Both self-created temporary modules were removed afterward.",
+      "expected_failures": 2,
+      "passed_guard_cases": 1,
+      "failures": [
+        {
+          "test": "leaf facets count terminal work across retired kinds without removing their parents",
+          "expected": [
+            "n-1",
+            "n-3"
+          ],
+          "actual": [
+            "n-1",
+            "n-2",
+            "n-3"
+          ]
+        },
+        {
+          "test": "bulk nesting accepts a retired task kind and preserves a separately stale record",
+          "expected": [
+            "n-3"
+          ],
+          "actual": []
+        }
+      ],
+      "log_sha256": "bf95e1a596473d7a39e68b3239a07b046724e1b911688fc85710560d15bc5b52"
+    },
+    "browser_collection": {
+      "passed": true,
+      "cases": 256,
+      "files": 8,
+      "stale_tier_entries": 0,
+      "execution": "Approved Playwright safety wrapper --list --workers=1; collection only, no browser pass claimed."
+    },
+    "browser_execution": {
+      "result": "pending",
+      "remote_exit_code": 3,
+      "reason": "Approved launcher refuses: OPS-247 bootstrap and remote lane contract are pending. No SSH, dependency/browser installation or local fallback was attempted.",
+      "owner": "coordinator / OPS-247 / hosted Linux Chromium CI",
+      "screenshots": "No fresh screenshots. Existing hosted failure screenshots were inspected read-only."
+    },
+    "go": {
+      "affected_packages": [],
+      "reason": "No Go or production source changes. remote-test.sh requires a temporary Git push prohibited by the user; no affected Go suite or full just test run is claimed."
+    },
+    "static": {
+      "tier_regressions": {
+        "passed": 33,
+        "failed": 0,
+        "skipped": 0
+      },
+      "migration_policy": {
+        "passed": true,
+        "base_ref": "v261003095616.0.0",
+        "unique_numbers": 258
+      },
+      "release_check": "pass",
+      "git_diff_check": "pass",
+      "migration_and_ledger_changes": false
+    }
+  },
+  "constraints": "No push, deployment, production access, credentials read, model review, subagent or other worktree access. Commit on existing branch only. Full hosted CI remains coordinator-owned."
+}

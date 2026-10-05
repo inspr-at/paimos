@@ -116,7 +116,7 @@ func newCatalogFixture(t *testing.T, complete bool, cold ...bool) *fixture {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','tokens',10000000)`, tid, f.account); err != nil {
 			return err
 		}
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,body,fields) SELECT $1,'REVIEW-1',id,'Guard tenant boundary','Every mutation checks tenant isolation.', '{"acceptance_criteria":"Cross-tenant tests pass"}' FROM node_kinds WHERE slug='ticket' RETURNING id::text`, tid).Scan(&f.ticket)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,body,fields) SELECT $1,'REVIEW-1',id,'Guard tenant boundary','Every mutation checks tenant isolation.', '{"acceptance_criteria":"Cross-tenant tests pass"}' FROM node_kinds WHERE slug='work' RETURNING id::text`, tid).Scan(&f.ticket)
 	})
 	prefix, secret := strings.ReplaceAll(tid, "-", "")+strings.ReplaceAll(testID(), "-", "")[:16], testID()
 	sum := sha256.Sum256([]byte(secret))
@@ -188,7 +188,7 @@ func TestReviewFlowIsolationReplayAndVerdicts(t *testing.T) {
 	}
 	var replay Review
 	f.call(t, f.person, "POST", path, in, 201, &replay)
-	if replay.OrderID != v.OrderID {
+	if replay.OrderID != v.OrderID || replay.RunID == nil || *replay.RunID != *v.RunID || replay.TicketID != f.ticket {
 		t.Fatal("replay started another review")
 	}
 	// Replaying a person's external request cannot bypass the agent author check.
@@ -314,26 +314,64 @@ func TestChangesStatusRequiresVerifiedPinnedModel(t *testing.T) {
 }
 
 func TestCompletedBuilderAutomaticallyRequestsIndependentReview(t *testing.T) {
-	f := newFixture(t)
-	var order workorders.Order
-	f.call(t, f.agent, "POST", "/api/work-orders", map[string]any{"title": "Builder", "parent_id": f.ticket, "assignee_principal_id": f.agent.ID, "criteria": []string{"Pass isolation tests"}}, 201, &order)
-	var source string
-	f.tx(t, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,status,account_id,daemon_id,daemon_generation,started_at)
+	for _, migrated := range []bool{false, true} {
+		t.Run(fmt.Sprintf("migrated=%v", migrated), func(t *testing.T) {
+			f := newFixture(t)
+			if migrated {
+				migrateReviewWork(t, f)
+			}
+			var order workorders.Order
+			f.call(t, f.agent, "POST", "/api/work-orders", map[string]any{"title": "Builder", "parent_id": f.ticket, "assignee_principal_id": f.agent.ID, "criteria": []string{"Pass isolation tests"}}, 201, &order)
+			var source string
+			f.tx(t, func(tx pgx.Tx) error {
+				return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,status,account_id,daemon_id,daemon_generation,started_at)
        SELECT $1,$2,$3,p.id,p.model,'running',$4,'review-daemon','review-generation',clock_timestamp() FROM model_profiles p WHERE p.family='openai' AND p.version='test-version' RETURNING id::text`, f.person.TenantID, order.NodeID, f.agent.ID, f.account).Scan(&source)
+			})
+			report := agentruns.Telemetry{Sequence: 1, Kind: "finished", Status: "completed", ReviewRange: &reviewgate.CommitRange{Repository: "example/review-fixture", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40)}}
+			f.call(t, f.agent, "POST", "/api/runs/"+source+"/telemetry", report, 200, nil)
+			var rows []Review
+			f.call(t, f.person, "GET", "/api/nodes/"+f.ticket+"/reviews", nil, 200, &rows)
+			if len(rows) != 1 || rows[0].AuthorRunID == nil || *rows[0].AuthorRunID != source || rows[0].AuthorFamily != "openai" || rows[0].RunID == nil {
+				t.Fatal("builder completion did not queue the exact independent review")
+			}
+			created := rows[0]
+			if created.TicketID != f.ticket || created.RequestID != source || created.Repository != report.ReviewRange.Repository || created.BaseSHA != report.ReviewRange.BaseSHA || created.HeadSHA != report.ReviewRange.HeadSHA || created.Status != "queued" || created.GateOpen || created.ReviewerFamily == nil || *created.ReviewerFamily != "anthropic" {
+				t.Fatalf("automatic work-leaf review lost its binding: %+v", created)
+			}
+			f.call(t, f.agent, "POST", "/api/runs/"+source+"/telemetry", report, 200, nil)
+			f.call(t, f.person, "GET", "/api/nodes/"+f.ticket+"/reviews", nil, 200, &rows)
+			if len(rows) != 1 {
+				t.Fatal("completion replay queued another review")
+			}
+		})
+	}
+}
+
+func TestReviewRejectsWorkParentWithoutCreatingOrders(t *testing.T) {
+	f := newFixture(t)
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id)
+          SELECT $1,'REVIEW-2',kind_id,'Child work',$2 FROM nodes WHERE id=$2`, f.person.TenantID, f.ticket)
+		return err
 	})
-	report := agentruns.Telemetry{Sequence: 1, Kind: "finished", Status: "completed", ReviewRange: &reviewgate.CommitRange{Repository: "example/review-fixture", BaseSHA: strings.Repeat("a", 40), HeadSHA: strings.Repeat("b", 40)}}
-	f.call(t, f.agent, "POST", "/api/runs/"+source+"/telemetry", report, 200, nil)
-	var rows []Review
-	f.call(t, f.person, "GET", "/api/nodes/"+f.ticket+"/reviews", nil, 200, &rows)
-	if len(rows) != 1 || rows[0].AuthorRunID == nil || *rows[0].AuthorRunID != source || rows[0].AuthorFamily != "openai" || rows[0].RunID == nil {
-		t.Fatal("builder completion did not queue the exact independent review")
+	var failure struct {
+		Code string `json:"code"`
 	}
-	f.call(t, f.agent, "POST", "/api/runs/"+source+"/telemetry", report, 200, nil)
-	f.call(t, f.person, "GET", "/api/nodes/"+f.ticket+"/reviews", nil, 200, &rows)
-	if len(rows) != 1 {
-		t.Fatal("completion replay queued another review")
+	f.call(t, f.person, "POST", "/api/nodes/"+f.ticket+"/reviews", f.input(), 409, &failure)
+	if failure.Code != "work_leaf_required" {
+		t.Fatalf("review rejected for the wrong reason: %s", failure.Code)
 	}
+	f.tx(t, func(tx pgx.Tx) error {
+		var orders, reviews, runs int
+		if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM work_orders),
+          (SELECT count(*) FROM work_order_reviews),(SELECT count(*) FROM agent_runs)`).Scan(&orders, &reviews, &runs); err != nil {
+			return err
+		}
+		if orders != 0 || reviews != 0 || runs != 0 {
+			t.Fatalf("parent review left partial writes: orders=%d reviews=%d runs=%d", orders, reviews, runs)
+		}
+		return nil
+	})
 }
 
 func TestReviewRespectsProjectVisibilityAndSealsSnapshot(t *testing.T) {
@@ -405,4 +443,38 @@ func TestLegacyDaemonCannotSeeOrClaimAReview(t *testing.T) {
 	if w.Code != 409 || !strings.Contains(w.Body.String(), "review-capable") {
 		t.Fatal("legacy daemon could claim a writable review")
 	}
+}
+
+func migrateReviewWork(t *testing.T, f *fixture) {
+	t.Helper()
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET kind_id=(SELECT id FROM node_kinds WHERE tenant_id=$1 AND slug='work') WHERE id=$2`, f.person.TenantID, f.ticket)
+		return err
+	})
+}
+
+func TestReviewHistoryAndActionsAfterWorkMigration(t *testing.T) {
+	f := newFixture(t)
+	path := "/api/nodes/" + f.ticket + "/reviews"
+	in := f.input()
+	var before Review
+	f.call(t, f.person, "POST", path, in, 201, &before)
+	migrateReviewWork(t, f)
+	var rows []Review
+	f.call(t, f.person, "GET", path, nil, 200, &rows)
+	if len(rows) != 1 || rows[0].OrderID != before.OrderID || rows[0].TicketID != f.ticket || rows[0].HeadSHA != in.HeadSHA {
+		t.Fatalf("migration lost review: %+v", rows)
+	}
+	var replay, next Review
+	f.call(t, f.person, "POST", path, in, 201, &replay)
+	if replay.OrderID != before.OrderID {
+		t.Fatal("migration broke review replay")
+	}
+	f.call(t, f.agent, "POST", path, in, 403, nil)
+	f.call(t, f.person, "POST", path, f.input(), 201, &next)
+	if next.OrderID == before.OrderID || next.TicketID != f.ticket || next.GateOpen {
+		t.Fatalf("new work review: %+v", next)
+	}
+	f.call(t, f.foreign, "GET", path, nil, 404, nil)
+	f.call(t, f.foreign, "POST", path, f.input(), 404, nil)
 }

@@ -90,7 +90,7 @@ func TestAgentKeyReleaseMembershipReadScopeAndVisibility(t *testing.T) {
 				return err
 			}
 			return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id)
-				SELECT $1::uuid,id,$2,$2,$3::uuid FROM node_kinds WHERE tenant_id=$1::uuid AND slug='ticket'
+				SELECT $1::uuid,id,$2,$2,$3::uuid FROM node_kinds WHERE tenant_id=$1::uuid AND slug='work'
 				RETURNING nodes.id::text`, tid, key+"-2", projectID).Scan(&ticketID)
 		})
 		if err != nil {

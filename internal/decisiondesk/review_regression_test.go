@@ -53,7 +53,7 @@ func TestUndecidableQuestionDoesNotStarveAuthorizedQuestion(t *testing.T) {
 	f := setup(t)
 	var otherTicket string
 	err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Other held work',$2 FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='ticket' RETURNING id::text`, f.person.TenantID, f.otherProject).Scan(&otherTicket)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Other held work',$2 FROM node_kinds k WHERE k.tenant_id=$1 AND k.slug='work' RETURNING id::text`, f.person.TenantID, f.otherProject).Scan(&otherTicket)
 	})
 	if err != nil {
 		t.Fatal(err)

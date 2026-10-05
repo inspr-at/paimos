@@ -28,7 +28,7 @@ func TestResolvePlacementAuthorizationPrecedesPersonAndTicketMismatch(t *testing
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'AUTH-1','Hidden project' FROM node_kinds WHERE slug='project' RETURNING id::text`, admin.TenantID).Scan(&project); err != nil {
 			return err
 		}
-		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,fields) SELECT $1,id,'AUTH-2','Hidden ticket',$2,'{"route_role":"build","area":"backend"}' FROM node_kinds WHERE slug='ticket' RETURNING id::text`, admin.TenantID, project).Scan(&ticket)
+		return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,fields) SELECT $1,id,'AUTH-2','Hidden ticket',$2,'{"route_role":"build","area":"backend"}' FROM node_kinds WHERE slug='work' RETURNING id::text`, admin.TenantID, project).Scan(&ticket)
 	}); err != nil {
 		t.Fatal(err)
 	}

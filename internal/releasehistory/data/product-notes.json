@@ -4481,6 +4481,367 @@
           "group": "features"
         }
       ]
+    },
+    "261005070923.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 123,
+      "snapshot_sha256": "7e3d98a6cea7ef367d873ac7ffc8a46223ba9025214cf4480ea4851802c34015",
+      "captured_at": "2026-10-05T11:29:58Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-123",
+          "pill_en": "Easier taps, cleaner layout",
+          "pill_de": "Leichter tippen, sauberes Layout",
+          "benefit_en": "Buttons are easier to tap on a phone, and overlapping elements, layout jumps and overflow are fixed.",
+          "benefit_de": "Schaltflächen lassen sich am Handy leichter treffen, und überlappende Elemente, springendes Layout und überlaufende Inhalte sind behoben.",
+          "group": "fixes"
+        },
+        {
+          "key": "AEON-442",
+          "pill_en": "Safer attach approval",
+          "pill_de": "Sicherere Andock-Freigabe",
+          "benefit_en": "On supported Macs with an upgraded pairing, attaching a session asks for Touch ID by default. Linux attachment also supports verified sessions started through sudo or SSH shells.",
+          "benefit_de": "Auf unterstützten Macs mit aktualisierter Kopplung wird das Andocken einer Sitzung standardmäßig per Touch ID bestätigt. Unter Linux lassen sich auch geprüfte Sitzungen aus sudo- oder SSH-Shells andocken.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-455",
+          "pill_en": "Phone approvals",
+          "pill_de": "Freigaben per Handy",
+          "benefit_en": "After an administrator configures phone approvals and push delivery, register a passkey on a supported device and enable notifications. Requests can then be approved or declined using device verification.",
+          "benefit_de": "Nach Einrichtung von Handyfreigaben und Push-Versand durch die Administration lassen sich auf einem unterstützten Gerät ein Passkey registrieren und Benachrichtigungen aktivieren. Anfragen können anschließend nach Gerätebestätigung freigegeben oder abgelehnt werden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-518",
+          "pill_en": "Readable scope list",
+          "pill_de": "Lesbare Berechtigungsliste",
+          "benefit_en": "Every permission in the key dialog stays readable, with no overlapping text and no sideways scrolling.",
+          "benefit_de": "Jede Berechtigung im Schlüsseldialog bleibt lesbar, ohne überlappenden Text und ohne seitliches Scrollen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-524",
+          "pill_en": "Agent pause controls",
+          "pill_de": "Pausen für Agenten",
+          "benefit_en": "Request pauses for supported agents individually or together, review their saved handover and request a continuation from that point.",
+          "benefit_de": "Du kannst für unterstützte Agenten einzeln oder gemeinsam eine Pause anfordern, ihre gespeicherte Übergabe ansehen und eine Fortsetzung anfordern.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-564",
+          "pill_en": "Answer corrections",
+          "pill_de": "Korrekturen von Antworten",
+          "benefit_en": "You can correct recorded answers while keeping earlier versions, with a ten-second delay after each edit before the new answer is sent.",
+          "benefit_de": "Du kannst gespeicherte Antworten korrigieren, ohne frühere Fassungen zu verlieren, und hast nach jeder Änderung zehn Sekunden bis zum Versand.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-573",
+          "pill_en": "Recurring tickets",
+          "pill_de": "Wiederkehrende Tickets",
+          "benefit_en": "Set up recurring tickets from the Repeat menu and manage schedules in project settings, including pause, resume and run now.",
+          "benefit_de": "Lege wiederkehrende Tickets über das Menü Wiederholen an und verwalte ihre Pläne in den Projekteinstellungen, mit Pausieren, Fortsetzen und Jetzt ausführen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-580",
+          "pill_en": "Owner workstation key",
+          "pill_de": "Arbeitsplatzschlüssel für Eigentümer",
+          "benefit_en": "As workspace owner, you can use the command line to designate one paired workstation key for administration within its granted permissions.",
+          "benefit_de": "Als Eigentümer kannst du über die Kommandozeile einen gekoppelten Arbeitsplatzschlüssel für die Verwaltung des Arbeitsbereichs im Rahmen seiner erteilten Rechte markieren.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-584",
+          "pill_en": "Drafts and Undo",
+          "pill_de": "Entwürfe und Rückgängig",
+          "benefit_en": "You can switch between tickets, quotes and customers without carrying drafts, deletion confirmations or Undo actions over to the next record.",
+          "benefit_de": "Beim Wechsel zwischen Einträgen bleiben Entwürfe, Löschbestätigungen und Rückgängig-Aktionen ihrem ursprünglichen Ticket, Angebot oder Kunden zugeordnet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-589",
+          "pill_en": "Exact CLI and API",
+          "pill_de": "Exakte CLI und API",
+          "benefit_en": "Commands and the API return complete, exact results or say clearly when they cannot.",
+          "benefit_de": "Befehle und API liefern vollständige, exakte Ergebnisse oder sagen klar, wenn das nicht geht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-591",
+          "pill_en": "Permissions and audit",
+          "pill_de": "Berechtigungen und Zugriffsprotokoll",
+          "benefit_en": "You can review agent permission grants in the access history and undo customer changes when your current permissions allow it.",
+          "benefit_de": "Du kannst erteilte Agentenrechte im Zugriffsprotokoll nachvollziehen und Kundenänderungen rückgängig machen, wenn deine aktuellen Berechtigungen es erlauben.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-592",
+          "pill_en": "Save and search feedback",
+          "pill_de": "Rückmeldungen beim Speichern",
+          "benefit_en": "You can see when timing settings fail to save or a knowledge search fails, retry the request and tell previous results from current ones.",
+          "benefit_de": "Du siehst Fehler beim Speichern der Zeiteinstellungen oder bei der Wissenssuche, kannst den Vorgang wiederholen und erkennst Ergebnisse einer früheren Suche.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-594",
+          "pill_en": "Honest healthchecks",
+          "pill_de": "Ehrliche Healthchecks",
+          "benefit_en": "Self-hosted installs report unhealthy when the database is down.",
+          "benefit_de": "Selbst gehostete Installationen melden einen Fehler, wenn die Datenbank nicht läuft.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-608",
+          "pill_en": "Attach survives updates",
+          "pill_de": "Verknüpfung übersteht Updates",
+          "benefit_en": "Linking sessions keeps working after an Aeon update without restarting the agent on your Mac",
+          "benefit_de": "Das Verknüpfen von Sitzungen funktioniert nach einem Aeon-Update weiter, ohne den Agenten am Mac neu zu starten",
+          "group": "features"
+        },
+        {
+          "key": "AEON-611",
+          "pill_en": "Newest decisions first",
+          "pill_de": "Neueste Entscheidungen zuerst",
+          "benefit_en": "The Decided view shows the most recently answered questions first, so a fresh answer stays easy to find after a refresh.",
+          "benefit_de": "Die Ansicht Entschieden zeigt zuletzt beantwortete Fragen zuerst, damit eine neue Antwort nach dem Aktualisieren leicht zu finden bleibt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-615",
+          "pill_en": "Review key permissions",
+          "pill_de": "Agentenschlüssel gezielt verschlanken",
+          "benefit_en": "Review proposed permission cuts for agent keys on the Decision Desk. You can approve or decline a proposal in one click and restore eligible changes within 30 days.",
+          "benefit_de": "Prüfe vorgeschlagene Kürzungen der Rechte von Agentenschlüsseln am Entscheidungstisch. Du kannst einen Vorschlag mit einem Klick annehmen oder ablehnen und zulässige Änderungen innerhalb von 30 Tagen wiederherstellen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-619",
+          "pill_en": "Multi-product portal",
+          "pill_de": "Portal für mehrere Produkte",
+          "benefit_en": "You can browse separate product catalogues and wish lists on one public portal, while the existing address still opens the default product.",
+          "benefit_de": "Du kannst in einem öffentlichen Portal die Kataloge und Wunschlisten mehrerer Produkte ansehen, während die bisherige Adresse weiterhin das Standardprodukt öffnet.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-624",
+          "pill_en": "Roomier dialogs",
+          "pill_de": "Geräumigere Dialoge",
+          "benefit_en": "You can read full confirmation button labels and use wider agent and key dialogs that make long permission lists easier to scan.",
+          "benefit_de": "Du kannst Bestätigungsschaltflächen vollständig lesen und Agenten sowie Schlüssel in breiteren Dialogen mit übersichtlicheren Berechtigungslisten verwalten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-629",
+          "pill_en": "Full text when deciding",
+          "pill_de": "Ganzer Text beim Entscheiden",
+          "benefit_en": "Expand approval reasons and held requests to read their full text; select a Decision Desk option to read its full details.",
+          "benefit_de": "Begründungen und zurückgehaltene Anfragen lassen sich vollständig aufklappen. Nach Auswahl einer Option am Entscheidungstisch sind ihre vollständigen Details lesbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-631",
+          "pill_en": "Full headings",
+          "pill_de": "Ganze Überschriften",
+          "benefit_en": "Long headings wrap where space permits, with full-text disclosure for capped headings.",
+          "benefit_de": "Lange Überschriften werden umgebrochen, soweit der Platz reicht. Bei begrenzten Überschriften lässt sich der vollständige Text einblenden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-632",
+          "pill_en": "Read long names",
+          "pill_de": "Lange Namen lesen",
+          "benefit_en": "Updated lists and pickers reveal clipped names on hover, keyboard focus or a long press. Pickers with a full-name button also support tapping that button.",
+          "benefit_de": "In den überarbeiteten Listen und Auswahlfeldern lassen sich abgeschnittene Namen beim Zeigen, per Tastaturfokus oder durch langes Drücken lesen. Auswahlfelder mit einer Taste für den vollständigen Namen zeigen ihn auch beim Antippen dieser Taste.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-637",
+          "pill_en": "Recurring ticket markers",
+          "pill_de": "Markierungen wiederkehrender Tickets",
+          "benefit_en": "You can spot tickets created by recurring work by their loop badge and see their schedule on the ticket page.",
+          "benefit_de": "Du erkennst Tickets aus wiederkehrender Arbeit am Schleifensymbol und siehst ihren Zeitplan auf der Ticketseite.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-639",
+          "pill_en": "Project header layouts",
+          "pill_de": "Layouts des Projektkopfs",
+          "benefit_en": "Choose how much room the project header takes, from comfortable to compact to a single line of tools, and see more tickets at once.",
+          "benefit_de": "Du kannst den Projektkopf großzügig, kompakt oder als einzelne Werkzeugzeile anzeigen lassen, damit mehr Tickets auf einmal sichtbar sind.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-641",
+          "pill_en": "Themes for everyone",
+          "pill_de": "Themes für alle",
+          "benefit_en": "Workspaces get a default theme, and anyone can keep personal themes; every change is logged and can be undone.",
+          "benefit_de": "Arbeitsbereiche erhalten ein Standard-Theme, und alle können eigene Themes anlegen; jede Änderung wird protokolliert und lässt sich rückgängig machen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-642",
+          "pill_en": "Your colours",
+          "pill_de": "Eigene Farben",
+          "benefit_en": "Choose, duplicate and edit themes and set the accent colours with a live preview; Suggest picks a readable shade in one click.",
+          "benefit_de": "Themes auswählen, duplizieren und bearbeiten und Akzentfarben mit Live-Vorschau festlegen; Vorschlagen wählt mit einem Klick einen gut lesbaren Farbton.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-643",
+          "pill_en": "Agent appearance",
+          "pill_de": "Aussehen der Agenten",
+          "benefit_en": "Choose agent avatars, motion, size and state colours in your theme, with light and dark previews of Working, Waiting, Throttled, Problem and Idle.",
+          "benefit_de": "Avatare, Bewegung, Größe und Zustandsfarben der Agenten lassen sich im Design einstellen. Die Vorschau zeigt Working, Waiting, Throttled, Problem und Idle im hellen und dunklen Modus.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-645",
+          "pill_en": "One-click status filters",
+          "pill_de": "Status per Klick",
+          "benefit_en": "Click a status count to filter tickets. On wider screens, Comfortable shows the built-in status breakdown, including cancelled and archived tickets.",
+          "benefit_de": "Ein Klick auf eine Statuszahl filtert die Tickets. Auf breiteren Bildschirmen zeigt die Ansicht Comfortable die eingebauten Status, einschließlich abgebrochener und archivierter Tickets.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-646",
+          "pill_en": "Hidden ticket statuses",
+          "pill_de": "Ausgeblendete Ticketstatus",
+          "benefit_en": "Choose which finished, cancelled or archived tickets to hide, with your choices shown beside the switch.",
+          "benefit_de": "Du kannst wählen, welche erledigten, abgebrochenen oder archivierten Tickets ausgeblendet werden, und siehst die Auswahl direkt am Schalter.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-647",
+          "pill_en": "Agent limit controls",
+          "pill_de": "Steuerung der Agentenlimits",
+          "benefit_en": "You can type agent limits directly, adjust them with round buttons and use each tool's icon to switch between a cap, no separate limit and no new starts.",
+          "benefit_de": "Du kannst Agentenlimits direkt eingeben, mit runden Tasten anpassen und über das jeweilige Werkzeugsymbol zwischen einer Obergrenze, keinem eigenen Limit und keinen neuen Starts wechseln.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-648",
+          "pill_en": "Work item rollups",
+          "pill_de": "Zusammengefasste Arbeitseinträge",
+          "benefit_en": "Work items share one kind, with rolled-up progress and finish-time estimates that can be partial when leaf estimates are missing or stale when reports are not refreshed. Parent status derivation and nesting labels apply where the parent rollout is enabled.",
+          "benefit_de": "Arbeitseinträge verwenden eine gemeinsame Art und zeigen zusammengefassten Fortschritt sowie Fertigstellungsschätzungen, die bei fehlenden Schätzungen unvollständig oder bei ausbleibenden Aktualisierungen veraltet sein können. Abgeleitete Elternstatus und Ebenennamen gelten dort, wo die Elternfunktionen aktiviert sind.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-649",
+          "pill_en": "One kind of work",
+          "pill_de": "Eine Art von Arbeit",
+          "benefit_en": "Epics, tickets and tasks become one kind of work item, so nothing ever needs converting.",
+          "benefit_de": "Epics, Tickets und Aufgaben werden zu einer Art Arbeitseintrag, sodass nichts mehr umgewandelt werden muss.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-650",
+          "pill_en": "Derived parent status",
+          "pill_de": "Abgeleiteter Elternstatus",
+          "benefit_en": "With parent-status rollout enabled for the project, epic statuses follow their work children and derived transitions record a reason.",
+          "benefit_de": "Wenn die Elternstatusführung für das Projekt aktiviert ist, folgen die Status der Epics ihren untergeordneten Arbeitseinträgen. Abgeleitete Statusänderungen nennen ihren Grund.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-651",
+          "pill_en": "Estimated epic progress",
+          "pill_de": "Geschätzter Epic-Fortschritt",
+          "benefit_en": "Epics roll up reported progress, total estimated leaf hours and available finish-time estimates, with estimate coverage shown. Finish-time estimates can be partial when leaf estimates are missing or stale when reports are not refreshed.",
+          "benefit_de": "Epics zeigen gemeldeten Fortschritt, die gesamten geschätzten Stunden ihrer einzelnen Arbeitseinträge und verfügbare Fertigstellungsschätzungen samt Schätzungsabdeckung. Fertigstellungsschätzungen können bei fehlenden Schätzungen unvollständig oder bei ausbleibenden Aktualisierungen veraltet sein.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-652",
+          "pill_en": "Agents on real work",
+          "pill_de": "Agenten an echter Arbeit",
+          "benefit_en": "Agents only ever work on actual tickets, and splitting or cancelling work never cuts a running agent off.",
+          "benefit_de": "Agenten arbeiten nur an echten Tickets, und Aufteilen oder Abbrechen unterbricht nie einen laufenden Agenten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-653",
+          "pill_en": "Plan epics into releases",
+          "pill_de": "Epics in Releases planen",
+          "benefit_en": "Put a whole epic into a release in one step; new tickets under it follow while the release is open.",
+          "benefit_de": "Ein ganzes Epic lässt sich in einem Schritt einem Release zuordnen; neue Tickets darunter folgen, solange das Release offen ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-654",
+          "pill_en": "Draft epic summaries",
+          "pill_de": "Epic-Texte entwerfen",
+          "benefit_en": "With parent rollout, a workspace AI provider and parent-benefit generation enabled, Aeon can draft English and German benefits for completed epics. Authored text is preserved, and failed drafts can be retried.",
+          "benefit_de": "Wenn Elternfunktionen, ein KI-Anbieter im Arbeitsbereich und die Erstellung von Eltern-Nutzentexten aktiviert sind, kann Aeon Nutzentexte erledigter Epics auf Deutsch und Englisch entwerfen. Eigene Texte bleiben erhalten; fehlgeschlagene Entwürfe lassen sich erneut anfordern.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-655",
+          "pill_en": "Name your levels",
+          "pill_de": "Ebenen selbst benennen",
+          "benefit_en": "Save your team's level names. Where work-vocabulary rollout is enabled, parent labels follow nesting and leaves use the chosen leaf name.",
+          "benefit_de": "Die Ebenennamen des Teams lassen sich speichern. Wo die Arbeitsebenen aktiviert sind, folgen Elternbezeichnungen der Verschachtelung, und einzelne Arbeitseinträge verwenden den gewählten Namen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-657",
+          "pill_en": "Tidier host names",
+          "pill_de": "Saubere Hostnamen",
+          "benefit_en": "Computer names in the session list sit in snug pills without odd empty space.",
+          "benefit_de": "Rechnernamen in der Sitzungsliste stehen in passgenauen Feldern ohne leeren Rand.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-667",
+          "pill_en": "Agent readiness checks",
+          "pill_de": "Bereitschaft der Agenten",
+          "benefit_en": "Fixes pairing-sync and login-context problems that could prevent signed-in accounts from completing their readiness check after a local agent-service update.",
+          "benefit_de": "Behoben sind Kopplungs- und Anmeldekontextprobleme, die nach einem Update des lokalen Agentendienstes die Bereitschaftsprüfung angemeldeter Konten verhindern konnten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-668",
+          "pill_en": "Steady ticket links",
+          "pill_de": "Ruhige Ticket-Links",
+          "benefit_en": "Ticket keys on long lists stay steady instead of flickering, and the page stops sending repeated lookups.",
+          "benefit_de": "Ticketschlüssel in langen Listen bleiben ruhig statt zu flackern, und die Seite sendet keine wiederholten Abfragen mehr.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-670",
+          "pill_en": "Readable phone sessions",
+          "pill_de": "Lesbare mobile Sitzungen",
+          "benefit_en": "Phone session rows show the model or command alongside the computer name.",
+          "benefit_de": "Mobile Sitzungszeilen zeigen Modell oder Befehl neben dem Rechnernamen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-682",
+          "pill_en": "Queue stale work",
+          "pill_de": "Liegengebliebenes einreihen",
+          "benefit_en": "Queue eligible, unassigned work left In progress with no worker. If its estimate and acceptance criteria are already set, one click adds it to the queue.",
+          "benefit_de": "Geeignete, unzugewiesene Arbeit ohne Agenten im Status In progress lässt sich einreihen. Sind Schätzung und Abnahmekriterien bereits vorhanden, genügt dafür ein Klick.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-685",
+          "pill_en": "Verify accounts again",
+          "pill_de": "Konten erneut prüfen",
+          "benefit_en": "An expired one-time verification no longer blocks an otherwise-ready account. As its owner, you can request a new supported verification with one click without removing the account.",
+          "benefit_de": "Eine abgelaufene Einmalprüfung blockiert ein ansonsten bereites Konto nicht mehr. Kontoeigentümer können eine unterstützte Prüfung mit einem Klick erneut anfordern, ohne das Konto zu entfernen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-687",
+          "pill_en": "Correct record links",
+          "pill_de": "Richtige Datensatz-Links",
+          "benefit_en": "Ticket links open the selected record without another peek covering it; on wide screens, the list stays alongside.",
+          "benefit_de": "Ticket-Links öffnen den ausgewählten Eintrag, ohne dass eine weitere Vorschau ihn verdeckt. Auf breiten Bildschirmen bleibt die Liste daneben sichtbar.",
+          "group": "features"
+        }
+      ]
     }
   }
 }

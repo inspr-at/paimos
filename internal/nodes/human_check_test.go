@@ -76,7 +76,7 @@ func TestHumanCheckValidationAndAttribution(t *testing.T) {
 
 func TestHumanCheckCRUDFilterAndRevision(t *testing.T) {
 	p := newPrincipal(t, "human-check")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	n := mustNode(t, p, `{"kind_id":"`+ticket.ID+`","title":"Touch ID","human_check":" Touch ID on the paired Mac ","fields":{"notes":"keep"}}`)
 	if n.HumanCheck == nil || *n.HumanCheck != "Touch ID on the paired Mac" {
 		t.Fatalf("check not stored: %+v", n)
@@ -92,14 +92,14 @@ func TestHumanCheckCRUDFilterAndRevision(t *testing.T) {
 		t.Fatalf("agent forged completion: %d %s", status, body)
 	}
 	for _, query := range []string{"pending", "!none"} {
-		status, body := call(t, &p, "GET", "/api/nodes?kind=ticket&human_check="+query+"&facets=human_check", "")
+		status, body := call(t, &p, "GET", "/api/nodes?kind=work&human_check="+query+"&facets=human_check", "")
 		page := decode[nodePage](t, status, body, 200)
 		if len(page.Items) != 1 || page.Items[0].ID != n.ID || page.Facets["human_check"]["pending"] != 1 {
 			t.Fatalf("pending filter: %s", body)
 		}
 	}
 	for _, query := range []string{"none", "!pending"} {
-		status, body := call(t, &p, "GET", "/api/nodes?kind=ticket&human_check="+query, "")
+		status, body := call(t, &p, "GET", "/api/nodes?kind=work&human_check="+query, "")
 		page := decode[nodePage](t, status, body, 200)
 		if len(page.Items) != 1 || page.Items[0].ID == n.ID {
 			t.Fatalf("empty filter: %s", body)

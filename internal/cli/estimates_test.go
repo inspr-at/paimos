@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -80,6 +81,133 @@ func TestParseEstimate(t *testing.T) {
 		if got, err := parseEstimate(value); err == nil {
 			t.Errorf("%q accepted: %v", value, got)
 		}
+	}
+}
+
+func TestEstimateMissingMigratedWorkLeaves(t *testing.T) {
+	for _, scenario := range []string{"dry-run", "apply", "stale-revision", "parent", "unknown-shape", "missing-revision"} {
+		t.Run(scenario, func(t *testing.T) {
+			isolate(t)
+			leaf, parent := true, false
+			revision := time.Date(2026, 10, 5, 8, 0, 0, 123456000, time.UTC)
+			missing := apiNode{ID: transcriptEntryID, Key: "AEON-1", KindID: "work-kind", IsLeaf: &leaf, UpdatedAt: revision,
+				Fields: json.RawMessage(`{"priority":"high","estimate_source":"agent","estimate_by":"old-worker","estimate_confirmed":true}`)}
+			existing := apiNode{ID: transcriptSessionID, Key: "AEON-2", KindID: "work-kind", IsLeaf: &leaf, UpdatedAt: revision,
+				Fields: json.RawMessage(`{"estimate_hours":5,"estimate_source":"person","estimate_confirmed":true}`)}
+			group := apiNode{ID: "parent-node", Key: "AEON-3", KindID: "work-kind", IsLeaf: &parent, UpdatedAt: revision, Fields: json.RawMessage(`{}`)}
+			if scenario == "unknown-shape" {
+				missing.IsLeaf = nil
+			}
+			if scenario == "missing-revision" {
+				missing.UpdatedAt = time.Time{}
+			}
+			original, person := string(missing.Fields), `{"estimate_hours":7,"estimate_source":"person","estimate_confirmed":true}`
+			writes, pages := 0, 0
+			var mu sync.Mutex
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				defer mu.Unlock()
+				switch {
+				case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
+					// Retired kinds may still be registered, but all migrated nodes use work.
+					json.NewEncoder(w).Encode(kindPage{Items: []apiKind{{ID: "project-kind", Slug: "project"}, {ID: "work-kind", Slug: "work"}, {ID: "ticket-kind", Slug: "ticket"}, {ID: "task-kind", Slug: "task"}}})
+				case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
+					if r.URL.Query().Get("kind_id") == "project-kind" {
+						json.NewEncoder(w).Encode(nodePage{Items: []apiNode{{ID: transcriptProjectID, Key: "PRJ-1", KindID: "project-kind", Fields: json.RawMessage(`{"project_key":"AEON"}`)}}})
+						return
+					}
+					if q := r.URL.Query(); q.Get("within") != transcriptProjectID || q.Get("kind") != "work" || q.Get("shape") != "leaf" || q.Get("limit") != "200" {
+						t.Errorf("missing canonical bounded leaf scope: %s", r.URL)
+					}
+					pages++
+					if r.URL.Query().Get("cursor") == "" {
+						cursor := "next-page"
+						json.NewEncoder(w).Encode(nodePage{Items: []apiNode{missing}, NextCursor: &cursor})
+						if scenario == "stale-revision" {
+							// The encoded read snapshot is fixed before the concurrent person write.
+							missing.Fields = json.RawMessage(person)
+							missing.UpdatedAt = revision.Add(time.Microsecond)
+						}
+					} else {
+						// Even an inconsistent server response must not make a parent writable.
+						json.NewEncoder(w).Encode(nodePage{Items: []apiNode{existing, group}})
+					}
+				case r.Method == http.MethodPatch && r.URL.Path == "/api/nodes/"+missing.ID:
+					writes++
+					if got := r.Header.Get("If-Unmodified-Since"); got != revision.Format(time.RFC3339Nano) {
+						t.Errorf("revision = %q, want the read snapshot", got)
+					}
+					if r.Header.Get("If-Unmodified-Since") != missing.UpdatedAt.Format(time.RFC3339Nano) {
+						w.WriteHeader(http.StatusPreconditionFailed)
+						w.Write([]byte(`{"error":"node has changed"}`))
+						return
+					}
+					var patch struct {
+						Fields map[string]any `json:"fields"`
+					}
+					if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+						t.Error(err)
+						w.WriteHeader(http.StatusBadRequest)
+						return
+					}
+					if f := patch.Fields; f["estimate_hours"] != float64(2) || f["estimate_source"] != "agent" || f["priority"] != "high" || f["estimate_by"] != nil || f["estimate_at"] != nil || f["estimate_confirmed"] != nil {
+						t.Errorf("invalid estimate or forged provenance: %#v", f)
+					}
+					missing.Fields, _ = json.Marshal(patch.Fields)
+					json.NewEncoder(w).Encode(missing)
+				default:
+					t.Errorf("unexpected %s %s", r.Method, r.URL)
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+			t.Setenv("AEON_URL", srv.URL)
+			t.Setenv("AEON_API_KEY", testKey)
+			mode := "--apply"
+			if scenario == "dry-run" {
+				mode = "--dry-run"
+			}
+			plan := `[{"key":"AEON-1","hours":2},{"key":"AEON-2","hours":3}]`
+			if scenario == "parent" {
+				plan = `[{"key":"AEON-1","hours":2},{"key":"AEON-3","hours":3}]`
+			}
+			code, out, stderr := runCLI([]string{"aeon", "--config", filepath.Join(t.TempDir(), "missing"), "issue", "estimate", "--missing", "--project", "AEON", "--from-file", "-", mode}, plan)
+			mu.Lock()
+			defer mu.Unlock()
+			if pages != 2 {
+				t.Fatalf("read %d pages, want the complete project snapshot", pages)
+			}
+			switch scenario {
+			case "dry-run", "apply":
+				status, wantWrites := "planned", 0
+				if scenario == "apply" {
+					status, wantWrites = "applied", 1
+				}
+				if code != 0 || stderr != "" || writes != wantWrites || !strings.Contains(out, "AEON-1: 2h ("+status+")") || !strings.Contains(out, "AEON-2: 3h (skipped: already estimated)") {
+					t.Fatalf("%s: exit %d writes %d stdout %q stderr %q", scenario, code, writes, out, stderr)
+				}
+				if scenario == "dry-run" && string(missing.Fields) != original {
+					t.Fatal("dry-run mutated the leaf")
+				}
+			case "stale-revision":
+				if code != 1 || writes != 1 || out != "" || !strings.Contains(stderr, "api 412: node has changed") || !strings.Contains(stderr, "stopped at AEON-1") || string(missing.Fields) != person {
+					t.Fatalf("stale estimate accepted: exit %d writes %d stdout %q stderr %q fields %s", code, writes, out, stderr, missing.Fields)
+				}
+			default:
+				want := "AEON-1 is not a visible work leaf"
+				if scenario == "parent" {
+					want = "AEON-3 is not a visible work leaf"
+				} else if scenario == "missing-revision" {
+					want = "AEON-1 has no revision timestamp"
+				}
+				if code == 0 || writes != 0 || out != "" || !strings.Contains(stderr, want) || string(missing.Fields) != original {
+					t.Fatalf("invalid target wrote: exit %d writes %d stdout %q stderr %q", code, writes, out, stderr)
+				}
+			}
+			if string(existing.Fields) != `{"estimate_hours":5,"estimate_source":"person","estimate_confirmed":true}` || string(group.Fields) != `{}` {
+				t.Fatal("existing estimate or parent changed")
+			}
+		})
 	}
 }
 

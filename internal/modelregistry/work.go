@@ -137,7 +137,7 @@ func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 		var fields []byte
 		var project *string
 		if err := tx.QueryRow(ctx, `SELECT n.fields,n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
-   WHERE n.id=$1::uuid AND n.deleted_at IS NULL AND k.slug IN ('ticket','task')`, q.TicketID).Scan(&fields, &project); err != nil {
+   WHERE n.id=$1::uuid AND n.deleted_at IS NULL AND k.slug IN ('work','ticket','task')`, q.TicketID).Scan(&fields, &project); err != nil {
 			return WorkResolution{}, err
 		}
 		placement := modelprefs.PlacementFields(fields)

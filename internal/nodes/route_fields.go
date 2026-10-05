@@ -16,10 +16,10 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-// Route classification lives on tickets and tasks only. Other kinds may use
-// "area" for something else, so their fields are left untouched.
+// Route classification lives on work items and legacy tickets and tasks.
+// Other kinds may use "area" for something else, so their fields are untouched.
 func canonicalRouteFields(p tenant.Principal, kindSlug string, raw, before json.RawMessage) (json.RawMessage, error) {
-	if kindSlug != "ticket" && kindSlug != "task" {
+	if kindSlug != "work" && kindSlug != "ticket" && kindSlug != "task" {
 		return raw, nil
 	}
 	next, err := decodeRouteFields(raw)
@@ -89,7 +89,7 @@ func validAreaShape(s string) bool { return areaShape.MatchString(s) }
 // legacy or archived areas retain their provenance and remain editable.
 func canonicalTicketRouteFields(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind string, parent *string, raw, before json.RawMessage) (json.RawMessage, error) {
 	out, err := canonicalRouteFields(p, kind, raw, before)
-	if err != nil || kind != "ticket" && kind != "task" {
+	if err != nil || kind != "work" && kind != "ticket" && kind != "task" {
 		return out, err
 	}
 	next, err := decodeRouteFields(out)

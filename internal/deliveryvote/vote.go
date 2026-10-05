@@ -402,7 +402,7 @@ func scope(ctx context.Context, tx pgx.Tx, tenantID, nodeID string) ([]string, b
 	err := tx.QueryRow(ctx, `SELECT k.slug FROM nodes n
 		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
 		WHERE n.tenant_id = $1::uuid AND n.id = $2::uuid AND n.deleted_at IS NULL
-			AND k.slug IN ('ticket', 'epic', 'task')
+			AND k.slug IN ('work', 'ticket', 'epic', 'task')
 			AND ((SELECT aeon_visible_all()) OR n.project_id = ANY ((SELECT aeon_visible_projects())::uuid[]))`, tenantID, nodeID).Scan(&kind)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, false, &workorders.Error{Status: http.StatusNotFound, Message: "not found"}

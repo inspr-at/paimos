@@ -12,6 +12,8 @@
 // event, and each connection first sends stream.ready naming its resume ID.
 // Reading attaches node_changes to node.* events (id, project, changed
 // attribute names, revision); nothing about them is stored.
+// Late harness.usage_reported events attach a projection hint for the current
+// readable session binding, so spend can refresh after a session has stopped.
 //
 // Every resource mutation must call Append(ctx, tx, principal, Change{...})
 // inside its existing db.InTenant callback, after taking resource locks. Append

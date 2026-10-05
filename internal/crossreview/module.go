@@ -128,8 +128,8 @@ func authorizeReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, id stri
 	if err != nil {
 		return target, err
 	}
-	if kind != "ticket" && kind != "task" {
-		return target, workorders.Fail(400, "review requires a ticket or task")
+	if kind != "work" && kind != "ticket" && kind != "task" {
+		return target, workorders.Fail(400, "review requires a work leaf, ticket or task")
 	}
 	scope := authz.Scope{}
 	if projectID != nil {
@@ -409,7 +409,7 @@ func completionTarget(ctx context.Context, tx pgx.Tx, p tenant.Principal, runID 
  JOIN nodes parent ON parent.tenant_id=n.tenant_id AND parent.id=n.parent_id
  JOIN node_kinds k ON k.tenant_id=parent.tenant_id AND k.id=parent.kind_id
  WHERE r.id=$1 AND r.agent_principal_id=$2 AND w.kind='build'
- AND n.deleted_at IS NULL AND parent.deleted_at IS NULL AND k.slug IN ('ticket','task')`, runID, p.ID).Scan(&ticket, &project)
+ AND n.deleted_at IS NULL AND parent.deleted_at IS NULL AND k.slug IN ('work','ticket','task')`, runID, p.ID).Scan(&ticket, &project)
 	return ticket, project, err
 }
 
@@ -457,6 +457,15 @@ func (m *Module) RequestForRun(ctx context.Context, tx pgx.Tx, p tenant.Principa
 			}
 			return err
 		}
+	}
+	var handoverPending bool
+	if err = tx.QueryRow(ctx, `SELECT aeon_work_pending($1::uuid) IS NOT NULL`, ticket).Scan(&handoverPending); err != nil {
+		return err
+	}
+	if handoverPending {
+		// Preserve accepted terminal telemetry while the work waits for a
+		// split/cancel, contributing the refusal to the outer event batch.
+		return unavailable("Work is waiting for graceful handover; automatic review is unavailable and the gate remains closed.")
 	}
 	// A savepoint can discard a refused partial review without discarding accepted
 	// telemetry. Infrastructure/event failures are never converted to a closed gate.

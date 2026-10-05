@@ -304,7 +304,7 @@ func TestProjectMemberCannotReadAnotherProjectsNoteSnapshot(t *testing.T) {
 		if _, err := tx.Exec(ctx, `INSERT INTO journey_releases(tenant_id,release_node_id,project_node_id,number) VALUES($1,$2,$3,1)`, f.person.TenantID, releaseB, projectB); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title,state) SELECT $1,id,aeon_next_node_key($1,short_prefix),$2,'Secret ticket','open' FROM node_kinds WHERE slug='ticket' RETURNING nodes.id::text`, f.person.TenantID, projectB).Scan(&memberB); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title,state) SELECT $1,id,aeon_next_node_key($1,short_prefix),$2,'Secret ticket','open' FROM node_kinds WHERE slug='work' RETURNING nodes.id::text`, f.person.TenantID, projectB).Scan(&memberB); err != nil {
 			return err
 		}
 		secret := `{"pill_en":"Project B pill","pill_de":"Projekt B Pille","benefit_en":"Project B secret benefit.","benefit_de":"Projekt B geheimer Nutzen.","hide_from_release_notes":false}`

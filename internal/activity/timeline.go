@@ -120,7 +120,7 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, limi
 		}
 		rows, err := tx.Query(ctx, `SELECT id,at,type,actor_principal_id::text,before,after,metadata FROM events
 		 WHERE tenant_id=$1 AND node_id=$2 AND ($3::bigint=0 OR id<=$3)
-		 AND type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','node.kind_changed','comment.created','comment.updated','comment.deleted','status_autopilot.changed','status_autopilot.undone','status_autopilot.skipped')
+		 AND type IN ('import.comment','import.history','import.node_created','node.created','node.updated','node.moved','node.kind_changed','comment.created','comment.updated','comment.deleted','status_autopilot.changed','status_autopilot.undone','status_autopilot.skipped','status_autopilot.derived','status_autopilot.retained','status_autopilot.causal_undo')
 		 ORDER BY id`, p.TenantID, node, watermark)
 		if err != nil {
 			return err
@@ -363,7 +363,11 @@ func project(evs []activityEvent, people map[string]Author) []Item {
 			item.Type = "change"
 			item.Changes = []FieldChange{{Field: "kind", From: &from, To: &to}}
 			items = append(items, item)
-		case "status_autopilot.changed", "status_autopilot.skipped":
+		case "status_autopilot.retained":
+			item.Type = "change"
+			item.Changes = []FieldChange{}
+			items = append(items, item)
+		case "status_autopilot.changed", "status_autopilot.skipped", "status_autopilot.derived":
 			item.Type = "change"
 			item.Changes = diff(nativeFields(e.before, people), nativeFields(e.after, people))
 			items = append(items, item)

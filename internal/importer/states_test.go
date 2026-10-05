@@ -3,6 +3,7 @@ package importer
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -133,8 +134,25 @@ func TestStateNormalizationAndStoredUserBackfill(t *testing.T) {
 }
 
 func TestNormalizeStatesMigrationEventsAndRollback(t *testing.T) {
-	d := dbtest.Open(t)
 	ctx := t.Context()
+	d, err := dbtest.NewUnmigrated(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := d.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	stop := errors.New("before historical state normalization")
+	if err := db.MigrateWithHook(ctx, d.App, func(name string) error {
+		if name == "0531_normalize_states.sql" {
+			return stop
+		}
+		return nil
+	}); !errors.Is(err, stop) {
+		t.Fatal(err)
+	}
 	migration, err := os.ReadFile("../db/migrations/0531_normalize_states.sql")
 	if err != nil {
 		t.Fatal(err)

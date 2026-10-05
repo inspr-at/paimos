@@ -39,6 +39,8 @@ func New(pool *pgxpool.Pool, events Writer) httpapi.Module {
 // Mount registers kind and node routes. Paths are the full /api paths the
 // server mux expects.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/settings/work-vocabulary", m.handleGetVocabulary)
+	mux.HandleFunc("PUT /api/settings/work-vocabulary", m.handlePutVocabulary)
 	mux.HandleFunc("GET /api/status/help", m.handleStatusHelp)
 	mux.HandleFunc("GET /api/kinds", m.handleListKinds)
 	mux.HandleFunc("POST /api/kinds", m.requirePermission("kinds.manage", m.handleCreateKind))
@@ -53,6 +55,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/nodes/lookup", m.handleLookupNodes)
 	mux.HandleFunc("GET /api/nodes/tree", m.handleTree)
 	mux.HandleFunc("GET /api/node-keys/{key}", m.handleGetNodeByKey)
+	mux.HandleFunc("GET /api/nodes/{nodeId}/work-lifecycle", m.handleWorkLifecycle)
+	mux.HandleFunc("POST /api/nodes/{nodeId}/work-lifecycle", m.handleWorkLifecycle)
+	mux.HandleFunc("POST /api/nodes/{nodeId}/work-lifecycle/{actionId}/continue", m.handleWorkLifecycle)
+	mux.HandleFunc("DELETE /api/nodes/{nodeId}/work-lifecycle/{actionId}", m.handleWorkLifecycle)
 	mux.HandleFunc("GET /api/nodes/{nodeId}", m.handleGetNode)
 	mux.HandleFunc("PATCH /api/nodes/{nodeId}", m.handleUpdateNode)
 	mux.HandleFunc("DELETE /api/nodes/{nodeId}", m.handleDeleteNode)

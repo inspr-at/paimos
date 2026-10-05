@@ -151,7 +151,7 @@ export async function listWork(project: string): Promise<ListItem[]> {
   const items: ListItem[] = []
   let cursor: string | undefined
   for (let page = 0; page < 12; page++) {
-    const result = await listNodes({ within: project, kind: ['epic', 'ticket', 'task'], limit: 500, sort: 'key', cursor })
+    const result = await listNodes({ within: project, kind: ['work', 'epic', 'ticket', 'task'], limit: 500, sort: 'key', cursor })
     items.push(...result.items)
     cursor = result.next_cursor ?? undefined
     if (!cursor) break
