@@ -156,6 +156,7 @@
   ],
   "tests": [
     {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentWorktreeIdentityIgnoresDaemon","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentRejectsOverlappingCheckoutDirectories","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentCompetingDaemonCannotClaimCheckout","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentCheckoutFenceSurvivesDaemonLoss","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentCheckoutReleasesAfterConfirmedExit","tier":"ESSENTIAL"},
@@ -1997,6 +1998,7 @@
     {"kind":"go","package":"internal/cli","name":"TestLocalRunnerFakeCommandReportsBack","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/cli","name":"TestRunAgentReadsSharedAccountRegistry","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/cli","name":"TestRunAgentScopesQueuedWorkOrdersToProject","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/cli","name":"TestRunAgentClaimsAssignedRunThroughProjectAPI","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/cli","name":"TestInvalidRunKindCLIReportsFlagAndValues","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/cli","name":"TestRunKindHeartbeatOptions","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/cli","name":"TestDoctorPreservesMissingScopeAndRedactsKey","tier":"GATED-FULL"},

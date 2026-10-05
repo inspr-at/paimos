@@ -351,3 +351,54 @@ func TestWorkerAssignmentRestartClearsOwnConfirmedCheckoutFence(t *testing.T) {
 		t.Fatalf("confirmed-exit recovery retained its own checkout fence: %v", err)
 	}
 }
+
+func TestWorkerAssignmentRejectsOverlappingCheckoutDirectories(t *testing.T) {
+	for _, marker := range []string{"directory", "gitdir-file"} {
+		t.Run(marker, func(t *testing.T) {
+			s, api, _ := assignedClaimFixture(t)
+			cmd := exec.Command("git", "init", "--quiet", s.workspace)
+			if out, err := cmd.CombinedOutput(); err != nil {
+				t.Fatalf("init checkout fixture: %v: %s", err, out)
+			}
+			if marker == "gitdir-file" {
+				// Git accepts a gitdir file as a checkout root (including linked
+				// worktrees); the fence must not depend on .git being a directory.
+				gitdir := filepath.Join(s.workspace, ".fixture-git")
+				if err := os.Rename(filepath.Join(s.workspace, ".git"), gitdir); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(s.workspace, ".git"), []byte("gitdir: "+gitdir+"\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			// The checkout root is valid; directories beneath it share its files and
+			// Git state and must not acquire their own writer identity or fence.
+			root, _, _ := competingHandoffSupervisor(t, s, api)
+			if root.workspace != s.workspace {
+				t.Fatal("checkout root changed")
+			}
+			for _, relative := range []string{"work", "work/nested", "other"} {
+				t.Run(relative, func(t *testing.T) {
+					workspace := filepath.Join(s.workspace, relative)
+					if err := os.MkdirAll(workspace, 0700); err != nil {
+						t.Fatal(err)
+					}
+					state, err := filepath.EvalSymlinks(t.TempDir())
+					if err != nil {
+						t.Fatal(err)
+					}
+					child, err := NewSupervisor(t.Context(), Config{API: api, StateRoot: state, DaemonID: "subdirectory-daemon", Workspace: workspace, Adapters: []Adapter{&handoffLaunchError{}}, Accounts: s.accounts, EstimatedUnits: s.estimates})
+					if child != nil {
+						defer child.Close(context.Background())
+					}
+					if err == nil || !strings.Contains(err.Error(), "workspace must be the Git checkout root") {
+						t.Fatalf("overlapping checkout directory accepted or wrong rejection: %v", err)
+					}
+					if _, err := os.Stat(filepath.Join(workspace, ".aeon-agentd")); !errors.Is(err, os.ErrNotExist) {
+						t.Fatalf("rejected directory acquired its own fence: %v", err)
+					}
+				})
+			}
+		})
+	}
+}

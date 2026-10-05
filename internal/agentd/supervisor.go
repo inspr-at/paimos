@@ -224,6 +224,25 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if !info.IsDir() {
 		return nil, fmt.Errorf("workspace %s is not a directory", physical)
 	}
+	// Git directories below one checkout share files and Git state. Require
+	// its root so pickup digests, durable fences and recovery all use the
+	// same physical directory. A linked worktree's .git file is also a root;
+	// standalone non-Git workspaces retain their directory-scoped identity.
+	for directory := physical; ; directory = filepath.Dir(directory) {
+		_, err := os.Lstat(filepath.Join(directory, ".git"))
+		if err == nil {
+			if directory != physical {
+				return nil, errors.New("workspace must be the Git checkout root")
+			}
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect workspace checkout root: %w", err)
+		}
+		if directory == filepath.Dir(directory) {
+			break
+		}
+	}
 	tenantID, principalID, err := c.API.Identity(ctx)
 	if err != nil {
 		return nil, errors.New("AEON agent identity preflight failed")
