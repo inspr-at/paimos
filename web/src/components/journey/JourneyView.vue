@@ -234,6 +234,7 @@ async function runNext() {
 // ---------- Navigation ----------
 const walking = computed(() => props.walkKey !== null && !!data.walker.value.value)
 function walk(key?: string) {
+  if (data.work.error.value) return
   const first = plan.order.value[0]
   const target = key ?? first?.key
   if (target) emit('walk', target, 'open')
@@ -308,13 +309,19 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
         <span class="spacer" />
         <span class="owner mono" :data-tip="`${STAGE_LABEL[viewed]} is carried by ${STAGE_OWNER[viewed] ?? brand.short_name}`">{{ STAGE_OWNER[viewed] ?? brand.short_name }}</span>
       </header>
-      <component :is="STAGE_VIEW[viewed]" :key="viewed" />
+      <div v-if="data.work.error.value" class="journey-error" role="alert">
+        <AppIcon name="alert" :size="20" />
+        <h3>The project work could not be loaded</h3>
+        <button type="button" class="btn" :disabled="data.work.status.value === 'loading'" @click="data.loadWork(true)"><AppIcon name="refresh" :size="14" />Try again</button>
+        <p>{{ data.work.error.value }}</p>
+      </div>
+      <component v-else :is="STAGE_VIEW[viewed]" :key="viewed" />
       <p class="journey-hint">
-        <kbd class="keycap">[</kbd><kbd class="keycap">]</kbd> stages<template v-if="data.walker.value.value?.tickets.length && ['plan', 'build', 'live'].includes(viewed)"> · <kbd class="keycap">w</kbd> walk the release</template> · <kbd class="keycap">?</kbd> all shortcuts
+        <kbd class="keycap">[</kbd><kbd class="keycap">]</kbd> stages<template v-if="!data.work.error.value && data.walker.value.value?.tickets.length && ['plan', 'build', 'live'].includes(viewed)"> · <kbd class="keycap">w</kbd> walk the release</template> · <kbd class="keycap">?</kbd> all shortcuts
       </p>
     </template>
     <ReleaseWalker
-      v-if="walking" :plan="plan" :editable="editable" :release-label="release ? releaseName(release) : 'Release'" :project-key="project.routeKey"
+      v-if="walking && !data.work.error.value" :plan="plan" :editable="editable" :release-label="release ? releaseName(release) : 'Release'" :project-key="project.routeKey"
       :work-by-id="data.workById.value" :start-key="walkKey" @close="emit('walk', null, 'close')" @moved="key => emit('walk', key, 'move')" @open="key => { emit('walk', null, 'close'); emit('open', key) }"
     />
   </section>

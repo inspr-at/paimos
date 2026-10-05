@@ -6,6 +6,15 @@ import { isJourneyLeaf, parentLeafGroups, workParentId } from '../src/lib/journe
 import { isWorkLeaf } from '../src/lib/workVocabulary.ts'
 
 const row = (id: string, parent: string | null, leaf: boolean, kind = 'work') => ({ id, kind_slug: kind, is_leaf: leaf, parent: parent ? { id: parent, kind_slug: 'work' } : null } as ListItem)
+test('canonical journey groups retain leaves through all 1000 supported ancestors', () => {
+  for (const depth of [65, 1000]) {
+    const parents = Array.from({ length: depth }, (_, i) => row(`parent-${i}`, i ? `parent-${i - 1}` : null, false))
+    const leaf = row('leaf', `parent-${depth - 1}`, true)
+    const groups = parentLeafGroups([leaf, ...parents.reverse()])
+    assert.equal(groups.size, depth)
+    for (let i = 0; i < depth; i++) assert.deepEqual(groups.get(`parent-${i}`), [leaf], `ancestor ${i} at depth ${depth}`)
+  }
+})
 test('canonical journey parent groups count nested leaves once and exclude non-work children', () => {
   const rows = [row('parent', null, false), row('nested', 'parent', false), row('leaf', 'nested', true), row('sibling', 'parent', true), row('memory', 'parent', true, 'memory')]
   assert.deepEqual(rows.filter(isWorkLeaf).map(row => row.id), ['leaf', 'sibling'])

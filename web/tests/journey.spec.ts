@@ -20,6 +20,40 @@ async function open(page: Page, start: JourneyStart = 'plan', path = '/p/PHAROS?
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Project journey' })
 const writes = (calls: { method: string; path: string }[], suffix: string) => calls.filter(c => c.method !== 'GET' && c.path.endsWith(suffix))
 
+test('Journey hides partial work totals on pagination failure and retries the complete list', async ({ page }) => {
+  const errors = watchErrors(page)
+  await mockWork(page, fixtures())
+  await mockJourney(page, journeyWorld('build'))
+  let complete = false
+  let workReads = 0
+  let finishRetry!: () => void
+  const retry = new Promise<void>(resolve => { finishRetry = resolve })
+  await page.route('**/api/nodes?**', async route => {
+    const query = new URL(route.request().url()).searchParams
+    if (query.get('kind') !== 'work,epic,ticket,task') return route.fallback()
+    workReads++
+    if (complete) { await retry; return route.fallback() }
+    await route.fulfill({ json: { items: [{ id: 'n-1', state: 'done', kind_slug: 'work', is_leaf: true }], next_cursor: `more-${workReads}` } })
+  })
+  await page.goto('/p/PHAROS?view=journey')
+  const alert = page.locator('.journey-view [role="alert"]')
+  await expect(alert).toContainText('The project has more work than Journey can load (6,000 rows). Counts and progress are unavailable.')
+  expect(workReads).toBe(12)
+  await expect(page.locator('.journey-view .progress, .journey-view .tally, .journey-view .j-count')).toHaveCount(0)
+  await page.keyboard.press('w')
+  await expect(page.getByRole('dialog', { name: 'Release walker', exact: true })).toHaveCount(0)
+  await expect(page).not.toHaveURL(/walk=/)
+  complete = true
+  await alert.getByRole('button', { name: 'Try again' }).click()
+  await expect(alert.getByRole('button', { name: 'Try again' })).toBeDisabled()
+  await expect(page.locator('.journey-view .progress, .journey-view .tally, .journey-view .j-count')).toHaveCount(0)
+  finishRetry()
+  await expect(alert).toHaveCount(0)
+  await expect(page.locator('.journey-view .progress')).toBeVisible()
+  expect(workReads).toBe(13)
+  expect(errors).toEqual([])
+})
+
 test('Journey is a third view of the project, with the stage and next action in the footer', async ({ page }) => {
   const errors = watchErrors(page)
   await page.setViewportSize({ width: 1440, height: 900 })

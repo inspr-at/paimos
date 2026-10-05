@@ -7466,6 +7466,12 @@
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
+    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work rejects a continuing twelfth page instead of returning partial totals","tier":"ESSENTIAL"},
+    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work accepts a complete twelfth page and retains every row in order","tier":"GATED-FULL"},
+    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work rejects repeated and cycling continuation cursors before another request","tier":"ESSENTIAL"},
+    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work finishes empty lists and propagates later page failures","tier":"GATED-FULL"},
+    {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey groups retain leaves through all 1000 supported ancestors","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"Journey hides partial work totals on pagination failure and retries the complete list","tier":"NIGHTLY","config":"playwright.ui.config.ts","project":""}
   ]
 }
