@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func (n notesFixture) deliveryRequest(op string) attachwatch.DeviceRequest {
@@ -130,29 +131,60 @@ func TestAttachedDeliverySingleAttemptAndHonestReceipt(t *testing.T) {
 func TestAttachedDeliveryConcurrentClaims(t *testing.T) {
 	n := readyNotes(t)
 	msg := n.sendNote(t, false)
-	var wg sync.WaitGroup
-	results := make(chan *httptest.ResponseRecorder, 12)
+	// Hold all contenders at the real tenant fence. Use a separate pool without
+	// rebuilding the API module: its watch-key authority must remain in memory.
+	barrier := &notesFenceBarrier{arrived: make(chan struct{}, 12), release: make(chan struct{}), gate: true}
+	cfg := n.f.db.App.Config()
+	cfg.MaxConns = 13
+	cfg.ConnConfig.Tracer = barrier
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	var release sync.Once
+	defer release.Do(func() { close(barrier.release) })
+	type result struct {
+		out attachedmsg.Exchange
+		err error
+	}
+	results := make(chan result, 12)
+	ctx := tenant.WithPrincipal(t.Context(), tenant.Principal{ID: n.recipient, TenantID: n.f.tenantID, Kind: tenant.Agent})
 	for i := 0; i < 12; i++ {
-		wg.Add(1)
 		go func() {
-			defer wg.Done()
-			w := httptest.NewRecorder()
-			n.f.h.ServeHTTP(w, n.f.request("POST", "/api/agent-pairing/attach", n.deliveryRequest("message_offer"), false, n.key))
-			results <- w
+			var offer *attachedmsg.Offer
+			r := result{}
+			r.err = db.InTenant(ctx, pool, n.f.tenantID, func(tx pgx.Tx) error {
+				var err error
+				offer, err = n.s.Claim(ctx, tx, n.grant.Binding, "1")
+				return err
+			})
+			if r.err == nil && offer != nil {
+				r.err = db.InTenant(ctx, pool, n.f.tenantID, func(tx pgx.Tx) error {
+					var err error
+					r.out, err = n.s.Release(ctx, tx, offer)
+					return err
+				})
+			}
+			results <- r
 		}()
 	}
-	wg.Wait()
-	close(results)
+	awaitNoteFences(t, barrier, 12)
+	release.Do(func() { close(barrier.release) })
 	offered := 0
-	for w := range results {
-		if w.Code != 200 {
-			t.Fatalf("claim status %d", w.Code)
+	for i := 0; i < 12; i++ {
+		var r result
+		select {
+		case r = <-results:
+		case <-ctx.Done():
+			t.Fatal("claim did not finish")
 		}
-		var out attachedmsg.Exchange
-		decodeResult(t, w, &out)
-		if out.Offer != nil {
+		if r.err != nil {
+			t.Fatal(r.err)
+		}
+		if r.out.Offer != nil {
 			offered++
-			if out.Offer.MessageID != msg.ID {
+			if r.out.Offer.MessageID != msg.ID {
 				t.Fatal("wrong note")
 			}
 		}
@@ -476,7 +508,7 @@ func TestAttachedDeliveryReleaseCommitAndRevocationFence(t *testing.T) {
 			case "deadline":
 				_, err = n.f.db.Admin.Exec(t.Context(), `UPDATE inbox_messages SET message_deadline=clock_timestamp()-interval '1 second' WHERE id=$1`, msg.ID)
 			case "daemon_restart":
-				in := attachwatch.DeviceRequest{Operation: "register", AttachProtocol: attachwatch.Protocol, MessageProtocol: attachedmsg.Protocol, ComputerID: n.in.ComputerID, DeviceProof: n.in.DeviceProof, PollKey: nonce()}
+				in := attachwatch.DeviceRequest{Operation: "register", AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, MessageProtocol: attachedmsg.Protocol, ComputerID: n.in.ComputerID, DeviceProof: n.in.DeviceProof, PollKey: nonce()}
 				n.f.call("POST", "/api/agent-pairing/attach", in, false, n.key, 200)
 				n.f.call("POST", "/api/agent-pairing/attach", n.deliveryRequest("message_offer"), false, n.key, 403)
 			case "stopped":
@@ -676,4 +708,27 @@ func TestAttachedDeliverySettlementCommitIsAtomic(t *testing.T) {
 	if n.offer(t).Offer != nil {
 		t.Fatal("settlement crash replayed the body")
 	}
+}
+
+func TestAttachedDisclosureRechecksConsentAfterRelease(t *testing.T) {
+	n := readyNotes(t)
+	msg := n.sendNote(t, false)
+	offered := n.offer(t)
+	if offered.Offer == nil {
+		t.Fatal("offer prerequisite failed")
+	}
+	in := n.deliveryRequest("message_validate")
+	in.MessageReceipt, _ = json.Marshal(attachedmsg.Receipt{DeliveryID: offered.Offer.DeliveryID, MessageID: msg.ID, Nonce: offered.Offer.Nonce, Epoch: offered.Offer.Epoch, Outcome: "uncertain"})
+	var valid attachedmsg.Exchange
+	decodeResult(t, n.f.call("POST", "/api/agent-pairing/attach", in, false, n.key, 200), &valid)
+	if valid.State != "offered" || valid.Offer != nil {
+		t.Fatal("fresh validation did not remain content-free")
+	}
+	n.f.call("POST", "/api/agent-pairing/attach/"+n.in.RequestID+"/messages/revoke", nil, true, "", 200)
+	var revoked attachedmsg.Exchange
+	decodeResult(t, n.f.call("POST", "/api/agent-pairing/attach", in, false, n.key, 200), &revoked)
+	if revoked.State != "uncertain" || revoked.Offer != nil || n.state(t, msg.ID) != "uncertain" {
+		t.Fatal("withdrawn consent remained valid for disclosure")
+	}
+	assertNoCanary(t, n.f, offered.Offer.Body)
 }

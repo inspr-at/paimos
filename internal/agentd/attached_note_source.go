@@ -211,6 +211,7 @@ func (s *AttachedNoteSource[N, B, E]) Validate(ctx context.Context, nonce string
 		return hooknote.ErrRevoked
 	}
 	in := s.request("message_validate", s.epoch)
+	pending.receipt.Outcome = "uncertain" // validation never records this outcome
 	in.MessageReceipt, _ = json.Marshal(pending.receipt)
 	out, err := s.exchange(ctx, in)
 	if err != nil || out.Offer != nil || out.State != "offered" {

@@ -14,11 +14,13 @@ ALTER TABLE harness_deliveries
  ADD COLUMN shown_at timestamptz,
  ADD COLUMN terminal_outcome text CHECK(terminal_outcome IN ('completed','uncertain','revoked','expired','not_delivered','cancelled')),
  ADD COLUMN receipt_outcome text CHECK(receipt_outcome IN ('shown','uncertain')),
- ADD FOREIGN KEY(tenant_id,message_grant_id) REFERENCES attached_message_grants(tenant_id,id),
+ ADD CONSTRAINT harness_deliveries_message_grant_fk FOREIGN KEY(tenant_id,message_grant_id) REFERENCES attached_message_grants(tenant_id,id) NOT VALID,
  ADD CONSTRAINT attached_offer_metadata CHECK(mode='managed' OR
   (message_grant_id IS NOT NULL AND message_generation IS NOT NULL AND daemon_epoch ~ '^[a-f0-9]{64}$'
    AND hook_epoch IS NOT NULL AND length(hook_epoch) BETWEEN 1 AND 128
-   AND nonce_digest ~ '^[a-f0-9]{64}$' AND offer_deadline IS NOT NULL) IS TRUE);
+   AND nonce_digest ~ '^[a-f0-9]{64}$' AND offer_deadline IS NOT NULL) IS TRUE) NOT VALID;
+ALTER TABLE harness_deliveries VALIDATE CONSTRAINT harness_deliveries_message_grant_fk;
+ALTER TABLE harness_deliveries VALIDATE CONSTRAINT attached_offer_metadata;
 CREATE UNIQUE INDEX attached_one_attempt ON harness_deliveries(tenant_id,message_id) WHERE mode='attached_hook';
 -- Backstop against old managed clients importing an attached message or resetting
 -- a lease. The existing row is the attempt: it can never be replaced or revived.
@@ -49,12 +51,3 @@ BEGIN
 END $$;
 CREATE TRIGGER attached_delivery_fence BEFORE INSERT OR UPDATE OR DELETE ON harness_deliveries
  FOR EACH ROW EXECUTE FUNCTION aeon_attached_delivery_fence();
--- Add revoked to the existing content-free outcome contract.
-DO $$
-DECLARE tbl text;
-BEGIN
- FOREACH tbl IN ARRAY ARRAY['inbox_messages','inbox_compat_messages'] LOOP
-  EXECUTE format('ALTER TABLE %I DROP CONSTRAINT attached_content_free',tbl);
-  EXECUTE format('ALTER TABLE %I ADD CONSTRAINT attached_content_free CHECK((content_mode=''durable'' OR (body=''Attached-session note; text not retained'' AND recipient_session_id IS NOT NULL AND message_deadline IS NOT NULL AND payload_bytes BETWEEN 1 AND 4096 AND (content_mode=''attached_notification'' OR (message_grant_id IS NOT NULL AND recipient_message_generation IS NOT NULL AND payload_epoch IS NOT NULL)) AND attached_outcome IN (''queued'',''notification_only'',''offered'',''shown'',''completed'',''not_delivered'',''cancelled'',''expired'',''uncertain'',''revoked''))) IS TRUE)',tbl);
- END LOOP;
-END $$;

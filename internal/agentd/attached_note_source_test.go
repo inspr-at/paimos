@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/client"
+	"github.com/inspr-at/paimos/internal/hooknote"
 )
 
 // Exact Note method shape from the independent S2-4 contract. This package
@@ -191,5 +192,50 @@ func TestAttachedMessageExchangePinsOriginAndRejectsRedirect(t *testing.T) {
 	}
 	if _, err = exchange(t.Context(), attachwatch.DeviceRequest{Operation: "message_offer", ComputerID: attachedmsg.UUID()}); err == nil || calls.Load() != 2 {
 		t.Fatal("alternate computer accepted")
+	}
+}
+
+func TestHookNotePortRechecksRemoteAuthorityBeforeDisclosure(t *testing.T) {
+	_, g, o := sourceFixture()
+	b := hooknote.Binding{SessionID: g.Binding.SessionID, MessageGeneration: g.Binding.Generation, DaemonGeneration: g.Binding.DaemonEpoch, Epoch: hooknote.Epoch{Generation: g.Binding.Generation, Counter: 7}}
+	epochRaw, _ := json.Marshal(b.Epoch)
+	o.Epoch = string(epochRaw)
+	authorized := true
+	validations := 0
+	exchange := func(_ context.Context, in attachwatch.DeviceRequest) (attachedmsg.Exchange, error) {
+		switch in.Operation {
+		case "message_offer":
+			return attachedmsg.Exchange{State: "offered", Offer: o}, nil
+		case "message_validate":
+			validations++
+			var receipt attachedmsg.Receipt
+			if json.Unmarshal(in.MessageReceipt, &receipt) != nil || receipt.Nonce != o.Nonce || receipt.Epoch != o.Epoch || in.MessageConsentDigest != g.Digest {
+				t.Fatal("disclosure check lost its consent or attempt binding")
+			}
+			if !authorized {
+				return attachedmsg.Exchange{State: "uncertain"}, nil
+			}
+			return attachedmsg.Exchange{State: "offered"}, nil
+		default:
+			t.Fatal("validation attempted a write")
+			return attachedmsg.Exchange{}, errors.New("unexpected operation")
+		}
+	}
+	src := NewAttachedNoteSource[hooknote.Note](b, b.Epoch, g, exchange, true, hooknote.ErrEmpty)
+	note, nonce, err := src.Offer(t.Context(), b)
+	if err != nil || note.Body != o.Body {
+		t.Fatal("concrete offer port failed")
+	}
+	if src.Validate(t.Context(), nonce, b) != nil || validations != 1 {
+		t.Fatal("fresh current authority failed")
+	}
+	authorized = false
+	if !errors.Is(src.Validate(t.Context(), nonce, b), hooknote.ErrRevoked) || validations != 2 {
+		t.Fatal("withdrawn remote consent was not rechecked")
+	}
+	wrong := b
+	wrong.MessageGeneration = attachedmsg.UUID()
+	if !errors.Is(src.Validate(t.Context(), nonce, wrong), hooknote.ErrRevoked) || validations != 2 {
+		t.Fatal("foreign generation reached the paired exchange")
 	}
 }

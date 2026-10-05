@@ -9,7 +9,7 @@ ALTER TABLE inbox_messages
  ADD COLUMN payload_epoch uuid,
  ADD COLUMN attached_outcome text,
  ADD CONSTRAINT inbox_messages_message_grant_fk FOREIGN KEY(tenant_id,message_grant_id) REFERENCES attached_message_grants(tenant_id,id),
- ADD CONSTRAINT attached_content_free CHECK((content_mode='durable' OR (body='Attached-session note; text not retained' AND recipient_session_id IS NOT NULL AND message_deadline IS NOT NULL AND payload_bytes BETWEEN 1 AND 4096 AND (content_mode='attached_notification' OR (message_grant_id IS NOT NULL AND recipient_message_generation IS NOT NULL AND payload_epoch IS NOT NULL)) AND attached_outcome IN ('queued','notification_only','offered','shown','completed','not_delivered','cancelled','expired','uncertain'))) IS TRUE) NOT VALID;
+ ADD CONSTRAINT attached_content_free CHECK((content_mode='durable' OR (body='Attached-session note; text not retained' AND recipient_session_id IS NOT NULL AND message_deadline IS NOT NULL AND payload_bytes BETWEEN 1 AND 4096 AND (content_mode='attached_notification' OR (message_grant_id IS NOT NULL AND recipient_message_generation IS NOT NULL AND payload_epoch IS NOT NULL)) AND attached_outcome IN ('queued','notification_only','offered','shown','completed','not_delivered','cancelled','expired','uncertain','revoked'))) IS TRUE) NOT VALID;
 ALTER TABLE inbox_messages VALIDATE CONSTRAINT attached_content_free;
 ALTER TABLE inbox_compat_messages
  ADD COLUMN content_mode text NOT NULL DEFAULT 'durable' CHECK(content_mode IN ('durable','attached_volatile','attached_notification')),
@@ -20,7 +20,7 @@ ALTER TABLE inbox_compat_messages
  ADD COLUMN payload_epoch uuid,
  ADD COLUMN attached_outcome text,
  ADD CONSTRAINT inbox_compat_messages_message_grant_fk FOREIGN KEY(tenant_id,message_grant_id) REFERENCES attached_message_grants(tenant_id,id),
- ADD CONSTRAINT attached_content_free CHECK((content_mode='durable' OR (body='Attached-session note; text not retained' AND recipient_session_id IS NOT NULL AND message_deadline IS NOT NULL AND payload_bytes BETWEEN 1 AND 4096 AND (content_mode='attached_notification' OR (message_grant_id IS NOT NULL AND recipient_message_generation IS NOT NULL AND payload_epoch IS NOT NULL)) AND attached_outcome IN ('queued','notification_only','offered','shown','completed','not_delivered','cancelled','expired','uncertain'))) IS TRUE) NOT VALID;
+ ADD CONSTRAINT attached_content_free CHECK((content_mode='durable' OR (body='Attached-session note; text not retained' AND recipient_session_id IS NOT NULL AND message_deadline IS NOT NULL AND payload_bytes BETWEEN 1 AND 4096 AND (content_mode='attached_notification' OR (message_grant_id IS NOT NULL AND recipient_message_generation IS NOT NULL AND payload_epoch IS NOT NULL)) AND attached_outcome IN ('queued','notification_only','offered','shown','completed','not_delivered','cancelled','expired','uncertain','revoked'))) IS TRUE) NOT VALID;
 ALTER TABLE inbox_compat_messages VALIDATE CONSTRAINT attached_content_free;
 ALTER TABLE inbox_compat_messages ADD CONSTRAINT attached_safe_mode CHECK(content_mode='durable' OR (NOT is_action_request AND NOT expects_reply AND delivery_level='simple' AND request_digest=repeat('0',64))) NOT VALID;
 ALTER TABLE inbox_compat_messages VALIDATE CONSTRAINT attached_safe_mode;

@@ -160,6 +160,21 @@ func (m *messaging) sendMessage(w http.ResponseWriter, r *http.Request) {
 		messagingFailure(w, err)
 		return
 	}
+	// A reply bridge must never intercept an explicitly attached note or an
+	// attached recipient before the shared volatile/unsupported-mode policy.
+	if m.heldReply != nil && in.ReplyTo != nil {
+		ctx, cancel := context.WithTimeout(attachedmsg.BrowserContext(r, m.base.attached.Origin(), p), 10*time.Second)
+		handled, _, _, err := m.base.tryAttached(ctx, p, project, attachedInput{Recipient: in.To, Body: in.Body, Key: in.Key, Generation: in.Generation, Session: in.RecipientSessionID, SenderSession: in.SenderSessionID, Reply: in.ReplyTo, Thread: in.ThreadID, Level: in.Level, Action: in.ActionRequest, Expects: in.ExpectsReply, Compat: true})
+		cancel()
+		if err != nil {
+			messagingFailure(w, err)
+			return
+		}
+		if handled {
+			messagingFailure(w, attachedmsg.Fail(400, "unsupported_attached_mode"))
+			return
+		}
+	}
 	if m.heldReply != nil && in.ReplyTo != nil && p.Kind == tenant.Person && len(r.Header.Values("Authorization")) == 0 && r.Header.Get("X-Paimos-Agent-Name") == "" && r.Header.Get("X-Aeon-Agent-Name") == "" {
 		if m.heldReply(w, r, p, project, HeldReplyInput{To: in.To, Body: in.Body, Key: in.Key, Thread: in.ThreadID, Parent: *in.ReplyTo, RecipientSession: in.RecipientSessionID, SenderSession: in.SenderSessionID, Action: in.ActionRequest, ExpectsReply: in.ExpectsReply, Level: in.Level}) {
 			return

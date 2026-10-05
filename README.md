@@ -2136,7 +2136,7 @@ To remove a pairing, run `aeon-agentd disconnect` and wait for `disconnected` be
 
 Attached-session user hooks (AEON-391) ship **disabled by default**. An explicit `aeon-agentd pair --install-user-hooks --hook-executable /absolute/path/to/aeon` requests installation after browser approval; existing connected computers use `aeon-agentd repair --install-user-hooks --hook-executable /absolute/path/to/aeon --json`. Add `--state-root` for an existing nondefault pairing. `aeon hook install|uninstall --paired --harness claude --setup-root /absolute/approved/pairing` uses the same repair path. Project scope is refused. These commands report `hook_capabilities` through pairing reconciliation and status; they never enable messages or upgrade watch consent.
 
-The installer authenticates the CLI, copies the exact artifact into a private digest-named executable (independent of PATH/profile upgrades and Nix garbage collection), and records its digest and file identity for the daemon's loaded-image check. Both installation and runtime identity checks require an independently authenticated release that is also in the compiled, reviewed release ceiling for that exact digest/OS/architecture. An install receipt alone cannot establish trust, and a newer artifact from the same signer cannot approve itself. The ceiling is currently empty pending native qualification. Runtime rechecks bytes and inode after verification, and refuses settings changed during the check. Darwin release jobs sign/notarize `aeon-cli` under the independently pinned Developer ID identity; the unsigned native rehearsal builds and hands off the same CLI before assets assembly. Linux requires an Ed25519-authenticated `aeon.hook-release.v1` manifest declaring the reviewed version and version scheme, plus a reviewed compiled-in public key; its public manifest/signature are retained beside the pin for independent runtime verification. No key is configured yet, so checksum-only Linux artifacts stay untrusted. No credential, network URL or API config path is written into the installed command. Runtime paired mode currently returns a bounded, content-free no-op pending S2-4; it cannot fall back to HTTP inbox delivery.
+The installer authenticates the CLI, copies the exact artifact into a private digest-named executable (independent of PATH/profile upgrades and Nix garbage collection), and records its digest and file identity for the daemon's loaded-image check. Both installation and runtime identity checks require an independently authenticated release that is also in the compiled, reviewed release ceiling for that exact digest/OS/architecture. An install receipt alone cannot establish trust, and a newer artifact from the same signer cannot approve itself. The ceiling is currently empty pending native qualification. Runtime rechecks bytes and inode after verification, and refuses settings changed during the check. Darwin release jobs sign/notarize `aeon-cli` under the independently pinned Developer ID identity; the unsigned native rehearsal builds and hands off the same CLI before assets assembly. Linux requires an Ed25519-authenticated `aeon.hook-release.v1` manifest declaring the reviewed version and version scheme, plus a reviewed compiled-in public key; its public manifest/signature are retained beside the pin for independent runtime verification. No key is configured yet, so checksum-only Linux artifacts stay untrusted. No credential, network URL or API config path is written into the installed command. Runtime paired mode uses the local fresh-exchange protocol described below; unqualified production releases return a bounded, content-free no-op and cannot fall back to HTTP inbox delivery.
 
 No harness/version/OS combination is advertised as qualified until native launch-chain, effective-settings and event-output evidence is reviewed with S2-4/S2-5. Both Claude and Codex currently report `qualification_pending` on explicit installation; normal pairing reports `feature_disabled`. Filesystem fixtures exercise the installation engine with test-only qualification, not a production enable switch. Project/ancestor overrides, environment-selected config roots and uncertain configuration provenance remain blockers. Qualification must account for every effective source, including managed settings, plugins and launch flags listed in the [Claude settings reference](https://code.claude.com/docs/en/settings) and [hook locations](https://code.claude.com/docs/en/hooks#hook-locations).
 
@@ -3401,8 +3401,8 @@ before their deadline; a sibling's `content_lost` settlement denies release even
 while the old process retains RAM. Missing transaction or any SQL error fails
 closed. Existing three-argument calls still compile but return no body. Never
 expose the result before that transaction commits; a rollback loses the taken
-body rather than replaying it. Lock order is pairing
-fence → tree → tenant, then compat advisory lock, session, attachment/grant, message,
+body rather than replaying it. Lock order follows current main: tenant → pairing
+fence → tree, then compat advisory lock, session, attachment/grant, message,
 delivery, receipt, event counter. Publication follows the metadata commit;
 rollback discards the reservation. The service epoch binds the owning process.
 Restart/disabled/expired/revoked notes settle without automatic retry. Status
@@ -3420,7 +3420,8 @@ The final attachment run passed all 16 tests and killed all 15 security
 mutations at their intended assertions, including an actual durable-body leak
 when the disabled-note guard was removed. Exact source bytes were restored.
 The migration guard passed against `v261003065316.0.0`: 230 unique migration
-numbers, immutable published files, and expand-safe additions 1210–1212.
+numbers, immutable published files, and expand-safe additions 1210–1212 on the original dependency branch.
+AEON-660 rebases those unpublished additions to reserved migrations 1252–1254.
 
 Fix-round validation (2026-10-03): all 18 attachment tests and the inbox package
 passed locally. Barrier tests prove session row protection through commit and
@@ -3431,6 +3432,54 @@ disabled-routing regressions fail at their intended assertions. Web build,
 checks passed; the browser checks used one supervised worker on macOS.
 The remote test host was off limits; Linux browser qualification and the
 consolidated release review remain with the coordinator.
+
+
+### Attached-note integration slice (AEON-660, disabled)
+
+This worker delivers the brief's first coherent slice: S2-3's one-attempt
+broker and S2-4's credential-free local hook, with the corrected AEON-391/392
+trust and consent prerequisites. Forward migrations 1251–1255 add metadata
+and fences without altering published migrations or the release version.
+
+A claim commits one immutable attempt before taking the volatile body; lost
+responses, rollback, restart, revocation and expired offers cannot recreate it.
+The paired exchange binds the attachment, grant, generation, daemon epoch and
+hook epoch. `message_validate` freshly checks that exact attempt and current
+consent without returning content or renewing the watch lease. Receipts report
+shown/completed or uncertain evidence; they do not assert model reading.
+
+The hook authenticates daemon executable bytes against its own compiled exact
+release ceiling before sending request bytes. Public `hook-peer.json` only
+narrows the kernel-observed process identity and cannot approve a substitute.
+Each socket invocation exchanges a fresh challenge with the current generation
+and epoch before its single offer. After fetching, the hook revalidates remote
+consent and then rechecks local registry, kernel peer and deadline at disclosure;
+local revocation is serialized with the final write. Reply bridges cannot
+intercept explicitly attached sends before the volatile-message policy.
+
+Both production hook/daemon release ceilings are empty. Feature switches stay
+off, and ordinary pairing does not opt a computer into messaging. Native
+Darwin/Linux signing and effective-settings/launch-chain qualification, harness
+version coverage, AEON-395 UI (including F6 person-change draft clearing), and
+AEON-404 independent helper messaging approval remain for the coordinator.
+The concrete source adapter and protocol are tested; end-to-end helper consent
+wiring and production activation are not delivered by this slice. No new
+credentials are required or introduced. This disabled groundwork is not a
+user-visible release benefit.
+
+Validation on current release-123 main (2026-10-05): the approved remote runner
+refused execution because Colima was stopped. Bounded, touched-package tests
+were therefore run locally one package at a time; their results are recorded
+in this worktree's ignored `tmp/aeon-660-validation` directory. The migration
+allowlist, test-tier checks, web shard registry checks and source ownership
+audit passed (34 tier checks, 22 shard checks, 33 ownership tests). Local checks
+passed for the affected attachment/consent broker, hook, source adapter, CLI,
+daemon command, installer/runtime authentication, managed-drain fence, inbox,
+server shutdown/bootstrap, OpenAPI contract and signing workflow. Controlled
+barriers prove 12 overlapping claims release one body and consent withdrawal
+before disclosure releases none.
+Full hosted CI, native qualification and consolidated release QA
+remain coordinator gates; this worker neither pushes nor deploys.
 
 
 ### Removing ghost sessions (AEON-265)

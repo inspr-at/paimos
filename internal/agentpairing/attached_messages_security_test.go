@@ -30,7 +30,14 @@ type notesFenceBarrier struct {
 }
 
 func (b *notesFenceBarrier) TraceQueryStart(ctx context.Context, _ *pgx.Conn, d pgx.TraceQueryStartData) context.Context {
-	if strings.Contains(d.SQL, "'aeon-pairing:'") {
+	if strings.Contains(d.SQL, "SELECT id FROM tenants") {
+		if b.gate {
+			select {
+			case <-b.release:
+				return ctx
+			default:
+			}
+		}
 		select {
 		case b.arrived <- struct{}{}:
 		case <-ctx.Done():
@@ -60,7 +67,7 @@ func fencedNotesHandler(t *testing.T, n notesFixture, participants int, gate boo
 	t.Cleanup(pool.Close)
 	mux := http.NewServeMux()
 	inbox.New(pool, n.s).Mount(mux)
-	compat, err := inbox.NewMessaging(pool, make([]byte, 32), n.s)
+	compat, err := inbox.NewMessaging(pool, make([]byte, 32), inbox.WithAttachedMessages(n.s))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +241,10 @@ func TestAttachedSessionValidityLockedThroughCommit(t *testing.T) {
 				second := make(chan error, 1)
 				done := make(chan struct{})
 				go func() {
-					_, err := n.f.db.Admin.Exec(ctx, mutation, n.grant.Binding.SessionID)
+					err := db.InTenant(dbtest.Seed(ctx), n.f.db.Admin, n.f.tenantID, func(tx pgx.Tx) error {
+						_, e := tx.Exec(ctx, mutation, n.grant.Binding.SessionID)
+						return e
+					})
 					second <- err
 					close(done)
 				}()
@@ -349,4 +359,43 @@ func noteSessionMutation(t *testing.T, n notesFixture, change string) string {
 		t.Fatal("unknown session mutation: ", change)
 	}
 	return "UPDATE harness_sessions SET " + assignment + " WHERE id=$1"
+}
+
+func TestAttachedReplyCannotBypassVolatilePolicyThroughDeskBridge(t *testing.T) {
+	for _, disabled := range []bool{false, true} {
+		t.Run(fmt.Sprintf("disabled-%t", disabled), func(t *testing.T) {
+			n := readyNotes(t)
+			service := n.s
+			if disabled {
+				service = attachedmsg.New(attachedmsg.Options{Origin: origin})
+			}
+			called := false
+			mod, err := inbox.NewMessaging(n.f.db.App, make([]byte, 32), inbox.WithAttachedMessages(service), inbox.WithHeldReplyBridge(func(w http.ResponseWriter, _ *http.Request, _ tenant.Principal, _ string, _ inbox.HeldReplyInput) bool {
+				called = true
+				w.WriteHeader(201)
+				return true
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			mux := http.NewServeMux()
+			mod.Mount(mux)
+			body := n.body(attachedmsg.UUID(), "desk-attached-canary-"+attachedmsg.UUID(), true)
+			body["reply_to"] = attachedmsg.UUID()
+			r := n.f.request("POST", n.path(true), body, true, "")
+			r = r.WithContext(tenant.WithPrincipal(r.Context(), tenant.Principal{ID: n.f.person, TenantID: n.f.tenantID, Kind: tenant.Person, BrowserSession: true, Name: "Owner"}))
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, r)
+			expected := 400
+			reason := "unsupported_attached_mode"
+			if disabled {
+				expected = 409
+				reason = "feature_disabled"
+			}
+			if called || w.Code != expected || !strings.Contains(w.Body.String(), reason) {
+				t.Fatalf("attached reply bypassed policy: bridge=%t status=%d body=%s", called, w.Code, w.Body.String())
+			}
+			assertNoCanary(t, n.f, body["body"].(string))
+		})
+	}
 }

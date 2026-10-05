@@ -310,16 +310,16 @@ func (p *blockingPeer) Settle(ctx context.Context, nonce, outcome string) error 
 	}
 }
 
-type unreadablePairedInput struct{ t *testing.T }
+type unreadablePeerInput struct{ t *testing.T }
 
-func (r unreadablePairedInput) Read([]byte) (int, error) {
+func (r unreadablePeerInput) Read([]byte) (int, error) {
 	r.t.Fatal("unqualified paired hook read stdin")
 	return 0, io.EOF
 }
 
 func TestPairedHookQualificationReadsNoStdin(t *testing.T) {
 	var out, diag bytes.Buffer
-	code := RunMessaging([]string{"aeon", "--config", "/must-not-read-fixture", "hook", "claude", "PostToolUse", "--paired"}, unreadablePairedInput{t}, &out, &diag)
+	code := RunMessaging([]string{"aeon", "--config", "/must-not-read-fixture", "hook", "claude", "PostToolUse", "--paired"}, unreadablePeerInput{t}, &out, &diag)
 	if code != 0 || out.Len() != 0 || !strings.Contains(diag.String(), "qualification_pending") {
 		t.Fatal(code, diag.String())
 	}
@@ -327,7 +327,7 @@ func TestPairedHookQualificationReadsNoStdin(t *testing.T) {
 	root := t.TempDir()
 	out.Reset()
 	diag.Reset()
-	code = RunMessaging([]string{"aeon", "--config", "/must-not-read-fixture", "hook", "codex", "--paired", "--setup-root", root, "Stop"}, unreadablePairedInput{t}, &out, &diag)
+	code = RunMessaging([]string{"aeon", "--config", "/must-not-read-fixture", "hook", "codex", "--paired", "--setup-root", root, "Stop"}, unreadablePeerInput{t}, &out, &diag)
 	if code != 0 || !strings.Contains(diag.String(), "qualification_pending") {
 		t.Fatal("missing paired state read stdin or fell open", code, diag.String())
 	}

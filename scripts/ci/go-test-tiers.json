@@ -4016,6 +4016,9 @@
     {"kind":"go","package":"internal/hooknote","name":"TestSnapshotRejectsForeignUID","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/hooknote","name":"TestHookPeerDisabledAndTokenAndMalformed","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/hooknote","name":"TestFakeDaemonSocketIsNotRead","tier":"GATED-FULL"},
-    {"kind":"go","package":"scripts/releaseworkflow","name":"TestDarwinHookCLIIsSignedAndRehearsedBeforeAssembly","tier":"GATED-FULL"}
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestDarwinHookCLIIsSignedAndRehearsedBeforeAssembly","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDisclosureRechecksConsentAfterRelease","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedReplyCannotBypassVolatilePolicyThroughDeskBridge","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentd","name":"TestHookNotePortRechecksRemoteAuthorityBeforeDisclosure","tier":"ESSENTIAL"}
   ]
 }

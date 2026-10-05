@@ -137,6 +137,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "rejected", http.StatusForbidden)
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2500*time.Millisecond)
+	defer cancel()
+	r = r.WithContext(ctx)
+	requestDeadline, _ := ctx.Deadline()
+	_ = slot.conn.SetReadDeadline(requestDeadline)
+	_ = http.NewResponseController(w).SetWriteDeadline(requestDeadline)
 	r.Body = http.MaxBytesReader(w, r.Body, 2048)
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()

@@ -465,7 +465,7 @@ func TestAttachedAPIIdentityAndLegacyConsumers(t *testing.T) {
 	// is stricter, but cannot be the only thing protecting legacy consumers.
 	mux := http.NewServeMux()
 	inbox.New(f.db.App, n.s).Mount(mux)
-	compat, e := inbox.NewMessaging(f.db.App, make([]byte, 32), n.s)
+	compat, e := inbox.NewMessaging(f.db.App, make([]byte, 32), inbox.WithAttachedMessages(n.s))
 	if e != nil {
 		t.Fatal(e)
 	}

@@ -177,7 +177,7 @@ func runHookHelper() {
 		_ = os.Stdout.Sync()
 		buf := make([]byte, 1)
 		_, _ = os.Stdin.Read(buf)
-		if err = unix.Exec("/bin/sleep", []string{"sleep", "30"}, []string{}); err != nil {
+		if err = unix.Exec("/bin/sh", []string{"sh", "-c", "printf 'replaced\n'; exec /bin/cat"}, []string{}); err != nil {
 			os.Exit(1)
 		}
 	case "raw":
@@ -591,18 +591,12 @@ func TestRecheckRejectsExecImageChange(t *testing.T) {
 	if _, err = stdin.Write([]byte("x")); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
-	changed := false
-	for time.Now().Before(deadline) {
-		now, obsErr := Observe(before.PID)
-		if obsErr == nil && (now.Ino != before.Ino || now.Executable != before.Executable) {
-			changed = true
-			break
-		}
-		time.Sleep(5 * time.Millisecond)
+	if _, err = fmt.Fscanln(stdout, &ready); err != nil || ready != "replaced" {
+		t.Fatal("replacement image did not report its barrier", err)
 	}
-	if !changed {
-		t.Fatal("exec did not replace the peer image")
+	after, observeErr := Observe(before.PID)
+	if observeErr == nil && after.Ino == before.Ino && after.Executable == before.Executable {
+		t.Fatal("exec did not replace image")
 	}
 	if err = Recheck(server, before); err == nil {
 		t.Fatal("peer recheck ignored the image change")

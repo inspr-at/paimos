@@ -50,7 +50,7 @@ func TestPairedHookCanaryIsNeverOpenedOrForwarded(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	var got atomic.Value
+	got := make(chan []byte, 1)
 	go func() {
 		c, err := ln.Accept()
 		if err != nil {
@@ -60,7 +60,7 @@ func TestPairedHookCanaryIsNeverOpenedOrForwarded(t *testing.T) {
 		_ = c.SetReadDeadline(time.Now().Add(time.Second))
 		buf := make([]byte, 4096)
 		n, _ := c.Read(buf)
-		got.Store(append([]byte(nil), buf[:n]...))
+		got <- append([]byte(nil), buf[:n]...)
 	}()
 	pin := cliSelfPin(t)
 	raw, _ := json.Marshal(pin)
@@ -70,8 +70,12 @@ func TestPairedHookCanaryIsNeverOpenedOrForwarded(t *testing.T) {
 	t.Setenv("AEON_URL", api.URL)
 	var out, errOut bytes.Buffer
 	code := RunMessaging([]string{"aeon", "--config", configFIFO, "hook", "claude", "--paired", "--socket", socket, "--daemon-peer", string(raw), "PostToolUse"}, strings.NewReader(`{"hook_event_name":"PostToolUse","session_id":"vendor-ref"}`), &out, &errOut)
-	time.Sleep(30 * time.Millisecond)
-	wire, _ := got.Load().([]byte)
+	var wire []byte
+	select {
+	case wire = <-got:
+	case <-time.After(3 * time.Second):
+		t.Fatal("paired connection did not close")
+	}
 	combined := out.String() + errOut.String() + string(wire)
 	if code != 0 || hits.Load() != 0 || openedConfig.Load() || openedKey.Load() || openedHome.Load() || openedToken.Load() || strings.Contains(combined, canary) {
 		t.Fatal("canary credential was opened or forwarded")
@@ -127,7 +131,7 @@ func TestPairedHookDerivesEndpointFromStateRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	var got atomic.Value
+	got := make(chan []byte, 1)
 	go func() {
 		c, err := ln.Accept()
 		if err != nil {
@@ -137,13 +141,21 @@ func TestPairedHookDerivesEndpointFromStateRoot(t *testing.T) {
 		_ = c.SetReadDeadline(time.Now().Add(time.Second))
 		buf := make([]byte, 4096)
 		n, _ := c.Read(buf)
-		got.Store(append([]byte(nil), buf[:n]...))
+		got <- append([]byte(nil), buf[:n]...)
 	}()
+	derivedSocket, derivedPin, e := pairedHookEndpoint(root)
+	if e != nil || derivedSocket != socket || derivedPin != string(pin) {
+		t.Fatal("paired metadata did not resolve to fixture endpoint")
+	}
 	var out, errOut bytes.Buffer
 	code := RunMessaging([]string{"aeon", "--config", filepath.Join(decoy, "must-not-read"), "hook", "claude", "--paired", "--setup-root", root, "PostToolUse"}, strings.NewReader(`{"hook_event_name":"PostToolUse","session_id":"vendor-ref"}`), &out, &errOut)
-	time.Sleep(30 * time.Millisecond)
-	wire, _ := got.Load().([]byte)
-	if code != 0 || openedDecoy.Load() || openedToken.Load() || !bytes.Contains(wire, []byte("POST /v1/inbox-hook")) {
+	var wire []byte
+	select {
+	case wire = <-got:
+	case <-time.After(3 * time.Second):
+		t.Fatal("paired connection did not close")
+	}
+	if code != 0 || openedDecoy.Load() || openedToken.Load() || len(wire) != 0 || out.Len() != 0 || !strings.Contains(errOut.String(), "incomplete") {
 		t.Fatalf("paired endpoint was not derived code=%d decoy=%v token=%v wire=%q err=%s", code, openedDecoy.Load(), openedToken.Load(), wire, errOut.String())
 	}
 }
@@ -157,24 +169,28 @@ func watchFIFO(t *testing.T, path string) *atomic.Bool {
 		t.Fatal(err)
 	}
 	opened := &atomic.Bool{}
-	stop := make(chan struct{})
-	t.Cleanup(func() { close(stop) })
+	done := make(chan struct{})
 	go func() {
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			fd, err := unix.Open(path, unix.O_WRONLY|unix.O_NONBLOCK, 0)
-			if err == nil {
-				unix.Close(fd)
-				opened.Store(true)
-				return
-			}
-			time.Sleep(5 * time.Millisecond)
+		fd, err := unix.Open(path, unix.O_WRONLY|unix.O_CLOEXEC, 0)
+		if err == nil {
+			opened.Store(true)
+			unix.Close(fd)
 		}
+		close(done)
 	}()
+	t.Cleanup(func() {
+		// Release only this fixture's unused writer after all assertions. A real
+		// reader cannot finish before opened is set and the writer closes.
+		fd, err := unix.Open(path, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_CLOEXEC, 0)
+		if err == nil {
+			defer unix.Close(fd)
+		}
+		select {
+		case <-done:
+		case <-time.After(3 * time.Second):
+			t.Error("FIFO fixture did not stop")
+		}
+	})
 	return opened
 }
 

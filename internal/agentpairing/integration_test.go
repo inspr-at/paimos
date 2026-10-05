@@ -191,7 +191,7 @@ func (f *fixture) rebuildHandler() {
 	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
 	if len(f.messages) > 0 {
 		pairing.SetAttachedMessages(f.messages[0])
-		messaging, err := inbox.NewMessaging(f.db.App, make([]byte, 32), f.messages[0])
+		messaging, err := inbox.NewMessaging(f.db.App, make([]byte, 32), inbox.WithAttachedMessages(f.messages[0]))
 		if err != nil {
 			f.t.Fatal(err)
 		}
