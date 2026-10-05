@@ -429,6 +429,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 		if id != "concurrency" {
 			j := treeMap(jobs[id])
 			value = j
+			normalizeNixVendorAdditions(t, id, j)
 			if condition, ok := j["if"].(string); ok && strings.Contains(condition, "tree-reuse") {
 				match := guard.FindStringSubmatch(condition)
 				if len(match) != 2 {

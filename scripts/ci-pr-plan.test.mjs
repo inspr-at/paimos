@@ -104,7 +104,7 @@ appendFileSync(process.env.GITHUB_OUTPUT, 'lane=docs-only\\nspecs=[]\\n');\n`);
   repo.file('internal/code.go');
   const head = repo.commit();
   mkdirSync(join(repo.root, 'runner-temp'));
-  assert.equal(executeWorkflowPlan(repo, head), 'lane=full\nspecs=[]\n');
+  assert.equal(executeWorkflowPlan(repo, head), 'lane=full\nspecs=[]\nnix_vendor=true\n');
 });
 
 test('ci-plan keeps trusted docs/spec lanes and falls back to full without a usable base classifier', () => {
@@ -119,12 +119,12 @@ test('ci-plan keeps trusted docs/spec lanes and falls back to full without a usa
     repo.file(path, 'changed\n');
     const head = repo.commit();
     mkdirSync(join(repo.root, 'runner-temp'));
-    assert.equal(executeWorkflowPlan(repo, head), `lane=${lane}\nspecs=${JSON.stringify(lane === 'spec-only' ? [path] : [])}\n`);
+    assert.equal(executeWorkflowPlan(repo, head), `lane=${lane}\nspecs=${JSON.stringify(lane === 'spec-only' ? [path] : [])}\nnix_vendor=${lane === 'full'}\n`);
     for (const eventName of ['push', 'merge_group', 'workflow_dispatch']) {
-      assert.equal(executeWorkflowPlan(repo, head, { eventName }), 'lane=full\nspecs=[]\n');
+      assert.equal(executeWorkflowPlan(repo, head, { eventName }), 'lane=full\nspecs=[]\nnix_vendor=true\n');
     }
-    assert.equal(executeWorkflowPlan(repo, head, { base: 'invalid-base' }), 'lane=full\nspecs=[]\n');
-    assert.equal(executeWorkflowPlan(repo, head, { base: 'a'.repeat(40) }), 'lane=full\nspecs=[]\n');
+    assert.equal(executeWorkflowPlan(repo, head, { base: 'invalid-base' }), 'lane=full\nspecs=[]\nnix_vendor=true\n');
+    assert.equal(executeWorkflowPlan(repo, head, { base: 'a'.repeat(40) }), 'lane=full\nspecs=[]\nnix_vendor=true\n');
   }
 });
 
@@ -156,6 +156,22 @@ test('path checks reject actual traversal components and absolute paths, allowin
 test('main, queue and manual classification do not read PR input or Git', () => {
   for (const name of ['push', 'merge_group', 'workflow_dispatch']) {
     assert.equal(classifyPR(name, {}, { git: () => { throw new Error('unexpected git'); } }).lane, 'full');
+  }
+});
+
+test('Nix hash checks follow dependency and guard inputs, including deletions and rename sources', () => {
+  for (const path of ['go.mod', 'go.sum', 'flake.nix', 'flake.lock',
+    '.github/workflows/ci.yml', 'scripts/ci-pr-plan.mjs', 'scripts/check-nix-vendor-hash.sh']) {
+    assert.equal(classifyPaths([path]).nixVendor, true, path);
+    assert.equal(classifyPaths(['internal/other.go'], [path]).nixVendor, true, `deleted ${path}`);
+  }
+  for (const path of ['README.md', 'docs/release.txt', 'web/tests/example.spec.ts',
+    'internal/nodes/module.go', 'web/src/App.vue']) {
+    assert.equal(classifyPaths([path]).nixVendor, false, path);
+  }
+  assert.equal(classifyPaths([]).nixVendor, true);
+  for (const event of ['push', 'merge_group', 'workflow_dispatch']) {
+    assert.equal(classifyPR(event, {}).nixVendor, true, event);
   }
 });
 
