@@ -22,6 +22,7 @@ paths:
   /settings/work-vocabulary:
     get:
       summary: Read workspace work names and icons
+      description: Requires nodes.read in the workspace or any bound project. Names and icons are tenant configuration needed to display and create work in visible projects.
       operationId: getWorkVocabulary
       security: [{session: []}, {agentKey: []}]
       responses:
@@ -31,6 +32,7 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/WorkVocabulary'}
         '401': {$ref: '#/components/responses/Unauthorized'}
+        '403': {$ref: '#/components/responses/Forbidden'}
     put:
       summary: Replace workspace vocabulary (person with settings.manage)
       operationId: putWorkVocabulary

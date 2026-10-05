@@ -1205,6 +1205,7 @@
     {"kind":"go","package":"internal/auth","name":"TestCustomerRoutesStayBoundToOwnProfileAndQuotes","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/auth","name":"TestFromEnv","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/auth","name":"TestNewDefaults","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/auth","name":"TestWorkVocabularyProjectOnlyCreation","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/auth","name":"TestNewRejectsShortKey","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/auth","name":"TestOIDCCookieSeal","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/auth","name":"TestOnlyPublicQuoteCapabilityPathsBypassAuthentication","tier":"ESSENTIAL"},
