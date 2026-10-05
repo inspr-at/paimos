@@ -25,6 +25,7 @@ const estimate = field('/settings/eta-interval', 'interval_minutes', 'Estimates'
 const lost = field('/settings/heartbeat-lost', 'heartbeat_lost_minutes', 'Silent sessions', 5, 1440)
 const numbers = [estimate, lost], fields = [activity, ...numbers]
 const session = useSession()
+const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const owner = () => `${session.identity?.tenant.id ?? ''}/${session.identity?.principal.id ?? ''}`
 let epoch = 0, disposed = false
 const timers = new Set<ReturnType<typeof setTimeout>>()
@@ -52,6 +53,14 @@ async function load(item: Field) {
     if (current(started, identity)) { item.draft = value; item.confirmed = value; item.error = '' }
   } catch { if (current(started, identity)) item.loadError = true }
   finally { if (current(started, identity)) item.loading = false }
+}
+function keys(event: KeyboardEvent, item: Field) {
+  if (event.isComposing || event.repeat) return
+  if (event.key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+    event.preventDefault(); event.stopPropagation(); (event.target as HTMLInputElement).blur()
+  } else if (event.key === 'Enter' && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && !event.altKey && !event.shiftKey) {
+    event.preventDefault(); event.stopPropagation(); void save(item)
+  }
 }
 async function save(item: Field, undo?: { version: number; before: string; after: string }) {
   if (!can('settings.manage') || disposed || item.saving || item.loading || item.confirmed === null) return
@@ -126,14 +135,14 @@ onBeforeUnmount(() => {
       <div v-for="item in numbers" :key="item.key" class="frow">
         <label class="flabel" :for="item.key">{{ item.label }}<small>{{ item === estimate ? 'How often a working agent reports when a ticket will be ready, and when it will be live.' : `A session running outside ${brand.short_name} that stops reporting is marked Lost contact. Its next heartbeat brings it back.` }}</small></label>
         <div class="fbody">
-          <input :id="item.key" :value="item.draft" class="num" @input="item.draft = ($event.target as HTMLInputElement).value" type="number" :min="item.min" :max="item.max" step="1" inputmode="numeric" :disabled="item.loading || item.saving || item.loadError || !can('settings.manage')" :aria-invalid="!!item.error" :aria-describedby="`${item.key}-feedback`" @blur="save(item)" @keydown.enter.prevent="save(item)" @keydown.esc.stop="($event.target as HTMLInputElement).blur()" />
+          <input :id="item.key" :value="item.draft" class="num" @input="item.draft = ($event.target as HTMLInputElement).value" type="number" :min="item.min" :max="item.max" step="1" inputmode="numeric" :disabled="item.loading || item.saving || item.loadError || !can('settings.manage')" :aria-invalid="!!item.error" :aria-describedby="`${item.key}-feedback`" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" @blur="save(item)" @keydown="keys($event, item)" />
           <span class="unit">{{ item === estimate ? 'minutes between estimates' : 'minutes without a heartbeat' }}</span>
           <p :id="`${item.key}-feedback`" class="number-feedback" :class="{ error: item.error }" :role="item.error ? 'alert' : 'status'">{{ item.error }}</p>
         </div>
       </div>
     </div>
     <div class="feedback-line">
-      <p id="mode-feedback" :role="activity.error || fields.some(item => item.loadError) ? 'alert' : 'status'" :class="{ error: activity.error || fields.some(item => item.loadError) }"><template v-if="fields.some(item => item.loadError)">Couldn't load this.</template><template v-else-if="activity.error">Agent activity: {{ activity.error }}</template><template v-else-if="fields.some(item => item.saved)">Saved</template><template v-else-if="fields.some(item => item.loading)">Loading agent settings…</template></p>
+      <p id="mode-feedback" :role="activity.error || fields.some(item => item.loadError) ? 'alert' : 'status'" :class="{ error: activity.error || fields.some(item => item.loadError) }"><template v-if="activity.error">Agent activity: {{ activity.error }} </template><template v-if="fields.some(item => item.loadError)">Couldn't load this.</template><template v-else-if="!activity.error && fields.some(item => item.saved)">Saved</template><template v-else-if="!activity.error && fields.some(item => item.loading)">Loading agent settings…</template></p>
       <button v-if="fields.some(item => item.loadError)" type="button" class="btn sm" @click="fields.filter(item => item.loadError).forEach(item => load(item))">Try again</button>
       <button v-else-if="activity.error" type="button" class="btn sm" @click="load(activity)">Reload</button>
     </div>

@@ -40,9 +40,17 @@ test('stored agent settings stay together; bounds, failures, Undo and Models lin
   await expect(estimate).toHaveValue('10')
   await expect(lost).toBeDisabled()
   await expect(card.getByRole('alert')).toContainText("Couldn't load this")
+  state.fail = 'agent-activity'
+  await group.getByRole('radio', { name: /^Off/ }).check()
+  await expect(card.locator('#mode-feedback')).toContainText('Could not save')
+  await expect(card.locator('#mode-feedback')).toContainText("Couldn't load this")
+  expect(values['agent-activity']).toEqual({ mode: 'agent_summary' })
+  state.fail = ''
   state.failLoad = ''
   await card.getByRole('button', { name: 'Try again', exact: true }).click()
   await expect(lost).toHaveValue('15')
+  await card.getByRole('button', { name: 'Reload', exact: true }).click()
+  await expect(group.getByRole('radio', { name: /^Agent summary/ })).toBeChecked()
   const guard = await controlStability(page, {
     estimates: estimate, 'silent sessions': lost, options: group,
     off: group.locator('.opt').nth(0), tool: group.locator('.opt').nth(1), summary: group.locator('.opt').nth(2),
@@ -60,9 +68,17 @@ test('stored agent settings stay together; bounds, failures, Undo and Models lin
     await expect(lost).toHaveValue(value)
     await expect(card.locator('#heartbeat_lost_minutes-feedback')).toContainText('Use 5 to 1440')
   })
-  expect(writes).toEqual([])
+  expect(writes).toEqual([{ path: 'agent-activity', body: { mode: 'off' } }])
+  const mac = await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent))
+  const submit = mac ? 'Meta+Enter' : 'Control+Enter'
+  await estimate.fill('1')
+  await estimate.press('Enter')
+  await estimate.press(mac ? 'Control+Enter' : 'Meta+Enter')
+  expect(writes).toEqual([{ path: 'agent-activity', body: { mode: 'off' } }])
+  await expect(estimate).toBeFocused()
+  await expect(estimate).toHaveAttribute('aria-keyshortcuts', submit)
   for (const value of ['1', '240']) await guard.check(async () => {
-    await estimate.fill(value); await estimate.press('Enter')
+    await estimate.fill(value); await estimate.press(submit)
     await expect(estimate).toBeEnabled(); await expect(estimate).toHaveAttribute('aria-invalid', 'false')
     expect(values['eta-interval']).toEqual({ interval_minutes: Number(value) })
   })
