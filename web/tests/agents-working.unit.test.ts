@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { describe, expect, it } from 'vitest'
-import { effectiveLimit, liveCopy, modeLimit, nextLimitMode, noOwnTip, nowCopy, setLimit, statusCopy, stepHarnessLimit, stepLimit, stepTotal, typedLimit, typedTotal, waitingCopy, workingRows, type HarnessLimit, type PlanSnapshot } from '../src/lib/agentsWorking'
+import { accountRoomCopy, accountRoomDetail, effectiveLimit, liveCopy, modeLimit, nextLimitMode, noOwnTip, nowCopy, setLimit, statusCopy, stepHarnessLimit, stepLimit, stepTotal, typedLimit, typedTotal, waitingCopy, workingAccountRoom, workingRows, type HarnessLimit, type PlanSnapshot } from '../src/lib/agentsWorking'
+import { buildRows, defaultSchedule, type AccountCapacity, type AccountInput, type CapacityRouting, type CapacityWindow } from '../src/lib/capacity'
 const snapshot: PlanSnapshot = { total: 5, limits: { codex: 4, claude: 2, cursor: 'off' }, principal_id: 'owner', running: { codex: 12, claude: 1, cursor: 3 }, running_total: 16, source: 'plan', updated_at: null }
 describe('the one dial', () => {
   it('changes only the ceiling, preserving running agents and independent harness limits', () => {
@@ -83,15 +84,15 @@ describe('the one dial', () => {
     expect(liveCopy(0, 2, 6)).toBe('2 running · nothing new starts')
     expect(nowCopy(0, 0, 6)).toBe('Nothing new starts, and nothing is running.')
     expect(liveCopy(8, 8, 2)).toBe('8 running · all 8 in use')
-    expect(liveCopy(8, 3, 0)).toBe('3 running · accounts full')
-    expect(statusCopy(8, 3, 0)).toBe('Room for 5 more, but the accounts are full: new starts wait for room.')
+    expect(liveCopy(8, 3, 0, true)).toBe('3 running · accounts full')
+    expect(statusCopy(8, 3, 0, true)).toBe('Room for 5 more in the total; all account start slots are occupied.')
     expect(nowCopy(8, 3, 2)).toBe('3 are running; 5 more would fit the 8 at once, but the accounts have room for 2.')
-    expect(nowCopy(8, 3, null)).toContain('Account room is not available yet.')
+    expect(nowCopy(8, 3, null)).toContain('Account room is not measured yet.')
   })
   it('reports actual waiting work without simulating starts or inventing an empty queue', () => {
     const room = { codex: 3, claude: 2, cursor: 2 }
     expect(waitingCopy(snapshot, snapshot, room, null)).toBe('Waiting work is not available yet.')
-    expect(waitingCopy(snapshot, snapshot, room, [])).toBe('No work waiting.')
+    expect(waitingCopy(snapshot, snapshot, room, [])).toBe('No work queued.')
     expect(waitingCopy(snapshot, snapshot, room, [{}, {}])).toBe('2 waiting: winding down first')
     const under = { ...snapshot, running: { cursor: 0 }, running_total: 0 }
     expect(waitingCopy(snapshot, under, room, [{ harness: 'cursor' }])).toBe('1 waiting: Cursor is off')
@@ -103,5 +104,96 @@ describe('the one dial', () => {
     expect(rows.map(r => r.key)).toEqual(['codex', 'claude', 'grok', 'cursor', 'pi', 'gemini', 'opencode'])
     expect(rows[0]!.sub).toBe('12 running')
     expect(workingRows(snapshot, snapshot, {}, null)[0]!.sub).toBe('12 running, 8 above, finishing')
+  })
+})
+
+describe('honest account room (AEON-720)', () => {
+  const now = Date.parse('2026-10-05T12:00:00Z')
+  const window: CapacityWindow = {
+    reading: { window_kind: 'weekly', window_minutes: 10080, used_percent: 10, resets_at: '2026-10-08T12:00:00Z', source: 'harness', read_at: '2026-10-05T11:59:00Z' },
+    starts_at: '2026-10-01T12:00:00Z', allowance: 100, remaining_percent: 90, freshness: 'fresh',
+    pacing: { usable_hours: 40, percent_per_hour: 1, suggested_today_percent: 15 },
+  }
+  const input = (harness: string, id = harness): AccountInput => ({ id, label: id, harness, host: 'workstation', state: 'available', last_probe_ok: true })
+  const cap = (account_id: string, routing?: CapacityRouting, windows = [window]): AccountCapacity => ({ account_id, routing, windows, schedule: defaultSchedule('UTC') })
+  const ready = (slots: number): CapacityRouting => ({ rank: 1, available_slots: slots })
+
+  it('carries real API room through accounts, pools and the dial when nothing runs', () => {
+    const inputs = ['codex', 'claude', 'cursor'].map(h => input(h))
+    const capacities = [cap('codex', ready(3)), cap('claude', ready(2)), cap('cursor', ready(1))]
+    const room = workingAccountRoom(buildRows(inputs, capacities), now, true)
+    expect(room.room).toEqual({ codex: 3, claude: 2, cursor: 1 })
+    expect(room.total).toBe(6)
+    expect(room.full).toBe(false)
+    expect(accountRoomCopy(room)).toBe('Room for 6 more right now.')
+    expect(accountRoomDetail(room, 'codex')).toBe('Codex room for 3 more')
+    expect(liveCopy(8, 0, room.total)).toBe('0 running · room for 6 more')
+  })
+  it('never labels a missing capacity response or reading as zero or full', () => {
+    for (const capacity of [[], [cap('codex')], [cap('codex', { ...ready(0), rank: 0, wait: { code: 'reading', run_now_allowed: false } }, [])]]) {
+      const room = workingAccountRoom(buildRows([input('codex')], capacity), now, true)
+      expect(room.room.codex).toBeNull()
+      expect(room.total).toBeNull()
+      expect(room.full).toBe(false)
+      expect(accountRoomCopy(room)).toContain('not measured yet')
+      expect(accountRoomDetail(room, 'codex')).toMatch(/not measured yet — .+/)
+      expect(liveCopy(5, 0, room.total)).not.toMatch(/full|room for 5/)
+    }
+  })
+  it('retains server start advice while explaining unmeasured usage', () => {
+    const room = workingAccountRoom(buildRows([input('codex'), input('cursor')], [cap('codex', ready(2), []), cap('cursor', ready(3), [])]), now, true)
+    expect(room.total).toBe(5)
+    expect(accountRoomDetail(room, 'codex')).toContain('room for 2 more — quota not measured yet — a managed run must report current usage')
+    expect(accountRoomDetail(room, 'cursor')).toContain('quota not measured yet — the harness does not report usage')
+  })
+  it('keeps known room when another harness has no current advice', () => {
+    const room = workingAccountRoom(buildRows([input('codex'), input('claude')], [cap('codex', ready(2))]), now, true)
+    expect(room.room.claude).toBeNull()
+    expect(room.total).toBe(2)
+    expect(accountRoomCopy(room)).toBe('Room for at least 2 more right now.')
+  })
+  it('explains routing blockers without calling scheduled, held or unapproved accounts full', () => {
+    for (const code of ['schedule', 'hold', 'approval', 'models', 'offline', 'vendor'] as const) {
+      const room = workingAccountRoom(buildRows([input('codex')], [cap('codex', { ...ready(0), rank: 0, wait: { code, run_now_allowed: false } })]), now, true)
+      expect(room.total).toBe(0)
+      expect(room.full).toBe(false)
+      expect(accountRoomCopy(room)).toBe('No account starts are available right now.')
+      expect(accountRoomDetail(room, 'codex')).toBe(`Codex ${room.reasons.codex}`)
+      expect(room.reasons.codex).not.toBe('')
+      const idle = { ...snapshot, total: 5, limits: {}, running: {}, running_total: 0 }
+      expect(waitingCopy(idle, idle, room.room, [{ harness: 'codex' }], room.reasons)).toBe(`1 waiting: Codex: ${room.reasons.codex}`)
+    }
+    const unread = workingAccountRoom(buildRows([input('codex')], [cap('codex', { ...ready(0), rank: 0, wait: { code: 'schedule', run_now_allowed: true } }, [])]), now, true)
+    expect(accountRoomDetail(unread, 'codex')).toContain('outside scheduled hours; quota not measured yet')
+    expect(unread.total).toBe(0)
+    expect(unread.full).toBe(false)
+  })
+  it('reserves full for explicitly occupied slots and keeps absent accounts distinct', () => {
+    const room = workingAccountRoom(buildRows([input('codex')], [cap('codex', { ...ready(0), rank: 0, wait: { code: 'capacity', run_now_allowed: false } })]), now, true)
+    expect(room.full).toBe(true)
+    expect(accountRoomCopy(room)).toContain('all start slots are occupied')
+    const absent = workingAccountRoom([], now, true)
+    expect(absent.full).toBe(false)
+    expect(accountRoomCopy(absent)).toBe('No linked accounts.')
+    expect(accountRoomDetail(absent, 'codex')).toBe('Codex no linked accounts')
+  })
+  it('rejects stale projections and never doubles shared quota aliases across groups', () => {
+    const rows = buildRows([input('codex', 'a'), input('codex', 'b')], [
+      { ...cap('a', ready(3)), quota_fingerprint: 'shared', group_id: 'one' },
+      { ...cap('b', { ...ready(0), same_quota_as: 'a' }), quota_fingerprint: 'shared', group_id: 'two', same_quota_as: 'a' },
+    ])
+    expect(workingAccountRoom(rows, now, true).total).toBe(3)
+    const stale = workingAccountRoom(rows, now, false)
+    expect(stale.total).toBeNull()
+    expect(accountRoomDetail(stale, 'codex')).toContain('account information is unavailable')
+  })
+  it('never turns unused ceiling positions into waiting work', () => {
+    const idle = { ...snapshot, total: 5, limits: {}, running: {}, running_total: 0 }
+    for (const room of [null, 0, 2, 5]) {
+      expect(nowCopy(5, 0, room)).not.toMatch(/wait|the other/)
+      expect(statusCopy(5, 0, room)).not.toContain('wait')
+      expect(waitingCopy(idle, idle, { codex: room }, [])).toBe('No work queued.')
+    }
+    expect(waitingCopy(idle, idle, { codex: null }, [{ harness: 'codex' }])).toBe('1 waiting: account room is not measured yet')
   })
 })

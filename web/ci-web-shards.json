@@ -1397,7 +1397,7 @@
           "file": "tests/agents-dial.spec.ts",
           "weightSeconds": 66.585366,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 30
+          "listedTests": 23
         },
         {
           "file": "tests/agents-handover.spec.ts",

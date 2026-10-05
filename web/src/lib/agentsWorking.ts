@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // AEON-540: the one start ceiling. Counts belong to the server's canonical
 // owner snapshot; limits are independent ceilings, never reservations.
-import { HARNESS_NAME, POOL_ORDER } from './capacity.ts'
+import { buildPools, HARNESS_NAME, hidesCapacityLimit, POOL_ORDER, type AccountRow } from './capacity.ts'
+import type { CapacityWait } from './capacityWait.ts'
 
 export const CAP_MAX = 30
 export const DEFAULT_TOTAL = 15
@@ -13,6 +14,72 @@ export interface PlanSnapshot extends WorkingPreference {
   source: 'default' | 'legacy' | 'plan'; updated_at: string | null
 }
 export interface WaitingWork { harness?: string; reason?: string }
+export interface WorkingAccountRoom {
+  room: Record<string, number | null>
+  reasons: Record<string, string>
+  total: number | null
+  incomplete: boolean
+  full: boolean
+  noAccounts: boolean
+}
+const accountBlockers: Record<CapacityWait['code'], string> = {
+  schedule: 'outside scheduled hours', reserve: 'kept for personal use', reading: 'not measured yet — a current reading is missing',
+  vendor: 'the vendor has stopped new starts', offline: 'the computer or account check is unavailable', sign_in: 'sign-in is required',
+  hold: 'on hold', approval: 'ongoing agent use needs approval', capacity: 'all start slots are occupied', allowance: 'the account allowance is exhausted',
+  models: 'no model is granted for this account', state: 'agent use is paused', residency: 'no account within the allowed providers',
+}
+/** Start advice and usage measurements are different facts. Only the server
+ * decides eligibility; neither Ready nor a missing reading invents slots. */
+export function workingAccountRoom(accounts: AccountRow[], now: number, current: boolean, configured: string[] = []): WorkingAccountRoom {
+  const room: WorkingAccountRoom['room'] = {}, reasons: WorkingAccountRoom['reasons'] = {}
+  const pools = buildPools(accounts, now)
+  const known = new Set(['codex', 'claude', 'cursor', ...configured, ...accounts.map(a => a.harness)])
+  let incomplete = !current
+  for (const harness of POOL_ORDER.filter(h => known.has(h))) {
+    const matching = pools.filter(p => p.mark === harness).flatMap(p => p.rows)
+    if (!current) {
+      room[harness] = null
+      reasons[harness] = 'not measured yet — account information is unavailable'
+      continue
+    }
+    if (!matching.length) {
+      room[harness] = 0
+      reasons[harness] = 'no linked accounts'
+      continue
+    }
+    const unknown = matching.some(a => !a.routing || a.routing.wait?.code === 'reading')
+    const slots = matching.reduce((n, a) => n + (a.routing?.available_slots ?? 0), 0)
+    room[harness] = unknown && slots === 0 ? null : slots
+    incomplete ||= unknown
+    const notes = matching.flatMap(a => {
+      if (!a.routing) return ['not measured yet — start advice is unavailable']
+      const notes = a.routing.wait ? [accountBlockers[a.routing.wait.code]] : []
+      if (a.routing.wait?.code !== 'reading' && (!a.primary || a.primary.freshness !== 'fresh' || a.primary.reading.source === 'estimate' || a.awaitingReading)) {
+        notes.push(hidesCapacityLimit(a.harness) ? 'quota not measured yet — the harness does not report usage' : 'quota not measured yet — a managed run must report current usage')
+      }
+      return notes
+    })
+    reasons[harness] = [...new Set(notes)].join('; ')
+  }
+  const slots = Object.values(room).reduce<number>((n, value) => n + (value ?? 0), 0)
+  return { room, reasons, total: incomplete && slots === 0 ? null : slots, incomplete,
+    full: current && accounts.length > 0 && accounts.every(a => a.routing?.wait?.code === 'capacity'),
+    noAccounts: current && accounts.length === 0 }
+}
+export function accountRoomCopy(accounts: WorkingAccountRoom): string {
+  if (accounts.noAccounts) return 'No linked accounts.'
+  if (accounts.total === null) return 'Account room is not measured yet; see the reasons below.'
+  if (accounts.total > 0) return `Room for ${accounts.incomplete ? 'at least ' : ''}${accounts.total} more right now.`
+  return accounts.full ? 'Full right now: all start slots are occupied.' : 'No account starts are available right now.'
+}
+export function accountRoomDetail(accounts: WorkingAccountRoom, harness: string): string {
+  const slots = accounts.room[harness], reason = accounts.reasons[harness]
+  let value = ''
+  if (slots === null || slots === undefined) value = reason?.startsWith('not measured yet') ? '' : 'not measured yet'
+  else if (slots > 0) value = `room for ${slots} more`
+  else if (!reason) value = 'no start slots available'
+  return `${HARNESS_NAME[harness] ?? harness} ${[value, reason].filter(Boolean).join(' — ')}`
+}
 export const limitMode = (limit: HarnessLimit | undefined): LimitMode => limit === 'off' ? 'off' : typeof limit === 'number' ? 'max' : 'none'
 const clamp = (n: number) => Math.max(0, Math.min(CAP_MAX, n))
 export const planValue = (snapshot: WorkingPreference): WorkingPreference => ({ total: snapshot.total, limits: { ...snapshot.limits } })
@@ -58,34 +125,35 @@ export function noOwnTip(harness: string, total: number): string {
   const name = HARNESS_NAME[harness] ?? harness
   return total === 0 ? `${name} has no limit of its own; with 0 at once, nothing new starts.` : `${name} has no limit of its own; the ${total} at once and ${name}'s accounts cap it.`
 }
-export function liveCopy(total: number, running: number, room: number | null) {
+export function liveCopy(total: number, running: number, room: number | null, full = false) {
   const prefix = `${running} running`
   if (total === 0) return `${prefix} · nothing new starts`
   if (running > total) return `${prefix} · winding down to ${total}`
   if (running === total) return `${prefix} · all ${total} in use`
-  if (room === 0) return `${prefix} · accounts full`
-  return `${prefix} · room for ${total - running} more`
+  if (room === null) return `${prefix} · account room not measured yet`
+  if (room === 0) return `${prefix} · ${full ? 'accounts full' : 'no account starts available'}`
+  return `${prefix} · room for ${Math.min(total - running, room)} more`
 }
-export function statusCopy(total: number, running: number, room: number | null) {
+export function statusCopy(total: number, running: number, room: number | null, full = false) {
   if (total === 0) return running ? `Start nothing new: the ${running} ${running === 1 ? 'agent' : 'agents'} running finish their work.` : 'Start nothing new. Nothing is running.'
   if (running > total) return `Winding down to ${total}: no new starts until below ${total}; running agents finish.`
-  if (running === total) return `All ${total} in use: the next start waits until one finishes.`
-  if (room === 0) return `Room for ${total - running} more, but the accounts are full: new starts wait for room.`
-  return room === null ? `Room for ${total - running} more in the total; account room is not available yet.` : `Room for ${total - running} more: starts as work and accounts allow.`
+  if (running === total) return `All ${total} in use: no further starts until one finishes.`
+  if (room === 0) return `Room for ${total - running} more in the total; ${full ? 'all account start slots are occupied' : 'no account starts are available right now'}.`
+  return room === null ? `Room for ${total - running} more in the total; account room is not measured yet.` : `Room for ${total - running} more: starts as work and accounts allow.`
 }
 export function nowCopy(total: number, running: number, room: number | null): string {
   const are = running === 1 ? 'is' : 'are'
   if (total === 0) return running ? `Nothing new starts. The ${running} running ${running === 1 ? 'finishes its' : 'finish their'} work.` : 'Nothing new starts, and nothing is running.'
   if (running > total) return `${running} ${are} running, ${running - total} more than ${total} at once; they finish before anything new starts.`
-  if (running === total) return `${running} ${are} running, all ${total} at once; the next start waits for one to finish.`
-  if (room === null) return `${running} ${are} running; ${total - running} more would fit the ${total} at once. Account room is not available yet.`
-  if (room === 0) return `${running} ${are} running; the other ${total - running} wait for room on an account.`
+  if (running === total) return `${running} ${are} running, all ${total} at once; no further starts until one finishes.`
+  if (room === null) return `${running} ${are} running; ${total - running} more would fit the ${total} at once. Account room is not measured yet.`
+  if (room === 0) return `${running} ${are} running; ${total - running} more would fit the ${total} at once, but no account starts are available right now.`
   if (room < total - running) return `${running} ${are} running; ${total - running} more would fit the ${total} at once, but the accounts have room for ${room}.`
   return `${running} ${are} running; ${total - running} more can start as work comes in.`
 }
-export function waitingCopy(plan: WorkingPreference, snapshot: PlanSnapshot, room: Record<string, number | null>, waiting: WaitingWork[] | null): string {
+export function waitingCopy(plan: WorkingPreference, snapshot: PlanSnapshot, room: Record<string, number | null>, waiting: WaitingWork[] | null, reasons: Record<string, string> = {}): string {
   if (waiting === null) return 'Waiting work is not available yet.'
-  if (!waiting.length) return 'No work waiting.'
+  if (!waiting.length) return 'No work queued.'
   const groups = new Map<string, number>()
   for (const item of waiting) {
     let why: string
@@ -97,7 +165,8 @@ export function waitingCopy(plan: WorkingPreference, snapshot: PlanSnapshot, roo
       const usable = candidates.filter(h => plan.limits[h] !== 'off' && (typeof plan.limits[h] !== 'number' || (snapshot.running[h] ?? 0) < (plan.limits[h] as number)))
       if (!usable.length && item.harness) why = plan.limits[item.harness] === 'off' ? `${HARNESS_NAME[item.harness] ?? item.harness} is off` : `${HARNESS_NAME[item.harness] ?? item.harness} is at its limit`
       else if (!usable.length && candidates.length) why = 'every harness is off or at its limit'
-      else if (usable.length && usable.every(h => room[h] === 0)) why = 'room on an account'
+      else if (usable.length && usable.every(h => room[h] === 0)) why = item.reason || usable.map(h => reasons[h] ? `${HARNESS_NAME[h] ?? h}: ${reasons[h]}` : '').filter(Boolean).join('; ') || 'room on an account'
+      else if (usable.length && usable.every(h => room[h] === null || room[h] === undefined)) why = item.reason || 'account room is not measured yet'
       else why = item.reason || 'ready for a start'
     }
     groups.set(why, (groups.get(why) ?? 0) + 1)
