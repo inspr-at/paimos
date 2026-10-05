@@ -11295,7 +11295,7 @@ components:
         residency: {type: string, enum: [any, eu, local]}
         details_redacted: {type: boolean}
         automatic_launch_enabled: {type: boolean, const: false}
-        wait_reason: {type: string, enum: [acceptance_pending, owner_unavailable]}
+        wait_reason: {type: string, enum: [acceptance_pending, owner_unavailable, selector_unavailable], description: An archived or unavailable work kind leaves settings readable and resettable but withholds model_selector; execution must wait until an available selector is configured or restored}
         dial_path: {type: string, const: /api/agents/plan}
         required_start_gates: {type: array, items: {type: string}, description: Dial, harness, account room and host load must be rechecked on every start; unreadable gates mean wait}
     WorkLifecyclePreview:

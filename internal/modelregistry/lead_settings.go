@@ -204,6 +204,27 @@ func LoadLeadSettingsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, proj
 		local = LeadPolicy{}
 	}
 	out.Effective = effectiveLeadPolicy(workspace.Policy, local)
+	// Stored selectors may outlive a work kind. Keep the policy readable and
+	// resettable, but never substitute "other" for an unavailable chosen kind.
+	kind := "other"
+	selectorAvailable := true
+	if out.Effective.WorkKindID != nil {
+		level := "project"
+		if project == "" {
+			level = "default"
+		}
+		k, err := preferenceKind(ctx, tx, *out.Effective.WorkKindID, level, project)
+		if err != nil {
+			var unavailable *preferenceError
+			if !errors.As(err, &unavailable) || (unavailable.code != "unknown_kind" && unavailable.code != "kind_not_in_project") {
+				return out, err
+			}
+			selectorAvailable = false
+			out.WaitReason = "selector_unavailable"
+		} else {
+			kind = k.Slug
+		}
+	}
 	// Only an active owning person sees private IDs. An agent creator grants no
 	// implicit account visibility; agents consume redacted public explanations.
 	person, err := modelprefs.CanonicalPerson(ctx, tx, p.ID)
@@ -247,16 +268,10 @@ func LoadLeadSettingsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, proj
 				if err != nil {
 					return out, err
 				}
-				kind := "other"
-				if out.Effective.WorkKindID != nil {
-					k, err := preferenceKind(ctx, tx, *out.Effective.WorkKindID, "project", project)
-					if err != nil {
-						return out, err
-					}
-					kind = k.Slug
+				if selectorAvailable {
+					selector := modelprefs.ResolveCell(chain, kind, *out.Effective.Bucket)
+					out.ModelSelector = &selector
 				}
-				selector := modelprefs.ResolveCell(chain, kind, *out.Effective.Bucket)
-				out.ModelSelector = &selector
 				out.Residency = modelprefs.ResolveResidency(chain).Value
 				for _, scope := range chain {
 					out.ModelRevisions = append(out.ModelRevisions, scope.Revision)

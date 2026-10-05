@@ -2,11 +2,16 @@
 package modelregistry
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -216,6 +221,77 @@ func TestLeadSettingsWriteRechecksRevocation(t *testing.T) {
 	})
 }
 
+func TestLeadSettingsArchivedKindsRemainReadableAndResettable(t *testing.T) {
+	for _, inherited := range []bool{false, true} {
+		t.Run(fmt.Sprintf("inherited=%v", inherited), func(t *testing.T) {
+			reset(t)
+			owner := makePrincipal(t, "lead-archived", "person", "Owner", []string{"admin"})
+			member := addPrincipal(t, owner.TenantID, "person", "Member", []string{"member"})
+			project := leadProject(t, owner)
+			path := "/api/projects/" + project + "/lead-settings"
+			kindBody := `{"label":"Archived selector"}`
+			if !inherited {
+				kindBody = `{"label":"Archived selector","project_id":"` + project + `"}`
+			}
+			kind := decode[workKind](t, &owner, "POST", "/api/work-kinds", kindBody, 201)
+			policy := `{"revision":0,"overrides":{"work_kind_id":"` + kind.ID + `"}}`
+			if inherited {
+				decode[LeadSettings](t, &owner, "PUT", "/api/settings/lead-policy", policy, 200)
+				policy = `{"revision":0,"overrides":{"bucket":"complex"}}`
+			}
+			before := decode[LeadSettings](t, &owner, "PUT", path, policy, 200)
+			if before.ModelSelector == nil || before.WaitReason != "acceptance_pending" {
+				t.Fatal("fixture lacks a live selector", before)
+			}
+			decode[workKind](t, &owner, "DELETE", "/api/work-kinds/"+kind.ID, "", 200)
+			assertUnavailable := func(view LeadSettings) {
+				t.Helper()
+				if view.WaitReason != "selector_unavailable" || view.ModelSelector != nil || view.AutomaticLaunchEnabled || view.Effective.WorkKindID == nil || *view.Effective.WorkKindID != kind.ID {
+					t.Fatal("archived kind fell back or blocked settings", view)
+				}
+			}
+			current := decode[LeadSettings](t, &owner, "GET", path, "", 200)
+			assertUnavailable(current)
+			if current.Revision != 1 || current.OwnerPersonID == nil || *current.OwnerPersonID != owner.ID || !slices.Equal(current.ModelRevisions, before.ModelRevisions) {
+				t.Fatal("archival changed settings identity or revisions", current)
+			}
+			public := decode[LeadSettings](t, &member, "GET", path, "", 200)
+			if public.WaitReason != "selector_unavailable" || !public.DetailsRedacted || public.Effective.WorkKindID != nil || public.ModelSelector != nil || public.Overrides != nil || public.AutomaticLaunchEnabled {
+				t.Fatal("public unavailable state leaked or failed open", public)
+			}
+			if inherited {
+				assertUnavailable(decode[LeadSettings](t, &owner, "GET", "/api/settings/lead-policy", "", 200))
+			}
+			expectPrefError(t, owner, "PUT", path, `{"revision":1,"overrides":{"work_kind_id":"`+kind.ID+`"}}`, 422, "unknown_kind")
+			resetView := decode[LeadSettings](t, &owner, "DELETE", path+"?revision=1", "", 200)
+			if resetView.Revision != 2 || resetView.OwnerPersonID == nil || *resetView.OwnerPersonID != owner.ID || resetView.Overrides == nil || resetView.Overrides.WorkKindID != nil || *resetView.Effective.Bucket != "normal" {
+				t.Fatal("reset did not preserve ownership and inheritance", resetView)
+			}
+			if inherited {
+				assertUnavailable(resetView)
+				decode[workKind](t, &owner, "POST", "/api/work-kinds/"+kind.ID+"/restore", "", 200)
+				restored := decode[LeadSettings](t, &owner, "GET", path, "", 200)
+				if restored.ModelSelector == nil || restored.WaitReason != "acceptance_pending" || restored.Revision != 2 {
+					t.Fatal("restored inherited selector remained unavailable", restored)
+				}
+			} else if resetView.ModelSelector == nil || resetView.WaitReason != "acceptance_pending" || resetView.Effective.WorkKindID != nil {
+				t.Fatal("reset did not clear archived project selector", resetView)
+			}
+			changes := 2
+			if inherited {
+				changes++
+			}
+			if eventCount(t, owner, "lead.settings_changed") != changes {
+				t.Fatal("archival/read/rejected write changed settings history")
+			}
+			persisted := decode[LeadSettings](t, &owner, "GET", path, "", 200)
+			if persisted.Revision != 2 || persisted.Overrides == nil || persisted.Overrides.WorkKindID != nil {
+				t.Fatal("reset response did not reflect committed settings", persisted)
+			}
+		})
+	}
+}
+
 func TestLeadSettingsConcurrentRevisionHasOneWinner(t *testing.T) {
 	reset(t)
 	owner := makePrincipal(t, "lead-race", "person", "Owner", []string{"admin"})
@@ -223,34 +299,72 @@ func TestLeadSettingsConcurrentRevisionHasOneWinner(t *testing.T) {
 	path := "/api/projects/" + project + "/lead-settings"
 	mux := http.NewServeMux()
 	New(appPool).Mount(mux)
-	barriers := []*mutationBarrier{
-		{entered: make(chan struct{}), release: make(chan struct{}), reader: strings.NewReader(`{"revision":0,"overrides":{"bucket":"normal"}}`)},
-		{entered: make(chan struct{}), release: make(chan struct{}), reader: strings.NewReader(`{"revision":0,"overrides":{"bucket":"complex"}}`)},
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	fence, err := adminPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
+	defer func() { _ = fence.Rollback(context.Background()) }()
+	if _, err := fence.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, owner.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	blocker := fence.Conn().PgConn().PID()
 	results := make(chan *httptest.ResponseRecorder, 2)
-	for _, b := range barriers {
+	for _, bucket := range []string{"normal", "complex"} {
 		go func() {
-			request := httptest.NewRequest("PUT", path, b)
-			request = request.WithContext(tenant.WithPrincipal(request.Context(), owner))
+			request := httptest.NewRequest("PUT", path, strings.NewReader(`{"revision":0,"overrides":{"bucket":"`+bucket+`"}}`))
+			request = request.WithContext(tenant.WithPrincipal(ctx, owner))
 			recorder := httptest.NewRecorder()
 			mux.ServeHTTP(recorder, request)
 			results <- recorder
 		}()
 	}
-	for _, b := range barriers {
-		<-b.entered
+	// Both handlers must reach the actual transaction fence while it is held.
+	// Request-body barriers alone allow sequential database execution.
+	for {
+		select {
+		case r := <-results:
+			t.Fatalf("write completed before database contention: %d %s", r.Code, r.Body.String())
+		default:
+		}
+		var waiting int
+		if err := adminPool.QueryRow(ctx, `WITH RECURSIVE blocked(pid) AS (
+			SELECT pid FROM pg_stat_activity WHERE datname=current_database() AND $1::int=ANY(pg_blocking_pids(pid))
+			UNION
+			SELECT a.pid FROM pg_stat_activity a JOIN blocked b ON b.pid=ANY(pg_blocking_pids(a.pid)) WHERE a.datname=current_database()
+		) SELECT count(*) FROM pg_stat_activity a JOIN blocked b USING(pid)
+			WHERE a.wait_event_type='Lock' AND a.query='SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE'`, blocker).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting == 2 {
+			break
+		}
+		runtime.Gosched()
 	}
-	for _, b := range barriers {
-		close(b.release)
+	if err := fence.Commit(ctx); err != nil {
+		t.Fatal(err)
 	}
 	wins, conflicts := 0, 0
-	for range barriers {
-		r := <-results
+	var winner LeadSettings
+	for range 2 {
+		var r *httptest.ResponseRecorder
+		select {
+		case r = <-results:
+		case <-ctx.Done():
+			t.Fatal("competing writes did not finish", ctx.Err())
+		}
 		switch r.Code {
 		case 200:
 			wins++
+			if err := json.Unmarshal(r.Body.Bytes(), &winner); err != nil {
+				t.Fatal(err)
+			}
 		case 409:
-			if !strings.Contains(r.Body.String(), "stale_revision") {
+			var failure struct {
+				Code string `json:"code"`
+			}
+			if err := json.Unmarshal(r.Body.Bytes(), &failure); err != nil || failure.Code != "stale_revision" {
 				t.Fatal(r.Body.String())
 			}
 			conflicts++
@@ -262,7 +376,7 @@ func TestLeadSettingsConcurrentRevisionHasOneWinner(t *testing.T) {
 		t.Fatal("competing writes were not serialized", wins, conflicts)
 	}
 	final := decode[LeadSettings](t, &owner, "GET", path, "", 200)
-	if final.Revision != 1 {
+	if final.Revision != 1 || winner.Revision != 1 || winner.Effective.Bucket == nil || final.Effective.Bucket == nil || *final.Effective.Bucket != *winner.Effective.Bucket {
 		t.Fatal(final)
 	}
 }
