@@ -51,12 +51,13 @@ const attentionCTE = `WITH pending AS (SELECT DISTINCT ON (node_id) * FROM statu
  AND ($4='' OR strpos(lower(key||' '||title),lower($4))>0)) `
 
 type attentionInput struct {
-	EventID         int64     `json:"event_id"`
-	NodeID          string    `json:"node_id"`
-	Revision        time.Time `json:"revision"`
-	Resolution      int64     `json:"resolution_event_id,omitempty"`
-	ReleaseID       string    `json:"release_id,omitempty"`
-	ReleaseRevision int64     `json:"release_revision,omitempty"`
+	EventID                int64     `json:"event_id"`
+	NodeID                 string    `json:"node_id"`
+	Revision               time.Time `json:"revision"`
+	Resolution             int64     `json:"resolution_event_id,omitempty"`
+	ReleaseID              string    `json:"release_id,omitempty"`
+	ReleaseRevision        int64     `json:"release_revision,omitempty"`
+	ReleaseProjectRevision int64     `json:"release_project_revision,omitempty"`
 }
 type attentionItem struct {
 	attentionInput
@@ -248,11 +249,11 @@ func (m *Module) prepareAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 		item.To = "open"
 	case "missed_release":
 		item.To = "release"
-		err = tx.QueryRow(ctx, `SELECT r.release_node_id::text,n.title,r.revision FROM journey_projects j
+		err = tx.QueryRow(ctx, `SELECT r.release_node_id::text,n.title,r.revision,j.revision FROM journey_projects j
  JOIN journey_releases r ON r.tenant_id=j.tenant_id AND r.release_node_id=j.current_release_node_id
  JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.release_node_id
  WHERE j.project_node_id=$1 AND r.state='planning' AND n.deleted_at IS NULL
- AND NOT EXISTS(SELECT 1 FROM journey_tickets t WHERE t.ticket_node_id=$2 AND t.release_node_id IS NOT NULL)`, item.ProjectID, item.NodeID).Scan(&item.ReleaseID, &item.ReleaseTitle, &item.ReleaseRevision)
+ AND NOT EXISTS(SELECT 1 FROM journey_tickets t WHERE t.ticket_node_id=$2 AND t.release_node_id IS NOT NULL)`, item.ProjectID, item.NodeID).Scan(&item.ReleaseID, &item.ReleaseTitle, &item.ReleaseRevision, &item.ReleaseProjectRevision)
 		if errors.Is(err, pgx.ErrNoRows) {
 			item.Applicable = false
 			item.Unavailable = "Choose a planning release in the ticket’s project first."
@@ -291,11 +292,16 @@ func decodeAttention(w http.ResponseWriter, r *http.Request, out any) error {
 }
 
 type attentionResult struct {
-	EventID    int64      `json:"event_id"`
-	OK         bool       `json:"ok"`
-	Resolution int64      `json:"resolution_event_id,omitempty"`
-	Revision   *time.Time `json:"revision,omitempty"`
-	Error      string     `json:"error,omitempty"`
+	EventID                        int64      `json:"event_id"`
+	OK                             bool       `json:"ok"`
+	Resolution                     int64      `json:"resolution_event_id,omitempty"`
+	Revision                       *time.Time `json:"revision,omitempty"`
+	Error                          string     `json:"error,omitempty"`
+	ReleaseID                      string     `json:"release_id,omitempty"`
+	ReleaseRevision                int64      `json:"release_revision,omitempty"`
+	PreviousReleaseRevision        int64      `json:"previous_release_revision,omitempty"`
+	ReleaseProjectRevision         int64      `json:"release_project_revision,omitempty"`
+	PreviousReleaseProjectRevision int64      `json:"previous_release_project_revision,omitempty"`
 }
 
 func (m *Module) attentionActions(w http.ResponseWriter, r *http.Request) {
@@ -324,6 +330,9 @@ func (m *Module) attentionActions(w http.ResponseWriter, r *http.Request) {
 	out := struct {
 		Items []attentionResult `json:"items"`
 	}{Items: []attentionResult{}}
+	// Only revisions advanced by committed items in this request may be rebased.
+	// A later external write still fails the equality check under the tenant fence.
+	advances := map[string]attentionReleaseAdvance{}
 	for _, item := range in.Items {
 		result := attentionResult{EventID: item.EventID}
 		// Independent transactions make failures precise and bound each lock hold.
@@ -340,7 +349,7 @@ func (m *Module) attentionActions(w http.ResponseWriter, r *http.Request) {
 			if err := db.SetLocalStatementTimeout(ctx, tx, 8*time.Second); err != nil {
 				return err
 			}
-			return m.resolveAttention(ctx, tx, p, in.Action, item, &result)
+			return m.resolveAttention(ctx, tx, p, in.Action, item, &result, advances)
 		})
 		if err != nil {
 			result.Error = "The suggestion could not be changed. Try again."
@@ -355,6 +364,16 @@ func (m *Module) attentionActions(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			result.OK = true
+			if result.ReleaseID != "" && (in.Action == "apply" || in.Action == "undo") {
+				advance, found := advances[result.ReleaseID]
+				if !found {
+					advance.Original = item.ReleaseRevision
+					advance.OriginalProject = item.ReleaseProjectRevision
+				}
+				advance.Current = result.ReleaseRevision
+				advance.CurrentProject = result.ReleaseProjectRevision
+				advances[result.ReleaseID] = advance
+			}
 		}
 		out.Items = append(out.Items, result)
 	}
@@ -370,7 +389,36 @@ type attentionResolution struct {
 	Membership int64  `json:"membership_event_id,omitempty"`
 }
 
-func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Principal, action string, in attentionInput, out *attentionResult) error {
+type attentionReleaseAdvance struct{ Original, Current, OriginalProject, CurrentProject int64 }
+
+// Membership snapshots already carry the authoritative revisions, so this
+// projection needs no queries or resource locks after the event counter.
+func attentionReleaseResult(out *attentionResult, change events.Change) error {
+	var before, after struct {
+		ReleaseID       string `json:"release_node_id"`
+		Revision        int64  `json:"release_revision"`
+		ProjectRevision int64  `json:"project_revision"`
+	}
+	raw, err := json.Marshal(change.Before)
+	if err != nil {
+		return err
+	}
+	if err = json.Unmarshal(raw, &before); err != nil {
+		return err
+	}
+	raw, err = json.Marshal(change.After)
+	if err != nil {
+		return err
+	}
+	if err = json.Unmarshal(raw, &after); err != nil {
+		return err
+	}
+	out.ReleaseID, out.ReleaseRevision, out.PreviousReleaseRevision = after.ReleaseID, after.Revision, before.Revision
+	out.ReleaseProjectRevision, out.PreviousReleaseProjectRevision = after.ProjectRevision, before.ProjectRevision
+	return nil
+}
+
+func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Principal, action string, in attentionInput, out *attentionResult, advances map[string]attentionReleaseAdvance) error {
 	c, before, err := loadCandidate(ctx, tx, in.NodeID, time.Now().UTC())
 	if err != nil {
 		return err
@@ -386,7 +434,7 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 		return events.ErrConflict
 	}
 	if action == "undo" {
-		return m.undoAttention(ctx, tx, p, in, c, before, out)
+		return m.undoAttention(ctx, tx, p, in, c, before, out, advances)
 	}
 	var item attentionItem
 	err = tx.QueryRow(ctx, attentionCTE+`SELECT event_id,node_id::text,key,title,coalesce(project_id::text,''),revision,kind,source,target,reason,at,stale FROM filtered WHERE event_id=$5 AND node_id=$6`, "", "", "", "", in.EventID, in.NodeID).Scan(&item.EventID, &item.NodeID, &item.Key, &item.Title, &item.ProjectID, &item.Revision, &item.Kind, &item.From, &item.To, &item.Reason, &item.At, &item.stale)
@@ -444,7 +492,11 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			return events.ErrConflict
 		}
 		if item.To == "release" {
-			if in.ReleaseID != item.ReleaseID || in.ReleaseRevision != item.ReleaseRevision {
+			expected, expectedProject := in.ReleaseRevision, in.ReleaseProjectRevision
+			if advance, found := advances[in.ReleaseID]; found && expected == advance.Original && expectedProject == advance.OriginalProject && item.ReleaseRevision == advance.Current && item.ReleaseProjectRevision == advance.CurrentProject {
+				expected, expectedProject = advance.Current, advance.CurrentProject
+			}
+			if in.ReleaseID != item.ReleaseID || expected != item.ReleaseRevision || expectedProject != 0 && expectedProject != item.ReleaseProjectRevision {
 				return events.ErrConflict
 			}
 			// Acquire membership's pairing fence before node/resource locks in this path
@@ -459,6 +511,9 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			}
 			change, err := releases.AddMissedReleaseTx(ctx, tx, p, *c.Node.ProjectID, item.ReleaseID, in.NodeID, item.ReleaseRevision)
 			if err != nil {
+				return err
+			}
+			if err = attentionReleaseResult(out, change); err != nil {
 				return err
 			}
 			membershipChange = &change
@@ -517,17 +572,29 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 	out.Revision = &revision
 	return nil
 }
-func (m *Module) undoAttention(ctx context.Context, tx pgx.Tx, p tenant.Principal, in attentionInput, c candidate, current []byte, out *attentionResult) error {
+func (m *Module) undoAttention(ctx context.Context, tx pgx.Tx, p tenant.Principal, in attentionInput, c candidate, current []byte, out *attentionResult, advances map[string]attentionReleaseAdvance) error {
 	var e events.Event
 	var meta []byte
 	var nodeID string
 	var used bool
-	err := tx.QueryRow(ctx, `SELECT id,node_id::text,type,before,after,metadata,EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id)
- FROM events e WHERE id=$1 AND node_id=$2 AND type IN ('status_autopilot.attention_apply','status_autopilot.attention_dismiss')`, in.Resolution, in.NodeID).Scan(&e.ID, &nodeID, &e.Type, &e.Before, &e.After, &meta, &used)
+	err := tx.QueryRow(ctx, `SELECT id,actor_principal_id::text,node_id::text,type,before,after,metadata,EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id)
+ FROM events e WHERE id=$1 AND node_id=$2 AND type IN ('status_autopilot.attention_apply','status_autopilot.attention_dismiss')`, in.Resolution, in.NodeID).Scan(&e.ID, &e.ActorPrincipalID, &nodeID, &e.Type, &e.Before, &e.After, &meta, &used)
 	if err != nil {
 		return err
 	}
 	e.NodeID = &nodeID
+	scope := authz.Scope{}
+	if c.Node.ProjectID != nil {
+		scope.ProjectID = *c.Node.ProjectID
+	}
+	if err = authz.RequireTx(ctx, tx, p, "events.undo", scope); err != nil {
+		return err
+	}
+	if e.ActorPrincipalID != p.ID {
+		if err = authz.RequireTx(ctx, tx, p, "events.undo_other", scope); err != nil {
+			return err
+		}
+	}
 	var metadata struct {
 		Resolution attentionResolution `json:"resolution"`
 	}
@@ -550,11 +617,26 @@ func (m *Module) undoAttention(ctx context.Context, tx pgx.Tx, p tenant.Principa
 			return err
 		}
 		member.Type = "journey.release_membership_changed"
-		change, err := releases.UndoHandlers()[member.Type](ctx, tx, p, member)
+		var change events.Change
+		if in.ReleaseProjectRevision > 0 {
+			if member.NodeID == nil || in.ReleaseID != *member.NodeID {
+				return events.ErrConflict
+			}
+			revision, projectRevision := in.ReleaseRevision, in.ReleaseProjectRevision
+			if advance, found := advances[in.ReleaseID]; found && revision == advance.Original && projectRevision == advance.OriginalProject {
+				revision, projectRevision = advance.Current, advance.CurrentProject
+			}
+			change, err = releases.UndoMissedReleaseTx(ctx, tx, p, member, in.NodeID, revision, projectRevision)
+		} else {
+			change, err = releases.UndoHandlers()[member.Type](ctx, tx, p, member)
+		}
 		if err != nil {
 			return err
 		}
 		change.UndoOf = &member.ID
+		if err = attentionReleaseResult(out, change); err != nil {
+			return err
+		}
 		membershipUndo = &change
 	}
 	marks, err := json.Marshal(before.Marks)

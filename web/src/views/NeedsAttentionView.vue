@@ -2,9 +2,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ATTENTION_KINDS, actOnAttention, attentionIdentity, listAttention, type AttentionFacet, type AttentionFilters, type AttentionItem, type AttentionPage } from '../lib/attention'
+import { ATTENTION_KINDS, actOnAttention, attentionIdentity, refreshAttentionRelease, listAttention, type AttentionFacet, type AttentionFilters, type AttentionItem, type AttentionPage } from '../lib/attention'
 import { createScope, scopeOwner } from '../lib/identityScope'
-import { toast, dismiss } from '../lib/toast'
+import { toast, dismiss, toastBottomClearance } from '../lib/toast'
 import { statusMeta, relativeTime } from '../lib/work'
 import { useSession } from '../stores/session'
 import { useProjects } from '../stores/projects'
@@ -24,6 +24,19 @@ const rows = ref<Row[]>([]), counts = ref<AttentionPage['counts']>({}), total = 
 const facets = ref<AttentionPage['facets']>({ projects: [], assignees: [] }), truncated = ref(false)
 const next = ref<string | null>(null), loading = ref(false), busy = ref(false), error = ref('')
 const selected = ref(new Set<number>()), search = ref(''), sentinel = ref<HTMLElement>(), undoToast = ref<number>()
+const selectionBar = ref<HTMLElement>()
+let selectionResize: ResizeObserver | undefined
+function measureSelection() {
+  const bar = selectionBar.value
+  // Keep the footer's animated height in CSS, so toasts follow its show/hide
+  // without waiting for a size change in the selection bar.
+  const footer = bar ? parseFloat(getComputedStyle(bar).getPropertyValue('--footer-h')) || 0 : 0
+  toastBottomClearance.value = bar ? window.innerHeight - bar.getBoundingClientRect().top - footer : 0
+}
+watch(selectionBar, bar => {
+  selectionResize?.disconnect(); measureSelection()
+  if (bar) { selectionResize = new ResizeObserver(measureSelection); selectionResize.observe(bar) }
+}, { flush: 'post' })
 const menu = ref<{ type: 'kind' | 'project_id' | 'assignee'; anchor: HTMLElement } | null>(null)
 let generation = 0, searchTimer: ReturnType<typeof setTimeout> | undefined, observer: IntersectionObserver | undefined
 const filters = computed<AttentionFilters>(() => ({ kind: String(route.query.kind ?? ''), project_id: String(route.query.project_id ?? ''), assignee: String(route.query.assignee ?? ''), q: String(route.query.q ?? '') }))
@@ -44,7 +57,7 @@ function setFilter(field: keyof AttentionFilters, value: string) {
   void router.replace({ path: '/tickets', query })
 }
 function resetVisit() {
-  generation++; reads.cancel(); rows.value = []; selected.value.clear(); counts.value = {}; total.value = 0; next.value = null; error.value = ''; busy.value = false; loading.value = false
+  generation++; reads.cancel(); rows.value = []; selected.value.clear(); counts.value = {}; facets.value = { projects: [], assignees: [] }; truncated.value = false; toastBottomClearance.value = 0; total.value = 0; next.value = null; error.value = ''; busy.value = false; loading.value = false
   closeMenu(false); if (undoToast.value) dismiss(undoToast.value)
 }
 function load(more = false) {
@@ -60,7 +73,7 @@ function load(more = false) {
 }
 watch([() => scopeOwner(session.identity), filters], () => {
   clearTimeout(searchTimer); scope.reset(); resetVisit(); search.value = filters.value.q; load()
-}, { immediate: true })
+}, { immediate: true, flush: 'sync' })
 watch(search, value => { if (value === filters.value.q) return; clearTimeout(searchTimer); searchTimer = setTimeout(() => setFilter('q', value.slice(0, 200)), 250) })
 function select(row: Row) {
   if (busy.value || row.resolved || !row.editable) return
@@ -86,6 +99,12 @@ function act(action: 'apply' | 'dismiss' | 'undo', targets: Row[], focusID?: num
       const result = response.items.find(result => result.event_id === target.event_id)
       if (!result?.ok || !result.revision || (action !== 'undo' && !result.resolution_event_id)) {
         row.failure = result?.error ?? 'The change could not be confirmed. Reload before trying again.'; failures.push(`${row.key}: ${row.failure}`); continue
+      }
+      // Advance only rows bound to the release revision this write verified.
+      // Other captured identities still need a reload after external changes.
+      if (result.release_id && result.release_revision !== undefined && result.previous_release_revision !== undefined) {
+        refreshAttentionRelease(rows.value, result)
+        row.release_id = result.release_id; row.release_revision = result.release_revision; row.release_project_revision = result.release_project_revision
       }
       row.revision = result.revision; row.failure = ''; row.resolution_event_id = result.resolution_event_id
       if (action === 'undo') { row.resolved = undefined; counts.value[row.kind] = (counts.value[row.kind] ?? 0) + 1; total.value++ }
@@ -130,10 +149,11 @@ function keys(event: KeyboardEvent) {
 onMounted(() => {
   void projects.load()
   window.addEventListener('keydown', keys)
+  window.addEventListener('resize', measureSelection)
   observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting) && !error.value) load(true) }, { rootMargin: '200px' })
   if (sentinel.value) observer.observe(sentinel.value)
 })
-onBeforeUnmount(() => { generation++; scope.dispose(); observer?.disconnect(); clearTimeout(searchTimer); window.removeEventListener('keydown', keys); if (undoToast.value) dismiss(undoToast.value) })
+onBeforeUnmount(() => { generation++; scope.dispose(); observer?.disconnect(); selectionResize?.disconnect(); toastBottomClearance.value = 0; window.removeEventListener('resize', measureSelection); clearTimeout(searchTimer); window.removeEventListener('keydown', keys); if (undoToast.value) dismiss(undoToast.value) })
 </script>
 
 <template>
@@ -192,7 +212,7 @@ onBeforeUnmount(() => { generation++; scope.dispose(); observer?.disconnect(); c
       <button v-else-if="next" type="button" class="btn sm" :disabled="loading" @click="load(true)">{{ loading ? 'Loading…' : 'Load 50 more' }}</button>
       <span ref="sentinel" class="sentinel" aria-hidden="true" />
     </div>
-    <div v-if="chosen.length" class="selection-dock"><div class="selection-bar" role="toolbar" aria-label="Selected tickets"><span><b>{{ chosen.length }}</b> selected</span><span class="selection-hint">Apply uses each row’s own suggestion</span><button type="button" class="btn sm primary" :disabled="busy || chosen.some(row => !row.applicable)" @click="act('apply', chosen)">Apply {{ chosen.length }}</button><button type="button" class="btn sm" :disabled="busy" @click="act('dismiss', chosen)">Dismiss {{ chosen.length }}</button><button type="button" class="btn sm ghost" aria-label="Clear the selection" :disabled="busy" @click="selected.clear()"><AppIcon name="close" :size="13" />Clear<KeyCap k="esc" /></button></div></div>
+    <div v-if="chosen.length" class="selection-dock"><div ref="selectionBar" class="selection-bar" role="toolbar" aria-label="Selected tickets"><span><b>{{ chosen.length }}</b> selected</span><span class="selection-hint">Apply uses each row’s own suggestion</span><button type="button" class="btn sm primary" :disabled="busy || chosen.some(row => !row.applicable)" @click="act('apply', chosen)">Apply {{ chosen.length }}</button><button type="button" class="btn sm" :disabled="busy" @click="act('dismiss', chosen)">Dismiss {{ chosen.length }}</button><button type="button" class="btn sm ghost" aria-label="Clear the selection" :disabled="busy" @click="selected.clear()"><AppIcon name="close" :size="13" />Clear<KeyCap k="esc" /></button></div></div>
     <FloatingPanel v-if="menu" :anchor="menu.anchor" :label="`${facetLabel(menu.type)} filter`" @close="closeMenu">
       <div class="facet-menu" @keydown="menuKeys" role="menu" :aria-label="`${facetLabel(menu.type)} filter`"><button v-for="option in options" :key="option.id" type="button" role="menuitemradio" :aria-checked="filters[menu.type] === option.id" :data-autofocus="filters[menu.type] === option.id ? '' : undefined" @click="setFilter(menu!.type, option.id)"><span v-clip-tip>{{ option.label }}</span><AppIcon v-if="filters[menu.type] === option.id" name="check" :size="13" /></button></div><p v-if="truncated" class="facet-note">Only the first 100 facet choices are shown. Search narrows the ticket list.</p>
     </FloatingPanel>

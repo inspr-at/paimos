@@ -20,13 +20,15 @@ async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fa
   const live = new Map(items.map(item => [item.event_id, { ...item }]))
   const actions: { action: string; items: AttentionItem[] }[] = [], queries: URLSearchParams[] = []
   let fail = options.fail ?? false
+  let releaseRevision = items.find(item => item.release_id)?.release_revision ?? 0
+  let projectRevision = items.find(item => item.release_id)?.release_project_revision ?? 0
   await page.route('**/api/status-autopilot/attention**', async route => {
     const request = route.request(), url = new URL(request.url())
     if (url.pathname.endsWith('/actions')) {
       const body = request.postDataJSON() as { action: string; items: AttentionItem[] }; actions.push(body)
       const results: AttentionResult[] = body.items.map(item => {
         if (options.partial && item.event_id === 2) return { event_id: 2, ok: false, error: 'The ticket changed. Reload before trying again.' }
-        return { event_id: item.event_id, ok: true, resolution_event_id: body.action === 'undo' ? undefined : item.event_id + 1000, revision: body.action === 'undo' ? '2026-10-05T09:00:00Z' : '2026-10-05T08:00:00Z' }
+        return { event_id: item.event_id, ok: true, resolution_event_id: body.action === 'undo' ? undefined : item.event_id + 1000, revision: body.action === 'undo' ? '2026-10-05T09:00:00Z' : '2026-10-05T08:00:00Z', ...(item.release_id ? { release_id: item.release_id, previous_release_revision: releaseRevision, release_revision: ++releaseRevision, previous_release_project_revision: projectRevision, release_project_revision: ++projectRevision } : {}) }
       })
       options.received?.(); if (options.held) await options.held
       return route.fulfill({ json: { items: results } }).catch(() => {})
@@ -36,7 +38,7 @@ async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fa
     const q = url.searchParams, filtered = [...live.values()].filter(item => (!q.get('kind') || item.kind === q.get('kind')) && (!q.get('project_id') || item.project_id === q.get('project_id')) && (!q.get('q') || item.title.toLowerCase().includes(q.get('q')!.toLowerCase())))
     const offset = q.has('after') ? 50 : 0
     return route.fulfill({ json: { items: filtered.slice(offset, offset + 50), total: filtered.length, counts: { proposed: 0, triage: items.filter(i => i.kind === 'triage').length, cancel: items.filter(i => i.kind === 'cancel').length, blocked: 0, missed: 0 }, next_cursor: filtered.length > offset + 50 ? 'second-page' : null,
-      facets: { projects: [{ id: 'p-aeon', label: 'AEON Aeon' }, { id: 'p-pharos', label: 'PHAROS Pharos' }], assignees: [] }, facets_truncated: false } })
+      facets: { projects: [{ id: 'p-aeon', label: 'AEON Aeon' }, { id: 'p-pharos', label: 'PHAROS Pharos' }], assignees: [{ id: 'old-person', label: 'Previous assignee' }] }, facets_truncated: false } })
   })
   return { actions, queries, recover: () => { fail = false } }
 }
@@ -145,4 +147,83 @@ test('an unavailable queue shows an honest error and Retry without moving its co
   data.recover()
   await guard.check(async () => { await page.getByRole('button', { name: 'Retry', exact: true }).click(); await expect(first(page)).toBeVisible() })
   guard.done()
+})
+
+for (const width of [390, 1024, 1440]) test(`partial results keep toasts above selection controls at ${width}px`, async ({ page }) => {
+ await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+ await setup(page, [row(0), row(1), row(2)], { partial: true })
+ await page.goto('/tickets?view=needs-attention')
+ for (const id of [1, 2, 3]) await table(page).locator(`[data-event-id="${id}"]`).getByRole('checkbox').click()
+ const bar = page.getByRole('toolbar', { name: 'Selected tickets' })
+ await bar.getByRole('button', { name: 'Apply 3' }).click()
+ await expect(bar).toContainText('1 selected')
+ await expect(page.locator('.toast.error')).toContainText('AEON-11')
+ for (const hidden of [false, true, false]) {
+  await page.locator('.app-shell').evaluate((el, hide) => el.classList.toggle('footer-hidden', hide), hidden)
+  await expect.poll(async () => {
+    const controls = await bar.boundingBox(), toasts = await page.locator('.toast-host').boundingBox()
+    if (!controls || !toasts || controls.height <= 0 || toasts.height <= 0) return false
+    return toasts.y + toasts.height <= controls.y - 8
+   }).toBe(true)
+ }
+ for (const theme of ['light', 'dark']) {
+  await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+  await page.screenshot({ path: `${shots}/attention-partial-${width}-${theme}.png`, fullPage: true })
+ }
+ await expect(bar.getByRole('button', { name: 'Dismiss 1' })).toBeVisible()
+ const offset = await page.locator('.toast-host').evaluate(el => parseFloat(getComputedStyle(el).bottom))
+ await bar.getByRole('button', { name: 'Clear the selection' }).click()
+ await expect(bar).toHaveCount(0)
+ await expect.poll(() => page.locator('.toast-host').evaluate(el => parseFloat(getComputedStyle(el).bottom))).toBeLessThan(offset)
+})
+
+for (const change of ['person', 'workspace'] as const) test(`${change} switch clears previous facets while the replacement read waits and fails`, async ({ page }) => {
+ await setup(page)
+ await page.goto('/tickets?view=needs-attention')
+ await expect(first(page)).toBeVisible()
+ await page.getByRole('button', { name: 'Project filter', exact: true }).click()
+ await expect(page.getByRole('menuitemradio', { name: 'PHAROS Pharos' })).toBeVisible()
+ await page.keyboard.press('Escape')
+ await page.getByRole('button', { name: 'Assignee filter', exact: true }).click()
+ await expect(page.getByRole('menuitemradio', { name: 'Previous assignee' })).toBeVisible()
+ let release!: () => void, received!: () => void
+ const held = new Promise<void>(resolve => { release = resolve }), started = new Promise<void>(resolve => { received = resolve })
+ await page.route('**/api/status-autopilot/attention?*', async route => { received(); await held; await route.fulfill({ status: 503, json: { error: 'unavailable' } }) })
+ await page.evaluate(async kind => {
+  // @ts-expect-error Vite serves the application's module in the isolated browser.
+  const { useSession } = await import('/src/stores/session.ts')
+  const session = useSession(), who = session.identity!
+  session.identity = kind === 'person' ? { ...who, principal: { ...who.principal, id: 'replacement-person' } } : { ...who, tenant: { ...who.tenant, id: 'replacement-workspace' } }
+ }, change)
+ await started
+ await expect(page.getByRole('menuitemradio', { name: 'Previous assignee' })).toHaveCount(0)
+ for (const name of ['Project', 'Assignee']) {
+  await page.getByRole('button', { name: `${name} filter`, exact: true }).click()
+  await expect(page.getByRole('menuitemradio', { name: 'PHAROS Pharos' })).toHaveCount(0)
+  await expect(page.getByRole('menuitemradio', { name: 'Previous assignee' })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+ }
+ release()
+ await expect(page.getByRole('alert')).toContainText('could not be loaded')
+ await page.getByRole('button', { name: 'Project filter', exact: true }).click()
+ await expect(page.getByRole('menuitemradio')).toHaveCount(1)
+ await page.keyboard.press('Escape')
+ await page.getByRole('button', { name: 'Assignee filter', exact: true }).click()
+ await expect(page.getByRole('menuitemradio')).toHaveCount(2)
+})
+
+test('release receipts refresh the retained row and siblings for subsequent Apply and Undo', async ({ page }) => {
+ const data = await setup(page, [row(0, { kind: 'missed', to: 'release', release_id: 'planning-release', release_revision: 7, release_project_revision: 4 }), row(1, { kind: 'missed', to: 'release', release_id: 'planning-release', release_revision: 7, release_project_revision: 4 })])
+ await page.goto('/tickets?view=needs-attention')
+ await first(page).getByRole('button', { name: /^Apply to/ }).click()
+ await expect(first(page)).toContainText('Applied')
+ await first(page).getByRole('button', { name: 'Undo for AEON-10' }).click()
+ await expect(first(page).getByRole('button', { name: /^Apply to/ })).toBeVisible()
+ expect(data.actions[1].items[0]).toMatchObject({ release_id: 'planning-release', release_revision: 8, release_project_revision: 5 })
+ await first(page).getByRole('button', { name: /^Apply to/ }).click()
+ await expect(first(page)).toContainText('Applied')
+ expect(data.actions[2].items[0]).toMatchObject({ release_id: 'planning-release', release_revision: 9, release_project_revision: 6 })
+ await table(page).locator('[data-event-id="2"]').getByRole('button', { name: /^Apply to/ }).click()
+ await expect(table(page).locator('[data-event-id="2"]')).toContainText('Applied')
+ expect(data.actions[3].items[0]).toMatchObject({ release_id: 'planning-release', release_revision: 10, release_project_revision: 7 })
 })

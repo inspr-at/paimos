@@ -436,6 +436,28 @@ func AddMissedReleaseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, proj
 	return result.change, err
 }
 
+// UndoMissedReleaseTx restores one attention membership against the project and
+// release identities currently on screen. This permits independent tickets to
+// be undone after other confirmed attention writes refreshed those identities.
+// The normal handler still fences permissions, current release, revisions and
+// the exact member state; external changes with stale identities still fail.
+func UndoMissedReleaseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, e events.Event, ticket string, releaseRevision, projectRevision int64) (events.Change, error) {
+	var before, after membershipSnapshot
+	if json.Unmarshal(e.Before, &before) != nil || json.Unmarshal(e.After, &after) != nil ||
+		len(before.Members) != 1 || len(after.Members) != 1 || len(before.Parents) != 0 || len(after.Parents) != 0 ||
+		before.Members[0].TicketID != ticket || after.Members[0].TicketID != ticket || before.Members[0].ReleaseID != nil ||
+		releaseRevision < after.ReleaseRevision || projectRevision < after.ProjectRevision {
+		return events.Change{}, events.ErrConflict
+	}
+	after.ReleaseRevision, after.ProjectRevision = releaseRevision, projectRevision
+	raw, err := json.Marshal(after)
+	if err != nil {
+		return events.Change{}, err
+	}
+	e.After = raw
+	return undoMembership(ctx, tx, p, e)
+}
+
 func closedTicketState(state string) bool {
 	switch state {
 	case "accepted", "delivered", "done", "cancelled", "canceled", "archived", "closed":

@@ -348,6 +348,7 @@ func TestAttentionMissedReleaseUsesPlanningMembershipAndUndo(t *testing.T) {
 	}
 	item.Resolution = result.Resolution
 	item.Revision = *result.Revision
+	item.ReleaseRevision, item.ReleaseProjectRevision = result.ReleaseRevision, result.ReleaseProjectRevision
 	result = attentionWrite(f, f.p, "undo", item.attentionInput)[0]
 	if !result.OK {
 		t.Fatalf("membership undo %+v", result)
@@ -434,5 +435,243 @@ func TestAttentionApplyAndUndoDeriveParentStatuses(t *testing.T) {
 	result = attentionWrite(f, f.p, "undo", item.attentionInput)[0]
 	if !result.OK || f.state(leaf).State != "blocked" || f.state(parent).State != "blocked" {
 		t.Fatalf("Undo did not derive parent from leaf: %+v", result)
+	}
+}
+
+func TestAttentionUndoRequiresPermissionAndActorOwnership(t *testing.T) {
+	for _, other := range []bool{false, true} {
+		t.Run(fmt.Sprintf("other_actor_%t", other), func(t *testing.T) {
+			f := setup(t)
+			f.add("AUT-2", "work", "new", 8, nil)
+			f.run(f.now)
+			editor := attentionMember(f)
+			var roleID string
+			f.tx(func(tx pgx.Tx) error {
+				if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'attention_editor','Attention editor') RETURNING id::text`, f.p.TenantID).Scan(&roleID); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, f.p.TenantID, roleID, []string{"nodes.read", "nodes.write"}); err != nil {
+					return err
+				}
+				if other {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'events.undo')`, f.p.TenantID, roleID); err != nil {
+						return err
+					}
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, editor.ID, roleID)
+				return err
+			})
+			actor := editor
+			if other {
+				actor = f.p
+			}
+			item := attentionRead(f, editor, "").Items[0]
+			applied := attentionWrite(f, actor, "apply", item.attentionInput)[0]
+			if !applied.OK {
+				t.Fatalf("apply: %+v", applied)
+			}
+			in := item.attentionInput
+			in.Revision, in.Resolution = *applied.Revision, applied.Resolution
+			result := attentionWrite(f, editor, "undo", in)[0]
+			if result.OK || !strings.Contains(result.Error, "no longer edit") || f.state(item.NodeID).State != "backlog" {
+				t.Fatalf("unauthorized undo: %+v", result)
+			}
+			f.tx(func(tx pgx.Tx) error {
+				var undone bool
+				if err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM events WHERE undo_of=$1)`, applied.Resolution).Scan(&undone); err != nil {
+					return err
+				}
+				if undone {
+					return fmt.Errorf("denied undo appended an event")
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT tenant_id,id,$1 FROM roles WHERE id=$2 ON CONFLICT DO NOTHING`, map[bool]string{false: "events.undo", true: "events.undo_other"}[other], roleID)
+				return err
+			})
+			if allowed := attentionWrite(f, editor, "undo", in)[0]; !allowed.OK || f.state(item.NodeID).State != "new" {
+				t.Fatalf("authorized undo: %+v", allowed)
+			}
+		})
+	}
+}
+
+func planningAttentionRelease(f *fixture) string {
+	f.t.Helper()
+	release := f.release(nil)
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(f.t.Context(), `UPDATE journey_releases SET state='planning',released_at=NULL,version=NULL,version_scheme=NULL WHERE release_node_id=$1`, release); err != nil {
+			return err
+		}
+		_, err := tx.Exec(f.t.Context(), `UPDATE journey_projects SET current_release_node_id=$1 WHERE project_node_id=$2`, release, f.project)
+		return err
+	})
+	return release
+}
+
+func TestAttentionBulkMissedReleaseSharesCapturedRevision(t *testing.T) {
+	f := setup(t)
+	for i := 2; i <= 4; i++ {
+		f.add(fmt.Sprintf("AUT-%d", i), "work", "done", 15, nil)
+	}
+	f.run(f.now)
+	release := planningAttentionRelease(f)
+	items := attentionRead(f, f.p, "").Items
+	if len(items) != 3 {
+		t.Fatalf("missed tickets: %+v", items)
+	}
+	results := attentionWrite(f, f.p, "apply", items[0].attentionInput, items[1].attentionInput)
+	for _, result := range results {
+		if !result.OK {
+			t.Fatalf("shared release bulk apply: %+v", results)
+		}
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var count int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM journey_tickets WHERE release_node_id=$1`, release).Scan(&count); err != nil {
+			return err
+		}
+		if count != 2 {
+			return fmt.Errorf("got %d members; want 2", count)
+		}
+		return nil
+	})
+	// A revision from outside this request must still be rejected.
+	stale := attentionWrite(f, f.p, "apply", items[2].attentionInput)[0]
+	if stale.OK || !strings.Contains(stale.Error, "changed") {
+		t.Fatalf("external stale release accepted: %+v", stale)
+	}
+}
+
+func TestAttentionMissedReleaseApplyUndoApplyRefreshesIdentity(t *testing.T) {
+	f := setup(t)
+	f.add("AUT-2", "work", "done", 15, nil)
+	f.run(f.now)
+	release := planningAttentionRelease(f)
+	in := attentionRead(f, f.p, "").Items[0].attentionInput
+	for _, action := range []string{"apply", "undo", "apply"} {
+		body, _ := json.Marshal(map[string]any{"action": action, "items": []attentionInput{in}})
+		var response struct {
+			Items []struct {
+				attentionResult
+				ReleaseID       string `json:"release_id"`
+				ReleaseRevision int64  `json:"release_revision"`
+			} `json:"items"`
+		}
+		if err := json.Unmarshal(f.call(f.p, "POST", "/api/status-autopilot/attention/actions", string(body), 200).Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		if len(response.Items) != 1 {
+			t.Fatalf("response: %+v", response)
+		}
+		result := response.Items[0]
+		if !result.OK || result.Revision == nil {
+			t.Fatalf("%s: %+v", action, result)
+		}
+		if result.ReleaseID != release || result.ReleaseRevision <= in.ReleaseRevision {
+			t.Fatalf("%s did not refresh release identity: %+v", action, result)
+		}
+		in.Revision, in.Resolution, in.ReleaseID, in.ReleaseRevision = *result.Revision, result.Resolution, result.ReleaseID, result.ReleaseRevision
+		in.ReleaseProjectRevision = result.attentionResult.ReleaseProjectRevision
+	}
+}
+
+func TestAttentionSharedReleaseBulkUndoUsesRefreshedFences(t *testing.T) {
+	f := setup(t)
+	f.add("AUT-2", "work", "done", 15, nil)
+	f.add("AUT-3", "work", "done", 15, nil)
+	f.run(f.now)
+	release := planningAttentionRelease(f)
+	items := attentionRead(f, f.p, "").Items
+	applied := attentionWrite(f, f.p, "apply", items[0].attentionInput, items[1].attentionInput)
+	for i := range items {
+		if !applied[i].OK {
+			t.Fatalf("apply: %+v", applied)
+		}
+		items[i].Revision, items[i].Resolution = *applied[i].Revision, applied[i].Resolution
+		items[i].ReleaseRevision, items[i].ReleaseProjectRevision = applied[1].ReleaseRevision, applied[1].ReleaseProjectRevision
+	}
+	// Even the oldest membership may be undone against freshly captured fences.
+	undone := attentionWrite(f, f.p, "undo", items[0].attentionInput, items[1].attentionInput)
+	for i := range items {
+		if !undone[i].OK {
+			t.Fatalf("bulk undo: %+v", undone)
+		}
+		items[i].Revision, items[i].Resolution = *undone[i].Revision, 0
+		items[i].ReleaseRevision, items[i].ReleaseProjectRevision = undone[1].ReleaseRevision, undone[1].ReleaseProjectRevision
+		if !f.state(items[i].NodeID).Marks["missed_release"] {
+			t.Fatal("missing restored flag")
+		}
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var n int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM journey_tickets WHERE release_node_id=$1`, release).Scan(&n); err != nil {
+			return err
+		}
+		if n != 0 {
+			return fmt.Errorf("retained %d members", n)
+		}
+		return nil
+	})
+	for _, result := range attentionWrite(f, f.p, "apply", items[0].attentionInput, items[1].attentionInput) {
+		if !result.OK {
+			t.Fatalf("reapply: %+v", result)
+		}
+	}
+}
+
+func TestAttentionReleaseUndoRejectsExternalProjectAndReleaseChanges(t *testing.T) {
+	for _, table := range []string{"journey_projects", "journey_releases", "journey_tickets"} {
+		t.Run(table, func(t *testing.T) {
+			f := setup(t)
+			f.add("AUT-2", "work", "done", 15, nil)
+			f.run(f.now)
+			release := planningAttentionRelease(f)
+			in := attentionRead(f, f.p, "").Items[0].attentionInput
+			applied := attentionWrite(f, f.p, "apply", in)[0]
+			if !applied.OK {
+				t.Fatalf("apply: %+v", applied)
+			}
+			in.Revision, in.Resolution = *applied.Revision, applied.Resolution
+			in.ReleaseRevision, in.ReleaseProjectRevision = applied.ReleaseRevision, applied.ReleaseProjectRevision
+			f.tx(func(tx pgx.Tx) error {
+				if table == "journey_tickets" {
+					if _, err := tx.Exec(t.Context(), `UPDATE journey_tickets SET walker_position=999 WHERE ticket_node_id=$1`, in.NodeID); err != nil {
+						return err
+					}
+					if _, err := tx.Exec(t.Context(), `UPDATE journey_releases SET revision=revision+1 WHERE release_node_id=$1`, release); err != nil {
+						return err
+					}
+					_, err := tx.Exec(t.Context(), `UPDATE journey_projects SET revision=revision+1 WHERE project_node_id=$1`, f.project)
+					// Fresh resource fences must not allow a changed member to be restored.
+					in.ReleaseRevision++
+					in.ReleaseProjectRevision++
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE `+table+` SET revision=revision+1 WHERE project_node_id=$1`, f.project)
+				return err
+			})
+			result := attentionWrite(f, f.p, "undo", in)[0]
+			if result.OK || !strings.Contains(result.Error, "changed") || f.state(in.NodeID).Marks["missed_release"] {
+				t.Fatalf("external change ignored: %+v", result)
+			}
+			f.tx(func(tx pgx.Tx) error {
+				var retained bool
+				if err := tx.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM journey_tickets WHERE ticket_node_id=$1 AND release_node_id=$2)`, in.NodeID, release).Scan(&retained); err != nil {
+					return err
+				}
+				if !retained {
+					return fmt.Errorf("conflicting undo removed member")
+				}
+				if table == "journey_tickets" {
+					var position int
+					if err := tx.QueryRow(t.Context(), `SELECT walker_position FROM journey_tickets WHERE ticket_node_id=$1`, in.NodeID).Scan(&position); err != nil {
+						return err
+					}
+					if position != 999 {
+						return fmt.Errorf("conflicting undo overwrote member position %d", position)
+					}
+				}
+				return nil
+			})
+		})
 	}
 }

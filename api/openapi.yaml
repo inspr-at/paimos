@@ -1314,6 +1314,14 @@ paths:
                         ok: {type: boolean}
                         resolution_event_id: {type: integer, format: int64}
                         revision: {type: string, format: date-time}
+                        release_id: {type: string, format: uuid}
+                        release_revision: {type: integer, format: int64}
+                        release_project_revision: {type: integer, format: int64}
+                        previous_release_project_revision: {type: integer, format: int64}
+                        previous_release_revision:
+                          type: integer
+                          format: int64
+                          description: Release revision verified before this committed change; refresh only identities matching it
                         error: {type: string}
         '400': {description: Invalid action or batch}
   /status-autopilot/changes:
@@ -12076,6 +12084,7 @@ components:
         resolution_event_id: {type: integer, format: int64}
         release_id: {type: string, format: uuid}
         release_revision: {type: integer, format: int64}
+        release_project_revision: {type: integer, format: int64}
     AutopilotAttentionItem:
       type: object
       required: [event_id, node_id, revision, key, title, project_id, kind, from, to, reason, at, editable, applicable]
@@ -12096,6 +12105,7 @@ components:
         unavailable_reason: {type: string}
         release_id: {type: string, format: uuid}
         release_revision: {type: integer, format: int64}
+        release_project_revision: {type: integer, format: int64}
         release_title: {type: string}
     AutopilotAttentionPage:
       type: object
