@@ -3,12 +3,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { select, validate, key } from '../../scripts/test-tiers/core.mjs'
-import { flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
+import { command, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
-import { command, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
-import { key, select, validate } from '../../scripts/test-tiers/core.mjs'
 import {
   balanceShards, checkCoverage, checkSpecInventory, discoverSpecs, loadManifest, main, parseArgs,
   parseShard, planCommands, planFlakeRetry, reconcileManifest, retryCount, selectChangedSpecs, validateManifest, mergeReports, webRoot,
