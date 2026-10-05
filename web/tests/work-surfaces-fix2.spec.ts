@@ -75,7 +75,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
       else if (++reads === 2) { started(); await held }
       await route.fulfill({ json: { revision, leaf: { name: `Arbeitsschritt ${revision}`, icon: '' }, levels: [] } })
     })
-    await page.goto('/settings/workspace')
+    await page.goto('/settings/vocabulary')
     const card = page.locator('#work-vocabulary'), reload = card.getByRole('button', { name: 'Reload', exact: true }), save = card.getByRole('button', { name: /Save names/ })
     await expect(card.getByLabel('Leaf name')).toHaveValue('Arbeitsschritt 1')
     await card.scrollIntoViewIfNeeded()

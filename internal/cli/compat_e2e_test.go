@@ -308,6 +308,12 @@ func TestCompatEndToEnd(t *testing.T) {
 	if err := bundleRT.harnessSessionFull("AEON", "worker", "json", session.ID); err != nil || !strings.Contains(bundleOut.String(), key) {
 		t.Fatalf("full bundle %s: %v", bundleOut.String(), err)
 	}
+	_, groups := decodeSessionBundle(t, bundleOut.Bytes())
+	for _, name := range []string{"work", "tickets", "tasks", "epics"} {
+		if len(groups[name]) != 1 || groups[name][0]["key"] != key || groups[name][0]["kind"] != "work" {
+			t.Fatalf("migrated full bundle %s: %#v", name, groups[name])
+		}
+	}
 
 	code, out, errOut = runCLI([]string{"paimos", "--config", missing, "onboard", "--project", "AEON", "--agent", "worker"}, "")
 	if code != 0 || !strings.Contains(out, "# Welcome to AEON") || !strings.Contains(out, "paimos session start --project AEON --agent worker") || strings.Contains(out, "## Recent context") {
