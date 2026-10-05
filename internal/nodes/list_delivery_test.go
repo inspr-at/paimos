@@ -63,6 +63,11 @@ func TestListDeliveryQueryValidation(t *testing.T) {
 
 func TestListDeliveryOrderFilterFacetAndPaging(t *testing.T) {
 	p := newPrincipal(t, "delivery-list")
+	// This regression exercises reviewed legacy placement kinds; the current
+	// starter catalog contains canonical Work instead.
+	for _, slug := range []string{"ticket", "task", "epic"} {
+		customKind(t, p, slug, slug)
+	}
 	kinds := map[string]string{}
 	for _, kind := range []string{"project", "release", "ticket", "task", "epic"} {
 		kinds[kind] = kindBySlug(t, p, kind).ID

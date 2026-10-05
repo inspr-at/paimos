@@ -22,7 +22,7 @@ describe('release planning query', () => {
     const query = new URLSearchParams(planningQuery('project', filtersFromQuery({ q: 'beyond page one', status: 'done,!cancelled', assignee: 'mira,!lin', type: 'ticket,!epic', ships_in: 'none', closed: '1' }), ['done', 'cancelled']))
     expect(query.get('view')).toBe('planning'); expect(query.get('hide_closed')).toBe('false'); expect(query.get('q')).toBe('beyond page one')
     expect(query.getAll('work_state')).toContain('done'); expect(query.getAll('work_state')).toContain('!cancelled')
-    expect(query.getAll('assignee')).toEqual(['mira', '!lin']); expect(query.getAll('kind')).toEqual(['ticket']) // Ticket helper resolves redundant excluded alternatives.
+    expect(query.getAll('assignee')).toEqual(['mira', '!lin']); expect(query.getAll('kind')).toEqual(['ticket', '!epic']) // Main preserves explicit exclusions for canonical Work aliases.
     expect(query.has('state')).toBe(false); expect(query.has('ships_in')).toBe(false); expect(query.getAll('hide_state')).toEqual(['done', 'cancelled'])
   })
   it('bounds UTF-8 search before work', () => { expect(() => planningQuery('project', filtersFromQuery({ q: 'ä'.repeat(101) }))).toThrow('200 UTF-8') })

@@ -14,6 +14,7 @@ import (
 
 func TestListDefersUnfilteredAssigneesUntilPage(t *testing.T) {
 	p := newPrincipal(t, "page-assignee-work")
+	customKind(t, p, "ticket", "ticket")
 	person := addPrincipalIn(t, p.TenantID, "Page person")
 	project, ticket := kindBySlug(t, p, "project"), kindBySlug(t, p, "ticket")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Page assignees"}`)
