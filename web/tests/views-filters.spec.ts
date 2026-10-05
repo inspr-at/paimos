@@ -5,6 +5,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { fixtures, me, mockView, mockWork, watchErrors, type Call, type Fixtures } from './work-fixtures'
+import { controlStability } from './control-stability'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
 
@@ -411,4 +412,43 @@ for (const width of [1920, 1440, 1280, 1024, 390]) {
       expect(Math.abs(viewsBox!.y - createBox!.y)).toBeLessThan(6)
     }
   })
+}
+
+for (const width of [390, 1024, 1440]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`project attention navigation fits and stays still at ${width}px in ${colorScheme}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.emulateMedia({ colorScheme })
+      const data = world()
+      data.views.push(
+        mockView({ id: MINE, name: 'Meine offenen Aufgaben vor der nächsten Veröffentlichung', filters: { assignee: me.id } }),
+        mockView({ id: SHARED, name: 'Gemeinsame Aufgaben für die nächste Veröffentlichung', owner_principal_id: mira, shared: true }),
+        mockView({ id: '11111111-aaaa-4aaa-8aaa-000000000003', name: 'Veröffentlichung v4.8.0', shared: true }),
+      )
+      await mockWork(page, data)
+      await page.goto(`/p/PHAROS?assignee=${me.id}&status=!done&v=${MINE}`)
+      await expect(rows(page).first()).toBeVisible()
+      await page.evaluate(() => document.fonts.ready)
+      expect(await page.locator('#main').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+      const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
+      await expect(attention).toHaveAttribute('href', '/tickets?view=needs-attention&project_id=p-pharos')
+      const bounds = await attention.boundingBox()
+      expect(bounds!.height).toBeGreaterThanOrEqual(width === 390 ? 44 : 20)
+      expect(bounds!.x).toBeGreaterThanOrEqual(0)
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width)
+      const options = bar(page).getByRole('button', { name: /^Options for view/ })
+      const guard = await controlStability(page, {
+        attention,
+        sections: page.getByRole('tablist', { name: 'Project sections' }),
+        tickets: page.getByRole('tab', { name: 'Tickets', exact: true }),
+        views: bar(page),
+        options,
+      })
+      await guard.check(async () => { await attention.focus(); await attention.hover() })
+      await guard.check(async () => { await options.click(); await expect(page.getByRole('menuitem', { name: 'Rename' })).toBeVisible() })
+      await guard.check(async () => { await page.keyboard.press('Escape'); await expect(options).toBeFocused() })
+      guard.done()
+      await page.screenshot({ path: testInfo.outputPath(`project-attention-${width}-${colorScheme}.png`), fullPage: true })
+    })
+  }
 }

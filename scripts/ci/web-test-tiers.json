@@ -7466,6 +7466,18 @@
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"home attention entry fits and stays still at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"project attention navigation fits and stays still at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"home attention entry fits and stays still at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"project attention navigation fits and stays still at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"home attention entry fits and stays still at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"project attention navigation fits and stays still at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"home attention entry fits and stays still at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"project attention navigation fits and stays still at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"home attention entry fits and stays still at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"project attention navigation fits and stays still at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"home attention entry fits and stays still at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"project attention navigation fits and stays still at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
   ]
 }

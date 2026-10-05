@@ -2092,7 +2092,11 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
   .project-page[class*="header-"] .head-stats > .project-status-counts { grid-area: stats; }
   .project-page[class*="header-"] .progress-line { grid-area: progress; width: 96px; }
   .progress-label { display: none; }
-  .project-navigation { margin-top: 8px; min-height: 52px; gap: 6px; }
+  .project-navigation { margin-top: 8px; min-height: 52px; gap: 6px; flex-wrap: wrap; }
+  .attention-view-link { flex: none; min-height: 44px; }
+  /* Saved views keep their own scrollable row below the project navigation. */
+  .project-navigation .view-bar { flex-basis: 100%; }
+  .project-navigation .nav-divider { display: none; }
   .project-navigation :deep(.sections button:not([aria-selected="true"])) { flex: none; width: 44px; padding: 0; }
   .project-navigation :deep(.sections button:not([aria-selected="true"]) .tab-label) { display: none; }
   .project-navigation :deep(.view-bar) { padding: 0; }

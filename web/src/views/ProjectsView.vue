@@ -1008,6 +1008,7 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
 @media (max-width: 760px) {
   .projects-page { padding: 14px 12px 28px; }
   .page-head { margin-bottom: 14px; padding: 0 4px; }
+  .attention-link { min-height: 44px; }
   .projects-toolbar { grid-template-columns: minmax(0, 1fr); grid-template-areas: "search" "chips" "tools"; gap: 10px; padding: 12px; }
   .project-search .field { height: 44px; font-size: 16px; }
   .chips-skeleton { height: 44px; }
