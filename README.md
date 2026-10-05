@@ -1806,6 +1806,38 @@ heartbeats use the returned session id and lease with `--eta-ready +10m
 --progress 40`, or keep `pct`, `remaining_min` and `note` current in the reporter's
 status file. Each concurrent job needs its own private state directory.
 
+Lead decision evidence (AEON-737) uses the existing project event log. An active
+coordinator generation records bounded, typed metadata with
+`aeon harness decision --project AEON --session UUID --body-file decision.json
+--worker-lease-file PATH`. Only its owning agent and exact generation lease can
+write; current project permission is checked inside the fenced transaction,
+including on replay. Identical `request_id` metadata replays its original event;
+different metadata or a different generation returns a conflict.
+Migration `1263` enforces request uniqueness per tenant and project even when
+a referenced ticket moves out of the coordinator's visibility. Reusing that
+identity for otherwise valid evidence returns a redacted 409, retaining the
+hidden snapshot and rolling back the failed append's event-counter allocation.
+Replay and history still obey event visibility and current authorization.
+
+`aeon project decisions AEON --limit 50 [--after EVENT-ID] [--session UUID]`
+reads a page of redacted reports, with `--json` preserving all evidence and the
+next-page cursor. Project members can read policy scope/revision, attempts,
+reason codes, gate observation times and same-project result links. Review
+links freeze the existing exact base/head commit and provider-family binding.
+`previous_event_id` links a report to an earlier decision for the same ticket;
+attempts may stay the same or advance by one, capped at 32. Existing run IDs
+identify assignments. A `partial` outcome requires `partial_result`; unavailable
+forecasts, model escalation, login selection and connection/process failures
+retain separate reason codes. Prompts, arbitrary
+URLs, account identities and quota values are rejected. Admission reports
+require dial, harness, account-room and host-load readings; unreadable readings,
+missing timestamps and readings older than 120 seconds or in the future produce
+a visible wait. Freshness stays frozen when replayed. These are coordinator
+reports, not launch receipts, verified review verdicts or execution grants;
+recording never starts work, opens a review gate, merges or deploys. The future
+lead executor must supply this evidence alongside its existing admission path.
+Automatic production launch remains gated by AEON-603 and OPS qualification.
+
 The Sessions table retains its existing design, adds a separate **Host** column,
 and calls the intended result column **Name**. Host identity is the exact
 registered `--host`; `run-heartbeat` defaults to the short OS hostname (the part
