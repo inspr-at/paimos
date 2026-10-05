@@ -114,20 +114,33 @@ export function select(tests, { event, paths, imports = {}, webImports = {}, for
     tests: tests.filter(t => t.tier === 'ESSENTIAL' || (t.kind === 'go' ? go.has(t.package) : web.has(t.file))) }
 }
 
+export function measuredWeights(manifest, rows) {
+  const weights = {}
+  for (const [owner, timing] of Object.entries(manifest.timingWeights?.owners ?? {})) {
+    if (!Number.isFinite(timing.seconds) || timing.seconds < 0 || !Number.isSafeInteger(timing.selectedTests) || timing.selectedTests < 1) throw new Error(`Invalid measured timing: ${owner}`)
+    const selected = rows.filter(row => (row.kind === 'go' ? row.package : row.file) === owner && row.active !== false).length
+    weights[owner] = timing.seconds * selected / timing.selectedTests
+  }
+  return weights
+}
+
 export function shard(rows, index, count, weights = {}) {
   if (!Number.isInteger(count) || count < 1 || count > 64 || !Number.isInteger(index) || index < 1 || index > count) throw new Error('Invalid shard i/N')
   // Keep packages/files together to avoid compiling or launching a server for
-  // each individual test. Weights are old full-file timings, not measured tier costs.
+  // each individual test. Measured tier costs override historical/count estimates.
   const groups = new Map()
   for (const row of rows) {
     const owner = row.kind === 'go' ? row.package : row.file
     if (!groups.has(owner)) groups.set(owner, [])
     groups.get(owner).push(row)
   }
-  const bins = Array.from({length: count}, () => ({ weight: 0, rows: [] }))
+  const bins = Array.from({length: count}, () => ({ weight: 0, owners: 0, rows: [] }))
   for (const [owner, entries] of [...groups].sort(([a,ar],[b,br]) => (weights[b] ?? br.length)-(weights[a] ?? ar.length) || a.localeCompare(b))) {
-    const bin = bins.reduce((a,b) => b.weight < a.weight ? b : a)
+    // Zero-duration owners still need a shard. On equal loads prefer fewer
+    // owners, then retain shard order for a deterministic final tie-break.
+    const bin = bins.reduce((a,b) => b.weight < a.weight || (b.weight === a.weight && b.owners < a.owners) ? b : a)
     bin.rows.push(...entries)
+    bin.owners++
     bin.weight += weights[owner] ?? entries.length
   }
   return bins[index-1].rows
