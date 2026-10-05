@@ -9540,6 +9540,7 @@
     {"kind":"vitest","file":"tests/morning-briefing-view.unit.test.ts","name":"canonical work-order facts do not expose a parent omitted by visibility","tier":"GATED-FULL"},
     {"kind":"node","file":"tests/palette.test.ts","name":"canonical work survives palette exact-key and title results with scope and deduplication","tier":"GATED-FULL"},
     {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey parent groups count nested leaves once and exclude non-work children","tier":"GATED-FULL"},
+    {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey parent totals include every leaf beyond 64 ancestors","tier":"ESSENTIAL"},
     {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey grouping bounds cycles and retains legacy epic projection","tier":"GATED-FULL"},
     {"kind":"browser","file":"tests/morning-briefing.spec.ts","name":"canonical work briefing keeps human checks and linked order facts at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/morning-briefing.spec.ts","name":"canonical work briefing keeps human checks and linked order facts at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
