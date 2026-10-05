@@ -47,7 +47,7 @@ paths:
               properties:
                 expected_revision: {type: integer, minimum: 0}
       responses:
-        '200': {description: Explicit lead intent, with unavailable gates shown as waiting_for_room}
+        '200': {description: 'Explicit lead intent, with unavailable gates shown as waiting_for_room'}
         '403': {description: Person or live owner permission required}
         '409': {description: Revision conflict or predecessor exit is unconfirmed}
   /projects/{projectId}/lead/claim:
@@ -70,8 +70,8 @@ paths:
                 session_id: {type: string, format: uuid}
       responses:
         '200': {description: Bound generation or truthful admission wait}
-        '403': {description: Lease, live authority or owned intent rejected}
-        '409': {description: Concurrent claim, unconfirmed stop or revision conflict}
+        '403': {description: 'Lease, live authority or owned intent rejected'}
+        '409': {description: 'Concurrent claim, unconfirmed stop or revision conflict'}
   /projects/{projectId}/lead/pause:
     post:
       summary: Checkpoint and cooperatively pause the current lead
@@ -1310,7 +1310,7 @@ paths:
       responses:
         '200': {description: Selection, content: {application/json: {schema: {type: object, required: [entry], properties: {entry: {oneOf: [{$ref: '#/components/schemas/WorkQueueEntry'}, {type: 'null'}]}}}}}}
         '403': {$ref: '#/components/responses/Error'}
-        '409': {description: Lead proof missing, stale assignment, paused/revoked/archived lead, or mandatory admission unavailable}
+        '409': {description: 'Lead proof missing, stale assignment, paused/revoked/archived lead, or mandatory admission unavailable'}
   /settings/status-autopilot:
     get:
       operationId: getStatusAutopilot
@@ -17529,7 +17529,7 @@ components:
         ticket_id: {type: string, format: uuid}
         ticket_revision: {type: string, format: date-time}
         work_order_revision: {type: integer, format: int64, minimum: 1}
-        brief_sha256: {type: string, pattern: '^[a-f0-9]{64}$', description: SHA-256 of domain-separated canonical JSON title, body and ordered criterion descriptions; content is fetched through existing work-order/node APIs.}
+        brief_sha256: {type: string, pattern: '^[a-f0-9]{64}$', description: 'SHA-256 of domain-separated canonical JSON title, body and ordered criterion descriptions; content is fetched through existing work-order/node APIs.'}
         worktree_id: {type: string, pattern: '^[a-f0-9]{64}$'}
         state: {type: string, enum: [assigned, launch_unknown, launched, completed], description: Completed requires confirmed process exit or proof launch was not attempted. Silence and terminal labels do not prove exit.}
         accepted_at: {type: string, format: date-time}
