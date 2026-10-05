@@ -16,6 +16,7 @@ spec.loader.exec_module(module)
 class ProbeTest(unittest.TestCase):
     def setUp(self):
         self.requests = []
+        self.posts = []
         self.responses = {
             '/': (200, 'text/html', b'<html>previous SPA</html>'),
             '/api/health': {'status': 'ok', 'db': 'ok'},
@@ -34,6 +35,8 @@ class ProbeTest(unittest.TestCase):
             def do_GET(self):
                 owner.requests.append(self.path)
                 value = owner.responses.get(self.path, (404, 'application/json', b'{}'))
+                if callable(value):
+                    value = value()
                 if isinstance(value, dict):
                     value = (200, 'application/json', json.dumps(value).encode())
                 status, content_type, body = value
@@ -43,7 +46,8 @@ class ProbeTest(unittest.TestCase):
                 self.wfile.write(body)
 
             def do_POST(self):
-                self.rfile.read(int(self.headers.get('Content-Length', 0)))
+                body = json.loads(self.rfile.read(int(self.headers.get('Content-Length', 0))))
+                owner.posts.append((self.path, body))
                 self.do_GET()
 
             def log_message(self, *_args):
@@ -62,6 +66,37 @@ class ProbeTest(unittest.TestCase):
     def check(self):
         with contextlib.redirect_stdout(io.StringIO()):
             self.probe.check({'project': 'project', 'ticket': 'ticket'}, '260930115354.0.0')
+
+    def seed(self, kinds):
+        self.responses['/api/kinds'] = {'items': [
+            {'slug': slug, 'id': 'kind-' + slug} for slug in kinds]}
+        self.responses['/api/nodes'] = lambda: {
+            'id': 'ticket' if self.posts[-1][1].get('parent_id') else 'project'}
+        with contextlib.redirect_stdout(io.StringIO()):
+            state = self.probe.seed()
+            self.probe.check(state, '260930115354.0.0')
+        self.assertEqual(state, {'project': 'project', 'ticket': 'ticket'})
+        creates = [body for path, body in self.posts if path == '/api/nodes']
+        self.assertEqual(len(creates), 2)
+        self.assertEqual(creates[0]['kind_id'], 'kind-project')
+        self.assertEqual(creates[1]['parent_id'], state['project'])
+        return creates[1]
+
+    def test_seed_uses_canonical_work_kind_from_release_123(self):
+        self.assertEqual(self.seed(['project', 'work'])['kind_id'], 'kind-work')
+
+    def test_seed_prefers_canonical_work_when_ticket_is_also_present(self):
+        self.assertEqual(self.seed(['project', 'work', 'ticket'])['kind_id'], 'kind-work')
+
+    def test_seed_supports_previous_releases_with_ticket_kind(self):
+        self.assertEqual(self.seed(['project', 'ticket'])['kind_id'], 'kind-ticket')
+
+    def test_seed_rejects_missing_work_kind_before_creating_nodes(self):
+        self.responses['/api/kinds'] = {'items': [{'slug': 'project', 'id': 'kind-project'}]}
+        with contextlib.redirect_stdout(io.StringIO()):
+            with self.assertRaisesRegex(AssertionError, 'previous release has no supported work kind'):
+                self.probe.seed()
+        self.assertFalse(any(path == '/api/nodes' for path, _ in self.posts))
 
     def test_reads_existing_rows_after_healthy_startup(self):
         self.check()
