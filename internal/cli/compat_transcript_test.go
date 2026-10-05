@@ -241,7 +241,7 @@ func TestOnboardCompatTranscript(t *testing.T) {
 	defer srv.Close()
 	t.Setenv("PAIMOS_URL", srv.URL)
 	t.Setenv("PAIMOS_API_KEY", testKey)
-	path := filepath.Join(t.TempDir(), "briefing.md")
+	path := filepath.Join(t.TempDir(), "onboarding.md")
 	args := []string{"paimos", "--config", filepath.Join(t.TempDir(), "missing"), "onboard", "--project", "AEON", "--agent", "worker", "--out", path}
 	code, out, stderr := runCLI(args, "")
 	if code != 0 || stderr != "" || !strings.Contains(out, "wrote "+path) {
