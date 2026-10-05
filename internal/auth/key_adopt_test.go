@@ -181,11 +181,14 @@ func waitAdoptionContention(t *testing.T, ctx context.Context, pool *pgxpool.Poo
 			t.Fatal(ctx.Err())
 		default:
 		}
-		var waiting bool
-		if err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE NOT granted AND $1::int=ANY(pg_blocking_pids(pid)))`, blocker).Scan(&waiting); err != nil {
+		var waiting string
+		if err := pool.QueryRow(ctx, `SELECT coalesce((SELECT locktype FROM pg_locks WHERE NOT granted AND $1::int=ANY(pg_blocking_pids(pid)) LIMIT 1),'')`, blocker).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
-		if waiting {
+		if waiting != "" {
+			if waiting != "advisory" {
+				t.Fatalf("operation waited on %s instead of the key admission fence", waiting)
+			}
 			return
 		}
 		runtime.Gosched()
@@ -203,7 +206,7 @@ func TestAdoptAgentKeyConcurrentNoTakeover(t *testing.T) {
 	defer func() { cancel(); close(release) }()
 	pauseAdoption(m, entered, release)
 	first, second := make(chan error, 1), make(chan error, 1)
-	go func() { _, err := m.adoptAgentKey(ctx, owner, key.ID); first <- err }()
+	go func() { _, err := m.adoptAgentKey(tenant.WithPrincipal(ctx, owner), owner, key.ID); first <- err }()
 	var blocker uint32
 	select {
 	case blocker = <-entered:
@@ -212,7 +215,7 @@ func TestAdoptAgentKeyConcurrentNoTakeover(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	go func() { _, err := m.adoptAgentKey(ctx, editor, key.ID); second <- err }()
+	go func() { _, err := m.adoptAgentKey(tenant.WithPrincipal(ctx, editor), editor, key.ID); second <- err }()
 	waitAdoptionContention(t, ctx, m.pool, blocker, second)
 	release <- struct{}{}
 	if err := <-first; err != nil {
@@ -291,7 +294,7 @@ func TestAdoptAgentKeyRechecksPermissionInsideWrite(t *testing.T) {
 		return original(ctx, pool, tid, func(tx pgx.Tx) error { close(entered); <-release; return fn(tx) })
 	}
 	result := make(chan error, 1)
-	go func() { _, err := m.adoptAgentKey(ctx, editor, key.ID); result <- err }()
+	go func() { _, err := m.adoptAgentKey(tenant.WithPrincipal(ctx, editor), editor, key.ID); result <- err }()
 	<-entered
 	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, owner.TenantID); err != nil {
@@ -337,7 +340,7 @@ func TestAdoptAgentKeyRejectsStaleCreatorAuthority(t *testing.T) {
 	}
 	// This person can adopt keys but cannot read/write project data.
 	editor := keyScopeEditor(t, m, owner, "keys.manage")
-	if _, err := m.adoptAgentKey(t.Context(), editor, key.ID); err != nil {
+	if _, err := m.adoptAgentKey(tenant.WithPrincipal(t.Context(), editor), editor, key.ID); err != nil {
 		t.Fatal(err)
 	}
 	entered := false
@@ -403,7 +406,7 @@ func TestAdoptAgentKeyFencesQueuedCreatorlessRequest(t *testing.T) {
 	defer func() { cancel(); close(release) }()
 	pauseAdoption(m, entered, release)
 	adopted, used := make(chan error, 1), make(chan error, 1)
-	go func() { _, err := m.adoptAgentKey(ctx, editor, key.ID); adopted <- err }()
+	go func() { _, err := m.adoptAgentKey(tenant.WithPrincipal(ctx, editor), editor, key.ID); adopted <- err }()
 	var blocker uint32
 	select {
 	case blocker = <-entered:
@@ -473,7 +476,7 @@ func TestAdoptAgentKeyWaitsForAdmittedUse(t *testing.T) {
 	case <-ctx.Done():
 		t.Fatal(ctx.Err())
 	}
-	go func() { _, err := m.adoptAgentKey(ctx, editor, key.ID); adopted <- err }()
+	go func() { _, err := m.adoptAgentKey(tenant.WithPrincipal(ctx, editor), editor, key.ID); adopted <- err }()
 	waitAdoptionContention(t, ctx, m.pool, blocker, adopted)
 	release <- struct{}{}
 	if err := <-used; err != nil {

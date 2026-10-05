@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -70,7 +71,13 @@ func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(
 
 	// Set only tenant isolation until keyed admission validates the captured
 	// creator. Project visibility must never be built from a stale owner.
-	if _, err := tx.Exec(ctx, `SELECT set_config($1,$2,true)`, TenantSetting, tenantID); err != nil {
+	p, hasPrincipal := tenant.PrincipalFrom(ctx)
+	keyed := hasPrincipal && p.TenantID == tenantID && p.Kind == tenant.Agent && p.KeyID != ""
+	if keyed {
+		if _, err := tx.Exec(ctx, `SELECT set_config($1,$2,true)`, TenantSetting, tenantID); err != nil {
+			return fmt.Errorf("set tenant: %w", err)
+		}
+	} else if err := enterTenant(ctx, tx, tenantID); err != nil {
 		return fmt.Errorf("set tenant: %w", err)
 	}
 	if limit, ok := ctx.Value(readLimitKey{}).(*readLimit); ok {
@@ -81,13 +88,13 @@ func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(
 	if err := lockAgentScopeUse(ctx, tx, tenantID); err != nil {
 		return err
 	}
-	if p, ok := tenant.PrincipalFrom(ctx); ok && p.TenantID == tenantID {
+	if keyed {
 		if err := ValidateKeyCreatorTx(ctx, tx, p); err != nil {
 			return err
 		}
-	}
-	if err := enterTenant(ctx, tx, tenantID); err != nil {
-		return fmt.Errorf("set tenant visibility: %w", err)
+		if err := enterTenant(ctx, tx, tenantID); err != nil {
+			return fmt.Errorf("set tenant visibility: %w", err)
+		}
 	}
 	active, err := beginWorkStatus(ctx, tx)
 	if err != nil {
