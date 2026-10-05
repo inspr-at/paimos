@@ -4,6 +4,8 @@ import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
+import { command, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
+import { key, select, validate } from '../../scripts/test-tiers/core.mjs'
 import {
   balanceShards, checkCoverage, checkSpecInventory, discoverSpecs, loadManifest, main, parseArgs,
   parseShard, planCommands, planFlakeRetry, reconcileManifest, retryCount, selectChangedSpecs, validateManifest, mergeReports, webRoot,
@@ -17,6 +19,58 @@ const fixture = () => ({ version: 1, groups: [group('a', [9, 8, 7]), group('b', 
 const files = manifest => manifest.groups.flatMap(g => g.specs.map(s => s.file))
 // The real manifest plus any specs that landed on main since it was written (what every shard job runs).
 const effective = () => reconcileManifest(loadManifest(), discoverSpecs()).manifest
+
+test('AEON-697 attention spec gates exactly once with its native case count and safe launch policy', () => {
+  const manifest = loadManifest(), file = 'tests/needs-attention.spec.ts'
+  const owners = manifest.groups.filter(group => group.specs.some(spec => spec.file === file))
+  assert.equal(owners.length, 1, 'Needs attention must have exactly one source manifest owner')
+  const [owner] = owners
+  assert.notEqual(owner.gate, false, 'Needs attention regressions must gate CI')
+  assert.equal(owner.hostedOnly, true)
+  assert.equal(owner.config, 'playwright.ui.config.ts')
+  assert.deepEqual(owner.flags, ['--workers=1', '--trace=retain-on-failure'])
+  const report = JSON.parse(command(process.execPath, ['node_modules/@playwright/test/cli.js', 'test',
+    '-c', owner.config, file, '--list', '--reporter=json'], { cwd: webRoot }))
+  const collected = flattenBrowser(report, owner.config)
+  assert.ok(collected.length > 0, 'Native collection must find attention cases')
+  assert.equal(owner.specs.find(spec => spec.file === file).listedTests, collected.length)
+  for (const count of [1, 12, 256]) {
+    const shards = balanceShards(manifest, count)
+    const assigned = shards.flatMap(shard => shard.specs).filter(spec => spec.file === file)
+    assert.equal(assigned.length, 1, `${count} shards must run Needs attention once`)
+    const shard = shards.find(shard => shard.specs.some(spec => spec.file === file))
+    assert.equal(planCommands(manifest, shard, {}).filter(command => command.files.includes(file)).length, 1)
+  }
+})
+
+test('AEON-697 native attention cases are explicitly classified and retained in PR and full execution', () => {
+  const manifest = JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json', import.meta.url)))
+  const files = new Set(['tests/attention.unit.test.ts', 'tests/needs-attention.spec.ts'])
+  const unit = JSON.parse(command(process.execPath, ['node_modules/vitest/vitest.mjs', 'list',
+    'tests/attention.unit.test.ts', '--json', '--no-staticParse', '--maxWorkers=1', '--no-fileParallelism'], { cwd: webRoot }))
+    .map(row => ({ kind: 'vitest', file: 'tests/attention.unit.test.ts', name: row.name }))
+  const browser = flattenBrowser(JSON.parse(command(process.execPath, ['node_modules/@playwright/test/cli.js', 'test',
+    '-c', 'playwright.ui.config.ts', 'tests/needs-attention.spec.ts', '--list', '--reporter=json'], { cwd: webRoot })), 'playwright.ui.config.ts')
+  assert.ok(unit.length > 0 && browser.length > 0, 'Both native collectors must find attention cases')
+  const warnings = [], stored = { ...manifest, deleteCandidateGroups: [], tests: manifest.tests.filter(row => files.has(row.file)) }
+  assert.deepEqual(stored.tests.map(key).sort(), [...unit, ...browser].map(key).sort(), 'Every native attention case needs an explicit tier entry')
+  const rows = validate(stored, [...unit, ...browser], undefined, { strict: true, warn: warning => warnings.push(warning) })
+  assert.deepEqual(warnings, [])
+  assert.ok(rows.every(row => row.tier === 'ESSENTIAL' || row.tier === 'GATED-FULL'))
+  assert.ok(rows.filter(row => row.kind === 'vitest').every(row => row.tier === 'ESSENTIAL'), 'Resource revision guards must run on every PR')
+  for (const event of ['pull_request', 'merge_group']) {
+    const core = select(rows, { event, paths: ['README.md'] }).tests
+    for (const name of ['a delayed action cannot resolve a different filtered record or offer stale Undo',
+      'person switch clears previous facets while the replacement read waits and fails',
+      'workspace switch clears previous facets while the replacement read waits and fails',
+      'bulk Apply reports a partial result, retains every row, and Undo all reverses only confirmed writes',
+      'read-only rows and unavailable release targets explain their permissions before acting',
+      'release receipts refresh the retained row and siblings for subsequent Apply and Undo']) {
+      assert.ok(core.some(row => row.name === name), `${event} must retain ${name}`)
+    }
+    assert.deepEqual(select(rows, { event, forceFull: true }).tests.map(key).sort(), rows.map(key).sort())
+  }
+})
 
 test('source manifest accounts for every spec, including nested files, before reconciliation', () => {
   const manifest = loadManifest(), discovered = discoverSpecs(webRoot, manifest.specDirectories)
