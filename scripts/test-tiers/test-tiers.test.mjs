@@ -300,6 +300,22 @@ test('job accounting includes setup in minutes and reports missing artifacts rat
   assert.deepEqual(measurement.missingEvidence,['go-test-1'])
 })
 
+test('skipped jobs have no runner duration and cannot hide missing test evidence',()=>{
+  const skipped={name:'tree-reuse',status:'completed',conclusion:'skipped',
+    started_at:'2026-10-05T12:38:25Z',completed_at:'2026-10-05T12:38:24Z'}
+  for(const timestamps of [{},{started_at:skipped.completed_at},{started_at:null,completed_at:null}]) {
+    assert.equal(jobMinutes({...skipped,...timestamps}),null)
+  }
+  const measurement=aggregate([], [skipped,{...skipped,name:'web-setup'}])
+  assert.ok(measurement.jobs.every(job=>job.runnerMinutes===null))
+  assert.equal(measurement.measured.webRunnerMinutes,0)
+  assert.equal(measurement.coverage,'incomplete')
+  assert.deepEqual(measurement.missingEvidence,['web-unit'])
+  for(const conclusion of ['success','failure','cancelled']) {
+    assert.throws(()=>jobMinutes({...skipped,conclusion}),/Invalid job timestamps: tree-reuse/)
+  }
+})
+
 test('rerun measurements reject earlier-attempt artifacts instead of replaying case passes',()=>{
   const job={name:'go-test (1)',status:'completed',started_at:'2026-10-04T01:00:00Z',completed_at:'2026-10-04T01:01:00Z'}
   const earlier={...reportCases([cases[0]],[{key:key(cases[0]),status:'passed',started:true}],1,'go-test-1'),runId:'123',attempt:'1',sha:'a'}

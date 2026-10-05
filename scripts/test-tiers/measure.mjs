@@ -5,6 +5,9 @@ import { fileURLToPath } from 'node:url'
 import { command } from './collect.mjs'
 
 export function jobMinutes(job) {
+  // Skipped jobs never acquired a runner; Actions may report their timestamps
+  // out of order while the job inventory is settling.
+  if(job.conclusion==='skipped') return null
   if(job.status!=='completed'||!job.started_at||!job.completed_at) return null
   const seconds=(Date.parse(job.completed_at)-Date.parse(job.started_at))/1000
   if(!Number.isFinite(seconds)||seconds<0) throw new Error(`Invalid job timestamps: ${job.name}`)

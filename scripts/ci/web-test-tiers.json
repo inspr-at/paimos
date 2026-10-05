@@ -7142,7 +7142,7 @@
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"start-time typing keeps the cost unit and controls stable (1024, dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"start-time typing keeps the cost unit and controls stable (1440, light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"start-time typing keeps the cost unit and controls stable (1440, dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
-    {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"timing failures restore confirmed values, keep both controls anchored and retry the requested value","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
+    {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"timing failures keep typed values and controls anchored, and save again on blur","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"knowledge keeps a failed second query visibly stale, with retry and the previous query named","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"a 2051-event access history shows its newest revocation and accurately reports the bounded window","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"returns the stale Undo receipt and drops an old identity write result","tier":"GATED-FULL"},
@@ -7443,6 +7443,20 @@
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"stale Agent activity saves require a reload before saving and Undo","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"stale Estimates saves require a reload before saving and Undo","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"stale Silent sessions saves require a reload before saving and Undo","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"numeric Undo conflict for Estimates persists until an authoritative reload","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"numeric Undo conflict for Silent sessions persists until an authoritative reload","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"a numeric conflict suppresses shared saved feedback from another field","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"stored agent settings stay together; bounds, failures, Undo and Models link stay honest","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"members do not see or fetch workspace agent settings","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"agent card fits 390px light, with stable controls and long German copy","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"agent card fits 390px dark, with stable controls and long German copy","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"agent card fits 1024px light, with stable controls and long German copy","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"agent card fits 1024px dark, with stable controls and long German copy","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"agent card fits 1440px light, with stable controls and long German copy","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"},
+    {"kind":"browser","config":"playwright.ui.config.ts","project":"","name":"agent card fits 1440px dark, with stable controls and long German copy","file":"tests/settings-agents.spec.ts","tier":"NIGHTLY"}
   ]
 }

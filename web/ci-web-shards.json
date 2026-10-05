@@ -2172,6 +2172,12 @@
           "listedTests": 21
         },
         {
+          "file": "tests/settings-agents.spec.ts",
+          "weightSeconds": 31.073171,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 14
+        },
+        {
           "file": "tests/stability.spec.ts",
           "weightSeconds": 28.853659,
           "weightSource": "unmeasured-test-rate",
