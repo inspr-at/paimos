@@ -27,6 +27,7 @@ var RoutePermissions = map[string]string{
 	// Lead handlers retain their actor/owner checks inside the final transaction.
 	"GET /api/projects/{projectId}/lead":                            "harness.read",
 	"POST /api/projects/{projectId}/lead":                           "harness.control",
+	"POST /api/projects/{projectId}/lead/yield":                     "harness.worker",
 	"POST /api/projects/{projectId}/lead/claim":                     "harness.worker",
 	"POST /api/projects/{projectId}/lead/pause":                     "harness.control|harness.worker",
 	"POST /api/projects/{projectId}/chat-roles":                     "chat.bind",

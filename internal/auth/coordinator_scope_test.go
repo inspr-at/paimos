@@ -311,6 +311,17 @@ func TestProjectLeadThroughProductionAuthentication(t *testing.T) {
 	if l["generation"] != float64(1) {
 		t.Fatalf("claim=%v", l)
 	}
+	call(key.Token, "POST", base+"/harness-sessions/"+s["id"].(string)+"/heartbeat", map[string]any{"phase": "working", "activity": "idle", "activity_sequence": 1}, lease, 200)
+	yield := map[string]any{"expected_revision": l["revision"], "generation": 1}
+	call(reader.Token, "POST", base+"/lead/yield", yield, lease, 403)
+	call(controlOnly.Token, "POST", base+"/lead/yield", yield, lease, 403)
+	if got := call(key.Token, "POST", base+"/lead/yield", yield, "wrong-proof-000000000000000000000000000", 403); got["error"] != "harness worker proof rejected" {
+		t.Fatalf("yield rejected for wrong reason: %v", got)
+	}
+	l = call(key.Token, "POST", base+"/lead/yield", yield, lease, 200)
+	if l["state"] != "paused" || l["reason"] != "idle_yield" || l["process_active"] != true {
+		t.Fatalf("yield=%v", l)
+	}
 	pause := map[string]any{"expected_revision": l["revision"], "generation": 1}
 	call(reader.Token, "POST", base+"/lead/pause", pause, lease, 403)
 	call(controlOnly.Token, "POST", base+"/lead/pause", pause, lease, 403)

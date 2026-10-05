@@ -412,7 +412,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			if len(parts) == 3 && read {
 				return "harness.read", true
 			}
-			if len(parts) == 4 && r.Method == http.MethodPost && (parts[3] == "claim" || parts[3] == "pause") {
+			if len(parts) == 4 && r.Method == http.MethodPost && (parts[3] == "claim" || parts[3] == "pause" || parts[3] == "yield") {
 				return "harness.worker", true
 			}
 		case "questions":

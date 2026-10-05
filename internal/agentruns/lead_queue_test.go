@@ -18,9 +18,11 @@ import (
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-func TestLeadQueueDispatchAndWorkerGenerationFence(t *testing.T) {
+func leadQueueFixture(t *testing.T) (*fixture, tenant.Principal, string, string, string, qEntry) {
+	t.Helper()
 	f := setup(t)
 	f.queueAccount(t, 1000000)
 	project, session := uuid(), uuid()
@@ -57,6 +59,11 @@ func TestLeadQueueDispatchAndWorkerGenerationFence(t *testing.T) {
 		return err
 	})
 	e := f.addQueue(t, id, nil)
+	return f, coordinator, project, session, lease, e
+}
+
+func TestLeadQueueDispatchAndWorkerGenerationFence(t *testing.T) {
+	f, coordinator, project, session, lease, e := leadQueueFixture(t)
 	mode, calls := "ready", 0
 	admission := func(ctx context.Context, tx pgx.Tx, _ tenant.Principal, _ string, _ harness.Session) (harness.LeadChecks, error) {
 		calls++
@@ -212,6 +219,12 @@ func TestLegacyQueueSkipsOtherProjectDispatchAuthorities(t *testing.T) {
 func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
 	f := setup(t)
 	f.queueAccount(t, 1000000)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, f.person.TenantID, f.profile)
+		return err
+	})
+
+	unrouteableWorker := uuid()
 	coordinator := f.other
 	coordinator.Scopes = authz.CoordinatorKeyScopes
 	coordinatorToken := f.key(t, coordinator, authz.CoordinatorKeyScopes)
@@ -219,6 +232,12 @@ func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
 	sessions := []string{uuid(), uuid()}
 	leases := []string{"fair-a-fixture-lease-00000000000000", "fair-b-fixture-lease-00000000000000"}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'agent','Unrouteable worker')`, f.person.TenantID, unrouteableWorker); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE key='member'`, f.person.TenantID, unrouteableWorker); err != nil {
+			return err
+		}
 		var role string
 		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'fair_coordinator','Lead') RETURNING id::text`, f.person.TenantID).Scan(&role); err != nil {
 			return err
@@ -299,6 +318,45 @@ func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
 			t.Fatalf("next=%s want=%s reason=%s", w.Body.String(), want, reason)
 		}
 	}
+	// The older project's targeted workers have no account route, while its
+	// coordinator admission remains fully available. It cannot own every turn.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_target_agent_id=$2,agent_principal_id=$2,model_profile_id=$3 WHERE id=ANY($1::uuid[])`, runs[:2], unrouteableWorker, f.profile)
+		return err
+	})
+	next(1, tickets[2], "")
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var unchanged bool
+		err := tx.QueryRow(t.Context(), `SELECT bool_and(agent_principal_id=$2 AND queue_routed_at IS NULL) AND (SELECT last_turn_at IS NULL FROM project_leads WHERE project_id=$3) FROM agent_runs WHERE id=ANY($1::uuid[])`, runs[:2], unrouteableWorker, projects[0]).Scan(&unchanged)
+		if err == nil && !unchanged {
+			t.Error("fairness changed a competing assignment or turn")
+		}
+		return err
+	})
+
+	resetRoutingFixture := func() {
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields-'route_role' WHERE id=ANY($1::uuid[])`, tickets[:2]); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_target_agent_id=NULL,agent_principal_id=tenant_id,model_profile_id=NULL WHERE id=ANY($1::uuid[])`, runs[:2]); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_routed_at=NULL,agent_principal_id=tenant_id,model_profile_id=NULL,trace=trace-'project_lead' WHERE id=$1`, runs[2]); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `UPDATE project_leads SET last_turn_at=NULL WHERE project_id=$1`, projects[1])
+			return err
+		})
+	}
+	resetRoutingFixture()
+	// Shared demand with no model route also yields to a ready project.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"route_role":"scout"}'::jsonb WHERE id=ANY($1::uuid[])`, tickets[:2])
+		return err
+	})
+	next(1, tickets[2], "")
+	resetRoutingFixture()
 	next(1, "", "project_turn_wait")
 	next(0, tickets[0], "") // Preserve the manual order despite ticket B's urgency.
 	var turn time.Time
@@ -345,5 +403,95 @@ func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
 	next(0, tickets[1], "")
 	if calls < 6 {
 		t.Fatal("live admission was not repeated")
+	}
+}
+
+// Reject oversized snapshots before fields are decoded or per-entry projections
+// start. The tracer observes the real query's returned row count and field cap.
+type leadPickupQueryKey struct{}
+
+type leadPickupQueries struct {
+	queries []string
+	counts  []int64
+}
+
+func (b *leadPickupQueries) TraceQueryStart(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryStartData) context.Context {
+	if strings.Contains(q.SQL, "SELECT queue_node_id::text") {
+		b.queries = append(b.queries, q.SQL)
+		return context.WithValue(ctx, leadPickupQueryKey{}, true)
+	}
+	return ctx
+}
+func (b *leadPickupQueries) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryEndData) {
+	if ctx.Value(leadPickupQueryKey{}) == true && q.CommandTag.Select() {
+		b.counts = append(b.counts, q.CommandTag.RowsAffected())
+	}
+}
+func TestLeadQueuePickupBoundsBeforeMaterialization(t *testing.T) {
+	for _, mode := range []string{"rows", "fields"} {
+		t.Run(mode, func(t *testing.T) {
+			f, coordinator, project, session, lease, e := leadQueueFixture(t)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				if mode == "fields" {
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||jsonb_build_object('large',repeat('x',65537)) WHERE id=$1`, e.NodeID)
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `WITH added AS (
+     INSERT INTO nodes(tenant_id,key,kind_id,title,parent_id,fields)
+     SELECT $1,'PB-'||i,k.id,'Bounded pickup',$2,'{"estimate_hours":1,"acceptance_criteria":["B"]}'::jsonb
+     FROM generate_series(1,205) i CROSS JOIN node_kinds k WHERE k.slug='work' RETURNING id
+    ) INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,queue_node_id,queue_by_principal_id,queue_at,queue_security_review_required,trace)
+    SELECT r.tenant_id,r.work_order_id,r.agent_principal_id,added.id,r.queue_by_principal_id,r.queue_at,false,'{}'::jsonb
+    FROM added CROSS JOIN agent_runs r WHERE r.id=$3`, f.person.TenantID, project, e.Run.ID)
+				return err
+			})
+			observer := &leadPickupQueries{}
+			cfg := f.d.App.Config()
+			cfg.ConnConfig.Tracer = observer
+			pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer pool.Close()
+			f.mux = http.NewServeMux()
+			agentruns.NewWithLeadAdmission(pool, func(ctx context.Context, tx pgx.Tx, _ tenant.Principal, _ string, _ harness.Session) (harness.LeadChecks, error) {
+				var now time.Time
+				err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+				g := harness.LeadGate{State: "available", CheckedAt: now}
+				return harness.LeadChecks{Dial: g, Harness: g, Account: g, Host: g}, err
+			}).Mount(f.mux)
+			r := httptest.NewRequest("POST", "/api/queue/next", strings.NewReader(`{"agent_principal_id":"`+f.agent.ID+`","model_profile_id":"`+f.profile+`"}`)).WithContext(tenant.WithPrincipal(t.Context(), coordinator))
+			r.Header.Set("X-Aeon-Lead-Session", session)
+			r.Header.Set("X-Aeon-Lead-Generation", "1")
+			r.Header.Set("X-Aeon-Worker-Lease", lease)
+			w := httptest.NewRecorder()
+			f.mux.ServeHTTP(w, r)
+			want := "lead scheduling snapshot exceeds bound"
+			if mode == "fields" {
+				want = "lead scheduling fields exceed bound"
+			}
+			if w.Code != 409 || !strings.Contains(w.Body.String(), want) {
+				t.Fatalf("bound response=%d %s", w.Code, w.Body.String())
+			}
+			if len(observer.queries) != 1 || !strings.Contains(observer.queries[0], "LIMIT 201") || !strings.Contains(observer.queries[0], "octet_length") {
+				t.Fatalf("pickup loaded an unbounded query: %v", observer.queries)
+			}
+			expectedRows := int64(201)
+			if mode == "fields" {
+				expectedRows = 1
+			}
+			if len(observer.counts) != 1 || observer.counts[0] != expectedRows {
+				t.Fatalf("pickup query row sample=%v want=%d", observer.counts, expectedRows)
+			}
+
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var routed bool
+				err := tx.QueryRow(t.Context(), `SELECT queue_routed_at IS NOT NULL FROM agent_runs WHERE id=$1`, e.Run.ID).Scan(&routed)
+				if routed {
+					t.Error("overflow routed work")
+				}
+				return err
+			})
+		})
 	}
 }

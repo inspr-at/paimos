@@ -4,18 +4,25 @@ package harness_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentplan"
 	"github.com/inspr-at/paimos/internal/agentruns"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/views"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func fairQueue(t *testing.T, f *harnessFixture, at time.Time) string {
@@ -140,6 +147,35 @@ func TestLeadWorkerPriorityYieldRetainsExactAssignment(t *testing.T) {
 	assignment("assignment lead generation is no longer current")
 }
 
+// Fairness requires a real worker route independently of coordinator admission.
+func fairWorkerRoute(t *testing.T, f *harnessFixture) {
+	t.Helper()
+	profile, account := uid(), uid()
+	schedule := capacity.DefaultSchedule()
+	for i := range schedule.Week {
+		schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	schedule.Reserve = capacity.ReserveOff
+	schedule.Override = "sprint"
+	raw, _ := json.Marshal(schedule)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'fair-worker','1','codex','openai','test-model','high','strong')`, f.person.TenantID, profile); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, f.person.TenantID, profile); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,$2::uuid,$2::text,'codex','fair-test',$3,'Fair worker',1,clock_timestamp(),true,'generation-1',$4)`, f.person.TenantID, account, f.agent.ID, f.person.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 hour','cost_micros',1000000)`, f.person.TenantID, account); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::text,$3::uuid,$4)`, f.person.TenantID, f.person.ID, account, raw)
+		return err
+	})
+}
+
 func TestLeadFairTurnsAndUnavailableContender(t *testing.T) {
 	mode := "ready"
 	admission := func(ctx context.Context, tx pgx.Tx, p tenant.Principal, owner string, s harness.Session) (harness.LeadChecks, error) {
@@ -150,6 +186,7 @@ func TestLeadFairTurnsAndUnavailableContender(t *testing.T) {
 		return checks, err
 	}
 	f := leadFixture(t, admission)
+	fairWorkerRoute(t, f)
 	_, _, _ = fairWorking(t, f)
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	run := fairQueue(t, f, at)
@@ -350,4 +387,113 @@ func TestLeadSingleDialProgressAfterWorkerYield(t *testing.T) {
 	if err == nil || err.Error() != "worker admission wait: host_unavailable" || ownerCalls != 1 {
 		t.Fatalf("yield bypassed live host gate: %v calls=%d", err, ownerCalls)
 	}
+}
+
+func TestLeadYieldRechecksAgentPermissionAfterFence(t *testing.T) {
+	f := leadFixture(t, readyLeadChecks)
+	// Built-in grants are computed, so use a custom role to revoke precisely
+	// one permission while retaining the same visibility and other authorities.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		effective, err := authz.EffectiveTx(t.Context(), tx, f.agent, f.project)
+		if err != nil {
+			return err
+		}
+		var role string
+		if err = tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'yield_worker','Yield worker') RETURNING id::text`, f.agent.TenantID).Scan(&role); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT $1,$2,unnest($3::text[])`, f.agent.TenantID, role, effective.Workspace.Permissions); err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1`, f.agent.ID, role)
+		return err
+	})
+	session, lease, l := fairWorking(t, f)
+	barrier := &leadBarrier{locked: make(chan uint32, 1), resume: make(chan struct{})}
+	cfg := f.db.App.Config()
+	cfg.ConnConfig.Tracer = barrier
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	f.mux = http.NewServeMux()
+	harness.NewWithLeadAdmission(pool, readyLeadChecks).Mount(f.mux)
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	defer func() {
+		select {
+		case <-barrier.resume:
+		default:
+			close(barrier.resume)
+		}
+	}()
+	revoked := make(chan error, 1)
+	go func() {
+		revoked <- db.InTenant(dbtest.Seed(ctx), pool, f.agent.TenantID, func(tx pgx.Tx) error {
+			if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+				return err
+			}
+			// Keep project visibility and all other worker permissions, removing only
+			// the live permission being checked by yield.
+			tag, err := tx.Exec(ctx, `DELETE FROM role_permissions WHERE permission='harness.worker' AND role_id IN (SELECT role_id FROM role_bindings WHERE principal_id=$1)`, f.agent.ID)
+			if err == nil && tag.RowsAffected() != 1 {
+				return fmt.Errorf("revocation changed %d permissions", tag.RowsAffected())
+			}
+			return err
+		})
+	}()
+	var pid uint32
+	select {
+	case pid = <-barrier.locked:
+	case <-ctx.Done():
+		t.Fatal("revocation never entered fence")
+	}
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		done <- f.call(f.agent, "POST", "/api/projects/"+f.project+"/lead/yield", map[string]any{"expected_revision": l["revision"], "generation": 1}, lease)
+	}()
+	for {
+		var waiting bool
+		if err := f.db.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)))`, pid).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+	}
+	close(barrier.resume)
+	select {
+	case err := <-revoked:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-ctx.Done():
+		t.Fatal("revocation did not commit")
+	}
+	var w *httptest.ResponseRecorder
+	select {
+	case w = <-done:
+	case <-ctx.Done():
+		t.Fatal("yield did not finish")
+	}
+	expect(t, w, 403)
+	if !strings.Contains(w.Body.String(), "permission") {
+		t.Fatal("yield failed for wrong reason", w.Body.String())
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var revision int64
+		var state string
+		var controls int
+		if err := tx.QueryRow(t.Context(), `SELECT revision,state FROM project_leads WHERE project_id=$1`, f.project).Scan(&revision, &state); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM harness_controls WHERE session_id=$1`, session).Scan(&controls); err != nil {
+			return err
+		}
+		if revision != int64(l["revision"].(float64)) || state != "working" || controls != 0 {
+			t.Fatalf("revoked yield mutated state: revision=%d state=%s controls=%d", revision, state, controls)
+		}
+		return nil
+	})
 }

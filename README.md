@@ -708,9 +708,12 @@ project demand by the later of its oldest eligible queue arrival and its last
 successful route. This gives waiting projects a turn while preserving targeted
 and manual ticket order inside each project. Idempotent routing does not advance
 turns. Revoked owners, archived projects, unresolved dependencies, stale reporting
-and unavailable live lead gates cannot win a competing turn. Scheduling reads
-are owner-scoped, limited to 200 entries with a three-second deadline and 64 KiB
-per ticket's fields; excess demand returns an explicit wait error.
+and unavailable live lead gates cannot win a competing turn. Competing demand
+also needs a usable worker model/account route, live claim permission and no
+pending worker assignment. Scheduling reads are owner-scoped, limited to 200
+entries with a three-second deadline and 64 KiB per ticket's fields; excess
+demand returns an explicit wait error. Lead pickup also caps its project queue
+before fields are decoded or entries projected.
 
 A worker uses `aeon lead yield --project KEY --expected-revision N --generation G
 --worker-lease-file PATH` (or `-` for stdin) when idle, waiting for an accepted

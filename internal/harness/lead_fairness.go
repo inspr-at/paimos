@@ -21,6 +21,7 @@ type leadDemand struct {
 	project, run string
 	at           time.Time
 	routed       bool
+	fields       []byte
 }
 
 // Widen only the owner-scoped scheduling read, like workqueue's full-order
@@ -79,18 +80,17 @@ func leadQueueDemand(ctx context.Context, tx pgx.Tx, owner string) ([]leadDemand
 	count := 0
 	for rows.Next() {
 		var d leadDemand
-		var fields []byte
-		if err = rows.Scan(&d.project, &d.run, &d.at, &d.routed, &fields); err != nil {
+		if err = rows.Scan(&d.project, &d.run, &d.at, &d.routed, &d.fields); err != nil {
 			return nil, err
 		}
-		if fields == nil {
+		if d.fields == nil {
 			return nil, workorders.Fail(409, "lead scheduling fields exceed bound")
 		}
 		count++
 		if count > maxLeadDemand {
 			return nil, workorders.Fail(409, "lead scheduling snapshot exceeds bound")
 		}
-		if workqueue.Check("work", "open", "", "", workqueue.Fields(fields), false).Ready {
+		if workqueue.Check("work", "open", "", "", workqueue.Fields(d.fields), false).Ready {
 			demands = append(demands, d)
 		}
 	}
@@ -169,7 +169,6 @@ func (m *Module) leadScheduleWait(ctx context.Context, tx pgx.Tx, p tenant.Princ
 			if d.routed || seen[d.project] {
 				continue
 			}
-			seen[d.project] = true
 			other, err := loadLead(ctx, step, d.project, false)
 			if err != nil {
 				return "", err
@@ -184,6 +183,13 @@ func (m *Module) leadScheduleWait(ctx context.Context, tx pgx.Tx, p tenant.Princ
 				if other.State != "working" || other.SessionID == nil {
 					continue
 				}
+				ready, err := workqueue.RunRouteReadyTx(ctx, step, p.TenantID, d.project, d.run, d.fields)
+				if err != nil {
+					return "", err
+				}
+				if !ready {
+					continue
+				}
 				candidate, err := load(ctx, step, d.project, *other.SessionID, false)
 				if err != nil {
 					return "", err
@@ -196,6 +202,7 @@ func (m *Module) leadScheduleWait(ctx context.Context, tx pgx.Tx, p tenant.Princ
 					continue
 				}
 			}
+			seen[d.project] = true
 			var last *time.Time
 			if err = step.QueryRow(ctx, `SELECT last_turn_at FROM project_leads WHERE project_id=$1`, d.project).Scan(&last); err != nil {
 				return "", err
@@ -273,6 +280,9 @@ func (m *Module) yieldLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	}
 	ctx, id := r.Context(), r.PathValue("projectId")
 	if err = leadFence(ctx, tx, id); err != nil {
+		return nil, err
+	}
+	if err = authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: id}); err != nil {
 		return nil, err
 	}
 	l, err := loadLead(ctx, tx, id, true)
