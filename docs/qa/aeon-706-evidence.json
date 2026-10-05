@@ -131,5 +131,75 @@
       "same-release refreshes prune removed tickets and features from partial selection memory",
       "project navigation clears drafts picker and selection memory even for the same release id"
     ]
+  },
+  "fix_round_3": {
+    "baseline": "dc5440778",
+    "findings_fixed": [
+      "Retained Add existing picker captured ownership only when a result arrived, allowing an older response to replace revision 20 with revision 8 and emit success.",
+      "A same-release refresh inserted a 560px skeleton above the retained form, moving its controls by 570px."
+    ],
+    "changes": [
+      "Picker captures project/release/load generation, release label and expected revision before the first confirmation; all dispatch, move retry, adoption and error feedback paths recheck that owner.",
+      "Added callback carries its captured owner into patchWalker and the project refresh; stale callbacks leave picker visibility, data and feedback alone.",
+      "Busy spans person confirmations so a second click cannot dispatch a duplicate action.",
+      "Retain loaded form, tickets and decision column during same-release refresh; aria-busy supplies loading feedback without inserting layout. Initial loads retain their skeleton.",
+      "Render retained walker content only when its project/release matches the current owner; navigation never presents another record as loaded."
+    ],
+    "regression_evidence": [
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/plan-owner.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "before": "Two new negative behavior regressions fail against dc5440778 at revision 20 versus 8 and foreign-record retained content assertions.",
+        "after": "28 passed, 0 failed, including captured-owner success and existing queued-write/draft/memory fences."
+      },
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/existing-ticket-picker.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "before": "Six new behavior regressions fail against dc5440778: stale primary/retry success, initial/move confirmation dispatch after refresh, stale error feedback, and duplicate pending confirmation. Existing leaf-count assertions also gain the captured owner in the callback contract.",
+        "after": "12 passed, 0 failed. Actual picker SFC action exercised with deferred promises and mocked person confirmations; current failure remains visible and success leaf counts remain exact."
+      },
+      {
+        "command": "npm test -- tests/journey.spec.ts --grep 'the retained plan controls|the plan: ticked|a stale plan write|Plan adds a ticket|adding a ticket on a server' --workers=1 --retries=0",
+        "before": "All six new refresh geometry cases fail unchanged on dc5440778: title.y shifts by 570px versus the 0.5px limit at 390/1024/1440px, in light and dark.",
+        "after": "10 passed. Shared controlStability guard samples positive-size named actions, form selectors/groups, feature selector/row and ticket selector/row before, during deferred GET and after completion; horizontal overflow guarded. Long German draft preserved. macOS bundled headless Chromium, one worker. Supervision reports after=0, remaining_processes=0."
+      },
+      {
+        "command": "npm run typecheck",
+        "result": "passed"
+      },
+      {
+        "command": "node web/node_modules/eslint/bin/eslint.js web/src/components/journey/PlanStage.vue web/src/components/journey/ExistingTicketPicker.vue",
+        "result": "passed"
+      },
+      {
+        "command": "python3 -m unittest discover -s scripts/audit",
+        "result": "33 passed. No new source files or slice changes; generated Python cache moved to ignored test-results."
+      },
+      {
+        "command": "Native focused Vitest --no-staticParse collection and Playwright --list plus strict tier validation and full/push selection",
+        "result": "46 collected/classified: 36 ESSENTIAL, 5 GATED-FULL, 5 existing NIGHTLY. All 16 new cases (14 ESSENTIAL, 2 GATED-FULL) selected by full and push; existing classifications retained."
+      },
+      {
+        "command": "git fetch origin main && git merge-tree --write-tree --name-only HEAD origin/main",
+        "result": "Newest origin/main fetched; merge simulation has no conflicts, so no conditional merge required."
+      },
+      {
+        "command": "git diff --check",
+        "result": "passed"
+      }
+    ],
+    "screenshots": [
+      "web/test-results/aeon-706-planbind/refresh-390-light.png",
+      "web/test-results/aeon-706-planbind/refresh-390-dark.png",
+      "web/test-results/aeon-706-planbind/refresh-1024-light.png",
+      "web/test-results/aeon-706-planbind/refresh-1024-dark.png",
+      "web/test-results/aeon-706-planbind/refresh-1440-light.png",
+      "web/test-results/aeon-706-planbind/refresh-1440-dark.png"
+    ],
+    "ownership": "Verified ppm account: tenant INSPR, principal workstation-agents (agent); coordinator builder markers for aeon-706-planbind verified on AEON-706 before edits. No status changes.",
+    "design": "Existing PAIMOS components and layout retained; no visual redesign or approved-decision conflict. Needs Opus design for any future new layout.",
+    "limits": [
+      "Specific brief requires local targeted tests and forbids mbp2606. remote-test.sh uses temporary pushed refs, so was not invoked under the user no-push instruction. No affected Go packages.",
+      "Focused macOS Chromium evidence only; CI-equivalent Linux Chromium, full just test/build/unit/browser suites and consolidated release review remain coordinator gates.",
+      "Local commit only; no pushes, remote-test host access, production access, deployments, ticket-status changes, model review gates or version changes."
+    ]
   }
 }

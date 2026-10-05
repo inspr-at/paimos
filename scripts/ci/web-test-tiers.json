@@ -7468,6 +7468,22 @@
     {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release refreshes preserve the partial selection through the feature cycle","tier":"ESSENTIAL"},
     {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release refreshes fence old ticket creation without erasing drafts or current busy state","tier":"ESSENTIAL"},
     {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release refreshes prune removed tickets and features from partial selection memory","tier":"ESSENTIAL"},
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"project navigation clears drafts picker and selection memory even for the same release id","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"project navigation clears drafts picker and selection memory even for the same release id","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a retained picker cannot adopt a deferred result from before a same-release refresh","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a current picker result adopts its captured owner and reports the returned leaf count","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the retained plan content belongs to the displayed record during deferred loading","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"discards a retained picker success after same-release refresh","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"discards a retained picker success after same-release refresh on the move retry","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"does not dispatch membership after its initial confirmation owner is refreshed","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"does not retry membership after its move confirmation owner is refreshed","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"discards stale picker failure feedback after a same-release refresh","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"reports a current picker failure without emitting success","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"keeps a picker action busy while its person confirmation is pending","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
   ]
 }

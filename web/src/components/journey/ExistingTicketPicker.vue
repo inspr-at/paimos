@@ -8,6 +8,7 @@ import {
   addReleaseMembership, availabilityMark, canSelectTicket, isMoveConflict, listReleaseTicketOptions,
   type MembershipResult, type MembershipTicket,
 } from '../../lib/releaseMembership'
+import type { PlanOwner } from '../../lib/useJourneyData'
 import { highlight, kindLabel, statusMeta, statusOptions } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
@@ -16,8 +17,8 @@ import StatusIcon from '../work/StatusIcon.vue'
 // Add tickets that already exist into this planning release. Search is by key or
 // title; status, epic and type narrow it. Closed and already released tickets
 // are shown and cannot be picked. A ticket in another open release asks first.
-const props = defineProps<{ projectId: string; releaseId: string; releaseTitle: string; epics: { id: string; key: string; title: string }[] }>()
-const emit = defineEmits<{ added: [payload: { count: number | null; result: MembershipResult }]; close: [] }>()
+const props = defineProps<{ projectId: string; releaseId: string; releaseTitle: string; epics: { id: string; key: string; title: string }[]; captureOwner: () => PlanOwner | null; isOwnerCurrent: (owner: PlanOwner) => boolean }>()
+const emit = defineEmits<{ added: [payload: { count: number | null; result: MembershipResult; owner: PlanOwner }]; close: [] }>()
 
 const dialog = ref<HTMLDialogElement>()
 const searchEl = ref<HTMLInputElement>()
@@ -113,44 +114,49 @@ function keydown(event: KeyboardEvent) {
 }
 async function add() {
   const chosen = picked.value
-  if (!chosen.length || busy.value) return
+  const owner = props.captureOwner()
+  if (!chosen.length || busy.value || !owner || owner.projectId !== props.projectId || owner.releaseId !== props.releaseId) return
+  const expectedRevision = revision.value, releaseTitle = props.releaseTitle
   note.value = ''
-  if (!await confirmOptionMoves(chosen, props.releaseTitle)) return
   busy.value = true
   try {
-    let confirmMove = chosen.some(ticket => ticket.availability === 'other_release')
+    if (!await confirmOptionMoves(chosen, releaseTitle) || !props.isOwnerCurrent(owner)) return
+    const confirmMove = chosen.some(ticket => ticket.availability === 'other_release')
     try {
-      const result = await addReleaseMembership(props.projectId, props.releaseId, {
-        expected_revision: revision.value, ticket_node_ids: chosen.map(ticket => ticket.ticket_node_id), confirm_move: confirmMove,
+      const result = await addReleaseMembership(owner.projectId, owner.releaseId, {
+        expected_revision: expectedRevision, ticket_node_ids: chosen.map(ticket => ticket.ticket_node_id), confirm_move: confirmMove,
       })
-      added(result)
+      added(result, owner)
     } catch (error) {
+      if (!props.isOwnerCurrent(owner)) return
       if (!confirmMove && isMoveConflict(error)) {
         const ok = await confirmAction({
           title: 'Move into this release?',
-          body: `At least one selected ticket is already in another open release. Moving it puts it in ${props.releaseTitle}.`,
+          body: `At least one selected ticket is already in another open release. Moving it puts it in ${releaseTitle}.`,
           points: chosen.map(ticket => `${ticket.key} · ${ticket.title}`),
-          confirmLabel: `Move into ${props.releaseTitle}`,
+          confirmLabel: `Move into ${releaseTitle}`,
           cancelLabel: 'Leave them',
         })
-        if (!ok) return
-        const result = await addReleaseMembership(props.projectId, props.releaseId, {
-          expected_revision: revision.value, ticket_node_ids: chosen.map(ticket => ticket.ticket_node_id), confirm_move: true,
+        if (!ok || !props.isOwnerCurrent(owner)) return
+        const result = await addReleaseMembership(owner.projectId, owner.releaseId, {
+          expected_revision: expectedRevision, ticket_node_ids: chosen.map(ticket => ticket.ticket_node_id), confirm_move: true,
         })
-        added(result)
+        added(result, owner)
         return
       }
       throw error
     }
   } catch (error) {
+    if (!props.isOwnerCurrent(owner)) return
     const missing = error instanceof APIError && (error.status === 404 || error.status === 405)
     note.value = missing ? 'This server cannot add tickets to a release yet.' : error instanceof Error ? error.message : 'The tickets were not added.'
   } finally { busy.value = false }
 }
-function added(result: MembershipResult) {
+function added(result: MembershipResult, owner: PlanOwner) {
+  if (!props.isOwnerCurrent(owner)) return
   // Parents and overlapping selections expand on the server. Older servers may
   // omit the leaf set; the selected root count cannot stand in for that result.
-  emit('added', { count: result.leaf_node_ids ? new Set(result.leaf_node_ids).size : null, result })
+  emit('added', { count: result.leaf_node_ids ? new Set(result.leaf_node_ids).size : null, result, owner })
 }
 function close() { dialog.value?.close(); emit('close') }
 function backdrop(event: MouseEvent) { if (event.target === dialog.value) close() }

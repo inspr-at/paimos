@@ -67,7 +67,8 @@ function planForm(context: Awaited<ReturnType<typeof setup>>) {
     if (id === '../../lib/toast') return { toast }
     if (id === '../../lib/journeyContext') return { useJourneyContext: () => ctx }
     if (id === '../../stores/journey') return { useJourney: () => store }
-    if (id === '../../lib/journey' || id === '../../lib/work' || id.endsWith('.vue')) return {}
+    if (id === '../../lib/work') return { plural: (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}` }
+    if (id === '../../lib/journey' || id.endsWith('.vue')) return {}
     throw new Error(`Unexpected form dependency: ${id}`)
   }, exports)
   const renderer = Vue.createRenderer<object, object>({
@@ -324,7 +325,7 @@ it('a foreign-release membership result cannot patch the plan or report success'
   const context = await setup(), form = planForm(context)
   await context.data.loadWalker('release-b')
   const addedExisting = form.state.addedExisting as (payload: unknown) => Promise<void>
-  await addedExisting({ count: 1, result: { walker: walker(), event_id: 123 } })
+  await addedExisting({ owner: context.data.capturePlanOwner()!, count: 1, result: { walker: walker(), event_id: 123 } })
   expect(context.data.walker.value.value).toEqual(walker('project-a', 'release-b'))
   expect(transport.listWork).not.toHaveBeenCalled()
   expect(form.store.load).not.toHaveBeenCalled()
@@ -429,4 +430,50 @@ it('project navigation clears drafts picker and selection memory even for the sa
   expect(form.state.newFeature).toBe('')
   expect(form.state.picking).toBe(false)
   expect(context.plan.memory.value.size).toBe(0)
+})
+
+it('a retained picker cannot adopt a deferred result from before a same-release refresh', async () => {
+  const context = await setup(), form = planForm(context)
+  form.state.picking = true
+  const owner = context.data.capturePlanOwner()!
+  const answer = deferred<{ count: number; result: { walker: Walker; event_id: number }; owner: typeof owner }>()
+  const pending = answer.promise.then(form.state.addedExisting as (payload: unknown) => Promise<void>)
+  transport.getWalker.mockResolvedValueOnce(walker('project-a', 'release-a', 20))
+  await context.data.loadWalker('release-a', true)
+  answer.resolve({ owner, count: 1, result: { walker: walker('project-a', 'release-a', 8), event_id: 123 } })
+  await pending
+  expect(context.data.walker.value.value?.revision).toBe(20)
+  expect(form.state.picking).toBe(true)
+  expect(transport.listWork).not.toHaveBeenCalled()
+  expect(form.store.load).not.toHaveBeenCalled()
+  expect(toast).not.toHaveBeenCalled()
+})
+
+it('a current picker result adopts its captured owner and reports the returned leaf count', async () => {
+  const context = await setup(), form = planForm(context)
+  form.state.picking = true
+  const owner = context.data.capturePlanOwner()!
+  await (form.state.addedExisting as (payload: unknown) => Promise<void>)({ owner, count: 3, result: { walker: walker('project-a', 'release-a', 8), event_id: 123 } })
+  expect(context.data.walker.value.value?.revision).toBe(8)
+  expect(form.state.picking).toBe(false)
+  expect(transport.listWork).toHaveBeenCalledWith('project-a')
+  expect(form.store.load).toHaveBeenCalledWith('project-a', true)
+  expect(toast).toHaveBeenCalledWith('Added 3 leaves to release a.', expect.objectContaining({ timeout: 8000 }))
+})
+
+it('the retained plan content belongs to the displayed record during deferred loading', async () => {
+  const context = await setup(), form = planForm(context)
+  const same = deferred<Walker>()
+  transport.getWalker.mockReturnValueOnce(same.promise)
+  const refreshing = context.data.loadWalker('release-a', true)
+  expect(form.state.walker).toEqual(walker())
+  same.resolve(walker('project-a', 'release-a', 20))
+  await refreshing
+  const other = deferred<Walker>()
+  transport.getWalker.mockReturnValueOnce(other.promise)
+  const navigating = context.data.loadWalker('release-b')
+  expect(form.state.walker).toBeNull()
+  other.resolve(walker('project-a', 'release-b'))
+  await navigating
+  expect(form.state.walker).toEqual(walker('project-a', 'release-b'))
 })

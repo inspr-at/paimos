@@ -21,6 +21,7 @@ onBeforeUnmount(() => narrowQuery.removeEventListener('change', onNarrow))
 import ReleaseList from './ReleaseList.vue'
 import ReleaseTickets from './ReleaseTickets.vue'
 import ExistingTicketPicker from './ExistingTicketPicker.vue'
+import type { PlanOwner } from '../../lib/useJourneyData'
 import type { MembershipResult } from '../../lib/releaseMembership'
 
 // Plan: the tickets of the release, grouped by feature. While the current
@@ -30,7 +31,10 @@ import type { MembershipResult } from '../../lib/releaseMembership'
 const ctx = useJourneyContext()
 const store = useJourney()
 const journey = computed(() => ctx.journey.value)
-const walker = computed(() => ctx.data.walker.value.value)
+const walker = computed(() => {
+  const value = ctx.data.walker.value.value, owner = ctx.data.planOwner.value
+  return value && owner && value.project_node_id === owner.projectId && value.release_node_id === owner.releaseId ? value : null
+})
 const status = computed(() => ctx.data.walker.status.value)
 const stats = computed(() => ctx.plan.stats.value)
 const planning = computed(() => journey.value.next_action.key === 'start_build')
@@ -75,11 +79,11 @@ async function addTicket() {
     toast(missing ? 'This server cannot add tickets to a plan yet.' : `The ticket was not added: ${e instanceof Error ? e.message : 'unknown error'}`, { tone: 'error' })
   } finally { if (ctx.data.isPlanOwnerCurrent(owner)) adding.value = false }
 }
-async function addedExisting(payload: { count: number | null; result: MembershipResult }) {
-  if (!ctx.data.patchWalker(payload.result.walker)) return
+async function addedExisting(payload: { count: number | null; result: MembershipResult; owner: PlanOwner }) {
+  if (!payload.owner || !ctx.data.patchWalker(payload.result.walker, payload.owner)) return
   picking.value = false
   void ctx.data.loadWork(true)
-  void store.load(ctx.project.value.id, true)
+  void store.load(payload.owner.projectId, true)
   const label = ctx.releaseLabel.value
   toast(`Added ${payload.count === null ? 'selected work' : plural(payload.count, 'leaf', 'leaves')} to ${label.toLowerCase()}.`, {
     timeout: 8000,
@@ -102,13 +106,13 @@ async function undoAdded(eventId: number) {
     <div class="j-col">
       <!-- No release shown: the journey has none open yet. What it will be chosen from is the backlog. -->
       <BacklogCard v-if="!ctx.release.value" />
-      <section v-else class="j-card" aria-labelledby="plan-tickets">
+      <section v-else class="j-card" aria-labelledby="plan-tickets" :aria-busy="status === 'loading'">
         <header class="j-card-head">
           <p id="plan-tickets" class="eyebrow">{{ ctx.editable.value ? 'Tickets · ticked ones form the release' : `Tickets · ${ctx.releaseLabel.value}` }}</p>
           <span v-if="walker" class="j-count">{{ ctx.editable.value ? `${stats.inRelease} in release · ${stats.backlog} in backlog` : plural(stats.inRelease, 'ticket') }}</span>
           <button type="button" class="btn sm" :disabled="!walker?.tickets.length" data-tip="Walk through the tickets with their screens · w" aria-keyshortcuts="w" @click="ctx.walk()"><AppIcon name="expand" :size="13" />Full screen</button>
         </header>
-        <p v-if="status === 'loading'" class="skeleton list-skel" role="status" aria-label="Loading the release" />
+        <p v-if="status === 'loading' && !walker" class="skeleton list-skel" role="status" aria-label="Loading the release" />
         <div v-else-if="status === 'error'" class="j-empty" role="alert"><strong>This release could not be loaded</strong><span>{{ ctx.data.walker.error.value }}</span>
           <button type="button" class="btn sm" @click="ctx.data.loadWalker(ctx.release.value!.id, true)"><AppIcon name="refresh" :size="13" />Try again</button>
         </div>
@@ -123,15 +127,15 @@ async function undoAdded(eventId: number) {
           <button type="button" class="btn" @click="picking = true"><AppIcon name="search" :size="14" />Add existing</button>
           <button type="submit" class="btn primary" :disabled="!newTitle.trim() || adding">{{ adding ? 'Adding…' : 'Add' }}</button>
         </form>
-        <ExistingTicketPicker v-if="picking && ctx.release.value" :project-id="ctx.project.value.id" :release-id="ctx.release.value.id" :release-title="ctx.releaseLabel.value" :epics="epics" @close="picking = false" @added="addedExisting" />
-        <ReleaseTickets v-if="walker && walker.tickets.length && status !== 'loading' && status !== 'error'" :plan="ctx.plan" :editable="ctx.editable.value" :project-key="ctx.project.value.routeKey" :work-by-id="ctx.data.workById.value" @walk="t => ctx.walk(t.key)" @open="ctx.open" />
+        <ExistingTicketPicker v-if="picking && ctx.release.value" :project-id="ctx.project.value.id" :release-id="ctx.release.value.id" :release-title="ctx.releaseLabel.value" :epics="epics" :capture-owner="ctx.data.capturePlanOwner" :is-owner-current="ctx.data.isPlanOwnerCurrent" @close="picking = false" @added="addedExisting" />
+        <ReleaseTickets v-if="walker && walker.tickets.length && status !== 'error'" :plan="ctx.plan" :editable="ctx.editable.value" :project-key="ctx.project.value.routeKey" :work-by-id="ctx.data.workById.value" @walk="t => ctx.walk(t.key)" @open="ctx.open" />
       </section>
       <section v-if="releases.length" class="j-card" aria-labelledby="plan-releases">
         <header class="j-card-head"><p id="plan-releases" class="eyebrow">Releases · {{ releases.length }}</p></header>
         <ReleaseList :releases="releases" :current-id="journey.current_release_id" :selected-id="ctx.release.value?.id ?? null" :now="ctx.now.value" :limit="6" @select="r => ctx.selectRelease(r.key)" />
       </section>
     </div>
-    <div v-if="!journey.current_release_id || status === 'ready' || status === 'error'" class="j-col">
+    <div v-if="!journey.current_release_id || walker || status === 'ready' || status === 'error'" class="j-col">
       <GateCard
         v-if="opening" eyebrow="Decision" title="Open release 1"
         :action="{ label: ctx.next.value.label, disabled: ctx.next.value.disabled, busy: ctx.next.value.busy, tip: ctx.next.value.tip }" @act="ctx.runNext()"
