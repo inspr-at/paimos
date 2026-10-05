@@ -1,28 +1,31 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Settings: the sections, who sees them, and the server calls they read. Personal
-// settings are everyone's; the rest are for workspace admins.
+// Settings: grouped sections, their visibility and the server calls they read.
 import { api } from './api.ts'
 import { sessionGone } from './authz.ts'
 
-export type SectionId = 'personal' | 'theme' | 'developer' | 'agent-rules' | 'accounts' | 'workspace' | 'access' | 'business' | 'projects' | 'portal'
-// permission: the section shows to whoever holds it (can()), instead of by role.
-// permission: one, or any of several (Access opens for See members or, alone, the access log).
-export interface SettingsSection { id: SectionId; label: string; summary: string; admin: boolean; permission?: string | string[]; deniedTitle?: string; denied?: string }
+export type SectionId = 'personal' | 'theme' | 'developer' | 'workspace' | 'vocabulary' | 'access' | 'agents' | 'agent-rules' | 'accounts' | 'autopilot' | 'business' | 'portal'
+export const SETTINGS_GROUPS = ['You', 'Workspace', 'Agents and automation', 'Business'] as const
+export type SettingsGroup = typeof SETTINGS_GROUPS[number]
+// Explicit grants keep Access, rules and accounts independent of admin role.
+export interface SettingsSection { id: SectionId; group: SettingsGroup; label: string; summary: string; who: string; admin: boolean; permission?: string | string[]; deniedTitle?: string; denied?: string }
 export const anyOf = (permission: string | string[], allowed: (permission: string) => boolean) => (Array.isArray(permission) ? permission : [permission]).some(allowed)
 export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
-  { id: 'personal', label: 'Personal', summary: 'Appearance, greeting and keys', admin: false },
-  { id: 'theme', label: 'Theme', summary: 'Colours and agent appearance', admin: false },
-  { id: 'developer', label: 'Developer', summary: 'For people working on Paimos itself', admin: false },
-  { id: 'agent-rules', label: 'Agent rules', summary: 'Rules for every agent', admin: false, permission: 'rules.read', deniedTitle: 'Agent rules need permission to read them', denied: 'Reading agent rules needs the rules read permission. Project membership alone does not open this page.' },
-  { id: 'accounts', label: 'Accounts', summary: 'Agent accounts and limits', admin: false, permission: 'account.read', deniedTitle: 'Accounts need permission to read them', denied: 'Agent accounts and their limits are visible to people who can read accounts.' },
-  { id: 'workspace', label: 'Workspace', summary: 'Name, brand, models and your role', admin: true },
-  { id: 'access', label: 'Access', summary: 'People, roles and agents', admin: true, permission: ['members.read', 'audit.read'] },
-  { id: 'business', label: 'Business', summary: 'Parts and quote settings', admin: true },
-  { id: 'projects', label: 'Projects', summary: 'Ticket types', admin: true },
-  { id: 'portal', label: 'Product portal', summary: 'Public catalog', admin: true },
+  { id: 'personal', group: 'You', label: 'Personal', summary: 'Mode, greeting and keys', who: 'Everyone has this section. Changes apply only to you.', admin: false },
+  { id: 'theme', group: 'You', label: 'Theme', summary: 'Colours, agent looks', who: 'Everyone picks a theme and can make their own. Only admins change the workspace themes and the default.', admin: false },
+  { id: 'developer', group: 'You', label: 'Developer', summary: 'For people working on Paimos itself', who: 'Everyone has this section. Changes apply only to you.', admin: false },
+  { id: 'workspace', group: 'Workspace', label: 'Workspace', summary: 'Name, brand and in-app AI', who: 'Admins only see and change this section.', admin: true },
+  { id: 'vocabulary', group: 'Workspace', label: 'Vocabulary', summary: 'Level names and ticket types', who: 'Everyone sees these names. Only admins change them.', admin: false },
+  { id: 'access', group: 'Workspace', label: 'Access', summary: 'People, roles and agents', who: 'People with See members or Read access log permission see this section. Only people with the corresponding manage permission change roles and invites.', admin: true, permission: ['members.read', 'audit.read'] },
+  { id: 'agents', group: 'Agents and automation', label: 'Agents', summary: 'Activity, estimates, models', who: 'Admins only change this section. It applies to every project.', admin: true },
+  { id: 'agent-rules', group: 'Agents and automation', label: 'Agent rules', summary: 'Rules for every agent', who: 'People who may read agent rules see this section. Changes need permission to manage rules.', admin: false, permission: 'rules.read', deniedTitle: 'Agent rules need permission to read them', denied: 'Reading agent rules needs the rules read permission. Project membership alone does not open this page.' },
+  { id: 'accounts', group: 'Agents and automation', label: 'Accounts and computers', summary: 'Accounts, computers, capacity', who: 'People who may read accounts see this section. Managing accounts and computers needs the corresponding manage permission; only admins change low-quota warnings.', admin: false, permission: 'account.read', deniedTitle: 'Accounts need permission to read them', denied: 'Agent accounts and their limits are visible to people who can read accounts.' },
+  { id: 'autopilot', group: 'Agents and automation', label: 'Autopilot', summary: 'Moves tickets on its own', who: 'Admins only change the rules and overrides. Everyone who can edit a ticket works the flagged ones.', admin: true },
+  { id: 'business', group: 'Business', label: 'Business', summary: 'Parts and quote settings', who: 'Admins only see and change this section.', admin: true },
+  { id: 'portal', group: 'Business', label: 'Product portal', summary: 'Public catalog', who: 'Admins only see and change this section.', admin: true },
 ]
 export function sectionOf(param: unknown): SectionId {
   const value = Array.isArray(param) ? param[0] : param
+  if (value === 'projects') return 'vocabulary'
   return SETTINGS_SECTIONS.find(section => section.id === value)?.id ?? 'personal'
 }
 export const visibleSections = (admin: boolean, allowed: (permission: string) => boolean = () => false) =>

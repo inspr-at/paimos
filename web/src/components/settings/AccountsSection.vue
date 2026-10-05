@@ -18,6 +18,7 @@ import AccountsCard from '../agents/AccountsCard.vue'
 import LinkedAccounts from '../agents/LinkedAccounts.vue'
 import AddAccountPanel from './AddAccountPanel.vue'
 import SettingsCard from './SettingsCard.vue'
+import QuotaWarningCard from './QuotaWarningCard.vue'
 
 // Settings → Accounts: the place behind "Manage accounts" on the Agents desk.
 // Pausing an account and limits set by hand live here; sign-ins happen on the
@@ -96,6 +97,7 @@ async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
 
 <template>
   <div id="add-account" class="add-account">
+    <QuotaWarningCard v-if="can('settings.manage')" />
     <p v-if="session.identity?.principal.kind === 'person' && can('profile.write')" class="add-hint"><RouterLink class="btn sm" to="/link"><AppIcon name="link" :size="14" />Link an account</RouterLink>Enter the code from your agent window.</p>
     <SettingsCard title="Accounts" icon="gauge" anchor="agent-accounts">
       <template #lead>The vendor accounts agents run on. Sign in on the computer itself; the password never leaves it.</template>

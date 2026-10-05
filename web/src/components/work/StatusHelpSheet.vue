@@ -50,7 +50,7 @@ function close(restore = true) {
 }
 async function changeLimits() {
   close(false)
-  await router.push('/settings/workspace#status-autopilot')
+  await router.push('/settings/autopilot#status-autopilot')
   await nextTick()
   const card = document.getElementById('status-autopilot')
   card?.scrollIntoView({ block: 'start', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
