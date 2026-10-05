@@ -125,8 +125,8 @@ func TestMeRequiresAuthenticationOnly(t *testing.T) {
 			t.Fatalf("authenticated %s without scopes or bindings: %v", kind, err)
 		}
 	}
-	// The marker belongs only to self identity. Adjacent and workspace routes
-	// retain their permission declarations, including profile.read's scope.
+	// Self identity and status metadata are the two authenticated-only reads.
+	// Adjacent routes retain their declarations, including profile.read's scope.
 	for _, route := range []string{"GET /api/me/profile", "GET /api/me/greeting", "GET /api/me/permissions", "GET /api/members", "GET /api/agent-keys", "GET /api/events"} {
 		declaration, ok := PermissionForPattern(route)
 		if !ok || declaration == PublicRoute || declaration == AuthenticatedRoute {
@@ -134,8 +134,37 @@ func TestMeRequiresAuthenticationOnly(t *testing.T) {
 		}
 	}
 	for route, declaration := range RoutePermissions {
-		if declaration == AuthenticatedRoute && route != "GET /api/me" {
+		if declaration == AuthenticatedRoute && route != "GET /api/me" && route != "GET /api/status/help" {
 			t.Errorf("unexpected authenticated-only route %s", route)
+		}
+	}
+}
+
+func TestStatusHelpRequiresAuthenticationOnly(t *testing.T) {
+	const route = "GET /api/status/help"
+	if PatternIsPublic(route) {
+		t.Fatal("status metadata must require authentication")
+	}
+	if declaration, ok := PermissionForPattern(route); !ok || declaration != AuthenticatedRoute {
+		t.Fatalf("status help declaration: %q, declared=%v", declaration, ok)
+	}
+	for _, p := range []tenant.Principal{{}, {ID: "caller"}, {TenantID: "tenant"}} {
+		if err := RequirePattern(tenant.WithPrincipal(t.Context(), p), route, Scope{}); !errors.Is(err, ErrForbidden) {
+			t.Fatalf("incomplete principal allowed: %v", err)
+		}
+	}
+	if err := RequirePattern(t.Context(), route, Scope{}); !errors.Is(err, ErrForbidden) {
+		t.Fatalf("anonymous status help: %v", err)
+	}
+	for _, kind := range []tenant.PrincipalKind{tenant.Person, tenant.Agent} {
+		ctx := tenant.WithPrincipal(t.Context(), tenant.Principal{ID: "caller", TenantID: "tenant", Kind: kind})
+		if err := RequirePattern(ctx, route, Scope{}); err != nil {
+			t.Fatalf("authenticated %s without scopes or bindings: %v", kind, err)
+		}
+	}
+	for _, route := range []string{"POST /api/status/help", "PUT /api/status/help", "PATCH /api/status/help", "DELETE /api/status/help", "GET /api/status/help/extra"} {
+		if err := RequirePattern(t.Context(), route, Scope{}); !errors.Is(err, ErrForbidden) {
+			t.Errorf("unexpected status route authority: %s: %v", route, err)
 		}
 	}
 }

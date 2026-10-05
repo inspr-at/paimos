@@ -4983,7 +4983,7 @@ paths:
     get:
       operationId: getStatusHelp
       summary: The same status definitions and live workspace limits for people and agents
-      description: Defaults are used while Status autopilot settings are absent. Optional project_id resolves its Inherit/On/Off override through the caller's project visibility. Queued describes Open in the work queue; it is not a stored status. No status values are changed.
+      description: Read-only tenant metadata for authenticated people and agents. Agent keys need no scopes or role bindings; customer portal restrictions and pairing lifecycle checks remain in place. Defaults are used while Status autopilot settings are absent. Optional project_id resolves its Inherit/On/Off override through the caller's project visibility; inaccessible projects return 404. Queued describes Open or Blocked in the work queue; it is not a stored status. Work merged into another ticket is cancelled with a reason naming the destination ticket; done describes completed work merged as code or a reviewed non-code result. No status values or write permissions are changed.
       security: *auth
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}

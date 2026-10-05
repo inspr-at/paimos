@@ -1565,10 +1565,20 @@ paimos mcp
 `aeon status help --json` (also `paimos status help --json`) reads
 `GET /api/status/help`: the ordered status definitions, hints, Queued explanation
 and effective workspace rules. `--project KEY` resolves that project's
-Inherit/On/Off override. The help sheet and agents use the same definitions;
-the API reads live Status autopilot limits when its settings tables are present,
-otherwise it explicitly reports the defaults. Queued means Open in the work
-queue (AEON-522), rather than another stored status.
+Inherit/On/Off override. The help sheet and agents use the same definitions.
+The endpoint is read-only tenant metadata available to authenticated people and
+agents, including keys without scopes or role bindings. Project names and
+overrides still require project visibility; inaccessible projects return 404.
+Customer portal restrictions and pairing lifecycle checks remain in place.
+This read grants no ticket or settings write permission.
+The API reads live Status autopilot limits when its settings tables are present,
+otherwise it explicitly reports the defaults. Queued means Open or Blocked in
+the work queue (AEON-522), rather than another stored status.
+
+Work **merged into another ticket** gets `cancelled`: it will not be done
+separately. Record a reason naming the destination ticket. `done` means the
+completed code was merged, or a non-code result exists and passed review;
+`merged` and `superseded` are not separate status values.
 
 Tickets and tasks can carry `human_check`, nullable text describing what only a
 person can confirm. Create or patch it through the nodes API, and filter lists
