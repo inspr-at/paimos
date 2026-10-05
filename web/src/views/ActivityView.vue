@@ -90,8 +90,6 @@ onBeforeUnmount(() => { clearTimeout(timer); observer?.disconnect(); stopProject
       <button class="btn sm" type="button" :disabled="loading || loadingOlder || pending.size > 0" @click="load">Reload</button>
     </div>
     <div class="activity-content" :aria-busy="loading || loadingOlder">
-      <p v-if="projectError" class="activity-note" role="alert">{{ projectError }}</p>
-      <p v-if="error" class="activity-error" role="alert">{{ error }} <button class="btn sm" type="button" @click="cursor ? loadOlder() : load()">Retry</button></p>
       <p v-if="loading" class="activity-note" role="status">Loading Activity…</p>
       <p v-else-if="!error && !items.length" class="activity-note">No changes match this view.</p>
       <div v-if="items.length" class="history" role="table" aria-label="Workspace activity">
@@ -113,6 +111,9 @@ onBeforeUnmount(() => { clearTimeout(timer); observer?.disconnect(); stopProject
         </template>
       </div>
       <div ref="sentinel" class="activity-more"><p>{{ items.length }} {{ items.length === 1 ? 'entry' : 'entries' }} loaded{{ cursor ? ' · older entries load as you scroll' : items.length ? ' · end of visible history' : '' }}</p><button v-if="cursor" class="btn sm" type="button" :disabled="loadingOlder || !!error" @click="loadOlder">Load older entries</button><span v-if="loadingOlder" role="status">Loading older entries…</span></div>
+      <!-- Feedback grows below retained rows and controls, including pagination. -->
+      <p v-if="error" class="activity-error" role="alert">{{ error }} <button class="btn sm" type="button" @click="cursor ? loadOlder() : load()">Retry</button></p>
+      <p v-if="projectError" class="activity-note" role="alert">{{ projectError }}</p>
     </div>
   </section>
 </template>
@@ -138,7 +139,7 @@ h1 { font-size: 26px; font-weight: 600; letter-spacing: -.03em; }
 .history { display: grid; grid-template-columns: 7ch 15ch minmax(0, 1fr) minmax(10rem, 18rem) 10rem; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised-2); overflow: hidden; }
 .history-day { grid-column: 1 / -1; padding: 12px 18px 6px; font: 500 10.5px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); border-bottom: 1px solid var(--line); }
 .history-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: start; min-height: 48px; border-bottom: 1px solid var(--line); font-size: 13px; padding-block: 6px; }
-.history-row:last-child { border-bottom: 0; }
+.history-row:last-child { border-bottom-color: transparent; }
 .history-row > [role=cell] { min-width: 0; padding: 0 12px; }
 .history-row time { padding-left: 18px; padding-top: 8px; color: var(--ink-2); font: 500 12px/1.5 var(--mono); }
 .history-key { padding-top: 8px !important; }
