@@ -103,3 +103,65 @@ func TestViewsShareReadOwnerWriteAndAppendEvents(t *testing.T) {
 		t.Fatalf("events after create/update/delete = %d, want %d", eventCount, baseline+3)
 	}
 }
+
+// AEON-718 regression: the HTTP mode contract validates writes, defaults older
+// creates to List, and preserves mode when unrelated properties are patched.
+func TestViewModeRoundTripAndValidation(t *testing.T) {
+	d := dbtest.Open(t)
+	ctx := t.Context()
+	var tenantID, ownerID string
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('view-modes','Modes') RETURNING id::text`).Scan(&tenantID); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','owner') RETURNING id::text`, tenantID).Scan(&ownerID); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	New(d.App).Mount(mux)
+	request := func(method, path, body string, want int) savedView {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req = req.WithContext(tenant.WithPrincipal(ctx, tenant.Principal{ID: ownerID, TenantID: tenantID}))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, req)
+		if w.Code != want {
+			t.Fatalf("%s %s: %d want %d: %s", method, path, w.Code, want, w.Body.String())
+		}
+		var v savedView
+		if want < 300 {
+			if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return v
+	}
+	for _, mode := range []string{"list", "outline", "graph"} {
+		v := request(http.MethodPost, "/api/views", `{"name":"mode","filters":{},"columns":["key","title","updated"],"mode":"`+mode+`"}`, http.StatusCreated)
+		if v.Mode != mode {
+			t.Fatalf("create mode=%s want %s", v.Mode, mode)
+		}
+		v = request(http.MethodGet, "/api/views/"+v.ID, "", http.StatusOK)
+		if v.Mode != mode || strings.Join(v.Columns, ",") != "key,title,updated" {
+			t.Fatalf("read=%#v", v)
+		}
+		v = request(http.MethodPatch, "/api/views/"+v.ID, `{"name":"renamed"}`, http.StatusOK)
+		if v.Mode != mode {
+			t.Fatalf("rename changed mode to %s", v.Mode)
+		}
+		v = request(http.MethodPatch, "/api/views/"+v.ID, `{"mode":"graph"}`, http.StatusOK)
+		if v.Mode != "graph" {
+			t.Fatalf("patch=%#v", v)
+		}
+		request(http.MethodPatch, "/api/views/"+v.ID, `{"mode":"invalid"}`, http.StatusBadRequest)
+		request(http.MethodPatch, "/api/views/"+v.ID, `{"mode":""}`, http.StatusBadRequest)
+		v = request(http.MethodGet, "/api/views/"+v.ID, "", http.StatusOK)
+		if v.Mode != "graph" {
+			t.Fatal("invalid patch changed mode")
+		}
+	}
+	legacy := request(http.MethodPost, "/api/views", `{"name":"old client","filters":{},"columns":["key","title"]}`, http.StatusCreated)
+	if legacy.Mode != "list" {
+		t.Fatalf("default mode=%s", legacy.Mode)
+	}
+	request(http.MethodPost, "/api/views", `{"name":"bad","filters":{},"columns":[],"mode":"invalid"}`, http.StatusBadRequest)
+}

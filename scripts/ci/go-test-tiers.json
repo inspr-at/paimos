@@ -155,6 +155,8 @@
     "internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink"
   ],
   "tests": [
+    {"kind":"go","package":"internal/views","name":"TestViewModeRoundTripAndValidation","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/views","name":"TestLegacyViewsMigrationScopeEventsAndRestore","tier":"ESSENTIAL"},
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachFallbackRefreshCannotWidenApprovedRoot","tier":"GATED-FULL"},
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachStartupDropsOnlyUnverifiableFallbacks","tier":"GATED-FULL"},
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachStartupRegistersWithUnverifiableFallback","tier":"GATED-FULL"},

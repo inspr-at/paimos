@@ -2438,6 +2438,10 @@
     "node:tests/work-vocabulary.test.ts:Parents / Leaves and depth survive links, saved views and API translation"
   ],
   "tests": [
+    {"kind":"node","file":"tests/list-views.test.ts","name":"saved views retain each mode and an explicit pinned-only column choice","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 plain columns save and reopen in list despite personal changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 plain columns save and reopen in outline despite personal changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 Graph offers saved views, persists mode and applies their filters","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"vitest","file":"tests/row-store.unit.test.ts","name":"RowStore: canonical work ancestry > a node read moving a canonical leaf from A to cached work B replaces both ancestry projections","tier":"GATED-FULL"},
     {"kind":"vitest","file":"tests/row-store.unit.test.ts","name":"RowStore: canonical work ancestry > an unresolved replacement parent clears old ancestry until an authoritative list supplies it","tier":"GATED-FULL"},
     {"kind":"vitest","file":"tests/row-store.unit.test.ts","name":"RowStore: canonical work ancestry > a cached non-grouping parent cannot retain the former work ancestor","tier":"GATED-FULL"},

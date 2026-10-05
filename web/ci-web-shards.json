@@ -938,7 +938,7 @@
           "file": "tests/views-filters.spec.ts",
           "weightSeconds": 42.152047,
           "weightSource": "web-13",
-          "listedTests": 17
+          "listedTests": 20
         },
         {
           "file": "tests/session-recovery.spec.ts",

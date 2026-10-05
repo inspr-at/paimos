@@ -32,13 +32,13 @@ export interface MockNode {
 }
 export interface MockView {
   id: string; owner_principal_id: string; project_id: string | null; name: string; filters: Record<string, string>
-  sort: { field: string; direction: string }; sort_keys: string[]; group_by: string; columns: string[]; shared: boolean
+  sort: { field: string; direction: string }; sort_keys: string[]; group_by: string; mode: 'list' | 'outline' | 'graph'; columns: string[]; shared: boolean
   created_at: string; updated_at: string; deleted_at: string | null
 }
 // A saved view as the server stores it (ids are UUIDs, like the server's).
 export function mockView(partial: Partial<MockView> & Pick<MockView, 'id' | 'name'>): MockView {
   return {
-    owner_principal_id: me.id, project_id: 'p-pharos', filters: {}, sort: { field: 'position', direction: 'asc' }, sort_keys: [], group_by: 'none', columns: [], shared: false,
+    owner_principal_id: me.id, project_id: 'p-pharos', filters: {}, sort: { field: 'position', direction: 'asc' }, sort_keys: [], group_by: 'none', mode: 'list', columns: [], shared: false,
     created_at: ago(24 * 3), updated_at: ago(24 * 3), deleted_at: null, ...partial,
   }
 }
@@ -378,7 +378,7 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     if (path === '/api/views' && method === 'POST') {
       const input = body as Partial<MockView>
       if (!input.name?.trim()) return route.fulfill({ status: 400, json: { error: 'name is required' } })
-      const view = mockView({ id: `00000000-0000-4000-8000-${String(data.counter.next++).padStart(12, '0')}`, name: input.name.trim(), project_id: input.project_id ?? null, filters: input.filters ?? {}, sort_keys: input.sort_keys ?? [], group_by: input.group_by ?? 'none', columns: input.columns ?? [], shared: !!input.shared, created_at: new Date(now + calls.length * 1000).toISOString(), updated_at: new Date(now + calls.length * 1000).toISOString() })
+      const view = mockView({ id: `00000000-0000-4000-8000-${String(data.counter.next++).padStart(12, '0')}`, name: input.name.trim(), project_id: input.project_id ?? null, filters: input.filters ?? {}, sort_keys: input.sort_keys ?? [], group_by: input.group_by ?? 'none', mode: input.mode ?? 'list', columns: input.columns ?? [], shared: !!input.shared, created_at: new Date(now + calls.length * 1000).toISOString(), updated_at: new Date(now + calls.length * 1000).toISOString() })
       data.views.push(view)
       return route.fulfill({ status: 201, json: view })
     }
