@@ -169,6 +169,7 @@
     {"kind":"go","package":"internal/harness","name":"TestLeadSingleDialProgressAfterWorkerYield","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentruns","name":"TestLeadQueueDispatchAndWorkerGenerationFence","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentruns","name":"TestLeadQueueFairRoutingAndWorkerRestartPriority","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestLeadQueueFairRoutingUsesLiveSecurityRoute","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadLifecycleAndExplicitMigration","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadAdmissionIsFreshAndFailClosed","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadLostContactDoesNotPermitSuccession","tier":"ESSENTIAL"},

@@ -98,12 +98,14 @@ func RouteReadyTx(ctx context.Context, tx pgx.Tx, tenantID, project, run string,
 }
 
 // RunRouteReadyTx qualifies another project's demand using its saved targets
-// or ordinary placement, without inheriting the caller's pickup overrides.
+// or ordinary placement and live ticket security requirements, without
+// inheriting the caller's pickup overrides.
 func RunRouteReadyTx(ctx context.Context, tx pgx.Tx, tenantID, project, run string, fields []byte) (bool, error) {
 	var agent, profile *string
 	var target RouteTarget
-	var security bool
-	if err := tx.QueryRow(ctx, `SELECT queue_target_agent_id::text,model_profile_id::text,requested_account_id::text,coalesce(queue_security_review_required,false) FROM agent_runs WHERE id=$1`, run).Scan(&agent, &profile, &target.Account, &security); err != nil {
+	var title, body string
+	if err := tx.QueryRow(ctx, `SELECT r.queue_target_agent_id::text,r.model_profile_id::text,r.requested_account_id::text,n.title,n.body
+ FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.queue_node_id WHERE r.id=$1`, run).Scan(&agent, &profile, &target.Account, &title, &body); err != nil {
 		return false, err
 	}
 	if agent != nil {
@@ -112,7 +114,7 @@ func RunRouteReadyTx(ctx context.Context, tx pgx.Tx, tenantID, project, run stri
 			target.Profile = *profile
 		}
 	}
-	candidates, _, err := RouteCandidatesTx(ctx, tx, run, fields, project, security, target)
+	candidates, _, err := RouteCandidatesTx(ctx, tx, run, fields, project, Security(title, body, Fields(fields)), target)
 	if err != nil {
 		return false, err
 	}

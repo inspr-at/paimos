@@ -216,6 +216,108 @@ func TestLegacyQueueSkipsOtherProjectDispatchAuthorities(t *testing.T) {
 	}
 }
 
+func TestLeadQueueFairRoutingUsesLiveSecurityRoute(t *testing.T) {
+	for _, change := range []string{"field", "title", "body"} {
+		t.Run(change, func(t *testing.T) {
+			f, coordinator, olderProject, olderSession, olderLease, older := leadQueueFixture(t)
+			project, session := uuid(), uuid()
+			lease := "live-route-fixture-lease-0000000000000"
+			refDigest := sha256.Sum256([]byte("aeon.harness.ref\x00live-route-reference"))
+			leaseDigest := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, f.person.TenantID, f.profile); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title) SELECT $1,$2,'LQ-2',id,'Younger project' FROM node_kinds WHERE slug='project'`, f.person.TenantID, project); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,phase,heartbeat_at,ref_digest,lease_digest) VALUES($1,$2,$3,$4,$5,'codex','local','unmanaged','coordinator','working',clock_timestamp(),$6,$7)`, f.person.TenantID, session, project, coordinator.ID, f.person.ID, refDigest[:], leaseDigest[:]); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,session_id,generation,state) VALUES($1,$2,$3,$4,1,'working')`, f.person.TenantID, project, f.person.ID, session)
+				return err
+			})
+			id := f.ticket(t, "open", "low", nil)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, id, project)
+				return err
+			})
+			younger := f.addQueue(t, id, nil)
+			at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_at=$2 WHERE id=$1`, older.Run.ID, at); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_at=$2 WHERE id=$1`, younger.Run.ID, at.Add(time.Minute)); err != nil {
+					return err
+				}
+				var savedSecurity, hardRoute bool
+				if err := tx.QueryRow(t.Context(), `SELECT coalesce(queue_security_review_required,false),EXISTS(SELECT 1 FROM model_role_routes WHERE role='build-hard') FROM agent_runs WHERE id=$1`, older.Run.ID).Scan(&savedSecurity, &hardRoute); err != nil {
+					return err
+				}
+				if savedSecurity || hardRoute {
+					t.Fatal("fixture must enqueue ordinary work with no build-hard route")
+				}
+				switch change {
+				case "field":
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||'{"security_review_required":true}'::jsonb WHERE id=$1`, older.NodeID)
+					return err
+				case "title":
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET title='Authorization changes' WHERE id=$1`, older.NodeID)
+					return err
+				default:
+					_, err := tx.Exec(t.Context(), `UPDATE nodes SET body='Review permissions' WHERE id=$1`, older.NodeID)
+					return err
+				}
+			})
+			admission := func(ctx context.Context, tx pgx.Tx, _ tenant.Principal, _ string, _ harness.Session) (harness.LeadChecks, error) {
+				var now time.Time
+				err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+				g := harness.LeadGate{State: "available", CheckedAt: now}
+				return harness.LeadChecks{Dial: g, Harness: g, Account: g, Host: g}, err
+			}
+			f.mux = http.NewServeMux()
+			workorders.New(f.d.App).Mount(f.mux)
+			agentruns.NewWithLeadAdmission(f.d.App, admission).Mount(f.mux)
+			next := func(session, lease, want, reason string) {
+				t.Helper()
+				// Ordinary placement must use the live ticket, with no pickup override.
+				r := httptest.NewRequest("POST", "/api/queue/next", strings.NewReader(`{}`)).WithContext(tenant.WithPrincipal(t.Context(), coordinator))
+				r.Header.Set("X-Aeon-Lead-Session", session)
+				r.Header.Set("X-Aeon-Lead-Generation", "1")
+				r.Header.Set("X-Aeon-Worker-Lease", lease)
+				w := httptest.NewRecorder()
+				f.mux.ServeHTTP(w, r)
+				if w.Code != 200 {
+					t.Fatalf("next=%d %s", w.Code, w.Body.String())
+				}
+				var out struct {
+					Entry  *qEntry `json:"entry"`
+					Reason string  `json:"wait_reason"`
+				}
+				if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil {
+					t.Fatal(err)
+				}
+				if want == "" && out.Entry != nil || want != "" && (out.Entry == nil || out.Entry.Run.ID != want || out.Entry.Run.QueueRoutedAt == nil) || out.Reason != reason {
+					t.Fatalf("next=%s want run=%s reason=%s", w.Body.String(), want, reason)
+				}
+			}
+			next(olderSession, olderLease, "", "")   // Current security route is unavailable.
+			next(session, lease, younger.Run.ID, "") // Older work cannot monopolize turns.
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				var unchanged bool
+				if err := tx.QueryRow(t.Context(), `SELECT queue_routed_at IS NULL AND model_profile_id IS NULL AND agent_principal_id=tenant_id AND NOT coalesce(queue_security_review_required,false) AND (SELECT last_turn_at IS NULL FROM project_leads WHERE project_id=$2) FROM agent_runs WHERE id=$1`, older.Run.ID, olderProject).Scan(&unchanged); err != nil {
+					return err
+				}
+				if !unchanged {
+					t.Fatal("qualification changed the older assignment, saved security flag or turn")
+				}
+				return nil
+			})
+		})
+	}
+}
+
 func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
 	f := setup(t)
 	f.queueAccount(t, 1000000)
