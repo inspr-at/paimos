@@ -54,12 +54,21 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 			const request = "44444444-4444-4444-8444-444444444444"
 			const account = "55555555-5555-4555-8555-555555555555"
 			view := agentsetup.View{RequestID: request, TenantID: tenantID, ComputerID: computer, PrincipalID: principal, DaemonID: "skew-fixture", ComputerName: "fixture", Workspace: root, ComputerState: "connected", Revision: 1}
-			var registrations atomic.Int32
+			var registrations, negotiations atomic.Int32
 			var updated atomic.Bool
 			polled := make(chan struct{}, 4)
 			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch r.URL.Path {
 				case "/api/agent-pairing/reconcile":
+					_ = json.NewEncoder(w).Encode(view)
+				case "/api/agent-pairing/self":
+					// Host-capacity negotiation: the released server serves this
+					// view without host_capacity, so starts stay on the legacy
+					// path and /self/capacity must never be called (default case).
+					if r.Method != http.MethodGet {
+						t.Errorf("host-capacity negotiation used %s", r.Method)
+					}
+					negotiations.Add(1)
 					_ = json.NewEncoder(w).Encode(view)
 				case "/api/me":
 					_ = json.NewEncoder(w).Encode(map[string]any{"tenant": map[string]string{"id": tenantID}, "principal": map[string]string{"id": principal, "tenant_id": tenantID, "kind": "agent"}})
@@ -141,6 +150,7 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 			store.Close()
 			for _, afterUpdate := range []bool{false, true} {
 				updated.Store(afterUpdate)
+				negotiated := negotiations.Load()
 				ctx, cancel := context.WithCancel(t.Context())
 				done := make(chan error, 1)
 				go func() { done <- servePairedContext(ctx, root, time.Hour) }()
@@ -165,6 +175,10 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 						case <-time.After(10 * time.Second):
 							t.Fatal("paired serve stopped polling work")
 						}
+					}
+					// Each poll negotiates host capacity before reading the queue.
+					if negotiations.Load() == negotiated {
+						t.Fatal("paired serve polled work without negotiating host capacity")
 					}
 					local, err := agentdwire.OpenClient(filepath.Join(root, "daemon"))
 					if err != nil {
