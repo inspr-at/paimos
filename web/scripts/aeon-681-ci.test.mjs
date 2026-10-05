@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { run, browserList, plan, main } from '../../scripts/test-tiers/cli.mjs'
 import { command, root, web, evidence, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
 import { resolve } from 'node:path'
-import { validate, key } from '../../scripts/test-tiers/core.mjs'
+import { validate, key, select } from '../../scripts/test-tiers/core.mjs'
 
 test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async()=>{
   const policy=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8'))
@@ -104,5 +104,31 @@ test('native browser selectors cover reconciled essentials and every collected f
       total+=listed.length
     }
     assert.equal(total,mode==='all'?all.length:reconciled.filter(row=>row.tier==='ESSENTIAL'||(mode==='full'&&row.tier==='GATED-FULL')).length)
+  }
+})
+
+test('AEON-648 work Node registrations have explicit tiers and remain in changed-area and nightly runs',()=>{
+  const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json')))
+  for(const file of ['tests/done-gate.test.ts','tests/release-membership.test.ts','tests/work-aggregates.test.ts',
+    'tests/work-surfaces-fix4.test.ts','tests/work-vocabulary.test.ts']) {
+    const collected=JSON.parse(command(process.execPath,['--import',resolve(root,'scripts/test-tiers/node-collect-hook.mjs'),
+      resolve(root,'scripts/test-tiers/node-collect.mjs'),resolve(web,file)],{cwd:web}))
+      .map(row=>({...row,kind:'node',file}))
+    assert.ok(collected.length>0,file)
+    const declared={version:1,tests:manifest.tests.filter(row=>row.file===file)}
+    const rows=validate(declared,collected,undefined,{strict:true})
+    for(const event of ['pull_request','merge_group']) {
+      const changed=select(rows,{event,paths:[`web/${file}`],webImports:{[file]:[]}})
+      assert.deepEqual(changed.tests.map(key).sort(),collected.map(key).sort(),`${event}: ${file}`)
+    }
+    assert.deepEqual(select(rows,{event:'schedule',paths:[]}).tests.map(key).sort(),collected.map(key).sort(),file)
+  }
+  for(const [file,name] of [
+    ['tests/release-membership.test.ts','ambiguous parent create replay never confirms a backlog leaf as added'],
+    ['tests/work-vocabulary.test.ts','workspace names depend on leaf shape first, then project-relative depth'],
+  ]) {
+    const row=manifest.tests.find(row=>row.file===file&&row.name===name)
+    assert.equal(row?.tier,'NIGHTLY',`${file}: ${name}`)
+    assert.equal(select([row],{event:'pull_request',paths:['README.md']}).tests.length,0)
   }
 })

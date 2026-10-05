@@ -18,6 +18,25 @@ const cases=[g('internal/auth','TestCeiling','ESSENTIAL'),g('internal/auth','Tes
 const fixture=()=>({version:1,tests:structuredClone(cases)})
 const noFlaky={version:1,entries:[]}
 
+test('AEON-648 pending writes and identity fences stay protected without promoting ordinary display tests',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
+  for(const [file,names] of [
+    ['tests/parent-benefit-generation.unit.test.ts',[
+      'retry captures its generation/revision and discards a result after navigation',
+      'tenant changes fence an old status read even for the same node id',
+      'an old provider save cannot restore another person’s opt-in or drafts',
+    ]],
+    ['tests/work-vocabulary-card.unit.test.ts',['serializes a deferred Reload with Save and leaves the saved revision visible']],
+  ]) for(const name of names) {
+    const row=manifest.tests.find(row=>row.file===file&&row.name===name)
+    assert.equal(row?.tier,'ESSENTIAL',`${file}: ${name}`)
+    for(const event of ['pull_request','merge_group'])
+      assert.deepEqual(select([row],{event,paths:['README.md']}).tests,[row])
+  }
+  const display=manifest.tests.find(row=>row.file==='tests/work-benefit-visibility.unit.test.ts'&&row.name==='work offers its benefit reading section in the workspace')
+  assert.equal(display?.tier,'NIGHTLY')
+})
+
 test('runtime reconciliation defaults new cases to NIGHTLY and drops stale cases with named warnings',()=>{
   const stale=cases[0],added={kind:'go',package:'internal/auth',name:'TestNew',active:false}
   const discovered=[...cases.slice(1),added],warnings=[],manifest=fixture(),before=structuredClone(manifest)

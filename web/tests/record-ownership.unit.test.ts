@@ -4,6 +4,7 @@ import { reactive, shallowReactive, ref } from 'vue'
 import { deferred, flush, setupSource } from './record-source'
 import * as CRM from '../src/lib/crm'
 import * as Knowledge from '../src/lib/knowledge'
+import * as WorkVocabulary from '../src/lib/workVocabulary'
 import { APIError } from '../src/lib/api'
 
 const stopped: (() => void)[] = []
@@ -205,6 +206,8 @@ it('S8-007: confirming deletion of A passes A even after selection moves to B', 
     '../../lib/liveNodes': { liveNodes: { state: 'live', onState: () => () => {} } }, '../../lib/eta': { etaFromTicket: () => null },
     '../../lib/useActivity': { useActivity: () => ({}) }, '../../lib/useTicket': { useTicket: () => ({ readOnly: ref(false), gone: ref(false), remove }) },
     '../../lib/work': { kindLabel: () => 'Ticket' }, '../../lib/useAttachments': { useAttachments: () => ({}) }, '../../lib/doneGate': {},
+    '../../lib/workVocabulary': WorkVocabulary,
+    '../../stores/workVocabulary': { useWorkVocabulary: () => ({ value: { revision: 0, leaf: { name: '', icon: '' }, levels: [] } }) },
     '../../lib/recurrences': {}, '../../lib/useIdentityScope': { useIdentityScope: () => ({ owner: ref(''), reset() {} }) },
     '../../lib/ticketBenefits': { benefitDraft: () => ({}) }, '../../lib/authz': { can: () => false }, '../../lib/releaseAssign': {}, '../../lib/releaseMembership': {},
     '../../stores/journey': { useJourney: () => ({}) }, '../../stores/workQueue': { useWorkQueue: () => ({ load: async () => {} }) },

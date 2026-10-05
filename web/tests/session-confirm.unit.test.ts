@@ -7,6 +7,7 @@ import { clearPermissions } from '../src/lib/authz'
 import { confirmAction, confirmState, settleConfirm } from '../src/lib/confirm'
 import { useSession } from '../src/stores/session'
 import { deferred, setupSource } from './record-source'
+import * as WorkVocabulary from '../src/lib/workVocabulary'
 
 vi.mock('../src/lib/api', () => ({ api: vi.fn(), getSession: vi.fn(), sessionEnded: { blocked: false, handler: null } }))
 vi.mock('../src/lib/theme', () => ({ restoreTheme: async () => {} }))
@@ -42,6 +43,8 @@ function deletingTicket() {
     '../../lib/liveNodes': { liveNodes: { state: 'live', onState: () => () => {} } }, '../../lib/eta': { etaFromTicket: () => null },
     '../../lib/useActivity': { useActivity: () => ({}) }, '../../lib/useTicket': { useTicket: () => ({ readOnly: ref(false), gone: ref(false), remove }) },
     '../../lib/work': { kindLabel: () => 'Ticket' }, '../../lib/useAttachments': { useAttachments: () => ({}) }, '../../lib/doneGate': {},
+    '../../lib/workVocabulary': WorkVocabulary,
+    '../../stores/workVocabulary': { useWorkVocabulary: () => ({ value: { revision: 0, leaf: { name: '', icon: '' }, levels: [] } }) },
     '../../lib/recurrences': {}, '../../lib/useIdentityScope': { useIdentityScope: () => ({ owner: ref(''), reset() {} }) },
     '../../lib/ticketBenefits': { benefitDraft: () => ({}) }, '../../lib/authz': { can: () => false }, '../../lib/releaseAssign': {}, '../../lib/releaseMembership': {},
     '../../stores/journey': { useJourney: () => ({}) }, '../../stores/workQueue': { useWorkQueue: () => ({ load: async () => {} }) },
