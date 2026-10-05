@@ -307,6 +307,7 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 	// An independent pre-502c snapshot envelope, with known fixture rates and
 	// exact price-row fields, must equal the stored JSON for every legacy row.
 	// AEON-502e adds history evidence; its seeded tests verify those new fields.
+	// AEON-503 also freezes the fixture's classification without changing rates.
 	for _, e := range want {
 		err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 			if err := CapturePlanningStart(t.Context(), tx, e.node.ID, "session"); err != nil {
@@ -317,7 +318,11 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 				return err
 			}
 			hours, tokens, cost, rate := 2.0, 2*e.rate, fmt.Sprintf("%d.000000", e.cost), fmt.Sprint(e.cost/2)
-			legacy := planningSnapshot{Source: "session", Hours: &hours, Tokens: &tokens, Cost: &cost, Route: views[e.node.Key].Route,
+			classification, err := json.Marshal(map[string]string{"area": e.area, "route_role": e.role, "complexity": "M"})
+			if err != nil {
+				return err
+			}
+			legacy := planningSnapshot{WorkClassification: classification, Source: "session", Hours: &hours, Tokens: &tokens, Cost: &cost, Route: views[e.node.Key].Route,
 				RateBasis: estimateRateBasis{planningCalibration: planningCalibration{Basis: "median", Tickets: 5, TokensPerHour: e.rate, AnyRoute: e.profile == ""}, TokensPerHourExact: fmt.Sprint(e.rate), ListPerHour: &rate, CachedMix: mixCached, InputMix: mixInput, OutputMix: mixOutput}}
 			if e.profile == "" {
 				legacy.RateBasis.Tickets = 10
@@ -380,7 +385,14 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 			}
 		}
 		var same bool
-		if err := tx.QueryRow(t.Context(), `SELECT (SELECT snapshot-'model_estimate' FROM ticket_estimate_snapshots WHERE ticket_node_id=$1)=(SELECT snapshot-'model_estimate' FROM ticket_estimate_snapshots WHERE ticket_node_id=$2)`, security.ID, twin.ID).Scan(&same); err != nil {
+		// Rates and the legacy envelope stay equal; the immutable classifications
+		// must retain each ticket's actual area. Check both exact classifications.
+		if err := tx.QueryRow(t.Context(), `SELECT
+            s.snapshot-'model_estimate'=jsonb_set(b.snapshot-'model_estimate','{work_classification}',
+                '{"area":"security","route_role":"build-hard","complexity":"M"}'::jsonb)
+            AND b.snapshot->'work_classification'='{"area":"backend","route_role":"build-hard","complexity":"M"}'::jsonb
+            FROM ticket_estimate_snapshots s CROSS JOIN ticket_estimate_snapshots b
+            WHERE s.ticket_node_id=$1 AND b.ticket_node_id=$2`, security.ID, twin.ID).Scan(&same); err != nil {
 			return err
 		}
 		if !same {
