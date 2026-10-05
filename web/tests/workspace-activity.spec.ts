@@ -78,7 +78,7 @@ for (const theme of ['light', 'dark']) for (const width of [390, 1024, 1440]) {
     undoGuard.done()
     expect(mock.undoCalls).toEqual([11])
     if (width === 390) expect((await row.locator('.undo-stack').boundingBox())!.height).toBeGreaterThanOrEqual(44)
-    await page.goto('/settings/workspace')
+    await page.goto('/settings/autopilot')
     const showAll = page.getByRole('link', { name: 'Show all', exact: true })
     await expect(showAll).toBeVisible()
     await showAll.scrollIntoViewIfNeeded()
@@ -169,7 +169,7 @@ for (const width of [390, 1024, 1440]) test(`delayed project-filter failure keep
 
 test('Show all opens the automatic view and a delayed Undo never marks a different view', async ({ page }) => {
   const mock = await setup(page)
-  await page.goto('/settings/workspace')
+  await page.goto('/settings/autopilot')
   const showAll = page.getByRole('link', { name: 'Show all', exact: true })
   await expect(showAll).toBeVisible()
   await showAll.click()
