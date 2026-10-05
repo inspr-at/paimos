@@ -262,8 +262,12 @@ for (const id of ['release-check', 'e2e']) {
 test('merged web commands keep spec-only independent of tiers and propagate failures in both lanes', () => {
   const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   const script = (id, name) => {
-    const job = new RegExp(`^  ${id}:\\n([\\s\\S]*?)(?=^  [a-z][a-z-]*:|$(?![\\s\\S]))`, 'm').exec(workflow)[1];
-    const step = job.split(`      - name: ${name}\n`)[1].split(/\n      - /)[0];
+    const match = new RegExp(`^  ${id}:\\n([\\s\\S]*?)(?=^  [a-z][a-z-]*:|$(?![\\s\\S]))`, 'm').exec(workflow);
+    assert.ok(match, `Missing job: ${id}`);
+    const job = match[1];
+    const remainder = job.split(`      - name: ${name}\n`)[1];
+    assert.ok(remainder, `Missing step: ${id}/${name}`);
+    const step = remainder.split(/\n      - /)[0];
     return step.split('        run: |\n')[1].replace(/^          /gm, '')
       .replaceAll('${{ matrix.shard }}', '1').replaceAll('${{ strategy.job-total }}', '2');
   };
@@ -271,24 +275,33 @@ test('merged web commands keep spec-only independent of tiers and propagate fail
   mkdirSync(bin);
   for (const tool of ['npm', 'node']) {
     const path = join(bin, tool);
-    writeFileSync(path, `#!/bin/bash\nprintf '%s\\n' '${tool} '"$*" >> "$CALL_LOG"\nexit "$CHILD_CODE"\n`);
+    writeFileSync(path, `#!/bin/bash
+printf '%s\\n' '${tool} '"$*" >> "$CALL_LOG"
+if [ '${tool} '"$*" = "$TARGET_COMMAND" ]; then exit "$CHILD_CODE"; fi
+exit 0
+`);
     chmodSync(path, 0o755);
   }
   for (const lane of ['spec-only', 'full']) {
     for (const code of ['0', '7']) {
-      for (const [id, name] of [['web-setup', 'Web unit checks (once)'], ['web-shard', 'Run selected UI cases without retries']]) {
+      for (const [id, name] of [['web-unit', 'Run selected web units without retries'], ['web-shard', 'Run selected UI cases without retries']]) {
+        const target = lane === 'spec-only'
+          ? id === 'web-unit' ? 'npm run test:unit:core' : 'npm --prefix web run ci:web:shard -- 1/1 --reporter=line,json'
+          : id === 'web-unit' ? 'node ../scripts/test-tiers/cli.mjs run web --unit --shard 1/2 --job web-unit-1'
+            : 'node scripts/test-tiers/cli.mjs run web --shard 1/2 --job web-shard-1';
         const log = join(home, `${id}-${lane}-${code}`);
         writeFileSync(log, '');
         const result = spawnSync('/bin/bash', ['-e', '-c', script(id, name)], { encoding: 'utf8', cwd: home,
-          env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, CI_LANE: lane, CHILD_CODE: code, CALL_LOG: log,
+          env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, CI_LANE: lane, CHILD_CODE: code, TARGET_COMMAND: target, CALL_LOG: log,
             CI_CHANGED_SPECS: '["web/tests/new-unclassified.spec.ts"]' } });
         assert.equal(result.status, Number(code), result.stderr);
         const calls = readFileSync(log, 'utf8');
+        assert.ok(calls.split('\n').includes(target), `${id}/${lane} must reach the target command before returning ${code}: ${calls}`);
         if (lane === 'spec-only') {
           assert.doesNotMatch(calls, /test-tiers|aeon-681-ci/);
           if (id === 'web-shard') assert.match(calls, /npm --prefix web run ci:web:shard -- 1\/1 --reporter=line,json/);
-          else if (code === '0') assert.match(calls, /npm run test:unit:core/);
-        } else if (id === 'web-shard' || code === '0') {
+          else assert.match(calls, /npm run test:unit:core/);
+        } else {
           assert.match(calls, /test-tiers\/cli\.mjs run web/);
         }
       }

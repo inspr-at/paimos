@@ -1041,6 +1041,22 @@ filtering within the full CI lane. Stability cases retain their manifest tiers
 and changed-area/full coverage. Selected cases never retry. `test-tier-run-measurement` reports cases
 per class and complete job costs against the 22.50 Go / 42.17 web runner-minute
 baselines; reused reports carry provenance without claiming fresh passes.
+Web setup shares the built runtime before four file-preserving unit shards and
+twelve full-gate browser shards run in parallel. The required `web` aggregate
+gates setup and both matrices; spec-only retains one unit job and one exact-spec
+job, while docs-only skips them. Skipped Actions jobs contribute no runner duration;
+executed jobs still reject invalid timestamps. Spec-only measurements explicitly
+report `untiered` scope rather than claim tier case passes.
+OPS-257 schedules tiers using hosted run 37341114152: browser `tierTiming` in
+`web/ci-web-shards.json` and unit/Go `timingWeights` in their tier ledgers.
+Browser costs include per-case durations and apportioned group overhead; unit
+costs include Vitest elapsed time, Node test time and shared residual launch
+overhead; Go costs use terminal package elapsed time. Other selections scale
+these measured slices by case count. Missing browser/Go artifacts retain
+historical estimates; exact-spec weights and all gated membership stay intact.
+The 39-case `aeon-632b-clip` file stays serial on its own shard. Local balance
+estimates exclude runner setup, native collection and shard 1's extra unit
+checks; the next hosted run must validate total job costs.
 The eight-minute target needs hosted measurement; [local selection counts](scripts/ci/test-tier-selection-baseline.json)
 establish coverage only.
 
