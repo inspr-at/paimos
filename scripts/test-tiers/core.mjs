@@ -134,10 +134,13 @@ export function shard(rows, index, count, weights = {}) {
     if (!groups.has(owner)) groups.set(owner, [])
     groups.get(owner).push(row)
   }
-  const bins = Array.from({length: count}, () => ({ weight: 0, rows: [] }))
+  const bins = Array.from({length: count}, () => ({ weight: 0, owners: 0, rows: [] }))
   for (const [owner, entries] of [...groups].sort(([a,ar],[b,br]) => (weights[b] ?? br.length)-(weights[a] ?? ar.length) || a.localeCompare(b))) {
-    const bin = bins.reduce((a,b) => b.weight < a.weight ? b : a)
+    // Zero-duration owners still need a shard. On equal loads prefer fewer
+    // owners, then retain shard order for a deterministic final tie-break.
+    const bin = bins.reduce((a,b) => b.weight < a.weight || (b.weight === a.weight && b.owners < a.owners) ? b : a)
     bin.rows.push(...entries)
+    bin.owners++
     bin.weight += weights[owner] ?? entries.length
   }
   return bins[index-1].rows

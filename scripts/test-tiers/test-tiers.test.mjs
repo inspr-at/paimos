@@ -275,6 +275,60 @@ test('two tier shards contain every selected identity exactly once, including eq
   assert.ok(pattern.test('test [1]'));assert.ok(!pattern.test('test 1'));assert.ok(!pattern.test('other ends.$'))
 })
 
+for(const [kind,maxShards] of [['go',7],['browser',12],['node',4]]) {
+  test(`${kind} zero-weight owners fill shards before reusing tied bins for counts 1..${maxShards}`,()=>{
+    for(let count=1;count<=maxShards;count++) {
+      for(const ownerCount of new Set([0,1,Math.max(0,count-1),count,count+1,2*count+1])) {
+        for(const distribution of ['mixed','all-zero','equal-positive']) {
+          const owners=Array.from({length:ownerCount},(_,i)=>kind==='go'
+            ? `internal/owner-${String(i).padStart(2,'0')}`
+            : `tests/owner-${String(i).padStart(2,'0')}.${kind==='browser'?'spec':'test'}.ts`)
+          // Different registration counts ensure the tie-break counts owners,
+          // rather than splitting owners or comparing their number of tests.
+          const rows=owners.flatMap((owner,i)=>Array.from({length:1+i%3},(_,j)=>kind==='go'
+            ? g(owner,`TestCase${j}`) : {...w(owner,`case ${j}`),kind}))
+          const weights=Object.fromEntries(owners.map((owner,i)=>[owner,
+            distribution==='all-zero'?0:distribution==='mixed'?(i===0?1:0):1]))
+          const before={rows:structuredClone(rows),weights:{...weights}}
+          const bins=Array.from({length:count},(_,i)=>shard(rows,i+1,count,weights))
+          const ownerOf=row=>kind==='go'?row.package:row.file
+          const ownerBins=bins.map(bin=>[...new Set(bin.map(ownerOf))])
+          const context=`${kind}: ${count} shards, ${ownerCount} owners, ${distribution}`
+          assert.deepEqual(bins.flat().map(key).sort(),rows.map(key).sort(),context)
+          assert.equal(new Set(bins.flat().map(key)).size,rows.length,context)
+          assert.deepEqual(ownerBins.flat().sort(),owners,`${context}: owners stay whole`)
+          assert.equal(ownerBins.filter(bin=>bin.length).length,Math.min(count,ownerCount),`${context}: empty shards only when owners are fewer`)
+          for(let i=0;i<count;i++) {
+            assert.deepEqual(shard([...rows].reverse(),i+1,count,weights).map(key).sort(),bins[i].map(key).sort(),`${context}: input order cannot change assignment`)
+          }
+          if(distribution==='all-zero') {
+            // Equal weights and owner counts resolve by path then shard index.
+            assert.deepEqual(ownerBins,Array.from({length:count},(_,i)=>owners.filter((_,j)=>j%count===i)),context)
+          }
+          assert.deepEqual({rows,weights},before,`${context}: inputs remain unchanged`)
+        }
+      }
+    }
+  })
+}
+
+test('fewer owners than shards retain successful empty-shard reports in Go, unit and browser callers',async()=>{
+  const {run}=await import('./cli.mjs')
+  const env={RUNNER_ENVIRONMENT:'github-hosted',GITHUB_RUN_ID:'empty-shard',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'a'.repeat(40)}
+  for(const [kind,unit,count,row] of [['go',false,7,cases[0]],['web',true,4,cases[5]],
+    ['web',false,12,{kind:'browser',file:'tests/only.spec.ts',name:'only',tier:'ESSENTIAL'}]]) {
+    const owner=row.kind==='go'?row.package:row.file
+    const tests=shard([row],count,count,{[owner]:0})
+    assert.deepEqual(tests,[])
+    const job=`ops257r3-empty-${kind}-${unit?'unit':'cases'}`
+    assert.equal(await run(kind,{tests,all:[row],full:true,scope:'gated-full',reason:'fewer owners than shards'},
+      {unit,job,env}),0)
+    const report=JSON.parse(readFileSync(new URL(`../../tmp/test-tiers/${job}-measurement.json`,import.meta.url)))
+    assert.equal(checkFull(report,env),true)
+    assert.ok(Object.values(report.classes).every(tier=>tier.selected===0&&tier.run===0&&tier.passed===0&&tier.notRun===0&&tier.failed===0))
+  }
+})
+
 test('reports distinguish missing, skipped and failed outcomes; nested Go subtests cannot inflate totals',()=>{
   const text=[{Package:'github.com/inspr-at/paimos/internal/auth',Test:'TestCeiling',Action:'run'},
     {Package:'github.com/inspr-at/paimos/internal/auth',Test:'TestCeiling/sub',Action:'pass'},
