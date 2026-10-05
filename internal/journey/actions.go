@@ -111,11 +111,6 @@ func (m *Module) actWithMode(ctx context.Context, p tenant.Principal, projectID 
 	}
 	var out Journey
 	err = m.inTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if in.Action == actionRenewPermit {
-			if _, err := tx.Exec(ctx, `SELECT 1 FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
-				return err
-			}
-		}
 		if seed {
 			brief, _ := ctx.Value(briefContextKey{}).(string)
 			if in.Action != "open_first_release" && in.Action != "start_build" && in.Action != "mark_candidate" && !(brief != "" && in.Action == "confirm_brief") {

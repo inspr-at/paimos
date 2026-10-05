@@ -15,6 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/releasesettlement"
@@ -92,20 +93,9 @@ type nodeSnap struct {
 }
 
 func ensureJourney(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string) error {
-	// Release membership may expand parents; acquire the pairing fence before
-	// the shared tree lock even while parent-status rollout is disabled.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, p.TenantID); err != nil {
-		return err
-	}
-
-	// Match release membership/plan and node-tree mutations: tenant advisory
-	// lock first, then journey project, release and ticket rows. recordDerivation
-	// already locks the project, before act reaches its explicit lockJourney.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
-		return err
-	}
-	var tenantID string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID).Scan(&tenantID); err != nil {
+	// Match permit renewal, handoff completion and release membership even
+	// without parent-status serialization: tenant -> pairing -> tree -> rows.
+	if err := db.LockWorkTreeTx(ctx, tx); err != nil {
 		return err
 	}
 	var one int

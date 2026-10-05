@@ -193,20 +193,6 @@ func contains(set []string, value string) bool {
 	return false
 }
 func (m *Module) close(ctx context.Context, tx pgx.Tx, p tenant.Principal, authorization, id string, in ResultWrite) (Result, error) {
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
-		return Result{}, err
-	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id'),0))`); err != nil {
-		return Result{}, err
-	}
-	var project string
-	if err := tx.QueryRow(ctx, `SELECT project_node_id::text FROM stage_handoffs WHERE id=$1::uuid`, id).Scan(&project); err != nil {
-		return Result{}, err
-	}
-	if _, err := tx.Exec(ctx, `SELECT 1 FROM journey_projects WHERE project_node_id=$1::uuid FOR NO KEY UPDATE`, project); err != nil {
-		return Result{}, err
-	}
-
 	if err := requireActiveAgent(ctx, tx, p); err != nil {
 		return Result{}, err
 	}
