@@ -10,7 +10,7 @@ import { mockPairing } from './agent-pairing-fixtures'
 import { makePng, mockSettings, settingsData } from './settings-fixtures'
 import { defaultStatusHelp } from '../src/lib/statusDefinitions'
 import { expectCompactDialog, expectPhoneSheet, phoneSheetFindings, sampleDialog, type DialogSize, type PhoneSheetGeometry } from './helpers/dialog-scale'
-import type { StableInteraction } from './helpers/stable'
+import { expectStableControls, type StableInteraction } from './helpers/stable'
 
 // AEON-730: every dialog takes one step of the shared size scale and keeps its
 // actions compact on wide screens; phones get full-height sheets with a pinned
@@ -191,13 +191,32 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     ] })
     await gate.getByRole('button', { name: 'Not now' }).click()
 
-    // Convert kind: M. Status help: L.
+    // Convert kind: M. Status help: L. A tenant kind with a longer name makes
+    // the primary label change width when the kind changes.
+    await page.route(/\/api\/kinds(\?|$)/, route => route.fulfill({ json: { items: ['work', 'epic', 'ticket', 'task', 'project', 'incident'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0]!.toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug === 'incident' ? 'bug' : slug, allowed_child_kinds: null, field_schema: slug === 'incident' ? { issue_family: true } : {} })) } }))
     await page.goto('/p/PHAROS/PHAROS-11')
     const details = page.getByRole('complementary', { name: 'Ticket details' })
     await details.getByRole('button', { name: 'More actions' }).click()
     await page.getByRole('menuitem', { name: 'Convert to…' }).click()
     const convert = dialog(page, 'Convert PHAROS-11')
-    await check({ name: 'convert-kind', frame: convert, actions: convert.locator('.actions'), size: 'm', body: convert.locator('.convert-scroll') })
+    const kindChoice = (name: string) => convert.getByRole('radio', { name, exact: true })
+    const pickKind = (name: string) => ({ name: `pick ${name}`, run: async () => { await kindChoice(name).click(); await expect(kindChoice(name)).toHaveAttribute('aria-checked', 'true') } })
+    await expect(kindChoice('Epic')).toHaveAttribute('aria-checked', 'true')
+    await check({ name: 'convert-kind', frame: convert, actions: convert.locator('.actions'), size: 'm', body: convert.locator('.convert-scroll'), changes: [pickKind('Incident'), pickKind('Task'), pickKind('Epic')] })
+    // Switching the kind relabels the primary action; neither action nor any
+    // kind row moves or resizes (AEON-541), on desktop as on phones.
+    await expectStableControls({
+      controls: {
+        cancel: convert.getByRole('button', { name: 'Cancel', exact: true }),
+        convert: convert.locator('.actions .btn').nth(1),
+        'kind selector': convert.getByRole('radiogroup', { name: 'New kind' }),
+        'Epic row': kindChoice('Epic'),
+        'Task row': kindChoice('Task'),
+        'Incident row': kindChoice('Incident'),
+      },
+      interactions: [pickKind('Incident'), pickKind('Task'), pickKind('Epic'), pickKind('Incident')],
+    })
+    await expect(convert.getByRole('button', { name: 'Convert to incident', exact: true })).toBeVisible()
     await convert.getByRole('button', { name: 'Cancel' }).click()
     await details.getByRole('button', { name: /Status: / }).click()
     await page.getByRole('menu', { name: 'Status of PHAROS-11' }).getByRole('menuitem', { name: 'What do these mean?' }).click()

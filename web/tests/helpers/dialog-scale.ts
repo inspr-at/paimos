@@ -103,8 +103,8 @@ export interface PhoneSheetOptions {
 }
 
 /** Phone (AEON-541 pattern B): a full-height sheet whose action bar is pinned
- * to the bottom edge. The sheet, the bar and its first action keep their exact
- * place while the content changes and the body scrolls. */
+ * to the bottom edge. The sheet, the bar and every visible action keep their
+ * exact place while the content changes and the body scrolls. */
 export async function expectPhoneSheet(frame: Locator, actions: Locator, viewport: { width: number; height: number }, { body, changes = [] }: PhoneSheetOptions) {
   const sample = await sampleDialog(frame, actions)
   await expect(actions).toHaveCount(1)
@@ -115,8 +115,13 @@ export async function expectPhoneSheet(frame: Locator, actions: Locator, viewpor
     return { frame: rect(sheet as Element), bar: bar.getClientRects().length ? rect(bar) : null, barIsFrame: bar.contains(sheet as Node), buttons }
   }, await frame.elementHandle())
   expect.soft(phoneSheetFindings(geometry, viewport), 'phone sheet').toEqual([])
+  // Actions by position: a label may change (Convert to epic → task) while the
+  // button must not.
+  const buttons = actions.locator('.btn, button.desk-btn').filter({ visible: true })
+  const controls: Record<string, Locator> = { sheet: frame, 'action bar': actions }
+  geometry.buttons.forEach((button, index) => { controls[`action ${index + 1} (“${button.label}”)`] = buttons.nth(index) })
   await expectStableControls({
-    controls: { sheet: frame, 'action bar': actions, 'first action': actions.locator('.btn, button.desk-btn').first() },
+    controls,
     interactions: [
       ...changes,
       { name: 'scroll the body to its end', run: () => body.evaluate(element => { element.scrollTop = element.scrollHeight }) },

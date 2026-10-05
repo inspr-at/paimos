@@ -61,6 +61,11 @@ const blockers = computed(() => {
 })
 const historyFields = computed(() => fieldsMovingToHistory(kindBySlug(choice.value)?.field_schema, props.item.fields))
 const canSubmit = computed(() => !!choice.value && !waiting.value && !busy.value && !parentBlocked.value && blockers.value.length === 0 && serverFields.value.length === 0)
+function convertLabel(slug: string) { return slug ? `Convert to ${kindLabel(slug).toLowerCase()}` : 'Convert' }
+const primaryLabel = computed(() => convertLabel(choice.value))
+// Every target's label is reserved, so switching kinds never resizes the
+// button or moves Cancel (AEON-541).
+const reservedLabels = computed(() => targets.value.map(convertLabel).filter(label => label !== primaryLabel.value))
 const sentence = computed(() => {
   const kept = `${props.item.key} keeps its key, history, relations, comments and attachments`
   if (!choice.value) return `${kept}.`
@@ -155,7 +160,7 @@ async function submit() {
       </div>
       <div class="actions">
         <button type="button" class="btn" @click="close">Cancel</button>
-        <button ref="primary" type="button" class="btn on" :disabled="!canSubmit" @click="submit">{{ choice ? `Convert to ${kindLabel(choice).toLowerCase()}` : 'Convert' }}</button>
+        <button ref="primary" type="button" class="btn on" :disabled="!canSubmit" @click="submit"><span class="btn-label"><span>{{ primaryLabel }}</span><span v-for="label in reservedLabels" :key="label" aria-hidden="true">{{ label }}</span></span></button>
       </div>
     </div>
   </dialog>
