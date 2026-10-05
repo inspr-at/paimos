@@ -58,5 +58,59 @@
     "web/src/lib/computerAccounts.ts": "93929503e863913194b4f16cb7a1dc3cd730be6b6724f3caf87acf2778f8dbed",
     "web/tests/accounts-computers.spec.ts": "1834f36807fa00db08e59c7fce1d637f3675c78af4b51e03a3b930df0771d91f",
     "web/tests/computer-accounts.unit.test.ts": "c2c65ea36dd39a3eb1060101694f07cd05995998934e8ddbff95a515b1690426"
+  },
+  "source_sha256_for": "1661b47f02fd9bea55ae1b64fdcab9b83577da91 (original implementation; fix-round-2 hashes below)",
+  "fix_round_2": {
+    "base_commit": "1661b47f02fd9bea55ae1b64fdcab9b83577da91",
+    "review": "review-aeon-716-opus.out plus full cross-family-review-gate-claude-woolly-harbor.md; the brief reference review-review-aeon-716-opus.out.out does not exist",
+    "findings": {
+      "M1": "Removed premature verification return; failed/stalled explanations remain in the existing label branch. Offline, draining, setup, sign-in and harness repair states/commands take precedence, including stalled enrollment labels.",
+      "M2": "Accept recognized error-only status reports and preserve current state. Updated quoted OpenAPI descriptions. Exact event_stream_bound DTO is accepted, replayed once and preserved through terminal settlement; empty/unknown reports remain invalid with exact failure reasons.",
+      "M3": "Prior-generation no-process records recover on their first permanent protocol rejection in the same flush, before probes rotate account authority. Original fencing headers, fresh terminal sequence, dead-letter evidence and unknown usage are retained. Permanent fallback rejection stays bounded through another generation change; no exit proof means no recovery.",
+      "L1": "Log validated run UUID, recognized kind, nonnegative sequence and fixed reason for 400s and all three permanent protocol 409s. Tests reject model/key/kind disclosure and prove replay, monotonicity and starting-state conflict reasons without deleting fixtures.",
+      "L2": "Claude verification SDK confinement test runs both absent and interrupt_receipt_v1 capability variants without changing production bridge behavior.",
+      "L3": "Stalled setup progress follows offline, login_required, service_conflict and setup_failed recovery states.",
+      "Info": "SettlementGap deliberately remains visible in settlement-pending status; local exit and failed terminal acceptance do not prove disputed usage was settled. No accounting evidence was pruned."
+    },
+    "regression_before": [
+      "New computer readiness regressions failed on the unchanged 1661b47f sources: attention instead of offline; Verification failed instead of Signed out.",
+      "New setup-progress regression failed on 1661b47f: Verification stalled instead of The computer is offline.",
+      "New real supervisor restart regression failed on 1661b47f: first old-generation flush posted once and left two reports pending, instead of recovering immediately.",
+      "New exact error-only DTO handler regression failed on 1661b47f: HTTP400 status report requires status instead of HTTP200.",
+      "New protocol diagnostics regression failed on 1661b47f: missing run id/fixed conflict reason."
+    ],
+    "passed": [
+      "Targeted internal/agentd telemetry, authority/outage, owned-child, dead-letter and exact settlement checks (4.272s); final telemetry and both Claude no-tools capability variants after retry-bound coverage update (4.472s).",
+      "Targeted internal/agentpairing new status/log cases, exact four-event batch/recovery, stalled ownership and all VerifyAgain checks (6.750s); final status/log/batch checks after bounded diagnostic fields and exact negative-reason assertions (4.705s).",
+      "Four internal/agentruns telemetry/replay/budget/fencing/overflow/concurrency tests (4.497s).",
+      "Full internal/reportercontract package, including OpenAPI syntax, response pins and compatibility (2.264s).",
+      "32 computer-accounts Vitest cases; 54 agent-pairing Node cases, including the new precedence regressions.",
+      "Two AEON-716 browser cases in accounts-computers.spec.ts with isolated headless Chromium and one worker (3.7s). Existing retry stability guard passes; new offline/sign-in/repair-control regression passes. Owned browser processes after=0, remaining=0.",
+      "Web vue-tsc typecheck and ESLint on both changed library sources.",
+      "34 test-tier checks, 22 web-shard checks and 33 ownership audit tests. Three new Go cases and four new web cases registered ESSENTIAL; existing spec remains in the web shard source manifest.",
+      "git diff --check."
+    ],
+    "limitations": [
+      "User expressly forbids push and deploy. remote-test.sh uploads a temporary Git ref, so it was not invoked. No origin push, PR, merge, deployment, live verification, hosted/Linux Chromium run or full suite was performed. Validation uses light targeted local package/spec runs only.",
+      "Lead owns the consolidated review and release. Required rollout order remains server first, confirm outstanding run settlement through the still-running daemon, then update agentd; no rollout performed.",
+      "Already-fenced old claims cannot regain authority through recovery; 403/authentication/generation/enrollment failures remain distinct from permanent telemetry rejection, preserving evidence and ownership.",
+      "No layout design was invented or replaced. No finding conflicts with an approved ticket decision."
+    ],
+    "safety": "Read mandatory skill and both normative references, worker-common and repo instructions. Verified selected ppm account/INSPR principal and AEON-716; coordinator attribution is recorded per worker-common. Only assigned worktree changed. No credentials read/displayed, live daemon state access, model CLI review, ticket status change, foreign process stop, secret creation, version migration, push or deploy. Tests use private local fixtures; owned temporary database and audit bytecode cache cleaned.",
+    "source_sha256": {
+      "api/openapi.yaml": "31d27cc440cee556b1be6c12b73ae487c4908e762e80fc940453dae600223670",
+      "internal/agentd/lifecycle.go": "7de2b26a3cc264fcd1478702fc52770f49cd182371f61664b06544fe47b6605e",
+      "internal/agentd/telemetry_lifecycle_test.go": "d630859d26fc28f042f70d803d9d3d4ed7063db11576c589081a4ae9b8426fb5",
+      "internal/agentd/verification_test.go": "edeb6f96011686f2f7780423e52e28306ec3b177100364845b7e9bd6ad4f7608",
+      "internal/agentpairing/verification_retry_test.go": "9a27781f9de32e107378dcaf0f178b336cbf5d4d24e28c2084367b128d0ef056",
+      "internal/agentruns/telemetry.go": "e4fbb0f14e5ef71a278328a17cda9bb427720e20929c0f07b53dc1dc98661fee",
+      "scripts/ci/go-test-tiers.json": "885f99dabe67f4700508b8ce117dfbdf754314927c0590a4fc42d4b88c3ac49b",
+      "scripts/ci/web-test-tiers.json": "9cb71d7482f1ce0741804baf7a8e223cc370e63b85cfbb495aaa41b344d3adb5",
+      "web/src/lib/agentPairing.ts": "7495c3d1ff0d0f2073d4d453fdb35d2fbd69cbac4796136e5f67772e6e0bcfbb",
+      "web/src/lib/computerAccounts.ts": "79cac1e376972cb8b84a906d09a2d7903a3c375ac60235a349bca7d3bbbb29fc",
+      "web/tests/accounts-computers.spec.ts": "80705bc137087af3c679c5c9ecc4d4f24c3aeb1c7f9938b59f93cfc4a74655ad",
+      "web/tests/agent-pairing.test.ts": "065ae487bf282a3e577017f8292eec5b23a5ac19eb94ee392275391c910bf1a4",
+      "web/tests/computer-accounts.unit.test.ts": "25fe06b1305bd7c40356b2cf6eec41589e87ef71d2c1aefb8c4f5721828654aa"
+    }
   }
 }

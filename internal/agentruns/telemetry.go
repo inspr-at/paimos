@@ -89,8 +89,8 @@ func (t Telemetry) validate() error {
 	default:
 		return workorders.Fail(400, "invalid run status")
 	}
-	if t.Kind == "status" && t.Status == "" && t.Model == "" {
-		return workorders.Fail(400, "status report requires status")
+	if t.Kind == "status" && t.Status == "" && t.Model == "" && t.ErrorCode == "" {
+		return workorders.Fail(400, "status report requires status, effective_model or error_code")
 	}
 	if t.Kind == "started" && t.Status != "" && t.Status != "running" {
 		return workorders.Fail(400, "started report requires running status")
@@ -153,15 +153,26 @@ func sameTelemetry(a, b Telemetry) bool {
 	return true
 }
 func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (out any, err error) {
+	var t Telemetry
 	defer func() {
 		var rejected *workorders.Error
-		if errors.As(err, &rejected) && rejected.Status == http.StatusBadRequest {
+		if errors.As(err, &rejected) && (rejected.Status == http.StatusBadRequest || rejected.Status == http.StatusConflict &&
+			(rejected.Message == "divergent telemetry replay" || rejected.Message == "telemetry sequence is not monotonic" || rejected.Message == "run cannot return to starting")) {
 			// Decode/validation messages are fixed field-level text, never values
 			// from the body, headers, vendor output or database errors.
-			slog.WarnContext(r.Context(), "run telemetry rejected", "reason", rejected.Message)
+			runID := r.PathValue("runId")
+			if !workorders.UUID(runID) {
+				runID = "" // Never log arbitrary path text as a run identifier.
+			}
+			kind := ""
+			switch t.Kind {
+			case "started", "heartbeat", "turn", "tool", "usage", "status", "finished":
+				kind = t.Kind
+			}
+			sequence := max(t.Sequence, 0)
+			slog.WarnContext(r.Context(), "run telemetry rejected", "run_id", runID, "kind", kind, "sequence", sequence, "reason", rejected.Message)
 		}
 	}()
-	var t Telemetry
 	if err := workorders.Decode(r, &t); err != nil {
 		return nil, err
 	}

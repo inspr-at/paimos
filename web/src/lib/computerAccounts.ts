@@ -113,9 +113,6 @@ export function offlineNotice(view: PairingView, now: number): ComputerNotice | 
  */
 export function readiness(row: AccountRow, computer: PairingView | null, now: number): Readiness {
   const enrollment = computer?.enrollments.find(e => e.account_id === row.id && e.state !== 'revoked')
-  if (computer?.computer_state === 'connected' && enrollment?.state === 'connected' && (enrollment.verification_stalled || enrollment.verification_state === 'failed')) {
-    return { kind: 'attention', text: enrollment.verification_stalled ? 'Verification stalled' : 'Verification failed', tone: 'warn', tip: verificationFailureText(enrollment) }
-  }
   if (computer?.computer_state === 'connected' && computer.connectivity === 'offline') return { kind: 'offline', text: 'Paused · computer offline', tone: 'warn', tip: `Agents can't start on ${computer.computer_name} until it reports again.` }
   if (!computer && row.state === 'offline') return { kind: 'offline', text: 'Paused · computer offline', tone: 'warn', tip: `Agents can't start on ${row.host} until it reports again.` }
   if (computer?.computer_state === 'draining' || enrollment?.state === 'draining' || row.disconnecting) return { kind: 'paused', text: 'Paused · disconnecting', tone: 'mute', tip: `Disconnecting from ${computer?.computer_name ?? row.host}: agents start nothing new on it.` }
@@ -133,7 +130,7 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
       const command = /^Verif/.test(label) ? '' : diagnostic?.command ?? (soleAccount ? describeHarnessFix(computer, row.harness) : '')
       const signin = /sign in/i.test(label)
       const waiting = /^(Verification queued|Verifying account)/.test(label)
-      return { kind: waiting ? 'waiting' : signin ? 'signin' : 'attention', text: signin ? 'Signed out' : label, tone: waiting ? 'mute' : 'warn', ...(command ? { command } : {}), tip: `${HARNESS_NAME[row.harness] ?? row.harness} on ${computer.computer_name}: ${label}.` }
+      return { kind: waiting ? 'waiting' : signin ? 'signin' : 'attention', text: signin ? 'Signed out' : label, tone: waiting ? 'mute' : 'warn', ...(command ? { command } : {}), tip: label === 'Verification failed' || label === 'Verification stalled' ? verificationFailureText(enrollment) : `${HARNESS_NAME[row.harness] ?? row.harness} on ${computer.computer_name}: ${label}.` }
     }
   }
   if (row.state === 'paused') return { kind: 'paused', text: 'Paused in Settings', tone: 'mute', tip: 'Turn “Agents may use it” back on in Settings / Accounts to resume.' }

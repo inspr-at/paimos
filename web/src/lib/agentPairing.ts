@@ -914,8 +914,6 @@ export function verificationFailureText(enrollment: Pick<PairingEnrollment, 'ver
 
 function setupProgress(view: PairingView): PairingProgress {
   const progress = view.setup_state
-  const stalled = view.enrollments.find(item => item.verification_stalled)
-  if (stalled) return { phase: 'verify', title: 'Verification stalled', detail: verificationFailureText(stalled), next: 'Use Verify again to check whether the previous run has settled. It cannot replace unconfirmed work.', renewsAuthority: false }
   if (view.connectivity === 'offline' && progress !== 'login_required' && progress !== 'service_conflict' && progress !== 'setup_failed') {
     return { phase: 'setup', title: 'The computer is offline', detail: `${localProcessSentence(view)} Being offline does not show that work has stopped.`, next: 'Server access follows the pairing record. Accounting for runs that have not settled stays unconfirmed.', renewsAuthority: false }
   }
@@ -925,6 +923,8 @@ function setupProgress(view: PairingView): PairingProgress {
   if (progress === 'service_conflict' || progress === 'setup_failed') {
     return { phase: 'setup', title: progress === 'service_conflict' ? 'Setup found a conflict' : 'Setup did not finish', detail: setupErrorText(view) || 'The computer reported that setup did not finish.', next: 'Resolve it on the computer. Approving again does not replace another service or refill a verification.', renewsAuthority: false }
   }
+  const stalled = view.enrollments.find(item => item.verification_stalled)
+  if (stalled) return { phase: 'verify', title: 'Verification stalled', detail: verificationFailureText(stalled), next: 'Use Verify again to check whether the previous run has settled. It cannot replace unconfirmed work.', renewsAuthority: false }
   const unavailable = view.enrollments.find(item => item.verification_state === 'unavailable' || item.verification_error === 'verification_unavailable')
   if (unavailable) {
     return {
@@ -1221,9 +1221,9 @@ export function describeEnrollmentStatus(view: HarnessView, enrollment: { accoun
     if (detail?.state !== 'ready' || attention.truncated || attention.count !== attention.accounts.length) return freshLabel(view, 'Needs attention')
     status = freshLabel(view, 'Ready')
   }
+  if (status && status !== 'Ready') return status
   if (enrollment.verification_stalled) return freshLabel(view, 'Verification stalled')
   if (enrollment.verification_state === 'expired' && enrollment.verification_expired_ready === false) return freshLabel(view, 'Verification failed')
-  if (status && status !== 'Ready') return status
   const verification = enrollment.verification_state
   if (verification && VERIFICATION_ACTIVE.includes(verification)) return freshLabel(view, verification === 'queued' ? 'Verification queued' : 'Verifying account')
   if (verification === 'expired' && status !== 'Ready') return freshLabel(view, 'Verification failed')

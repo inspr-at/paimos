@@ -8020,7 +8020,7 @@ paths:
   /runs/{runId}/telemetry:
     post:
       operationId: reportRunTelemetry
-      description: Daemon reports monotonic sequence numbers; exact duplicate is idempotent and divergent replay conflicts. Telemetry is content-free. Totals, run status and event update atomically; budget excess blocks further dispatch. Model-only status and turn reports may precede started after a successful claim; an omitted status preserves the current run state. After observing local exit, a daemon may settle a rejected outbox with a fresh minimal finished/failed report using reporter_unavailable; rejected usage remains unconfirmed, never invented.
+      description: "Daemon reports monotonic sequence numbers; exact duplicate is idempotent and divergent replay conflicts. Telemetry is content-free. Totals, run status and event update atomically; budget excess blocks further dispatch. Model-only or error-only status and turn reports may precede started after a successful claim; an omitted status preserves the current run state. After observing local exit, a daemon may settle a rejected outbox with a fresh minimal finished/failed report using reporter_unavailable; rejected usage remains unconfirmed, never invented."
       security: [{agentKey: []}]
       parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunTelemetry'}}}}
@@ -17244,7 +17244,7 @@ components:
         created_at: {type: string, format: date-time}
     RunTelemetry:
       type: object
-      description: A status report requires either status or effective_model. Model evidence does not imply that startup completed. Empty status reports remain invalid.
+      description: "A status report requires status, effective_model or a recognized error_code. Model and error evidence preserve the current run state when status is omitted. Empty status reports remain invalid."
       required: [sequence, kind]
       properties:
         service_tier: {$ref: '#/components/schemas/ServiceTier'}

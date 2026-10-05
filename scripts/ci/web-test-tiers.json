@@ -9695,6 +9695,10 @@
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification warnings preserve recovery precedence > keeps failed verification behind offline, disconnecting and setup states","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification warnings preserve recovery precedence > keeps failed and stalled checks behind sign-in and harness repair commands","tier":"ESSENTIAL"},
+    {"kind":"node","file":"tests/agent-pairing.test.ts","name":"stalled verification preserves offline, login and setup recovery progress","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-716: verification warnings preserve offline and account recovery controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
   ]
 }

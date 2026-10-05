@@ -453,3 +453,127 @@ func TestStalledVerificationPreservesOwnership(t *testing.T) {
 		t.Fatal("elapsed time granted process-exit or accounting authority")
 	}
 }
+
+func TestVerificationErrorOnlyStatusKeepsCauseAndClaimState(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	f.probe(v, e, key, 200)
+	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+	path := "/api/runs/" + *e.VerificationRunID + "/telemetry"
+	post := func(report agentd.Telemetry, want int) agentruns.Run {
+		t.Helper()
+		r := f.request("POST", path, report, false, key)
+		r.Header.Set(agentruns.DaemonHeader, *v.DaemonID)
+		r.Header.Set(agentruns.GenerationHeader, "test-generation")
+		w := httptest.NewRecorder()
+		f.h.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("sequence %d: HTTP %d, want %d: %s", report.Sequence, w.Code, want, w.Body.String())
+		}
+		var run agentruns.Run
+		if want == 200 {
+			decodeResult(t, w, &run)
+		} else if want == 400 {
+			reason := "status report requires status, effective_model or error_code"
+			if report.ErrorCode != "" {
+				reason = "invalid error code"
+			}
+			var rejected struct {
+				Error string `json:"error"`
+			}
+			decodeResult(t, w, &rejected)
+			if rejected.Error != reason {
+				t.Fatalf("rejected for wrong reason: %s", rejected.Error)
+			}
+		}
+		return run
+	}
+	// Exact status event from protocol.go when the bounded scanner fails.
+	report := agentd.Telemetry{Sequence: 1, Kind: "status", ErrorCode: "event_stream_bound"}
+	for i := 0; i < 2; i++ {
+		run := post(report, 200)
+		if run.Status != "starting" || run.EffectiveModel != nil || run.InputTokens != 0 || run.EndedAt != nil {
+			t.Fatal("error evidence invented startup, model or usage")
+		}
+	}
+	var cause string
+	var count int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*),min(error_code) FROM run_telemetry WHERE run_id=$1`, *e.VerificationRunID).Scan(&count, &cause); err != nil || count != 1 || cause != "event_stream_bound" {
+		t.Fatalf("error cause or replay lost: %d %s %v", count, cause, err)
+	}
+	post(agentd.Telemetry{Sequence: 2, Kind: "status"}, 400)
+	post(agentd.Telemetry{Sequence: 2, Kind: "status", ErrorCode: "private-unknown-error"}, 400)
+	run := post(agentd.Telemetry{Sequence: 2, Kind: "finished", Status: "failed", ErrorCode: "event_stream_bound"}, 200)
+	if run.Status != "failed" || run.EndedAt == nil {
+		t.Fatal("stream error did not settle truthfully")
+	}
+	var listed agentpairing.View
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+*v.ComputerID, nil, true, "", 200), &listed)
+	if listed.Enrollments[0].VerificationError != "event_stream_bound" {
+		t.Fatal("verification lost original failure cause")
+	}
+}
+
+func TestVerificationRejectionLogsRunAndProtocolConflicts(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	e := v.Enrollments[0]
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	f.probe(v, e, key, 200)
+	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+	post := func(report agentd.Telemetry, want int) {
+		t.Helper()
+		r := f.request("POST", "/api/runs/"+*e.VerificationRunID+"/telemetry", report, false, key)
+		r.Header.Set(agentruns.DaemonHeader, *v.DaemonID)
+		r.Header.Set(agentruns.GenerationHeader, "test-generation")
+		w := httptest.NewRecorder()
+		f.h.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("HTTP %d, want %d: %s", w.Code, want, w.Body.String())
+		}
+	}
+	post(agentd.Telemetry{Sequence: 2, Kind: "started"}, 200)
+	var logs bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})))
+	defer slog.SetDefault(old)
+	for _, tc := range []struct {
+		report agentd.Telemetry
+		status int
+		reason string
+	}{
+		{agentd.Telemetry{Sequence: 2, Kind: "started", Status: "running"}, 409, "divergent telemetry replay"},
+		{agentd.Telemetry{Sequence: 1, Kind: "heartbeat"}, 409, "telemetry sequence is not monotonic"},
+		{agentd.Telemetry{Sequence: 3, Kind: "status", Status: "starting"}, 409, "run cannot return to starting"},
+		{agentd.Telemetry{Sequence: 3, Kind: "status", EffectiveModel: "PRIVATE-FIXTURE model"}, 400, "effective_model must be a bounded model identifier"},
+		{agentd.Telemetry{Sequence: 3, Kind: "PRIVATE-FIXTURE kind"}, 400, "invalid telemetry kind"},
+	} {
+		logs.Reset()
+		post(tc.report, tc.status)
+		var line struct {
+			RunID    string `json:"run_id"`
+			Kind     string `json:"kind"`
+			Sequence int64  `json:"sequence"`
+			Reason   string `json:"reason"`
+		}
+		if err := json.Unmarshal(logs.Bytes(), &line); err != nil || line.RunID != *e.VerificationRunID || line.Reason != tc.reason {
+			t.Fatalf("missing run or fixed rejection reason: %v", err)
+		}
+		wantKind := tc.report.Kind
+		if tc.reason == "invalid telemetry kind" {
+			wantKind = ""
+		}
+		if line.Kind != wantKind || line.Sequence != tc.report.Sequence {
+			t.Fatal("missing bounded kind or sequence")
+		}
+		if strings.Contains(logs.String(), "PRIVATE-FIXTURE") || strings.Contains(logs.String(), key) {
+			t.Fatal("diagnostics leaked request values")
+		}
+	}
+}

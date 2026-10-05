@@ -531,7 +531,14 @@ func (s *Supervisor) settlePending(ctx context.Context) {
 
 func (s *Supervisor) flushReports(ctx context.Context, e *owned) error {
 	for len(e.record.Pending) > 0 {
-		if e.record.ReportRejections >= 3 {
+		// A restarted daemon has one flush before probes rotate account authority.
+		// Only proven no-process records may recover under their original claim.
+		oldExited := e.record.Generation != s.generation && noLocalProcess(e.record)
+		rejectionLimit := 3
+		if oldExited {
+			rejectionLimit = 1
+		}
+		if e.record.ReportRejections >= rejectionLimit {
 			if !noLocalProcess(e.record) {
 				return ErrTelemetryProtocol
 			}
@@ -572,6 +579,10 @@ func (s *Supervisor) flushReports(ctx context.Context, e *owned) error {
 					return errors.Join(err, saveErr)
 				}
 				e.record = next
+				if oldExited && !e.record.TerminalRecovery {
+					// Recover in this same flush, before a new-generation account probe.
+					continue
+				}
 			}
 			return err
 		}

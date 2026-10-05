@@ -3893,6 +3893,9 @@
     {"kind":"go","package":"internal/db","name":"TestWorkTreeTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/ticketwork","name":"TestMigratedWorkSessionsAndCostsRespectVisibility","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/deliveryvote","name":"TestMigratedWorkRetainsDeliveryRatingsAndVisibility","tier":"GATED-FULL"},
-    {"kind":"go","package":"internal/releases","name":"TestReleaseMembershipTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"}
+    {"kind":"go","package":"internal/releases","name":"TestReleaseMembershipTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryRestartRecoversBeforeProbeChangesGeneration","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentpairing","name":"TestVerificationErrorOnlyStatusKeepsCauseAndClaimState","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentpairing","name":"TestVerificationRejectionLogsRunAndProtocolConflicts","tier":"ESSENTIAL"}
   ]
 }

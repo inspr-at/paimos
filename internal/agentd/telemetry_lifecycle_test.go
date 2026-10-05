@@ -25,6 +25,10 @@ func (a *telemetryHTTPAPI) Report(ctx context.Context, id string, report Telemet
 	return a.remote.Report(ctx, id, report)
 }
 
+func (a *telemetryHTTPAPI) ReportForClaim(ctx context.Context, id, daemon, generation string, report Telemetry) error {
+	return a.remote.ReportForClaim(ctx, id, daemon, generation, report)
+}
+
 func useTelemetryHTTP(t *testing.T, s *Supervisor, api *fakeAPI, handler http.HandlerFunc) {
 	t.Helper()
 	server := httptest.NewServer(handler)
@@ -255,15 +259,102 @@ func TestTelemetryDeadLettersBoundedAndRecoversAfterObservedExit(t *testing.T) {
 }
 
 func TestTelemetryTerminalRejectionIsBounded(t *testing.T) {
-	s, api, _ := testSupervisor(t)
-	entry := &owned{record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", AccountID: "account", Generation: s.generation, State: "failed", ExitObserved: true, Sequence: 1, Pending: []Telemetry{{Sequence: 1, Kind: "status"}}}}
-	s.runs["run"] = entry
-	var attempts atomic.Int64
-	useTelemetryHTTP(t, s, api, func(w http.ResponseWriter, r *http.Request) { attempts.Add(1); w.WriteHeader(422) })
-	for i := 0; i < 20; i++ {
-		s.settlePending(t.Context())
+	for _, oldGeneration := range []bool{false, true} {
+		t.Run(fmt.Sprintf("old_generation_%t", oldGeneration), func(t *testing.T) {
+			s, api, _ := testSupervisor(t)
+			generation := s.generation
+			expectedAttempts, expectedRejections := int64(6), 3
+			if oldGeneration {
+				generation = "prior-generation"
+				expectedAttempts, expectedRejections = 2, 1
+			}
+			entry := &owned{record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", AccountID: "account", Generation: generation, State: "failed", ExitObserved: true, Sequence: 1, Pending: []Telemetry{{Sequence: 1, Kind: "status"}}}}
+			s.runs["run"] = entry
+			var attempts atomic.Int64
+			useTelemetryHTTP(t, s, api, func(w http.ResponseWriter, r *http.Request) { attempts.Add(1); w.WriteHeader(422) })
+			for i := 0; i < 20; i++ {
+				s.settlePending(t.Context())
+			}
+			if attempts.Load() != expectedAttempts || len(entry.record.DeadLetters) != 1 || len(entry.record.Pending) != 1 || entry.record.ReportRejections != expectedRejections || !entry.record.SettlementGap {
+				t.Fatal("permanently rejected terminal lost evidence or retried forever")
+			}
+			// Reload the durable fallback into another generation: the bound still holds.
+			entry.record = s.journal.Snapshot()[0]
+			s.generation = "another-generation"
+			for i := 0; i < 20; i++ {
+				s.settlePending(t.Context())
+			}
+			if attempts.Load() != expectedAttempts {
+				t.Fatal("restart reset the rejected fallback retry bound")
+			}
+		})
 	}
-	if attempts.Load() != 6 || len(entry.record.DeadLetters) != 1 || len(entry.record.Pending) != 1 || entry.record.ReportRejections != 3 || !entry.record.SettlementGap {
-		t.Fatal("permanently rejected terminal lost evidence or retried forever")
+}
+
+func TestTelemetryRestartRecoversBeforeProbeChangesGeneration(t *testing.T) {
+	for _, exitObserved := range []bool{true, false} {
+		t.Run(fmt.Sprintf("exit_observed_%t", exitObserved), func(t *testing.T) {
+			s, api, proc := testSupervisor(t)
+			pending := []Telemetry{{Sequence: 1, Kind: "status", EffectiveModel: "invalid model"}, {Sequence: 2, Kind: "finished", Status: "failed", ErrorCode: "app_server_protocol"}}
+			oldGeneration := s.generation
+			record := Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", AccountID: "account", Generation: oldGeneration,
+				Workspace: s.workspace, ExecutionMode: VerificationPurpose, LaunchState: launchAttempted, State: "failed", Sequence: 2, Pending: pending, ExitObserved: exitObserved}
+			if err := s.journal.Put(record); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(t.Context()); err != nil {
+				t.Fatal(err)
+			}
+			restarted, err := NewSupervisor(t.Context(), Config{API: api, StateRoot: s.journalDir(), DaemonID: s.daemonID, Workspace: s.workspace,
+				Adapters: []Adapter{&fakeAdapter{proc: proc}}, EstimatedUnits: map[string]int64{"requests": 1}, Accounts: s.accounts})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = restarted.Close(context.Background()) })
+			if restarted.generation == oldGeneration {
+				t.Fatal("fixture did not restart with a new generation")
+			}
+			var attempts []Telemetry
+			useTelemetryHTTP(t, restarted, api, func(w http.ResponseWriter, r *http.Request) {
+				var report Telemetry
+				if json.NewDecoder(r.Body).Decode(&report) != nil {
+					t.Error("invalid report")
+					w.WriteHeader(400)
+					return
+				}
+				if r.Header.Get("X-Aeon-Daemon-Generation") != oldGeneration {
+					t.Error("recovery changed original claim generation")
+				}
+				attempts = append(attempts, report)
+				if report.Sequence <= 2 {
+					w.WriteHeader(400)
+					return
+				}
+				w.WriteHeader(204)
+			})
+			// This is the one recovery opportunity before the next account probe.
+			restarted.settlePending(t.Context())
+			entry := restarted.runs["run"]
+			if !exitObserved {
+				if len(attempts) != 1 || len(entry.record.DeadLetters) != 0 || entry.record.TerminalRecovery {
+					t.Fatal("unconfirmed prior child allowed recovery")
+				}
+				return
+			}
+			want := Telemetry{Sequence: 3, Kind: "finished", Status: "failed", ErrorCode: "reporter_unavailable"}
+			if len(attempts) != 2 || !reflect.DeepEqual(attempts[1], want) || !reflect.DeepEqual(entry.record.DeadLetters, pending) || len(entry.record.Pending) != 0 || !entry.record.SettlementGap {
+				t.Fatalf("old-generation rejection did not settle in the first flush: attempts=%d pending=%d", len(attempts), len(entry.record.Pending))
+			}
+			// Subsequent account probes may rotate authority; settled data is not resent.
+			useTelemetryHTTP(t, restarted, api, func(w http.ResponseWriter, r *http.Request) {
+				t.Error("settled outbox posted after generation rotation")
+				w.WriteHeader(403)
+			})
+			restarted.settlePending(t.Context())
+			saved := restarted.journal.Snapshot()
+			if len(saved) != 1 || !saved[0].TerminalRecovery || len(saved[0].Pending) != 0 || !reflect.DeepEqual(saved[0].DeadLetters, pending) {
+				t.Fatal("recovery was not durable")
+			}
+		})
 	}
 }
