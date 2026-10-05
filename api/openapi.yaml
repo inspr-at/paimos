@@ -1164,6 +1164,57 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '409': {description: Active run or changed target conflicts}
         '422': {description: 'Not ready; code queue_not_ready, error text and structured readiness with missing field names and suggested_estimate_hours'}
+  /queue/{nodeId}/snapshots:
+    post:
+      operationId: captureParentQueueSnapshot
+      summary: Capture visible open executable leaves without starting work
+      description: Captures at most 100 leaves, traversing at most 256 visible work nodes and 32 levels within 5 seconds. Hidden branches are omitted without counts. The server retains leaf identities, revisions and ancestry; later descendants are never added. When continuation_available is true, capture a fresh snapshot with continuation_of set to this snapshot id to advance beyond visited nodes. Continuations retain bounded traversal and explicit page membership; they are owned by the caller and must use the same parent. A fresh capture without continuation_of starts at the beginning. The depth limit remains 32 levels. Queue presence grants no launch authority.
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: string, format: date-time}
+                continuation_of: {type: string, format: uuid, description: Prior owned snapshot whose server-held traversal cursor advances this capture}
+      responses:
+        '200': {description: Owner-bound snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/ParentQueueSnapshot'}}}}
+        '400': {description: Invalid revision or id}
+        '403': {description: Queue permission denied}
+        '404': {description: Parent unavailable}
+        '409': {description: 'Parent changed, is not a work parent, or continuation is cancelled, exhausted or its ancestry changed'}
+  /queue-snapshots/{snapshotId}:
+    get:
+      operationId: getParentQueueSnapshot
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Current visible results only, content: {application/json: {schema: {$ref: '#/components/schemas/ParentQueueSnapshot'}}}}
+        '404': {description: Snapshot unavailable or owned by another principal}
+    delete:
+      operationId: cancelParentQueueSnapshot
+      description: Cancels only a pending snapshot. Applied queue entries remain; remove those with the existing per-leaf queue removal API. Cancellation and application serialize; repeated cancellation is idempotent.
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Cancelled snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/ParentQueueSnapshot'}}}}
+        '404': {description: Snapshot unavailable}
+        '409': {description: Snapshot already applied}
+  /queue-snapshots/{snapshotId}/apply:
+    post:
+      operationId: applyParentQueueSnapshot
+      description: Rechecks each current leaf and ancestry under the tenant access and tree fences. Changed, closed, ineligible, active or unavailable leaves are skipped. Existing shared queue membership is idempotent. All new entries and audit events commit atomically; retries replay results without re-adding removed work. No routing, capacity reservation or automatic start is performed. Mandatory launch gates remain on the existing launch path.
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Honest per-leaf outcomes, content: {application/json: {schema: {$ref: '#/components/schemas/ParentQueueSnapshot'}}}}
+        '404': {description: Snapshot or parent unavailable}
+        '409': {description: Snapshot cancelled}
   /queue/{nodeId}/undo:
     post:
       operationId: undoStaleWorkQueue
@@ -17229,6 +17280,30 @@ components:
         message_id: {type: string, format: uuid}
         decision: {type: string, enum: [resolved, dismissed]}
         created_at: {type: string, format: date-time}
+    ParentQueueSnapshot:
+      type: object
+      required: [id, parent_id, parent_revision, tree_revision, state, truncated, partial, tree_changed, items]
+      properties:
+        id: {type: string, format: uuid}
+        parent_id: {type: string, format: uuid}
+        parent_revision: {type: string, format: date-time}
+        tree_revision: {type: string, description: SHA-256 of the bounded visible topology and revisions at capture}
+        state: {type: string, enum: [pending, applied, cancelled]}
+        truncated: {type: boolean}
+        continuation_available: {type: boolean, description: More visible traversal remains; use this snapshot id as continuation_of for a fresh capture. Remaining nodes may all be ineligible. False when only the depth limit truncated traversal.}
+        partial: {type: boolean, description: True when truncated or any captured leaf was skipped or is no longer readable}
+        tree_changed: {type: boolean, description: Visible topology or revision changed before application}
+        items:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [node_id, revision, outcome]
+            properties:
+              node_id: {type: string, format: uuid}
+              revision: {type: string, format: date-time}
+              outcome: {type: string, enum: [pending, queued, already_queued, changed, not_ready, active, unavailable]}
+              run_id: {type: string, format: uuid}
     QueueReadiness:
       type: object
       required: [queueable, ready, missing, suggested_estimate_hours, security_review_required]
