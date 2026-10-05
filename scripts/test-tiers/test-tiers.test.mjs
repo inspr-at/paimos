@@ -545,7 +545,7 @@ test('hosted unit and Go weights preserve files/packages and every selected iden
     for(const event of ['pull_request','merge_group','push','schedule']) {
       const rows=select(manifest.tests,{event,paths:['.github/workflows/ci.yml']}).tests.filter(row=>kind==='web'?row.kind!=='browser':row.lane!=='timing')
       const weights=measuredWeights(manifest,rows),count=kind==='web'?4:7
-      const bins=Array.from({length:count},(_,i)=>shard(rows,i+1,count,weights))
+      const bins=Array.from({length:count},(_,i)=>shard(rows,i+1,count,weights,{firstShardLast:kind==='web'}))
       assert.deepEqual(bins.flat().map(key).sort(),rows.map(key).sort())
       const owners=new Map()
       bins.forEach((bin,i)=>bin.forEach(row=>{
@@ -555,6 +555,17 @@ test('hosted unit and Go weights preserve files/packages and every selected iden
       }))
     }
   }
+})
+
+test('unit tie preference keeps the heaviest file away from shard 1 extra checks without losing cases',()=>{
+  const rows=[...Array(4)].flatMap((_,i)=>[1,2].map(n=>({kind:'node',file:`tests/unit-${i}.test.ts`,name:`case ${n}`})))
+  const weights=Object.fromEntries(rows.map(row=>[row.file, row.file.includes('unit-0')?44:30]))
+  const bins=Array.from({length:4},(_,i)=>shard(rows,i+1,4,weights,{firstShardLast:true}))
+  assert.deepEqual(bins.flat().map(key).sort(),rows.map(key).sort())
+  assert.deepEqual(bins[1],rows.slice(0,2))
+  assert.ok(bins[0].every(row=>row.file!=='tests/unit-0.test.ts'))
+  assert.deepEqual(shard(rows,1,1,weights,{firstShardLast:true}).map(key).sort(),rows.map(key).sort())
+  assert.deepEqual(shard(rows,1,4,weights),rows.slice(0,2),'Go/browser default tie policy stays unchanged')
 })
 
 test('measured weights scale the selected slice, retain zero elapsed and reject invalid data',()=>{

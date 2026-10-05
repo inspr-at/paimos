@@ -1008,16 +1008,26 @@ gates setup and both matrices; spec-only retains one unit job and one exact-spec
 job, while docs-only skips them. Skipped Actions jobs contribute no runner duration;
 executed jobs still reject invalid timestamps. Spec-only measurements explicitly
 report `untiered` scope rather than claim tier case passes.
-OPS-257 schedules tiers using hosted run 37341114152: browser `tierTiming` in
+OPS-257 schedules tiers using hosted run 37377299349: browser `tierTiming` in
 `web/ci-web-shards.json` and unit/Go `timingWeights` in their tier ledgers.
 Browser costs include per-case durations and apportioned group overhead; unit
 costs include Vitest elapsed time, Node test time and shared residual launch
-overhead; Go costs use terminal package elapsed time. Other selections scale
+overhead; Go costs include terminal package elapsed time plus shared residual
+native enumeration and launch time. Other selections scale
 these measured slices by case count. Missing browser/Go artifacts retain
 historical estimates; exact-spec weights and all gated membership stay intact.
-The 39-case `aeon-632b-clip` file stays serial on its own shard. Local balance
-estimates exclude runner setup, native collection and shard 1's extra unit
-checks; the next hosted run must validate total job costs.
+The 39 `aeon-632b-clip` cases keep their original bodies and titles in two
+serial files: planning/touch (27 cases) and settings/rules (12), importing
+shared fixtures. Each half conservatively retains the original launch overhead.
+Unit shard 1 loses equal-load ties to its peers because it also runs the shard
+and browser-supervisor regressions; the heaviest unit file starts on shard 2.
+Scheduling estimates after native inventory reconciliation are 6.28–6.39 browser
+minutes (max/median 1.012), 0.50–0.74 unit minutes and 4.85–6.12 Go minutes
+(max/median about 1.26).
+The indivisible `internal/nodes` package sets the Go floor, slightly above
+the 1.25 execution-only ratio target. Estimates exclude runner setup, initial
+selection and shard 1's extra unit checks; hosted runs must validate complete
+job costs and the intended eight-to-nine-minute critical path.
 The eight-minute target needs hosted measurement; [local selection counts](scripts/ci/test-tier-selection-baseline.json)
 establish coverage only.
 
