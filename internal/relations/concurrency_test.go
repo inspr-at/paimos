@@ -17,7 +17,7 @@ func TestRelationDisjointEdgesCannotCloseCycle(t *testing.T) {
 		t.Run(fmt.Sprint("restore=", restore), func(t *testing.T) {
 			f := setup(t)
 			var d string
-			if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'TSK-4',id,'Fourth' FROM node_kinds WHERE tenant_id=$1 AND slug='task' RETURNING id::text`, f.a.TenantID).Scan(&d); err != nil {
+			if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'TSK-4',id,'Fourth' FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, f.a.TenantID).Scan(&d); err != nil {
 				t.Fatal(err)
 			}
 			a, b, c := f.nodes[0], f.nodes[1], f.nodes[2]

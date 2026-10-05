@@ -163,6 +163,18 @@ func TestWorkParentStatusCausalUndo(t *testing.T) {
 	if currentWorkTest(t, p, child.ID).State != "in_progress" {
 		t.Fatal("preview committed a write")
 	}
+	// Confirmation must accept authority granted only in the child's project.
+	// Admission is not a workspace-only permission check.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, p.ID); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+		 SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='admin'`, p.TenantID, p.ID, root.ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	status, raw = causalCallTest(t, p, "POST", id, "")
 	if status != 409 {
 		t.Fatalf("missing confirmation %d %s", status, raw)

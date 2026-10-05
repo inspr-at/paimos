@@ -5791,7 +5791,7 @@ paths:
               required: [confirmed_cause_event_id]
               properties:
                 confirmed_cause_event_id: {type: integer, minimum: 1, description: Must match the cause_event_id returned by undo-preview. Required only for derived parent events.}
-      description: For status_autopilot.derived, confirmation from undo-preview is required and Undo reverses the visible triggering child change, refusing later child edits. Confirmation is limited to 1 KiB and read with a 10-second deadline before mutation locks; its cause and permissions are rechecked inside the final transaction even after the derivation feature is disabled. Reversing roadmap publication, a human-check completion or its person provenance requires a person; an authorized reversal preserves the historical snapshot attribution. Append one compensating event and restore the prior resource snapshot atomically. Only reversible events can be undone; an event can be undone once. Undoing a change to a portal_product, portal_feature or portal_wish, or a move into or out of a portal parent, requires a person with settings.manage. Agents are refused.
+      description: For status_autopilot.derived, confirmation from undo-preview is required and Undo reverses the visible triggering child change, refusing later child edits. Confirmation is limited to 1 KiB and read with a 10-second deadline before mutation locks; its cause and permissions are rechecked inside the final transaction even after the derivation feature is disabled. Callers lacking events.undo in the workspace or any project are refused before event lookup; final permission checks use the current target's project. Reversing roadmap publication, a human-check completion or its person provenance requires a person; an authorized reversal preserves the historical snapshot attribution. Append one compensating event and restore the prior resource snapshot atomically. Only reversible events can be undone; an event can be undone once. Undoing a change to a portal_product, portal_feature or portal_wish, or a move into or out of a portal parent, requires a person with settings.manage. Agents are refused.
       security: *auth
       responses:
         '201':
@@ -14218,7 +14218,7 @@ components:
               release_node_id: {type: [string, 'null'], format: uuid}
               release_title: {type: [string, 'null']}
               release_state: {type: [string, 'null'], enum: [planning, building, candidate, deploying, refused, access, released, superseded, null]}
-              leaf_node_ids: {type: array, maxItems: 1000, uniqueItems: true, items: {type: string, format: uuid}, description: Current leaves, deduplicated by the client across overlapping parents.}
+              leaf_node_ids: {type: array, maxItems: 1000, uniqueItems: true, items: {type: string, format: uuid}, description: "Current leaves, deduplicated by the client across overlapping parents."}
               assigned_leaf_count: {type: integer, minimum: 0, maximum: 1000, description: Current leaves with a live native release membership. A single distinct release does not imply full coverage; compare with leaf_node_ids before confirming placement.}
               is_parent: {type: boolean, description: Only live work children make a parent.}
               release_count: {type: integer, minimum: 0, description: Distinct releases of current leaves; parent placement intent is excluded.}

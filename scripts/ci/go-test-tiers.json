@@ -2005,6 +2005,7 @@
     {"kind":"go","package":"internal/events","name":"TestSSEReplayLiveResumeAndPoolCapacity","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/events","name":"TestUUIDAndIDValidation","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/events","name":"TestUndoAdapterRollbackAndUnknownType","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/events","name":"TestUndoChecksAuthorityBeforeEventLookup","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/events","name":"TestWriterAtomicityIsolationAndAppendOnly","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/events","name":"TestExactAPINodeChangesCompareNumbersExactly","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/events","name":"TestNodeChangesAreOmittedFromOtherEvents","tier":"GATED-FULL"},

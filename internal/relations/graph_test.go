@@ -80,7 +80,7 @@ func TestCRMRelationKindsDirectionAndUndo(t *testing.T) {
 
 	expect(t, request(f.handler, f.a, "DELETE", "/api/relations/"+customer.ID, ""), 204)
 	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.a.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE nodes SET kind_id = (SELECT id FROM node_kinds WHERE tenant_id=$1 AND slug='task') WHERE id=$2`, f.a.TenantID, ids["org"])
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET kind_id = (SELECT id FROM node_kinds WHERE tenant_id=$1 AND slug='work') WHERE id=$2`, f.a.TenantID, ids["org"])
 		return err
 	})
 	if err != nil {

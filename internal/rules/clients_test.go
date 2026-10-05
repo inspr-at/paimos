@@ -262,7 +262,10 @@ func TestClientGateFloorAndBlockerCap(t *testing.T) {
 	agent := w.principal(tenant.Agent, "worker", "admin")
 	insert := func(host string, maximum int) {
 		t.Helper()
-		_, err := w.d.Admin.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,max_session_file_bytes,rules_client_version) VALUES($1,$2,$3,'codex',$4,'unmanaged','worker',convert_to($4,'UTF8'),convert_to($4,'UTF8'),$5,'fixture-version')`, w.tid, w.project, agent.ID, host, maximum)
+		err := db.InTenant(dbtest.Seed(t.Context()), w.d.App, w.tid, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,max_session_file_bytes,rules_client_version) VALUES($1,$2,$3,'codex',$4,'unmanaged','worker',convert_to($4,'UTF8'),convert_to($4,'UTF8'),$5,'fixture-version')`, w.tid, w.project, agent.ID, host, maximum)
+			return err
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -311,7 +314,9 @@ func TestClientReportsDoNotBlockEachOther(t *testing.T) {
 	ids := [2]string{}
 	for i := range ids {
 		host := fmt.Sprintf("lock-%d", i)
-		err := w.d.Admin.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,max_session_file_bytes) VALUES($1,$2,$3,'claude',$4,'unmanaged','worker',convert_to($4,'UTF8'),convert_to($4,'UTF8'),12000) RETURNING id::text`, w.tid, w.project, agent.ID, host).Scan(&ids[i])
+		err := db.InTenant(dbtest.Seed(t.Context()), w.d.App, w.tid, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,max_session_file_bytes) VALUES($1,$2,$3,'claude',$4,'unmanaged','worker',convert_to($4,'UTF8'),convert_to($4,'UTF8'),12000) RETURNING id::text`, w.tid, w.project, agent.ID, host).Scan(&ids[i])
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -398,7 +403,9 @@ func TestBudgetSevenDayClientGateAndDelivery(t *testing.T) {
 	addClient := func(host string, maximum any, age string) string {
 		t.Helper()
 		var id string
-		err := w.d.Admin.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,max_session_file_bytes,rules_client_version,created_at) VALUES($1,$2,$3,'codex',$4,'unmanaged','worker',convert_to($4,'UTF8'),convert_to($4,'UTF8'),$5,'fixture-version',clock_timestamp()-$6::interval) RETURNING id::text`, w.tid, w.project, agent.ID, host, maximum, age).Scan(&id)
+		err := db.InTenant(dbtest.Seed(t.Context()), w.d.App, w.tid, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,max_session_file_bytes,rules_client_version,created_at) VALUES($1,$2,$3,'codex',$4,'unmanaged','worker',convert_to($4,'UTF8'),convert_to($4,'UTF8'),$5,'fixture-version',clock_timestamp()-$6::interval) RETURNING id::text`, w.tid, w.project, agent.ID, host, maximum, age).Scan(&id)
+		})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -395,11 +395,6 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 	}
 	var result Event
 	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		e, err := scanEvent(tx.QueryRow(r.Context(), `SELECT id,actor_principal_id::text,node_id::text,type,before,after,at,undo_of
-    FROM events WHERE tenant_id=$1 AND id=$2`, p.TenantID, id))
-		if err != nil {
-			return err
-		}
 		// Match the shared tenant -> pairing -> tree prefix before taking the
 		// per-event lock. NO KEY UPDATE allows concurrent event FK shares.
 		if _, err := tx.Exec(r.Context(), `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID); err != nil {
@@ -410,6 +405,20 @@ func (m *module) handleUndo(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if err := authz.LockProjectWrite(r.Context(), tx, p.TenantID); err != nil {
+			return err
+		}
+		// Reject callers with no Undo authority before looking up the event.
+		// AnyProject is admission only: project-scoped causal grants still reach
+		// the target checks below, under the same access-change fences.
+		if err := authz.RequireTx(r.Context(), tx, p, "events.undo", authz.Scope{AnyProject: true}); err != nil {
+			if errors.Is(err, authz.ErrForbidden) {
+				return ErrForbidden
+			}
+			return err
+		}
+		e, err := scanEvent(tx.QueryRow(r.Context(), `SELECT id,actor_principal_id::text,node_id::text,type,before,after,at,undo_of
+    FROM events WHERE tenant_id=$1 AND id=$2`, p.TenantID, id))
+		if err != nil {
 			return err
 		}
 		// Causal Undo resolves and checks every current project target in
