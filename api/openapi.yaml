@@ -7451,7 +7451,6 @@ paths:
                 required: [interval_minutes]
                 properties:
                   interval_minutes: {type: integer, minimum: 1, maximum: 240}
-                expected_interval_minutes: {type: integer, minimum: 1, maximum: 240, description: Optional current value required for a conditional reverse write}
     put:
       operationId: putEtaInterval
       description: Sets how often working agents must refresh an estimate. Requires settings.manage. One through 240 minutes. Changed values append tenant.agent_work_settings_changed with before and after values.
@@ -7464,6 +7463,7 @@ paths:
               required: [interval_minutes]
               properties:
                 interval_minutes: {type: integer, minimum: 1, maximum: 240}
+                expected_interval_minutes: {type: integer, minimum: 1, maximum: 240, description: Optional current value required for a conditional reverse write}
       responses:
         '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
@@ -7598,7 +7598,6 @@ paths:
                 required: [heartbeat_lost_minutes]
                 properties:
                   heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
-                expected_heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440, description: Optional current value required for a conditional reverse write}
     put:
       operationId: putHeartbeatLost
       description: Sets the lost-contact threshold for unmanaged sessions. Requires settings.manage. Five through 1440 minutes. The server sweeps once a minute; no process is signalled. Changed values append tenant.agent_work_settings_changed with before and after values.
@@ -7611,6 +7610,7 @@ paths:
               required: [heartbeat_lost_minutes]
               properties:
                 heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
+                expected_heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440, description: Optional current value required for a conditional reverse write}
       responses:
         '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
