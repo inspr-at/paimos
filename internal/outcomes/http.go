@@ -34,6 +34,7 @@ func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
 // Mount registers GET and POST /api/outcomes.
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/outcomes", m.list)
+	mux.HandleFunc("GET /api/outcomes/measurement", m.measurement)
 	mux.HandleFunc("POST /api/outcomes", m.record)
 }
 
