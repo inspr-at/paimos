@@ -459,6 +459,11 @@ func TestTicketAgentWorkThroughAuthMiddleware(t *testing.T) {
 	f.node(t, f.project, "project", "TW1-1", "Visible", "")
 	ticket := uid()
 	f.node(t, ticket, "ticket", "TW1-2", "Ticket", f.project)
+	// Keys are issued by the current binary, which only runs on a fully
+	// migrated schema; the retained fixture nodes are upgraded in place.
+	if err := db.MigrateWithHook(t.Context(), f.db.App, nil); err != nil {
+		t.Fatal(err)
+	}
 	_, _, emptyKey, err := auth.OperatorCreateAgentKey(t.Context(), f.db.App, f.person.TenantID, "tw1-empty", f.agent.ID, []string{}, nil, f.person.ID)
 	if err != nil {
 		t.Fatal(err)
