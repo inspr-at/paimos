@@ -2,6 +2,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 import { controlStability } from './control-stability'
 import type { HarnessSession } from '../src/lib/agents'
 
@@ -18,6 +19,12 @@ async function setup(page: Page, action: '' | 'restart' | 'reconnect' = 'restart
   Object.assign(data.runs[1]!, { status: 'running' })
   Object.assign(selected, { process_observed_at: new Date().toISOString(), process_ownership: { daemon_id: 'fixture', generation: 'a'.repeat(32), process_id: 'b'.repeat(32), root_pid: 1234, group_id: 1234, started_at: new Date().toISOString() }, management_mode: 'managed', harness: 'claude', display_label: label, advertised_capabilities: ['managed_control_v1', 'session_recovery_v1', 'stop', 'inbox'], heartbeat_at: new Date(Date.now() - 180000).toISOString(), agent_recovery: { session_id: selected.id, observed_revision: 'a'.repeat(64), cause: action === 'reconnect' ? 'inbox_not_listening' : action ? 'heartbeat_overdue' : 'host_not_reporting', detail: long ? 'Der gekoppelte Rechner meldet sich weiterhin, aber die Sitzung hat seit mehreren Minuten keinen Heartbeat mehr gemeldet. Ein Neustart wartet auf das bestätigte Prozessende.' : action ? 'The host is reporting but this session needs recovery.' : 'The paired host has not reported recently; its process state is unknown.', action } })
   await mockAgents(page, data)
+  // Restart queues a continuation, so it also needs run.create; the admin fixture grants it like the other agent specs.
+  if (admin) await page.route('**/api/me/permissions*', route => {
+    const answer = mockEffectivePermissions('admin', new URL(route.request().url()).searchParams.get('project_id') ?? undefined)
+    answer.workspace.permissions = [...answer.workspace.permissions, 'run.create', 'run.read', 'work_orders.read']
+    return route.fulfill({ json: answer })
+  })
   let request: Record<string, unknown> | undefined
   let outcome: string | null = null
   await page.route('**/recover-agent', async route => {
