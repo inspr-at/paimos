@@ -152,6 +152,37 @@ func TestPinnedShapeKeys(t *testing.T) {
 	}
 }
 
+// TestLeadSettingsStartGatesSchema preserves the complete safety explanation
+// as one string, without comma-separated prose becoming schema keywords.
+func TestLeadSettingsStartGatesSchema(t *testing.T) {
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]map[string]any `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	gates := doc.Components.Schemas["LeadSettingsView"].Properties["required_start_gates"]
+	const description = "Dial, harness, account room and host load must be rechecked on every start; unreadable gates mean wait"
+	if gates["description"] != description {
+		t.Fatalf("start-gate explanation truncated: got %q, want %q", gates["description"], description)
+	}
+	if len(gates) != 3 || gates["type"] != "array" {
+		t.Fatalf("unexpected start-gate schema: %#v", gates)
+	}
+	items, ok := gates["items"].(map[string]any)
+	if !ok || len(items) != 1 || items["type"] != "string" {
+		t.Fatalf("unexpected start-gate items: %#v", gates["items"])
+	}
+}
+
 // TestOpenAPIPropertyNamesHaveNoSpace re-parses the canonical contract and the
 // harness fragment. An unquoted flow-mapping description that contains ", " or
 // ": " becomes extra keys, and those keys contain a space.

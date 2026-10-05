@@ -3112,6 +3112,7 @@
     {"kind":"go","package":"internal/reportercontract","name":"TestHarnessSharedComponentAddition","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/reportercontract","name":"TestHarnessStatusAndHeartbeatContract","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/reportercontract","name":"TestPausePlanningHeartbeatFieldsStayOptional","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/reportercontract","name":"TestLeadSettingsStartGatesSchema","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/reportercontract","name":"TestOpenAPIPropertyNamesHaveNoSpace","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/reportercontract","name":"TestPinnedShapeKeys","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/reportercontract","name":"TestRequiredBump","tier":"GATED-FULL"},
