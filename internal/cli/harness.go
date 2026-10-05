@@ -842,7 +842,7 @@ func (rt *runtime) harnessSessionFull(project, agent, format, sid string) error 
 		return false
 	}
 	relevant := []map[string]any{}
-	byKind := map[string][]map[string]any{"memory": {}, "runbook": {}, "guideline": {}, "work_order": {}, "ticket": {}, "task": {}, "epic": {}}
+	byKind := map[string][]map[string]any{"memory": {}, "runbook": {}, "guideline": {}, "work_order": {}, "work": {}, "ticket": {}, "task": {}, "epic": {}}
 	for _, n := range nodes {
 		slug := kinds.slug(n.KindID)
 		if belongs(n) {
@@ -851,9 +851,16 @@ func (rt *runtime) harnessSessionFull(project, agent, format, sid string) error 
 			if _, ok := byKind[slug]; ok {
 				byKind[slug] = append(byKind[slug], entry)
 			}
+			// As with issue --type aliases, migrated work appears in each legacy
+			// collection. Keep its canonical kind; nesting is not a retired type.
+			if slug == "work" {
+				for _, alias := range []string{"ticket", "task", "epic"} {
+					byKind[alias] = append(byKind[alias], entry)
+				}
+			}
 		}
 	}
-	bundle := map[string]any{"schema": "aeon.session.bundle.v1", "project": map[string]any{"id": projectNode.ID, "key": projectNode.Key}, "agent_name": agent, "session_id": sid, "nodes": relevant, "memory": byKind["memory"], "runbooks": byKind["runbook"], "guidelines": byKind["guideline"], "tickets": byKind["ticket"], "tasks": byKind["task"], "epics": byKind["epic"], "work_orders": byKind["work_order"]}
+	bundle := map[string]any{"schema": "aeon.session.bundle.v1", "project": map[string]any{"id": projectNode.ID, "key": projectNode.Key}, "agent_name": agent, "session_id": sid, "nodes": relevant, "work": byKind["work"], "memory": byKind["memory"], "runbooks": byKind["runbook"], "guidelines": byKind["guideline"], "tickets": byKind["ticket"], "tasks": byKind["task"], "epics": byKind["epic"], "work_orders": byKind["work_order"]}
 	content, err := json.Marshal(bundle)
 	if err != nil {
 		return err

@@ -1534,6 +1534,7 @@
     {"kind":"go","package":"internal/cli","name":"TestWhoamiEnv","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/cli","name":"TestCodexSteerOnlyDowngradesDocumentedRejections","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/cli","name":"TestCompatEndToEnd","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/cli","name":"TestSessionFullWorkCollections","tier":"NIGHTLY"},
     {"kind":"go","package":"internal/cli","name":"TestMessagingCompatEndToEnd","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/cli","name":"TestUnsupportedCompatCommands","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/cli","name":"TestCompatDefaultConfigPath","tier":"GATED-FULL"},

@@ -3,6 +3,8 @@
 package cli
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -584,5 +586,152 @@ func TestLocalToolCompatTranscripts(t *testing.T) {
 	code, out, stderr = runCLI([]string{"paimos", "--config", missing, "sync", "check", "--project", "AEON", "--workspace", root}, "")
 	if code != 0 || stderr != "" || !strings.Contains(out, "identical") {
 		t.Fatalf("sync check exit %d out %q stderr %q", code, out, stderr)
+	}
+}
+
+// The migrated fixture exposes only work for issue kinds, as migration 1215 does.
+func sessionBundleFixture(t *testing.T, slugs []string, list http.HandlerFunc) apiNode {
+	t.Helper()
+	project := apiNode{ID: transcriptProjectID, Key: "PRJ-1", KindID: "project-kind", Title: "AEON", Fields: json.RawMessage(`{"project_key":"AEON"}`)}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/kinds":
+			items := []apiKind{{ID: "project-kind", Slug: "project"}}
+			for _, slug := range slugs {
+				items = append(items, apiKind{ID: slug + "-kind", Slug: slug})
+			}
+			json.NewEncoder(w).Encode(kindPage{Items: items})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes" && r.URL.Query().Get("kind_id") == "project-kind":
+			json.NewEncoder(w).Encode(nodePage{Items: []apiNode{project}})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/nodes":
+			list(w, r)
+		default:
+			t.Errorf("unexpected bundle request: %s %s", r.Method, r.URL)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("AEON_URL", srv.URL)
+	t.Setenv("AEON_API_KEY", testKey)
+	return project
+}
+
+func decodeSessionBundle(t *testing.T, raw []byte) (map[string]any, map[string][]map[string]any) {
+	t.Helper()
+	var bundle map[string]any
+	if err := json.Unmarshal(raw, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	if bundle["schema"] != "aeon.session.bundle.v1" || bundle["agent_name"] != "worker" || !validUUID(bundle["session_id"].(string)) {
+		t.Fatalf("bundle identity: %s", raw)
+	}
+	rev := bundle["rev"]
+	delete(bundle, "rev")
+	content, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256(content)
+	if rev != hex.EncodeToString(digest[:]) {
+		t.Fatal("bundle revision does not cover the full snapshot")
+	}
+	groups := map[string][]map[string]any{}
+	for _, name := range []string{"nodes", "work", "tickets", "tasks", "epics", "memory", "runbooks", "guidelines", "work_orders"} {
+		array, ok := bundle[name].([]any)
+		if !ok {
+			t.Errorf("bundle %s must be an array, got %#v", name, bundle[name])
+			continue
+		}
+		groups[name] = []map[string]any{}
+		for _, item := range array {
+			entry, ok := item.(map[string]any)
+			if !ok {
+				t.Fatalf("%s entry: %#v", name, item)
+			}
+			groups[name] = append(groups[name], entry)
+		}
+	}
+	return bundle, groups
+}
+
+func TestSessionFullWorkCollections(t *testing.T) {
+	isolate(t)
+	for _, vocabulary := range []string{"migrated", "legacy"} {
+		for _, format := range []string{"json", "files", "env"} {
+			t.Run(vocabulary+"/"+format, func(t *testing.T) {
+				slugs := []string{"work", "memory", "runbook", "guideline", "work_order"}
+				workSlugs := []string{"work", "work", "work"}
+				if vocabulary == "legacy" {
+					slugs = []string{"ticket", "task", "epic", "memory", "runbook", "guideline", "work_order"}
+					workSlugs = []string{"ticket", "task", "epic"}
+				}
+				items := []apiNode{}
+				parent := transcriptProjectID
+				for i, slug := range append(workSlugs, "memory", "runbook", "guideline", "work_order") {
+					id := fmt.Sprintf("50000000-0000-4000-8000-%012d", i+1)
+					items = append(items, apiNode{ID: id, Key: fmt.Sprintf("AEON-%d", i+1), KindID: slug + "-kind", ParentID: &parent, Title: "Entry", Body: "Context", Fields: json.RawMessage(`{"status":"open"}`)})
+				}
+				var project apiNode
+				project = sessionBundleFixture(t, slugs, func(w http.ResponseWriter, r *http.Request) {
+					page := items
+					if r.URL.Query().Get("within") == "" {
+						page = append([]apiNode{project}, items...)
+					}
+					json.NewEncoder(w).Encode(nodePage{Items: page})
+				})
+				cfg := filepath.Join(t.TempDir(), "missing.yaml")
+				args := []string{"aeon", "--config", cfg, "session", "start", "--project", "AEON", "--agent", "worker", "--bundle", "full", "--format", format}
+				code, out, errOut := runCLI(args, "")
+				if code != 0 || errOut != "" {
+					t.Fatalf("full bundle: exit %d stdout %q stderr %q", code, out, errOut)
+				}
+				raw := []byte(out)
+				if format != "json" {
+					paths, err := filepath.Glob(filepath.Join(filepath.Dir(cfg), "bundles", project.ID, "*", "manifest.json"))
+					if err != nil || len(paths) != 1 {
+						t.Fatalf("manifest paths %v: %v", paths, err)
+					}
+					raw, err = os.ReadFile(paths[0])
+					if err != nil {
+						t.Fatal(err)
+					}
+					info, err := os.Stat(paths[0])
+					if err != nil || info.Mode().Perm() != 0600 {
+						t.Fatalf("manifest is not private: %v", err)
+					}
+				}
+				_, groups := decodeSessionBundle(t, raw)
+				if len(groups["nodes"]) != len(items)+1 {
+					t.Fatalf("nodes: got %d want %d", len(groups["nodes"]), len(items)+1)
+				}
+				wantWork := 3
+				if vocabulary == "legacy" {
+					wantWork = 0
+				}
+				if len(groups["work"]) != wantWork {
+					t.Errorf("canonical work: got %d want %d", len(groups["work"]), wantWork)
+				}
+				for i, name := range []string{"tickets", "tasks", "epics"} {
+					want := []map[string]any{}
+					for j, node := range items[:3] {
+						if vocabulary == "migrated" || i == j {
+							want = append(want, map[string]any{"id": node.ID, "key": node.Key, "kind": workSlugs[j], "title": node.Title, "body": node.Body, "fields": map[string]any{"status": "open"}})
+						}
+					}
+					if !reflect.DeepEqual(groups[name], want) {
+						t.Errorf("%s: got %#v want %#v", name, groups[name], want)
+					}
+					if vocabulary == "migrated" && !reflect.DeepEqual(groups["work"], groups[name]) {
+						t.Errorf("%s does not alias canonical work", name)
+					}
+				}
+				for i, name := range []string{"memory", "runbooks", "guidelines", "work_orders"} {
+					if len(groups[name]) != 1 || groups[name][0]["id"] != items[i+3].ID {
+						t.Errorf("%s collection: %#v", name, groups[name])
+					}
+				}
+			})
+		}
 	}
 }
