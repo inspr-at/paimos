@@ -223,6 +223,20 @@ func TestTierEvidenceSampleLookupUsesPartialIndex(t *testing.T) {
 	path, _, _ := tierSession(t, f)
 	sessionID := path[strings.LastIndex(path, "/")+1:]
 	f.tx(t, f.person, func(tx pgx.Tx) error {
+		// A one-row table makes every tenant-leading index equally selective,
+		// so a new unrelated index can win the planner's cost tie. Keep the
+		// indexed sample and add matching generations without runs: only the
+		// partial index can exclude them before reading the table.
+		if _, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions
+   (tenant_id,project_id,agent_principal_id,harness,host,management,role,ref_digest,lease_digest,model,reasoning_effort)
+   SELECT tenant_id,project_id,agent_principal_id,harness,host,management,role,
+    decode(md5(n::text),'hex'),lease_digest,model,reasoning_effort
+   FROM harness_sessions CROSS JOIN generate_series(1,256) n WHERE id=$1`, sessionID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `ANALYZE harness_sessions`); err != nil {
+			return err
+		}
 		if _, err := tx.Exec(t.Context(), `SET LOCAL enable_seqscan=off`); err != nil {
 			return err
 		}

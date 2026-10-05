@@ -155,6 +155,18 @@
     "internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink"
   ],
   "tests": [
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageSharedRunNeverAddsLeadAndWorkerCounters","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/auth","name":"TestLeadUsageAgentRouteCeiling","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageStableAttemptsAndReplay","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageCounterRejectsInvalidEvidence","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageGenerationSuccessionAndUnknownEvidence","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageBoundsAndPrivacy","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageUnavailableDependency","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageConcurrentSharedRunUsesOneSnapshot","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageEpisodesUnavailableIsPartial","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageHoldsReleaseAndRetryDoNotDoubleCount","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageContributionLimitIsHonest","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/cli","name":"TestHarnessLeadUsageReadAndFailure","tier":"ESSENTIAL"},
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachFallbackRefreshCannotWidenApprovedRoot","tier":"GATED-FULL"},
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachStartupDropsOnlyUnverifiableFallbacks","tier":"GATED-FULL"},
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestAttachStartupRegistersWithUnverifiableFallback","tier":"GATED-FULL"},
@@ -3923,7 +3935,18 @@
     {"kind":"go","package":"internal/outcomes","name":"TestEscalationPayloadValidation","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/modelregistry","name":"TestEscalationRouteGrantsAndLocks","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/outcomes","name":"TestEscalationRetryBudgetExitAndRollback","tier":"ESSENTIAL"},
-    {"kind":"go","package":"internal/agentruns","name":"TestEscalatedClaimRequiresFreshMeasuredRoom","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/agentruns","name":"TestEscalatedClaimRequiresFreshMeasuredRoom","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionFrozenGateEvidence","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionClosedVocabulary","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionReplayVisibilityAndOwnership","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionWaitPaginationAndRevocation","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionResultBindingsAndRollback","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionRechecksAccessAfterEarlierAuthorization","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionRequestIdentityNeverAddsHiddenNodeReference","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionRequestIdentitySurvivesChangedVisibility","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/harness","name":"TestLeadDecisionRequestUniquenessScope","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIReadAndRecord","tier":"GATED-FULL"},
+    {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIRejectsUnboundedAndPrivateEvidence","tier":"GATED-FULL"}
   ],
   "timingWeights": {
     "runId": "37341114152",
