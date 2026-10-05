@@ -7443,6 +7443,12 @@
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"failed Go jsonl names the package and test with the last 40 lines in logs and summary","tier":"NIGHTLY"},
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Go subtest diagnostics retain ancestry and package-only failures keep their output","tier":"NIGHTLY"},
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Node reporter preserves assertion details and console output without changing terminal events","tier":"NIGHTLY"},
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Node tier runner logs a real failure once and retains failure accounting and exit code","tier":"NIGHTLY"},
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Vitest diagnostics name failed assertions and bounded output cannot escape summary fences","tier":"NIGHTLY"},
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Go tier runner consumes one failing jsonl execution and preserves the original exit code","tier":"NIGHTLY"}
   ]
 }
