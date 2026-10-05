@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
@@ -26,6 +28,18 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	if err := validateQueueTarget(in, true); err != nil {
 		return nil, err
+	}
+	if err := queueLock(r.Context(), tx); err != nil {
+		return nil, err
+	}
+	leadProject := ""
+	if session := r.Header.Get("X-Aeon-Lead-Session"); session != "" {
+		if !workorders.UUID(session) {
+			return nil, workorders.Fail(400, "invalid lead session")
+		}
+		if err := tx.QueryRow(r.Context(), `SELECT project_id::text FROM harness_sessions WHERE id=$1 AND agent_principal_id=$2`, session, p.ID).Scan(&leadProject); err != nil {
+			return nil, workorders.Fail(403, "owned lead session required")
+		}
 	}
 	if in.Agent != "" {
 		if err := queueValidateTarget(r.Context(), tx, in); err != nil {
@@ -49,6 +63,20 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		}
 	}
 	for _, e := range ordered {
+		if leadProject != "" && (e.ProjectID == nil || *e.ProjectID != leadProject) {
+			continue
+		}
+		var leadBinding json.RawMessage
+		if e.ProjectID != nil {
+			if err := harness.RequireLeadDispatchTx(r.Context(), tx, r, p, *e.ProjectID, m.leadAdmission); err != nil {
+				return nil, err
+			}
+			if r.Header.Get("X-Aeon-Lead-Session") != "" {
+				var generation int64
+				generation, _ = strconv.ParseInt(r.Header.Get("X-Aeon-Lead-Generation"), 10, 64)
+				leadBinding, _ = json.Marshal(map[string]any{"session_id": r.Header.Get("X-Aeon-Lead-Session"), "generation": generation})
+			}
+		}
 		t, err := queueLoadTicket(r.Context(), tx, e.NodeID, true)
 		if err != nil {
 			return nil, err
@@ -67,6 +95,15 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			}
 		}
 		if e.Run.QueueRoutedAt != nil {
+			var trace struct {
+				Lead json.RawMessage `json:"project_lead"`
+			}
+			_ = json.Unmarshal(e.Run.Trace, &trace)
+			if e.ProjectID != nil {
+				if err = harness.RequireAssignedLeadTx(r.Context(), tx, p, *e.ProjectID, trace.Lead); err != nil {
+					return nil, err
+				}
+			}
 			if target.Agent != "" && target.Agent != e.Run.AgentID || target.Profile != "" && (e.Run.ProfileID == nil || target.Profile != *e.Run.ProfileID) || target.Account != nil && (e.Run.RequestedAccountID == nil || *target.Account != *e.Run.RequestedAccountID) {
 				continue
 			}
@@ -139,7 +176,7 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			}
 		}
 		for _, candidate := range candidates {
-			picked, err := queueTryRoute(r.Context(), tx, p, t, e.Run, candidate, rawPlacement)
+			picked, err := queueTryRoute(r.Context(), tx, p, t, e.Run, candidate, rawPlacement, leadBinding)
 			if err != nil {
 				return nil, err
 			}
@@ -151,7 +188,7 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	return map[string]any{"entry": nil}, nil
 }
-func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, v Run, target queueTarget, placement json.RawMessage) (bool, error) {
+func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, v Run, target queueTarget, placement, lead json.RawMessage) (bool, error) {
 	// Live role check is separate from the daemon's key ceiling, which is
 	// authenticated again by reserve and claim. Never mint a runtime grant.
 	agent := tenant.Principal{TenantID: p.TenantID, ID: target.Agent, Kind: tenant.Agent, Scopes: []string{"run.claim"}}
@@ -190,6 +227,11 @@ func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTi
 	}
 	if wait != nil {
 		return false, nil
+	}
+	if lead != nil {
+		if _, err = attempt.Exec(ctx, `UPDATE agent_runs SET trace=jsonb_set(coalesce(trace,'{}'::jsonb),'{project_lead}',$2::jsonb) WHERE id=$1`, v.ID, lead); err != nil {
+			return false, err
+		}
 	}
 	_, err = attempt.Exec(ctx, `UPDATE agent_runs SET queue_routed_at=clock_timestamp() WHERE id=$1`, v.ID)
 	if err != nil {

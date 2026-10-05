@@ -71,6 +71,7 @@ import (
 )
 
 type Module struct {
+	leadAdmission  LeadAdmission
 	planningStart  func(context.Context, pgx.Tx, string, string) error
 	pool           *pgxpool.Pool
 	controlText    controlRelay
@@ -96,6 +97,10 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		status         int
 		fn             func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
 	}{
+		{"GET /api/projects/{projectId}/lead", "harness.read", false, 200, m.readLead},
+		{"POST /api/projects/{projectId}/lead", "harness.control", false, 200, m.startLead},
+		{"POST /api/projects/{projectId}/lead/claim", "harness.worker", true, 200, m.claimLead},
+		{"POST /api/projects/{projectId}/lead/pause", "harness.worker", false, 200, m.pauseLead},
 		{"POST /api/projects/{projectId}/harness-sessions", "harness.write", false, 201, m.register},
 		{"GET /api/me/host-labels", "harness.read", false, 200, m.listHostLabels},
 		{"PUT /api/me/host-labels", "harness.read", false, 200, m.putHostLabel},
@@ -820,6 +825,9 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		return nil, err
 	}
 	ref, lease := digest("ref", in.SessionRef), digest("lease", in.WorkerLease)
+	if err = fenceLeadRegistration(ctx, tx, projectID, in, ref, lease); err != nil {
+		return nil, err
+	}
 	vendor, err := vendorRefDigest(in.SessionRef, in.WorkerLease, in.VendorSessionRef)
 	if err != nil {
 		return nil, err

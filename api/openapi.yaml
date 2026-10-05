@@ -19,6 +19,80 @@ info:
 servers:
   - url: /api
 paths:
+  /projects/{projectId}/lead:
+    get:
+      summary: Read the project's explicitly owned lead
+      description: Requires harness.read. Returns none until a person explicitly requests a lead; existing coordinator registrations are never automatically adopted. Project members see only generation, state and redacted reason codes.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: Lead lifecycle snapshot
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectLead'}
+    post:
+      summary: Request a project lead without launching a process
+      description: Person-only harness.control and run.create. Requires expected_revision (zero for none). Creates an explicit owned intent; queue presence grants no authority. Automatic production launch stays disabled pending AEON-603. Idle or stopped leads restart through admission.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision]
+              additionalProperties: false
+              properties:
+                expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200': {description: Explicit lead intent, with unavailable gates shown as waiting_for_room}
+        '403': {description: Person or live owner permission required}
+        '409': {description: Revision conflict or predecessor exit is unconfirmed}
+  /projects/{projectId}/lead/claim:
+    post:
+      summary: Bind a proven coordinator generation to the project lead intent
+      description: Agent-only harness.worker. X-Aeon-Worker-Lease proves the named session; its canonical person owner must match the explicit intent. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. No process is launched.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - {in: header, name: X-Aeon-Worker-Lease, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, session_id]
+              additionalProperties: false
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                session_id: {type: string, format: uuid}
+      responses:
+        '200': {description: Bound generation or truthful admission wait}
+        '403': {description: Lease, live authority or owned intent rejected}
+        '409': {description: Concurrent claim, unconfirmed stop or revision conflict}
+  /projects/{projectId}/lead/pause:
+    post:
+      summary: Checkpoint and cooperatively pause the current lead
+      description: Person owner with harness.control, or the current lead with harness.worker and X-Aeon-Worker-Lease. Requires expected_revision and generation. Stops new dispatch immediately and reuses the harness wrap-up/handover controls. A live process keeps its slot until confirmed stopped. A worker may request idle pause only for its own generation; no workers are reassigned.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, generation]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                generation: {type: integer, minimum: 0}
+      responses:
+        '200': {description: Dispatch fenced; existing graceful handover pending confirmed exit}
+        '403': {description: Owner or generation proof required}
+        '409': {description: Stale revision or generation}
   /settings/work-vocabulary:
     get:
       summary: Read workspace work names and icons
@@ -1173,6 +1247,10 @@ paths:
       operationId: nextWorkQueue
       description: Coordinator or permitted person routes the first ready run to an eligible agent using existing allowance admission. Targeted work precedes shared work for its agent. Blocked work keeps its place and is skipped. No capacity returns entry null. This selects a run; pickup and In progress occur atomically on the daemon's fenced claim. Repeated selection returns the same assigned run until claim.
       security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {in: header, name: X-Aeon-Lead-Session, required: false, schema: {type: string, format: uuid}, description: Required for projects with an explicit lead intent; the current lead must prove its session lease. Legacy manual routing in unconfigured projects remains compatible.}
+        - {in: header, name: X-Aeon-Lead-Generation, required: false, schema: {type: integer, minimum: 1}, description: Exact current project lead generation. All mandatory start checks are repeated; unavailable checks return an admission wait.}
+        - {in: header, name: X-Aeon-Worker-Lease, required: false, schema: {type: string, minLength: 32, maxLength: 256}}
       requestBody:
         required: true
         content:
@@ -1181,6 +1259,7 @@ paths:
       responses:
         '200': {description: Selection, content: {application/json: {schema: {type: object, required: [entry], properties: {entry: {oneOf: [{$ref: '#/components/schemas/WorkQueueEntry'}, {type: 'null'}]}}}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '409': {description: Lead proof missing, stale assignment, paused/revoked/archived lead, or mandatory admission unavailable}
   /settings/status-autopilot:
     get:
       operationId: getStatusAutopilot
@@ -11146,6 +11225,17 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    ProjectLead:
+      type: object
+      required: [project_id, revision, generation, state, reason, process_active]
+      properties:
+        project_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 0}
+        generation: {type: integer, minimum: 0}
+        session_id: {type: [string, 'null'], format: uuid}
+        state: {type: string, enum: [none, starting, working, waiting_for_room, paused, cannot_start]}
+        reason: {type: string, description: Redacted machine-readable reason; contains no account or credential details}
+        process_active: {type: boolean, description: True until the bound harness generation has confirmed stopped; heartbeat loss and archive do not prove exit}
     WorkLifecyclePreview:
       type: object
       required: [is_leaf, busy, open_leaves, updated_at, scope_revision, pending]
