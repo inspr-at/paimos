@@ -1,12 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
-import { mkdir } from 'node:fs/promises'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { controlStability } from './control-stability'
 import type { AttentionItem, AttentionResult } from '../src/lib/attention'
 
-const shots = '/private/tmp/claude-501/-Users-markus-Code-aithema/af3ab8bf-63f6-4fb5-bccf-086eb11c043e/scratchpad/aeon/shots/aeon-697-set'
 const row = (index: number, extra: Partial<AttentionItem> = {}): AttentionItem => ({
   event_id: index + 1, node_id: `node-${index}`, revision: '2026-10-04T08:00:00Z', key: `AEON-${index + 10}`,
   title: index === 0 ? 'Die vollständigen Abrechnungseinstellungen für sämtliche angeschlossenen Arbeitsbereiche zuverlässig aktualisieren' : `Ticket ${index + 1}`,
@@ -45,10 +43,9 @@ async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fa
 const table = (page: Page) => page.getByRole('table', { name: 'Tickets needing attention' })
 const first = (page: Page) => table(page).locator('[data-event-id="1"]')
 
-test('Apply, Dismiss and Undo retain rows and control boxes on desktop and phone, in both themes', async ({ page }) => {
+test('Apply, Dismiss and Undo retain rows and control boxes on desktop and phone, in both themes', async ({ page }, testInfo) => {
   const errors = watchErrors(page)
   const data = await setup(page)
-  await mkdir(shots, { recursive: true })
   for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
     await page.goto('/tickets?view=needs-attention')
@@ -67,14 +64,14 @@ test('Apply, Dismiss and Undo retain rows and control boxes on desktop and phone
     await guard.check(async () => { await first(page).getByRole('button', { name: 'Dismiss for AEON-10' }).click(); await expect(first(page)).toContainText('Dismissed') })
     guard.done()
     await expect(table(page).locator('[data-event-id]')).toHaveCount(3)
-    await page.screenshot({ path: `${shots}/attention-${width}-${theme}.png`, fullPage: true })
+    await page.screenshot({ path: testInfo.outputPath(`attention-${width}-${theme}.png`), fullPage: true })
   }
   expect(data.actions[0]).toMatchObject({ action: 'apply', items: [{ event_id: 1, node_id: 'node-0', revision: '2026-10-04T08:00:00Z' }] })
   expect(data.actions[1].items[0]).toMatchObject({ revision: '2026-10-05T08:00:00Z', resolution_event_id: 1001 })
   expect(errors).toEqual([])
 })
 
-for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) test(`bulk Apply has no glow and keeps visible keyboard focus at ${width}px in ${theme}`, async ({ page }) => {
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) test(`bulk Apply has no glow and keeps visible keyboard focus at ${width}px in ${theme}`, async ({ page }, testInfo) => {
   await setup(page)
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
   await page.goto('/tickets?view=needs-attention')
@@ -103,8 +100,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) te
     expect(outline).not.toBe('rgba(0, 0, 0, 0)')
   })
   guard.done()
-  await mkdir(shots, { recursive: true })
-  await page.screenshot({ path: `${shots}/attention-bulk-focus-${width}-${theme}.png`, fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath(`attention-bulk-focus-${width}-${theme}.png`), fullPage: true })
 })
 
 test('bulk Apply reports a partial result, retains every row, and Undo all reverses only confirmed writes', async ({ page }) => {
@@ -182,7 +178,7 @@ test('an unavailable queue shows an honest error and Retry without moving its co
   guard.done()
 })
 
-for (const width of [390, 1024, 1440]) test(`partial results keep toasts above selection controls at ${width}px`, async ({ page }) => {
+for (const width of [390, 1024, 1440]) test(`partial results keep toasts above selection controls at ${width}px`, async ({ page }, testInfo) => {
  await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
  await setup(page, [row(0), row(1), row(2)], { partial: true })
  await page.goto('/tickets?view=needs-attention')
@@ -201,7 +197,7 @@ for (const width of [390, 1024, 1440]) test(`partial results keep toasts above s
  }
  for (const theme of ['light', 'dark']) {
   await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
-  await page.screenshot({ path: `${shots}/attention-partial-${width}-${theme}.png`, fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath(`attention-partial-${width}-${theme}.png`), fullPage: true })
  }
  await expect(bar.getByRole('button', { name: 'Dismiss 1' })).toBeVisible()
  const offset = await page.locator('.toast-host').evaluate(el => parseFloat(getComputedStyle(el).bottom))
@@ -210,7 +206,7 @@ for (const width of [390, 1024, 1440]) test(`partial results keep toasts above s
  await expect.poll(() => page.locator('.toast-host').evaluate(el => parseFloat(getComputedStyle(el).bottom))).toBeLessThan(offset)
 })
 
-for (const width of [390, 1024, 1440]) test(`partial errors leave adjacent actions unobscured and stationary at ${width}px`, async ({ page }) => {
+for (const width of [390, 1024, 1440]) test(`partial errors leave adjacent actions unobscured and stationary at ${width}px`, async ({ page }, testInfo) => {
  const data = await setup(page, [row(0), row(1), row(2)], { partial: true })
  await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
  for (const theme of ['light', 'dark']) {
@@ -234,8 +230,7 @@ for (const width of [390, 1024, 1440]) test(`partial errors leave adjacent actio
     return [0.25, 0.5, 0.75].every(fraction => el.contains(document.elementFromPoint(box.x + box.width * fraction, box.y + box.height / 2)))
    }), 'adjacent actions receive pointer hits while the error is visible').toBe(true)
   }
-  await mkdir(shots, { recursive: true })
-  await page.screenshot({ path: `${shots}/attention-error-actions-${width}-${theme}.png`, fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath(`attention-error-actions-${width}-${theme}.png`), fullPage: true })
   const before = data.actions.length
   await guard.check(async () => {
    await undo.click({ timeout: 2000 })

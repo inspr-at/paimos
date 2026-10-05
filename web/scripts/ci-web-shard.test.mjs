@@ -20,6 +20,16 @@ const files = manifest => manifest.groups.flatMap(g => g.specs.map(s => s.file))
 // The real manifest plus any specs that landed on main since it was written (what every shard job runs).
 const effective = () => reconcileManifest(loadManifest(), discoverSpecs()).manifest
 
+test('AEON-697 screenshots use per-test output paths for hosted Linux artifacts', () => {
+  const source = readFileSync(new URL('../tests/needs-attention.spec.ts', import.meta.url), 'utf8')
+  const screenshots = [...source.matchAll(/await page\.screenshot\(\{ path: (.+), fullPage: true \}\)/g)]
+  assert.equal(screenshots.length, 4, 'Check every attention screenshot site')
+  for (const [, path] of screenshots) {
+    assert.match(path, /^testInfo\.outputPath\(`attention-[^/`]+\.png`\)$/, 'Screenshots must stay in each test output directory')
+  }
+  assert.doesNotMatch(source, /\/private\/tmp|\bmkdir\b/, 'Hosted runs must not create workstation screenshot directories')
+})
+
 test('AEON-697 attention spec gates exactly once with its native case count and safe launch policy', () => {
   const manifest = loadManifest(), file = 'tests/needs-attention.spec.ts'
   const owners = manifest.groups.filter(group => group.specs.some(spec => spec.file === file))
