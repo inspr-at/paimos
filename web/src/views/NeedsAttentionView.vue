@@ -24,8 +24,22 @@ const rows = ref<Row[]>([]), counts = ref<AttentionPage['counts']>({}), total = 
 const facets = ref<AttentionPage['facets']>({ projects: [], assignees: [] }), truncated = ref(false)
 const next = ref<string | null>(null), loading = ref(false), busy = ref(false), error = ref('')
 const selected = ref(new Set<number>()), search = ref(''), sentinel = ref<HTMLElement>(), undoToast = ref<number>()
-const selectionBar = ref<HTMLElement>()
+const selectionBar = ref<HTMLElement>(), statLine = ref<HTMLElement>()
 let selectionResize: ResizeObserver | undefined
+let kindResize: ResizeObserver | undefined
+function measureKindTargets() {
+  const buttons = [...(statLine.value?.querySelectorAll<HTMLElement>('.stat') ?? [])]
+  const tops = [...new Set(buttons.map(button => button.offsetTop))].sort((a, b) => a - b)
+  // Wrapped 30px rows have only a 4px gap. Spread their invisible 44px
+  // targets into the surrounding whitespace, leaving the visible rows still.
+  const targetTops = tops.map(top => top)
+  for (let i = 1; i < tops.length; i++) targetTops[i] = Math.max(tops[i]!, targetTops[i - 1]! + 44)
+  const centre = ((targetTops.at(-1) ?? 0) - (tops.at(-1) ?? 0)) / 2
+  for (const button of buttons) {
+    const index = tops.indexOf(button.offsetTop)
+    button.style.setProperty('--touch-offset', `${targetTops[index]! - tops[index]! - centre}px`)
+  }
+}
 function measureSelection() {
   const bar = selectionBar.value
   // Keep the footer's animated height in CSS, so toasts follow its show/hide
@@ -148,12 +162,15 @@ function keys(event: KeyboardEvent) {
 }
 onMounted(() => {
   void projects.load()
+  kindResize = new ResizeObserver(measureKindTargets)
+  if (statLine.value) kindResize.observe(statLine.value)
+  measureKindTargets()
   window.addEventListener('keydown', keys)
   window.addEventListener('resize', measureSelection)
   observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting) && !error.value) load(true) }, { rootMargin: '200px' })
   if (sentinel.value) observer.observe(sentinel.value)
 })
-onBeforeUnmount(() => { generation++; scope.dispose(); observer?.disconnect(); selectionResize?.disconnect(); toastBottomClearance.value = 0; window.removeEventListener('resize', measureSelection); clearTimeout(searchTimer); window.removeEventListener('keydown', keys); if (undoToast.value) dismiss(undoToast.value) })
+onBeforeUnmount(() => { generation++; scope.dispose(); observer?.disconnect(); selectionResize?.disconnect(); kindResize?.disconnect(); toastBottomClearance.value = 0; window.removeEventListener('resize', measureSelection); clearTimeout(searchTimer); window.removeEventListener('keydown', keys); if (undoToast.value) dismiss(undoToast.value) })
 </script>
 
 <template>
@@ -161,7 +178,7 @@ onBeforeUnmount(() => { generation++; scope.dispose(); observer?.disconnect(); s
     <header class="attention-head">
       <h1 id="attention-title">{{ heading }}</h1>
       <p>Every project you can see. Needs attention collects what the autopilot flagged for a person.</p>
-      <div class="stat-line" role="group" aria-label="Filter by kind">
+      <div ref="statLine" class="stat-line" role="group" aria-label="Filter by kind">
         <button v-for="kind in ATTENTION_KINDS" :key="kind.id" type="button" class="stat" :aria-pressed="filters.kind === kind.id" @click="setFilter('kind', filters.kind === kind.id ? '' : kind.id)">
           <StatusIcon v-if="kind.id === 'cancel'" state="cancelled" :size="12" /><AppIcon v-else :name="kind.icon as IconName" :size="12" /><b>{{ counts[kind.id] ?? '—' }}</b><span>{{ kind.label.toLowerCase() }}</span>
         </button>
@@ -259,5 +276,11 @@ a.active { background: var(--row-selected); color: var(--teal-ink); box-shadow: 
  .attention-table { display: block; }.trow { display: grid; grid-template-columns: 44px minmax(0, 1fr) max-content; grid-template-areas: 'sel key since' 'sel title title' 'sel kind kind' 'sel sug sug' 'sel act act'; height: auto; min-height: 190px; gap: 4px 0; padding: 10px 12px 12px 0; }.thead { display: none; }.trow > [role="cell"] { padding: 0; white-space: normal; }.trow > .c-sel { grid-area: sel; align-self: start; }.c-key { grid-area: key; }.c-since { grid-area: since; }.c-title { grid-area: title; height: 42px; align-items: start !important; font-size: 14.5px; line-height: 1.4; }.title { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }.c-title svg { margin-top: 3px; }.c-kind { grid-area: kind; }.c-kind svg { display: block; }.c-sug { grid-area: sug; flex-wrap: wrap; }.trow > .c-act { grid-area: act; justify-content: start; }.cbx { width: 44px; height: 44px; }.row-actions .btn, .link-btn { min-height: 44px; }.done-mark { justify-self: start; }.selection-dock { bottom: var(--footer-h, 0px); }.selection-bar { width: 100%; max-width: 100%; border-radius: 0; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); }.selection-hint { display: none; }
 }
 @media (pointer: coarse) { .cbx { width: 44px; height: 44px; }.trow { min-height: 48px; }.btn.sm, .link-btn { min-height: 44px; } }
+/* Extend the touch surface without changing the visible filters or navigation. */
+@media (pointer: coarse) {
+ .stat, .section-tabs a, .view-tabs a { position: relative; }
+ .stat::before, .section-tabs a::before, .view-tabs a::before { content: ''; position: absolute; top: 50%; left: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+ .stat::before { top: calc(50% + var(--touch-offset, 0px)); }
+}
 @media (prefers-reduced-motion: no-preference) { .trow { transition: background .12s ease; } }
 </style>

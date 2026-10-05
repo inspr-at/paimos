@@ -939,7 +939,7 @@
           "file": "tests/views-filters.spec.ts",
           "weightSeconds": 42.152047,
           "weightSource": "web-13",
-          "listedTests": 17
+          "listedTests": 29
         },
         {
           "file": "tests/session-recovery.spec.ts",
@@ -1295,7 +1295,7 @@
           "file": "tests/needs-attention.spec.ts",
           "weightSeconds": 46.609756,
           "weightSource": "estimate",
-          "listedTests": 21
+          "listedTests": 29
         }
       ]
     },

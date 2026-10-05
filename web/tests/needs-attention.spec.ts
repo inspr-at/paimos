@@ -292,3 +292,70 @@ test('release receipts refresh the retained row and siblings for subsequent Appl
  await expect(table(page).locator('[data-event-id="2"]')).toContainText('Applied')
  expect(data.actions[3].items[0]).toMatchObject({ release_id: 'planning-release', release_revision: 10, release_project_revision: 7 })
 })
+
+test.describe('coarse-pointer attention controls', () => {
+ test.use({ hasTouch: true })
+ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark']) {
+  test(`expanded attention targets activate without moving controls at ${width}px in ${theme}`, async ({ page }, testInfo) => {
+   await page.setViewportSize({ width: width === 768 ? 1024 : width, height: 1000 })
+   await setup(page)
+   await page.goto('/tickets?view=needs-attention')
+   await expect(first(page)).toBeVisible()
+   await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+   await page.evaluate(() => document.fonts.ready)
+   if (width === 768) {
+    await page.setViewportSize({ width, height: 1000 })
+    await expect.poll(() => page.locator('.stat').first().evaluate(el => el.style.getPropertyValue('--touch-offset'))).toBe('-5px')
+   }
+   expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+   const targets = page.locator('.stat, .section-tabs a, .view-tabs a, .facet-button, .reset')
+   const boxes = await targets.evaluateAll(elements => elements.map(el => {
+    const rect = el.getBoundingClientRect(), hit = getComputedStyle(el, '::before')
+    const width = parseFloat(hit.width) || rect.width, height = parseFloat(hit.height) || rect.height
+    const x = rect.x + (rect.width - width) / 2, y = rect.y + (parseFloat(hit.top) || rect.height / 2) - height / 2
+    return { label: el.textContent, x, y, width, height, visualHeight: rect.height,
+     edgesHit: [[x + 1, y + height / 2], [x + width - 1, y + height / 2], [x + width / 2, y + 1], [x + width / 2, y + height - 1]].every(([px, py]) => el.contains(document.elementFromPoint(px!, py!))) }
+   }))
+   expect(boxes).toHaveLength(13)
+   for (const box of boxes) {
+    expect(box.width, `${box.label} hit width`).toBeGreaterThanOrEqual(44)
+    expect(box.height, `${box.label} hit height`).toBeGreaterThanOrEqual(44)
+    expect(box.edgesHit, `${box.label} all target edges activate the control`).toBe(true)
+   }
+   for (let i = 0; i < boxes.length; i++) for (const b of boxes.slice(i + 1)) {
+    const a = boxes[i]!
+    const overlapX = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)
+    const overlapY = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y)
+    expect(overlapX > .5 && overlapY > .5, `${a.label} and ${b.label} targets must not overlap`).toBe(false)
+   }
+   // The invisible extension must preserve the established visible tablet size.
+   if (width > 720) {
+    for (const box of boxes.slice(0, 5)) expect(box.visualHeight).toBe(30)
+    for (const box of boxes.slice(5, 9)) expect(box.visualHeight).toBe(36)
+   }
+   const stat = page.getByRole('button', { name: /1 cancel suggested/ })
+   const guard = await controlStability(page, { stat, kinds: page.locator('.stat-line'), sections: page.locator('.section-tabs'), savedViews: page.locator('.view-tabs'), facets: page.locator('.facets'), kind: page.getByRole('button', { name: 'Kind filter', exact: true }), reset: page.getByRole('button', { name: 'Clear filters' }), search: page.getByRole('searchbox') })
+   const cancel = boxes[2]!
+   await guard.check(async () => {
+    await page.touchscreen.tap(cancel.x + cancel.width / 2, cancel.y + 1)
+    await expect(page).toHaveURL(/kind=cancel/)
+    await expect(stat).toHaveAttribute('aria-pressed', 'true')
+   })
+   await guard.check(async () => {
+    await page.getByRole('button', { name: 'Clear filters' }).tap()
+    await expect(page).toHaveURL('/tickets?view=needs-attention')
+    await expect(stat).toHaveAttribute('aria-pressed', 'false')
+   })
+   await guard.check(async () => {
+    await page.getByRole('button', { name: 'Kind filter', exact: true }).tap()
+    await expect(page.getByRole('menu', { name: 'Kind filter' })).toBeVisible()
+   })
+   await guard.check(async () => { await page.keyboard.press('Escape'); await expect(page.getByRole('menu')).toHaveCount(0) })
+   guard.done()
+   await page.screenshot({ path: testInfo.outputPath(`attention-touch-${width}-${theme}.png`), fullPage: true })
+   const knowledge = boxes[7]!
+   await page.touchscreen.tap(knowledge.x + knowledge.width / 2, knowledge.y + 1)
+   await expect(page).toHaveURL('/knowledge')
+  })
+ }
+})
