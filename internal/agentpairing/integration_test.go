@@ -338,6 +338,11 @@ func TestPairingApprovalRedemptionIsolationAndOneShot(t *testing.T) {
 		t.Fatal("approval falsely reports connected or exposes runtime prefix")
 	}
 	v := f.redeem(p)
+	var creator string
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT k.created_by_principal_id::text FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.tenant_id=$1 AND c.id=$2`, f.tenantID, *v.ComputerID).Scan(&creator); err != nil || creator != f.person {
+		t.Fatal("pairing omitted approving person creator")
+	}
+
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	if v.State != "redeemed" || len(v.Enrollments) != 1 {
 		t.Fatal("missing redemption bindings")

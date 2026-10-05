@@ -143,8 +143,8 @@ func issueKey(t *testing.T, p tenant.Principal, scopes []string) string {
 	prefix = prefix[:48]
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `
-			INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes)
-			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)`,
+			INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes,created_by_principal_id)
+			VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`,
 			p.TenantID, p.ID, p.Name, prefix, hex.EncodeToString(sum[:]), scopes)
 		return err
 	})

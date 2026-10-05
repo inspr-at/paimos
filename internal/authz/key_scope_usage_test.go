@@ -19,6 +19,7 @@ func TestScopeUsageDebounceKeyIsolationAndDeniedGrant(t *testing.T) {
 	if err := d.Admin.QueryRow(ctx, `INSERT INTO tenants(slug,name) VALUES('scope-use','Scope use') RETURNING id::text`).Scan(&tid); err != nil {
 		t.Fatal(err)
 	}
+	dbtest.KeyPerson(t, d.App, tid)
 	p := tenant.Principal{TenantID: tid, Kind: tenant.Agent, Scopes: []string{"nodes.read"}}
 	var otherKey string
 	if err := db.InTenant(ctx, d.App, tid, func(tx pgx.Tx) error {
@@ -30,10 +31,10 @@ func TestScopeUsageDebounceKeyIsolationAndDeniedGrant(t *testing.T) {
 			return err
 		}
 		// Test fixture metadata only: these keys never authenticate.
-		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'Usage','scope-use-fixture-a',decode(repeat('00',32),'hex'),ARRAY['nodes.read']) RETURNING id::text`, tid, p.ID).Scan(&p.KeyID); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'Usage','scope-use-fixture-a',decode(repeat('00',32),'hex'),ARRAY['nodes.read'],(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1)) RETURNING id::text`, tid, p.ID).Scan(&p.KeyID); err != nil {
 			return err
 		}
-		return tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'Other','scope-use-fixture-b',decode(repeat('00',32),'hex'),ARRAY['nodes.read']) RETURNING id::text`, tid, p.ID).Scan(&otherKey)
+		return tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'Other','scope-use-fixture-b',decode(repeat('00',32),'hex'),ARRAY['nodes.read'],(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1)) RETURNING id::text`, tid, p.ID).Scan(&otherKey)
 	}); err != nil {
 		t.Fatal(err)
 	}

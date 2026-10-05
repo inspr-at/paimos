@@ -92,13 +92,18 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 	}{{"historical", authz.CoordinatorBaseScopes}, {"current", authz.CoordinatorKeyScopes}} {
 		t.Run(tc.name, func(t *testing.T) {
 			for _, humanCreator := range []bool{false, true} {
-				name, actor := tc.name+"-operator", tenant.Principal{TenantID: tenantID}
+				name, actor := tc.name+"-operator", tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}
 				if humanCreator {
 					name, actor = tc.name+"-human", owner
 				}
 				key, err := m.createAgentKey(ctx, actor, name, "", tc.scopes, nil)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if !humanCreator {
+					// Preserve the historical ownerless-key refusal case;
+					// production operator issuance now requires a person.
+					legacyKey(t, m, owner, key.ID)
 				}
 				perms := workspacePermissions(t, tenantID, key.PrincipalID)
 				if slices.Contains(perms, "rules.read") || !slices.Contains(perms, "models.read") {
@@ -145,7 +150,7 @@ func TestCoordinatorKeysThroughRealHandlers(t *testing.T) {
 			}
 		})
 	}
-	runtime, err := m.createAgentKey(ctx, tenant.Principal{TenantID: tenantID}, "paired-runtime", "", agentpairing.RuntimePermissions, nil)
+	runtime, err := m.createAgentKey(ctx, tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, "paired-runtime", "", agentpairing.RuntimePermissions, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -748,9 +748,9 @@
         },
         {
           "file": "tests/key-scopes.spec.ts",
-          "weightSeconds": 42.451613,
-          "weightSource": "web-8",
-          "listedTests": 16
+          "weightSeconds": 61.024194,
+          "weightSource": "web-8 plus 7 adoption cases (estimate)",
+          "listedTests": 23
         },
         {
           "file": "tests/key-expiry.spec.ts",
