@@ -3,8 +3,11 @@
 export interface QuickDraft { title: string; kind: string; state: string; priority: string; epic: { id: string; key: string; title: string } | null }
 </script>
 <script setup lang="ts">
-import { nextTick, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
+import { vClipTip } from '../../directives/clipTip'
 import { priorityLabel, statusMeta } from '../../lib/work'
+import { workIcon, workNoun } from '../../lib/workVocabulary'
+import { useWorkVocabulary } from '../../stores/workVocabulary'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import EpicPicker from './EpicPicker.vue'
@@ -23,7 +26,11 @@ const draft = reactive<QuickDraft>({ title: '', kind: 'work', state: 'new', prio
 const busy = ref(false)
 const input = ref<HTMLInputElement>()
 const menu = ref<{ kind: 'type' | 'status' | 'priority' | 'epic'; anchor: HTMLElement } | null>(null)
-const kindOptions = [{ value: 'work', label: 'Work item' }]
+const vocabulary = useWorkVocabulary()
+const level = computed(() => vocabulary.leaf)
+const noun = computed(() => workNoun(level.value.name))
+const subject = computed(() => `the new ${noun.value}`)
+const kindOptions = computed(() => [{ value: 'work', label: level.value.name }])
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const priorityOptions = [{ value: 'high', label: 'High' }, { value: 'medium', label: 'Medium' }, { value: 'low', label: 'Low' }, { value: '', label: 'No priority' }]
 
@@ -52,9 +59,9 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
     <td class="c-key"><div class="cell"><span class="new-badge">New</span></div></td>
     <td class="c-title">
       <div class="cell create-title" :style="indent ? { paddingLeft: `${indent}px` } : undefined">
-        <input ref="input" v-model="draft.title" class="create-input" :placeholder="initialEpic ? `Work item in ${initialEpic.key}` : 'Work item title'" aria-label="New work item title" :disabled="busy" />
-        <button type="button" class="create-chip" aria-haspopup="menu" aria-label="Type: Work item" @click="open('type', $event)">
-          <AppIcon :name="draft.kind === 'epic' ? 'epic' : draft.kind === 'task' ? 'task' : 'ticket'" :size="12" :class="['kind', draft.kind]" />Work item<AppIcon name="chevron" :size="11" class="chev" />
+        <input ref="input" v-model="draft.title" class="create-input" :placeholder="initialEpic ? `${level.name} in ${initialEpic.key}` : `${level.name} title`" :aria-label="`New ${noun} title`" :disabled="busy" />
+        <button type="button" class="create-chip type-chip" aria-haspopup="menu" :aria-label="`Type: ${level.name}`" @click="open('type', $event)">
+          <AppIcon :name="workIcon({ kind_slug: draft.kind, level_icon: level.icon })" :size="12" :class="['kind', draft.kind]" /><span v-clip-tip class="chip-text">{{ level.name }}</span><AppIcon name="chevron" :size="11" class="chev" />
         </button>
       </div>
 
@@ -82,10 +89,10 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
   <tr class="create-hint-row" aria-hidden="true">
     <td :colspan="span ? span + 2 : trailing + 4"><span class="create-hint"><KeyCap k="mod" /><KeyCap k="enter" /> create and keep going · <kbd class="keycap">tab</kbd> status, priority, parent · <kbd class="keycap">esc</kbd> close</span></td>
   </tr>
-  <OptionMenu v-if="menu?.kind === 'type'" :anchor="menu.anchor" title="Type" subject="the new work item" kind="type" :options="kindOptions" :current="draft.kind" @choose="value => choose(() => { draft.kind = value })" @close="close" />
-  <StatusMenu :project-id="projectId" v-if="menu?.kind === 'status'" :anchor="menu.anchor" :current="draft.state" :known-states="knownStates" ticket-key="the new work item" @choose="value => choose(() => { draft.state = value })" @close="close" />
-  <OptionMenu v-if="menu?.kind === 'priority'" :anchor="menu.anchor" title="Priority" subject="the new work item" kind="priority" :options="priorityOptions" :current="draft.priority" @choose="value => choose(() => { draft.priority = value })" @close="close" />
-  <EpicPicker v-if="menu?.kind === 'epic'" :anchor="menu.anchor" :project-id="projectId" :current="draft.epic?.id ?? null" subject="the new work item" allow-none @choose="epic => choose(() => { draft.epic = epic })" @close="close" />
+  <OptionMenu v-if="menu?.kind === 'type'" :anchor="menu.anchor" title="Type" :subject="subject" kind="type" :options="kindOptions" :current="draft.kind" @choose="value => choose(() => { draft.kind = value })" @close="close" />
+  <StatusMenu :project-id="projectId" v-if="menu?.kind === 'status'" :anchor="menu.anchor" :current="draft.state" :known-states="knownStates" :ticket-key="subject" @choose="value => choose(() => { draft.state = value })" @close="close" />
+  <OptionMenu v-if="menu?.kind === 'priority'" :anchor="menu.anchor" title="Priority" :subject="subject" kind="priority" :options="priorityOptions" :current="draft.priority" @choose="value => choose(() => { draft.priority = value })" @close="close" />
+  <EpicPicker v-if="menu?.kind === 'epic'" :anchor="menu.anchor" :project-id="projectId" :current="draft.epic?.id ?? null" :subject="subject" allow-none @choose="epic => choose(() => { draft.epic = epic })" @close="close" />
 </template>
 
 <style scoped>
@@ -102,6 +109,7 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
 @media (hover: hover) { .create-chip:hover { box-shadow: inset 0 0 0 1px var(--glass-rim); } }
 .create-chip:focus-visible { box-shadow: var(--focus-ring); }
 .chip-text { overflow: hidden; text-overflow: ellipsis; }
+.type-chip { min-width: 0; max-width: 60%; }
 .chip-text.unset { color: var(--ink-3); }
 .chev, .dash { color: var(--ink-3); }
 .kind { color: var(--ink-3); }

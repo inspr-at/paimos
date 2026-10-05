@@ -39,6 +39,8 @@ import { useProjects } from '../stores/projects'
 import { useLiveAgents } from '../stores/liveAgents'
 import { useSession } from '../stores/session'
 import { useWorkQueue } from '../stores/workQueue'
+import { useWorkVocabulary } from '../stores/workVocabulary'
+import { workNoun } from '../lib/workVocabulary'
 import { useReleases } from '../stores/releases'
 import { usePoller } from '../lib/usePolledData'
 import { queueable, queueHours } from '../lib/workQueue'
@@ -150,6 +152,7 @@ watch([projectId, () => project.value?.description], () => {
 })
 const routeKey = computed(() => project.value?.routeKey ?? projectKey.value)
 const queue = useWorkQueue(), releases = useReleases()
+const vocabulary = useWorkVocabulary()
 const queueAnchor = ref<HTMLElement | null>(null)
 const assigneeMenu = ref<{ row: ListItem; anchor: HTMLElement } | null>(null)
 const queueSnapshot = computed(() => projectId.value ? queue.snapshots[projectId.value] : undefined)
@@ -422,7 +425,7 @@ const displayRows = computed(() => {
 const rowsById = computed(() => new Map(list.rows.value.map(row => [row.id, row])))
 const groups = computed(() => {
   const facet = groupFacet(filters.value.group)
-  return groupRows(displayRows.value, filters.value.group, facet ? list.facetCounts(facet) : {}, { me: session.identity?.principal.id, layout: liveList.layout })
+  return groupRows(displayRows.value, filters.value.group, facet ? list.facetCounts(facet) : {}, { me: session.identity?.principal.id, layout: liveList.layout, workName: vocabulary.leaf.name })
 })
 // Keyboard order: every visible row once (a ticket under two labels is visited once).
 const sequence = computed(() => {
@@ -464,13 +467,13 @@ function options(dimension: Dimension) {
       const value = dimension === 'status' ? node.status : dimension === 'priority' ? node.priority ?? 'none' : node.type
       counts[value] = (counts[value] ?? 0) + 1
     }
-    return facetOptions(dimension, counts, filters.value[dimension], list.names).filter(option => dimension !== 'type' || option.value !== 'task')
+    return facetOptions(dimension, counts, filters.value[dimension], list.names, undefined, { workName: vocabulary.leaf.name }).filter(option => dimension !== 'type' || option.value !== 'task')
   }
-  const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value })
+  const result = facetOptions(dimension, list.counts(dimension), filters.value[dimension].filter(value => value !== 'queued' && value !== '!queued'), list.names, session.identity?.principal.id, { colors: list.colors, epics: list.epics.value, workName: vocabulary.leaf.name })
   return dimension === 'status' ? [{ value: 'queued', label: 'Queued', count: queueSnapshot.value?.items.length ?? 0, hint: 'Open + a place' }, ...result] : result
 }
 function chipLabel(dimension: Dimension, value: string) {
-  return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value })
+  return valueLabel(dimension, value, { names: list.names, me: session.identity?.principal.id, epics: list.epics.value, workName: vocabulary.leaf.name })
 }
 // What a menu needs before it opens: names, label counts or the project's epics.
 const facetLoading = ref(false)
@@ -925,6 +928,11 @@ function openEpic(epic: EpicRef) { openKey(epic.key) }
 
 // ---------- Create and remove ----------
 async function startCreate(under: ListItem | null = null) {
+  const project = projectId.value, person = session.identity?.principal.id, tenant = session.identity?.tenant.id
+  const revision = under?.updated_at
+  await vocabulary.load()
+  if (project !== projectId.value || person !== session.identity?.principal.id || tenant !== session.identity?.tenant.id || (under && outline.node(under.id)?.updated_at !== revision)) return
+  if (!vocabulary.loaded) { toast(vocabulary.error, { tone: 'error' }); return }
   if (fullView.value) collapse()
   if (under && outlineActive.value) {
     creating.value = false
@@ -946,7 +954,7 @@ async function quickCreate(draft: QuickDraft): Promise<boolean> {
     if (!kind) throw new Error('this workspace has no such type')
     let fields: Record<string, unknown> = draft.priority ? { priority: draft.priority } : {}
     if (needsBenefitPrompt({ kind_id: kind.id, kind_slug: draft.kind, state: 'new', fields }, draft.state)) {
-      const text = await askDoneGate({ key: 'New work item', title: draft.title, state: draft.state, fields })
+      const text = await askDoneGate({ key: `New ${workNoun(vocabulary.leaf.name)}`, title: draft.title, state: draft.state, fields })
       if (!text) return false
       fields = completionFields(fields, text)
     }

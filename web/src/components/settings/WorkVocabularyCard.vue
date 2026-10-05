@@ -3,11 +3,13 @@
 import { computed, ref, watch } from 'vue'
 import { api } from '../../lib/api'
 import { useSession } from '../../stores/session'
+import { useWorkVocabulary } from '../../stores/workVocabulary'
 import { WORK_ICONS, workLevel, type WorkVocabulary } from '../../lib/workVocabulary'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import SettingsCard from './SettingsCard.vue'
 const session = useSession()
+const vocabulary = useWorkVocabulary()
 const draft = ref<WorkVocabulary>({ revision: 0, leaf: { name: '', icon: '' }, levels: [] })
 const loaded = ref(false), busy = ref(false), message = ref(''), error = ref(false)
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
@@ -28,6 +30,7 @@ async function load(run = generation) {
     const value = await response.json() as WorkVocabulary
     if (run !== generation) return
     draft.value = { ...value, levels: value.levels.length ? value.levels : [{ name: '', icon: '' }, { name: '', icon: '' }] }
+    vocabulary.accept(value)
     loaded.value = true
   } catch (e) { if (run === generation) { error.value = true; message.value = e instanceof Error ? e.message : 'Vocabulary could not be read.' } }
   finally { if (run === generation) busy.value = false }
@@ -41,7 +44,7 @@ async function save() {
     const value = await response.json()
     if (run !== generation) return
     if (!response.ok) throw new Error(typeof value.error === 'string' ? value.error : 'Vocabulary was not saved.')
-    draft.value = value; message.value = 'Workspace names saved.'
+    draft.value = value; vocabulary.accept(value); message.value = 'Workspace names saved.'
   } catch (e) { if (run === generation) { error.value = true; message.value = e instanceof Error ? e.message : 'Vocabulary was not saved.' } }
   finally { if (run === generation) busy.value = false }
 }

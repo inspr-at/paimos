@@ -28,7 +28,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     const row = (id: string) => tree.locator(`#row-${id}`)
     const moving = row('moving'), destination = tree.getByRole('row', { name: 'Project root drop destination' })
     await expect(moving).toHaveAttribute('aria-level', '1')
-    const stable = await controlStability(page, { create: page.getByRole('button', { name: 'New work item', exact: true }), destination })
+    const stable = await controlStability(page, { create: page.getByRole('button', { name: 'New ticket', exact: true }), destination })
     await stable.check(async () => {
       // Start on the row's key-cell whitespace, away from native links and
       // buttons whose hit targets depend on the column layout.

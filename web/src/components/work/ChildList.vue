@@ -11,7 +11,7 @@ import StatusIcon from './StatusIcon.vue'
 
 // The children of an epic (tickets) or a ticket (tasks), with progress and an
 // inline add row that stays open for the next title.
-const props = defineProps<{ children: ListItem[]; loading: boolean; editable: boolean; childLabel: 'work item' | 'ticket' | 'task'; progress: { done: number; total: number; percent: number } | null; progressError?: string; add: (title: string) => Promise<ListItem | null> }>()
+const props = defineProps<{ children: ListItem[]; loading: boolean; editable: boolean; childLabel: string; parentLabel: string; progress: { done: number; total: number; percent: number } | null; progressError?: string; add: (title: string) => Promise<ListItem | null> }>()
 const emit = defineEmits<{ open: [key: string] }>()
 const adding = ref(false)
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
@@ -36,9 +36,9 @@ defineExpose({ startAdd })
 </script>
 
 <template>
-  <section class="children" :aria-label="childLabel === 'work item' ? 'Child work items' : `${childLabel === 'ticket' ? 'Tickets' : 'Tasks'} in this ${childLabel === 'ticket' ? 'epic' : 'ticket'}`">
+  <section class="children" :aria-label="`${childLabel === 'ticket' ? 'Tickets' : childLabel === 'task' ? 'Tasks' : 'Children'} in this ${parentLabel}`">
     <header class="children-head">
-      <h3 class="eyebrow">{{ childLabel === 'work item' ? 'Children' : childLabel === 'ticket' ? 'Tickets' : 'Tasks' }} <span class="count">{{ children.length }}</span></h3>
+      <h3 class="eyebrow">{{ childLabel === 'ticket' ? 'Tickets' : childLabel === 'task' ? 'Tasks' : childLabel }} <span class="count">{{ children.length }}</span></h3>
       <span v-if="progress?.total" class="progress" :data-tip="`${progress.done} of ${progress.total} leaves done`"><span class="bar"><i :style="{ width: `${progress.percent}%` }" /></span><span class="mono pct">{{ progress.done }}/{{ progress.total }}</span></span>
       <span v-else-if="!progress" class="progress" role="status" :aria-label="progressError || 'Loading leaf progress…'"><span class="progress-status" :data-tip="progressError || 'Loading leaf progress…'">{{ progressError ? 'Leaf progress unavailable' : 'Loading leaf progress…' }}</span></span>
     </header>
@@ -61,7 +61,7 @@ defineExpose({ startAdd })
       </li>
     </ul>
     <div v-else-if="loading" class="child-skeleton" aria-hidden="true"><span class="skeleton" /><span class="skeleton short" /></div>
-    <p v-else class="none">No {{ childLabel }}s yet.</p>
+    <p v-else class="none">No children yet.</p>
 
   </section>
 </template>

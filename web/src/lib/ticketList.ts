@@ -335,7 +335,7 @@ export function totalFrom(facets: Facets | undefined): number | null {
 
 // ---------- Facet options ----------
 export interface EpicOption { id: string; key: string; title: string; state?: string }
-export interface OptionContext { names?: Map<string, string>; me?: string; colors?: Map<string, string>; epics?: EpicOption[] }
+export interface OptionContext { names?: Map<string, string>; me?: string; colors?: Map<string, string>; epics?: EpicOption[]; workName?: string }
 // Labels (tags, cost units, releases) are counted by spelling; one label is one option.
 function labelOptions(dimension: Dimension, counts: Record<string, number>, selected: string[], colors: Map<string, string> = new Map()): FacetOption[] {
   const byName = new Map<string, FacetOption>()
@@ -384,7 +384,7 @@ export function facetOptions(dimension: Dimension, counts: Record<string, number
   }
   if (dimension === 'shape') return [{ value: 'parent', label: 'Parents', count: counts.parent ?? 0 }, { value: 'leaf', label: 'Leaves', count: counts.leaf ?? 0 }]
   if (dimension === 'depth') return [...new Set([...Object.keys(counts), ...selected, '1', '2', '3'])].sort((a,b) => Number(a)-Number(b)).map(value => ({ value, label: `Level ${value}`, count: counts[value] ?? 0 }))
-  if (dimension === 'type') return KINDS.map(kind => ({ value: kind.value, label: kind.label, count: counts[kind.value] ?? 0 }))
+  if (dimension === 'type') return KINDS.map(kind => ({ value: kind.value, label: kind.value === 'work' && context.workName ? context.workName : kind.label, count: counts[kind.value] ?? 0 }))
   if (dimension === 'tag' || dimension === 'cost' || dimension === 'release') return labelOptions(dimension, counts, selectedValues, context.colors)
   if (dimension === 'epic') {
     const epics = context.epics ?? []
@@ -411,7 +411,7 @@ export function valueLabel(dimension: Dimension, value: string, context: OptionC
     case 'priority': return priorityLabel(value)
     case 'shape': return value === 'parent' ? 'Parents' : 'Leaves'
     case 'depth': return `Level ${value}`
-    case 'type': return kindLabel(value)
+    case 'type': return value === 'work' && context.workName ? context.workName : kindLabel(value)
     case 'assignee': return value === context.me ? 'Me' : context.names?.get(value) ?? 'Someone'
     case 'epic': return context.epics?.find(e => e.id === value)?.title ?? context.names?.get(value) ?? 'A parent'
     default: return value
@@ -517,7 +517,7 @@ export interface RowGroup {
 // priority, kind or tag), so a group shows its whole size while pages load.
 // layout gives the values a row is grouped by (a live list holds them while an
 // update waits); the group still lists the row itself.
-export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string; layout?: (row: ListItem) => ListItem } = {}): RowGroup[] {
+export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string; layout?: (row: ListItem) => ListItem; workName?: string } = {}): RowGroup[] {
   if (group === 'none') return [{ key: 'all', label: '', rows, total: rows.length }]
   const layout = options.layout ?? (row => row)
   if (group === 'status') {
@@ -568,7 +568,7 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
       const value = placed.priority && placed.priority !== 'none' ? placed.priority : 'none'
       put(value, () => ({ key: value, label: priorityLabel(value), priority: value }), row)
     } else if (group === 'type') {
-      put(placed.kind_slug, () => ({ key: placed.kind_slug, label: kindLabel(placed.kind_slug), kind: placed.kind_slug }), row)
+      put(placed.kind_slug, () => ({ key: placed.kind_slug, label: placed.kind_slug === 'work' && options.workName ? options.workName : kindLabel(placed.kind_slug), kind: placed.kind_slug }), row)
     } else {
       // A ticket with several labels shows under each of them.
       const tags = rowTags(placed)

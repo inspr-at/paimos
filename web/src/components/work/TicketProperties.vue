@@ -4,8 +4,8 @@ import { vClipTip } from '../../directives/clipTip'
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
-import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta } from '../../lib/work'
-import { workIcon } from '../../lib/workVocabulary'
+import { absoluteTime, priorityLabel, relativeTime, statusMeta } from '../../lib/work'
+import { workIcon, workLabel } from '../../lib/workVocabulary'
 import AppIcon from '../AppIcon.vue'
 import PersonAvatar from './PersonAvatar.vue'
 import PriorityIcon from './PriorityIcon.vue'
@@ -20,6 +20,7 @@ import TicketPlacement from './TicketPlacement.vue'
 import type { SaveResult } from '../../lib/useTicket'
 import { useAgents } from '../../stores/agents'
 import { usePoller } from '../../lib/usePolledData'
+import { useWorkVocabulary } from '../../stores/workVocabulary'
 
 defineOptions({ inheritAttrs: false })
 
@@ -41,6 +42,7 @@ const releaseInfo = computed(() => releaseCell(props.releaseView))
 const release = computed(() => releaseInfo.value.kind === 'member' ? releaseInfo.value.text : '')
 // Agent sessions bound to this ticket, with their live state; refreshed while shown.
 const agents = useAgents()
+const vocabulary = useWorkVocabulary()
 const bound = computed(() => agents.forTicket(props.item.id))
 const refresh = usePoller(() => agents.ensureTicket(props.item.id), 20_000)
 watch(() => props.item.id, id => { void agents.ensureTicket(id) }, { immediate: true })
@@ -75,7 +77,7 @@ const target = (event: Event) => event.currentTarget as HTMLElement
     </div>
     <div class="prop">
       <dt>Type</dt>
-      <dd><span class="prop-static"><AppIcon :name="workIcon(item)" :size="13" :class="['kind', item.kind_slug]" />{{ item.level_name || kindLabel(item.kind_slug) }}</span></dd>
+      <dd><span class="prop-static"><AppIcon :name="workIcon(item)" :size="13" :class="['kind', item.kind_slug]" />{{ workLabel(item, vocabulary.value) }}</span></dd>
     </div>
     <div v-if="item.kind_slug !== 'epic'" class="prop">
       <dt>Parent</dt>

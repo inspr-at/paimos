@@ -13,7 +13,9 @@ import SuggestedReleaseCell from './SuggestedReleaseCell.vue'
 import EtaCell from './EtaCell.vue'
 import { useActivity } from '../../lib/useActivity'
 import { useTicket, type RelatedNode, type TicketChange } from '../../lib/useTicket'
-import { absoluteTime, kindLabel, priorityLabel, relativeTime, statusMeta, statusOptions } from '../../lib/work'
+import { absoluteTime, priorityLabel, relativeTime, statusMeta, statusOptions } from '../../lib/work'
+import { workLabel, workNoun } from '../../lib/workVocabulary'
+import { useWorkVocabulary } from '../../stores/workVocabulary'
 import { useAttachments } from '../../lib/useAttachments'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
@@ -127,7 +129,7 @@ function closeWorkActions() {
 }
 function finishConvert() {
   convertOpen.value = false
-  if (item.value) toast(`${item.value.key} is now ${kindLabel(item.value.kind_slug).toLowerCase()}`)
+  if (item.value) toast(`${item.value.key} is now ${workNoun(workLabel(item.value, vocabulary.value))}`)
   activity.load()
 }
 function closeConvert() {
@@ -136,6 +138,7 @@ function closeConvert() {
 }
 const editable = computed(() => props.canWrite && !ticket.readOnly.value && !ticket.gone.value)
 const session = useSession()
+const vocabulary = useWorkVocabulary()
 const repeatSource = ref<ListItem | null>(null)
 const originRecurrence = ref<Recurrence | null>(null), recurrenceEdit = ref<Recurrence | null>(null)
 const mayRepeat = computed(() => !!item.value && ['work', 'epic', 'ticket', 'task'].includes(item.value.kind_slug) && !ticket.gone.value && !ticket.readOnly.value && can('recurrences.manage', props.project.id))
@@ -549,7 +552,7 @@ async function remove() {
   const ok = await confirmAction({
     title: `Delete ${target.key}?`,
     body: `“${target.title}” leaves the project list. ${target.children_count ? 'Its children must be moved or deleted first.' : 'The history stays in the audit log.'}`,
-    confirmLabel: `Delete ${kindLabel(target.kind_slug).toLowerCase()}`, danger: true,
+    confirmLabel: `Delete ${workNoun(workLabel(target, vocabulary.value))}`, danger: true,
   })
   if (ok) await ticket.remove(target)
 }
@@ -600,7 +603,7 @@ defineExpose({
   >
     <TicketHeaderBar
       ref="header"
-      :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :level-name="item?.level_name" :level-icon="item?.level_icon" :position="position" :mode="mode" :can-write="editable"
+      :ticket-key="item?.key ?? ticketKey" :kind="item?.kind_slug ?? null" :level-name="item ? workLabel(item, vocabulary.value) : undefined" :level-icon="item?.level_icon" :position="position" :mode="mode" :can-write="editable"
       :can-delete="deletable" :can-move="movable && ['work','ticket'].includes(item?.kind_slug ?? '')" :can-repeat="mayRepeat" :can-edit-recurrence="mayEditRecurrence" :recurrence-label="originRecurrence && item?.recurrence && !item.recurrence.retired ? recurrenceName(originRecurrence) : undefined" :trail="trail" :editing="editing" :saving="saving" :dirty="editDirty"
       :can-work-actions="item?.kind_slug === 'work' && editable && humanCheckPerson"
        :open-in-project="openInProject" :back-label="backLabel"
@@ -683,7 +686,7 @@ defineExpose({
 
       <div v-else class="ws-grid">
         <div class="ws-main">
-          <p v-if="!editable" class="read-only" role="note"><AppIcon name="alert" :size="13" />You can read this {{ kindLabel(item.kind_slug).toLowerCase() }} but not change it.</p>
+          <p v-if="!editable" class="read-only" role="note"><AppIcon name="alert" :size="13" />You can read this {{ workNoun(workLabel(item, vocabulary.value)) }} but not change it.</p>
           <InlineTitle :record-id="item.id" ref="title" :class="{ 'live-tint': liveTint.title }" :value="item.title" :editable="editable" :large="mode === 'full'" :save="record.setTitle" />
           <TicketProperties
             class="ws-props" :class="{ 'only-narrow': mode === 'full', 'live-tint': liveTint.props }" :item="item" :editable="editable" layout="row" :now="now"
@@ -733,12 +736,12 @@ defineExpose({
             <TicketBenefits v-if="['ticket', 'work'].includes(item.kind_slug)" class="ws-benefits" :fields="item.fields" :parent="item.estimate?.is_parent" :node-id="item.id" @generated="ticket.refresh()" :done="completedTicketState(item.state, rowStore.kindSchema(item.kind_id))" :editable="editable" @edit="startEdit('benefit')" />
           </div>
 
-          <TicketAgentWork v-if="['work','ticket','epic','task'].includes(item.kind_slug)" class="ws-block" :node-id="item.id" :kind="item.kind_slug" />
+          <TicketAgentWork v-if="['work','ticket','epic','task'].includes(item.kind_slug)" class="ws-block" :node-id="item.id" :kind="item.kind_slug" :level-name="workLabel(item, vocabulary.value)" />
           <TicketOutcomes v-if="['work', 'ticket'].includes(item.kind_slug)" class="ws-block" :node-id="item.id" />
           <TicketReviews v-if="['work', 'ticket', 'task'].includes(item.kind_slug)" :key="item.id" class="ws-block" :node-id="item.id" :project-id="project.id" />
           <ChildList
             v-if="hasChildren" class="ws-block" :children="ticket.children.value" :loading="ticket.childrenLoading.value" :editable="editable"
-            :child-label="item.kind_slug === 'work' ? 'work item' : item.kind_slug === 'epic' ? 'ticket' : 'task'" :progress="ticket.childProgress()" :progress-error="ticket.progressError.value" :add="title => ticket.addChild(title, project.routeKey)"
+            :child-label="item.kind_slug === 'work' ? workNoun(vocabulary.leaf.name) : item.kind_slug === 'epic' ? 'ticket' : 'task'" :parent-label="workNoun(workLabel(item, vocabulary.value))" :progress="ticket.childProgress()" :progress-error="ticket.progressError.value" :add="title => ticket.addChild(title, project.routeKey)"
             @open="openLinked"
           />
           <!-- Relations, then activity: both wait for the relations, so neither jumps. -->

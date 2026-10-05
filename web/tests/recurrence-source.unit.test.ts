@@ -7,6 +7,7 @@ import { parse, compileScript } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import { createScope } from '../src/lib/identityScope'
 import * as Recurrences from '../src/lib/recurrences'
+import * as workVocabulary from '../src/lib/workVocabulary'
 import type { Recurrence } from '../src/lib/recurrences'
 import type { ListItem, NodeRecurrence } from '../src/lib/api'
 
@@ -221,6 +222,7 @@ it('Repeat creates children of a canonical parent and siblings of a canonical le
       vue: { ...Vue, onMounted: () => {}, onBeforeUnmount: Vue.onScopeDispose },
       '../../lib/api': { createRecurrence: vi.fn(), updateRecurrence: vi.fn(), getNode: vi.fn(), previewRecurrenceDraft: async () => ({ times: [] }) },
       '../../lib/authz': { can: () => true }, '../../lib/useIdentityScope': { useIdentityScope: identityScope }, '../../lib/recurrences': Recurrences,
+      '../../stores/workVocabulary': { useWorkVocabulary: () => ({ leaf: { name: 'Arbeitsschritt', icon: 'check' } }) }, '../../lib/workVocabulary': workVocabulary,
     })
     expect(state.parent.value).toBe(is_leaf ? 'existing-parent' : 'work-source')
     expect(state.input.value.template.type).toBe('work')

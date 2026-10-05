@@ -406,7 +406,7 @@ for (const width of [1920, 1440, 1280, 1024, 390]) {
     // The controls keep to one line on desktop widths; applied filters get their own.
     if (width >= 1024) {
       const viewsBox = await toolbar(page).getByRole('tablist', { name: 'Ticket views' }).boundingBox()
-      const createBox = await toolbar(page).getByRole('button', { name: 'New work item', exact: true }).boundingBox()
+      const createBox = await toolbar(page).getByRole('button', { name: 'New ticket', exact: true }).boundingBox()
       expect(Math.abs(viewsBox!.y - createBox!.y)).toBeLessThan(6)
     }
   })

@@ -5,7 +5,8 @@ import type { Kind } from '../../lib/api'
 import { isIssueKind } from '../../lib/kindConvert'
 import { kinds } from '../../lib/useTicket'
 import AppIcon, { type IconName } from '../AppIcon.vue'
-import { WORK_ICONS } from '../../lib/workVocabulary'
+import { WORK_ICONS, workNoun } from '../../lib/workVocabulary'
+import { kindLabel } from '../../lib/work'
 import FloatingPanel from './FloatingPanel.vue'
 
 const props = defineProps<{
@@ -124,7 +125,7 @@ void props
         <button v-if="canConvert" type="button" role="menuitem" class="menu-item" @click="pickConvert"><AppIcon name="refresh" :size="14" />Convert to…</button>
         <button v-if="canMove" type="button" role="menuitem" class="menu-item" @click="pickMove"><AppIcon name="epic" :size="14" />Move to another parent…</button>
         <div v-if="canMove || canDelete" class="menu-sep" role="separator" />
-        <button v-if="canDelete" type="button" role="menuitem" class="menu-item danger" @click="pick('delete')"><AppIcon name="trash" :size="14" />Delete {{ kind === 'epic' ? 'epic' : kind === 'task' ? 'task' : 'ticket' }}…</button>
+        <button v-if="canDelete" type="button" role="menuitem" class="menu-item danger" @click="pick('delete')"><AppIcon name="trash" :size="14" />Delete {{ workNoun(levelName || kindLabel(kind || 'ticket')) }}…</button>
       </div>
     </FloatingPanel>
     </div>
