@@ -177,6 +177,43 @@ for (const width of [390, 1024, 1440]) test(`partial results keep toasts above s
  await expect.poll(() => page.locator('.toast-host').evaluate(el => parseFloat(getComputedStyle(el).bottom))).toBeLessThan(offset)
 })
 
+for (const width of [390, 1024, 1440]) test(`partial errors leave adjacent actions unobscured and stationary at ${width}px`, async ({ page }) => {
+ const data = await setup(page, [row(0), row(1), row(2)], { partial: true })
+ await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
+ for (const theme of ['light', 'dark']) {
+  await page.goto('/tickets?view=needs-attention')
+  await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+  const failedRow = table(page).locator('[data-event-id="2"]'), adjacentRow = table(page).locator('[data-event-id="3"]')
+  for (const id of [1, 2, 3]) await table(page).locator(`[data-event-id="${id}"]`).getByRole('checkbox').click()
+  await adjacentRow.evaluate(el => el.scrollIntoView({ block: 'center' }))
+  const guard = await controlStability(page, { failedRow, failedActions: failedRow.locator('.action-stack'), adjacentRow, adjacentActions: adjacentRow.locator('.action-stack') })
+  await guard.check(async () => {
+   await page.getByRole('toolbar', { name: 'Selected tickets' }).getByRole('button', { name: 'Apply 3' }).click()
+   await expect(page.locator('.toast.error')).toContainText('AEON-11: The ticket changed. Reload before trying again.')
+   await expect(failedRow).toContainText('The ticket changed. Reload before trying again.')
+   await expect(adjacentRow.getByRole('button', { name: 'Undo for AEON-12' })).toBeEnabled()
+  })
+  const undo = adjacentRow.getByRole('button', { name: 'Undo for AEON-12' })
+  // Hit-test the actual control; visibility alone misses feedback painted over it.
+  for (const control of [failedRow.getByRole('button', { name: /^Apply to/ }), failedRow.getByRole('button', { name: 'Dismiss for AEON-11' }), undo]) {
+   expect(await control.evaluate(el => {
+    const box = el.getBoundingClientRect()
+    return [0.25, 0.5, 0.75].every(fraction => el.contains(document.elementFromPoint(box.x + box.width * fraction, box.y + box.height / 2)))
+   }), 'adjacent actions receive pointer hits while the error is visible').toBe(true)
+  }
+  await mkdir(shots, { recursive: true })
+  await page.screenshot({ path: `${shots}/attention-error-actions-${width}-${theme}.png`, fullPage: true })
+  const before = data.actions.length
+  await guard.check(async () => {
+   await undo.click({ timeout: 2000 })
+   await expect(adjacentRow.getByRole('button', { name: /^Apply to/ })).toBeVisible()
+  })
+  guard.done()
+  expect(data.actions[before]).toMatchObject({ action: 'undo', items: [{ event_id: 3, node_id: 'node-2', resolution_event_id: 1003 }] })
+  expect(data.actions[before].items).toHaveLength(1)
+ }
+})
+
 for (const change of ['person', 'workspace'] as const) test(`${change} switch clears previous facets while the replacement read waits and fails`, async ({ page }) => {
  await setup(page)
  await page.goto('/tickets?view=needs-attention')
