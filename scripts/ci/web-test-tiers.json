@@ -2438,6 +2438,11 @@
     "node:tests/work-vocabulary.test.ts:Parents / Leaves and depth survive links, saved views and API translation"
   ],
   "tests": [
+    {"kind":"vitest","file":"tests/row-store.unit.test.ts","name":"RowStore: canonical work ancestry > a node read moving a canonical leaf from A to cached work B replaces both ancestry projections","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/row-store.unit.test.ts","name":"RowStore: canonical work ancestry > an unresolved replacement parent clears old ancestry until an authoritative list supplies it","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/row-store.unit.test.ts","name":"RowStore: canonical work ancestry > a cached non-grouping parent cannot retain the former work ancestor","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/live-ticket.unit.test.ts","name":"guardedMove: canonical work ancestry conflicts > inline node conflict adopts remote work B without keeping ancestor A","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/live-ticket.unit.test.ts","name":"guardedMove: canonical work ancestry conflicts > fallback GET conflict adopts remote work B without keeping ancestor A","tier":"GATED-FULL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"Settings primary actions have no glow and retain keyboard focus in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"Settings primary actions have no glow and retain keyboard focus in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"},
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"needs-you counts problems, keeps calm kinds and uses the container for narrow actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"},
@@ -9692,6 +9697,11 @@
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"work-order launch > rejects a freshly read parent or unknown shape before any work-order write","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > queries canonical leaves on every page and excludes parents and unknown shapes from mixed results","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > refuses non-leaf selection and initial targets while keeping confirmed leaves launchable","tier":"ESSENTIAL"},
+    {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > rechecks leaf eligibility at submission before remembering an account or launching","tier":"ESSENTIAL"},
+    {"kind":"browser","file":"tests/start-agent.spec.ts","name":"canonical leaf search excludes mixed parent results and queues only the selected leaf","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
   ]
 }
