@@ -1517,6 +1517,7 @@
     {"kind":"node","file":"tests/places.test.ts","name":"g then a place key goes there within the window; anything else disarms","tier":"GATED-FULL","tags":["delete-candidate"]},
     {"kind":"node","file":"tests/places.test.ts","name":"a place chord finishes only through the release menu g opened, before it expires","tier":"GATED-FULL","tags":["delete-candidate"]},
     {"kind":"node","file":"tests/planning.test.ts","name":"placement provenance labels a pin, latest, and Automatic without changing legacy cells","tier":"GATED-FULL"},
+    {"kind":"node","file":"tests/planning.test.ts","name":"canonical work aggregates disclose excluded uncalibrated leaves in token and cost tips","tier":"NIGHTLY"},
     {"kind":"node","file":"tests/planning.test.ts","name":"frozen default estimates have one uncalibrated basis line","tier":"GATED-FULL"},
     {"kind":"node","file":"tests/planning.test.ts","name":"real capped planner list response keeps legacy figures and explicit history text","tier":"GATED-FULL"},
     {"kind":"node","file":"tests/planning.test.ts","name":"dense figures","tier":"GATED-FULL"},

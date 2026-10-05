@@ -16,6 +16,21 @@ function row(planning: Partial<TicketPlanning> | undefined, fields: Record<strin
 const tokens = (spent: number | null, estimated: number | null, extra: object = {}) => ({ spent, input: spent ?? 0, output: 0, cached: 0, sessions: spent === null ? 0 : 2, unreported: 0, estimated, ...extra })
 const cost = (extra: object) => ({ list_spent: null, list_estimated: null, list_unpriced: false, paid_spent: null, paid_estimated: null, paid_unknown: false, plans: [], ...extra })
 
+test('canonical work aggregates disclose excluded uncalibrated leaves in token and cost tips', async t => {
+  for (const [name, render] of [['tokens', tokensCell], ['cost', listCostCell]] as const) await t.test(name, () => {
+    for (const uncalibrated of [1, 2, 0]) for (const spent of [null, 1_000_000]) for (const shape of [false, undefined]) {
+      const r = { ...row({ tokens: tokens(spent, 8_000_000), cost: cost({ list_spent: spent === null ? null : '2', list_estimated: '16' }),
+        children: { total: 4, estimated: 4 - uncalibrated, uncalibrated } }, {}, 'work'), is_leaf: shape }
+      const basis = `Sum of ${4 - uncalibrated} of 4 open and done children with an estimate${uncalibrated ? ` · partial: ${uncalibrated} uncalibrated ${uncalibrated === 1 ? 'child excluded' : 'children excluded'}` : ''}`
+      const cell = render(r)
+      assert.equal(cell.tip.split('\n').filter(line => line.startsWith('Sum of ')).length, 1, cell.tip)
+      assert.ok(cell.tip.split('\n').includes(basis), cell.tip)
+      assert.notEqual(cell.estimated, '')
+      assert.equal(cell.tip.includes('partial:'), uncalibrated > 0, cell.tip)
+    }
+  })
+})
+
 test('placement provenance labels a pin, latest, and Automatic without changing legacy cells', () => {
   const legacy = modelCell(row({ route })).tip
   assert.doesNotMatch(legacy, /preference/)
