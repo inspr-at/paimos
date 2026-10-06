@@ -31,6 +31,15 @@ export const levelName = (level?: PauseLevel) => LEVELS.find(l => l.value === le
 export const MINUTE = 60_000
 export const clockTime = (at: number | string) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 export const liveSession = (s: Pick<HarnessSessionRow, 'phase' | 'stopped_at' | 'archived_at'>) => s.phase !== 'stopped' && !s.stopped_at && !s.archived_at
+// A non-live row is not evidence of a handover. Paused state is the saved handover;
+// a confirmed stop is terminal; lost contact stays unresolved until an exit report.
+export type WindDownResult = 'running' | 'handover' | 'terminal' | 'lost'
+export function windDownResult(s: Pick<HarnessSessionRow, 'phase' | 'stopped_at' | 'archived_at' | 'stop_reason' | 'pause'>): WindDownResult {
+  if (liveSession(s)) return 'running'
+  if (s.pause?.state === 'paused') return 'handover'
+  if (s.stop_reason === 'heartbeat_lost') return 'lost'
+  return 'terminal'
+}
 export const pausedSession = (s: DeepReadonly<HarnessSessionRow>) => !s.archived_at && s.pause?.state === 'paused' && !liveSession(s)
 export const pausingSession = (s: DeepReadonly<HarnessSessionRow>) => liveSession(s) && !!s.pause && ['requested', 'planned'].includes(s.pause.state) && !s.pause.stop_requested && s.pause.deliver !== false
 export const cooperative = (s: DeepReadonly<HarnessSessionRow>) => s.supported_pause_levels

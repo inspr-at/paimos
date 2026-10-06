@@ -232,6 +232,140 @@ test('a failed status read says so with a Retry instead of hiding the wind-down'
 })
 test('without control permission pause actions and wind-down are hidden', async ({ page }) => { await setup(page, true); await page.goto('/agents'); await expect(page.locator('.agents-page .row').first()).toBeVisible(); await expect(windButton(page)).toHaveCount(0); await expect(page.getByRole('button', { name: /^Pause worker/ })).toHaveCount(0) })
 
+test('AEON-783: chosen agents keeps Done in, By, Cancel and Submit still', async ({ page }) => {
+  await setup(page)
+  await page.goto('/agents')
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1000 })
+    const open = windButton(page)
+    if (await formPopover(page).count()) await formPopover(page).getByRole('button', { name: /^Cancel/ }).click()
+    await open.click()
+    const pop = formPopover(page)
+    const where = pop.getByLabel('Where'), by = pop.getByLabel('By', { exact: true }), seg = pop.getByRole('radiogroup', { name: 'Done in' })
+    const go = pop.locator('button[type=submit]'), quit = pop.getByRole('button', { name: /^Cancel/ })
+    const pauseAll = pop.getByRole('button', { name: /^Pause all…/ }), resumeAll = pop.getByRole('button', { name: /^Resume all…/ })
+    const guard = await controlStability(page, { where, seg, by, go, quit, pauseAll, resumeAll })
+    await guard.check(async () => { await where.selectOption({ label: 'Markus’s studio · 2 agents' }); await expect(pop.locator('.wdf-prev')).toContainText('2 agents on Markus’s studio') })
+    await guard.check(async () => { await where.selectOption('pick'); await expect(pop.getByRole('group', { name: 'Agents to wind down' })).toBeVisible() })
+    await guard.check(async () => { await pop.getByRole('group', { name: 'Agents to wind down' }).getByRole('checkbox').nth(2).uncheck(); await expect(pop.locator('.wdf-prev')).toContainText('2 agents you chose') })
+    await guard.check(async () => { await where.selectOption({ label: 'All computers · 3 agents' }); await expect(pop.getByRole('group', { name: 'Agents to wind down' })).toHaveCount(0) })
+    await guard.check(async () => { await where.selectOption({ label: 'Build machine · 1 agent' }); await expect(pop.locator('.wdf-prev')).toContainText('1 agent on Build machine') })
+    guard.done()
+    await quit.click(); await expect(pop).toHaveCount(0)
+  }
+})
+
+test('AEON-783: plain Enter in By does not start the wind-down', async ({ page }) => {
+  const mock = await setup(page)
+  await page.goto('/agents')
+  await windButton(page).click()
+  const pop = formPopover(page), by = pop.getByLabel('By', { exact: true })
+  await expect(pop.locator('button[type=submit]')).toBeEnabled()
+  await by.focus()
+  await page.keyboard.press('Enter')
+  await expect(pop).toBeVisible()
+  expect(mock.calls).toHaveLength(0)
+  await page.keyboard.press('Shift+Enter')
+  expect(mock.calls).toHaveLength(0)
+  await page.keyboard.press('Alt+Enter')
+  expect(mock.calls).toHaveLength(0)
+  await page.keyboard.press('ControlOrMeta+Enter')
+  await expect.poll(() => mock.calls.length).toBe(1)
+  expect(mock.calls[0]?.body.hosts).toBe('all')
+})
+
+test('AEON-783: preset arrows focus the selected time', async ({ page }) => {
+  const errors = watchErrors(page)
+  // The DOM clears currentTarget when a listener returns. This Chromium keeps it,
+  // so the radiogroup listener clears it on return. The handler must capture the
+  // group before that, or the deferred focus reads null and throws.
+  await page.addInitScript(() => {
+    const orig = EventTarget.prototype.addEventListener
+    EventTarget.prototype.addEventListener = function (type, listener, options) {
+      if (type !== 'keydown' || typeof listener !== 'function') return orig.call(this, type, listener, options)
+      return orig.call(this, type, function (event) {
+        const result = listener.call(this, event)
+        const role = event.currentTarget && event.currentTarget.getAttribute && event.currentTarget.getAttribute('role')
+        if (role === 'radiogroup') Object.defineProperty(event, 'currentTarget', { configurable: true, get: () => null })
+        return result
+      }, options)
+    }
+  })
+  await setup(page)
+  await page.goto('/agents')
+  await windButton(page).click()
+  const seg = formPopover(page).getByRole('radiogroup', { name: 'Done in' })
+  const fifteen = seg.getByRole('radio', { name: '15 min', exact: true })
+  const thirty = seg.getByRole('radio', { name: '30 min', exact: true })
+  await fifteen.focus()
+  await expect(fifteen).toBeFocused()
+  await page.keyboard.press('ArrowRight')
+  await expect(thirty).toHaveAttribute('aria-checked', 'true')
+  await expect(thirty).toBeFocused()
+  await page.keyboard.press('ArrowLeft')
+  await expect(fifteen).toHaveAttribute('aria-checked', 'true')
+  await expect(fifteen).toBeFocused()
+  await page.keyboard.press('ArrowDown')
+  await expect(thirty).toBeFocused()
+  await page.keyboard.press('ArrowUp')
+  await expect(fifteen).toBeFocused()
+  expect(errors).toEqual([])
+})
+
+test('AEON-783: new starts remain allowed until enforcement exists', async ({ page }) => {
+  await setup(page)
+  await page.goto('/agents')
+  await windButton(page).click()
+  const form = formPopover(page)
+  await expect(form).toContainText('New starts on those computers remain allowed until enforcement exists.')
+  await expect(form).not.toContainText('Nothing new starts')
+  await form.locator('button[type=submit]').click()
+  await chipButton(page).click()
+  const status = statusPopover(page)
+  await expect(status).toContainText('New starts remain allowed until enforcement exists')
+  await expect(status).not.toContainText('Nothing new starts')
+})
+
+test('AEON-783: progress distinguishes handover, confirmed stop and lost contact', async ({ page }) => {
+  const mock = await setup(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto('/agents')
+  await startWindDown(page)
+  await expect.poll(() => mock.calls.length).toBe(1)
+  const [saved, stopped, lost] = mock.data.sessions
+  const handover = { state: 'Tests passed; work committed.', next_steps: ['Continue the feature'], open_questions: [], worktree_state: 'committed', commit_sha: 'abc1234' }
+  Object.assign(saved!, { row_version: Number(saved!.row_version) + 1, phase: 'stopped', stopped_at: new Date(NOW + 5 * 60_000).toISOString(), stop_reason: 'paused', finished: false, pause: { ...(saved!.pause as object), state: 'paused', handover } })
+  Object.assign(stopped!, { row_version: Number(stopped!.row_version) + 1, phase: 'stopped', stopped_at: new Date(NOW + 6 * 60_000).toISOString(), stop_reason: 'stopped', finished: false, pause: { ...(stopped!.pause as object), state: 'cancelled', level: 'stop_now', stop_requested: true } })
+  Object.assign(lost!, { row_version: Number(lost!.row_version) + 1, phase: 'stopped', stopped_at: new Date(NOW + 7 * 60_000).toISOString(), stop_reason: 'heartbeat_lost', finished: false, pause: { ...(lost!.pause as object), state: 'requested' } })
+  await page.reload()
+  const chip = chipButton(page)
+  await expect(chip).toContainText('Winding down')
+  await expect(chip).toContainText('· 1 left')
+  await expect(chip).not.toContainText('· 0 left')
+  const dash = await chip.locator('circle.val').getAttribute('stroke-dasharray')
+  expect(dash, 'progress ring').toBeTruthy()
+  const [drawn, circ] = dash!.split(' ').map(Number)
+  expect(drawn / circ).toBeGreaterThan(0.6)
+  expect(drawn / circ).toBeLessThan(0.73)
+  await chip.click()
+  const status = statusPopover(page)
+  await expect(status).toContainText('1 of 3 handed over')
+  await expect(status).toContainText('1 confirmed terminal outcome')
+  await expect(status).toContainText('1 lost contact, exit unconfirmed')
+  await expect(status).not.toContainText('2 of 3 handed over')
+  await expect(status).not.toContainText('3 of 3 handed over')
+  await expect(status.locator('.wd-plan li').filter({ hasText: 'worker-1' })).toContainText('Handed over · handover saved')
+  await expect(status.locator('.wd-plan li').filter({ hasText: 'worker-2' })).toContainText('Ended')
+  await expect(status.locator('.wd-plan li').filter({ hasText: 'worker-2' })).not.toContainText('Handed over')
+  await expect(status.locator('.wd-plan li').filter({ hasText: 'worker-3' })).toContainText('Lost contact · exit unconfirmed')
+  const ratio = await status.locator('.bar i').evaluate(el => {
+    const track = el.parentElement?.getBoundingClientRect().width ?? 0
+    return track ? el.getBoundingClientRect().width / track : 1
+  })
+  expect(ratio).toBeGreaterThan(0.6)
+  expect(ratio).toBeLessThan(0.73)
+})
+
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`${width} ${theme}: stop request stays visible until the worker confirms stopped`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1000 })

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { estimates, hostTick, normalizeScope, prediction, predictWindDown, selectedAgent, toggleScope } from '../src/lib/agentPause.ts'
+import { estimates, hostTick, normalizeScope, prediction, predictWindDown, selectedAgent, toggleScope, windDownResult } from '../src/lib/agentPause.ts'
 import { assessAgentState } from '../src/lib/agentSignals.ts'
 import type { HarnessSessionRow } from '../src/lib/agentRows.ts'
 const now = Date.parse('2026-10-02T09:30:00Z'), minute = 60_000
@@ -51,6 +51,16 @@ test('planning counts down from its report and stale or cleared snapshots never 
   assert.match(prediction(s, 'pause_quickly', now, 10).detail, /No estimate/)
   assert.match(prediction(row({ pause_progress: progress({ interrupt: false }) }), 'pause_quickly', now, 10).detail, /No estimate/)
   assert.equal(estimates(s, now, null).fresh, false)
+})
+test('AEON-783: a saved handover, a confirmed stop and lost contact are different wind-down results', () => {
+  const stopped = { phase: 'stopped' as const, stopped_at: new Date(now).toISOString() }
+  assert.equal(windDownResult(row({ pause: { state: 'requested' } })), 'running')
+  assert.equal(windDownResult(row({ pause: { state: 'cancelled', stop_requested: true, level: 'stop_now' } })), 'running')
+  assert.equal(windDownResult(row({ ...stopped, stop_reason: 'paused', pause: { state: 'paused', handover: { state: 'saved', next_steps: ['Continue'], open_questions: [], worktree_state: 'committed' } } })), 'handover')
+  assert.equal(windDownResult(row({ ...stopped, stop_reason: 'stopped', finished: true, pause: { state: 'cancelled', level: 'stop_now', stop_requested: true } })), 'terminal')
+  assert.equal(windDownResult(row({ ...stopped, stop_reason: 'stopped', pause: { state: 'cancelled' } })), 'terminal')
+  assert.equal(windDownResult(row({ ...stopped, stop_reason: 'heartbeat_lost', pause: { state: 'requested' } })), 'lost')
+  assert.equal(windDownResult(row({ ...stopped, stop_reason: 'heartbeat_lost', pause: { state: 'requested', handover: { state: 'partial', next_steps: [], open_questions: [], worktree_state: 'clean' } } })), 'lost')
 })
 test('paused is resumable evidence, scheduled pauses stay working and stop requests do not claim exit', () => {
   assert.equal(assessAgentState({ ...row(), pause: { state: 'requested', deliver: false } }, now).state, 'working')

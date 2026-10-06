@@ -6,7 +6,7 @@ import { useAgents } from '../../stores/agents'
 import { useCapacity } from '../../stores/capacity'
 import { useAgentPause } from '../../stores/agentPause'
 import { useSession } from '../../stores/session'
-import { clockTime, liveSession, normalizeScope, pausedSession, prediction, predictWindDown, selectedAgent, levelName, type WindDownScope } from '../../lib/agentPause'
+import { clockTime, liveSession, normalizeScope, pausedSession, prediction, predictWindDown, selectedAgent, levelName, windDownResult, type WindDownScope } from '../../lib/agentPause'
 import { readPreference, writePreference } from '../../lib/preferences'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import AppIcon from '../AppIcon.vue'
@@ -129,13 +129,19 @@ function typeBy(value: string) { mins.value = null; typed.value = value }
 function presetKeys(event: KeyboardEvent) {
   const step = event.key === 'ArrowRight' || event.key === 'ArrowDown' ? 1 : event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 0
   if (!step) return
+  const group = event.currentTarget
+  if (!(group instanceof HTMLElement)) return
   event.preventDefault()
   const at = mins.value === null ? -1 : PRESETS.indexOf(mins.value as typeof PRESETS[number]), next = PRESETS[(at + step + PRESETS.length) % PRESETS.length]!
   setPreset(next)
-  void nextTick(() => (event.currentTarget as HTMLElement).querySelector<HTMLElement>('[aria-checked="true"]')?.focus())
+  void nextTick(() => group.querySelector<HTMLElement>('[aria-checked="true"]')?.focus())
 }
 function formKeys(event: KeyboardEvent) {
-  if (event.key === 'Enter' && !event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)) { event.preventDefault(); void confirm() }
+  if (event.key !== 'Enter' || event.isComposing) return
+  const shortcut = !event.altKey && !event.shiftKey && (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey)
+  if (shortcut) { event.preventDefault(); void confirm(); return }
+  const target = event.target
+  if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) event.preventDefault()
 }
 async function confirm() {
   if (!ownershipReady.value || pause.leavingBusy) return
@@ -157,17 +163,36 @@ const selectedScope = computed<WindDownScope>(() => active.value && pause.report
 const planRows = computed(() => active.value ? pause.reportIds.map(id => agents.sessionById(id)).filter((s): s is HarnessSession => !!s) : [])
 const untouched = computed(() => running.value.filter(s => !pause.reportIds.includes(s.id)))
 const planHosts = computed(() => hosts.value.filter(h => planRows.value.some(s => s.host === h.id) || selectedScope.value.hosts === 'all' || selectedScope.value.hosts.includes(h.id)))
+const tally = computed(() => {
+  const counts = { running: 0, handover: 0, terminal: 0, lost: 0 }
+  for (const row of planRows.value) counts[windDownResult(row)]++
+  return counts
+})
 const total = computed(() => planRows.value.length)
-const left = computed(() => planRows.value.filter(liveSession).length)
+const left = computed(() => tally.value.running + tally.value.lost)
 const done = computed(() => !pause.leavingError && pause.settled)
 const byClock = computed(() => pause.report?.deadline_at ? hhmm(Date.parse(pause.report.deadline_at)) : '')
 const minutesLeft = computed(() => Math.max(0, Math.ceil((Date.parse(pause.report?.deadline_at ?? '') - agents.now) / 60_000)))
 const startedAt = computed(() => { const times = planRows.value.map(s => Date.parse(s.pause?.requested_at || '')).filter(Number.isFinite); return times.length ? hhmm(Math.min(...times)) : 'unknown' })
-const ring = computed(() => { const c = 2 * Math.PI * 5, share = done.value ? 1 : total.value ? (total.value - left.value) / total.value : 0; return `${(share * c).toFixed(1)} ${c.toFixed(1)}` })
+const progressPct = computed(() => total.value ? ((tally.value.handover + tally.value.terminal) / total.value) * 100 : 0)
+const ring = computed(() => { const c = 2 * Math.PI * 5, share = progressPct.value / 100; return `${(share * c).toFixed(1)} ${c.toFixed(1)}` })
 const chipRest = computed(() => done.value ? '' : minutesLeft.value === 0 ? `· deadline reached · by ${byClock.value}` : `· ${left.value} left · by ${byClock.value}`)
+const progressSentence = computed(() => {
+  const { handover, terminal, lost } = tally.value
+  const parts = [`${handover} of ${total.value} handed over`]
+  if (terminal) parts.push(`${terminal} confirmed terminal ${terminal === 1 ? 'outcome' : 'outcomes'}`)
+  if (lost) parts.push(`${lost} lost contact, exit unconfirmed`)
+  if (!done.value) parts.push(minutesLeft.value === 0 ? 'deadline reached, awaiting reported outcomes' : `${minutesLeft.value} min left`)
+  return `${parts.join(' · ')}. New starts remain allowed until enforcement exists; started ${startedAt.value}.`
+})
 function line(s: HarnessSession) {
   if (s.pause) {
-    if (!liveSession(s)) return s.pause.state === 'paused' ? 'Handed over · handover saved' : s.finished ? 'Finished' : s.stop_reason === 'heartbeat_lost' ? 'Lost contact · exit unconfirmed' : 'Ended'
+    if (!liveSession(s)) {
+      const result = windDownResult(s)
+      if (result === 'handover') return 'Handed over · handover saved'
+      if (result === 'lost') return 'Lost contact · exit unconfirmed'
+      return s.finished ? 'Finished' : 'Ended'
+    }
     if (s.pause.stop_requested) return 'Stop requested · exit unconfirmed'
     if (agents.now >= Date.parse(s.pause.deadline_at)) return 'Deadline reached · awaiting outcome'
     return `${levelName(s.pause.level)}${s.pause.deliver === false && s.pause.starts_at ? ` starts ${clockTime(s.pause.starts_at)}` : ''} · by ${hhmm(Date.parse(s.pause.deadline_at))}`
@@ -223,11 +248,10 @@ defineExpose({ open: openForm, openStatus: () => { panel.value = 'status' } })
     <FloatingPanel v-if="panel" :anchor="anchor" align="end" :width="panel === 'form' ? 380 : 360" :tallest="640" :label="panel === 'form' ? 'Wind down' : 'Wind-down'" field-escape cycle @close="restore => closePanel(restore)">
       <form v-if="panel === 'form'" class="wdf" novalidate @submit.prevent="confirm" @keydown="formKeys">
         <h3><AppIcon name="winddown" :size="16" />Wind down</h3>
-        <p>Agents finish their current step, save a handover and stop by the time you set. Nothing new starts on those computers.</p>
+        <p>Agents finish their current step, save a handover and stop by the time you set. New starts on those computers remain allowed until enforcement exists.</p>
         <div class="wdf-grid">
           <label for="wd-where">Where</label>
           <select id="wd-where" class="field" data-autofocus :value="where" @change="chooseWhere(($event.target as HTMLSelectElement).value)"><option v-for="o in whereOptions" :key="o.value" :value="o.value">{{ o.label }}</option></select>
-          <template v-if="where === 'pick'"><span /><fieldset class="wd-pick"><legend class="sr-only">Agents to wind down</legend><label v-for="s in running" :key="s.id" class="pk"><input type="checkbox" :checked="picked.includes(s.id)" @change="togglePick(s.id)" /><span>{{ name(s) }}</span><small>{{ hostLabel(s.host) }}</small></label></fieldset></template>
           <span id="wd-in-l" class="lb">Done in</span>
           <span class="seg" role="radiogroup" aria-labelledby="wd-in-l" @keydown="presetKeys"><button v-for="m in PRESETS" :key="m" type="button" role="radio" :aria-checked="mins === m" :tabindex="mins === m || (mins === null && m === PRESETS[0]) ? 0 : -1" @click="setPreset(m)">{{ m }} min</button></span>
           <label for="wd-by">By</label>
@@ -238,17 +262,18 @@ defineExpose({ open: openForm, openStatus: () => { panel.value = 'status' } })
           <button type="button" class="btn ghost" @click="closePanel(true)">Cancel<kbd class="keycap">Esc</kbd></button>
           <button type="submit" class="btn primary" :disabled="!ownershipReady || pause.leavingBusy">Wind down<span class="go-by" :class="{ hidden: !!timeError }">· by {{ goTime }}</span><span class="submit-keys"><KeyCap k="mod" /><KeyCap k="enter" /></span></button>
         </div>
-        <p class="wdf-prev"><b>{{ chosen.length }} agent{{ chosen.length === 1 ? '' : 's' }}</b> {{ wherePhrase }} hand over by <template v-if="timeError">the time you set</template><b v-else>{{ byText }}</b>. New agents can still start elsewhere.<small>{{ previewLevels }}. Preview from the latest reports; eligibility and timing are checked on confirm.</small></p>
+        <p class="wdf-prev"><b>{{ chosen.length }} agent{{ chosen.length === 1 ? '' : 's' }}</b> {{ wherePhrase }} hand over by <template v-if="timeError">the time you set</template><b v-else>{{ byText }}</b>. New starts remain allowed until enforcement exists.<small>{{ previewLevels }}. Preview from the latest reports; eligibility and timing are checked on confirm.</small></p>
         <p v-if="labelsError" class="wdf-note" role="status">{{ labelsError }}</p>
         <div class="wd-sep" role="separator" />
         <p class="eyebrow now-head">Right now</p>
         <button type="button" class="wd-item" :aria-disabled="!canPause.length || pause.leavingBusy || undefined" @click="bulk('pause-all')"><AppIcon name="pause" :size="16" /><span class="t">Pause all…</span><span class="d">{{ canPause.length ? 'Each agent saves a handover and pauses at its next safe point.' : 'Nothing outside the wind-down can pause right now.' }}</span></button>
         <button type="button" class="wd-item" :aria-disabled="!canResume.length || pause.leavingBusy || undefined" @click="bulk('resume-all')"><AppIcon name="play" :size="16" /><span class="t">Resume all…</span><span class="d">{{ canResume.length ? `Continue ${canResume.length} paused agent${canResume.length === 1 ? '' : 's'} from their handovers, leads first.` : 'Nothing is paused.' }}</span></button>
+        <fieldset v-if="where === 'pick'" class="wd-pick"><legend class="sr-only">Agents to wind down</legend><label v-for="s in running" :key="s.id" class="pk"><input type="checkbox" :checked="picked.includes(s.id)" @change="togglePick(s.id)" /><span>{{ name(s) }}</span><small>{{ hostLabel(s.host) }}</small></label></fieldset>
       </form>
       <div v-else class="wds">
         <h3>{{ done ? (pause.completedAt === null ? 'Wound down' : `Wound down at ${hhmm(pause.completedAt)}`) : `Winding down · by ${byClock}` }}</h3>
-        <div class="bar" aria-hidden="true"><i :style="{ width: `${done ? 100 : total ? ((total - left) / total) * 100 : 0}%`, boxShadow: 'none', background: 'var(--teal)' }" /></div>
-        <p>{{ total - left }} of {{ total }} handed over<template v-if="!done"> · {{ minutesLeft === 0 ? 'deadline reached, awaiting reported outcomes' : `${minutesLeft} min left` }}</template>. Nothing new starts on these; started {{ startedAt }}.</p>
+        <div class="bar" aria-hidden="true"><i :style="{ width: `${progressPct}%`, boxShadow: 'none', background: 'var(--teal)' }" /></div>
+        <p>{{ progressSentence }}</p>
         <p v-if="pause.leavingError" class="wds-error" role="alert">{{ pause.leavingError }} <button type="button" class="link-btn" @click="pause.refreshLeaving()">Retry</button></p>
         <p v-if="labelsError" class="wdf-note" role="status">{{ labelsError }}</p>
         <div class="wd-scroll">
@@ -304,7 +329,7 @@ defineExpose({ open: openForm, openStatus: () => { panel.value = 'status' } })
 .by-row .field.n { width: 8ch; text-align: center; font-variant-numeric: tabular-nums; }
 .by-row .field[aria-invalid="true"] { box-shadow: 0 0 0 1px var(--danger-line), inset 0 0 0 1px var(--danger-line); }
 .by-row .small { color: var(--ink-3); font-size: 12px; }
-.wd-pick { grid-column: 2; display: grid; gap: 0; max-height: 168px; overflow: auto; margin: -4px 0 0; padding: 4px 8px; border: 0; border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.wd-pick { display: grid; gap: 0; max-height: 168px; overflow: auto; margin: 8px 0 0; padding: 4px 8px; border: 0; border-radius: 10px; background: var(--surface-2); min-width: 0; }
 .pk { display: flex; align-items: center; gap: 8px; min-height: 30px; font-size: 12.5px; color: var(--ink); }
 .pk span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pk small { margin-left: auto; color: var(--ink-3); font-family: var(--mono); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 45%; }
@@ -344,7 +369,6 @@ defineExpose({ open: openForm, openStatus: () => { panel.value = 'status' } })
   .wd-x { width: 44px; }
   .wdf-grid { grid-template-columns: minmax(0, 1fr); gap: 6px; }
   .wdf .seg button, .wdf .field, .wdf .btn { min-height: 44px; }
-  .wd-pick { grid-column: 1; }
   .pk { min-height: 44px; }
   .pk input { width: 22px; height: 22px; }
   .wd-item { min-height: 52px; }
