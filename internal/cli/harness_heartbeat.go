@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"sort"
 	"strings"
 	"time"
@@ -21,6 +22,9 @@ import (
 	"unicode/utf8"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/agentd"
+	"github.com/inspr-at/paimos/internal/agentdwire"
+	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/eta"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/modelreport"
@@ -82,6 +86,7 @@ type heartbeatDeps struct {
 }
 
 type heartbeatOptions struct {
+	ReconnectSocket   string
 	OwnedStop         bool
 	LinkAccountID     string
 	LinkSetupRoot     string
@@ -148,6 +153,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 		Use:   "harness run-heartbeat --owner-pid PID --state-dir DIR --project KEY --agent NAME --harness KIND",
 		addFlags: func(fs *flagSet) {
 			o.Capacity.flags(fs)
+			fs.string(&o.ReconnectSocket, "reconnect-socket", 0, "paired daemon socket for this existing heartbeat/inbox hook; no process control")
 			fs.int(&o.OwnerPID, "owner-pid", "process id whose exit stops the session")
 			fs.int(&o.Interval, "interval", "seconds between beats (default 50)")
 			fs.string(&o.StateDir, "state-dir", 0, "private directory for registration and resume")
@@ -197,6 +203,7 @@ func (rt *runtime) harnessRunHeartbeat() *Command {
 			if err := o.prepare(); err != nil {
 				return err
 			}
+			o.discoverReconnectSocket()
 			ctx, stop := signalContext()
 			defer stop()
 			return rt.runHeartbeat(ctx, o, heartbeatDeps{})
@@ -267,6 +274,9 @@ func (o *heartbeatOptions) prepare() error {
 		}
 	}
 	o.normalize()
+	if o.ReconnectSocket != "" && (o.Management != "unmanaged" || !validUUID(o.SourceSession) || o.Harness != "claude" || !filepath.IsAbs(o.ReconnectSocket)) {
+		return usagef("--reconnect-socket requires an absolute paired socket, an unmanaged Claude session and --source-session with the installed inbox hook")
+	}
 	if o.OwnerPID <= 0 {
 		return usagef("--owner-pid must be a positive process id")
 	}
@@ -883,6 +893,9 @@ func (rt *runtime) openHeartbeatSession(ctx context.Context, o heartbeatOptions,
 	if o.OwnedStop {
 		body["advertised_capabilities"] = []string{"status", "owned_stop_v1"}
 	}
+	if o.ReconnectSocket != "" {
+		body["advertised_capabilities"] = append(body["advertised_capabilities"].([]string), "inbox")
+	}
 	putText(body, "generator", o.Generator, true)
 	putText(body, "command", o.CommandLabel, true)
 	putText(body, "display_label", label, haveLabel)
@@ -1295,6 +1308,24 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if err != nil {
 		session.disk.Sequence--
 		return err
+	}
+
+	if o.ReconnectSocket != "" {
+		indexed, _, result := lookupSessionIndex(strings.ToLower(o.SourceSession))
+		if result != sessionIndexBound || indexed != session.id {
+			return errors.New("heartbeat reported, but the live inbox hook binding is unavailable")
+		}
+		active, apiErr := rt.api()
+		if apiErr != nil {
+			return apiErr
+		}
+		local := agentdwire.Client{Socket: o.ReconnectSocket, TokenFile: o.ReconnectSocket + ".token"}
+		hookCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		hookErr := local.BindAttachedHook(hookCtx, agentd.AttachedHookRequest{Origin: strings.TrimRight(active.BaseURL, "/"), ProjectID: projectID, SessionID: session.id, Harness: o.Harness, Lease: session.lease, OwnerPID: o.OwnerPID, Sequence: session.disk.Sequence, Activity: o.Activity})
+		cancel()
+		if hookErr != nil {
+			return errors.New("heartbeat reported, but paired reconnect binding was refused")
+		}
 	}
 	if dep.stopOwned != nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.StopExpiresInMS > 0 && response.Pause.StopExpiresInMS <= 45000 {
 		deadline := beatStarted.Add(time.Duration(response.Pause.StopExpiresInMS) * time.Millisecond)
@@ -1891,4 +1922,26 @@ func addTokens(a, b int64) (int64, bool) {
 		return 0, false
 	}
 	return a + b, true
+}
+
+// A normal attached heartbeat with the existing source-session inbox hook
+// discovers only the known owner-only paired socket. No home scan, credential
+// file or foreign registration is used. The daemon/server verify instance and
+// principal before advertising recovery; older or absent daemons fail closed.
+func (o *heartbeatOptions) discoverReconnectSocket() {
+	if o.ReconnectSocket != "" || o.Management != "unmanaged" || o.Harness != "claude" || !validUUID(o.SourceSession) {
+		return
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	root, err := agentsetup.DefaultStateRoot(goruntime.GOOS, home, os.Getenv("XDG_STATE_HOME"))
+	if err != nil {
+		return
+	}
+	local, err := agentdwire.OpenClient(filepath.Join(root, "daemon"))
+	if err == nil {
+		o.ReconnectSocket = local.Socket
+	}
 }

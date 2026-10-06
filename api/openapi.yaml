@@ -7380,6 +7380,68 @@ paths:
         '200': {description: Control outcome; inspect outcome and reason, content: {application/json: {schema: {type: object}}}}
         '403': {description: Wrong session agent or generation lease}
         '409': {description: 'divergent control completion means the control is already finished. setting authorization expired means an applied setting missed the database deadline. Both are terminal for the worker. Other conflicts, including an unclaimed control, stay retryable.'}
+  /projects/{projectId}/harness-sessions/{sessionId}/recover-agent:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: diagnoseAgentRecovery
+      summary: Diagnose reporting loss and the available daemon recovery action
+      description: "Person-only harness.control. Uses tenant-scoped paired-host, credential and process evidence; silence alone never proves process exit or auth 401. Attached sessions without an exact daemon hook binding fail closed. A stale host observation reports host_not_reporting. No credentials or process arguments are returned."
+      responses:
+        '200':
+          description: Bounded diagnosis and exact session observation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentRecoveryDiagnosis'}
+        '403': {description: Person with harness.control required}
+    post:
+      operationId: requestAgentRecovery
+      summary: Request generation-bound Restart or Reconnect
+      description: "Person-only harness.control, and run.create for Restart, rechecked inside the tenant access/tree fence. request_id is idempotent only for the same actor and payload. Requires the exact observed revision and session_recovery_v1 advertised by a paired daemon. Accepted means requested, never restarted. Restart gracefully closes only the exact owned process; it never escalates to a group kill. A continuation is queued only after verified root exit and terminal run settlement. Same work order/account, approved model/effort and tier, and last recorded handover are retained; routing and admission still apply. Reconnect restores daemon-owned heartbeat/inbox reporting without signals or credential changes. One live request per session; 45-second single-use claim, no uncertain replay."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [request_id, expected_revision, action], additionalProperties: false, properties: {request_id: {type: string, format: uuid}, expected_revision: {type: string, minLength: 64, maxLength: 64}, action: {type: string, enum: [restart, reconnect]}}}
+      responses:
+        '201': {description: Durable pending request; poll its status before reporting a result, content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
+        '403': {description: Person and current recovery/create permissions required}
+        '409': {description: Observation changed or exact paired recovery unavailable}
+  /projects/{projectId}/harness-sessions/{sessionId}/recover-agent/{requestId}:
+    get:
+      operationId: readAgentRecovery
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: "Pending, claimed, completed or expired; expired claims have unconfirmed outcome", content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
+  /harness-recoveries/claim:
+    post:
+      operationId: claimAgentRecoveries
+      description: "Paired agent with harness.worker. Tenant/tree access fence, current credential and requester authority checked before claiming at most 10 requests for this exact daemon generation. Claims are never reoffered after uncertainty."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [daemon_id, generation], additionalProperties: false, properties: {daemon_id: {type: string, maxLength: 128}, generation: {type: string, pattern: '^[0-9a-f]{32}$'}}}
+      responses:
+        '200': {description: At most ten generation-bound requests with a relative expires_in_ms budget, content: {application/json: {schema: {type: array, maxItems: 10, items: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}}
+  /harness-recoveries/{requestId}/complete:
+    post:
+      operationId: completeAgentRecovery
+      parameters:
+        - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+      description: "Paired exact agent/daemon generation only. Reports a bounded outcome: reconnected, exited, or rejected. A verified exit must accompany a terminal old run; no new run from silence. Rechecks the initiating person's permissions and original session binding before queuing a continuation through standard run creation. Exact completion retry returns the saved receipt and never creates another run. No credential mutation."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [daemon_id, generation, outcome], additionalProperties: false, properties: {daemon_id: {type: string, maxLength: 128}, generation: {type: string, pattern: '^[0-9a-f]{32}$'}, outcome: {type: string, enum: [reconnected, exited, rejected]}}}
+      responses:
+        '200': {description: "Recorded result; continuation_queued means waiting for normal dispatch, not process started", content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
+        '409': {description: "Claim expired, binding changed, prior exit unconfirmed, or divergent completion"}
   /projects/{projectId}/harness-sessions/{sessionId}/recovery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -7568,6 +7630,7 @@ paths:
                 max_session_file_bytes: {$ref: '#/components/schemas/RulesClientMaximum'}
                 rules_client_version: {type: [string, 'null'], minLength: 1, maxLength: 80}
                 process_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
+                attached_hook: {type: boolean, default: false, description: "Bind an existing unmanaged inbox hook to its paired daemon and exact process identity. Requires the current worker lease, inbox capability and active pairing; never grants process controls or watch consent."}
                 phase: {type: string, enum: [starting, working, yielded, stopping]}
                 activity: {type: string, enum: [unknown, busy, idle, throttled]}
                 activity_sequence: {type: integer, format: int64, minimum: 0}
@@ -7601,6 +7664,20 @@ paths:
         '400': {description: Invalid note or heartbeat}
         '403': {description: Worker proof rejected}
         '410': {description: Authenticated archived generation; detach harness servicing without signaling the process}
+  /projects/{projectId}/harness-sessions/{sessionId}/drain:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    post:
+      operationId: drainHarnessInbox
+      description: "Existing managed inbox or an explicitly paired attached hook. Attached hooks lease only exact-session messages; an unfinished lease is replayed until the foreground hook confirms handoff. Reconnect never acknowledges messages. Requires existing harness.worker authority and this registration's worker lease."
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      responses:
+        '200': {description: Empty or one replayable delivery, content: {application/json: {schema: {type: array, maxItems: 1, items: {type: object, required: [delivery_id, message_id, cursor, sender_principal_id, body, leased_at], properties: {delivery_id: {type: string, format: uuid}, message_id: {type: string, format: uuid}, cursor: {type: integer, format: int64}, sender_principal_id: {type: string, format: uuid}, body: {type: string}, leased_at: {type: string, format: date-time}}}}}}}
+        '403': {description: Worker proof rejected}
+        '409': {description: An existing managed inbox or paired attached hook is required}
+        '410': {description: Archived generation}
   /projects/{projectId}/harness-sessions/{sessionId}/model-reports:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -11574,7 +11651,7 @@ components:
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.3']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
-    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.8']}}
+    HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.9']}}
     NodeRevision: {description: 'The node''s updated_at after this write (RFC 3339), the revision its node event carries in node_changes. A live view recognises that event as its own write (AEON-326).', schema: {type: string, format: date-time}}
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
   securitySchemes:
@@ -16501,6 +16578,9 @@ components:
           type: [string, 'null']
           format: uuid
           description: Optional strict account choice. Must belong to the selected agent, match the model harness and allow the selected model profile. The daemon still reserves allowance and claims; an unavailable chosen account leaves the run queued without fallback. Omit or null for automatic routing.
+        recovery_brief: {type: string, maxLength: 20000, description: Last recorded handover for a person-requested restart; task context only}
+        recovery_service_tier: {type: string, enum: [default, fast, fastest]}
+        recovery_display_label: {type: [string, 'null']}
         retry_of_run_id:
           type: [string, 'null']
           format: uuid
@@ -16612,7 +16692,7 @@ components:
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [coordinator, worker]}
         work_shape: {type: string, enum: [unknown, ship, scout]}
-        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, pause, owned_stop_v1, status, steer, interrupt, stop, managed_control_v1, rename, model, effort, service_tier_v1]}}
+        advertised_capabilities: {type: array, items: {type: string, enum: [inbox, pause, owned_stop_v1, status, steer, interrupt, stop, managed_control_v1, session_recovery_v1, rename, model, effort, service_tier_v1]}}
         harness_session_ref: {type: string, minLength: 16, maxLength: 4096, writeOnly: true}
         vendor_session_ref:
           type: string
@@ -16621,6 +16701,31 @@ components:
           writeOnly: true
           description: Optional harness-native session id, digested like harness_session_ref. Unique among active generations per tenant and agent across all harnesses. Must identify this generation, not its parent. Omitted on replay does not clear a stored value. The same value as harness_session_ref is not stored again.
         worker_lease: {type: string, minLength: 32, maxLength: 256, writeOnly: true}
+    AgentRecoveryDiagnosis:
+      type: object
+      required: [session_id, observed_revision, cause, detail, action]
+      properties:
+        session_id: {type: string, format: uuid}
+        observed_revision: {type: string, minLength: 64, maxLength: 64}
+        cause: {type: string}
+        detail: {type: string}
+        action: {type: string, enum: ['', restart, reconnect]}
+    AgentRecoveryReceipt:
+      type: object
+      required: [id, session_id, project_id, run_id, action, state, outcome, next_run_id, expires_at, claimed_at, expected_ownership]
+      properties:
+        id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        run_id: {type: [string, 'null'], format: uuid}
+        action: {type: string, enum: [restart, reconnect]}
+        state: {type: string, enum: [pending, claimed, completed, expired]}
+        outcome: {type: [string, 'null'], enum: [reconnected, continuation_queued, rejected, unconfirmed, null]}
+        next_run_id: {type: [string, 'null'], format: uuid}
+        expires_at: {type: string, format: date-time}
+        expires_in_ms: {type: integer, minimum: 0, maximum: 45000}
+        claimed_at: {type: [string, 'null'], format: date-time}
+        expected_ownership: {$ref: '#/components/schemas/HarnessProcessOwnership'}
     HarnessProcessOwnership:
       type: object
       description: Content-free current daemon ownership. Never sufficient by itself; the daemon verifies its live Process before signaling.
@@ -17221,6 +17326,9 @@ components:
         management_mode: {type: string, enum: [managed, unmanaged]}
         role: {type: string, enum: [worker, coordinator]}
         work_shape: {type: string, enum: [unknown, ship, scout]}
+        agent_recovery:
+          $ref: '#/components/schemas/AgentRecoveryDiagnosis'
+          description: Caller-specific evidence; omitted for agents and people without harness.control.
         advertised_capabilities: {type: array, items: {type: string}}
         phase: {type: string, enum: [starting, working, yielded, stopping, stopped]}
         activity: {type: string, enum: [unknown, busy, idle, throttled]}

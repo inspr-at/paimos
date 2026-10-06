@@ -1072,7 +1072,14 @@ func (a *ClaudeAdapter) Start(ctx context.Context, r StartRequest, observe func(
 	})
 	op, cancel := operationContext(ctx)
 	defer cancel()
-	if err := p.sendContext(op, map[string]any{"op": "start", "service_tier": "default", "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "read_only_review": r.Run.ReadOnlyReview, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens, "capabilities": append([]string{}, r.Capabilities...)}); err != nil {
+	tier := r.ServiceTier
+	if tier == "" {
+		tier = "default"
+	}
+	if !servicetier.Valid(tier) {
+		return p.failStart(errors.New("invalid serving tier"))
+	}
+	if err := p.sendContext(op, map[string]any{"op": "start", "service_tier": tier, "prompt": r.Prompt, "model": r.Profile.Model, "effort": r.Profile.Effort, "correlation_id": "initial", "tools": r.Tools, "purpose": r.Run.Purpose, "read_only_review": r.Run.ReadOnlyReview, "rules": r.Rules, "max_turns": r.MaxTurns, "max_tokens": r.MaxTokens, "capabilities": append([]string{}, r.Capabilities...)}); err != nil {
 		return p.failStart(err)
 	}
 	select {
