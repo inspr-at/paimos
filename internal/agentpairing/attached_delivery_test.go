@@ -660,6 +660,11 @@ func TestAttachedDeliveryLegacyStreamAndDatabaseFences(t *testing.T) {
 	if _, err := n.f.db.Admin.Exec(t.Context(), `UPDATE harness_sessions SET capabilities=ARRAY['inbox','attached_reconnect_v1'],lease_digest=$2 WHERE id=$1`, n.grant.Binding.SessionID, proof[:]); err != nil {
 		t.Fatal(err)
 	}
+	// Supply worker key authority in this handler fixture so only the lease's
+	// delivery mode can refuse the request.
+	if _, err := n.f.db.Admin.Exec(t.Context(), `UPDATE agent_keys SET scopes=array_append(scopes,'harness.worker') WHERE principal_id=$1`, n.recipient); err != nil {
+		t.Fatal(err)
+	}
 	var cursor int64
 	if err := n.f.db.Admin.QueryRow(t.Context(), `SELECT cursor FROM harness_deliveries WHERE id=$1`, o.DeliveryID).Scan(&cursor); err != nil {
 		t.Fatal(err)
@@ -670,6 +675,7 @@ func TestAttachedDeliveryLegacyStreamAndDatabaseFences(t *testing.T) {
 	}
 	complete := httptest.NewRequest("POST", "/api/projects/"+n.in.Snapshot.ProjectID+"/harness-sessions/"+n.grant.Binding.SessionID+"/complete-delivery", strings.NewReader(string(body))).WithContext(tenant.WithPrincipal(t.Context(), p))
 	complete.Header.Set("X-Aeon-Worker-Lease", lease)
+	complete.Header.Set("Authorization", "Bearer "+n.key)
 	refused := httptest.NewRecorder()
 	mux.ServeHTTP(refused, complete)
 	if refused.Code != http.StatusNotFound {
