@@ -26,7 +26,9 @@ export function classifyPaths(files, deleted = []) {
   files.forEach(validatePath);
   deleted.forEach(validatePath);
   const nixVendor = [...files, ...deleted].some(file => nixVendorPaths.has(file));
-  if (files.every(file => !instructionPattern.test(file) && !file.split('/').includes('testdata') && docsPaths.some(pattern => pattern.test(file)))) {
+  const instruction = [...files, ...deleted].find(file => instructionPattern.test(file));
+  if (instruction) return { ...full(`test-pinned instruction input: ${instruction}`), nixVendor };
+  if (files.every(file => !file.split('/').includes('testdata') && docsPaths.some(pattern => pattern.test(file)))) {
     return { lane: 'docs-only', specs: [], nixVendor, reason: 'documentation allowlist' };
   }
   // A rename includes its removed source with --no-renames. Removals require full validation.

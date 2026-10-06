@@ -74,10 +74,14 @@ test('instruction-only PRs require full CI while ordinary documentation stays do
   }
   const rollout = JSON.parse(readFileSync(new URL('./rules-bootstrap/rollout.json', import.meta.url), 'utf8'));
   const pinned = rollout.targets.flatMap(({ target, candidate }) => [target, candidate]);
-  for (const path of [...pinned, 'docs/AGENTS.md', 'docs/nested/CLAUDE.md', 'web/AGENTS.md', 'agents.md', 'docs/claude.MD']) {
+  for (const path of [...pinned, 'docs/AGENTS.md', 'docs/nested/CLAUDE.md', 'web/AGENTS.md',
+    'internal/auth/CLAUDE.md', 'cmd/aeon/AGENTS.md', 'internal/rulesimport/testdata/pack/AGENTS.md',
+    'scripts/audit/AGENTS.md', 'agents.md', 'docs/claude.MD', 'internal/auth/cLaUdE.mD']) {
     assert.equal(classifyPaths([path]).lane, 'full', path);
     assert.equal(classifyPaths(['README.md', path]).lane, 'full', path);
   }
+  for (const path of ['README.md', 'docs/x.md', 'docs/guide.txt', 'CHANGELOG.md', 'LICENSE'])
+    assert.equal(classifyPaths([path]).lane, 'docs-only', path);
 });
 
 test('Markdown fixtures and implementation documentation require full validation', () => {

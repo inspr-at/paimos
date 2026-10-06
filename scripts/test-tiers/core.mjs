@@ -163,11 +163,14 @@ const goCaseCount = (tests, packages) => tests.filter(row => row.kind === 'go' &
 // and migration jobs; "full" keeps the essential shard layout. The returned
 // seeds extend the changed area; handled paths skip the generic mapping.
 export function impactRisk(paths, { event, affectedLane, webImports = {}, tree, promotions, readFile, tests = [] }) {
+  const reasons = [], handled = new Set(), goSeeds = new Set(), webSeeds = new Set()
+  const full = reason => ({ full: true, reasons: [reason], layout: 'full', handled, goSeeds, webSeeds, promoted: new Set() })
+  // Instruction inputs require the full gate even when affected narrowing is off.
+  const instruction = paths.find(path => instructionPattern.test(path))
+  if (instruction) return full(`test-pinned instruction input: ${instruction}`)
   // Only the literal repository-variable value "on" enables new rules.
   if (event !== 'pull_request' || affectedLane !== 'on')
     return { full: paths.some(uncertain), reasons: [], layout: 'full', handled: new Set(), goSeeds: new Set(), webSeeds: new Set(), promoted: new Set() }
-  const reasons = [], handled = new Set(), goSeeds = new Set(), webSeeds = new Set()
-  const full = reason => ({ full: true, reasons: [reason], layout: 'full', handled, goSeeds, webSeeds, promoted: new Set() })
   if (tree?.complete === false) return full(`incomplete consumer scan: ${tree.reason}`)
   const rules = paths.map(path => [path, affectedRisk(path, webImports)])
   const failed = rules.find(([, rule]) => rule.full)
