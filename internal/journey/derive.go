@@ -33,6 +33,7 @@ const (
 	actionApproveDeploy       = "approve_deploy"
 	actionRenewCandidate      = "renew_candidate"
 	actionRenewDeploy         = "renew_deploy"
+	actionRenewPermit         = "renew_permit"
 	actionRetryDeploy         = "retry_deploy"
 	actionApprovePermit       = "approve_permit"
 	actionPlanNext            = "plan_next_release"
@@ -423,6 +424,14 @@ func deployProjection(f facts) (string, string, bool, string, string, bool) {
 }
 
 func accessProjection(f facts) (string, string, bool, string, string, bool) {
+	if f.AccessOutcome != outcomeSucceeded && f.AccessGateID != "" && !f.GateLiveByID[f.AccessGateID] {
+		ok, id := offer(f.Access)
+		reason := ""
+		if !ok {
+			reason = gateReason(f.Access, reasonPermitGate)
+		}
+		return stageAccess, actionRenewPermit, ok, reason, id, true
+	}
 	switch f.AccessOutcome {
 	case outcomeSucceeded:
 		if f.AccessGateID == "" {
@@ -524,20 +533,23 @@ func samePerson(decider string, ids ...string) bool {
 
 func nextAction(f facts, stage, key string, available bool, reason, approvalID string) JourneyNextAction {
 	label := actionLabel(f, key)
-	renewal := ""
+	renewal, accessRenewal := "", ""
 	if key == actionRenewCandidate {
 		renewal, key = key, actionApproveCandidate
 	} else if key == actionRenewDeploy {
 		renewal, key = key, actionApproveDeploy
+	} else if key == actionRenewPermit {
+		accessRenewal, key = key, actionApprovePermit
 	}
 	return JourneyNextAction{
-		Key:               key,
-		RenewalAction:     renewal,
-		Label:             label,
-		Stage:             stage,
-		Available:         available,
-		Reason:            reason,
-		ApprovalRequestID: strPtr(approvalID),
+		Key:                 key,
+		RenewalAction:       renewal,
+		AccessRenewalAction: accessRenewal,
+		Label:               label,
+		Stage:               stage,
+		Available:           available,
+		Reason:              reason,
+		ApprovalRequestID:   strPtr(approvalID),
 	}
 }
 
@@ -578,6 +590,8 @@ func actionLabel(f facts, key string) string {
 		return "Renew candidate approval"
 	case actionRenewDeploy:
 		return "Renew deployment approval"
+	case actionRenewPermit:
+		return "Renew Access permit"
 	case actionRetryDeploy:
 		return "Retry deployment"
 	case actionApprovePermit:

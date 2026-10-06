@@ -170,10 +170,13 @@ func (m *Module) putCandidateArtifact(w http.ResponseWriter, r *http.Request) {
 	var out candidateArtifactView
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
+		if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+			return err
+		}
 		if err := candidateAccess(ctx, tx, p, project, "stage_handoffs.write"); err != nil {
 			return err
 		}
-		// Match launch/consume's lock order: handoff, then current()'s project/release.
+		// Share launch/consume's tenant/tree -> project/release -> handoff order.
 		h, err := loadHandoff(ctx, tx, in.HandoffID, true)
 		if err != nil {
 			return err
