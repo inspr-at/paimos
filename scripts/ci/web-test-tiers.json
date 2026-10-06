@@ -5282,6 +5282,24 @@
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"without control permission pause actions and wind-down are hidden","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"Reconnect waits for reporting confirmation and rejected recovery stays an error","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"Restart requests the exact row and keeps destructive actions behind the separator","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"offline and unauthorized sessions offer no Restart or Reconnect","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agent-recovery.spec.ts","name":"recovery actions stay still 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"budget controls stay in place as guidance grows 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-rules-budget-clients.spec.ts","name":"budget controls stay in place as guidance grows 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13402,6 +13420,8 @@
     ,
     {"kind":"node","file":"tests/session-actions.test.ts","name":"managed_control_v1 offers controls only when the server would accept them","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/session-actions.test.ts","name":"recovery offers only the server diagnosis for the exact visible session and current person authority","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"101 and 250 delivered sends are all queried within two refreshes (AEON-369)","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"a delivered receipt does not take the batch from a send that has none (AEON-369)","tier":"GATED-FULL"}
@@ -13753,6 +13773,18 @@
     {"kind":"vitest","file":"tests/agent-pause-store.unit.test.ts","name":"stop-only agents keep running unless Stop now is explicitly chosen","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/agent-pause-store.unit.test.ts","name":"wind-down eligibility matches ownership while bulk permissions stay available","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"accepted recovery stays pending until verified result and never calls queued work restarted","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"changing diagnosis remains below every session control and tab","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"disposal and wrong-session responses cannot produce a recovery success","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"person changes discard a late accepted request and clear owned state","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"rejected or expired recovery surfaces failure and stops polling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-recovery.unit.test.ts","name":"switching the visible session discards a late recovery result","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agent-row-fences.unit.test.ts","name":"accepts normal typed reads, store admission and fixed sub-resource operations","tier":"GATED-FULL"}
     ,
