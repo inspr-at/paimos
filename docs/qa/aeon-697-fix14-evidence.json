@@ -1,0 +1,45 @@
+{
+  "ticket": "AEON-697",
+  "fix_round": 14,
+  "scope": "Verify the resolved PR #278 static merge conflict against current main; preserve attention behavior and test assertions.",
+  "review": {
+    "brief_filename": "review-review-static278.out.out",
+    "located_filename": "review-static278.out",
+    "finding": "HEAD could not merge with origin/main because web/scripts/ci-web-shard.test.mjs conflicted.",
+    "resolution_commit": "8a4db1d04b7a3423cf757bae4300dbf6aacfdf97",
+    "new_behavior_findings": 0
+  },
+  "ownership": {
+    "tracker": "ppm",
+    "account": "INSPR",
+    "branch": "work/aeon-697-set",
+    "worker_session": "95ce5b99-b2fb-455e-9a4e-49c7bd67d3d5",
+    "marker_recorded_before_edits": true,
+    "release_gates": "Coordinator owned; no worker model review, origin push, deploy, ticket status change or approval."
+  },
+  "source_commit": "8a4db1d04b7a3423cf757bae4300dbf6aacfdf97",
+  "main": "04962b5a01ff3fbd8a2fa964b41a1dd16120ee64",
+  "verification": {
+    "main_already_ancestor": true,
+    "go_registrations": 4049,
+    "registrations_missing_from_main_or_4cea8379": 0,
+    "attention_shard_guards": 3,
+    "shared_main_regression_preserved": true,
+    "assertions_removed_or_loosened": false,
+    "new_behavior_changes": false,
+    "new_regression_required": "No behavior fix in this round; existing regressions and exact classifications are retained."
+  },
+  "validation": {
+    "static": {
+      "status": "queued on shared locked remote runner"
+    },
+    "remote_go": {
+      "status": "running"
+    },
+    "remote_web": {
+      "status": "planned after Go suite"
+    }
+  },
+  "follow_ups": [],
+  "updated_at": "2026-10-06T12:06:23.343721+00:00"
+}
