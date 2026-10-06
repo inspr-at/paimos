@@ -63,20 +63,20 @@ func lockTenant(ctx context.Context, tx pgx.Tx, visible, tenantID string) error 
 }
 
 // LockTree is the shared tenant-first entry for project/tree writers. Re-entry
-// is safe only when these fences were acquired before any resource rows.
+// is safe only when these fences were acquired before any resource rows. The
+// advisory statement stays inline: TestSharedFencePrimitiveOrder proves the
+// tenant fence precedes it by reading this function body.
 func LockTree(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	if err := LockTenant(ctx, tx, tenantID); err != nil {
 		return err
 	}
-	return lockTreeAdvisory(ctx, tx, tenantID)
-}
-
-func lockTreeAdvisory(ctx context.Context, tx pgx.Tx, tenantID string) error {
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID)
 	return err
 }
 
-// LockCurrentTree uses the transaction's RLS tenant, never a caller-selected scope.
+// LockCurrentTree uses the transaction's RLS tenant, never a caller-selected
+// scope, and refuses a transaction that never entered tenant visibility. It
+// enters through LockTree so the shared fence inventory sees one tree entry.
 func LockCurrentTree(ctx context.Context, tx pgx.Tx) error {
 	visible, err := visibleTenant(ctx, tx)
 	if err != nil {
@@ -85,8 +85,5 @@ func LockCurrentTree(ctx context.Context, tx pgx.Tx) error {
 	if visible == "" {
 		return fmt.Errorf("tenant fence: transaction has no tenant visibility")
 	}
-	if err := lockTenant(ctx, tx, visible, visible); err != nil {
-		return err
-	}
-	return lockTreeAdvisory(ctx, tx, visible)
+	return LockTree(ctx, tx, visible)
 }
