@@ -14,7 +14,7 @@ import { useAgents } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
 import { relativeTime } from '../../lib/work'
 import FoldSection from './FoldSection.vue'
-import { useSectionPrefs } from '../../stores/sectionPrefs'
+import { useSectionFold } from '../../stores/sectionPrefs'
 
 const agents = useAgents()
 const session = useSession()
@@ -112,13 +112,7 @@ const stateText = (run: AgentRun) => run.wait ? capacityWaitText(run.wait, 'Agen
 // Queued runs fold like the other sections (AEON-784): open by default, the
 // fold per person. Folded, the head says how many wait and why. A ?run= link
 // opens the section for this visit without changing the person's preference.
-const sections = useSectionPrefs()
-const revealed = ref(false)
-const open = computed(() => sections.open.queued || revealed.value)
-function toggleFold() {
-  if (revealed.value && !sections.open.queued) revealed.value = false
-  else sections.toggle('queued')
-}
+const { open, toggle: toggleFold, reveal } = useSectionFold('queued')
 // One run says its own state; several are counted by what they wait for
 // (a vendor wait counts as waiting), never all called waiting.
 const summary = computed(() => {
@@ -128,12 +122,6 @@ const summary = computed(() => {
   for (const run of pending.value) counts.set(kind(run), (counts.get(kind(run)) ?? 0) + 1)
   return [...counts].map(([label, n]) => `${n} ${label}`).join(' · ')
 })
-// Opens a folded section for this visit; says whether it had to.
-function reveal() {
-  if (open.value) return false
-  revealed.value = true
-  return true
-}
 defineExpose({ reveal })
 </script>
 

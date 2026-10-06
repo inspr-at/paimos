@@ -65,3 +65,30 @@ export const useSectionPrefs = defineStore('sectionPrefs', () => {
   }
   return { open, error, toggle }
 })
+
+/**
+ * One section's fold on this visit (AEON-784): the person's preference, or a
+ * reveal that opened it for a link or a page action. A reveal holds until the
+ * person folds the section, so a preference read that lands later never hides
+ * what a link just showed. Folding a section open only through a reveal writes
+ * nothing: the stored preference already says folded.
+ */
+export function useSectionFold(key: SectionKey) {
+  const prefs = useSectionPrefs(), session = useSession()
+  const revealed = ref(false)
+  // A reveal belongs to the person who saw the link.
+  watch(() => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : '', () => { revealed.value = false }, { flush: 'sync' })
+  const open = computed(() => prefs.open[key] || revealed.value)
+  function toggle() {
+    const onlyRevealed = revealed.value && !prefs.open[key]
+    revealed.value = false
+    if (!onlyRevealed) prefs.toggle(key)
+  }
+  /** Opens a folded section for this visit; says whether it had to. */
+  function reveal() {
+    const opened = !open.value
+    revealed.value = true
+    return opened
+  }
+  return { open, toggle, reveal }
+}

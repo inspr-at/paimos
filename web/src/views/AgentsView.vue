@@ -221,11 +221,13 @@ async function control(view: SessionView, kind: SessionControl['kind']) {
     toast(kind === 'stop' ? `Stop sent to ${view.name}.` : `Interrupt sent to ${view.name}.`)
   } catch (e) { toast(message(e), { tone: 'error' }) }
 }
-// The live line's counts jump to the first session in that state.
-function jump(state: AgentState) {
+// The live line's counts jump to the first session in that state; a folded
+// Sessions section opens for this visit to show it (AEON-784).
+async function jump(state: AgentState) {
   const states = state === 'problem' ? ['problem', 'unresponsive'] : state === 'waiting' ? ['waiting'] : [state]
   const el = [...document.querySelectorAll<HTMLElement>('.agents-page .row[data-state]')].find(row => states.includes(row.dataset.state ?? ''))
   if (!el?.dataset.row) return
+  if (el.closest('[inert]') && sessionList.value?.reveal()) await nextTick()
   cursor.value = el.dataset.row
   el.focus({ preventScroll: true })
   el.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
@@ -385,7 +387,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
             <RouterLink role="menuitem" class="menu-item" to="/decision-desk" @click="headerMenu = null"><AppIcon name="inbox" /><span>Decision Desk</span></RouterLink>
             <RouterLink role="menuitem" class="menu-item" to="/agents/usage" @click="headerMenu = null"><AppIcon name="pulse" /><span>Usage<small>Tokens and cost per agent, account and day.</small></span></RouterLink>
             <RouterLink v-if="can('keys.manage')" role="menuitem" class="menu-item" to="/settings/access/agents" @click="headerMenu = null"><AppIcon name="key" /><span>Agent keys<small>Scoped API keys for agents.</small></span></RouterLink>
-            <button role="menuitem" type="button" class="menu-item" @click="menuAction(() => sessionList?.toggleHistory())"><AppIcon name="history" /><span>History<small>Ended sessions and saved handovers.</small></span></button>
+            <button role="menuitem" type="button" class="menu-item" @click="menuAction(() => sessionList?.menuHistory())"><AppIcon name="history" /><span>History<small>Ended sessions and saved handovers.</small></span></button>
             <RouterLink role="menuitem" class="menu-item" to="/settings/personal#agents" @click="headerMenu = null"><AppIcon name="gear" /><span>Agent settings<small>Default pause level and indicators.</small></span></RouterLink>
           </template>
         </div>

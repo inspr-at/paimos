@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({ api: vi.fn(), session: null as null | { identi
 vi.mock('../src/lib/api', () => ({ api: mocks.api }))
 vi.mock('../src/stores/session', () => ({ useSession: () => mocks.session }))
 import { cacheKey, DEFAULT_SECTIONS, LEGACY_DIAL_KEY, readSections, SECTIONS_KEY } from '../src/lib/sectionPrefs'
-import { useSectionPrefs } from '../src/stores/sectionPrefs'
+import { useSectionFold, useSectionPrefs } from '../src/stores/sectionPrefs'
 
 const flush = () => new Promise<void>(resolve => setImmediate(resolve))
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
@@ -97,5 +97,28 @@ describe('per-person section folds', () => {
     read.resolve(json({ value: null })); await flush()
     expect(puts()).toEqual([])
     expect(prefs.error).toBe('')
+  })
+
+  // AEON-784 fix round 2: a reveal made while the section looked open must hold
+  // when the stored fold lands later; folding ends it without a write.
+  it('a reveal holds against a later preference read, ends on fold, and resets for a new viewer', async () => {
+    const read = deferred<Response>()
+    mocks.api.mockImplementation((path: string, init?: RequestInit) => init?.method === 'PUT' ? Promise.resolve(json({})) : path === `/preferences/${SECTIONS_KEY}` ? read.promise : Promise.resolve(json({ value: null })))
+    const queued = useSectionFold('queued')
+    expect(queued.open.value).toBe(true)
+    expect(queued.reveal()).toBe(false)
+    read.resolve(json({ value: { dial: true, accounts: false, sessions: true, queued: false } })); await flush()
+    expect(useSectionPrefs().open.queued).toBe(false)
+    expect(queued.open.value).toBe(true)
+    queued.toggle(); await flush()
+    expect(queued.open.value).toBe(false)
+    expect(puts()).toEqual([])
+    // The next viewer keeps Queued folded too; the previous viewer's reveal is not theirs.
+    expect(queued.reveal()).toBe(true)
+    mocks.api.mockImplementation(async () => json({ value: { queued: false } }))
+    mocks.session!.identity = { tenant: { id: 't' }, principal: { id: 'q' } }
+    await flush()
+    expect(useSectionPrefs().open.queued).toBe(false)
+    expect(queued.open.value).toBe(false)
   })
 })

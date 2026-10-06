@@ -39,7 +39,7 @@ import { useSession } from '../../stores/session'
 import { DEFAULT_SORT, nextSort, orderForest, readSort, writeSort, type SessionSort, type SortKey } from './sessionOrder'
 import TierCell from './TierCell.vue'
 import FoldSection from './FoldSection.vue'
-import { useSectionPrefs } from '../../stores/sectionPrefs'
+import { useSectionFold } from '../../stores/sectionPrefs'
 import { below, shownBelow, treeRows, type TreeRow } from './sessionTree'
 import { useServiceTiers } from '../../stores/serviceTiers'
 import { TIER_NAME } from '../../lib/serviceTier'
@@ -345,8 +345,9 @@ function pendingLabel(view: SessionView) {
 }
 // The section folds per person (AEON-781/784). Folded, its head still says the
 // state: how many run where, and what needs a look.
-const sections = useSectionPrefs()
-const sectionOpen = computed(() => sections.open.sessions)
+// A page action that leads into the section (a state count, History) opens it
+// for this visit, without changing the preference.
+const { open: sectionOpen, toggle: toggleFold, reveal } = useSectionFold('sessions')
 const liveViews = computed(() => current.value.filter(view => live(view)))
 const foldedSummary = computed(() => {
   if (!props.loaded || props.state !== 'ready') return props.state === 'error' ? 'Could not be loaded' : ''
@@ -363,11 +364,15 @@ function rowClick(event: MouseEvent, id: string) {
   if ((event.target as HTMLElement).closest('a, button')) return
   emit('open', id)
 }
-defineExpose({ toggleHistory })
+// The page menu's History shows History; an open section toggles it as before.
+function menuHistory() {
+  if (!reveal() || !showRemoved.value) toggleHistory()
+}
+defineExpose({ toggleHistory, menuHistory, reveal })
 </script>
 
 <template>
-  <FoldSection class="sessions" label="Sessions" :open="sectionOpen" :tip="sectionOpen ? 'Fold sessions' : 'Unfold sessions'" @toggle="sections.toggle('sessions')">
+  <FoldSection class="sessions" label="Sessions" :open="sectionOpen" :tip="sectionOpen ? 'Fold sessions' : 'Unfold sessions'" @toggle="toggleFold">
     <template #title><span id="sessions-title">{{ showRemoved ? 'History' : 'Sessions' }}</span><span v-if="loaded && state === 'ready'" class="fs-count">{{ showRemoved ? removedCount : total }}</span></template>
     <template #head>
       <span v-if="!sectionOpen && foldedSummary" class="fs-sum">{{ foldedSummary }}</span>

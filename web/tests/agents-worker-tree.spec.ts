@@ -61,7 +61,7 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
   data.messages.splice(0)
   data.targets.splice(0)
   await mockAgents(page, data)
-  return { data, session }
+  return { data, session, work }
 }
 
 test('four live workers lead eight collapsed stopped workers, and labels distinguish their shared principal', async ({ page }) => {
@@ -201,6 +201,33 @@ test('a deep problem marks every ancestor, folded parents name it, and arrow key
   await expect(row(page, id(100))).toHaveCount(0)
   await expect(expand(page, id(2))).toBeFocused()
   await expect(row(page, id(2))).toHaveClass(/\bactive\b/)
+})
+
+// AEON-784 risk (fix round 2): folding Sessions strands the page's ways into it.
+// A live-line count and the menu's History open a folded section for this visit;
+// the stored fold stays as the person left it.
+test('a live-line count and the menu History open a folded Sessions section without a preference write', async ({ page }) => {
+  const { work } = await setup(page)
+  work.preferences['ui.agents.sections'] = { dial: true, accounts: false, sessions: false, queued: true }
+  const puts: string[] = []
+  page.on('request', request => { if (request.method() === 'PUT' && request.url().includes('/api/preferences/ui.agents.sections')) puts.push(request.url()) })
+  await page.goto('/agents')
+  const sessions = page.getByRole('region', { name: 'Sessions' })
+  const toggle = sessions.locator('.fs-head > .fs-tog')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await page.getByRole('group', { name: 'Live sessions' }).getByRole('button', { name: /^\d+ working\./ }).click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(sessions.locator('.row[data-state="working"]').first()).toBeFocused()
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+
+  await page.locator('.agents-page .page-head').getByRole('button', { name: 'More agent actions', exact: true }).click()
+  await page.getByRole('menu').getByRole('menuitem').filter({ hasText: 'History' }).click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(sessions.locator('#sessions-title')).toHaveText('History')
+  await expect(sessions.locator('.fs-body')).not.toHaveAttribute('inert', /.*/)
+  expect(puts).toEqual([])
+  expect(work.preferences['ui.agents.sections']).toMatchObject({ sessions: false })
 })
 
 for (const theme of ['light', 'dark'] as const) {
