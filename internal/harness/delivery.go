@@ -113,8 +113,8 @@ func (m *Module) completeDelivery(r *http.Request, tx pgx.Tx, p tenant.Principal
 	if err != nil {
 		return nil, err
 	}
-	if s.Management != "managed" || !has(s, "inbox") {
-		return nil, workorders.Fail(409, "managed inbox capability required")
+	if !has(s, "inbox") || s.Management != "managed" && !has(s, "attached_reconnect_v1") {
+		return nil, workorders.Fail(409, "managed inbox or paired attached hook required")
 	}
 	var messageID string
 	var cursor int64

@@ -3,6 +3,7 @@ package agentpairing_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,7 @@ import (
 	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -649,7 +651,34 @@ func TestAttachedDeliveryLegacyStreamAndDatabaseFences(t *testing.T) {
 	}
 	mux := http.NewServeMux()
 	inbox.New(n.f.db.App, n.s).Mount(mux)
-	p := tenant.Principal{ID: n.recipient, TenantID: n.f.tenantID, Kind: tenant.Agent}
+	harness.New(n.f.db.App).Mount(mux)
+	p := tenant.Principal{ID: n.recipient, TenantID: n.f.tenantID, Kind: tenant.Agent, Scopes: []string{"harness.worker"}}
+	// A verified attached hook may complete durable drain leases, but its
+	// volatile offer must still use the generation-bound receipt protocol.
+	lease := "attached-delivery-legacy-fence-lease-000001"
+	proof := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
+	if _, err := n.f.db.Admin.Exec(t.Context(), `UPDATE harness_sessions SET capabilities=ARRAY['inbox','attached_reconnect_v1'],lease_digest=$2 WHERE id=$1`, n.grant.Binding.SessionID, proof[:]); err != nil {
+		t.Fatal(err)
+	}
+	var cursor int64
+	if err := n.f.db.Admin.QueryRow(t.Context(), `SELECT cursor FROM harness_deliveries WHERE id=$1`, o.DeliveryID).Scan(&cursor); err != nil {
+		t.Fatal(err)
+	}
+	body, err := json.Marshal(map[string]any{"delivery_id": o.DeliveryID, "cursor": cursor})
+	if err != nil {
+		t.Fatal(err)
+	}
+	complete := httptest.NewRequest("POST", "/api/projects/"+n.in.Snapshot.ProjectID+"/harness-sessions/"+n.grant.Binding.SessionID+"/complete-delivery", strings.NewReader(string(body))).WithContext(tenant.WithPrincipal(t.Context(), p))
+	complete.Header.Set("X-Aeon-Worker-Lease", lease)
+	refused := httptest.NewRecorder()
+	mux.ServeHTTP(refused, complete)
+	if refused.Code != http.StatusNotFound {
+		t.Fatalf("volatile hook lease entered durable completion: status %d body %s", refused.Code, refused.Body.String())
+	}
+	var completed, released bool
+	if err := n.f.db.Admin.QueryRow(t.Context(), `SELECT completed_at IS NOT NULL,released_at IS NOT NULL FROM harness_deliveries WHERE id=$1`, o.DeliveryID).Scan(&completed, &released); err != nil || completed || released {
+		t.Fatalf("durable completion changed volatile lease: completed=%t released=%t err=%v", completed, released, err)
+	}
 	ctx, cancel := context.WithTimeout(tenant.WithPrincipal(t.Context(), p), time.Second)
 	defer cancel()
 	w := httptest.NewRecorder()
