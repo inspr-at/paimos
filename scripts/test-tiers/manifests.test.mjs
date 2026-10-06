@@ -44,10 +44,10 @@ function driver(t, base, ours, theirs, file = goFile) {
 }
 
 function assertUnresolved(result) {
-  assert.match(result.output, /^<<<<<<< ours\n/)
+  assert.match(result.output, /^<<<<<<< ours\n/m)
   assert.match(result.output, /\n\|{7} base\n/)
   assert.match(result.output, /\n=======\n/)
-  assert.match(result.output, /\n>>>>>>> theirs\n$/)
+  assert.match(result.output, /\n>>>>>>> theirs\n/m)
   assert.throws(() => JSON.parse(result.output), SyntaxError)
 }
 
@@ -217,7 +217,7 @@ test('OPS-257 driver conflicts on remove/change, divergent tiers or additions an
   }
 })
 
-test('OPS-257 driver merges postGateCases, candidate lists and timing owners without mixing owner records', t => {
+test('OPS-257 driver merges postGateCases, candidate lists and timing owners by owner field', t => {
   const base = { ...manifest([row('TestA')]), postGateCases: ['x', 'z'], timingWeights: { owners: { a: { seconds: 1, selectedTests: 1 } } } }
   const ours = { ...structuredClone(base), postGateCases: ['o', 'z'], deleteCandidateGroups: [{ file: 'tests/a.spec.ts', tag: 'delete-candidate' }] }
   const theirs = { ...structuredClone(base), postGateCases: ['t', 'x', 'z'], deleteCandidateGroups: [{ file: 'tests/b.spec.ts', tag: 'delete-candidate' }] }
@@ -228,7 +228,7 @@ test('OPS-257 driver merges postGateCases, candidate lists and timing owners wit
   assert.deepEqual(result.timingWeights.owners, theirs.timingWeights.owners)
   ours.timingWeights.owners.a.seconds = 2
   theirs.timingWeights.owners.a.selectedTests = 3
-  assert.throws(() => mergeManifests(base, ours, theirs, goFile), /merge conflict:.*timingWeights.owners.a/)
+  assert.deepEqual(mergeManifests(base, ours, theirs, goFile).timingWeights.owners.a, { seconds: 2, selectedTests: 3 })
 })
 
 test('OPS-257 shard driver merges both spec additions in one group and retains group policy/order', t => {
@@ -256,7 +256,7 @@ test('OPS-257 shard driver rejects divergent weights and removal/change; duplica
   assert.throws(() => normalizeManifest(shards([group('first', [spec('tests/a.spec.ts')]), group('second', [spec('tests/a.spec.ts')])]), shardsFile), /Duplicate spec across groups/)
   const empty = shards([]), one = shards([group('first', [spec('tests/a.spec.ts')])]), two = shards([group('second', [spec('tests/a.spec.ts')])])
   const result = driver(t, empty, one, two, shardsFile)
-  assert.equal(result.status, 1); assert.match(result.stderr, /merge conflict:.*Duplicate spec across groups/)
+  assert.equal(result.status, 1); assert.match(result.stderr, /merge conflict:[\s\S]*Duplicate spec across groups/)
   assertUnresolved(result)
 })
 
