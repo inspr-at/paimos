@@ -72,11 +72,23 @@ import (
 )
 
 type Module struct {
-	leadAdmission  LeadAdmission
-	planningStart  func(context.Context, pgx.Tx, string, string) error
-	pool           *pgxpool.Pool
-	controlText    controlRelay
-	ownershipClock func(context.Context, pgx.Tx) (time.Time, error)
+	sessionRecovery SessionRecovery
+	leadAdmission   LeadAdmission
+	planningStart   func(context.Context, pgx.Tx, string, string) error
+	pool            *pgxpool.Pool
+	controlText     controlRelay
+	ownershipClock  func(context.Context, pgx.Tx) (time.Time, error)
+}
+
+// SessionRecovery prepares a continuation under the caller's transaction and
+// returns its ID and deferred event flush without coupling harness to runs.
+type SessionRecovery func(context.Context, pgx.Tx, tenant.Principal, string, string, string, string) (string, func() error, error)
+
+// NewWithSessionRecovery connects the existing run admission writer.
+func NewWithSessionRecovery(pool *pgxpool.Pool, recovery SessionRecovery, planningStart ...func(context.Context, pgx.Tx, string, string) error) httpapi.Module {
+	m := New(pool, planningStart...).(*Module)
+	m.sessionRecovery = recovery
+	return m
 }
 
 var _ httpapi.Module = (*Module)(nil)

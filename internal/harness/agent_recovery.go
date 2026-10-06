@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
-	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -456,11 +455,14 @@ func (m *Module) completeAgentRecovery(r *http.Request, tx pgx.Tx, p tenant.Prin
 		if s.ReasoningEffort != nil {
 			effort = *s.ReasoningEffort
 		}
-		run, flushRun, e := agentruns.PrepareSessionRecovery(r.Context(), tx, actor, s.ProjectID, *s.RunID, model, effort)
+		if m.sessionRecovery == nil {
+			return nil, workorders.Fail(409, "run recovery admission unavailable")
+		}
+		runID, flushRun, e := m.sessionRecovery(r.Context(), tx, actor, s.ProjectID, *s.RunID, model, effort)
 		if e != nil {
 			return nil, e
 		}
-		next = &run.ID
+		next = &runID
 		event = flushRun
 		outcome = "continuation_queued"
 	}
