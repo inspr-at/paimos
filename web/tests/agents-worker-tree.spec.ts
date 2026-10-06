@@ -16,7 +16,8 @@ const row = (page: Page, key: string) => page.locator(`[data-row="s:${key}"]`)
 const children = (page: Page, key = lead) => page.locator(`.sessions .row[data-parent="${key}"]`)
 const order = (page: Page, key = lead) => children(page, key).evaluateAll(rows => rows.map(r => r.getAttribute('data-row')!.slice(2)))
 const history = (page: Page, key = lead) => row(page, key).locator('.history-toggle')
-const expand = (page: Page, key = lead) => row(page, key).locator('.worker-toggle').first()
+// Every parent has its own fold button (AEON-784); its name says what is under it.
+const expand = (page: Page, key = lead) => row(page, key).locator('.tree-fold')
 
 async function refresh(page: Page) {
   const response = page.waitForResponse(r => new URL(r.url()).pathname === '/api/harness-sessions')
@@ -66,9 +67,9 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light') {
 test('four live workers lead eight collapsed stopped workers, and labels distinguish their shared principal', async ({ page }) => {
   const { data } = await setup(page)
   await page.goto('/agents')
-  await expect(expand(page)).toContainText('4 working')
+  await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead: 4 sub-agents, 4 working')
   await expect(history(page)).toHaveText('8 stopped')
-  await expect(row(page, lead).locator('.worker-tools')).toHaveText('4 working · 8 stopped')
+  await expect(row(page, lead).locator('.worker-tools')).toHaveText('8 stopped')
   await expect(history(page)).toHaveAttribute('aria-expanded', 'false')
   // Equal start times: session ID decides, never the latest heartbeat (AEON-468).
   await expect.poll(() => order(page)).toEqual([id(2), id(3), id(4), id(5)])
@@ -80,6 +81,7 @@ test('four live workers lead eight collapsed stopped workers, and labels disting
   await expect.poll(() => order(page)).toEqual([id(2), id(3), id(4), id(5), ...Array.from({ length: 8 }, (_, n) => id(10 + n))])
   await expand(page).click()
   await expect(children(page)).toHaveCount(0)
+  await expect(row(page, lead).locator('.kid-count')).toHaveText('12 sub-agents')
   await expand(page).click()
   await expect(children(page)).toHaveCount(12)
   // A fresh heartbeat on the last worker leaves every row where it is.
@@ -103,7 +105,7 @@ test('idle follows working; newly stopped workers hide immediately and histories
   Object.assign(data.sessions.find(s => s.id === id(4))!, { activity: 'idle', heartbeat_at: ago(0) })
   await page.goto('/agents')
   await expect.poll(() => order(page)).toEqual([id(2), id(3), id(5), id(4)])
-  await expect(row(page, lead).locator('.idle-count')).toHaveText('1 other active')
+  await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead: 4 sub-agents, 3 working')
   await history(page).click()
   await expect(children(page, id(90))).toHaveCount(0)
   await history(page, id(90)).click()
@@ -112,7 +114,7 @@ test('idle follows working; newly stopped workers hide immediately and histories
   await refresh(page)
   await expect(row(page, id(5))).toHaveCount(0)
   await expect(history(page)).toHaveText('9 stopped')
-  await expect(expand(page)).toContainText('2 working')
+  await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead: 3 sub-agents, 2 working')
   await expect(children(page, id(90))).toHaveCount(1)
 })
 
@@ -121,8 +123,8 @@ test('a lead with only stopped workers opens history only through its stopped co
   for (const worker of data.sessions.filter(s => s.id !== lead)) Object.assign(worker, { phase: 'stopped', stopped_at: ago(0) })
   await page.goto('/agents')
   await expect(children(page)).toHaveCount(0)
-  await expect(expand(page)).toContainText('0 working')
-  await expect(expand(page)).toBeDisabled()
+  // Nothing live to fold: no fold button, only the stopped count.
+  await expect(expand(page)).toHaveCount(0)
   await expect(history(page)).toHaveText('12 stopped')
   await history(page).click()
   await expect(children(page)).toHaveCount(12)
@@ -150,6 +152,55 @@ test('nested live workers stay visible through stopped parents and each level cl
   await expect(row(page, id(3)).locator('.tree-stem')).toHaveCount(0)
   await page.goto(`/agents/${id(100)}`)
   await expect(row(page, id(100))).toBeVisible()
+})
+
+// AEON-784 risk: depth hides trouble and the keyboard cannot reach it. A problem
+// three levels down marks every ancestor and is named on folded parents; ← and →
+// fold, unfold and walk; the rows say their level and place to assistive tech.
+test('a deep problem marks every ancestor, folded parents name it, and arrow keys fold and walk the tree', async ({ page }) => {
+  const { data, session } = await setup(page)
+  data.sessions.push(session(100, { parent_harness_session_id: id(2), display_label: 'Mid lead' }), session(200, { parent_harness_session_id: id(100), display_label: 'Deep worker', has_problem: true }))
+  await page.goto('/agents')
+  await expect(page.getByRole('treegrid', { name: 'Agent sessions' })).toBeVisible()
+  await expect(row(page, id(200))).toHaveAttribute('aria-level', '4')
+  await expect(row(page, id(2))).toHaveAttribute('aria-expanded', 'true')
+  await expect(row(page, id(4))).toHaveAttribute('aria-posinset', '3')
+  await expect(row(page, id(4))).toHaveAttribute('aria-setsize', '4')
+  await expect(row(page, id(4))).not.toHaveAttribute('aria-expanded', /.*/)
+  // The family sits with its most urgent member; only ancestors carry the dot.
+  await expect(page.locator('.group-row.attention + .row')).toHaveAttribute('data-row', `s:${lead}`)
+  for (const key of [lead, id(2), id(100)]) await expect(row(page, key).locator('.roll-dot')).toHaveCount(1)
+  for (const key of [id(200), id(3)]) await expect(row(page, key).locator('.roll-dot')).toHaveCount(0)
+
+  await row(page, id(100)).focus()
+  await page.keyboard.press('ArrowLeft')
+  await expect(row(page, id(200))).toHaveCount(0)
+  await expect(row(page, id(100))).toHaveAttribute('aria-expanded', 'false')
+  await expect(row(page, id(100)).locator('.kid-count')).toHaveText('1 sub-agent')
+  await expect(row(page, id(100)).locator('.roll.problem')).toHaveText('1 problem below')
+  await expect(row(page, id(100))).toBeFocused()
+  await page.keyboard.press('ArrowLeft')
+  await expect(row(page, id(2))).toBeFocused()
+  await page.keyboard.press('ArrowLeft')
+  await expect(row(page, id(100))).toHaveCount(0)
+  await expect(row(page, id(2)).locator('.kid-count')).toHaveText('2 sub-agents')
+  await expect(row(page, id(2)).locator('.roll.problem')).toHaveText('1 problem below')
+  await page.keyboard.press('ArrowRight')
+  await expect(row(page, id(100))).toBeVisible()
+  await expect(row(page, id(2))).toBeFocused()
+  await page.keyboard.press('ArrowRight')
+  await expect(row(page, id(100))).toBeFocused()
+  await page.keyboard.press('ArrowRight')
+  await page.keyboard.press('ArrowRight')
+  await expect(row(page, id(200))).toBeFocused()
+  // j moves over visible rows, so it leaves the deep row for the next sibling family.
+  await page.keyboard.press('j')
+  await expect(row(page, id(3))).toBeFocused()
+  // Folding with the button from deep below takes the cursor to the folded parent.
+  await expand(page, id(2)).click()
+  await expect(row(page, id(100))).toHaveCount(0)
+  await expect(expand(page, id(2))).toBeFocused()
+  await expect(row(page, id(2))).toHaveClass(/\bactive\b/)
 })
 
 for (const theme of ['light', 'dark'] as const) {

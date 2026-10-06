@@ -67,6 +67,7 @@ const session = useSession()
 const route = useRoute()
 const router = useRouter()
 const cursor = ref('')
+const runQueue = ref<InstanceType<typeof RunQueue>>()
 // Decision Desk and notification links focus the existing request card.
 watch([() => route.query.needs, () => agents.loaded], async ([id, loaded]) => {
   if (!loaded || typeof id !== 'string' || !/^[am]:[0-9a-f-]{36}$/i.test(id)) return
@@ -79,6 +80,8 @@ watch([() => route.query.run, () => agents.loaded, () => agents.sessions, () => 
   if (!loaded || typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) return
   const linked = agents.sessions.find(s => s.run_id === id)
   if (linked) { void router.replace({ path: `/agents/${linked.id}`, query: { ...route.query, run: undefined } }); return }
+  // A folded Queued section opens for this visit to show the linked run.
+  runQueue.value?.reveal()
   await nextTick()
   if (route.query.run !== id) return
   const queued = document.getElementById(`run-${id}`)
@@ -260,7 +263,8 @@ async function closePanel() {
 }
 
 // ---------- Keyboard: j/k move, a approve, d deny, Enter opens, Esc closes ----------
-function rows() { return [...document.querySelectorAll<HTMLElement>('.agents-page [data-row]')] }
+// A folded section's rows stay in the page but inert; the cursor skips them.
+function rows() { return [...document.querySelectorAll<HTMLElement>('.agents-page [data-row]')].filter(el => !el.closest('[inert]')) }
 function focusRow(id: string) {
   const el = document.querySelector<HTMLElement>(`.agents-page [data-row="${CSS.escape(id)}"]`)
   el?.focus({ preventScroll: true })
@@ -419,9 +423,9 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="agents.decide" :revoke="agents.revoke" :resolve="resolveHeld"
         />
         <QuotaWarnings v-if="agents.loaded && showCapacity" :sessions="agents.views" />
-        <RunQueue v-if="agents.loaded" @emptied="pageTitle?.focus()" />
+        <RunQueue v-if="agents.loaded" ref="runQueue" @emptied="pageTitle?.focus()" />
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
-          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
+          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap">←</kbd><kbd class="keycap">→</kbd> fold · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
       </div>
     </div>
