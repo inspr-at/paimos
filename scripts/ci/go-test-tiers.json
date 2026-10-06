@@ -30,9 +30,13 @@
     ,
     "internal/agentruns:TestWaitingClockTerminalWithoutStatusAndLifetimeBounds"
     ,
+    "internal/agentruns:TestWorkLeafDispatchAndClaimRejectParents"
+    ,
     "internal/agentsetup:TestVerificationApprovalURLUsesExistingAccountWithoutMutation"
     ,
     "internal/auth:TestAccessAuditIncludesGeneratedAgentPermissionGrant"
+    ,
+    "internal/auth:TestExitConfirmationAgentRouteCeiling"
     ,
     "internal/auth:TestRecurrenceAgentScopeIsExplicitAndBounded"
     ,
@@ -67,6 +71,8 @@
     "internal/auth:TestWorkstationSignatureAndActionEncoding"
     ,
     "internal/authz:TestAuditNewestWindowBeyondCap"
+    ,
+    "internal/authz:TestExitConfirmationRoutePermission"
     ,
     "internal/authz:TestScopeLookupPropagatesConnectionFailure"
     ,
@@ -110,9 +116,63 @@
     ,
     "internal/config:TestPhonePushConfigurationIsOptionalStrictAndRedacted"
     ,
+    "internal/crossreview:TestBuilderCompletionDuringWorkHandover"
+    ,
+    "internal/crossreview:TestCompletedBuilderDuringWorkHandover"
+    ,
+    "internal/crossreview:TestReviewHistoryAndActionsAfterWorkMigration"
+    ,
+    "internal/crossreview:TestReviewRejectsWorkParentWithoutCreatingOrders"
+    ,
+    "internal/db:TestMergeWorkSchemas"
+    ,
     "internal/db:TestRunMeasurementUpgradeFromRelease122PreservesEvidence"
     ,
     "internal/db:TestTenantGuardRefreshesVisibilityAfterRevocation"
+    ,
+    "internal/db:TestWorkNodesMigrationBusyGuardAndAtomicRetry"
+    ,
+    "internal/db:TestWorkNodesMigrationExactNumbers"
+    ,
+    "internal/db:TestWorkNodesMigrationPreservesRowsHistoryAndIdentities"
+    ,
+    "internal/db:TestWorkNodesUpgradeFromRelease122"
+    ,
+    "internal/db:TestWorkNodesVerifiedBackupRestoreDrill"
+    ,
+    "internal/db:TestWorkStatusBoundaryFlagAndCoalescing"
+    ,
+    "internal/db:TestWorkStatusConcurrentWritersUseCommittedTree"
+    ,
+    "internal/db:TestWorkStatusDeepAndWideBoundedCascade"
+    ,
+    "internal/db:TestWorkStatusEndpointBodiesPrecedeAdmission"
+    ,
+    "internal/db:TestWorkStatusLastChildKindConversionRetainsAudit"
+    ,
+    "internal/db:TestWorkStatusMovesDeletionRestoreAndRevisions"
+    ,
+    "internal/db:TestWorkStatusNodeLimitCrossingRollsBack"
+    ,
+    "internal/db:TestWorkStatusNodeLimitRecoveryAndTombstones"
+    ,
+    "internal/db:TestWorkStatusRejectsOversizedChangesAtomically"
+    ,
+    "internal/db:TestWorkStatusRulesAndCategories"
+    ,
+    "internal/db:TestWorkStatusTenantVisibilityRestored"
+    ,
+    "internal/eta:TestAggregateReadsHaveDeadline"
+    ,
+    "internal/events:TestCausalPreviewRejectsOversizedBulkBeforeTransfer"
+    ,
+    "internal/events:TestImportParentChangeHintInHistoryAndStream"
+    ,
+    "internal/events:TestImportParentChangeSummarizesMembershipWithoutRevisionChange"
+    ,
+    "internal/events:TestLateUsageReportHasAuthorizedNodeHint"
+    ,
+    "internal/events:TestPositionReadForwardsDeadlinesWithoutFlushing"
     ,
     "internal/features:TestAuthorizationProjectVisibilityAndRLS"
     ,
@@ -122,9 +182,35 @@
     ,
     "internal/features:TestValidationConcurrencyAndAtomicAudit"
     ,
+    "internal/harness:TestControlEventBounds"
+    ,
+    "internal/harness:TestCoordinatorLargeHandover"
+    ,
     "internal/harness:TestDeskAnswerReferencesSurviveVerifiedResumeAndLateCorrection"
     ,
     "internal/harness:TestHeartbeatCommitDiffValidationAndStorage"
+    ,
+    "internal/harness:TestLiveEtaRechecksWorkPermission"
+    ,
+    "internal/harness:TestWorkLeafBusyScopeAllowsSiblingWork"
+    ,
+    "internal/harness:TestWorkLeafExitBodyReadBeforeLocks"
+    ,
+    "internal/harness:TestWorkLeafPendingLostContactCanReviveAndStop"
+    ,
+    "internal/harness:TestWorkLeafRecoveryFencesBeforeResourceLocks"
+    ,
+    "internal/harness:TestWorkLeafRegistrationBindingAndGracefulDeadline"
+    ,
+    "internal/harness:TestWorkLeafResumeDefersEventsUntilSuccessorLocks"
+    ,
+    "internal/harness:TestWorkLeafUncertainExitConfirmation"
+    ,
+    "internal/importer:TestWorkNodesImporterLegacyMappingAndProvenance"
+    ,
+    "internal/importer:TestWorkNodesImporterReplaysMigrationWithoutMaskingPersonEdits"
+    ,
+    "internal/importer:TestWorkParentStatusImporterReplayAndChildChange"
     ,
     "internal/inbox:TestDeskReplyReservesBeforeEventWithConcurrentSend"
     ,
@@ -134,9 +220,19 @@
     ,
     "internal/knowledge:TestHistoricalSlugFollowsRenameOrderAfterBodyEdit"
     ,
+    "internal/knowledge:TestKnowledgeUndoPairingBeforeTreeWithWorkStatusOff"
+    ,
     "internal/knowledge:TestLearningDraftTenantBeforeAdvisory"
     ,
     "internal/markdownsource:TestCodeRangesPreserveEmptyUnclosedAndNestedBlocks"
+    ,
+    "internal/modelprovider:TestParentBenefitsRequiresSeparateOptInAndRevision"
+    ,
+    "internal/nodes:TestBenefitCompletionCategoryOverridesLiteralNames"
+    ,
+    "internal/nodes:TestFieldSchemaExactNumbers"
+    ,
+    "internal/nodes:TestFitKindFieldsExactNumbers"
     ,
     "internal/nodes:TestHeaderSelectorBounds"
     ,
@@ -144,9 +240,13 @@
     ,
     "internal/nodes:TestHideStatesBoundsAndNormalisation"
     ,
+    "internal/nodes:TestListEpicMembershipSetBasedAndScoped"
+    ,
     "internal/nodes:TestNodeRecurrenceBounds"
     ,
     "internal/nodes:TestNodeRecurrenceProvenance"
+    ,
+    "internal/nodes:TestPlanningDisplayedPlacementsInvariantAcrossSorts"
     ,
     "internal/nodes:TestPlanningWorkStartIncludesInitiatingMeasuredRun"
     ,
@@ -156,11 +256,117 @@
     ,
     "internal/nodes:TestReleaseTextEditPreservesMissingRouteHints"
     ,
+    "internal/nodes:TestTicketBenefitsCausalUndoCompletion"
+    ,
+    "internal/nodes:TestWorkAggregateLimitsAreExplicitHTTPFailures"
+    ,
+    "internal/nodes:TestWorkAggregatesCalibratedTokenEstimates"
+    ,
+    "internal/nodes:TestWorkAggregatesClosedLeafEstimateOrder"
+    ,
+    "internal/nodes:TestWorkAggregatesCoverageRegroupingCountsAndSort"
+    ,
+    "internal/nodes:TestWorkAggregatesDeepWideAndRLS"
+    ,
+    "internal/nodes:TestWorkAggregatesUnweightedAndHistoricalSpend"
+    ,
+    "internal/nodes:TestWorkBenefitsCausalUndoRejectsIncompleteCompletion"
+    ,
+    "internal/nodes:TestWorkCausalUndoAgentOrdinaryEditPreservesProtectedFields"
+    ,
+    "internal/nodes:TestWorkCausalUndoProtectedTransitions"
+    ,
+    "internal/nodes:TestWorkLifecycleBackgroundCompletionAndRevocation"
+    ,
+    "internal/nodes:TestWorkLifecycleBindingSerializesChildCreation"
+    ,
+    "internal/nodes:TestWorkLifecycleBodyDeadlineClearedOnlyAfterCompleteRead"
+    ,
+    "internal/nodes:TestWorkLifecycleBodyNetworkDeadline"
+    ,
+    "internal/nodes:TestWorkLifecycleCancelOpenLeavesAfterStop"
+    ,
+    "internal/nodes:TestWorkLifecycleCancelSettlesOrderWithAudit"
+    ,
+    "internal/nodes:TestWorkLifecycleExpiredHandoverRetriesDelivery"
+    ,
+    "internal/nodes:TestWorkLifecycleLeafGuardAndHistory"
+    ,
+    "internal/nodes:TestWorkLifecycleLostContactBlocksOrdinaryWrites"
+    ,
+    "internal/nodes:TestWorkLifecycleLostContactRetainsStopFence"
+    ,
+    "internal/nodes:TestWorkLifecyclePendingFencesOrderAndRunBindings"
+    ,
+    "internal/nodes:TestWorkLifecyclePendingFencesOriginalBindings"
+    ,
+    "internal/nodes:TestWorkLifecycleSplitWaitsAndReplays"
+    ,
+    "internal/nodes:TestWorkLifecycleStalePreviewAndAbandon"
+    ,
+    "internal/nodes:TestWorkLifecycleWorkOrderAndDispatchBindings"
+    ,
+    "internal/nodes:TestWorkName"
+    ,
+    "internal/nodes:TestWorkParentStatusCausalUndo"
+    ,
+    "internal/nodes:TestWorkParentStatusCausalUndoAuditRedactsHiddenCause"
+    ,
+    "internal/nodes:TestWorkParentStatusConfirmationReadsBeforeTenantLocks"
+    ,
+    "internal/nodes:TestWorkParentStatusDeleteCausalUndo"
+    ,
+    "internal/nodes:TestWorkParentStatusDisabledUndoFencesRevocation"
+    ,
+    "internal/nodes:TestWorkParentStatusHiddenCauseAndPermissionRevocation"
+    ,
+    "internal/nodes:TestWorkParentStatusMoveAndCreateCausalUndo"
+    ,
+    "internal/nodes:TestWorkParentStatusOrdinaryUndoOrdersAcrossActivation"
+    ,
+    "internal/nodes:TestWorkParentStatusPatchAndBulkBoundary"
+    ,
+    "internal/nodes:TestWorkParentStatusReusesAutopilotActivity"
+    ,
+    "internal/nodes:TestWorkScopeRootAndExpansionBudgets"
+    ,
+    "internal/nodes:TestWorkShapeFilterBounds"
+    ,
+    "internal/nodes:TestWorkVocabularyRoundTripAndShape"
+    ,
+    "internal/outcomes:TestOutcomeHistoryAndRecordingAfterWorkMigration"
+    ,
     "internal/outcomes:TestTicketMeasurementCanonicalCommitIdentity"
     ,
     "internal/outcomes:TestTicketMeasurementEvidenceKinds"
     ,
     "internal/outcomes:TestTicketMeasurementProjectScopeThroughMiddleware"
+    ,
+    "internal/parentbenefits:TestCombinedHumanEditAndStatusChangeKeepsAuthoredText"
+    ,
+    "internal/parentbenefits:TestDoneDoesNotWaitAndSummarisesLeaves"
+    ,
+    "internal/parentbenefits:TestFailureVisibleRetryAndLeafGate"
+    ,
+    "internal/parentbenefits:TestFlagAndProviderOffNeverPreventDone"
+    ,
+    "internal/parentbenefits:TestGenerationRechecksCurrentFieldSchema"
+    ,
+    "internal/parentbenefits:TestHumanEditAndSourceChangeFence"
+    ,
+    "internal/parentbenefits:TestLeaseRecoveryAndTenantIsolation"
+    ,
+    "internal/parentbenefits:TestNestedLeafSourcesAndExplicitLimits"
+    ,
+    "internal/parentbenefits:TestPublishedSnapshotAndUnrelatedFieldsSurvive"
+    ,
+    "internal/parentbenefits:TestRetryDeadlineBoundsBothBodyDecodes"
+    ,
+    "internal/parentbenefits:TestRetryIsPersonOnlyAndRechecksPermission"
+    ,
+    "internal/parentbenefits:TestSourceTextBudgetAndMissingBenefitsFailVisibly"
+    ,
+    "internal/parentbenefits:TestSummaryRejectsInvalidOrUnboundedModelOutput"
     ,
     "internal/phoneapprovals:TestPhoneDecisionHidesUnavailableApprovals"
     ,
@@ -240,9 +446,15 @@
     ,
     "internal/recurrences:TestEventMorningFollowsLocalDateAcrossDST"
     ,
+    "internal/recurrences:TestRecurrenceCreatesWorkLeafAndReopensDoneParent"
+    ,
     "internal/recurrences:TestRecurrenceTenantBeforeTree"
     ,
     "internal/recurrences:TestSixMonthSpringGapWalksPastOneYear"
+    ,
+    "internal/recurrences:TestStoredLegacyTemplateCreatesQueuedWorkLeafAfterLockedReload"
+    ,
+    "internal/recurrences:TestStoredRecurrenceKindMigrationPreservesReceipts"
     ,
     "internal/recurrences:TestUIClosedWorkflowCategoriesMatchOverlapAndOpenPrevious"
     ,
@@ -270,6 +482,60 @@
     ,
     "internal/recurrences:TestUIRetirementMigrationBackfillsUnderTenantRLS"
     ,
+    "internal/releases:TestExistingPlanningParentRepairPreservesExplicitBacklog"
+    ,
+    "internal/releases:TestFormerParentPlanRemovalAndUndoRespectsBacklog"
+    ,
+    "internal/releases:TestFormerParentReassignmentUpdatesFutureIntentAndUndo"
+    ,
+    "internal/releases:TestInheritedLeafBecomingParentReconcilesLiveMembership"
+    ,
+    "internal/releases:TestLeafParentRoundTripPreservesPlanningMetadata"
+    ,
+    "internal/releases:TestLeafShapeChangesPreserveCompleteProjectionAndUndo"
+    ,
+    "internal/releases:TestLeafShapeChangesReconcileMovedAndRestoredChildren"
+    ,
+    "internal/releases:TestNativeWorkMembershipReadProjection"
+    ,
+    "internal/releases:TestParentPlacementUndoPreservesRetainedBacklogProjection"
+    ,
+    "internal/releases:TestParentReassignmentInvalidatesRetainedScopeApproval"
+    ,
+    "internal/releases:TestParentReleaseSummaryReportsPartialCoverage"
+    ,
+    "internal/releases:TestPlacedLeafBecomingParentPreservesFrozenSnapshot"
+    ,
+    "internal/releases:TestQuickCreateUnderPlacedParentHonorsExplicitInclusion"
+    ,
+    "internal/releases:TestTicketOptionsHistoricalParentCanJoinNextRelease"
+    ,
+    "internal/releases:TestTicketOptionsParentMatchesCurrentLeaves"
+    ,
+    "internal/releases:TestWorkParentFrozenReleaseLeavesScopeUnchanged"
+    ,
+    "internal/releases:TestWorkParentPlacementAndFutureLeaves"
+    ,
+    "internal/releases:TestWorkParentPlacementBoundAndWorkEdges"
+    ,
+    "internal/releases:TestWorkParentPlacementDoesNotPermitUnrelatedClosedLeaf"
+    ,
+    "internal/releases:TestWorkParentPlacementRechecksRevokedGrantUnderFence"
+    ,
+    "internal/releases:TestWorkParentPlacementThousandLeavesWithNestedParents"
+    ,
+    "internal/releases:TestWorkParentPlacementUndoRestoresFutureLeafIntent"
+    ,
+    "internal/releases:TestWorkParentSplitShipsInAndAtomicFrozenRejection"
+    ,
+    "internal/releases:TestWorkParentStatusReleaseQuickCreate"
+    ,
+    "internal/releases:TestWorkParentWalkerKeepsScreenLinksBoundToEachLeaf"
+    ,
+    "internal/requirements:TestReagreementDoesNotRegenerateWorkThatBecameParent"
+    ,
+    "internal/requirements:TestWorkParentStatusRequirementGeneration"
+    ,
     "internal/rules/doctrine:TestFix2InboxPreparationDoesNotHoldMutationFence"
     ,
     "internal/rules/doctrine:TestHeadingAnchorsIgnoreCompleteCodeExamples"
@@ -290,6 +556,8 @@
     ,
     "internal/rulesimport:TestCodeExamplesNeverBecomeRules"
     ,
+    "internal/statusautopilot:TestAutopilotUndoVisibleToProjectReaderWithUnchangedParent"
+    ,
     "internal/themes:TestAgentAppearanceAPIRoundTripAndBounds"
     ,
     "internal/themes:TestAppearanceMigrationKeepsCanonicalAppearanceWhileLinkedAndAliasesAfterUnlink"
@@ -299,6 +567,18 @@
     "internal/themes:TestAppearanceMigrationPreservesPhysicalOwnersGeometryAndBehaviour"
     ,
     "internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink"
+    ,
+    "internal/ticketbenefits:TestMigratedWorkCompletionRequirements"
+    ,
+    "internal/ticketbenefits:TestUnifiedWorkLeavesKeepCompletionRequirements"
+    ,
+    "internal/workorders:TestBufferBodyBoundsAndDecode"
+    ,
+    "internal/workorders:TestEndpointBodyNetworkDeadline"
+    ,
+    "internal/workorders:TestEndpointPositionedBodyNetworkDeadline"
+    ,
+    "scripts/releaseworkflow:TestParallelWebUnitsShareRuntimeAndRunOnce"
   ]
   ,
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)"
