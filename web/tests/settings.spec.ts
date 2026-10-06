@@ -272,26 +272,32 @@ test('old workspace bookmarks redirect during section and hash changes inside Se
     await page.locator('main').evaluate(el => el.scrollTo(0, 0))
     await expect.poll(() => page.locator('main').evaluate(el => el.scrollTop)).toBe(0)
   }
+  // The card renders once its data has loaded; the deep link then scrolls to it
+  // and marks it arrived. Resetting before that mark races the arrival scroll,
+  // which then wins and leaves the body scrolled (CI, PR #310).
+  async function arrivedAt(id: string) {
+    const card = page.locator(`#${id}`)
+    await expect(card).toBeVisible()
+    await expect(card).toHaveClass(/\barrived\b/)
+    await resetScroll()
+  }
   const guard = await controlStability(page, { navigation: sections(page), personal: sections(page).getByRole('link', { name: /^Personal/ }) })
   await guard.check(async () => {
     await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/settings/workspace?source=bookmark#estimates')))
     await expect(page).toHaveURL('/settings/agents?source=bookmark#estimates')
-    await expect(page.locator('#estimates')).toBeVisible()
-    await resetScroll()
+    await arrivedAt('estimates')
   })
   await guard.check(async () => {
     await sections(page).getByRole('link', { name: /^Workspace/ }).click()
     await expect(page).toHaveURL('/settings/workspace')
     await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push({ hash: '#status-autopilot' })))
     await expect(page).toHaveURL('/settings/autopilot#status-autopilot')
-    await expect(page.locator('#status-autopilot')).toBeVisible()
-    await resetScroll()
+    await arrivedAt('status-autopilot')
   })
   await guard.check(async () => {
     await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/settings/workspace#work-vocabulary')))
     await expect(page).toHaveURL('/settings/vocabulary#work-vocabulary')
-    await expect(page.locator('#work-vocabulary')).toBeVisible()
-    await resetScroll()
+    await arrivedAt('work-vocabulary')
   })
   guard.done()
 })
