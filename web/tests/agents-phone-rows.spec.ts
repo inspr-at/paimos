@@ -100,12 +100,12 @@ for (const theme of ['light', 'dark'] as const) for (const width of [375, 390, 4
       expect(title.y).toBeLessThanOrEqual(avatar.y + 2)
       // The title may wrap to two lines, never more.
       expect(title.height).toBeLessThanOrEqual(lineHeight * 2 + 1)
-      // One execution line and one state line, both in the text column.
+      // The execution and state lines start under the glyph (AEON-784): the fold column keeps the tree.
       expect(exec.y).toBeGreaterThanOrEqual(identity.y + identity.height - 1)
       expect(exec.height).toBeLessThanOrEqual(22)
-      expect(Math.abs(exec.x - title.x)).toBeLessThanOrEqual(1)
+      expect(Math.abs(exec.x - avatar.x)).toBeLessThanOrEqual(1)
       expect(state.y).toBeGreaterThanOrEqual(exec.y + exec.height - 1)
-      expect(Math.abs(state.x - title.x)).toBeLessThanOrEqual(1)
+      expect(Math.abs(state.x - avatar.x)).toBeLessThanOrEqual(1)
       if (await r.locator('.ticket-chip').count()) {
         const chip = await box(r.locator('.ticket-chip'))
         expect(Math.abs(midY(chip) - midY(state)), `state and ticket on one line (row ${n})`).toBeLessThanOrEqual(3)
@@ -116,17 +116,21 @@ for (const theme of ['light', 'dark'] as const) for (const width of [375, 390, 4
     const leadMenu = await box(row(page, 1).locator('.more'))
     expect(leadMenu.x - (lead0.x + lead0.width)).toBeLessThanOrEqual(16)
 
-    // Tree lines run through avatar centres, never through the text column.
+    // Tree lines run in the fold column, 16 px per level (AEON-784), never through glyphs or text.
+    const leadFold = await box(row(page, 1).locator('.tree-fold'))
     const leadAvatar = await box(row(page, 1).locator('.bot'))
     const stem = await box(row(page, 1).locator('.tree-stem'))
-    expect(Math.abs(stem.x - midX(leadAvatar))).toBeLessThanOrEqual(1)
-    expect(stem.y).toBeGreaterThanOrEqual(leadAvatar.y + leadAvatar.height - 1)
+    expect(leadFold.width).toBeGreaterThanOrEqual(44)
+    expect(leadFold.height).toBeGreaterThanOrEqual(44)
+    expect(stem.x).toBeGreaterThanOrEqual(leadFold.x)
+    expect(stem.x).toBeLessThan(leadAvatar.x)
+    expect(stem.y).toBeGreaterThanOrEqual(leadFold.y + leadFold.height - 1)
     for (const [child, parent] of [[2, 1], [4, 1], [5, 4]] as const) {
       const guide = await box(row(page, child).locator('.tree-guide.elbow'))
-      const parentAvatar = await box(row(page, parent).locator('.bot'))
+      const parentStem = await box(row(page, parent).locator('.tree-stem'))
       const childAvatar = await box(row(page, child).locator('.bot'))
       const text = await box(row(page, child).locator('.who'))
-      expect(Math.abs(guide.x - midX(parentAvatar)), `guide of ${child} under its parent's avatar`).toBeLessThanOrEqual(1)
+      expect(Math.abs(guide.x - parentStem.x), `guide of ${child} continues its parent's stem`).toBeLessThanOrEqual(1)
       expect(childAvatar.x - guide.x, `readable indent for ${child}`).toBeGreaterThanOrEqual(8)
       expect(text.x).toBeGreaterThan(guide.x + 8)
     }

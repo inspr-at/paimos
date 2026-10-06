@@ -13,6 +13,8 @@ import { activeRun, launchState } from '../../lib/startAgent'
 import { useAgents } from '../../stores/agents'
 import AppIcon from '../AppIcon.vue'
 import { relativeTime } from '../../lib/work'
+import FoldSection from './FoldSection.vue'
+import { useSectionFold } from '../../stores/sectionPrefs'
 
 const agents = useAgents()
 const session = useSession()
@@ -68,7 +70,9 @@ async function runNow(run: AgentRun) {
 }
 // A queued run that never started can be cancelled; its holds go back (AEON-402).
 const list = ref<HTMLElement>()
-const heading = ref<HTMLElement>()
+const root = ref<InstanceType<typeof FoldSection>>()
+// With no run left to focus, focus goes to the section's own fold control.
+const heading = () => (root.value?.$el as HTMLElement | undefined)?.querySelector<HTMLElement>('.fs-title, .fs-tog') ?? null
 const cancelling = ref('')
 // Cancelling the last row closes this section; the page then takes focus.
 const emit = defineEmits<{ emptied: [] }>()
@@ -89,7 +93,7 @@ async function cancel(run: AgentRun) {
     // else the section heading; the page takes it when the section closes.
     const rows = [...(list.value?.querySelectorAll<HTMLElement>('li') ?? [])]
     const order = [...rows.slice(index), ...rows.slice(0, index).reverse()]
-    const next = order.map(row => row.querySelector<HTMLElement>('button:not(:disabled)')).find(Boolean) ?? heading.value
+    const next = order.map(row => row.querySelector<HTMLElement>('button:not(:disabled)')).find(Boolean) ?? heading()
     if (next) next.focus()
     else emit('emptied')
   } catch (e) { error.value = e instanceof Error ? e.message : 'The run could not be cancelled.' }
@@ -103,48 +107,74 @@ watch(() => pending.value.map(r => r.work_order_id), async ids => {
     try { titles.value[id] = (await getNode(id)).title } catch { /* Keep the durable run ID when the order is not readable. */ }
   }
 }, { immediate: true })
+const stateText = (run: AgentRun) => run.wait ? capacityWaitText(run.wait, 'Agents', agents.now) : launchState(run).label
+
+// Queued runs fold like the other sections (AEON-784): open by default, the
+// fold per person. Folded, the head says how many wait and why. A ?run= link
+// opens the section for this visit without changing the person's preference.
+const { open, toggle: toggleFold, reveal } = useSectionFold('queued')
+// One run says its own state; several are counted by what they wait for
+// (a vendor wait counts as waiting), never all called waiting.
+const summary = computed(() => {
+  if (pending.value.length === 1) return stateText(pending.value[0]!)
+  const kind = (run: AgentRun) => run.wait ? 'waiting' : launchState(run).label.toLowerCase()
+  const counts = new Map<string, number>()
+  for (const run of pending.value) counts.set(kind(run), (counts.get(kind(run)) ?? 0) + 1)
+  return [...counts].map(([label, n]) => `${n} ${label}`).join(' · ')
+})
+defineExpose({ reveal })
 </script>
 
 <template>
-  <section v-if="pending.length" class="run-queue glass-card" aria-label="Runs awaiting a session">
-    <header>
-      <h2 ref="heading" tabindex="-1">Queued</h2><span class="count mono">{{ pending.length }}</span>
-    </header>
+  <FoldSection v-if="pending.length" ref="root" class="run-queue" label="Runs awaiting a session" :open="open" :tip="open ? 'Fold queued runs' : 'Unfold queued runs'" @toggle="toggleFold">
+    <template #title>Queued<span class="count mono">{{ pending.length }}</span></template>
+    <template #head><span v-if="!open" class="fs-sum">{{ summary }}</span></template>
     <ul ref="list">
       <li v-for="run in pending" :id="`run-${run.id}`" :key="run.id" tabindex="-1">
         <AppIcon :name="run.status === 'queued' || run.wait ? 'clock' : 'check'" :size="14" class="run-icon" />
-        <strong class="run-title" :title="titles[run.work_order_id] || `Run ${run.id}`">{{ titles[run.work_order_id] || 'Run' }}</strong>
-        <time class="run-when" :datetime="run.created_at">{{ relativeTime(run.created_at, { now: agents.now }) }}</time>
-        <span v-if="run.requested_model" class="run-model mono">{{ run.requested_model }}</span>
-        <span class="run-state">{{ run.wait ? capacityWaitText(run.wait, 'Agents', agents.now) : launchState(run).label }}</span>
-        <button v-if="mayRunNow && run.status === 'queued'" type="button" class="btn sm ghost move" :disabled="!!busy" @click="openMove(run)">Move to…</button>
+        <span class="run-main">
+          <strong class="run-title" :title="titles[run.work_order_id] || `Run ${run.id}`">{{ titles[run.work_order_id] || 'Run' }}</strong>
+          <span class="run-meta">
+            <time class="run-when" :datetime="run.created_at">{{ relativeTime(run.created_at, { now: agents.now }) }}</time>
+            <span v-if="run.requested_model" class="run-model mono">{{ run.requested_model }}</span>
+            <span class="run-state">{{ stateText(run) }}</span>
+          </span>
+        </span>
+        <span class="run-acts">
+          <button v-if="mayRunNow && run.status === 'queued'" type="button" class="btn sm ghost move" :disabled="!!busy" :aria-expanded="moveFor === run.id" @click="openMove(run)">Move to…</button>
+          <button v-if="mayRunNow && run.status === 'queued' && run.wait?.run_now_allowed" type="button" class="btn sm" :disabled="!!busy" @click="runNow(run)">Run now once</button>
+          <button v-if="mayRunNow && run.status === 'queued'" type="button" class="btn sm ghost cancel" :disabled="!!busy" @click="cancel(run)">{{ cancelling === run.id ? 'Cancelling…' : 'Cancel' }}<span class="sr-only"> {{ titles[run.work_order_id] || 'run' }}</span></button>
+        </span>
         <div v-if="moveFor === run.id" class="move-list">
           <button v-for="dest in destinations(run)" :key="dest.key" type="button" class="btn sm ghost" :disabled="!!busy" @click="move(run, dest.body)">{{ dest.label }}</button>
           <p v-if="!destinations(run).length" class="move-empty">No account to move this run to.</p>
         </div>
-        <button v-if="mayRunNow && run.status === 'queued' && run.wait?.run_now_allowed" type="button" class="btn sm" :disabled="!!busy" @click="runNow(run)">Run now once</button>
-        <button v-if="mayRunNow && run.status === 'queued'" type="button" class="btn sm ghost cancel" :disabled="!!busy" @click="cancel(run)">{{ cancelling === run.id ? 'Cancelling…' : 'Cancel' }}<span class="sr-only"> {{ titles[run.work_order_id] || 'run' }}</span></button>
       </li>
     </ul>
     <p v-if="error" role="alert" class="error">{{ error }}</p>
-  </section>
+  </FoldSection>
 </template>
 
 <style scoped>
 .run-queue { overflow: clip; }
-header { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; padding: 14px 18px 10px; }
-h2 { font-size: 15px; font-weight: 650; color: var(--ink); }
-.count { font-size: 12px; color: var(--ink-3); }
+.count { font-size: 12px; font-weight: 500; color: var(--ink-3); }
+.fs-sum { min-width: 0; font-size: 13px; color: var(--ink-2); }
 ul { list-style: none; padding: 0 8px 8px; margin: 0; }
-li { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; min-height: 40px; padding: 8px 10px; border-top: 1px solid var(--line); font-size: 13px; }
+/* Title and its facts on the left, actions at the line end; a destination list opens below. */
+li { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; min-height: 52px; padding: 8px 10px; border-top: 1px solid var(--line); font-size: 13px; }
+li:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 8px; }
 .run-icon { flex: none; color: var(--ink-3); }
-.run-title { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
-.run-model { flex: none; max-width: 30%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-2); }
-.run-when { flex: none; margin-right: auto; font-size: 12px; color: var(--ink-3); white-space: nowrap; }
-.run-state { flex: 0 1 auto; font-size: 12px; color: var(--ink-2); white-space: normal; }
+.run-main { display: grid; flex: 1 1 260px; min-width: 0; gap: 2px; }
+.run-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.run-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 0; min-width: 0; font-size: 12px; color: var(--ink-3); }
+.run-meta > * + *::before { content: '·'; margin: 0 .45em; color: var(--ink-3); }
+.run-when { white-space: nowrap; }
+.run-model { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); }
+.run-state { color: var(--ink-2); white-space: normal; }
+.run-acts { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin-left: auto; }
 .error { padding: 10px 18px; color: var(--danger); }
 .move, .cancel { color: var(--ink-2); }
-.move-list { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; max-width: 100%; }
+.move-list { display: flex; flex-wrap: wrap; gap: 6px; flex-basis: 100%; max-width: 100%; padding-left: 26px; }
 .move-empty { margin: 0; color: var(--ink-3); font-size: 12px; }
-@media (max-width: 600px) { li { flex-wrap: wrap; padding: 10px; } .run-title { flex: 1; } .run-state, .move-list { flex-basis: 100%; } .btn { min-height: 44px; } }
+@media (max-width: 600px) { li { padding: 10px; } .run-acts { flex-basis: 100%; justify-content: flex-start; margin-left: 26px; } .btn { min-height: 44px; } .move-list { padding-left: 0; } }
 </style>
