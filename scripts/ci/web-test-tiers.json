@@ -16,8 +16,6 @@
     ,
     {"file":"tests/developer-settings.spec.ts","reportedCases":5,"scope":"Retained mixed slice after rule B: real behavior, authority, identity, data safety or control stability assertions remain.","tag":"delete-candidate"}
     ,
-    {"file":"tests/footer-flow-pill.spec.ts","reportedCases":1,"scope":"Retained mixed slice after rule B: real behavior, authority, identity, data safety or control stability assertions remain.","tag":"delete-candidate"}
-    ,
     {"file":"tests/footer-release-pill.spec.ts","reportedCases":15,"scope":"Retained mixed slice after rule B: real behavior, authority, identity, data safety or control stability assertions remain.","tag":"delete-candidate"}
     ,
     {"file":"tests/header-menus.spec.ts","reportedCases":48,"scope":"Retained mixed slice after rule B: real behavior, authority, identity, data safety or control stability assertions remain.","tag":"delete-candidate"}
@@ -879,16 +877,6 @@
     "vitest:tests/crm-undo-receipt.unit.test.ts:S9-002: a save receipt keeps event 10 when event 11 arrives before Undo"
     ,
     "vitest:tests/crm-undo-receipt.unit.test.ts:S9-002: missing receipts and receipts from a previous sign-in refuse Undo"
-    ,
-    "vitest:tests/existing-ticket-picker.unit.test.ts:counts returned leaves for a parent"
-    ,
-    "vitest:tests/existing-ticket-picker.unit.test.ts:counts returned leaves for a parent after move confirmation"
-    ,
-    "vitest:tests/existing-ticket-picker.unit.test.ts:counts returned leaves for a parent plus an overlapping leaf"
-    ,
-    "vitest:tests/existing-ticket-picker.unit.test.ts:counts returned leaves for a parent plus an overlapping leaf after move confirmation"
-    ,
-    "vitest:tests/existing-ticket-picker.unit.test.ts:does not invent a leaf count when an older server omits the leaf IDs"
     ,
     "vitest:tests/features.unit.test.ts:discards old tenant and revoked-session responses"
     ,
@@ -4674,70 +4662,6 @@
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: hours week in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey build derived in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey build derived in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey deploy in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey deploy in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey deploy ready in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey deploy ready in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey history fold in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey history fold in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey imported origin in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey imported origin in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey imported plan backlog in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey imported plan backlog in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey inspire in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey inspire in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey live in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey live in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey mark candidate in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey mark candidate in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey open release 1 in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey open release 1 in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey plan earlier release in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey plan earlier release in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey plan in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey plan in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey requirements in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey requirements in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey shape in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey shape in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey walker in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey walker in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey walker sheet in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: journey walker sheet in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: knowledge across projects in dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/a11y.spec.ts","name":"axe: knowledge across projects in light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
@@ -5008,34 +4932,6 @@
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip-settings.spec.ts","name":"settings names 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"a phone tap opens its project immediately without revealing text","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"hidden journey stages reveal their labels at 768px without moving the rail","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"long press reads Cards before native project navigation 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"long press reads Cards before native project navigation 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"long press reads Cards before native project navigation 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"long press reads Cards before native project navigation 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"long press reads Cards before native project navigation 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"long press reads Cards before native project navigation 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"long press reads Rows before native project navigation 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"long press reads Rows before native project navigation 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"long press reads Rows before native project navigation 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"long press reads Rows before native project navigation 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"long press reads Rows before native project navigation 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"long press reads Rows before native project navigation 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"planning names 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"planning names 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -5059,8 +4955,6 @@
     {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"stationary touch explains a restricted shared group 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"stationary touch explains a restricted shared group 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/aeon-632b-clip.spec.ts","name":"unclipped touch, mouse and keyboard project activation stay immediate","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"approved releases keep their controls still at 1024 dark (AEON-635)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5238,13 +5132,25 @@
     ,
     {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"the public guide is readable without sign-in and keeps only the human code","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1024 dark: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1024 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 dark: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 dark: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 light: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"State groups running agents, idle hosts and offline hosts in that order","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6540,6 +6446,12 @@
     ,
     {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch selection reveals the same full graph card after leaving ticket details","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/coarse-hit-area.spec.ts","name":"1024px coarse pointer › shared controls extend to a 44px hit area","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/coarse-hit-area.spec.ts","name":"1440px fine pointer › shared controls keep only their own box","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/coarse-hit-area.spec.ts","name":"390px fine pointer › shared controls extend to a 44px hit area","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/connect-verification.spec.ts","name":"a mismatched computer has a reason at Connect and a working recovery","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/connect-verification.spec.ts","name":"agent sees the permission reason at Connect","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -6750,45 +6662,17 @@
     ,
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"full Decision Desk context and stable series 768 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"release description reveal and reset 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"release description reveal and reset 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"release description reveal and reset 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"release description reveal and reset 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"release description reveal and reset 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"release description reveal and reset 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"release description reveal and reset 768 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"release description reveal and reset 768 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 1024 coarse dark › approval and held controls fit both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 1024 coarse dark › release description fits both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 1024 coarse light › approval and held controls fit both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 1024 coarse light › release description fits both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 1440 fine dark › approval and held controls fit both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 1440 fine dark › release description fits both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 1440 fine light › approval and held controls fit both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 1440 fine light › release description fits both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 390 coarse dark › approval and held controls fit both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 390 coarse dark › release description fits both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 390 coarse light › approval and held controls fit both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/decision-text.spec.ts","name":"reveal sizing 390 coarse light › release description fits both labels with disjoint stable targets","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/delivery-guarantee.spec.ts","name":"dark 1600: listening status in the list and the panel","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -6818,33 +6702,19 @@
     ,
     {"kind":"browser","file":"tests/deploy-target.spec.ts","name":"Needs you names destinations and keeps target-less approvals usable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/deploy-target.spec.ts","name":"deploy target screenshots","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retired Flow bookmarks open tickets and saved opt-ins cannot revive it","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/deploy-target.spec.ts","name":"deploy target uses journey metadata when no approval is available","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retirement keeps project and settings controls stable 1024 dark","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/deploy-target.spec.ts","name":"journey decision and confirmation preserve optional targets: false at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retirement keeps project and settings controls stable 1024 light","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/deploy-target.spec.ts","name":"journey decision and confirmation preserve optional targets: false at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retirement keeps project and settings controls stable 1440 dark","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/deploy-target.spec.ts","name":"journey decision and confirmation preserve optional targets: true at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retirement keeps project and settings controls stable 1440 light","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/deploy-target.spec.ts","name":"journey decision and confirmation preserve optional targets: true at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retirement keeps project and settings controls stable 390 dark","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"Developer settings and the hidden flow remain accessible on desktop and phone","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"a failed save keeps the preference off and offers a visible retry","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"a person deliberately opts in; it persists on reload and disappears again after opt-out","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"an opted-in journey mounts its stages and walker","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"canonical and legacy deep links explain the opt-in without mounting the stages or walker","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"fresh preferences leave no flow DOM, space or keyboard stops on several screens","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"malformed and unreadable preferences fail closed","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"preferences belong to a person; another person and an agent remain off","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retirement keeps project and settings controls stable 390 light","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/dialog-full-text.spec.ts","name":"1024 dark › keyboard full text: business","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -7192,10 +7062,6 @@
     ,
     {"kind":"browser","file":"tests/first-run.spec.ts","name":"pairing retries only account approval after a partial save","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/footer-flow-pill.spec.ts","name":"a project with no next step leaves the footer without a flow pill","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/footer-flow-pill.spec.ts","name":"the flow pill stays centred in the footer on project routes only","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"flow is absent by default and a long codename cannot push the version off a phone","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"long names ellipsize at their cap with uncut descenders at 1440px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -7207,8 +7073,6 @@
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"new count takes room only while present at 320","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"new count takes room only while present at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"opt-in flow avoids the release pill, including while the hover card is open","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"release pill and product mark at 1440 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -7896,30 +7760,6 @@
     ,
     {"kind":"browser","file":"tests/indicator-gallery.spec.ts","name":"robot family gallery light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"inspire retains extension versions at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"inspire retains extension versions at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"inspire retains extension versions at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"inspire retains extension versions at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"requirements retains extension versions at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"requirements retains extension versions at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"requirements retains extension versions at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"requirements retains extension versions at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"shape retains extension versions at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"shape retains extension versions at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"shape retains extension versions at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"shape retains extension versions at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket extension reads respect intake permission","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket shows originating extension data at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -7929,312 +7769,6 @@
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket shows originating extension data at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/intake-extensions.spec.ts","name":"ticket shows originating extension data at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"changed build refresh during approval cannot advance the confirmed action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"changed requirements refresh during approval cannot advance the confirmed action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"changed retry refresh during approval cannot advance the confirmed action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"confirmation rejects changed action identity with the same gate","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"confirmation rejects changed fresh request identity beside standing evidence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"confirmation rejects changed journey revision alone","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"confirmation rejects changed pending gate revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"confirmation rejects changed release identity with the same request ID","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"confirmation rejects changed requirements scope without a revision bump","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"requirements confirmation rejects in-flight replacement at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"requirements confirmation rejects in-flight replacement at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"requirements confirmation rejects in-flight replacement at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"requirements confirmation rejects in-flight replacement at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"unchanged in-flight build confirmation submits the captured request and revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"unchanged in-flight requirements confirmation submits the captured request and revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"unchanged in-flight retry confirmation submits the captured request and revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"unseen build server change receives the captured revision and is rejected","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"unseen requirements server change receives the captured revision and is rejected","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-confirmation.spec.ts","name":"unseen retry server change receives the captured revision and is rejected","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-imported.spec.ts","name":"Build and Live of a project without releases are one card each, never an empty stage","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-imported.spec.ts","name":"Inspire of an imported project shows what it brought: its work, its description and its knowledge","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-imported.spec.ts","name":"Live of an imported project shows the latest released release while the journey is still building","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-imported.spec.ts","name":"Plan before release 1 shows the backlog it is chosen from, grouped by epic, open tickets only","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-imported.spec.ts","name":"Requirements of an imported project: its epics stand as the features, with how far their tickets are","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-imported.spec.ts","name":"Shape of an imported project: the description is the brief of record, decided before it came here","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-imported.spec.ts","name":"a stage not reached yet says what comes first and leads there","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-imported.spec.ts","name":"every stage of an imported project has content at 1440px, and nothing is cut","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-imported.spec.ts","name":"every stage of an imported project has content at 390px, and nothing is cut","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"access: contained at 1280, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"access: contained at 1280, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"access: contained at 1280, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"access: contained at 1280, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"access: contained at 1440, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"access: contained at 1440, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"access: contained at 1440, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"access: contained at 1440, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"access: contained at 1999, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"access: contained at 1999, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"access: contained at 1999, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"access: contained at 1999, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"backlog: contained at 1280, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"backlog: contained at 1280, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"backlog: contained at 1280, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"backlog: contained at 1280, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"backlog: contained at 1440, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"backlog: contained at 1440, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"backlog: contained at 1440, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"backlog: contained at 1440, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"backlog: contained at 1999, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"backlog: contained at 1999, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"backlog: contained at 1999, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"backlog: contained at 1999, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"build: contained at 1280, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"build: contained at 1280, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"build: contained at 1280, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"build: contained at 1280, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"build: contained at 1440, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"build: contained at 1440, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"build: contained at 1440, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"build: contained at 1440, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"build: contained at 1999, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"build: contained at 1999, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"build: contained at 1999, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"build: contained at 1999, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"deploy: contained at 1280, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"deploy: contained at 1280, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"deploy: contained at 1280, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"deploy: contained at 1280, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"deploy: contained at 1440, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"deploy: contained at 1440, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"deploy: contained at 1440, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"deploy: contained at 1440, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"deploy: contained at 1999, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"deploy: contained at 1999, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"deploy: contained at 1999, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"deploy: contained at 1999, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"plan: contained at 1280, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"plan: contained at 1280, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"plan: contained at 1280, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"plan: contained at 1280, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"plan: contained at 1440, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"plan: contained at 1440, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"plan: contained at 1440, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"plan: contained at 1440, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"plan: contained at 1999, dark, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"plan: contained at 1999, dark, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"plan: contained at 1999, light, ticket panel closed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-overflow.spec.ts","name":"plan: contained at 1999, light, ticket panel open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"candidate renewal stays in Deploy when reviewing Build history","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"decision card uses neutral elevation without a coloured glow in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"decision card uses neutral elevation without a coloured glow in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renewal confirmation rejects a changed renewal action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renewal requires a fresh live grant","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renewal requires a fresh request","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1024 dark · Access-Genehmigung erneuern","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1024 dark · Renew Access permit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1024 light · Access-Genehmigung erneuern","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1024 light · Renew Access permit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1440 dark · Access-Genehmigung erneuern","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1440 dark · Renew Access permit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1440 light · Access-Genehmigung erneuern","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1440 light · Renew Access permit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 390 dark · Access-Genehmigung erneuern","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 390 dark · Renew Access permit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 390 light · Access-Genehmigung erneuern","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 390 light · Renew Access permit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews both standing gates with fresh exact requests at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews both standing gates with fresh exact requests at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"Build: marking the candidate approves the build gate and sends mark_candidate","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"Deploy decision card follows the Apply deployment approval action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"Deploy decision card follows the Await deployment evidence action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"Deploy follows launch readiness: ready shows a check, blocked shows its reason","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"Deploy shows closed launch admission as a check with its reason, one decision and the refused handoff","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"Inspire shows the sources, the transcript and cited drafts; accepting the brief moves the next action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"Journey hides partial work totals on pagination failure and retries the complete list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"Journey is a third view of the project, with the stage and next action in the footer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"Plan adds a ticket to the release, under a feature","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"Plan: a project without a release opens release 1 with one click","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"Shape decides with the gate: park needs a reason","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"a mature project leads with its build: progress, what is left, releases; Inspire and Shape are history","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"a member sees the deploy gate without an approval action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"a past Inspire of a project started here folds away as history, with its sources","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"a stale plan write restores the list and says so","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"adding a ticket on a server without the route says so","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"an agent principal cannot opt into the person-only flow UI","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"an earlier release reads without boxes and its walker cannot change it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"candidate decision card reflects a approved_live gate offer and its deadline","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"candidate decision card reflects a expired gate offer and its deadline","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"candidate decision card reflects a pending gate offer and its deadline","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"distinct deployment retry expires at the grant deadline on screen and inside confirmation","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"distinct deployment retry fails closed with expired action evidence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"distinct deployment retry fails closed with missing action evidence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"distinct deployment retry fails closed with revoked action evidence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"distinct deployment retry keeps pending and applied authority separate at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"distinct deployment retry keeps pending and applied authority separate at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"distinct deployment retry keeps pending and applied authority separate at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"distinct deployment retry keeps pending and applied authority separate at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"distinct deployment retry primary control decides and applies only the fresh pending ID","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"on a phone the rail scrolls and says what is next","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"requirements agree with the gate scoped to the revision","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"the footer pill hides until the project has really started its journey","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"the footer pill shows once there are sources, or when the stage is derived","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"the one next action approves the gate and starts the build; the stage follows","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"the plan: ticked tickets form the release; features cycle all, none and the last partial pick","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"the walker (A3): release eyebrow, features and tickets, arrows, Space, the sheet and Esc","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"the walker checkbox shows only over its slot, never over the chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/journey.spec.ts","name":"without a requested gate the next action waits and says why","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/key-dialog.spec.ts","name":"edited description and role survive project changes; empty description needs confirmation","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9582,11 +9116,9 @@
     ,
     {"kind":"browser","file":"tests/project-sections.spec.ts","name":"light 390px: SVG tabs, arrow keys, focus order and no horizontal page scroll","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/project-sections.spec.ts","name":"section tabs separate Tickets views, Journey and Knowledge views; each keeps its filters","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/project-sections.spec.ts","name":"section tabs separate Tickets and Knowledge views; each keeps its filters","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-sections.spec.ts","name":"switching Knowledge view while a search waits for the session guard keeps both changes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/project-sections.spec.ts","name":"ticket side panel retains journey/ through reload, expand, collapse and close","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-sections.spec.ts","name":"ticket side panel retains knowledge/entries through reload, expand, collapse and close","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10206,8 +9738,6 @@
     ,
     {"kind":"browser","file":"tests/release-own-tenant.spec.ts","name":"own release notes reach another tenant at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"Plan adds three existing tickets in one go and Start build counts them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"a delayed create from the ticket panel does not update the project opened meanwhile","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"a delayed create on one project does not update the project opened meanwhile","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10218,29 +9748,9 @@
     ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"a lost new-release response is retried with the same key and no membership write","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"a rejected new release is not left open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"a replay after the project moved on names the tickets’ release, not the later one","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"a replay does not invent a count when membership no longer matches","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"a task in the batch rolls the new release back and keeps the tickets out","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"a ticket in another open release is moved only after confirmation","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing picker recovers a revision conflict without losing the selection","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing release rejects a building member and preserves the whole batch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10253,26 +9763,6 @@
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"new release rejects a released member and preserves the whole batch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"screenshot plan picker 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"screenshot plan picker 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"screenshot plan picker 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"screenshot plan picker 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"screenshot release picker 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11810,8 +11300,6 @@
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"partially visible controls wait until they can be assessed after scrolling","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"the journey keeps its lower decision card out of the loading reflow","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"touch rule checks only the undersized axis of a wide control","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/ui-audit-rules.spec.ts","name":"touch rule lets an open menu cover controls and exempts dates in the paper’s text","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11867,10 +11355,6 @@
     {"kind":"browser","file":"tests/vendor-signals.spec.ts","name":"vendor throttling and explicit statusline consent 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/vendor-signals.spec.ts","name":"vendor throttling and explicit statusline consent 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/version-reveal.spec.ts","name":"journey Live heading: the standalone copy pill reveals on keyboard focus and copies","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/version-reveal.spec.ts","name":"journey release list: hover and focus reveal; a click still opens the release","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/version-reveal.spec.ts","name":"reduced motion reveals at once, without a transition","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -12035,18 +11519,6 @@
     {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical leaf classification renders, confirms and saves at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical leaf classification renders, confirms and saves at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical project journey shows leaves and parent groups at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical project journey shows leaves and parent groups at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical project journey shows leaves and parent groups at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical project journey shows leaves and parent groups at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical project journey shows leaves and parent groups at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical project journey shows leaves and parent groups at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical work palette and relation key/title search at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12516,6 +11988,8 @@
     ,
     {"kind":"node","file":"tests/agent-pause.test.ts","name":"selection separates host admission intent from individual agents and normalizes tri-state","tier":"NIGHTLY"}
     ,
+    {"kind":"node","file":"tests/agent-pause.test.ts","name":"stop requests remain visible through stale heartbeats until a worker stop report","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/agent-pause.test.ts","name":"wind-down chooses fitting wrap-up before quick pause and respects margins and uninterruptible commands","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/agent-signals.test.ts","name":"100% reported and then quiet is no finish: the heartbeat warning stays (AEON-437)","tier":"GATED-FULL"}
@@ -12966,16 +12440,6 @@
     ,
     {"kind":"node","file":"tests/fatal.test.ts","name":"the report keeps a short first line, a reference and the retry path, never a stack","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/flow-pill.test.ts","name":"a wide pill shrinks to the gap between the wordmark and the version","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/flow-pill.test.ts","name":"no gap yields a zero-width pill instead of an overlap","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/flow-pill.test.ts","name":"the pill shifts so it does not cover the version control","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/flow-pill.test.ts","name":"the pill sits on the page centre when both sides leave room","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/flow-pill.test.ts","name":"the wordmark stays whole, or hides when the next action would be crushed","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a hit-bitmap pixel belongs to a node only when it is opaque and holds its index colour","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/graph-renderer.test.ts","name":"a ticket adapter needs no knowledge schema and engines cannot mutate the source","tier":"GATED-FULL"}
@@ -13067,40 +12531,6 @@
     {"kind":"node","file":"tests/indicator-variants.test.ts","name":"nine unique styles in the Settings grid order, with five graded robots","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/indicator-variants.test.ts","name":"only existing filenames enable variants, regardless of package landing order","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey grouping bounds cycles and retains legacy epic projection","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey groups retain leaves through all 1000 supported ancestors","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey parent groups count nested leaves once and exclude non-work children","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey parent totals include every leaf beyond 64 ancestors","tier":"ESSENTIAL"}
-    ,
-    {"kind":"node","file":"tests/journey-work.test.ts","name":"journey legacy ticket counts retain subdivisions until the canonical migration","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work accepts a complete twelfth page and retains every row in order","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work finishes empty lists and propagates later page failures","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work rejects a continuing twelfth page instead of returning partial totals","tier":"ESSENTIAL"}
-    ,
-    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work rejects repeated and cycling continuation cursors before another request","tier":"ESSENTIAL"}
-    ,
-    {"kind":"node","file":"tests/journey.test.ts","name":"confirmation binds journey, requirements, release, action and request identities by value","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey.test.ts","name":"confirmation snapshots deployment metadata by value without requiring it","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey.test.ts","name":"distinct standing and retry IDs retain applied evidence and exact fresh authority","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey.test.ts","name":"features cycle all → none → the last partial pick → all","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey.test.ts","name":"gate approvals match the gate and its resource; requirements need the revision scope","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey.test.ts","name":"groups follow the features, add epics for loose tickets, and keep the rest last","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey.test.ts","name":"releases are numbered in creation order; journey releases keep their own number","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/journey.test.ts","name":"the plan write lists every ticket once and the included subset in order","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/key-expiry.test.ts","name":"expiry choices include Never and use second precision from an injected clock","tier":"GATED-FULL"}
     ,
@@ -13410,25 +12840,13 @@
     ,
     {"kind":"node","file":"tests/relations.test.ts","name":"toasts say what changed in words","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"a 200 that does not name the release keeps the same key","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"a definite rejection is not retried with the same key","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"a denial after a lost create keeps the same key until the replay","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"a failed membership read is unknown, and ids are asked in batches of 100","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"a lost commit stays ambiguous through project 404 and reconciles on the same key","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"a lost response after commit retries the same key and does not write membership","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"a missing availability is not addable","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"a new release carries its tickets on the journey action","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"a new release waits until the current one is live","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"a task is unsupported and not addable","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/release-membership.test.ts","name":"account changes discard an old native release result and reset pending ownership","tags":[],"tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"ambiguous parent create replay never confirms a backlog leaf as added","tier":"NIGHTLY"}
     ,
@@ -13440,21 +12858,13 @@
     ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"native membership rows stay separate from an omitted ticket and an imported label","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/release-membership.test.ts","name":"native release creation keeps the same key after a lost response and a later denial","tags":[],"tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"parent replay needs valid coverage and counts overlapping full scopes once","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"parents show actual ships-in summaries and deduplicate leaf counts","tier":"NIGHTLY"}
     ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"replay membership is the tickets’ release, not the journey’s current release","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"the first denial is a rejection and the next try uses a new key","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"the first project 404 is a rejection and the next try uses a new key","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"the open release is the current one while planning, and the next title counts on","tier":"GATED-FULL"}
-    ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"ticket option query keeps only the filters that are set","tier":"GATED-FULL"}
-    ,
-    {"kind":"node","file":"tests/release-membership.test.ts","name":"two clicks share one create","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/release-pending.test.ts","name":"a moved snapshot error is surfaced rather than replacing an incomplete list with success","tier":"ESSENTIAL"}
     ,
@@ -13938,8 +13348,6 @@
     ,
     {"kind":"vitest","file":"tests/agent-indicator.unit.test.ts","name":"keeps Calm and hovering off for missing or malformed data: null","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/agent-indicator.unit.test.ts","name":"keeps Calm and hovering off for missing or malformed data: undefined","occurrence":1,"tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
     {"kind":"vitest","file":"tests/agent-indicator.unit.test.ts","name":"keeps Calm and hovering off for missing or malformed data: undefined","occurrence":2,"tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agent-indicator.unit.test.ts","name":"keeps Calm and hovering off for missing or malformed data: {\"style\":\"unknown\",\"hovering\":\"true\"}","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -14172,7 +13580,7 @@
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > carries real API room through accounts, pools and the dial when nothing runs","tier":"NIGHTLY"}
     ,
-    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > claims readiness only from confirmed room when unknown and zero room mix","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > claims readiness only from confirmed room when unknown and zero room mix","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > explains routing blockers without calling scheduled, held or unapproved accounts full","tier":"NIGHTLY"}
     ,
@@ -14186,7 +13594,7 @@
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > reserves full for explicitly occupied slots and keeps absent accounts distinct","tier":"NIGHTLY"}
     ,
-    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > resolves a shared-quota alias measurement from the canonical gauge","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > resolves a shared-quota alias measurement from the canonical gauge","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > retains server start advice while explaining unmeasured usage","tier":"NIGHTLY"}
     ,
@@ -14434,43 +13842,7 @@
     ,
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > retains choice navigation outside the summary and Escape inside it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps   native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps ArrowDown native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps ArrowLeft native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps ArrowRight native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps ArrowUp native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps End native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Home native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps PageDown native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps PageUp native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+  native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+ArrowDown native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+ArrowLeft native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+ArrowRight native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+ArrowUp native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+End native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+Home native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+PageDown native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+PageUp native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > retains membership and screen shortcuts outside the description and Escape inside it","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"retired Release Walker > is not opened by this scrolling suite","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"adoption confirmation is bound to the acting person and key","tier":"ESSENTIAL"}
     ,
@@ -14485,44 +13857,6 @@
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"names the creator ceiling when a custom project role grants recurrence alongside built-in Admin","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"retains the other unavailable reasons and their precedence","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"blocks a retained picker write until its refreshed options arrive","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"counts returned leaves for a parent","tier":"NIGHTLY"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"counts returned leaves for a parent after move confirmation","tier":"NIGHTLY"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"counts returned leaves for a parent plus an overlapping leaf","tier":"NIGHTLY"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"counts returned leaves for a parent plus an overlapping leaf after move confirmation","tier":"NIGHTLY"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"discards a retained picker success after same-release refresh","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"discards a retained picker success after same-release refresh on the move retry","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"discards stale picker failure feedback after a same-release refresh","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"does not dispatch membership after its initial confirmation owner is refreshed","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"does not invent a leaf count when an older server omits the leaf IDs","tier":"NIGHTLY"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"does not retry membership after its move confirmation owner is refreshed","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"ignores an older options response after a retained picker owner refresh","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"keeps a picker action busy while its person confirmation is pending","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"keeps failed conflict recovery honest and blocks another stale write","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"reconciles retained selections with refreshed availability and move details","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"refreshes a retained picker revision and submits its retained selection successfully","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"reloads a revision conflict for a successful person retry","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"reloads a revision conflict for a successful person retry after move confirmation","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"reports a current picker failure without emitting success","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/features.unit.test.ts","name":"discards old tenant and revoked-session responses","tier":"NIGHTLY"}
     ,
@@ -14579,8 +13913,6 @@
     {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"keeps Default for missing or malformed data: \"slow\"","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"keeps Default for missing or malformed data: null","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"keeps Default for missing or malformed data: undefined","occurrence":1,"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"keeps Default for missing or malformed data: undefined","occurrence":2,"tier":"GATED-FULL"}
     ,
@@ -15188,62 +14520,6 @@
     ,
     {"kind":"vitest","file":"tests/phone-controls.unit.test.ts","name":"uses a constant Add label in the sheet while preserving desktop sort wording","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a current picker result adopts its captured owner and reports the returned leaf count","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a foreign-release membership result cannot patch the plan or report success","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a late ticket creation result cannot replace another project or refresh its work","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a retained picker cannot adopt a deferred result from before a same-release refresh","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a same-release reload invalidates an in-flight write and queued successor","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"adopts current-owner ticket creation and refreshes work for that project","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"an old save cannot clear the busy state or block writes for a new owner","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"discards a late plan conflict without rollback toast or stale refresh","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"discards a late plan success without refreshing the newly selected release","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"discards a plan result after its view scope is disposed","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"drops a queued toggle when its project changes and comes back synchronously","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"drops a queued toggle when the selected release changes before dispatch","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"drops an explicitly captured ticket creation owner before dispatch after navigation","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"only the latest walker load can install a result after release A B A navigation","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"project navigation clears drafts picker and selection memory even for the same release id","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"rechecks editability immediately before a queued write","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"reloads a current-owner conflict from its captured release","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"resets partial feature selection memory for a different release owner","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"rolls back a current-owner transport failure and surfaces its real error","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release refreshes fence old ticket creation without erasing drafts or current busy state","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release refreshes preserve the partial selection through the feature cycle","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release refreshes prune removed tickets and features from partial selection memory","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release save refreshes preserve ticket drafts and the open picker","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"serializes same-owner toggles using the preceding saved revision","tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the retained plan content belongs to the displayed record during deferred loading","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the ticket form discards late failure feedback after release navigation","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the ticket form preserves a new release draft and busy state after an old success","tier":"ESSENTIAL"}
-    ,
-    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the ticket form rechecks editability before submitting its captured draft","tier":"ESSENTIAL"}
-    ,
     {"kind":"vitest","file":"tests/planning-states.unit.test.ts","name":"actual models and saved picker choices > compares Cursor Grok profile effort high with the normalized used model","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/planning-states.unit.test.ts","name":"actual models and saved picker choices > compares Cursor Grok profile effort low with the normalized used model","tier":"GATED-FULL"}
@@ -15847,6 +15123,22 @@
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a slow poll cannot overwrite the reply loaded after a send","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"filters before limiting and keeps two sessions of one principal separate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-a\"},\"principal\":{\"id\":\"person-b\"}})","tags":[],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-b\"},\"principal\":{\"id\":\"person-a\"}})","tags":[],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a new owner without Access cannot resurrect the previous owner’s shown section on expiry","tags":[],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a section opened in the same frame also keeps its draft on expiry","tags":[],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"access retains the same child, draft and one-time link on expiry, with writes inert","tags":[],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"an incoming owner clears frozen Access before fresh permissions arrive","tags":[],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"personal retains the same child, draft and one-time link on expiry, with writes inert","tags":[],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"same-owner refresh keeps mounted state, but lost permission closes Access","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"Back returns to the previous section after following a legacy bookmark","tier":"GATED-FULL"}
     ,

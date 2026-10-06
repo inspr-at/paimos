@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { pairingView } from './agent-pairing-fixtures'
+import { controlStability } from './control-stability'
 const NOW = Date.parse('2026-10-02T09:30:00Z')
 const world: AgentWorld = { me: me.id, now: NOW, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: { 'p-pharos': { key: 'PRJ-17', title: 'Pharos' }, 'p-aeon': { key: 'PRJ-35', title: 'Aeon' }, 'p-frozen': { key: 'PRJ-26', title: 'Studio infrastructure' }, 'n-1': { key: 'PHAROS-11', title: 'Provisioning' }, 'n-2': { key: 'PHAROS-12', title: 'Restore' }, 'n-a1': { key: 'AEON-1', title: 'Foundation' } } }
 async function setup(page: Page, readonly = false, configure?: (data: ReturnType<typeof agentData>) => void) {
@@ -33,7 +34,7 @@ async function setup(page: Page, readonly = false, configure?: (data: ReturnType
   await page.route(/\/api\/projects\/[^/]+\/harness-sessions\/[^/]+\/(pause|resume)$/, async route => {
     const path = new URL(route.request().url()).pathname, id = path.split('/').at(-2)!, s = data.sessions.find(s => s.id === id)!, body = route.request().postDataJSON(); calls.push({ path, body })
     if (path.endsWith('/resume')) { Object.assign(s, { row_version: Number(s.row_version) + 1, pause: { ...(s.pause as object), state: 'resume_requested' } }); return route.fulfill({ json: { session: s, continuation: { brief: 'Saved handover continuation' } } }) }
-    Object.assign(s, { row_version: Number(s.row_version) + 1, pause: { control_id: `pause-${id}`, state: 'requested', level: body.level, note: body.note, requested_at: new Date(NOW).toISOString(), deadline_at: new Date(NOW + 600000).toISOString(), deliver: true, stop_requested: body.level === 'stop_now' } })
+    Object.assign(s, { row_version: Number(s.row_version) + 1, pause: { control_id: `pause-${id}`, state: body.level === 'stop_now' ? 'cancelled' : 'requested', level: body.level, note: body.note, requested_at: new Date(NOW).toISOString(), deadline_at: new Date(NOW + 600000).toISOString(), deliver: true, stop_requested: body.level === 'stop_now' } })
     return route.fulfill({ json: s })
   })
   return { data, calls, deletes }
@@ -191,3 +192,43 @@ test('dismissing a completed report before its deadline has no withdrawal toast 
   expect(mock.calls).toHaveLength(1)
 })
 test('without control permission pause actions and wind-down are hidden', async ({ page }) => { await setup(page, true); await page.goto('/agents'); await expect(page.locator('.agents-page .row').first()).toBeVisible(); await expect(page.getByRole('switch', { name: 'Wind down', exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: /^Pause worker/ })).toHaveCount(0) })
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`${width} ${theme}: stop request stays visible until the worker confirms stopped`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    const errors = watchErrors(page)
+    const mock = await setup(page, false, data => {
+      data.sessions = [data.sessions[0]!]
+      Object.assign(data.sessions[0]!, { management_mode: 'unmanaged', run_id: null, ticket_node_id: null, ticket: null, activity: 'busy', heartbeat_at: new Date(NOW).toISOString(), display_label: 'Datenbankänderungen und Wiederherstellungsprüfung abschließen' })
+    })
+    const session = mock.data.sessions[0]!
+    await page.goto(`/agents/${session.id}`)
+    const row = page.locator(`[data-row="s:${session.id}"]`)
+    const shotTarget = width === 390 ? page.getByRole('complementary', { name: 'Session details' }) : row
+    await expect(row.locator('.c-state .state-word')).toHaveText('Working')
+    const guard = await controlStability(page, { row, menu: row.locator('.more') })
+    await guard.check(async () => {
+      await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop now…', exact: true }).click()
+      const dialog = page.getByRole('dialog', { name: /^Stop now / })
+      await dialog.locator('[data-submit]').click()
+      await expect(dialog).not.toBeVisible()
+      await expect(row.locator('.c-state .state-word')).toHaveText('Stop requested')
+      expect(mock.calls).toHaveLength(1)
+      expect(mock.calls[0]?.body.level).toBe('stop_now')
+      expect(mock.calls[0]?.path).toContain(`/harness-sessions/${session.id}/pause`)
+      expect(session.stopped_at).toBeNull()
+    })
+    await shotTarget.screenshot({ path: testInfo.outputPath(`stop-requested-${width}-${theme}.png`) })
+    await guard.check(async () => {
+      Object.assign(session, { row_version: Number(session.row_version) + 1, phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'stopped' })
+      await page.evaluate(() => window.dispatchEvent(new Event('online')))
+      await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
+    })
+    guard.done()
+    await shotTarget.screenshot({ path: testInfo.outputPath(`stopped-${width}-${theme}.png`) })
+    await page.reload()
+    await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
+    expect(errors).toEqual([])
+  })
+}

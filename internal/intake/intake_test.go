@@ -209,17 +209,18 @@ func TestIntakePreservesPersonEdits(t *testing.T) {
 	if reqView.Status != "accepted" || reqView.TargetNodeID == nil || len(reqView.Suggestions) != 1 || !reqView.Suggestions[0].Later || !reqView.Suggestions[0].AccessChange {
 		t.Fatalf("requirement view %+v", reqView)
 	}
-	var kind, origin, creation string
+	var kind string
 	if err := database.Admin.QueryRow(ctx, `
-		SELECT k.slug, r.origin_draft_id::text, r.creation_key
-		FROM journey_requirements r
-		JOIN nodes n ON n.tenant_id = r.tenant_id AND n.id = r.requirement_node_id
+		SELECT k.slug FROM nodes n
 		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
-		WHERE r.requirement_node_id = $1::uuid`, *reqView.TargetNodeID).Scan(&kind, &origin, &creation); err != nil {
+		WHERE n.id = $1::uuid`, *reqView.TargetNodeID).Scan(&kind); err != nil {
 		t.Fatal(err)
 	}
-	if kind != "requirement" || origin != requirement.ID || creation != "req-1" {
-		t.Fatalf("requirement projection %s %s %s", kind, origin, creation)
+	if kind != "requirement" {
+		t.Fatalf("requirement node kind %s", kind)
+	}
+	if n := count(t, database, `SELECT count(*) FROM journey_requirements WHERE requirement_node_id=$1`, *reqView.TargetNodeID); n != 0 {
+		t.Fatalf("acceptance wrote retired Flow metadata: %d", n)
 	}
 	if n := count(t, database, `SELECT count(*) FROM journey_tickets`); n != 0 {
 		t.Fatalf("acceptance invented tickets: %d", n)

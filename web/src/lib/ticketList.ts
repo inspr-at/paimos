@@ -63,7 +63,7 @@ export const DIMENSIONS: DimensionDef[] = [
   { key: 'human_check', title: 'Human check', facet: 'human_check', primary: false, none: 'No human check' },
   { key: 'epic', title: 'Parent', facet: null, primary: false, none: 'No parent' },
   { key: 'cost', title: 'Cost unit', facet: 'cost_unit', primary: false, none: 'No cost unit' },
-  // Imported fields.release only. The ticket Release column reads native journey membership.
+  // Imported fields.release only. The ticket Release column reads native release membership.
   { key: 'release', title: 'Imported release', facet: 'release', primary: false, none: 'No imported release' },
 ]
 export const DIMENSION_BY_KEY = new Map(DIMENSIONS.map(d => [d.key, d]))
