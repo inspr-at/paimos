@@ -71,5 +71,10 @@ test('stop requests remain visible through stale heartbeats until a worker stop 
     assert.equal(confirmed.state, 'stopped')
     assert.equal(confirmed.label, 'Stopped')
   }
+  // The reporter's default reason is not a person stop. This fails while every
+  // stop_reason "stopped" is labelled Stopped (ad3f6605).
+  const plain = assessAgentState({ ...row({ phase: 'stopped', stopped_at: new Date(now).toISOString(), stop_reason: 'stopped', progress_pct: 100, finished: false }) }, now)
+  assert.equal(plain.state, 'stopped')
+  assert.equal(plain.label, 'Ended')
   assert.equal(assessAgentState({ ...row(), pause: { state: 'cancelled', stop_requested: false } }, now).label, 'Working')
 })

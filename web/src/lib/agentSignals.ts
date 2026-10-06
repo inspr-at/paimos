@@ -83,6 +83,8 @@ export function problemReason(reason?: string | null) {
 // it is the one answer and this file has no second one: it never reads the percent
 // or the stop reason to decide Done. A plain stop, a force stop, a spent budget, a
 // failure and a silence the server closed are not a finish; they are Ended or failed.
+// A stop the person requested reads Stopped only after the worker confirms it.
+// The reporter's default reason "stopped" is still a plain stop (AEON-437).
 export interface StateReason { code: string; detail: string; next: string }
 export interface StateAssessment { state: AgentState; label: string; reasons: StateReason[] }
 export function heartbeatEvidence(evidence: StateEvidence, now: number) {
@@ -125,7 +127,7 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
   if (evidence.phase === 'stopped' || evidence.stopped_at) {
     if (evidence.pause?.state === 'paused' || evidence.pause?.state === 'resume_requested') return result('paused', [], evidence.pause.state === 'resume_requested' ? 'Resume requested' : 'Paused')
     if (evidence.finished) return result('done')
-    return result('stopped', [], evidence.stop_reason === LOST_CONTACT ? 'Lost contact' : evidence.pause?.stop_requested || evidence.stop_reason === 'stopped' ? 'Stopped' : STATE_LABEL.stopped)
+    return result('stopped', [], evidence.stop_reason === LOST_CONTACT ? 'Lost contact' : evidence.pause?.stop_requested ? 'Stopped' : STATE_LABEL.stopped)
   }
   const heartbeat = heartbeatEvidence(evidence, now)
   const working = ['starting', 'working', 'stopping'].includes(evidence.phase) && !['idle', 'throttled'].includes(evidence.activity)
