@@ -93,6 +93,22 @@ test('a failed Sprint is said as a failure, not as saved', async ({ page }) => {
   await expect(page.locator('.toast').filter({ hasText: /^Sprint: agents may use/ })).toHaveCount(0)
 })
 
+test('a menu opened before the pool changed acts on nothing and says so', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  const { capacity } = await setup(page)
+  await open(page)
+  const menu = await accountMenu(page, ACCOUNTS.main)
+  // Another tab sprints Codex while this menu still offers Sprint; a refresh brings it in.
+  capacity.schedules.push({ scope: 'pool', pool: 'codex', schedule: { ...capacity.schedules.find(e => e.scope === 'user')!.schedule, override: 'sprint', override_until: '2026-09-30T16:02:00.000Z' } })
+  const reread = page.waitForResponse(response => response.url().endsWith('/api/agent-accounts/capacity/schedule') && response.request().method() === 'GET')
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await reread
+  await expect(menu.getByRole('menuitem', { name: /Sprint Codex until reset/ })).toBeVisible()
+  await menu.getByRole('menuitem', { name: /Sprint Codex until reset/ }).click()
+  await expect(page.locator('.toast.error').filter({ hasText: 'This record changed. Reopen its menu.' })).toBeVisible()
+  expect(pools(capacity)).toEqual([])
+})
+
 test('Remove account… says what stays untouched, and only Remove account removes it', async ({ page }) => {
   const errors = watchErrors(page)
   await page.setViewportSize({ width: 1280, height: 1000 })

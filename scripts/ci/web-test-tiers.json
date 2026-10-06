@@ -600,6 +600,8 @@
     ,
     "browser:tests/settings-account-pacing.spec.ts:a failed Sprint is said as a failure, not as saved"
     ,
+    "browser:tests/settings-account-pacing.spec.ts:a menu opened before the pool changed acts on nothing and says so"
+    ,
     "browser:tests/settings-account-pacing.spec.ts:people without account management get no account menu and read-only pacing"
     ,
     "browser:tests/settings-account-pacing.spec.ts:phone: the editor is a full-height sheet and nothing scrolls sideways"
@@ -10937,6 +10939,8 @@
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Remove account… says what stays untouched, and only Remove account removes it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"a failed Sprint is said as a failure, not as saved","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"a menu opened before the pool changed acts on nothing and says so","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"people without account management get no account menu and read-only pacing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

@@ -161,7 +161,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 /** The plan card's Change and the #capacity-and-load link land here. */
 function reveal() {
   root.value?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
-  const first = root.value?.querySelector<HTMLElement>('.days [aria-checked="true"]:not(:disabled), .days button:not(:disabled)')
+  const first = root.value?.querySelector<HTMLElement>('.days [aria-checked="true"]:not(:disabled)') ?? root.value?.querySelector<HTMLElement>('.days button:not(:disabled)')
   if (first) first.focus({ preventScroll: true }); else heading.value?.focus({ preventScroll: true })
 }
 defineExpose({ reveal })

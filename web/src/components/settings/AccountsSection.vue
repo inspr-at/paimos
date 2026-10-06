@@ -185,7 +185,9 @@ async function renameComputer() {
 }
 async function menuAction(id: string, context: string | undefined) {
   const t = menuTarget.value, identity = owner.value, turn = generation, screen = selectedKey.value
-  if (!t || context !== menuContext.value || context !== menuKey(t) || busy.value || !manage.value) return
+  if (!t || busy.value || !manage.value) return
+  // A record that changed since its menu opened (a poll, another tab) is said, never acted on.
+  if (context !== menuContext.value || context !== menuKey(t)) { fail('This record changed. Reopen its menu.'); return }
   const current = t.kind === 'account' ? accounts.value.find(a => a.id === t.account.id) : computers.value.find(c => c.computer_id === (t.kind === 'signin' ? t.signin.computer.computer_id : t.computer.computer_id))
   if (!current || (t.kind !== 'account' && 'revision' in current && current.revision !== (t.kind === 'signin' ? t.signin.computer.revision : t.computer.revision))) { fail('This record changed. Reopen its menu.'); return }
   if (t.kind === 'account' && (id === 'plan' || id === 'sprint' || id.startsWith('hold:'))) { await pace(t.account, id); return }
