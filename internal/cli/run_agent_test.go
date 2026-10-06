@@ -5,10 +5,13 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -93,5 +96,61 @@ func TestRunAgentScopesQueuedWorkOrdersToProject(t *testing.T) {
 	runs, err := scoped.Queued(t.Context())
 	if err != nil || len(runs) != 1 || runs[0].ID != "one" {
 		t.Fatalf("scoped runs %+v err %v", runs, err)
+	}
+}
+
+func TestRunAgentClaimsAssignedRunThroughProjectAPI(t *testing.T) {
+	pickup := agentd.WorkerPickup{TicketRevision: time.Date(2026, 10, 6, 0, 0, 0, 0, time.UTC), WorkOrderRevision: 3, BriefSHA256: strings.Repeat("a", 64), WorktreeID: strings.Repeat("b", 64)}
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != http.MethodPost || r.URL.Path != "/api/runs/assigned/claim" {
+			t.Error("wrong assignment claim route")
+		}
+		var body struct {
+			Daemon       string              `json:"daemon_id"`
+			Generation   string              `json:"daemon_generation"`
+			Reservations []string            `json:"reservation_ids"`
+			Handoff      agentd.WorkerPickup `json:"handoff"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		if body.Daemon != "daemon" || body.Generation != "generation" || !reflect.DeepEqual(body.Reservations, []string{"reservation"}) || !reflect.DeepEqual(body.Handoff, pickup) {
+			t.Error("project runner changed assignment pickup")
+		}
+		// A failed claim must remain an error through the wrapper.
+		if calls == 2 {
+			w.WriteHeader(http.StatusConflict)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	remote := agentd.NewRemote(server.URL, "test-key")
+	// Construct exactly the API used by run-agent watch and check the same
+	// optional capability that Supervisor.claimWorker checks.
+	scoped := &projectRunAPI{API: remote, client: remote.Client, projectID: "project"}
+	claim, ok := any(scoped).(interface {
+		ClaimHandoff(context.Context, string, string, string, []string, agentd.WorkerPickup) error
+	})
+	if !ok {
+		t.Fatal("project runner drops assignment pickup capability")
+	}
+	if err := claim.ClaimHandoff(t.Context(), "assigned", "daemon", "generation", []string{"reservation"}, pickup); err != nil {
+		t.Fatal(err)
+	}
+	if err := claim.ClaimHandoff(t.Context(), "assigned", "daemon", "generation", []string{"reservation"}, pickup); err == nil {
+		t.Fatal("project runner hid rejected claim")
+	}
+	if calls != 2 {
+		t.Fatalf("claim requests repeated or missing: %d", calls)
+	}
+	unavailable := &projectRunAPI{API: queuedProjectAPI{}}
+	claim = any(unavailable).(interface {
+		ClaimHandoff(context.Context, string, string, string, []string, agentd.WorkerPickup) error
+	})
+	if err := claim.ClaimHandoff(t.Context(), "assigned", "daemon", "generation", nil, pickup); !errors.Is(err, agentd.ErrUnsupported) {
+		t.Fatalf("missing capability did not fail closed: %v", err)
 	}
 }
