@@ -35,13 +35,15 @@ async function setup(page: Page, action: '' | 'restart' | 'reconnect' = 'restart
   await page.goto(`/agents/${selected.id}`)
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await expect(panel).toBeVisible()
-  // From here only runFor advances the page clock, so every wait below is the
-  // exact number of seconds the test names rather than that plus wall time.
-  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
   // The daemon confirms process ownership with every heartbeat. A diagnosis
-  // wait models one such confirmation and then the server's next read of the
-  // session, so the managed controls never report a stale owner on their own:
-  // that hint is a different state and would move the tabs below it (AEON-541).
+  // wait models one such confirmation (stamped from the page clock, which the
+  // waits below have moved ahead of Node's) and then the server's next read of
+  // the session, so the 45 s managed-control window never lapses on its own:
+  // a stale owner is a different state whose hint would move the tabs below
+  // the controls (AEON-541), and the guard would then fail for that reason.
+  // The clock keeps ticking: a paused clock stamps a click and the listeners
+  // attached since the pause with the same instant, and Vue then drops the
+  // click as stale, so the overflow menu would never close.
   const diagnosis = async (detail: string) => {
     selected.process_observed_at = await page.evaluate(() => new Date().toISOString())
     selected.agent_recovery!.detail = detail
