@@ -375,14 +375,24 @@ func (r *Remote) Route(ctx context.Context, runID, daemonID string, accountIDs [
 }
 
 func (r *Remote) Claim(ctx context.Context, runID, daemonID, generation string, reservations []string) error {
+	return r.claim(ctx, runID, daemonID, generation, reservations, nil)
+}
+
+func (r *Remote) ClaimHandoff(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup WorkerPickup) error {
+	return r.claim(ctx, runID, daemonID, generation, reservations, &pickup)
+}
+
+func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup *WorkerPickup) error {
 	// Retain the attempted binding even if the HTTP response is lost. It is
 	// only a header hint; the server remains the authority for claim ownership.
 	r.mu.Lock()
 	r.daemonID, r.generation = daemonID, generation
 	r.mu.Unlock()
-	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", map[string]any{
-		"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations,
-	}, nil, map[string]string{reviewgate.PolicyHeader: reviewgate.Policy})
+	body := map[string]any{"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations}
+	if pickup != nil {
+		body["handoff"] = pickup
+	}
+	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", body, nil, map[string]string{reviewgate.PolicyHeader: reviewgate.Policy})
 	return err
 }
 
