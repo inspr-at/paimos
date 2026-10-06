@@ -31,11 +31,7 @@
 // Missing or malformed records preserve the last accepted identity.
 // CP3 adds relation add, project create/show/update and resource reads, tag
 // catalog commands, attachment upload/list/get/rm, declarative apply, schema,
-// doctor, and authenticated curl. External-stage request/pull/report/result
-// call Aeon's server-fenced stage handoff API. Classic one-time credentials,
-// reporter registrations and launch admission cannot grant Aeon authority;
-// those commands return exit 3 and point to first-party plugins and journey
-// approvals. rules-compare is an offline one-time report of explicit doctrine
+// doctor, and authenticated curl. The retired external-stage CLI is removed. rules-compare is an offline one-time report of explicit doctrine
 // files, an optional saved AR1 merge document and optional AEON-219 receipt
 // hashes. It does not contact the network, wait, or replace instruction files.
 // The coordinator wires the CLI constructor into cmd/aeon.

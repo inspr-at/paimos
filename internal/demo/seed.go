@@ -115,13 +115,7 @@ func (s *seeder) run() error {
 	if err := s.step("agents"); err != nil {
 		return err
 	}
-	if err := s.journey(); err != nil {
-		return err
-	}
 	if err := s.work(); err != nil {
-		return err
-	}
-	if err := s.pendingJourney(); err != nil {
 		return err
 	}
 	if err := s.step("work"); err != nil {
@@ -344,7 +338,6 @@ func (s *seeder) mark() error {
 
 func (s *seeder) finish(already bool) error {
 	var projects, tickets int
-	var stage string
 	err := db.InTenant(tenant.WithPrincipal(s.ctx, s.admin), s.pool, s.tenantID, func(tx pgx.Tx) error {
 		if err := tx.QueryRow(s.ctx, `SELECT count(*) FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE k.slug='project' AND n.deleted_at IS NULL`).Scan(&projects); err != nil {
 			return err
@@ -354,23 +347,13 @@ func (s *seeder) finish(already bool) error {
 		 WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND ck.slug='work')`).Scan(&tickets); err != nil {
 			return err
 		}
-		return tx.QueryRow(s.ctx, `SELECT coalesce(r.state,'') FROM journey_releases r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.project_node_id WHERE n.key=$1`, markerKey).Scan(&stage)
+		return nil
 	})
 	if err != nil {
 		return err
 	}
-	viewStage := ""
-	if s.lumenID != "" {
-		view, err := s.journeyView(s.lumenID)
-		if err != nil {
-			return err
-		}
-		viewStage = view.Stage
-	}
-	s.out = Summary{Slug: s.slug, TenantID: s.tenantID, Already: already, Projects: projects, Tickets: tickets, Stage: viewStage}
-	if viewStage == "" {
-		s.out.Stage = stage
-	}
+	s.out = Summary{Slug: s.slug, TenantID: s.tenantID, Already: already, Projects: projects, Tickets: tickets}
+
 	return nil
 }
 

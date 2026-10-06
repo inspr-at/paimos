@@ -20,7 +20,6 @@ import ProjectStatusCounts from '../components/work/ProjectStatusCounts.vue'
 import { orderOf, pickerColumns, PINNED, type ColumnId, type ListPrefs } from '../lib/columns'
 import { copyName, duplicateView, loadViews, removeView, renameView, saveNewView, saveViewState, shareView, viewsOf } from '../lib/savedViews'
 import { usePreference } from '../lib/preferences'
-import { useDeveloperSettings } from '../lib/developerSettings'
 import { toast } from '../lib/toast'
 import { settledNavigation } from '../lib/navigation'
 import { command, consume, run } from '../lib/commands'
@@ -69,8 +68,6 @@ import EpicPicker from '../components/work/EpicPicker.vue'
 import ReleasePicker from '../components/work/ReleasePicker.vue'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../lib/releaseAssign'
 import { listNativeMemberships, openedMembershipMessage, releaseViewIsParent, type NativeReleaseView } from '../lib/releaseMembership'
-import { useJourney } from '../stores/journey'
-import { flowPillContext } from '../lib/flowPillContext'
 import HeaderGlimpse from '../components/work/HeaderGlimpse.vue'
 import LeadBand from '../components/lead/LeadBand.vue'
 import LeadOverlays from '../components/lead/LeadOverlays.vue'
@@ -78,10 +75,8 @@ import type KnowledgeEntryPageType from '../components/knowledge/KnowledgeEntryP
 import type KnowledgeTabType from '../components/knowledge/KnowledgeTab.vue'
 import { DOCK_LIST_RESERVE, DOCK_MEDIA, entryPath, isKnowledgeType, parseEntryParam, type KnowledgeEntry, type KnowledgeType } from '../lib/knowledge'
 import { filtersFromQuery as knowledgeFiltersFrom, filtersToQuery as knowledgeQuery, useKnowledge, type KnowledgeFilters } from '../lib/useKnowledge'
-import type { Stage } from '../lib/journey'
 import type { QuickDraft } from '../components/work/QuickCreateRow.vue'
 
-const JourneyView = defineAsyncComponent(() => import('../components/journey/JourneyView.vue'))
 const RecurringWorkCard = defineAsyncComponent(() => import('../components/recurrences/RecurringWorkCard.vue'))
 // Knowledge loads with its tab, not with every project page.
 const KnowledgeTab = defineAsyncComponent(() => import('../components/knowledge/KnowledgeTab.vue'))
@@ -91,8 +86,7 @@ const route = useRoute()
 const router = useRouter()
 const projects = useProjects()
 const session = useSession()
-const { showFlowControls } = useDeveloperSettings()
-const projectSections = computed(() => PROJECT_SECTIONS.filter(item => item.id !== 'journey' || showFlowControls.value))
+const projectSections = computed(() => PROJECT_SECTIONS)
 
 const projectKey = computed(() => String(route.params.projectKey ?? ''))
 const ticketKey = computed(() => typeof route.params.ticketKey === 'string' ? route.params.ticketKey : '')
@@ -253,7 +247,7 @@ async function fetchWorkList(query: ListQuery) {
 const list = useTicketList(projectId, filters, { review: row => openRow(row), fetchList: fetchWorkList })
 const now = ref(Date.now())
 // Sections own their views. The registry also supplies TG1's optional renderer.
-type ViewMode = TicketView | 'journey' | 'knowledge' | 'settings'
+type ViewMode = TicketView | 'knowledge' | 'settings'
 const activeTicketView = computed(() => ticketView(route.query.view))
 // Knowledge has its own address: /p/KEY/knowledge, and /p/KEY/knowledge/<type>/<slug> for one entry.
 const knowledgeActive = computed(onKnowledge)
@@ -305,30 +299,7 @@ watch([dockEntry, knowledgeWide], ([entry]) => {
 }, { immediate: true })
 const fullViewQuery = computed(() => !!ticketKey.value && (route.query.panel === 'full' || route.query.view === 'full'))
 const viewMode = computed<ViewMode>(() => section.value === 'tickets' ? activeTicketView.value.id as TicketView : section.value)
-const journeyActive = computed(() => section.value === 'journey')
 const settingsActive = computed(() => section.value === 'settings')
-// The journey's own place: the stage looked at, a chosen release and the walker's ticket.
-const JOURNEY_KEYS = ['stage', 'release', 'walk'] as const
-const queryText = (value: unknown) => typeof value === 'string' && value ? value : null
-const journeyStage = computed(() => queryText(route.query.stage))
-const journeyRelease = computed(() => queryText(route.query.release))
-const journeyWalk = computed(() => queryText(route.query.walk))
-function journeyQuery(patch: Partial<Record<typeof JOURNEY_KEYS[number], string | null>> = {}) {
-  const query: Record<string, string> = ticketKey.value ? { section: 'journey' } : {}
-  for (const key of JOURNEY_KEYS) {
-    const value = key in patch ? patch[key] : queryText(route.query[key])
-    if (value) query[key] = value
-  }
-  return query
-}
-function journeyStageTo(stage: Stage) { void router.push({ path: ticketKey.value ? route.path : sectionPath('journey'), query: journeyQuery({ stage, walk: null }) }) }
-function journeyReleaseTo(key: string | null) { void router.replace({ path: route.path, query: journeyQuery({ release: key }) }) }
-function journeyWalkTo(key: string | null, mode: 'open' | 'move' | 'close') {
-  if (mode === 'open') { void router.push({ path: route.path, query: journeyQuery({ walk: key }) }); return }
-  if (mode === 'move') { void router.replace({ path: route.path, query: journeyQuery({ walk: key }) }); return }
-  if (typeof window.history.state?.back === 'string' && /(?:\/journey|section=journey)/.test(window.history.state.back) && !window.history.state.back.includes('walk=')) router.back()
-  else void router.replace({ path: route.path, query: journeyQuery({ walk: null }) })
-}
 const graphActive = computed(() => viewMode.value === 'graph')
 const graphState = ref<TicketGraphState>({ data: { nodes: [], links: [], truncated: false }, visible: { nodes: [], links: [], truncated: false }, loading: true })
 const ticketGraphView = ref<{ focus: () => void }>()
@@ -546,20 +517,6 @@ function setSection(id: string) {
   void router.push({ path: ticketKey.value ? ticketPath(ticketKey.value) : sectionPath(target),
     query: { ...saved, ...(ticketKey.value ? ticketSectionQuery(target) : {}) } })
 }
-watch([project, journeyActive, journeyStage], () => {
-  const current = project.value
-  if (!current) { flowPillContext.value = null; return }
-  const active = journeyActive.value
-  const stage = journeyStage.value
-  flowPillContext.value = {
-    projectId: current.id,
-    active,
-    open() {
-      if (active) journeyStageTo((stage ?? 'inspire') as Stage)
-      else setSection('journey')
-    },
-  }
-}, { immediate: true })
 let viewIntent = 0
 async function setView(view: string) {
   const intent = ++viewIntent, within = projectKey.value, sectionAtClick = section.value
@@ -607,9 +564,9 @@ const viewFilters = computed(() => activeView.value ? filtersFromView(activeView
 const savedFilters = computed(() => ({ ...filters.value, mode: activeTicketView.value.id as ListFilters['mode'], cols: toolbarColumns.value.order.filter(id => toolbarColumns.value.visible.includes(id) && !PINNED.includes(id)) }))
 const customised = computed(() => !!listPrefs.value?.visible || filters.value.mode !== 'list' || hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed || !!filters.value.hideStates)
 const viewDirty = computed(() => !!viewFilters.value && !sameListState(savedFilters.value, viewFilters.value))
-const canSaveView = computed(() => !journeyActive.value && !knowledgeActive.value && !settingsActive.value && (activeView.value ? viewDirty.value : customised.value))
+const canSaveView = computed(() => !knowledgeActive.value && !settingsActive.value && (activeView.value ? viewDirty.value : customised.value))
 // The saved-view strip shows once there is a view to pick or a list worth keeping; the plain list alone needs no strip.
-const showViewBar = computed(() => !journeyActive.value && !knowledgeActive.value && !settingsActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
+const showViewBar = computed(() => !knowledgeActive.value && !settingsActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
 const defaultViewId = computed(() => listPrefs.value?.defaultView ?? null)
 function viewQuery(view: SavedView | null): Record<string, string> {
   return view ? filtersToQuery(filtersFromView(view)) : {}
@@ -660,7 +617,7 @@ watch(projectId, async id => {
 const queryKey = computed(() => projectId.value && entryResolved.value ? JSON.stringify(apiParams(projectId.value, filters.value)) : '')
 // The Outline without filters loads its own levels; the list query then only supplies
 // counts. With filters or Hide closed, the Outline needs the list's whole match set.
-const listLoadMode = computed(() => graphActive.value ? 'graph' : journeyActive.value || knowledgeActive.value || settingsActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
+const listLoadMode = computed(() => graphActive.value ? 'graph' : knowledgeActive.value || settingsActive.value ? 'counts' : !outlineActive.value ? 'list' : outline.matchMode.value ? 'all' : 'counts')
 watch([queryKey, listLoadMode], async ([value, mode], old) => {
   if (!value || mode === 'graph') return
   // Switching views on the same query reuses the rows already loaded.
@@ -1236,7 +1193,7 @@ async function remove(view: SavedView) {
 }
 
 // ---------- Selection and bulk changes ----------
-const selectable = computed(() => writable.value && !journeyActive.value && !knowledgeActive.value && !settingsActive.value && !graphActive.value && !fullView.value)
+const selectable = computed(() => writable.value && !knowledgeActive.value && !settingsActive.value && !graphActive.value && !fullView.value)
 const selected = ref(new Set<string>())
 // Phone selection can be armed before the first card is chosen.
 const phoneQuery = window.matchMedia('(max-width: 720px)')
@@ -1497,7 +1454,6 @@ async function chooseRelease(target: ReleaseTarget) {
   const here = () => attempt === releaseAttempt && project.value?.id === projectId
   try {
     const outcome = await assignToRelease(projectId, tickets, target)
-    if (outcome.journey) useJourney().set(projectId, outcome.journey)
     if (!here()) return
     const changed = outcome.opened ? openedMembershipMessage(outcome.opened) : null
     if (changed) {
@@ -1625,10 +1581,8 @@ function keydown(event: KeyboardEvent) {
     if (!graphActive.value && event.key === 'ArrowDown' && target === toolbar.value?.input) { event.preventDefault(); target.blur(); void move(cursorId.value ? 0 : 1) }
     return
   }
-  // The journey has its own keys; with a ticket open, the panel's keys still work.
-  if (journeyActive.value && !ticketKey.value) return
   if (graphActive.value && ['j', 'k', 'ArrowDown', 'ArrowUp', 'Enter', 'o', 'n'].includes(event.key)) return
-  if ((journeyActive.value || knowledgeActive.value) && ['j', 'k', 'ArrowDown', 'ArrowUp', 'Enter', 'o', '/', 'n'].includes(event.key)) return
+  if ((knowledgeActive.value) && ['j', 'k', 'ArrowDown', 'ArrowUp', 'Enter', 'o', '/', 'n'].includes(event.key)) return
   const row = sequence.value.find(item => item.id === cursorId.value)
   if (event.key === 'F') { event.preventDefault(); toolbar.value?.openFilterMenu(); return }
   if (selectable.value && !panel.value?.el?.contains(document.activeElement)) {
@@ -1739,7 +1693,6 @@ onBeforeUnmount(() => {
   knowledge.stop()
   dockQuery.removeEventListener('change', onDockWidth)
   phoneQuery.removeEventListener('change', onPhone)
-  flowPillContext.value = null
 })
 
 // ---------- Document title ----------
@@ -1810,7 +1763,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       </div>
       </div>
       <div ref="stickMark" class="stick-mark" aria-hidden="true" />
-      <div v-if="!journeyActive && !settingsActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
+      <div v-if="!settingsActive" ref="toolbarWrap" class="toolbar-wrap" :class="{ stuck }">
         <ListToolbar
           ref="toolbar" :summary="project" :filters="filters" :options="options" :label="chipLabel" :total="total" :loading="graphActive ? graphState.loading : list.loading.value" :density="density" :stuck="stuck"
           :facet-loading="facetLoading" :settings-target="ticketsHeader ? '#project-view-settings' : undefined" :project-header="ticketsHeader"
@@ -1835,17 +1788,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         </div>
       </div>
 
-      <JourneyView
-        v-if="journeyActive && showFlowControls" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :stage="journeyStage" :release-key="journeyRelease" :walk-key="journeyWalk"
-        :can-write="writable" :person="session.identity?.principal.kind === 'person'" :me="me?.id ?? null"
-        @stage="journeyStageTo" @release="journeyReleaseTo" @walk="journeyWalkTo" @open="openKey"
-      />
-      <section v-else-if="journeyActive" class="glass-card flow-disabled" aria-labelledby="flow-disabled-title">
-        <h2 id="flow-disabled-title">Flow controls are a developer feature</h2>
-        <p>They are off by default and have not yet been tested end to end. In the Developer section of Settings, turn on “Show the flow controls (not yet tested end to end)” to open this journey.</p>
-        <RouterLink class="btn" to="/settings/developer#flow-controls">Developer settings</RouterLink>
-      </section>
-      <RecurringWorkCard v-else-if="settingsActive" :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" />
+      <RecurringWorkCard v-if="settingsActive" :project="project" :selected-id="typeof route.query.recurrence === 'string' ? route.query.recurrence : undefined" />
       <KnowledgeTab
         v-else-if="knowledgeActive" ref="knowledgeTab" :project="{ id: project.id, routeKey: project.routeKey, title: project.title }" :state="knowledge"
         :filters="knowledgeFilters" :can-write="knowledgeWritable" :person="session.identity?.principal.kind === 'person'" :now="now" :paused="knowledgeEntryOpen || !!ticketKey" :dock="knowledgeWide" :open-entry="shownEntry?.mode === 'dock' ? shownEntry : null" @update="updateKnowledge" @accepted="learningAccepted" @reverted="learningReverted"
@@ -1882,7 +1825,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         @status="anchor => openBulk('status', anchor)" @assignee="anchor => openBulk('assignee', anchor)" @priority="anchor => openBulk('priority', anchor)"
         @labels="anchor => openBulk('labels', anchor)" @move="anchor => openBulk('move', anchor)" @release="anchor => openRelease(anchor, liveSelection())" @queue="bulkQueue" @archive="bulkArchive" @clear="clearSelection" @select-all="selectAllMatching"
       />
-      <p v-if="!journeyActive && !knowledgeActive && !settingsActive && !graphActive" class="hint">
+      <p v-if="!knowledgeActive && !settingsActive && !graphActive" class="hint">
         <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">/</kbd> search ·
         <button type="button" class="hint-link" @click="run({ name: 'shortcuts' })"><kbd class="keycap">?</kbd> all shortcuts</button>
       </p>
@@ -2021,9 +1964,6 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
 }
 /* Without the saved-view strip the header glimpse keeps that room (14px + the 42px strip) to spread into; the graph was framed for it. */
 .project-head.glimpse-room { padding-bottom: 56px; }
-.flow-disabled { display: grid; justify-items: start; gap: 12px; padding: 24px; }
-.flow-disabled h2 { font-size: 18px; }
-.flow-disabled p { max-width: 65ch; font-size: 13.5px; line-height: 1.6; color: var(--ink-2); }
 .toolbar-wrap { position: sticky; top: 0; z-index: 5; margin: 0 calc(-1 * var(--gutter)); padding: 0 var(--gutter); container: toolbar / inline-size; }
 .ticket-freshness { margin: 0 0 8px 4px; }
 .toolbar-wrap.stuck { background: var(--glass); box-shadow: 0 1px 0 var(--line), 0 12px 24px -20px rgba(16, 35, 39, .35); -webkit-backdrop-filter: blur(18px) saturate(1.2); backdrop-filter: blur(18px) saturate(1.2); }

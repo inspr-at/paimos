@@ -93,6 +93,17 @@ test('indivisible specs rebalance after LPT without changing weights, coverage o
   assert.deepEqual(balanceShards(reordered, 2), shards)
 })
 
+test('multi-spec exchanges lower a peak that pairwise swaps leave in place', () => {
+  // LPT plus one-for-one swaps stops at 51/47/46 for these weights. A three-spec
+  // exchange reaches the even 48/48/48 split, which is what merged gate weights need.
+  const manifest = { version: 1, groups: [group('peak', [40, 21, 20, 19, 18, 8, 7, 6, 5])] }
+  const shards = balanceShards(manifest, 3)
+  assert.deepEqual(shards.map(shard => shard.weightSeconds), [48, 48, 48])
+  assert.deepEqual(checkCoverage(manifest, shards, files(manifest)), { specs: 9, shards: 3 })
+  manifest.groups[0].specs.reverse()
+  assert.deepEqual(balanceShards(manifest, 3).map(shard => shard.weightSeconds), [48, 48, 48])
+})
+
 test('one-worker tier weights convert measured parallel steps but retain serial and unmeasured estimates', async () => {
   const { tierWeights } = await import('./ci-web-shard.mjs')
   const manifest = fixture()

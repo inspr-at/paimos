@@ -683,9 +683,9 @@ test('offline replay CLI prints every real PR with selected counts, effective la
   const report=JSON.parse(result.stdout)
   assert.equal(report.replay.length,80)
   // Measured on the current tree (consumers, migrations); deleted files replay as full.
-  assert.deepEqual(report.transitions,{'full->full':45,'full->essential':20,'essential->essential':15})
-  assert.equal(report.summary.newNarrowed,35)
-  assert.equal(report.summary.oldEssential,15)
+  assert.deepEqual(report.transitions,{'full->full':48,'full->essential':18,'essential->essential':14})
+  assert.equal(report.summary.newNarrowed,32)
+  assert.equal(report.summary.oldEssential,14)
   assert.ok(report.summary.fullReasons['CI machinery']>=15)
   for(const row of report.replay) {
     assert.ok(row.oldCases>0&&row.newCases>0)

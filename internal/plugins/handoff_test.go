@@ -32,7 +32,7 @@ func TestGrantNarrowCannotWidenOrMutate(t *testing.T) {
 }
 
 func TestHandoffAuthorizationUsesCompiledBindings(t *testing.T) {
-	reg, err := Builtin()
+	reg, err := Builtin(testStagePlugin("janus"), testStagePlugin("pharos"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,4 +75,36 @@ func TestHandoffAuthorizationUsesCompiledBindings(t *testing.T) {
 	if err := reg.AuthorizeHandoff(t.Context(), p, "janus", "deploy"); !errors.Is(err, ErrDenied) {
 		t.Fatalf("lookup mutation changed registry: %v", err)
 	}
+}
+
+// testStagePlugin is a framework fixture; it contains no deployment/access policy.
+func testStagePlugin(id string) func() (Plugin, error) {
+	return func() (Plugin, error) {
+		bindings := map[string]string{"deploy": fence.PermStageDeploy, "verify": fence.PermStageVerify}
+		if id == "janus" {
+			bindings = map[string]string{"prepare": fence.PermStageAccessPrepare, "apply": fence.PermStageAccessApply}
+		}
+		steps := []WorkflowStep{}
+		perms := []string{fence.PermStepsEvaluate, fence.PermStepsRequest, fence.PermStepsApply}
+		for operation, permission := range bindings {
+			steps = append(steps, WorkflowStep{Key: operation, Gates: []string{fence.GateReadiness}})
+			perms = append(perms, permission)
+		}
+		p := Plugin{Manifest: Manifest{ID: id, Version: "1", Owner: "test", Permissions: perms, WorkflowSteps: steps}, StepPermissions: bindings, Steps: testSteps{}}
+		digest, err := Digest(p)
+		p.Manifest.DigestSHA256 = digest
+		return p, err
+	}
+}
+
+type testSteps struct{}
+
+func (testSteps) Evaluate(context.Context, Call, StepRequest) (StepDecision, error) {
+	return StepDecision{Proceed: true}, nil
+}
+func (testSteps) Request(context.Context, Call, StepRequest) (StepDecision, error) {
+	return StepDecision{Proceed: true}, nil
+}
+func (testSteps) ApplyResult(context.Context, Call, StepResult) (StepDecision, error) {
+	return StepDecision{Proceed: true}, nil
 }

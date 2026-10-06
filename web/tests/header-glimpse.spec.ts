@@ -3,7 +3,6 @@ import { inflateSync } from 'node:zlib'
 import { mkdirSync } from 'node:fs'
 import { test, expect, type Page } from '@playwright/test'
 import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
-import { journeyWorld } from './journey-fixtures'
 import type { TicketGraphLink } from '../src/lib/ticketGraph'
 
 test.use({
@@ -296,7 +295,6 @@ test('long title and description stay separate from the glimpse while resizing',
   project.title = 'Pharos fleet management and operator workspace for every environment'
   project.description = 'Fleet management, service health, deployment history and host access across every environment in the INSPR family.'
   await mockTicketGraph(page, world)
-  await page.route('**/api/projects/p-pharos/journey', route => route.fulfill({ json: journeyWorld('plan').journey }))
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   for (const width of [1600, 1280, 1600]) {
@@ -313,7 +311,6 @@ test('the 2D fallback also frames the dense core with faded edges', async ({ pag
     } as typeof original
   })
   await mockTicketGraph(page)
-  await page.route('**/api/projects/p-pharos/journey', route => route.fulfill({ json: journeyWorld('plan').journey }))
   await page.goto('/p/PHAROS/tickets')
   await ready(page)
   await expect(surface(page)).toHaveAttribute('data-dimension', '2d')
@@ -438,8 +435,6 @@ for (const scheme of ['light', 'dark'] as const) {
       const errors: string[] = []
       page.on('pageerror', error => errors.push(error.message))
       const world = await mockTicketGraph(page)
-      world.work.preferences['developer-ui'] = { show_flow_controls: true }
-      await page.route('**/api/projects/p-pharos/journey', route => route.fulfill({ json: journeyWorld('plan').journey }))
       const dir = `../.agent-shots/${process.env.HG2_SHOT_PASS ?? 'pass-1'}`
       mkdirSync(dir, { recursive: true })
       if (width >= 1280) await page.addInitScript(`window.__aeonGlimpsePin = { frames: ${GLIMPSE_PIN_FRAMES} }`)
@@ -447,7 +442,6 @@ for (const scheme of ['light', 'dark'] as const) {
       await page.goto('/p/PHAROS/tickets')
       if (width >= 1280) await ready(page)
       else await expect(page.getByRole('heading', { name: 'Pharos', exact: true })).toBeVisible()
-      await expect(page.locator('.journey-chip')).toBeVisible()
       if (width >= 1280) await releasePinnedGlimpse(page)
       if (width >= 1280) {
         await expectClearOfText(page)
