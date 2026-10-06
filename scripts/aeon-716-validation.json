@@ -166,5 +166,234 @@
       ],
       "checked_source": "06dc429d3 (evidence-only uncommitted report changes were excluded)"
     }
+  },
+  "merge_main_round_2": {
+    "reviewed_head": "adb4d57ad7e093a2a9c280acad38ca2835863065",
+    "main_commit": "e1571d6a6f3567a8349b349396f6eb2944d7ea8f",
+    "merge_commit": "d439c9668b2d5787a099042f6342d41387a90b9c",
+    "scope": "Normal local merge of newest origin/main; no feature changes.",
+    "preservation": {
+      "main_files": 3,
+      "branch_files": 18,
+      "shared_files": 0,
+      "method": "Every incoming file matches origin/main by exact git blob identity; all 18 reviewed branch files match reviewed HEAD.",
+      "migration_numbers": 265,
+      "migration_collisions": 0,
+      "manifests": "No incoming manifest changes; both branch manifests preserved byte-for-byte."
+    },
+    "passed": [
+      "GOMAXPROCS=2 go test -p 2 ./internal/agentaccounts -run ^TestResidencyEvidence -count=1 -timeout=90s: passed (13.836s), isolated dbtest databases and restricted app roles; fixtures cleaned by TestMain.",
+      "Static prefilter first full run: 34 passed, 0 skipped; includes migration policy tests/check, OpenAPI property check, Go vet, test tiers, ownership audit, web typecheck and lint.",
+      "Second static run: 35 checks passed, 0 skipped, including browser safety. Migration tests and policy check passed on both runs against published v261005070923.0.0; OpenAPI property checks also passed although this merge does not change the contract."
+    ],
+    "limitations": [
+      "remote-test.sh not invoked: it pushes a temporary Git ref, contrary to the direct user no-push instruction. No hosted CI or full remote suites run.",
+      "Required static prefilter exit 0 not achieved after two complete runs: unchanged web-shard-tests times out at 120 seconds, also recorded in the prior merge-main round. No skipped-check override, timeout increase, hook bypass or unrelated source/test edits; coordinator must resolve this gate before release."
+    ],
+    "safety": "Verified active GitHub markus-barta account and ppm workstation-agents/INSPR principal; coordinator marker recorded per worker-common. No feature changes, migration renumbering, pushes, deployment, PR merge, ticket status changes, credentials access, other-model calls or edits to other worker worktrees.",
+    "static_prefilter": {
+      "command": "GOMAXPROCS=2 GOFLAGS=-p=2 node scripts/ci-static.mjs --merge-main --jobs 1 --json",
+      "attempts": 2,
+      "first_run": {
+        "exit_code": 1,
+        "seconds": 386.75,
+        "passed_checks": 34,
+        "skipped_checks": 0,
+        "failures": [
+          "web-shard-tests: 120 second timeout",
+          "web-browser-safety: two process-group start-time fixture failures"
+        ]
+      },
+      "retry": {
+        "exit_code": 1,
+        "seconds": 440.09,
+        "passed_checks": 35,
+        "skipped_checks": 0,
+        "results": [
+          {
+            "id": "volatile-identity",
+            "status": "passed",
+            "seconds": 0.4
+          },
+          {
+            "id": "go-vet",
+            "status": "passed",
+            "seconds": 15.74
+          },
+          {
+            "id": "rules-bootstrap",
+            "status": "passed",
+            "seconds": 0.93
+          },
+          {
+            "id": "test-tiers",
+            "status": "passed",
+            "seconds": 2.14
+          },
+          {
+            "id": "go-tiers",
+            "status": "passed",
+            "seconds": 91.8
+          },
+          {
+            "id": "go-shards-7",
+            "status": "passed",
+            "seconds": 4.09
+          },
+          {
+            "id": "go-shards-4",
+            "status": "passed",
+            "seconds": 3.31
+          },
+          {
+            "id": "release-metadata",
+            "status": "passed",
+            "seconds": 0.1
+          },
+          {
+            "id": "release-rehearsal-tests",
+            "status": "passed",
+            "seconds": 3.46
+          },
+          {
+            "id": "own-release-notes-tests",
+            "status": "passed",
+            "seconds": 0.22
+          },
+          {
+            "id": "own-release-notes",
+            "status": "passed",
+            "seconds": 0.09
+          },
+          {
+            "id": "release-tool-tests",
+            "status": "passed",
+            "seconds": 0.42
+          },
+          {
+            "id": "live-policy-tests",
+            "status": "passed",
+            "seconds": 0.34
+          },
+          {
+            "id": "cross-family-tests",
+            "status": "passed",
+            "seconds": 4.77
+          },
+          {
+            "id": "release-pin-tests",
+            "status": "passed",
+            "seconds": 0.46
+          },
+          {
+            "id": "audit-tests",
+            "status": "passed",
+            "seconds": 2.91
+          },
+          {
+            "id": "audit-coverage",
+            "status": "passed",
+            "seconds": 1.9
+          },
+          {
+            "id": "ci-plan-tests",
+            "status": "passed",
+            "seconds": 8.5
+          },
+          {
+            "id": "full-ui-qa-tests",
+            "status": "passed",
+            "seconds": 0.3
+          },
+          {
+            "id": "releaseworkflow-tests",
+            "status": "passed",
+            "seconds": 7.73
+          },
+          {
+            "id": "runner-route-tests",
+            "status": "passed",
+            "seconds": 0.26
+          },
+          {
+            "id": "runner-guard-tests",
+            "status": "passed",
+            "seconds": 9.59
+          },
+          {
+            "id": "runner-guard",
+            "status": "passed",
+            "seconds": 0.46
+          },
+          {
+            "id": "docker-web-inputs",
+            "status": "passed",
+            "seconds": 0.41
+          },
+          {
+            "id": "web-typecheck",
+            "status": "passed",
+            "seconds": 21.62
+          },
+          {
+            "id": "web-lint",
+            "status": "passed",
+            "seconds": 8.81
+          },
+          {
+            "id": "migration-tests",
+            "status": "passed",
+            "seconds": 14.4
+          },
+          {
+            "id": "migrations",
+            "status": "passed",
+            "seconds": 3.78
+          },
+          {
+            "id": "migration-splitter",
+            "status": "passed",
+            "seconds": 1.8
+          },
+          {
+            "id": "migration-probe-tests",
+            "status": "passed",
+            "seconds": 4.48
+          },
+          {
+            "id": "web-shard-spec-tests",
+            "status": "passed",
+            "seconds": 1.14
+          },
+          {
+            "id": "web-shard-tests",
+            "status": "timeout",
+            "seconds": 120.01
+          },
+          {
+            "id": "openapi-properties",
+            "status": "passed",
+            "seconds": 1.53
+          },
+          {
+            "id": "web-tiers",
+            "status": "passed",
+            "seconds": 71.7
+          },
+          {
+            "id": "web-spec-inventory",
+            "status": "passed",
+            "seconds": 0.1
+          },
+          {
+            "id": "web-browser-safety",
+            "status": "passed",
+            "seconds": 24.85
+          }
+        ],
+        "failure": "web-shard-tests reached its existing 120 second timeout again in aeon-681-ci.test.mjs; browser safety passed on retry."
+      },
+      "checked_source": "d439c9668; uncommitted evidence report excluded"
+    }
   }
 }
