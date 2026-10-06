@@ -13744,43 +13744,7 @@
     ,
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > retains choice navigation outside the summary and Escape inside it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps   native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps ArrowDown native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps ArrowLeft native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps ArrowRight native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps ArrowUp native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps End native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Home native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps PageDown native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps PageUp native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+  native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+ArrowDown native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+ArrowLeft native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+ArrowRight native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+ArrowUp native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+End native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+Home native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+PageDown native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > keeps Shift+PageUp native without changing membership, screens or tickets","tags":["delete-candidate"],"tier":"GATED-FULL"}
-    ,
-    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > retains membership and screen shortcuts outside the description and Escape inside it","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"retired Release Walker > is not opened by this scrolling suite","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"adoption confirmation is bound to the acting person and key","tier":"ESSENTIAL"}
     ,

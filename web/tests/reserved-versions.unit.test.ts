@@ -39,15 +39,18 @@ it.each([null, {}, { show_reserved_versions: 'true' }, { show_reserved_versions:
 })
 
 it('saves each choice without discarding the other setting or unknown fields', async () => {
-  vi.mocked(readPreference).mockResolvedValue({ show_flow_controls: true, future_field: 'preserve' })
+  vi.mocked(readPreference).mockResolvedValue({ show_flow_controls: true, show_expert_start: true, future_field: 'preserve' })
   const prefs = settings()
   await prefs.setShowReservedVersions(true)
   expect(prefs.showReservedVersions.value).toBe(true)
-  expect(prefs.showFlowControls.value).toBe(true)
-  expect(writePreference).toHaveBeenLastCalledWith('developer-ui', { show_flow_controls: true, show_reserved_versions: true, future_field: 'preserve' })
-  await prefs.setShowFlowControls(false)
+  expect(prefs.showExpertStart.value).toBe(true)
+  expect(Object.hasOwn(prefs, 'showFlowControls')).toBe(false)
+  expect(Object.hasOwn(prefs, 'setShowFlowControls')).toBe(false)
+  expect(writePreference).toHaveBeenLastCalledWith('developer-ui', { show_flow_controls: true, show_expert_start: true, show_reserved_versions: true, future_field: 'preserve' })
+  await prefs.setShowExpertStart(false)
   expect(prefs.showReservedVersions.value).toBe(true)
-  expect(writePreference).toHaveBeenLastCalledWith('developer-ui', { show_flow_controls: false, show_reserved_versions: true, future_field: 'preserve' })
+  expect(prefs.showExpertStart.value).toBe(false)
+  expect(writePreference).toHaveBeenLastCalledWith('developer-ui', { show_flow_controls: true, show_expert_start: false, show_reserved_versions: true, future_field: 'preserve' })
 })
 
 it('waits for the initial read and a successful save before revealing reservations', async () => {
