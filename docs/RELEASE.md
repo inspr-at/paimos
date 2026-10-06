@@ -951,6 +951,8 @@ the evidence. Fixture timings are not live acceptance evidence.
 
 ### Host compilation, runtime pin and digest proof (AEON-422)
 
+The tag and rehearsal workflows pin Buildx `v0.37.1` and the docker-container builder to `moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea`. Each setup immediately asserts the Buildx and bootstrapped BuildKit versions; both platform jobs have a 45-minute budget. To bump them, rehearse the candidate versions and image digest first, then update both workflows together with the releaseworkflow pin expectations and rehearsal coverage inventory, and require a new successful exact-SHA main rehearsal before tagging.
+
 `scripts/Dockerfile.runtime` pins the official Alpine 3.24 multi-platform index
 by digest (3.24.2 when observed on 2026-10-05), while preserving Chromium
 152.0.7977.82-r0 and tini 0.19.0-r3. The index keeps both native architectures;

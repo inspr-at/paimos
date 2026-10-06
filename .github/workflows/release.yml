@@ -13,6 +13,12 @@ concurrency:
 permissions:
   contents: read
 
+# Keep these rehearsed pins together; releaseworkflow tests enforce both workflows.
+env:
+  AEON_BUILDX_VERSION: v0.37.1
+  AEON_BUILDKIT_VERSION: v0.33.1
+  AEON_BUILDKIT_IMAGE: moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+
 jobs:
   agentd-darwin:
     permissions:
@@ -148,10 +154,9 @@ jobs:
             cache: buildcache-arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    # 30 instead of the former 20 minutes: three cold Go compilations (the
-    # smoked build and both proof runs) and a cold runtime closure preparation
-    # replace the former warm caches. The timeout only guards against a hang.
-    timeout-minutes: 30
+    # The tag path adds push, attestation and verification to cold compilation
+    # and runtime closure preparation by design; no cache warming. Rehearsal matches.
+    timeout-minutes: 45
     permissions:
       # Preserve push access for the draft-aware release immutability lookup.
       contents: write
@@ -270,6 +275,29 @@ jobs:
           GOFLAGS: -mod=readonly
         run: node scripts/build-image-inputs.mjs build
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        with:
+          version: ${{ env.AEON_BUILDX_VERSION }}
+          driver: docker-container
+          driver-opts: image=${{ env.AEON_BUILDKIT_IMAGE }}
+      - name: Assert pinned Buildx and BuildKit versions
+        run: |
+          set -euo pipefail
+          expected="Expected Buildx ${AEON_BUILDX_VERSION} and BuildKit ${AEON_BUILDKIT_VERSION}"
+          if ! buildx="$(docker buildx version)" || [[ "$(printf '%s\n' "$buildx" | awk '$1 == "github.com/docker/buildx" {print $2}')" != "$AEON_BUILDX_VERSION" ]]; then
+            echo "::error::${expected}; Buildx version assertion failed" >&2
+            exit 1
+          fi
+          if ! builder="$(docker buildx inspect --bootstrap)"; then
+            echo "::error::${expected}; builder bootstrap failed" >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$builder" | awk -v expected="$AEON_BUILDKIT_VERSION" '
+            /^[[:space:]]*BuildKit version:/ { count++; if ($3 != expected) mismatch = 1 }
+            END { exit (count == 0 || mismatch) }
+          '; then
+            echo "::error::${expected}; BuildKit version assertion failed" >&2
+            exit 1
+          fi
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ghcr.io
@@ -497,6 +525,29 @@ jobs:
         run: node scripts/release-tag.mjs
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        with:
+          version: ${{ env.AEON_BUILDX_VERSION }}
+          driver: docker-container
+          driver-opts: image=${{ env.AEON_BUILDKIT_IMAGE }}
+      - name: Assert pinned Buildx and BuildKit versions
+        run: |
+          set -euo pipefail
+          expected="Expected Buildx ${AEON_BUILDX_VERSION} and BuildKit ${AEON_BUILDKIT_VERSION}"
+          if ! buildx="$(docker buildx version)" || [[ "$(printf '%s\n' "$buildx" | awk '$1 == "github.com/docker/buildx" {print $2}')" != "$AEON_BUILDX_VERSION" ]]; then
+            echo "::error::${expected}; Buildx version assertion failed" >&2
+            exit 1
+          fi
+          if ! builder="$(docker buildx inspect --bootstrap)"; then
+            echo "::error::${expected}; builder bootstrap failed" >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$builder" | awk -v expected="$AEON_BUILDKIT_VERSION" '
+            /^[[:space:]]*BuildKit version:/ { count++; if ($3 != expected) mismatch = 1 }
+            END { exit (count == 0 || mismatch) }
+          '; then
+            echo "::error::${expected}; BuildKit version assertion failed" >&2
+            exit 1
+          fi
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
         with:
           registry: ghcr.io

@@ -40,6 +40,12 @@ concurrency:
   group: release-image-check-${{ github.ref }}
   cancel-in-progress: true
 
+# Keep these rehearsed pins together; releaseworkflow tests enforce both workflows.
+env:
+  AEON_BUILDX_VERSION: v0.37.1
+  AEON_BUILDKIT_VERSION: v0.33.1
+  AEON_BUILDKIT_IMAGE: moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+
 jobs:
   image-dry-run:
     name: image-dry-run (${{ matrix.arch }})
@@ -54,9 +60,8 @@ jobs:
             cache: buildcache-arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    # Same budget as the tag build: three cold Go compilations and a cold
-    # runtime closure preparation.
-    timeout-minutes: 30
+    # Same budget as the tag build (including its push, attestation and verification).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -121,6 +126,29 @@ jobs:
           GOFLAGS: -mod=readonly
         run: node scripts/build-image-inputs.mjs build
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        with:
+          version: ${{ env.AEON_BUILDX_VERSION }}
+          driver: docker-container
+          driver-opts: image=${{ env.AEON_BUILDKIT_IMAGE }}
+      - name: Assert pinned Buildx and BuildKit versions
+        run: |
+          set -euo pipefail
+          expected="Expected Buildx ${AEON_BUILDX_VERSION} and BuildKit ${AEON_BUILDKIT_VERSION}"
+          if ! buildx="$(docker buildx version)" || [[ "$(printf '%s\n' "$buildx" | awk '$1 == "github.com/docker/buildx" {print $2}')" != "$AEON_BUILDX_VERSION" ]]; then
+            echo "::error::${expected}; Buildx version assertion failed" >&2
+            exit 1
+          fi
+          if ! builder="$(docker buildx inspect --bootstrap)"; then
+            echo "::error::${expected}; builder bootstrap failed" >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$builder" | awk -v expected="$AEON_BUILDKIT_VERSION" '
+            /^[[:space:]]*BuildKit version:/ { count++; if ($3 != expected) mismatch = 1 }
+            END { exit (count == 0 || mismatch) }
+          '; then
+            echo "::error::${expected}; BuildKit version assertion failed" >&2
+            exit 1
+          fi
       # Cold, exactly like the tag build: no registry cache, no builder layer.
       - name: Prepare pinned runtime closure
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7

@@ -115,8 +115,14 @@
     {
       "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
       "mode": "action",
-      "sha256": "f1c421c866796120658fcc5886fcd38c9490f8f0c7b5c946c0fdb465fa72940e",
+      "sha256": "0298b54837964a703589dc54434a5b9305ab7d975261760c345aedfc6f40efb4",
       "step": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069"
+    },
+    {
+      "counterpart": "image-dry-run/Assert pinned Buildx and BuildKit versions",
+      "mode": "step",
+      "sha256": "4af7a23bb382737f5178d948227cdde8d4c5461d49aa5ce3296454ce39b0dffd",
+      "step": "Assert pinned Buildx and BuildKit versions"
     },
     {
       "counterpart": "Registry login is tag-only; rehearsal reads the public build cache without credentials.",
@@ -255,8 +261,14 @@
     {
       "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
       "mode": "action",
-      "sha256": "f1c421c866796120658fcc5886fcd38c9490f8f0c7b5c946c0fdb465fa72940e",
+      "sha256": "0298b54837964a703589dc54434a5b9305ab7d975261760c345aedfc6f40efb4",
       "step": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069"
+    },
+    {
+      "counterpart": "image-dry-run/Assert pinned Buildx and BuildKit versions",
+      "mode": "step",
+      "sha256": "4af7a23bb382737f5178d948227cdde8d4c5461d49aa5ce3296454ce39b0dffd",
+      "step": "Assert pinned Buildx and BuildKit versions"
     },
     {
       "counterpart": "Registry login is tag-only; rehearsal reads the public build cache without credentials.",
