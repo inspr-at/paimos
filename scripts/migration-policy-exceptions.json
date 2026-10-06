@@ -160,6 +160,12 @@
       "sha256": "362cbd935fb0beb4fc64631c25528f8e5baedd3a87a3490923ba062143a5833b",
       "ticket": "AEON-697",
       "reason": "Add only named public proposal/resolution events to the existing event visibility policy, retaining tenant isolation, visible-node and all referenced-node checks, own-event access and workspace-only domains. Replace the existing parent-status cause helper with its strict superset so attention Apply, Dismiss and Undo derive parent statuses from leaves; existing event types and bounds remain intact. ALTER POLICY and CREATE OR REPLACE FUNCTION are outside the expand-safe allowlist. Exact bytes require coordinator consolidated review and whole-chain previous-binary compatibility/backup gates before merge or release. This worker records a review artifact and grants no acceptance, push or deployment authority."
+    },
+    {
+      "file": "1249_saved_view_mode.sql",
+      "sha256": "d8a3ce208229cd779c2cc740e5ddedfae51981ed66c3eccb83a51c75883f136a",
+      "ticket": "AEON-718",
+      "reason": "Markus explicitly decided to soft-delete legacy views with columns = '{}' on every instance, including PMA. The tenant-loop DO block is conservatively outside the expansion allowlist. Only live views with exactly empty columns are retired, with one complete view.deleted snapshot per view; rows and ids remain restorable. Re-running the data repair emits no duplicate deletion events. Mode is additive with list as its default. Exact bytes require the lead's consolidated review and release gates; this exception grants no push, merge or deployment authority."
     }
   ]
 }

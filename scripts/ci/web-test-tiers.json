@@ -10978,6 +10978,8 @@
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an unpooled account joins every existing member and can leave them sharing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"dock: drain and pool confirmations keep Tab and Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"names that clash ask to be named, and a rename changes only the name","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"old limits set by hand show as Set by you, with Make this repeat and Remove","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11004,9 +11006,37 @@
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"screenshots › shot read-only","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"sheet: drain and pool confirmations keep Tab and Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"side: drain and pool confirmations keep Tab and Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"the Advanced sentence round-trips and caps on top of the plan","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"without account.manage the list is read-only","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"Needs you verifies the expired sign-in once and reports a failed request honestly","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"a matching login joins the shared quota from the account panel and Sign out everywhere covers it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"failed capacity apply stays unsaved and reports the actual failure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"members see account and computer details without mutation controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"quota warning popover submits with platform modifier and Undo restores its snapshot","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"sign-out confirmation names its scope and a failed write keeps the reviewed account open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"Settings primary actions have no glow and retain keyboard focus in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -11740,6 +11770,12 @@
     ,
     {"kind":"browser","file":"tests/version-reveal.spec.ts","name":"unnamed release rows: only the version copy control reveals; the row still selects","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 Graph offers saved views, persists mode and applies their filters","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 plain columns save and reopen in list despite personal changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 plain columns save and reopen in outline despite personal changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"Shift F opens every filter: labels, parent, cost unit and release by name, and a relative date","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"a custom date range filters imported start dates by day","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -12215,6 +12251,10 @@
     {"kind":"node","file":"tests/account-limits.test.ts","name":"the unit menu offers what the account can count, likeliest first","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/account-link.test.ts","name":"account code accepts the one-line format without URL or command parsing","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/accounts-overview.test.ts","name":"accounts overview merges only a canonical shared quota identity within one harness","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/accounts-overview.test.ts","name":"host capacity parsing retains off defaults and rejects oversized history","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/activity.test.ts","name":"an automatic change keeps the job that wrote it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
@@ -13005,6 +13045,8 @@
     {"kind":"node","file":"tests/list-views.test.ts","name":"groups by assignee (you first), priority, type and label, with totals from the counts","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/list-views.test.ts","name":"options and chip words for labels, epics and people","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/list-views.test.ts","name":"saved views retain each mode and an explicit pinned-only column choice","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/list-views.test.ts","name":"the list API gets exclusions with their spellings, kinds without the excluded ones, and day bounds","tier":"GATED-FULL"}
     ,

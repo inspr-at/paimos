@@ -909,7 +909,7 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/QuotaWarningSettings'}
-        '403': {description: Settings management permission required}
+        '403': {description: Account read permission required}
     put:
       summary: Configure workspace low-quota warning thresholds
       operationId: putQuotaWarningSettings
@@ -3688,6 +3688,95 @@ paths:
         '404': {description: Request or proof not found}
         '409': {description: Immutable choice or lifecycle conflict}
         '429': {description: Rate or attempt limit reached; honor Retry-After}
+  /agent-pairing/computers/{computerId}/capacity:
+    parameters:
+      - {name: computerId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: saveComputerCapacity
+      description: Person account.manage required; current computer owner only. Revision-bound, under the pairing access fence. Off by default; changes affect only new starts.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, policy]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                policy: {$ref: '#/components/schemas/HostCapacityPolicy'}
+      responses:
+        '200': {description: Saved capacity, content: {application/json: {schema: {$ref: '#/components/schemas/HostCapacityView'}}}}
+        '400': {description: Invalid or oversized policy}
+        '403': {description: Current owner permission required}
+        '409': {description: Revision changed or computer removed}
+  /agent-pairing/self/capacity:
+    post:
+      operationId: reportHostCapacity
+      description: Paired runtime run.claim required. Reports bounded, content-free host signals and returns current start admission. Server time determines freshness. Does not stop running agents. Activity is accepted only with owner opt-in.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/HostCapacitySignals'}
+      responses:
+        '200': {description: Host capacity, content: {application/json: {schema: {$ref: '#/components/schemas/HostCapacityView'}}}}
+        '400': {description: Invalid or oversized signals}
+        '403': {description: Paired runtime permission required}
+
+  /agent-pairing/accounts/sign-out:
+    post:
+      operationId: signOutAccountEverywhere
+      description: Person account.manage and ownership of every sign-in required. Atomically revokes the complete revision-bound canonical quota account set. Other accounts and vendor sessions outside PAIMOS remain untouched; local cleanup stays pending.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [targets]
+              properties:
+                targets:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [computer_id, account_id, expected_revision]
+                    properties:
+                      computer_id: {type: string, format: uuid}
+                      account_id: {type: string, format: uuid}
+                      expected_revision: {type: integer, minimum: 1}
+      responses:
+        '200': {description: All reviewed sign-ins blocked; local cleanup pending}
+        '403': {description: Current owner permission required}
+        '409': {description: Reviewed sign-in set changed}
+
+  /agent-pairing/computers/{computerId}/name:
+    parameters:
+      - {name: computerId, in: path, required: true, schema: {type: string, format: uuid}}
+    put:
+      operationId: renamePairedComputer
+      description: Person account.manage and computer ownership required; changes only its displayed name, using the reviewed revision.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [name, expected_revision]
+              properties:
+                name: {type: string, minLength: 1, maxLength: 128}
+                expected_revision: {type: integer, minimum: 1}
+      responses:
+        '200': {description: Saved computer name}
+        '400': {description: Invalid name}
+        '403': {description: Current owner permission required}
+        '409': {description: Computer changed or removed}
+
   /agent-pairing/computers:
     get:
       operationId: listPairedComputers
@@ -7484,7 +7573,7 @@ paths:
       operationId: completeAgentRecovery
       parameters:
         - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
-      description: "Paired exact agent/daemon generation only. Reports a bounded outcome: reconnected, exited, or rejected. A verified exit must accompany a terminal old run; no new run from silence. Rechecks the initiating person's permissions and original session binding before queuing a continuation through standard run creation. Exact completion retry returns the saved receipt and never creates another run. No credential mutation."
+      description: "Paired exact agent/daemon generation only. Reports a bounded outcome: reconnected, exited, or rejected. A verified exit must accompany a terminal old run; no new run from silence. Rechecks the initiating person's permissions and original session binding before queuing a continuation through standard run creation. A committed escalation budget refusal is recorded without a continuation. Exact completion retry returns the saved receipt and never creates another run. No credential mutation."
       requestBody:
         required: true
         content:
@@ -7492,7 +7581,7 @@ paths:
             schema: {type: object, required: [daemon_id, generation, outcome], additionalProperties: false, properties: {daemon_id: {type: string, maxLength: 128}, generation: {type: string, pattern: '^[0-9a-f]{32}$'}, outcome: {type: string, enum: [reconnected, exited, rejected]}}}
       responses:
         '200': {description: "Recorded result; continuation_queued means waiting for normal dispatch, not process started", content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
-        '409': {description: "Claim expired, binding changed, prior exit unconfirmed, or divergent completion"}
+        '409': {description: "Claim expired, binding changed, prior exit unconfirmed, divergent completion, or a committed escalation budget refusal"}
   /projects/{projectId}/harness-sessions/{sessionId}/recovery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -13995,7 +14084,53 @@ components:
     PairingSelfDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "account_id": {"type": "string", "format": "uuid"}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
     PairingDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode", "expected_revision"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
     PairingError: {"type": "object", "additionalProperties": false, "required": ["error", "code"], "properties": {"error": {"type": "string"}, "code": {"type": "string"}}}
-    PairingView: {"type": "object", "description": "Immutable request review and current lifecycle. Runtime prefix is returned only to initiating proof on successful redemption; never a token. Each verification has exactly one immutable run. Disconnect never asserts process termination.", "properties": {"local_auth_pinned": {"type": "boolean", "description": "A Secure Enclave confirmation key is pinned to this computer; this is a pairing prerequisite, not a live Touch ID capability report."}, "request_id": {"type": "string"}, "tenant_id": {"type": "string"}, "tenant_name": {"type": "string"}, "state": {"type": "string", "enum": ["pending", "approved", "denied", "expired", "redeemed", "revoked"]}, "request_digest": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "computer_name": {"type": "string"}, "platform": {"type": "string"}, "arch": {"type": "string"}, "workspace_path": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "requested_accounts": {"type": "array", "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "verification": {"type": "object", "properties": {"mode": {"type": ["string", "null"], "enum": ["one_per_harness", "connect_only", null]}, "policy": {"const": "read_only"}, "runs_per_account": {"const": 1}, "max_parallel_runs": {"const": 1}, "allowance": {"const": 1}, "unit": {"const": "requests"}, "max_duration_seconds": {"const": 60}, "expires_at": {"type": "string", "format": "date-time"}, "task": {"const": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."}}}, "computer_id": {"type": ["string", "null"]}, "computer_state": {"type": ["string", "null"], "enum": ["connected", "draining", "revoked", null]}, "principal_id": {"type": ["string", "null"]}, "daemon_id": {"type": ["string", "null"]}, "runtime_prefix": {"type": "string"}, "local_cleanup": {"type": "string"}, "local_processes": {"type": "string"}, "enrollments": {"type": "array", "items": {"type": "object", "properties": {"account_id": {"type": "string"}, "account_key": {"type": "string"}, "harness": {"type": "string"}, "label": {"type": "string"}, "model_profile_id": {"type": "string"}, "state": {"type": "string"}, "local_cleanup": {"type": "string"}, "verification_run_id": {"type": ["string", "null"]}, "active_run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}}, "can_verify": {"type": "boolean", "description": "This signed-in person owns the enrollment; account.manage is separately required at the final write."}, "verification_expired_ready": {"type": "boolean", "description": "Expired verification is informational only when this enrollment has a fresh successful live probe. It does not grant ongoing use."}, "verification_state": {"type": "string"}, "verification_error": {"type": "string"}, "verification_reason": {"type": "string", "description": "Bounded no-launch cause: adapter_unsupported, binding_incomplete or local_binding_missing. Empty when no refusal was reported."}, "local_processes": {"type": "string", "enum": ["unconfirmed", "drained"]}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}}}}, "setup_state": {"type": "string", "enum": ["not_started", "approved", "provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "setup_error": {"type": "string"}, "last_seen_at": {"type": ["string", "null"], "format": "date-time"}, "archived_at": {"type": "string", "format": "date-time", "description": "Set once a person removed the computer (AEON-402); removed computers leave the list"}, "connectivity": {"type": "string", "enum": ["online", "offline", "unknown"]}, "revision": {"type": "integer"}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}, "existing_computer_id": {"type": "string", "format": "uuid"}, "verification_capabilities": {"$ref": "#/components/schemas/PairingVerificationCapabilities"}, "verification_helper_version": {"type": "string"}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}, "agent_compatibility": {"$ref": "#/components/schemas/AgentCompatibility"}}, "required": ["request_id", "tenant_id", "tenant_name", "state", "request_digest", "expires_at", "computer_name", "platform", "arch", "workspace_path", "capabilities", "requested_accounts", "verification", "computer_id", "computer_state", "principal_id", "daemon_id", "local_cleanup", "local_processes", "enrollments", "setup_state", "setup_error", "last_seen_at", "connectivity", "revision", "accounting_state"]}
+    HostCapacityPolicy:
+      type: object
+      additionalProperties: false
+      required: [mode, maximum_agents, maximum_load, wait_when_busy, ease_on_battery, ease_when_hot, consider_activity]
+      properties:
+        mode: {type: string, enum: [off, smart, fixed], default: off}
+        maximum_agents: {type: integer, minimum: 0, maximum: 64, default: 0, description: Zero preserves the existing unlimited policy; configured limits are 1–64.}
+        maximum_load: {type: number, minimum: 1, maximum: 200, default: 30}
+        wait_when_busy: {type: boolean, default: true}
+        ease_on_battery: {type: boolean, default: true}
+        ease_when_hot: {type: boolean, default: true}
+        consider_activity: {type: boolean, default: false, description: "Opt-in; measures activity only, never input content."}
+    HostCapacitySignals:
+      type: object
+      additionalProperties: false
+      required: [load, cores, memory_pressure, power, thermal]
+      properties:
+        load: {type: [number, 'null'], minimum: 0, maximum: 10000}
+        cores: {type: integer, minimum: 1, maximum: 4096}
+        memory_pressure: {type: string, enum: [unknown, normal, high]}
+        memory_used_gb: {type: [number, 'null'], minimum: 0, maximum: 1048576}
+        memory_total_gb: {type: [number, 'null'], minimum: 0, maximum: 1048576}
+        power: {type: string, enum: [unknown, plugged_in, battery]}
+        thermal: {type: string, enum: [unknown, normal, hot]}
+        input_active: {type: [boolean, 'null']}
+    HostCapacityView:
+      type: object
+      required: [policy, running, queued, reason, load_limit, history]
+      properties:
+        policy: {$ref: '#/components/schemas/HostCapacityPolicy'}
+        signals: {oneOf: [{$ref: '#/components/schemas/HostCapacitySignals'}, {type: 'null'}]}
+        reported_at: {type: [string, 'null'], format: date-time}
+        running: {type: integer, minimum: 0}
+        queued: {type: integer, minimum: 0}
+        reason: {type: string, description: Empty means allowed; otherwise the reason new starts wait.}
+        load_limit: {type: number, minimum: 0}
+        history:
+          type: array
+          maxItems: 60
+          items:
+            type: object
+            required: [at, load]
+            properties:
+              at: {type: string, format: date-time}
+              load: {type: number, minimum: 0}
+
+    PairingView: {"type": "object", "description": "Immutable request review and current lifecycle. Runtime prefix is returned only to initiating proof on successful redemption; never a token. Each verification has exactly one immutable run. Disconnect never asserts process termination.", "properties": {"local_auth_pinned": {"type": "boolean", "description": "A Secure Enclave confirmation key is pinned to this computer; this is a pairing prerequisite, not a live Touch ID capability report."}, "request_id": {"type": "string"}, "tenant_id": {"type": "string"}, "tenant_name": {"type": "string"}, "state": {"type": "string", "enum": ["pending", "approved", "denied", "expired", "redeemed", "revoked"]}, "request_digest": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "computer_name": {"type": "string"}, "platform": {"type": "string"}, "arch": {"type": "string"}, "workspace_path": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "requested_accounts": {"type": "array", "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "verification": {"type": "object", "properties": {"mode": {"type": ["string", "null"], "enum": ["one_per_harness", "connect_only", null]}, "policy": {"const": "read_only"}, "runs_per_account": {"const": 1}, "max_parallel_runs": {"const": 1}, "allowance": {"const": 1}, "unit": {"const": "requests"}, "max_duration_seconds": {"const": 60}, "expires_at": {"type": "string", "format": "date-time"}, "task": {"const": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."}}}, "computer_id": {"type": ["string", "null"]}, "computer_state": {"type": ["string", "null"], "enum": ["connected", "draining", "revoked", null]}, "principal_id": {"type": ["string", "null"]}, "daemon_id": {"type": ["string", "null"]}, "runtime_prefix": {"type": "string"}, "local_cleanup": {"type": "string"}, "local_processes": {"type": "string"}, "enrollments": {"type": "array", "items": {"type": "object", "properties": {"account_id": {"type": "string"}, "account_key": {"type": "string"}, "harness": {"type": "string"}, "label": {"type": "string"}, "model_profile_id": {"type": "string"}, "state": {"type": "string"}, "local_cleanup": {"type": "string"}, "verification_run_id": {"type": ["string", "null"]}, "active_run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}}, "verified_at": {"type":"string","format":"date-time"}, "verification_expires_at": {"type":"string","format":"date-time"}, "last_used_at": {"type":"string","format":"date-time"}, "can_verify": {"type": "boolean", "description": "This signed-in person owns the enrollment; account.manage is separately required at the final write."}, "verification_expired_ready": {"type": "boolean", "description": "Expired verification is informational only when this enrollment has a fresh successful live probe. It does not grant ongoing use."}, "verification_state": {"type": "string"}, "verification_error": {"type": "string"}, "verification_reason": {"type": "string", "description": "Bounded no-launch cause: adapter_unsupported, binding_incomplete or local_binding_missing. Empty when no refusal was reported."}, "local_processes": {"type": "string", "enum": ["unconfirmed", "drained"]}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}}}}, "setup_state": {"type": "string", "enum": ["not_started", "approved", "provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "setup_error": {"type": "string"}, "last_seen_at": {"type": ["string", "null"], "format": "date-time"}, "archived_at": {"type": "string", "format": "date-time", "description": "Set once a person removed the computer (AEON-402); removed computers leave the list"}, "connectivity": {"type": "string", "enum": ["online", "offline", "unknown"]}, "revision": {"type": "integer"}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}, "existing_computer_id": {"type": "string", "format": "uuid"}, "verification_capabilities": {"$ref": "#/components/schemas/PairingVerificationCapabilities"}, "verification_helper_version": {"type": "string"}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}, "agent_compatibility": {"$ref": "#/components/schemas/AgentCompatibility"}, "host_capacity": {"$ref": "#/components/schemas/HostCapacityView", "description": "Present on every paired computer view from servers that offer host capacity. A daemon negotiates the capacity report and claim fence from this field on GET /api/agent-pairing/self; without it, starts follow the unchanged legacy path."}}, "required": ["request_id", "tenant_id", "tenant_name", "state", "request_digest", "expires_at", "computer_name", "platform", "arch", "workspace_path", "capabilities", "requested_accounts", "verification", "computer_id", "computer_state", "principal_id", "daemon_id", "local_cleanup", "local_processes", "enrollments", "setup_state", "setup_error", "last_seen_at", "connectivity", "revision", "accounting_state"]}
     PairingDeviceResponse: {"type": "object", "additionalProperties": false, "required": ["request_id", "tenant_id", "user_code", "state", "expires_at", "interval_seconds", "verification_uri", "request_digest"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "user_code": {"type": "string"}, "state": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "interval_seconds": {"const": 5}, "verification_uri": {"type": "string"}, "request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
     ClassicBatchAliasResponse:
       type: object
@@ -16647,6 +16782,7 @@ components:
       description: Server routing advice; times use the account owner schedule. Does not grant dispatch authority.
       properties:
         code: {type: string, enum: [schedule, reserve, reading, vendor, offline, sign_in, hold, approval, capacity, allowance, models, state, residency]}
+        host_reason: {type: string, description: Content-free host admission reason; present only on a capacity wait.}
         until: {type: string, format: date-time}
         read_at: {type: string, format: date-time}
         timezone: {type: string}
@@ -19005,6 +19141,8 @@ components:
       additionalProperties: false
       required: [early_percent, urgent_percent]
       properties:
+        expected_early_percent: {type: integer, minimum: 1, maximum: 50, description: "Optional compare-and-set guard, paired with expected_urgent_percent."}
+        expected_urgent_percent: {type: integer, minimum: 1, maximum: 50}
         early_percent: {type: integer, minimum: 1, maximum: 50, default: 10}
         urgent_percent: {type: integer, minimum: 1, maximum: 50, default: 3}
     QuotaWarningSession:
@@ -20649,10 +20787,15 @@ components:
               type: string
               enum: [asc, desc]
           description: The earlier single-key sort; defaults to position asc
+        mode:
+          type: string
+          enum: [list, outline, graph]
+          default: list
+          description: "Ticket presentation mode; saved views always store it."
         columns:
           type: array
           maxItems: 32
-          description: Column ids in order; empty means the columns follow the table width
+          description: "Visible column ids in order; empty is retained for legacy clients."
           items:
             type: string
             pattern: '^[a-z][a-z_]{0,23}$'
@@ -20677,6 +20820,11 @@ components:
           items: {type: string}
         group_by:
           type: string
+        mode:
+          type: string
+          enum: [list, outline, graph]
+          default: list
+          description: "Ticket presentation mode; saved views always store it."
         columns:
           type: array
           items:
@@ -20687,7 +20835,7 @@ components:
       allOf:
         - {$ref: '#/components/schemas/ViewWrite'}
         - type: object
-          required: [id, owner_principal_id, project_id, sort, sort_keys, group_by, shared, created_at, updated_at, deleted_at]
+          required: [id, owner_principal_id, project_id, sort, sort_keys, group_by, mode, shared, created_at, updated_at, deleted_at]
           properties:
             id: {type: string, format: uuid}
             owner_principal_id: {type: string, format: uuid}
