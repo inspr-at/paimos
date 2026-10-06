@@ -30,9 +30,13 @@
     ,
     "internal/agentruns:TestWaitingClockTerminalWithoutStatusAndLifetimeBounds"
     ,
+    "internal/agentruns:TestWorkLeafDispatchAndClaimRejectParents"
+    ,
     "internal/agentsetup:TestVerificationApprovalURLUsesExistingAccountWithoutMutation"
     ,
     "internal/auth:TestAccessAuditIncludesGeneratedAgentPermissionGrant"
+    ,
+    "internal/auth:TestExitConfirmationAgentRouteCeiling"
     ,
     "internal/auth:TestRecurrenceAgentScopeIsExplicitAndBounded"
     ,
@@ -67,6 +71,8 @@
     "internal/auth:TestWorkstationSignatureAndActionEncoding"
     ,
     "internal/authz:TestAuditNewestWindowBeyondCap"
+    ,
+    "internal/authz:TestExitConfirmationRoutePermission"
     ,
     "internal/authz:TestScopeLookupPropagatesConnectionFailure"
     ,
@@ -110,9 +116,63 @@
     ,
     "internal/config:TestPhonePushConfigurationIsOptionalStrictAndRedacted"
     ,
+    "internal/crossreview:TestBuilderCompletionDuringWorkHandover"
+    ,
+    "internal/crossreview:TestCompletedBuilderDuringWorkHandover"
+    ,
+    "internal/crossreview:TestReviewHistoryAndActionsAfterWorkMigration"
+    ,
+    "internal/crossreview:TestReviewRejectsWorkParentWithoutCreatingOrders"
+    ,
+    "internal/db:TestMergeWorkSchemas"
+    ,
     "internal/db:TestRunMeasurementUpgradeFromRelease122PreservesEvidence"
     ,
     "internal/db:TestTenantGuardRefreshesVisibilityAfterRevocation"
+    ,
+    "internal/db:TestWorkNodesMigrationBusyGuardAndAtomicRetry"
+    ,
+    "internal/db:TestWorkNodesMigrationExactNumbers"
+    ,
+    "internal/db:TestWorkNodesMigrationPreservesRowsHistoryAndIdentities"
+    ,
+    "internal/db:TestWorkNodesUpgradeFromRelease122"
+    ,
+    "internal/db:TestWorkNodesVerifiedBackupRestoreDrill"
+    ,
+    "internal/db:TestWorkStatusBoundaryFlagAndCoalescing"
+    ,
+    "internal/db:TestWorkStatusConcurrentWritersUseCommittedTree"
+    ,
+    "internal/db:TestWorkStatusDeepAndWideBoundedCascade"
+    ,
+    "internal/db:TestWorkStatusEndpointBodiesPrecedeAdmission"
+    ,
+    "internal/db:TestWorkStatusLastChildKindConversionRetainsAudit"
+    ,
+    "internal/db:TestWorkStatusMovesDeletionRestoreAndRevisions"
+    ,
+    "internal/db:TestWorkStatusNodeLimitCrossingRollsBack"
+    ,
+    "internal/db:TestWorkStatusNodeLimitRecoveryAndTombstones"
+    ,
+    "internal/db:TestWorkStatusRejectsOversizedChangesAtomically"
+    ,
+    "internal/db:TestWorkStatusRulesAndCategories"
+    ,
+    "internal/db:TestWorkStatusTenantVisibilityRestored"
+    ,
+    "internal/eta:TestAggregateReadsHaveDeadline"
+    ,
+    "internal/events:TestCausalPreviewRejectsOversizedBulkBeforeTransfer"
+    ,
+    "internal/events:TestImportParentChangeHintInHistoryAndStream"
+    ,
+    "internal/events:TestImportParentChangeSummarizesMembershipWithoutRevisionChange"
+    ,
+    "internal/events:TestLateUsageReportHasAuthorizedNodeHint"
+    ,
+    "internal/events:TestPositionReadForwardsDeadlinesWithoutFlushing"
     ,
     "internal/features:TestAuthorizationProjectVisibilityAndRLS"
     ,
@@ -122,9 +182,35 @@
     ,
     "internal/features:TestValidationConcurrencyAndAtomicAudit"
     ,
+    "internal/harness:TestControlEventBounds"
+    ,
+    "internal/harness:TestCoordinatorLargeHandover"
+    ,
     "internal/harness:TestDeskAnswerReferencesSurviveVerifiedResumeAndLateCorrection"
     ,
     "internal/harness:TestHeartbeatCommitDiffValidationAndStorage"
+    ,
+    "internal/harness:TestLiveEtaRechecksWorkPermission"
+    ,
+    "internal/harness:TestWorkLeafBusyScopeAllowsSiblingWork"
+    ,
+    "internal/harness:TestWorkLeafExitBodyReadBeforeLocks"
+    ,
+    "internal/harness:TestWorkLeafPendingLostContactCanReviveAndStop"
+    ,
+    "internal/harness:TestWorkLeafRecoveryFencesBeforeResourceLocks"
+    ,
+    "internal/harness:TestWorkLeafRegistrationBindingAndGracefulDeadline"
+    ,
+    "internal/harness:TestWorkLeafResumeDefersEventsUntilSuccessorLocks"
+    ,
+    "internal/harness:TestWorkLeafUncertainExitConfirmation"
+    ,
+    "internal/importer:TestWorkNodesImporterLegacyMappingAndProvenance"
+    ,
+    "internal/importer:TestWorkNodesImporterReplaysMigrationWithoutMaskingPersonEdits"
+    ,
+    "internal/importer:TestWorkParentStatusImporterReplayAndChildChange"
     ,
     "internal/inbox:TestDeskReplyReservesBeforeEventWithConcurrentSend"
     ,
@@ -134,9 +220,19 @@
     ,
     "internal/knowledge:TestHistoricalSlugFollowsRenameOrderAfterBodyEdit"
     ,
+    "internal/knowledge:TestKnowledgeUndoPairingBeforeTreeWithWorkStatusOff"
+    ,
     "internal/knowledge:TestLearningDraftTenantBeforeAdvisory"
     ,
     "internal/markdownsource:TestCodeRangesPreserveEmptyUnclosedAndNestedBlocks"
+    ,
+    "internal/modelprovider:TestParentBenefitsRequiresSeparateOptInAndRevision"
+    ,
+    "internal/nodes:TestBenefitCompletionCategoryOverridesLiteralNames"
+    ,
+    "internal/nodes:TestFieldSchemaExactNumbers"
+    ,
+    "internal/nodes:TestFitKindFieldsExactNumbers"
     ,
     "internal/nodes:TestHeaderSelectorBounds"
     ,
@@ -144,9 +240,13 @@
     ,
     "internal/nodes:TestHideStatesBoundsAndNormalisation"
     ,
+    "internal/nodes:TestListEpicMembershipSetBasedAndScoped"
+    ,
     "internal/nodes:TestNodeRecurrenceBounds"
     ,
     "internal/nodes:TestNodeRecurrenceProvenance"
+    ,
+    "internal/nodes:TestPlanningDisplayedPlacementsInvariantAcrossSorts"
     ,
     "internal/nodes:TestPlanningWorkStartIncludesInitiatingMeasuredRun"
     ,
@@ -156,11 +256,117 @@
     ,
     "internal/nodes:TestReleaseTextEditPreservesMissingRouteHints"
     ,
+    "internal/nodes:TestTicketBenefitsCausalUndoCompletion"
+    ,
+    "internal/nodes:TestWorkAggregateLimitsAreExplicitHTTPFailures"
+    ,
+    "internal/nodes:TestWorkAggregatesCalibratedTokenEstimates"
+    ,
+    "internal/nodes:TestWorkAggregatesClosedLeafEstimateOrder"
+    ,
+    "internal/nodes:TestWorkAggregatesCoverageRegroupingCountsAndSort"
+    ,
+    "internal/nodes:TestWorkAggregatesDeepWideAndRLS"
+    ,
+    "internal/nodes:TestWorkAggregatesUnweightedAndHistoricalSpend"
+    ,
+    "internal/nodes:TestWorkBenefitsCausalUndoRejectsIncompleteCompletion"
+    ,
+    "internal/nodes:TestWorkCausalUndoAgentOrdinaryEditPreservesProtectedFields"
+    ,
+    "internal/nodes:TestWorkCausalUndoProtectedTransitions"
+    ,
+    "internal/nodes:TestWorkLifecycleBackgroundCompletionAndRevocation"
+    ,
+    "internal/nodes:TestWorkLifecycleBindingSerializesChildCreation"
+    ,
+    "internal/nodes:TestWorkLifecycleBodyDeadlineClearedOnlyAfterCompleteRead"
+    ,
+    "internal/nodes:TestWorkLifecycleBodyNetworkDeadline"
+    ,
+    "internal/nodes:TestWorkLifecycleCancelOpenLeavesAfterStop"
+    ,
+    "internal/nodes:TestWorkLifecycleCancelSettlesOrderWithAudit"
+    ,
+    "internal/nodes:TestWorkLifecycleExpiredHandoverRetriesDelivery"
+    ,
+    "internal/nodes:TestWorkLifecycleLeafGuardAndHistory"
+    ,
+    "internal/nodes:TestWorkLifecycleLostContactBlocksOrdinaryWrites"
+    ,
+    "internal/nodes:TestWorkLifecycleLostContactRetainsStopFence"
+    ,
+    "internal/nodes:TestWorkLifecyclePendingFencesOrderAndRunBindings"
+    ,
+    "internal/nodes:TestWorkLifecyclePendingFencesOriginalBindings"
+    ,
+    "internal/nodes:TestWorkLifecycleSplitWaitsAndReplays"
+    ,
+    "internal/nodes:TestWorkLifecycleStalePreviewAndAbandon"
+    ,
+    "internal/nodes:TestWorkLifecycleWorkOrderAndDispatchBindings"
+    ,
+    "internal/nodes:TestWorkName"
+    ,
+    "internal/nodes:TestWorkParentStatusCausalUndo"
+    ,
+    "internal/nodes:TestWorkParentStatusCausalUndoAuditRedactsHiddenCause"
+    ,
+    "internal/nodes:TestWorkParentStatusConfirmationReadsBeforeTenantLocks"
+    ,
+    "internal/nodes:TestWorkParentStatusDeleteCausalUndo"
+    ,
+    "internal/nodes:TestWorkParentStatusDisabledUndoFencesRevocation"
+    ,
+    "internal/nodes:TestWorkParentStatusHiddenCauseAndPermissionRevocation"
+    ,
+    "internal/nodes:TestWorkParentStatusMoveAndCreateCausalUndo"
+    ,
+    "internal/nodes:TestWorkParentStatusOrdinaryUndoOrdersAcrossActivation"
+    ,
+    "internal/nodes:TestWorkParentStatusPatchAndBulkBoundary"
+    ,
+    "internal/nodes:TestWorkParentStatusReusesAutopilotActivity"
+    ,
+    "internal/nodes:TestWorkScopeRootAndExpansionBudgets"
+    ,
+    "internal/nodes:TestWorkShapeFilterBounds"
+    ,
+    "internal/nodes:TestWorkVocabularyRoundTripAndShape"
+    ,
+    "internal/outcomes:TestOutcomeHistoryAndRecordingAfterWorkMigration"
+    ,
     "internal/outcomes:TestTicketMeasurementCanonicalCommitIdentity"
     ,
     "internal/outcomes:TestTicketMeasurementEvidenceKinds"
     ,
     "internal/outcomes:TestTicketMeasurementProjectScopeThroughMiddleware"
+    ,
+    "internal/parentbenefits:TestCombinedHumanEditAndStatusChangeKeepsAuthoredText"
+    ,
+    "internal/parentbenefits:TestDoneDoesNotWaitAndSummarisesLeaves"
+    ,
+    "internal/parentbenefits:TestFailureVisibleRetryAndLeafGate"
+    ,
+    "internal/parentbenefits:TestFlagAndProviderOffNeverPreventDone"
+    ,
+    "internal/parentbenefits:TestGenerationRechecksCurrentFieldSchema"
+    ,
+    "internal/parentbenefits:TestHumanEditAndSourceChangeFence"
+    ,
+    "internal/parentbenefits:TestLeaseRecoveryAndTenantIsolation"
+    ,
+    "internal/parentbenefits:TestNestedLeafSourcesAndExplicitLimits"
+    ,
+    "internal/parentbenefits:TestPublishedSnapshotAndUnrelatedFieldsSurvive"
+    ,
+    "internal/parentbenefits:TestRetryDeadlineBoundsBothBodyDecodes"
+    ,
+    "internal/parentbenefits:TestRetryIsPersonOnlyAndRechecksPermission"
+    ,
+    "internal/parentbenefits:TestSourceTextBudgetAndMissingBenefitsFailVisibly"
+    ,
+    "internal/parentbenefits:TestSummaryRejectsInvalidOrUnboundedModelOutput"
     ,
     "internal/phoneapprovals:TestPhoneDecisionHidesUnavailableApprovals"
     ,
@@ -240,9 +446,15 @@
     ,
     "internal/recurrences:TestEventMorningFollowsLocalDateAcrossDST"
     ,
+    "internal/recurrences:TestRecurrenceCreatesWorkLeafAndReopensDoneParent"
+    ,
     "internal/recurrences:TestRecurrenceTenantBeforeTree"
     ,
     "internal/recurrences:TestSixMonthSpringGapWalksPastOneYear"
+    ,
+    "internal/recurrences:TestStoredLegacyTemplateCreatesQueuedWorkLeafAfterLockedReload"
+    ,
+    "internal/recurrences:TestStoredRecurrenceKindMigrationPreservesReceipts"
     ,
     "internal/recurrences:TestUIClosedWorkflowCategoriesMatchOverlapAndOpenPrevious"
     ,
@@ -270,6 +482,60 @@
     ,
     "internal/recurrences:TestUIRetirementMigrationBackfillsUnderTenantRLS"
     ,
+    "internal/releases:TestExistingPlanningParentRepairPreservesExplicitBacklog"
+    ,
+    "internal/releases:TestFormerParentPlanRemovalAndUndoRespectsBacklog"
+    ,
+    "internal/releases:TestFormerParentReassignmentUpdatesFutureIntentAndUndo"
+    ,
+    "internal/releases:TestInheritedLeafBecomingParentReconcilesLiveMembership"
+    ,
+    "internal/releases:TestLeafParentRoundTripPreservesPlanningMetadata"
+    ,
+    "internal/releases:TestLeafShapeChangesPreserveCompleteProjectionAndUndo"
+    ,
+    "internal/releases:TestLeafShapeChangesReconcileMovedAndRestoredChildren"
+    ,
+    "internal/releases:TestNativeWorkMembershipReadProjection"
+    ,
+    "internal/releases:TestParentPlacementUndoPreservesRetainedBacklogProjection"
+    ,
+    "internal/releases:TestParentReassignmentInvalidatesRetainedScopeApproval"
+    ,
+    "internal/releases:TestParentReleaseSummaryReportsPartialCoverage"
+    ,
+    "internal/releases:TestPlacedLeafBecomingParentPreservesFrozenSnapshot"
+    ,
+    "internal/releases:TestQuickCreateUnderPlacedParentHonorsExplicitInclusion"
+    ,
+    "internal/releases:TestTicketOptionsHistoricalParentCanJoinNextRelease"
+    ,
+    "internal/releases:TestTicketOptionsParentMatchesCurrentLeaves"
+    ,
+    "internal/releases:TestWorkParentFrozenReleaseLeavesScopeUnchanged"
+    ,
+    "internal/releases:TestWorkParentPlacementAndFutureLeaves"
+    ,
+    "internal/releases:TestWorkParentPlacementBoundAndWorkEdges"
+    ,
+    "internal/releases:TestWorkParentPlacementDoesNotPermitUnrelatedClosedLeaf"
+    ,
+    "internal/releases:TestWorkParentPlacementRechecksRevokedGrantUnderFence"
+    ,
+    "internal/releases:TestWorkParentPlacementThousandLeavesWithNestedParents"
+    ,
+    "internal/releases:TestWorkParentPlacementUndoRestoresFutureLeafIntent"
+    ,
+    "internal/releases:TestWorkParentSplitShipsInAndAtomicFrozenRejection"
+    ,
+    "internal/releases:TestWorkParentStatusReleaseQuickCreate"
+    ,
+    "internal/releases:TestWorkParentWalkerKeepsScreenLinksBoundToEachLeaf"
+    ,
+    "internal/requirements:TestReagreementDoesNotRegenerateWorkThatBecameParent"
+    ,
+    "internal/requirements:TestWorkParentStatusRequirementGeneration"
+    ,
     "internal/rules/doctrine:TestFix2InboxPreparationDoesNotHoldMutationFence"
     ,
     "internal/rules/doctrine:TestHeadingAnchorsIgnoreCompleteCodeExamples"
@@ -290,6 +556,8 @@
     ,
     "internal/rulesimport:TestCodeExamplesNeverBecomeRules"
     ,
+    "internal/statusautopilot:TestAutopilotUndoVisibleToProjectReaderWithUnchangedParent"
+    ,
     "internal/themes:TestAgentAppearanceAPIRoundTripAndBounds"
     ,
     "internal/themes:TestAppearanceMigrationKeepsCanonicalAppearanceWhileLinkedAndAliasesAfterUnlink"
@@ -299,6 +567,18 @@
     "internal/themes:TestAppearanceMigrationPreservesPhysicalOwnersGeometryAndBehaviour"
     ,
     "internal/themes:TestAppearanceMigrationRetainsLegacyAliasAfterExplicitCanonicalUnlink"
+    ,
+    "internal/ticketbenefits:TestMigratedWorkCompletionRequirements"
+    ,
+    "internal/ticketbenefits:TestUnifiedWorkLeavesKeepCompletionRequirements"
+    ,
+    "internal/workorders:TestBufferBodyBoundsAndDecode"
+    ,
+    "internal/workorders:TestEndpointBodyNetworkDeadline"
+    ,
+    "internal/workorders:TestEndpointPositionedBodyNetworkDeadline"
+    ,
+    "scripts/releaseworkflow:TestParallelWebUnitsShareRuntimeAndRunOnce"
   ]
   ,
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)"
@@ -2308,6 +2588,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestWaitingClockTerminalWithoutStatusAndLifetimeBounds","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkLeafDispatchAndClaimRejectParents","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestWorkOrderLifecycleAndIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestWorkParentQueueRefusedWithLiveWorkChild","tier":"GATED-FULL"}
@@ -2904,6 +3186,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestEmptyAgentKeyDeniedAcrossRegisteredAPIRoutes","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestExitConfirmationAgentRouteCeiling","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestFromEnv","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestHasScopeAcceptsDotAndColon","tier":"GATED-FULL"}
@@ -3153,6 +3437,8 @@
     {"kind":"go","package":"internal/authz","name":"TestDenialLayersAndDisclosureOrder","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestEffectiveRouteMatrix","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/authz","name":"TestExitConfirmationRoutePermission","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestInstructionProvenanceRoutePermissions","tier":"GATED-FULL"}
     ,
@@ -4458,9 +4744,13 @@
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestBindingRefreshRunsWhileDirtyPublicationIsBlocked","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/crossreview","name":"TestBuilderCompletionDuringWorkHandover","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/crossreview","name":"TestChangesStatusRequiresVerifiedPinnedModel","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestCompletedBuilderAutomaticallyRequestsIndependentReview","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/crossreview","name":"TestCompletedBuilderDuringWorkHandover","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestGitHubStatusExactHeadAndNarrowAuthority","tier":"GATED-FULL"}
     ,
@@ -4482,7 +4772,11 @@
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestReviewFlowIsolationReplayAndVerdicts","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/crossreview","name":"TestReviewHistoryAndActionsAfterWorkMigration","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/crossreview","name":"TestReviewPreferencesStayWithinQualifiedSet","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/crossreview","name":"TestReviewRejectsWorkParentWithoutCreatingOrders","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestReviewRespectsProjectVisibilityAndSealsSnapshot","tier":"GATED-FULL"}
     ,
@@ -4529,6 +4823,8 @@
     {"kind":"go","package":"internal/db","name":"TestEveryTenantTableHasForcedRLS","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestHumanCheckMigrationUpgradesExistingStrictSchemasUnderRLS","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestMergeWorkSchemas","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/db","name":"TestMigrationCheckerSplitParity","tier":"GATED-FULL"}
     ,
@@ -4590,7 +4886,39 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestWorkMigrationPreflightPagesAllTenantsWithoutWrites","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestWorkNodesMigrationBusyGuardAndAtomicRetry","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkNodesMigrationExactNumbers","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkNodesMigrationPreservesRowsHistoryAndIdentities","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkNodesUpgradeFromRelease122","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkNodesVerifiedBackupRestoreDrill","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestWorkRoutingUpgradePreservesResidencyAndPins","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkStatusBoundaryFlagAndCoalescing","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkStatusConcurrentWritersUseCommittedTree","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkStatusDeepAndWideBoundedCascade","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkStatusEndpointBodiesPrecedeAdmission","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkStatusLastChildKindConversionRetainsAudit","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkStatusMovesDeletionRestoreAndRevisions","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkStatusNodeLimitCrossingRollsBack","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkStatusNodeLimitRecoveryAndTombstones","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkStatusRejectsOversizedChangesAtomically","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkStatusRulesAndCategories","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestWorkStatusTenantVisibilityRestored","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/db","name":"TestWorkTreeTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"}
     ,
@@ -4688,11 +5016,15 @@
     ,
     {"kind":"go","package":"internal/escalation","name":"TestDistinctFailureEvidence","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/eta","name":"TestAggregateReadsHaveDeadline","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/eta","name":"TestAllowedWindow","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestAccountEventHistoryAndSSEUseCurrentOwnerSharing","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestActivityCursorBindsFiltersAndBoundsInput","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestCausalPreviewRejectsOversizedBulkBeforeTransfer","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/events","name":"TestCounterWaitsForCommitAndNotificationContainsOnlyHint","tier":"ESSENTIAL"}
     ,
@@ -4703,6 +5035,12 @@
     {"kind":"go","package":"internal/events","name":"TestEventTimestampRange","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestExactAPINodeChangesCompareNumbersExactly","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestImportParentChangeHintInHistoryAndStream","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestImportParentChangeSummarizesMembershipWithoutRevisionChange","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestLateUsageReportHasAuthorizedNodeHint","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/events","name":"TestListPositionIsALowerBoundWithoutRepeatingUnderContinuousEvents","tier":"GATED-FULL"}
     ,
@@ -4721,6 +5059,8 @@
     {"kind":"go","package":"internal/events","name":"TestPositionOfAReadNamesTheSnapshotAnInterruptedReadIsRunAgain","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestPositionOfAnAcceptedWriteIsAtOrAboveItsOwnEvent","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/events","name":"TestPositionReadForwardsDeadlinesWithoutFlushing","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/events","name":"TestPositionReadsNameRegisteredRoutes","tier":"GATED-FULL"}
     ,
@@ -4790,9 +5130,13 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestAutomaticProvenanceFitsTheRulesBudget","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestControlEventBounds","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestControlRelayUsesDatabaseBudgetAndMonotonicRetention","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestCoordinatorHandover","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestCoordinatorLargeHandover","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestCoordinatorProgressCountsMissingAndFinishedWorkers","tier":"GATED-FULL"}
     ,
@@ -4953,6 +5297,8 @@
     {"kind":"go","package":"internal/harness","name":"TestLiveDisplayLabelIsNotThePrincipalName","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLiveEtaFollowsCurrentProject","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestLiveEtaRechecksWorkPermission","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestLiveEtaTimestampsArePerTicket","tier":"GATED-FULL"}
     ,
@@ -5256,6 +5602,20 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestVendorSessionBinding","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestWorkLeafBusyScopeAllowsSiblingWork","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestWorkLeafExitBodyReadBeforeLocks","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestWorkLeafPendingLostContactCanReviveAndStop","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestWorkLeafRecoveryFencesBeforeResourceLocks","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestWorkLeafRegistrationBindingAndGracefulDeadline","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestWorkLeafResumeDefersEventsUntilSuccessorLocks","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestWorkLeafUncertainExitConfirmation","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/harnesslaunch","name":"TestEntrypointAndEnvironment","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harnesslaunch","name":"TestGeminiBudgetScaleAndSettings","tier":"GATED-FULL"}
@@ -5353,6 +5713,12 @@
     {"kind":"go","package":"internal/importer","name":"TestSyntheticQuoteCRMMapping","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/importer","name":"TestTargetPersonIDKeepsAliasAndCanonicalLinks","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/importer","name":"TestWorkNodesImporterLegacyMappingAndProvenance","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/importer","name":"TestWorkNodesImporterReplaysMigrationWithoutMaskingPersonEdits","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/importer","name":"TestWorkParentStatusImporterReplayAndChildChange","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/importer/offers","name":"TestBundleDirectoryTarAndDryRun","tier":"GATED-FULL"}
     ,
@@ -5506,9 +5872,17 @@
     ,
     {"kind":"go","package":"internal/intake","name":"TestTargetRefusalCodes","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/journey","name":"TestAccessPermitRenewalRecoversExpiredAndRevokedAuthority","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/journey","name":"TestAtomicReleaseMembershipLockOrder","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/journey","name":"TestBriefingNextActionsFencePermitRenewalByRevisionAndWindow","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/journey","name":"TestBriefingNextActionsIgnoreDeletedMembersAndRestoreThem","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/journey","name":"TestBriefingNextActionsMatchJourneyRegression","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/journey","name":"TestCurrentTicketStatsIgnoreDeletedMembersAndRestoreThem","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/journey","name":"TestDeriveStagesAndNextAction","tier":"GATED-FULL"}
     ,
@@ -5549,6 +5923,10 @@
     {"kind":"go","package":"internal/journey","name":"TestJourneyStageGateLiveTracksRevocationAndExpiry","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/journey","name":"TestJourneyStandingGateRenewalFences","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/journey","name":"TestJourneyWritesTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/journey","name":"TestLiveReleaseFactsExcludeFormerAndDeletedLeavesInBothProjections","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/journey","name":"TestOpenFirstReleaseWithFiveExistingTicketsAtomic","tier":"GATED-FULL"}
     ,
@@ -5591,6 +5969,8 @@
     {"kind":"go","package":"internal/knowledge","name":"TestKnowledgeLockedEligibilityAfterConcurrentDelete","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestKnowledgeTenantBeforeTreeAndRowForDeleteAndUndo","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestKnowledgeUndoPairingBeforeTreeWithWorkStatusOff","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningDraftProjectOnlyUndo","tier":"GATED-FULL"}
     ,
@@ -5693,6 +6073,8 @@
     {"kind":"go","package":"internal/modelprovider","name":"TestLocalAndPublicModelAddressesRemainAllowed","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelprovider","name":"TestOutboundInventoryUsesWorkspaceModelOptIn","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelprovider","name":"TestParentBenefitsRequiresSeparateOptInAndRevision","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/modelprovider","name":"TestSecretFormattingIsMasked","tier":"GATED-FULL"}
     ,
@@ -5826,6 +6208,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestAccessWritesDoNotDeadlockNodeMove","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestBenefitCompletionCategoryOverridesLiteralNames","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestBulkChangeSkipsWithReasonsAndUndoesAsOne","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestBulkPreconditionsSkipNodesChangedSince","tier":"GATED-FULL"}
@@ -5876,6 +6260,10 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestFieldSchema","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestFieldSchemaExactNumbers","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestFitKindFieldsExactNumbers","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestHeaderSelectorBounds","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestHideClosedAgreesWithBuckets","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -5925,6 +6313,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestListAssigneeSortUsesTheNameTheViewerSees","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestListCursorFiltersAndTree","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestListEpicMembershipSetBasedAndScoped","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestListFiltersExclusionsLabelsEpicsAndDates","tier":"GATED-FULL"}
     ,
@@ -6001,6 +6391,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestPlanningCostMicrosAgree","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPlanningDegradedHistoryRetainsLegacyCalibration","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestPlanningDisplayedPlacementsInvariantAcrossSorts","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange","tier":"GATED-FULL"}
     ,
@@ -6116,6 +6508,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestTicketBenefitsBulkAndUndo","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestTicketBenefitsCausalUndoCompletion","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestTicketBenefitsConcurrentFieldsAndCompletion","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestTicketBenefitsCreationCompletionAndHistory","tier":"GATED-FULL"}
@@ -6134,6 +6528,80 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestUnauthorized","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkAggregateLimitsAreExplicitHTTPFailures","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkAggregatesCalibratedTokenEstimates","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkAggregatesClosedLeafEstimateOrder","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkAggregatesCoverageRegroupingCountsAndSort","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkAggregatesDeepWideAndRLS","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkAggregatesUnweightedAndHistoricalSpend","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkBenefitsCausalUndoRejectsIncompleteCompletion","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkCausalUndoAgentOrdinaryEditPreservesProtectedFields","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkCausalUndoProtectedTransitions","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleBackgroundCompletionAndRevocation","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleBindingSerializesChildCreation","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleBodyDeadlineClearedOnlyAfterCompleteRead","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleBodyNetworkDeadline","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleCancelOpenLeavesAfterStop","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleCancelSettlesOrderWithAudit","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleExpiredHandoverRetriesDelivery","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleLeafGuardAndHistory","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleLostContactBlocksOrdinaryWrites","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleLostContactRetainsStopFence","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecyclePendingFencesOrderAndRunBindings","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecyclePendingFencesOriginalBindings","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleSplitWaitsAndReplays","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleStalePreviewAndAbandon","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkLifecycleWorkOrderAndDispatchBindings","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkName","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkParentStatusCausalUndo","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkParentStatusCausalUndoAuditRedactsHiddenCause","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkParentStatusConfirmationReadsBeforeTenantLocks","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkParentStatusDeleteCausalUndo","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkParentStatusDisabledUndoFencesRevocation","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkParentStatusHiddenCauseAndPermissionRevocation","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkParentStatusMoveAndCreateCausalUndo","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkParentStatusOrdinaryUndoOrdersAcrossActivation","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkParentStatusPatchAndBulkBoundary","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkParentStatusReusesAutopilotActivity","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkScopeRootAndExpansionBudgets","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkShapeFilterBounds","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkStartSnapshotBaselineHistoryAndCostScope","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkStartSnapshotConcurrentUnknownAndTenantIsolation","tier":"GATED-FULL"}
@@ -6145,6 +6613,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestWorkStartSnapshotUsesKindCategoriesAndClosesSessionFirstEpisodes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkStatusEntryFencesTenantBeforeTree","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkVocabularyRoundTripAndShape","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkingAgentConfirmsEstimate","tier":"GATED-FULL"}
     ,
@@ -6176,6 +6646,8 @@
     ,
     {"kind":"go","package":"internal/outcomes","name":"TestOutcomeBriefingRangePagination","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/outcomes","name":"TestOutcomeHistoryAndRecordingAfterWorkMigration","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/outcomes","name":"TestOutcomeRangeValidation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/outcomes","name":"TestOutcomeReadIsPerProject","tier":"ESSENTIAL"}
@@ -6199,6 +6671,32 @@
     {"kind":"go","package":"internal/ownedprocess","name":"TestUnsupportedPlatformWithholdsGroupOwnership","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/ownedprocess","name":"TestWaitGroupObserverFailureDoesNotSignal","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/parentbenefits","name":"TestCombinedHumanEditAndStatusChangeKeepsAuthoredText","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/parentbenefits","name":"TestDoneDoesNotWaitAndSummarisesLeaves","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/parentbenefits","name":"TestFailureVisibleRetryAndLeafGate","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/parentbenefits","name":"TestFlagAndProviderOffNeverPreventDone","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/parentbenefits","name":"TestGenerationRechecksCurrentFieldSchema","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/parentbenefits","name":"TestHumanEditAndSourceChangeFence","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/parentbenefits","name":"TestLeaseRecoveryAndTenantIsolation","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/parentbenefits","name":"TestNestedLeafSourcesAndExplicitLimits","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/parentbenefits","name":"TestPublishedSnapshotAndUnrelatedFieldsSurvive","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/parentbenefits","name":"TestRetryDeadlineBoundsBothBodyDecodes","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/parentbenefits","name":"TestRetryIsPersonOnlyAndRechecksPermission","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/parentbenefits","name":"TestSourceTextBudgetAndMissingBenefitsFailVisibly","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/parentbenefits","name":"TestSummaryRejectsInvalidOrUnboundedModelOutput","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/perf","name":"TestLocalEndpointsAtScale","tier":"GATED-FULL"}
     ,
@@ -6542,6 +7040,8 @@
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRRULEValidationAndPreviewBounds","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceCreatesWorkLeafAndReopensDoneParent","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceFenceAllowsTenantKeyShare","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestRecurrenceTenantBeforeTree","tier":"NIGHTLY"}
@@ -6551,6 +7051,10 @@
     {"kind":"go","package":"internal/recurrences","name":"TestRollbackUniqueKeyAndInvalidTarget","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestSixMonthSpringGapWalksPastOneYear","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestStoredLegacyTemplateCreatesQueuedWorkLeafAfterLockedReload","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/recurrences","name":"TestStoredRecurrenceKindMigrationPreservesReceipts","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/recurrences","name":"TestTemplateVariablesAndBounds","tier":"GATED-FULL"}
     ,
@@ -6585,6 +7089,8 @@
     {"kind":"go","package":"internal/relations","name":"TestCRMRelationKindsDirectionAndUndo","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/relations","name":"TestConcurrentUndoExactlyOnce","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/relations","name":"TestCycleSearchBudgetFailsClosed","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/relations","name":"TestPaginationValidationAndAtomicity","tier":"GATED-FULL"}
     ,
@@ -6768,9 +7274,23 @@
     ,
     {"kind":"go","package":"internal/releases","name":"TestCreateReleaseTickets","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/releases","name":"TestExistingPlanningParentRepairPreservesExplicitBacklog","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/releases","name":"TestExistingTicketMoveConfirmationAndProjectBoundary","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/releases","name":"TestExistingTicketOptionsBulkAddAndUndo","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestFormerParentPlanRemovalAndUndoRespectsBacklog","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestFormerParentReassignmentUpdatesFutureIntentAndUndo","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestInheritedLeafBecomingParentReconcilesLiveMembership","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestLeafParentRoundTripPreservesPlanningMetadata","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestLeafShapeChangesPreserveCompleteProjectionAndUndo","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestLeafShapeChangesReconcileMovedAndRestoredChildren","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/releases","name":"TestMalformedBackfillFallsBackOnlyForItsRelease","tier":"GATED-FULL"}
     ,
@@ -6788,9 +7308,19 @@
     ,
     {"kind":"go","package":"internal/releases","name":"TestNativeMembershipVisibilityBoundsAndUninitializedProject","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/releases","name":"TestNativeWorkMembershipReadProjection","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/releases","name":"TestNoteSnapshotConcurrentMembershipAndFields","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/releases","name":"TestNoteSnapshotUsesExactMembershipAndFields","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestParentPlacementUndoPreservesRetainedBacklogProjection","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestParentReassignmentInvalidatesRetainedScopeApproval","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestParentReleaseSummaryReportsPartialCoverage","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestPlacedLeafBecomingParentPreservesFrozenSnapshot","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/releases","name":"TestPlanRemovalEmitsUndoableMembershipAndFreshScope","tier":"GATED-FULL"}
     ,
@@ -6802,9 +7332,37 @@
     ,
     {"kind":"go","package":"internal/releases","name":"TestPublishedNoteSnapshotIgnoresLaterTicketEdits","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/releases","name":"TestQuickCreateUnderPlacedParentHonorsExplicitInclusion","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/releases","name":"TestReleaseMembershipTenantBeforePairingWithDerivationDisabled","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/releases","name":"TestTicketOptionsHistoricalParentCanJoinNextRelease","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/releases","name":"TestTicketOptionsMatchSourceReleaseWriteEligibility","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestTicketOptionsParentMatchesCurrentLeaves","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestWalkerClosedStatesDoNotCountAsOpen","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestWorkParentFrozenReleaseLeavesScopeUnchanged","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestWorkParentPlacementAndFutureLeaves","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestWorkParentPlacementBoundAndWorkEdges","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestWorkParentPlacementDoesNotPermitUnrelatedClosedLeaf","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestWorkParentPlacementRechecksRevokedGrantUnderFence","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestWorkParentPlacementThousandLeavesWithNestedParents","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestWorkParentPlacementUndoRestoresFutureLeafIntent","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestWorkParentSplitShipsInAndAtomicFrozenRejection","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestWorkParentStatusReleaseQuickCreate","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/releases","name":"TestWorkParentWalkerKeepsScreenLinksBoundToEachLeaf","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestAccountLimitRequestAndResponseSchemas","tier":"GATED-FULL"}
     ,
@@ -6868,9 +7426,13 @@
     ,
     {"kind":"go","package":"internal/requirements","name":"TestPlanEventFailureRollsBackSelectionAndRevisions","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/requirements","name":"TestReagreementDoesNotRegenerateWorkThatBecameParent","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/requirements","name":"TestReleasePlanAndWalker","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/requirements","name":"TestRequirementCreation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/requirements","name":"TestWorkParentStatusRequirementGeneration","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/reviewgate","name":"TestGateRequiresIndependentFinishedVerifiedRun","tier":"ESSENTIAL"}
     ,
@@ -7500,13 +8062,21 @@
     ,
     {"kind":"go","package":"internal/sessionusage","name":"TestWrongVendorNestedUsageAndCompetingFormats","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/stagehandoff","name":"TestAccessRenewalFencesInflightReporterEvidence","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/stagehandoff","name":"TestCandidateVersionValidation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/stagehandoff","name":"TestClassicBatchAliasBuiltEvidence","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/stagehandoff","name":"TestClosedLaunchChecksRefuse","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/stagehandoff","name":"TestCompletionAndJourneyShareTenantPairingTreeOrder","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/stagehandoff","name":"TestEvidenceAndCompletionShareLockOrderWithDerivationDisabled","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/stagehandoff","name":"TestEvidenceLaunchAdmission","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/stagehandoff","name":"TestEvidenceLocksProjectBeforeHandoffWithDerivationDisabled","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/stagehandoff","name":"TestExistingHandoffCanFinishAfterPluginDisable","tier":"GATED-FULL"}
     ,
@@ -7568,9 +8138,13 @@
     ,
     {"kind":"go","package":"internal/stagehandoff","name":"TestSupersededHandoffReadAndLaunchReplay","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/stagehandoff","name":"TestTerminalHandoffsSettleSuccessiveReleases","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAutopilotHumanCheckObjectionAndStaleUndo","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAutopilotTenantIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAutopilotUndoVisibleToProjectReaderWithUnchangedParent","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestCurrentFlagsOutliveRecentChangesAndDisappearOnResolution","tier":"GATED-FULL"}
     ,
@@ -7720,6 +8294,10 @@
     ,
     {"kind":"go","package":"internal/ticketbenefits","name":"TestCompletionTransitions","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/ticketbenefits","name":"TestMigratedWorkCompletionRequirements","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/ticketbenefits","name":"TestUnifiedWorkLeavesKeepCompletionRequirements","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"internal/ticketwork","name":"TestAgentWorkRoutePermission","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/ticketwork","name":"TestApplyUsageGroupsModelsOnce","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -7757,6 +8335,8 @@
     {"kind":"go","package":"internal/usagedashboard","name":"TestBuildWorkKeepsTwoOrFewerWorkersAsSessionWaste","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/usagedashboard","name":"TestBuildWorkTokenCoverageIsPerComponent","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/usagedashboard","name":"TestCompletionCapSignalsTruncationWithoutSessionsInRange","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/usagedashboard","name":"TestDashboardAggregatesVisibleSessionsOnly","tier":"ESSENTIAL"}
     ,
@@ -7833,6 +8413,12 @@
     {"kind":"go","package":"internal/views","name":"TestProjectViewsRoundTripSoftDeleteAndUndo","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/views","name":"TestViewsShareReadOwnerWriteAndAppendEvents","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/workorders","name":"TestBufferBodyBoundsAndDecode","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/workorders","name":"TestEndpointBodyNetworkDeadline","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/workorders","name":"TestEndpointPositionedBodyNetworkDeadline","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/workqueue","name":"TestQueueReadiness","tier":"ESSENTIAL"}
     ,
@@ -7946,6 +8532,8 @@
     ,
     {"kind":"go","package":"scripts/pdf-visual-diff","name":"TestIdenticalSyntheticPDFsMatch","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/pdf-visual-diff","name":"TestMissingBlankPageFailsRegardlessOfPixelTolerance","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"scripts/pdf-visual-diff","name":"TestShiftedRectangleExceedsThreshold","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestAnnotatedTagGuardFailsClosed","tier":"GATED-FULL"}
@@ -7962,6 +8550,8 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestEveryReleaseStepHasReviewedRehearsalCounterpart","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestExportsShareSourceEpoch","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestExternalImageAssemblyAndEvidence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestFullFallbackPreservesPinnedMainJobs","tier":"GATED-FULL"}
@@ -7976,7 +8566,11 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestNixVendorHashGate","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestParallelWebUnitsShareRuntimeAndRunOnce","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestPinProposalFollowsVerificationWithoutWaitingForAssets","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestPublishedRuntimeMustMatchSmokedRuntime","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestPushedImageMatchesSmokedBuild","tier":"ESSENTIAL"}
     ,

@@ -8293,7 +8293,7 @@ paths:
         is api. Subscription and unknown store tokens without a dollar estimate. Dashboard totals sum a
         stored estimate only when billing_mode is api. Subscription and unknown rows stay unknown even
         when a historical estimate is stored. Run telemetry
-        and agent-run totals are not added. More than 5000 sessions sets truncated and drops the rest. If the
+        and agent-run totals are not added. More than 5000 sessions or completed tickets sets truncated and drops the rest. work.truncated identifies capped work totals. If the
         usage relation is not installed the response is 503, not a dashboard of zeros. Allowance windows are the
         caller's registered account windows and only when they hold account.read; the response has no account key.
         A provisional window, including mixed settled evidence, returns null used, headroom and hard remaining.
@@ -11608,7 +11608,7 @@ components:
     StageEvidenceContract: {description: Stage evidence response contract, schema: {type: string, enum: ['stage-evidence/1.0']}}
     StageResultContract: {description: Stage result response contract, schema: {type: string, enum: ['stage-result/1.0']}}
     StageLaunchContract: {description: Stage launch response contract, schema: {type: string, enum: ['stage-launch/1.0']}}
-    JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.3']}}
+    JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.4']}}
     MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.3']}}
     BaselineBatchesContract: {description: Classic-compatible baseline batch response contract, schema: {type: string, enum: ['baseline-batches/1.0']}}
     ApprovalsContract: {description: Approval response contract, schema: {type: string, enum: ['approvals/1.1']}}
@@ -14004,6 +14004,7 @@ components:
         - {$ref: '#/components/schemas/UsageWorkTokenParts'}
       required: [basis, sessions, worker_sessions, timed_sessions, agent_seconds, usage_reported_sessions, model_sessions, done, released, done_attributed, tickets_worked, tickets_done, days, tickets, by_harness, by_model, by_project, waste]
       properties:
+        truncated: {type: boolean, description: Work totals are lower bounds because the session or completion population exceeded 5000.}
         basis: {type: string, enum: [sessions_started_in_range]}
         sessions: {type: integer, minimum: 0}
         worker_sessions: {type: integer, minimum: 0}
@@ -14697,6 +14698,7 @@ components:
       properties:
         key: {type: string, enum: [continue_intake, confirm_brief, decide, reopen, approve_requirements, open_first_release, start_build, wait_for_build, mark_candidate, approve_candidate, approve_deploy, retry_deploy, approve_permit, plan_next_release]}
         renewal_action: {type: string, enum: [renew_candidate, renew_deploy], description: Explicit action for replacing a nonlive standing gate. Requires the exact current release_id and a fresh approved request. Advances the journey revision and requires fresh preparation and deployment evidence. Older clients using key alone fail closed.}
+        access_renewal_action: {type: string, enum: [renew_permit], description: Replace a nonlive Access permit with a fresh approved request for the exact current release_id. Advances the journey revision and fences stale Access evidence while retaining the completed deployment. Older clients using key alone fail closed.}
         label: {type: string}
         stage: {type: string, enum: [inspire, shape, requirements, plan, build, deploy, access, live]}
         available: {type: boolean}
@@ -14714,7 +14716,7 @@ components:
       additionalProperties: false
       required: [action, expected_revision, idempotency_key]
       properties:
-        action: {type: string, enum: [confirm_brief, go, reduce_scope, park, drop, reopen, open_first_release, start_build, mark_candidate, approve_candidate, reject_candidate, approve_deploy, renew_candidate, renew_deploy, retry_deploy, approve_permit, plan_next_release]}
+        action: {type: string, enum: [confirm_brief, go, reduce_scope, park, drop, reopen, open_first_release, start_build, mark_candidate, approve_candidate, reject_candidate, approve_deploy, renew_candidate, renew_deploy, retry_deploy, approve_permit, renew_permit, plan_next_release]}
         expected_revision: {type: integer, minimum: 1}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
         approval_request_id: {type: string, format: uuid}

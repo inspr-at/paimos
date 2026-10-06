@@ -9,7 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func TestLiveReleaseFactsExcludeFormerLeavesInBothProjections(t *testing.T) {
+func TestLiveReleaseFactsExcludeFormerAndDeletedLeavesInBothProjections(t *testing.T) {
 	d := dbtest.Open(t)
 	ctx := dbtest.Seed(t.Context())
 	var tenantID string
@@ -54,6 +54,13 @@ func TestLiveReleaseFactsExcludeFormerLeavesInBothProjections(t *testing.T) {
 		if _, err := tx.Exec(ctx, `UPDATE journey_tickets SET estimated_hours=2,scope_revision_required=false WHERE ticket_node_id=$1`, leaf); err != nil {
 			return err
 		}
+		deleted, err := node("work", "Deleted leaf", parent)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE journey_tickets SET estimated_hours=NULL,scope_revision_required=true,access_change=true WHERE ticket_node_id=$1`, deleted); err != nil {
+			return err
+		}
 		// Old frozen scope can still contain a former leaf. Its estimate, open
 		// state and access/scope flags must not affect any live projection.
 		if _, err := tx.Exec(ctx, `UPDATE journey_releases SET state='building' WHERE release_node_id=$1`, release); err != nil {
@@ -63,21 +70,58 @@ func TestLiveReleaseFactsExcludeFormerLeavesInBothProjections(t *testing.T) {
  VALUES($1,$2,$3,$4,'manual',0,100,true,true) ON CONFLICT(tenant_id,ticket_node_id) DO UPDATE SET estimated_hours=100,scope_revision_required=true,access_change=true`, tenantID, project, parent, release); err != nil {
 			return err
 		}
-		want := facts{ProjectID: project, Release: &releaseFacts{ID: release}}
-		if err := loadTicketStats(ctx, tx, &want); err != nil {
-			return err
-		}
-		snapshots, err := loadActionSnapshots(ctx, tx, []string{project})
-		if err != nil {
-			return err
-		}
-		if len(snapshots) != 1 {
-			t.Fatalf("missing batch snapshot: %+v", snapshots)
-		}
-		for label, f := range map[string]facts{"journey": want, "next actions": snapshots[0].Facts} {
-			if f.IncludedTickets != 1 || f.OpenReleaseTickets != 0 || f.PlanCents != 200 || f.MissingEstimate || f.ScopeRevision || f.AccessChange {
-				t.Fatalf("%s counted former leaf: included=%d open=%d plan=%d missing=%v scope=%v access=%v", label, f.IncludedTickets, f.OpenReleaseTickets, f.PlanCents, f.MissingEstimate, f.ScopeRevision, f.AccessChange)
+		check := func(step string, included, open int, plan int64, flagged, missing bool) error {
+			want := facts{ProjectID: project, Release: &releaseFacts{ID: release}}
+			if err := loadTicketStats(ctx, tx, &want); err != nil {
+				return err
 			}
+			snapshots, err := loadActionSnapshots(ctx, tx, []string{project})
+			if err != nil {
+				return err
+			}
+			if len(snapshots) != 1 {
+				t.Fatalf("missing batch snapshot: %+v", snapshots)
+			}
+			for label, f := range map[string]facts{"journey": want, "next actions": snapshots[0].Facts} {
+				if f.IncludedTickets != included || f.OpenReleaseTickets != open || f.PlanCents != plan || f.MissingEstimate != missing || f.ScopeRevision != flagged || f.AccessChange != flagged {
+					t.Errorf("%s/%s live membership: included=%d open=%d plan=%d missing=%v scope=%v access=%v; want included=%d open=%d plan=%d flagged=%v missing=%v", step, label, f.IncludedTickets, f.OpenReleaseTickets, f.PlanCents, f.MissingEstimate, f.ScopeRevision, f.AccessChange, included, open, plan, flagged, missing)
+				}
+			}
+			return nil
+		}
+		if err := check("live missing estimate", 2, 1, 200, true, true); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=now() WHERE id=$1`, deleted); err != nil {
+			return err
+		}
+		if err := check("deleted", 1, 0, 200, false, false); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=NULL WHERE id=$1`, deleted); err != nil {
+			return err
+		}
+		if err := check("restored missing estimate", 2, 1, 200, true, true); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE journey_tickets SET estimated_hours=20 WHERE ticket_node_id=$1`, deleted); err != nil {
+			return err
+		}
+		if err := check("restored estimate", 2, 1, 2200, true, false); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE nodes SET deleted_at=now() WHERE id=$1`, deleted); err != nil {
+			return err
+		}
+		if err := check("deleted estimate", 1, 0, 200, false, false); err != nil {
+			return err
+		}
+		var retained int
+		if err := tx.QueryRow(ctx, `SELECT count(*) FROM journey_tickets WHERE ticket_node_id=ANY($1::uuid[])`, []string{parent, deleted}).Scan(&retained); err != nil {
+			return err
+		}
+		if retained != 2 {
+			t.Fatal("fixture lost the frozen parent or deleted membership")
 		}
 		return nil
 	})
