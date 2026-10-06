@@ -31,6 +31,7 @@ const (
 // [from, to), the same set as the usage totals. Done and released count tickets
 // whose outcome event was recorded in [from, to) and that an agent worked on.
 type Work struct {
+	Truncated        bool         `json:"truncated"`
 	Basis            string       `json:"basis"`
 	Sessions         int          `json:"sessions"`
 	WorkerSessions   int          `json:"worker_sessions"`
@@ -176,6 +177,10 @@ func loadWork(ctx context.Context, tx pgx.Tx, from, to, now time.Time, project s
 	if err != nil {
 		return Work{}, err
 	}
+	sessionsTruncated := len(rows) > maxSessions
+	if sessionsTruncated {
+		rows = rows[:maxSessions]
+	}
 	done, err := loadDone(ctx, tx, from, to, projectArg)
 	if err != nil {
 		return Work{}, err
@@ -198,7 +203,12 @@ func loadWork(ctx context.Context, tx pgx.Tx, from, to, now time.Time, project s
 	if err != nil {
 		return Work{}, err
 	}
+	truncated := len(done) > maxDoneTickets
+	if truncated {
+		done = done[:maxDoneTickets]
+	}
 	out := buildWork(rows, done, releasedTickets, from, to, now)
+	out.Truncated = truncated || sessionsTruncated
 	out.Released = released
 	return out, nil
 }
@@ -227,7 +237,7 @@ func loadWorkSessions(ctx context.Context, tx pgx.Tx, from, to time.Time, projec
 		 WHERE s.created_at >= $1 AND s.created_at < $2
 		   AND ($3::uuid IS NULL OR s.project_id = $3)
 		 ORDER BY s.created_at, s.id
-		 LIMIT $4`, from, to, project, maxSessions)
+		 LIMIT $4`, from, to, project, maxSessions+1)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +281,7 @@ func loadDone(ctx context.Context, tx pgx.Tx, from, to time.Time, project any) (
 		   AND o.recorded_at >= $1 AND o.recorded_at < $2
 		   AND ($3::uuid IS NULL OR o.project_id = $3)
 		 ORDER BY o.ticket_node_id, o.recorded_at, o.id
-		 LIMIT $4`, from, to, project, maxDoneTickets)
+		 LIMIT $4`, from, to, project, maxDoneTickets+1)
 	if err != nil {
 		return nil, err
 	}
