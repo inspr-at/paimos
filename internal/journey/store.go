@@ -15,10 +15,11 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/deploytarget"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/releasesettlement"
 	"github.com/inspr-at/paimos/internal/requirements"
-	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -92,20 +93,9 @@ type nodeSnap struct {
 }
 
 func ensureJourney(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string) error {
-	// Release membership may expand parents; acquire the pairing fence before
-	// the shared tree lock even while parent-status rollout is disabled.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||$1,0))`, p.TenantID); err != nil {
-		return err
-	}
-
-	// Match release membership/plan and node-tree mutations: tenant advisory
-	// lock first, then journey project, release and ticket rows. recordDerivation
-	// already locks the project, before act reaches its explicit lockJourney.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended(current_setting('aeon.tenant_id',true),0))`); err != nil {
-		return err
-	}
-	var tenantID string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, p.TenantID).Scan(&tenantID); err != nil {
+	// Match permit renewal, handoff completion and release membership even
+	// without parent-status serialization: tenant -> pairing -> tree -> rows.
+	if err := db.LockWorkTreeTx(ctx, tx); err != nil {
 		return err
 	}
 	var one int
@@ -387,7 +377,7 @@ func loadTicketStats(ctx context.Context, tx pgx.Tx, f *facts) error {
 		       coalesce(sum(estimated_hours) FILTER (
 		         WHERE release_node_id = $2::uuid AND estimated_hours IS NOT NULL), 0)::text
 		FROM journey_tickets t JOIN nodes n ON n.tenant_id=t.tenant_id AND n.id=t.ticket_node_id
-		WHERE t.project_node_id = $1::uuid AND aeon_work_is_release_leaf(n.tenant_id,n.id)`, f.ProjectID, f.Release.ID).Scan(
+		WHERE t.project_node_id = $1::uuid AND t.release_node_id = $2::uuid AND n.deleted_at IS NULL AND aeon_work_is_release_leaf(n.tenant_id,n.id)`, f.ProjectID, f.Release.ID).Scan(
 		&f.IncludedTickets, &f.OpenReleaseTickets, &scopeN, &accessN, &f.MissingEstimate, &plan); err != nil {
 		return err
 	}
@@ -699,22 +689,23 @@ func assignOffer(f *facts, scope, resource string, offer gateOffer, replace bool
 
 func loadHandoffs(ctx context.Context, tx pgx.Tx, f *facts) error {
 	var deployWindow, accessWindow *time.Time
-	var renewalRevision int64
+	var renewalRevision, permitRevision int64
 	err := tx.QueryRow(ctx, `
 		SELECT max(at) FILTER (WHERE type IN ('journey.candidate_approved', 'journey.deploy_retried')),
-		       max(at) FILTER (WHERE type = 'journey.permit_approved'),
-		       coalesce(max((after->>'revision')::bigint) FILTER (WHERE type IN ('journey.candidate_renewed', 'journey.deploy_renewed')),0)
+		       max(at) FILTER (WHERE type IN ('journey.permit_approved','journey.permit_renewed')),
+		       coalesce(max((after->>'revision')::bigint) FILTER (WHERE type IN ('journey.candidate_renewed', 'journey.deploy_renewed')),0),
+		       coalesce(max((after->>'revision')::bigint) FILTER (WHERE type='journey.permit_renewed'),0)
 		FROM events
-		WHERE node_id = $1::uuid AND after->>'current_release_id' = $2`, f.ProjectID, f.Release.ID).Scan(&deployWindow, &accessWindow, &renewalRevision)
+		WHERE node_id = $1::uuid AND after->>'current_release_id' = $2`, f.ProjectID, f.Release.ID).Scan(&deployWindow, &accessWindow, &renewalRevision, &permitRevision)
 	if err != nil {
 		return err
 	}
 	rows, err := tx.Query(ctx, `
-		SELECT h.id::text, h.stage, h.operation, h.state, coalesce(r.outcome, ''), h.attempt, h.authority_epoch, h.created_at, h.journey_revision < $2
+		SELECT h.id::text, h.stage, h.operation, h.state, coalesce(r.outcome, ''), h.attempt, h.authority_epoch, h.created_at, (h.journey_revision < $2 OR (h.stage='access' AND h.journey_revision < $3))
 		FROM stage_handoffs h
 		LEFT JOIN stage_handoff_results r
 		  ON r.tenant_id = h.tenant_id AND r.handoff_id = h.id
-		WHERE h.release_node_id = $1::uuid AND h.stage IN ('deploy', 'access')`, f.Release.ID, renewalRevision)
+		WHERE h.release_node_id = $1::uuid AND h.stage IN ('deploy', 'access')`, f.Release.ID, renewalRevision, permitRevision)
 	if err != nil {
 		return err
 	}
@@ -1005,87 +996,12 @@ func projectCap(ctx context.Context, tx pgx.Tx, projectID string) (int64, bool, 
 	return cents, ok, nil
 }
 
-func artifactVersion(ctx context.Context, tx pgx.Tx, releaseID string) (string, string, error) {
-	var scheme, version *string
-	err := tx.QueryRow(ctx, `
-		SELECT e.version_scheme, e.version
-		FROM stage_handoff_evidence e
-		JOIN stage_handoffs h ON h.tenant_id = e.tenant_id AND h.id = e.handoff_id
-		WHERE h.release_node_id = $1::uuid
-		  AND h.stage = 'deploy' AND h.operation = 'deploy' AND e.kind = 'deployment'
-		  AND e.version_scheme IS NOT NULL AND e.version IS NOT NULL
-		ORDER BY h.attempt DESC, e.sequence DESC
-		LIMIT 1`, releaseID).Scan(&scheme, &version)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "", "", nil
-	}
-	if err != nil {
-		return "", "", err
-	}
-	if scheme == nil || version == nil {
-		return "", "", nil
-	}
-	return *scheme, *version, nil
-}
-
 func settleReleased(ctx context.Context, tx pgx.Tx, projectID, releaseID string) ([]string, error) {
-	var pinnedScheme, pinnedVersion *string
-	if err := tx.QueryRow(ctx, `SELECT version_scheme,version FROM journey_releases WHERE project_node_id=$1::uuid AND release_node_id=$2::uuid FOR UPDATE`, projectID, releaseID).Scan(&pinnedScheme, &pinnedVersion); err != nil {
-		return nil, err
+	ids, err := releasesettlement.SettleTx(ctx, tx, projectID, releaseID)
+	if errors.Is(err, releasesettlement.ErrVersionConflict) {
+		return nil, fail(409, err.Error())
 	}
-	scheme, version, err := artifactVersion(ctx, tx, releaseID)
-	if err != nil {
-		return nil, err
-	}
-	if (pinnedScheme == nil) != (pinnedVersion == nil) || pinnedScheme != nil && scheme != "" && (*pinnedScheme != scheme || *pinnedVersion != version) {
-		return nil, fail(409, "deployment artifact does not match pinned release version")
-	}
-	var schemeArg, versionArg any
-	if scheme != "" && version != "" {
-		schemeArg, versionArg = scheme, version
-	}
-	tag, err := tx.Exec(ctx, `
-		UPDATE journey_releases
-		SET state = 'released', released_at = clock_timestamp(), revision = revision + 1,
-		    version_scheme = coalesce(version_scheme, $2), version = coalesce(version, $3)
-		WHERE release_node_id = $1::uuid AND state NOT IN ('released', 'superseded')`,
-		releaseID, schemeArg, versionArg)
-	if err != nil {
-		return nil, err
-	}
-	if tag.RowsAffected() == 0 {
-		return nil, nil
-	}
-	rows, err := tx.Query(ctx, `
-		UPDATE journey_releases
-		SET state = 'superseded', revision = revision + 1
-		WHERE project_node_id = $1::uuid AND state = 'released' AND release_node_id <> $2::uuid
-		RETURNING release_node_id::text`, projectID, releaseID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var ids []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, err
-		}
-		ids = append(ids, id)
-	}
-	err = rows.Err()
-	rows.Close()
-	if err != nil {
-		return nil, err
-	}
-	var tenantID string
-	if err = tx.QueryRow(ctx, `SELECT current_setting('aeon.tenant_id')`).Scan(&tenantID); err != nil {
-		return nil, err
-	}
-	if err = statusautopilot.PublishTx(ctx, tx, tenantID, releaseID); err != nil {
-		return nil, err
-	}
-	return ids, nil
+	return ids, err
 }
 
 func createNextRelease(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string, revision int64) (string, int64, error) {
