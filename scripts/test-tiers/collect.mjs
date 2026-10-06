@@ -43,7 +43,9 @@ export function collectWeb() {
   // vectors and parameter loops, so explicitly disable it.
   const vitestPath = resolve(evidence,'vitest-list.json')
   command(process.execPath,['node_modules/vitest/vitest.mjs','list','.unit.test.ts',`--json=${vitestPath}`,
-    '--no-staticParse','--maxWorkers=1','--no-fileParallelism'],{cwd:web})
+    '--no-staticParse','--maxWorkers=1','--no-fileParallelism',
+    // Avoid Vite's bundled-config writes into shared node_modules/.vite-temp.
+    ...(process.env.VITE_CACHE_DIR ? ['--configLoader=runner'] : [])],{cwd:web})
   const unit = JSON.parse(readFileSync(vitestPath,'utf8')).map(row => ({ kind:'vitest',file:relative(web,row.file),name:row.name }))
   const nodeFiles=[]
   const visit=directory=>{
