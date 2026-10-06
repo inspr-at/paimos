@@ -7776,6 +7776,8 @@
     ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIPlanUsesTrustedBaseClassifier","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIStaticLayoutAggregatesAndJobGates","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCanonicalEventGuard","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestFullUIQALabelOptInBoundary","tier":"GATED-FULL"}
