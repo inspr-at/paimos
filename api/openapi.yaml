@@ -5902,6 +5902,34 @@ paths:
           $ref: '#/components/responses/Events'
         '400':
           $ref: '#/components/responses/Error'
+  /events/activity:
+    get:
+      operationId: listWorkspaceActivity
+      summary: Workspace history, newest first
+      description: >-
+        Bounded read projection of the existing tenant event log under current project visibility and events.read authority. Quote events remain excluded. Returns summaries, never raw snapshots. Pages use descending (at,id) keysets; the cursor is bound to the view, rule, project and search filters. Automatic means status_autopilot.changed or status_autopilot.derived; People and Agents use the recorded principal kind. Automatic move Undo is offered only with an unchanged live ticket revision and current events.undo, events.undo_other and nodes.write permissions; the existing Undo mutation rechecks these inside its transaction. Derived parent changes require the existing ticket causal preview/confirmation flow. No event schema or per-ticket Activity changes.
+      security: *auth
+      parameters:
+        - {name: view, in: query, schema: {type: string, enum: [everything, automatic, people, agents], default: everything}}
+        - {name: rule, in: query, schema: {type: string, enum: [new, backlog, blocked, progress, done, publish, accept, work_parent]}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: q, in: query, schema: {type: string, maxLength: 200}, description: 'Literal case-insensitive search of key, title, actor, event type and reason; at most 200 UTF-8 bytes.'}
+        - {name: cursor, in: query, schema: {type: string, maxLength: 256}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200':
+          description: Visible page; next_cursor is null when exhausted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor]
+                properties:
+                  items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/WorkspaceActivityItem'}}
+                  next_cursor: {type: [string, 'null'], maxLength: 256}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '503': {description: Read timed out; retry the same page}
   /events/stream:
     get:
       operationId: streamEvents
@@ -19588,6 +19616,28 @@ components:
       required: [body_markdown]
       properties:
         body_markdown: {type: string, minLength: 1, maxLength: 65536, description: Nonblank Markdown; at most 65536 UTF-8 bytes. Render safely on the client.}
+    WorkspaceActivityItem:
+      type: object
+      required: [event_id, node_id, project_id, key, title, actor, type, rule, reason, from, to, at, revision, automatic, undone, changed_since, undoable, requires_preview]
+      properties:
+        event_id: {type: integer, format: int64}
+        node_id: {type: [string, 'null'], format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        key: {type: string}
+        title: {type: string}
+        actor: {type: string}
+        type: {type: string}
+        rule: {type: string}
+        reason: {type: string}
+        from: {type: string}
+        to: {type: string}
+        at: {type: string, format: date-time}
+        revision: {type: [string, 'null'], format: date-time, description: Original event's ticket revision after its change; captured with event_id/node_id when Undo is clicked.}
+        automatic: {type: boolean}
+        undone: {type: boolean}
+        changed_since: {type: boolean}
+        undoable: {type: boolean}
+        requires_preview: {type: boolean}
     ActivityItem:
       type: object
       required: [id, at, type, author]

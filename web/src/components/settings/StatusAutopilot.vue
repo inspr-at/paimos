@@ -129,6 +129,7 @@ function modeKey(event: KeyboardEvent, project: (typeof projects.value)[number])
         </section>
       </SettingsCard>
       <SettingsCard title="Recent automatic changes" icon="history" anchor="autopilot-recent">
+        <template #aside><RouterLink class="btn sm" to="/activity?view=automatic">Show all</RouterLink></template>
         <template #lead>The latest moves by Status autopilot, with their reasons. The full record stays in each ticket’s Activity.</template>
         <ul class="auto-changes"><li v-for="change in changes" :key="change.event_id" class="change"><span class="node auto" aria-hidden="true"><AppIcon name="sparkle" :size="12" /></span><div class="change-main"><p class="change-head"><TicketLink :ticket-key="change.key" /><span v-clip-tip="change.title" class="change-title">{{ change.title }}</span></p><AutomaticChangeRow :change="change" recent @undone="recent" /></div></li></ul>
         <p v-if="!changes.length" class="empty">No automatic changes yet.</p>
