@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { spawnSync, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound } from './core.mjs'
+import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
@@ -106,7 +106,7 @@ const goPackages=selection=>new Set(selection.tests.filter(row=>row.kind==='go'&
 const webFiles=selection=>new Set(selection.tests.filter(row=>row.kind!=='go'&&row.tier!=='ESSENTIAL').map(row=>row.file))
 const essentialOnly=selection=>selection.tests.every(row=>row.tier==='ESSENTIAL')
 
-test('affected kill switch off exactly equals the frozen old selector for all 80 real PR lists',()=>{
+test('affected kill switch off matches the frozen selector for all 80 real PR lists except instruction inputs (AEON-766)',()=>{
   assert.equal(replay.prs.length,80)
   assert.equal(replay.base,'b6f74faa11d506efd3d21387ca4e2f5a9c687dcf')
   assert.equal(replay.legacySelectorSHA256,'737a4bb8a805c23e572ad83f2922e65d8c0d34a932afca2e13fd9fa51e26d710')
@@ -117,8 +117,15 @@ test('affected kill switch off exactly equals the frozen old selector for all 80
   for(const {number,paths} of [...replay.prs,...synthetic.map(paths=>({number:paths[0],paths}))]) {
     const options={event:'pull_request',paths,imports:replay.goImports,webImports:replayGraph}
     const expected=legacy.select(replayRows,options)
-    for(const affectedLane of [undefined,'','off','ON','true',' on','on '])
-      assert.deepEqual(select(replayRows,{...options,affectedLane,tree:repoTree,promotions:noPromotions,readFile:readRepo}),expected,`PR ${number}, switch ${affectedLane}`)
+    for(const affectedLane of [undefined,'','off','ON','true',' on','on ']) {
+      const selected=select(replayRows,{...options,affectedLane,tree:repoTree,promotions:noPromotions,readFile:readRepo})
+      const message=`PR ${number}, switch ${affectedLane}`
+      // AEON-766's instruction safety rule also applies with affected narrowing off.
+      if(paths.some(path=>/(?:^|\/)(?:AGENTS|CLAUDE)\.md$/i.test(path))) {
+        assert.equal(selected.full,true,message)
+        assert.deepEqual(selected.tests,replayRows.filter(row=>row.tier==='ESSENTIAL'||row.tier==='GATED-FULL'),message)
+      } else assert.deepEqual(selected,expected,message)
+    }
     assert.deepEqual(schedulingDecision('pull_request',paths,()=>true,{graph:replayGraph}),schedulingDecision('pull_request',paths,()=>true,{affectedLane:'off',graph:replayGraph}),`PR ${number}`)
   }
 })
@@ -437,6 +444,37 @@ test('R5 audit tooling and R9 always-on migration tests take the static layout; 
   assert.ok(realPaths.includes('scripts/audit/test_audit.py')&&realPaths.includes('scripts/check-migrations.test.mjs'))
 })
 
+test('test-pinned instruction files require the full gate under every affected switch state (AEON-766)',()=>{
+  const rollout=JSON.parse(readFileSync(new URL('../rules-bootstrap/rollout.json',import.meta.url),'utf8'))
+  const pinned=rollout.targets.flatMap(({target,candidate})=>[target,candidate])
+  const switches=[undefined,'','off','ON','true',' on','on ','on']
+  const gated=replayRows.filter(row=>row.tier==='ESSENTIAL'||row.tier==='GATED-FULL')
+  for(const path of [...pinned,'docs/AGENTS.md','docs/nested/CLAUDE.md','web/AGENTS.md','internal/auth/CLAUDE.md','cmd/aeon/AGENTS.md',
+    'internal/rulesimport/testdata/pack/AGENTS.md','scripts/audit/AGENTS.md','agents.md','docs/claude.MD','internal/auth/cLaUdE.mD']) {
+    assert.equal(isDocsLike(path),false,path)
+    for(const paths of [[path],['README.md',path]]) for(const affectedLane of switches) {
+      const message=`${paths.join()}, switch ${affectedLane}`
+      const selected=on(paths,{affectedLane})
+      assert.equal(selected.full,true,message)
+      assert.deepEqual(selected.tests,gated,message)
+      // Model existing instruction files, so deletion fallback cannot hide a missing guard.
+      const decision=schedulingDecision('pull_request',paths,()=>true,{affectedLane,graph:replayGraph,tree:repoTree,promotions:noPromotions})
+      assert.deepEqual([decision.mode,decision.layout],['full','full'],message)
+    }
+  }
+  for(const path of ['README.md','docs/x.md','docs/guide.txt','CHANGELOG.md','LICENSE']) for(const affectedLane of switches) {
+    const message=`${path}, switch ${affectedLane}`
+    const selected=on([path],{affectedLane})
+    assert.equal(selected.full,false,message)
+    assert.ok(essentialOnly(selected),message)
+    const decision=schedulingDecision('pull_request',[path],()=>true,{affectedLane,graph:replayGraph,tree:repoTree,promotions:noPromotions})
+    assert.equal(decision.mode,'essential',message)
+    assert.equal(decision.layout,affectedLane==='on'?'static':'full',message)
+  }
+  for(const path of ['README.md','docs/x.md','web/README.md','CHANGELOG.md','LICENSE'])
+    assert.equal(isDocsLike(path),true,path)
+})
+
 test('R6 release data, R7 test data and R8 harness pages select their readers; docs-like files are static',()=>{
   const release=on(['version.json','internal/releasehistory/data/product-notes.json'])
   assert.equal(release.full,false)
@@ -452,7 +490,7 @@ test('R6 release data, R7 test data and R8 harness pages select their readers; d
   const page=on(['web/tests/settings-shared-harness.html'])
   assert.equal(page.full,false);assert.ok(webFiles(page).has('tests/settings-shared.spec.ts'))
   assert.equal(decide(['web/tests/settings-shared-harness.html']).mode,'essential')
-  for(const paths of [['AGENTS.md'],['docs/RELEASE.md'],['web/README.md'],['scripts/audit/rubric.md'],['README.md','LICENSE','CHANGELOG.md']]) {
+  for(const paths of [['docs/RELEASE.md'],['web/README.md'],['scripts/audit/rubric.md'],['README.md','LICENSE','CHANGELOG.md']]) {
     const selected=on(paths)
     assert.equal(selected.full,false,paths.join());assert.ok(essentialOnly(selected))
     assert.deepEqual([decide(paths).mode,decide(paths).layout],['essential','static'],paths.join())
@@ -517,7 +555,7 @@ test('trusted tier planner uses base classifier and base graph despite candidate
   const git=args=>execFileSync('git',args,{cwd:directory,env,encoding:'utf8'})
   const file=(path,source)=>{mkdirSync(resolve(directory,path,'..'),{recursive:true});writeFileSync(resolve(directory,path),source)}
   git(['init','-q'])
-  for(const name of ['core.mjs','diff.mjs','collect.mjs','inputs.mjs','migration.mjs','manifests.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
+  for(const name of ['core.mjs','diff.mjs','collect.mjs','inputs.mjs','migration.mjs','manifests.mjs','failures.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
   file('scripts/ci/web-test-tiers.json',JSON.stringify({tests:[]}))
   file('scripts/ci/go-test-tiers.json',JSON.stringify({tests:[]}))
   file('web/src/unused.ts','export {}')
