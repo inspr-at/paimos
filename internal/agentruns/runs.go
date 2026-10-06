@@ -331,6 +331,7 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		}
 	}
 	var escalationTrace map[string]any
+	var placement *modelregistry.WorkPlacement
 	var ticket, project *string
 	if err := tx.QueryRow(ctx, `SELECT parent_id::text,project_id::text FROM nodes WHERE id=$1`, o.NodeID).Scan(&ticket, &project); err != nil {
 		return nil, err
@@ -344,7 +345,7 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			if in.Retry == nil {
 				return nil, workorders.Fail(409, "stuck work requires a bounded retry lineage")
 			}
-			rejection, err := escalation.ReserveTx(ctx, tx, p, *ticket, *project, *in.Retry, in.Profile, o.MaxCost)
+			reserved, rejection, err := escalation.ReservePlacementTx(ctx, tx, p, *ticket, *project, *in.Retry, in.Profile, o.MaxCost)
 			if err != nil {
 				return nil, err
 			}
@@ -356,11 +357,14 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 				return nil, err
 			}
 			escalationTrace = state.Public()
+			placement = reserved
 		}
 	}
-	placement, err := modelregistry.DispatchPlacement(ctx, tx, p, o.NodeID, time.Now().UTC())
-	if err != nil {
-		return nil, err
+	if placement == nil {
+		placement, err = modelregistry.DispatchPlacement(ctx, tx, p, o.NodeID, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
 	}
 	dispatchTrace := struct {
 		modelprefs.RequirementTrace
@@ -553,8 +557,28 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	var trace struct {
 		Escalation json.RawMessage `json:"escalation"`
 	}
-	if err := json.Unmarshal(v.Trace, &trace); err != nil {
-		return nil, workorders.Fail(409, "invalid run trace")
+	if len(v.Trace) > 0 {
+		if err := json.Unmarshal(v.Trace, &trace); err != nil {
+			return nil, workorders.Fail(409, "invalid run trace")
+		}
+	}
+	if v.Purpose == "managed" && !v.ReadOnlyReview {
+		var ticket *string
+		if err := tx.QueryRow(ctx, `SELECT coalesce($2::uuid,parent_id)::text FROM nodes WHERE id=$1`, v.OrderID, v.QueueNodeID).Scan(&ticket); err != nil {
+			return nil, err
+		}
+		if ticket != nil {
+			profile, previous := "", ""
+			if v.ProfileID != nil {
+				profile = *v.ProfileID
+			}
+			if v.RetryOfRunID != nil {
+				previous = *v.RetryOfRunID
+			}
+			if err := escalation.CheckLaunchTx(ctx, tx, *ticket, profile, previous, trace.Escalation); err != nil {
+				return nil, err
+			}
+		}
 	}
 	if len(trace.Escalation) > 0 && string(trace.Escalation) != "null" {
 		ids, err := agentaccounts.EscalationRoomIDs(ctx, tx, []string{*v.AccountID}, time.Now().UTC())

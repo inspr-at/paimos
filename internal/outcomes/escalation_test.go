@@ -2,6 +2,8 @@
 package outcomes
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,7 +11,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
@@ -131,54 +135,8 @@ func TestEscalationPayloadValidation(t *testing.T) {
 }
 
 func TestEscalationRetryBudgetExitAndRollback(t *testing.T) {
-	d := dbtest.Open(t)
-	p := newPerson(t, d, "stuck-retry")
-	project := insertNode(t, d, p, "project", "RTY-1", "Project", nil)
-	ticket := insertNode(t, d, p, "ticket", "RTY-2", "Stuck work", &project)
-	order := insertNode(t, d, p, "work_order", "RTY-3", "Fix", &ticket)
-	// Seed the real registry, then register only a qualified Claude account.
-	w := callAs(t, modelregistry.New(d.App), p, "GET", "/api/models", "")
-	if w.Code != 200 {
-		t.Fatalf("catalog: %d %s", w.Code, w.Body.String())
-	}
-	var runner, account, opus, sol, run, session string
-	inTenant(t, d, p, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Retry runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&opus); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='codex-6-1-sol-high'`).Scan(&sol); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,allowed_model_profile_ids) VALUES($1,'retry-claude','claude','retry-runner',$2,'Claude',now(),true,'generation',$3,ARRAY[$4::uuid]) RETURNING id::text`, p.TenantID, runner, p.ID, opus).Scan(&account); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model,capacity_kind,capacity_source,capacity_read_at) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',1000,'unrestricted','5h','agentd',now())`, p.TenantID, account); err != nil {
-			return err
-		}
-		schedule := capacity.DefaultSchedule()
-		schedule.Override = "sprint"
-		schedule.Reserve = capacity.ReserveOff
-		raw, _ := json.Marshal(schedule)
-		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, account, raw); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,status,max_cost_micros) VALUES($1,$2,$3,'ready',10000000)`, p.TenantID, order, p.ID); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,requested_model,started_at,ended_at) VALUES($1,$2,$3,$4,'failed','gpt-6.1-sol',now()-interval '1 minute',now()) RETURNING id::text`, p.TenantID, order, runner, sol).Scan(&run); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,stopped_at,stop_reason,model,reasoning_effort,model_profile_id) VALUES($1,$2,$3,$4,$5,$6,'codex','fixture','managed','worker','ship',decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'stopped',now(),'lost_contact','gpt-6.1-sol','high',$7) RETURNING id::text`, p.TenantID, project, runner, run, ticket, order, sol).Scan(&session); err != nil {
-			return err
-		}
-		state := escalation.State{EpisodeID: ticket, Status: "stuck", Reason: "failed_fix_rounds", Revision: 1, MaxAttempts: 2, MaxCost: escalation.MaxCostMicros}
-		raw, _ = json.Marshal(state)
-		_, err := tx.Exec(t.Context(), `INSERT INTO work_escalations(tenant_id,ticket_node_id,project_id,state) VALUES($1,$2,$3,$4)`, p.TenantID, ticket, project, raw)
-		return err
-	})
+	f := setupEscalationRetry(t)
+	d, p, project, ticket, order, runner, opus, run, session := f.d, f.p, f.project, f.ticket, f.order, f.runner, f.opus, f.run, f.session
 	attempt := func(cost *int64, rollback bool) error {
 		return db.InTenant(tenant.WithPrincipal(t.Context(), p), d.App, p.TenantID, func(tx pgx.Tx) error {
 			if err := db.LockWorkTreeTx(t.Context(), tx); err != nil {
@@ -325,3 +283,239 @@ func TestEscalationRetryBudgetExitAndRollback(t *testing.T) {
 }
 
 var errRetryRollback = errors.New("retry fixture rollback")
+
+type escalationRetryFixture struct {
+	d                                                           *dbtest.DB
+	p                                                           tenant.Principal
+	project, ticket, order, runner, opus, run, session, account string
+}
+
+func setupEscalationRetry(t *testing.T) escalationRetryFixture {
+	t.Helper()
+	d := dbtest.Open(t)
+	p := newPerson(t, d, "stuck-retry")
+	project := insertNode(t, d, p, "project", "RTY-1", "Project", nil)
+	ticket := insertNode(t, d, p, "ticket", "RTY-2", "Stuck work", &project)
+	order := insertNode(t, d, p, "work_order", "RTY-3", "Fix", &ticket)
+	// Seed the real registry, then register only a qualified Claude account.
+	w := callAs(t, modelregistry.New(d.App), p, "GET", "/api/models", "")
+	if w.Code != 200 {
+		t.Fatalf("catalog: %d %s", w.Code, w.Body.String())
+	}
+	var runner, account, opus, sol, run, session string
+	inTenant(t, d, p, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Retry runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='claude-opus-xhigh'`).Scan(&opus); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='codex-6-1-sol-high'`).Scan(&sol); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,allowed_model_profile_ids) VALUES($1,'retry-claude','claude','retry-runner',$2,'Claude',now(),true,'generation',$3,ARRAY[$4::uuid]) RETURNING id::text`, p.TenantID, runner, p.ID, opus).Scan(&account); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model,capacity_kind,capacity_source,capacity_read_at) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',1000,'unrestricted','5h','agentd',now())`, p.TenantID, account); err != nil {
+			return err
+		}
+		schedule := capacity.DefaultSchedule()
+		schedule.Override = "sprint"
+		schedule.Reserve = capacity.ReserveOff
+		raw, _ := json.Marshal(schedule)
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, p.TenantID, p.ID, account, raw); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,status,max_cost_micros) VALUES($1,$2,$3,'ready',10000000)`, p.TenantID, order, p.ID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,requested_model,started_at,ended_at) VALUES($1,$2,$3,$4,'failed','gpt-6.1-sol',now()-interval '1 minute',now()) RETURNING id::text`, p.TenantID, order, runner, sol).Scan(&run); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,run_id,ticket_node_id,work_order_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,stopped_at,stop_reason,model,reasoning_effort,model_profile_id) VALUES($1,$2,$3,$4,$5,$6,'codex','fixture','managed','worker','ship',decode(repeat('01',32),'hex'),decode(repeat('02',32),'hex'),'stopped',now(),'lost_contact','gpt-6.1-sol','high',$7) RETURNING id::text`, p.TenantID, project, runner, run, ticket, order, sol).Scan(&session); err != nil {
+			return err
+		}
+		state := escalation.State{EpisodeID: ticket, Status: "stuck", Reason: "failed_fix_rounds", Revision: 1, MaxAttempts: 2, MaxCost: escalation.MaxCostMicros}
+		raw, _ = json.Marshal(state)
+		_, err := tx.Exec(t.Context(), `INSERT INTO work_escalations(tenant_id,ticket_node_id,project_id,state) VALUES($1,$2,$3,$4)`, p.TenantID, ticket, project, raw)
+		return err
+	})
+
+	return escalationRetryFixture{d, p, project, ticket, order, runner, opus, run, session, account}
+}
+
+func TestEscalationRetryFreezesReservedPlacement(t *testing.T) {
+	f := setupEscalationRetry(t)
+	inTenant(t, f.d, f.p, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET stop_reason='process_failed' WHERE id=$1`, f.session); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields='{"route_role":"build","area":"backend"}' WHERE id=$1`, f.ticket)
+		return err
+	})
+	body, _ := json.Marshal(map[string]any{"agent_principal_id": f.runner, "model_profile_id": f.opus, "retry_of_run_id": f.run})
+	w := callAs(t, agentruns.New(f.d.App), f.p, "POST", "/api/work-orders/"+f.order+"/runs", string(body))
+	if w.Code != 201 {
+		t.Fatalf("retry: %d %s", w.Code, w.Body.String())
+	}
+	var run agentruns.Run
+	if err := json.Unmarshal(w.Body.Bytes(), &run); err != nil {
+		t.Fatal(err)
+	}
+	var trace struct {
+		Placement modelregistry.WorkPlacement `json:"work_placement"`
+		State     escalation.State            `json:"escalation"`
+	}
+	if err := json.Unmarshal(run.Trace, &trace); err != nil {
+		t.Fatal(err)
+	}
+	if run.ProfileID == nil || *run.ProfileID != f.opus || trace.Placement.PlannedProfileID == nil || *trace.Placement.PlannedProfileID != f.opus || trace.Placement.Blocked != "" || len(trace.Placement.QualifyingAccountIDs) != 1 {
+		t.Fatalf("frozen placement did not describe admitted profile: run=%s trace=%s", w.Body.String(), run.Trace)
+	}
+	if trace.State.Attempts != 1 || trace.State.HeldCost != 10000000 {
+		t.Fatal("retry not charged", trace.State)
+	}
+	// The recorded reservation must also survive the live claim gate, while a
+	// human-decision transition after reservation closes that same launch.
+	dbtest.BindRole(t, f.d, f.p.TenantID, f.runner, "member")
+	agent := tenant.Principal{TenantID: f.p.TenantID, ID: f.runner, Kind: tenant.Agent, Scopes: []string{"run.claim", "run.read"}}
+	sum := sha256.Sum256([]byte(f.ticket))
+	inTenant(t, f.d, f.p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'retry test','retryfixture',$3,ARRAY['run.claim'])`, f.p.TenantID, f.runner, hex.EncodeToString(sum[:]))
+		return err
+	})
+	claim := func(body string) *httptest.ResponseRecorder {
+		mux := http.NewServeMux()
+		agentruns.New(f.d.App).Mount(mux)
+		r := httptest.NewRequest("POST", "/api/runs/"+run.ID+"/claim", strings.NewReader(body))
+		r.Header.Set("Authorization", "Bearer aeon_retryfixture_"+f.ticket)
+		r = r.WithContext(tenant.WithPrincipal(r.Context(), agent))
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, r)
+		return w
+	}
+
+	body, _ = json.Marshal(map[string]any{"run_id": run.ID, "daemon_id": "retry-runner", "account_ids": []string{f.account}, "estimated_units": map[string]int{"requests": 1}})
+	routed := callAs(t, agentaccounts.New(f.d.App), agent, "POST", "/api/agent-accounts/route", string(body))
+	if routed.Code != 200 {
+		t.Fatalf("account reservation: %d %s", routed.Code, routed.Body.String())
+	}
+	var route agentaccounts.RouteResult
+	if err := json.Unmarshal(routed.Body.Bytes(), &route); err != nil {
+		t.Fatal(err)
+	}
+	ids := []string{}
+	for _, r := range route.Reservations {
+		ids = append(ids, r.ReservationID)
+	}
+	body, _ = json.Marshal(map[string]any{"daemon_id": "retry-runner", "daemon_generation": "generation", "reservation_ids": ids})
+	inTenant(t, f.d, f.p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE work_escalations SET state=jsonb_set(state,'{status}','"awaiting_decision"') WHERE ticket_node_id=$1`, f.ticket)
+		return err
+	})
+	denied := claim(string(body))
+	if denied.Code != 409 || !strings.Contains(denied.Body.String(), "Decision Desk") {
+		t.Fatalf("reserved retry ignored live decision gate: %d %s", denied.Code, denied.Body.String())
+	}
+	inTenant(t, f.d, f.p, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE work_escalations SET state=jsonb_set(state,'{status}','"stuck"') WHERE ticket_node_id=$1`, f.ticket)
+		return err
+	})
+	claimed := claim(string(body))
+	if claimed.Code != 200 {
+		t.Fatalf("charged retry claim: %d %s", claimed.Code, claimed.Body.String())
+	}
+	if err := json.Unmarshal(claimed.Body.Bytes(), &run); err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "starting" {
+		t.Fatal("charged retry failed to launch", run.ID, run.Status)
+	}
+}
+
+func TestEscalationRetainsOriginalModelAcrossSelections(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(fmt.Sprintf("legacy=%t", legacy), func(t *testing.T) {
+			f := setupEscalationRetry(t)
+			inTenant(t, f.d, f.p, func(tx pgx.Tx) error {
+				var fable string
+				if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='claude-fable-xhigh'`).Scan(&fable); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE harness_sessions SET model_profile_id=$2,model='fable',reasoning_effort='xhigh',stop_reason='process_failed' WHERE id=$1`, f.session, fable); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET model_profile_id=$2,requested_model='fable' WHERE id=$1`, f.run, fable); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids=ARRAY[$1::uuid,$2::uuid] WHERE account_key='retry-claude'`, f.opus, fable); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id,state,reason) VALUES($1,'build-hard',99,$2,'available','Explicit fixture build authority')`, f.p.TenantID, fable); err != nil {
+					return err
+				}
+				// Observe first while Fable is the original writer. It must survive a later session.
+				if err := db.LockWorkTreeTx(t.Context(), tx); err != nil {
+					return err
+				}
+				if err := escalation.ObserveTx(t.Context(), tx, f.p, f.ticket, f.project, f.ticket, "fix_round", json.RawMessage(`{"round":3}`)); err != nil {
+					return err
+				}
+				return nil
+			})
+			inTenant(t, f.d, f.p, func(tx pgx.Tx) error {
+				if err := db.LockWorkTreeTx(t.Context(), tx); err != nil {
+					return err
+				}
+				cost := int64(10000000)
+				rejection, err := escalation.ReserveTx(t.Context(), tx, f.p, f.ticket, f.project, f.run, f.opus, &cost)
+				if err != nil {
+					return err
+				}
+				if rejection != nil {
+					return rejection
+				}
+				state, err := escalation.LoadTx(t.Context(), tx, f.ticket)
+				if err != nil {
+					return err
+				}
+				raw, _ := json.Marshal(map[string]any{"escalation": state.Public()})
+				var retry string
+				if err := tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status,requested_model,started_at,ended_at,retry_of_run_id,trace) VALUES($1,$2,$3,$4,'failed','opus',now(),now(),$5,$6) RETURNING id::text`, f.p.TenantID, f.order, f.runner, f.opus, f.run, raw).Scan(&retry); err != nil {
+					return err
+				}
+				if legacy {
+					if _, err := tx.Exec(t.Context(), `UPDATE work_escalations SET state=state-'original_profile_id' WHERE ticket_node_id=$1`, f.ticket); err != nil {
+						return err
+					}
+				}
+				_, err = tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,stopped_at,stop_reason,model,reasoning_effort,model_profile_id,created_at,run_id) VALUES($1,$2,$3,$4,'claude','fixture','managed','worker','ship',decode(repeat('03',32),'hex'),decode(repeat('04',32),'hex'),'stopped',now(),'process_failed','opus','xhigh',$5,now()+interval '1 second',$6)`, f.p.TenantID, f.project, f.runner, f.ticket, f.opus, retry)
+				return err
+			})
+			inTenant(t, f.d, f.p, func(tx pgx.Tx) error {
+				q := modelregistry.WorkQuery{TicketID: f.ticket, Role: "build", Area: "backend"}
+				pick, err := modelregistry.ResolveWork(t.Context(), tx, f.p, q, time.Now())
+				if err != nil {
+					return err
+				}
+				if pick.Profile != nil || pick.Trace.Blocked != "no allowed stronger route" {
+					t.Fatal("original model returned to routing", pick)
+				}
+				if err := db.LockWorkTreeTx(t.Context(), tx); err != nil {
+					return err
+				}
+				if err := escalation.ObserveTx(t.Context(), tx, f.p, f.ticket, f.project, f.ticket, "fix_round", json.RawMessage(`{"round":4}`)); err != nil {
+					return err
+				}
+				state, err := escalation.LoadTx(t.Context(), tx, f.ticket)
+				if err != nil {
+					return err
+				}
+				if state.Status != "awaiting_decision" || state.PlannedProfile != "" {
+					t.Fatal("original model returned to episode plan", state)
+				}
+				return nil
+			})
+		})
+	}
+}

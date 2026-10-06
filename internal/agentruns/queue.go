@@ -13,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/escalation"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
@@ -326,6 +327,9 @@ type queuePrepared struct {
 // It does not acquire the event counter; composite callers flush audit last.
 func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, in queueTarget) (queuePrepared, error) {
 	if err := queuePermission(ctx, tx, p, t.ProjectID, true); err != nil {
+		return queuePrepared{}, err
+	}
+	if err := escalation.CheckLaunchTx(ctx, tx, t.ID, "", "", nil); err != nil {
 		return queuePrepared{}, err
 	}
 	existing, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM agent_runs WHERE queue_node_id=$1 AND status IN ('queued','starting','running','waiting')`, t.ID))

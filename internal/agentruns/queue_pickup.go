@@ -10,6 +10,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/escalation"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
@@ -59,6 +60,15 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		if err = queuePermission(r.Context(), tx, p, t.ProjectID, true); err != nil {
 			return nil, err
 		}
+		// A queue entry cannot mint a retry lineage or an unbounded cost hold.
+		// Re-check already routed entries too, before the idempotent pickup return.
+		if err := escalation.CheckLaunchTx(r.Context(), tx, t.ID, "", "", nil); err != nil {
+			var refusal *workorders.Error
+			if errors.As(err, &refusal) && refusal.Status == 409 {
+				continue
+			}
+			return nil, err
+		}
 		target := in
 		if e.Queued.Targeted {
 			target = queueTarget{Agent: e.Run.AgentID, Account: e.Run.RequestedAccountID}
@@ -101,7 +111,7 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			return nil, err
 		}
 		placement, err := modelregistry.PlacementFor(r.Context(), tx, tenant.Principal{}, modelregistry.WorkQuery{
-			Role: role, TicketRole: f.RouteRole, Area: f.Area, Complexity: f.Complexity, ComplexitySource: f.ComplexitySource, TicketResidency: f.Residency, ProjectID: project, PersonID: starter}, time.Now().UTC())
+			TicketID: t.ID, Role: role, TicketRole: f.RouteRole, Area: f.Area, Complexity: f.Complexity, ComplexitySource: f.ComplexitySource, TicketResidency: f.Residency, ProjectID: project, PersonID: starter}, time.Now().UTC())
 		if err != nil {
 			return nil, err
 		}

@@ -38,6 +38,7 @@ type State struct {
 	QuestionPending bool           `json:"question_pending,omitempty"`
 	LastOutcomeID   string         `json:"last_outcome_id,omitempty"`
 	UsedProfiles    []string       `json:"used_profile_ids,omitempty"`
+	OriginalProfile string         `json:"original_profile_id,omitempty"`
 	// Bounded detector internals are withheld from the public projection.
 	LastFixRound    int                      `json:"last_fix_round,omitempty"`
 	LastReviewRound int                      `json:"last_review_round,omitempty"`

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -51,24 +52,13 @@ func route(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket string, s 
 	if role == "" {
 		role = "build"
 	}
-	// Every observed worker profile is excluded, including the original writer.
-	excluded := append([]string{}, s.UsedProfiles...)
-	var current *string
-	if err := tx.QueryRow(ctx, `SELECT (SELECT model_profile_id::text FROM harness_sessions WHERE ticket_node_id=$1 AND role='worker' AND model_profile_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM work_orders w WHERE w.node_id=harness_sessions.work_order_id AND w.kind='review') ORDER BY created_at DESC,id DESC LIMIT 1)`, ticket).Scan(&current); err != nil {
+	excluded, err := modelregistry.EscalationExclusionsTx(ctx, tx, ticket, s.OriginalProfile, s.EpisodeID, s.UsedProfiles)
+	if err != nil {
 		return modelregistry.WorkResolution{}, err
 	}
-	if current != nil {
-		found := false
-		for _, id := range excluded {
-			if id == *current {
-				found = true
-			}
-		}
-		if !found {
-			excluded = append(excluded, *current)
-		}
-	}
-	return modelregistry.ResolveEscalation(ctx, tx, p, modelregistry.WorkQuery{Role: role, Area: fields.Area, ProjectID: project, Complexity: fields.Complexity, ComplexitySource: fields.ComplexitySource, TicketResidency: fields.Residency}, excluded, time.Now().UTC())
+	pick, err := modelregistry.ResolveEscalation(ctx, tx, p, modelregistry.WorkQuery{Role: role, Area: fields.Area, ProjectID: project, Complexity: fields.Complexity, ComplexitySource: fields.ComplexitySource, TicketResidency: fields.Residency}, excluded, time.Now().UTC())
+	pick.Trace.Role, pick.Trace.ProjectID, pick.Trace.TicketRequirement = pick.Role, project, modelprefs.NormalizeResidency(fields.Residency)
+	return pick, err
 }
 
 // ObserveTx is called exactly once for each newly inserted outcome, under
@@ -91,6 +81,16 @@ func ObserveTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, proje
 			return err
 		}
 		s = &State{EpisodeID: id, Status: "observing", MaxAttempts: MaxAttempts, MaxCost: MaxCostMicros}
+	}
+	if s.OriginalProfile == "" {
+		episode := ""
+		if s.Attempts > 0 {
+			episode = s.EpisodeID
+		}
+		s.OriginalProfile, err = modelregistry.EscalationOriginalTx(ctx, tx, ticket, episode)
+		if err != nil {
+			return err
+		}
 	}
 	before := s.Public()
 	s.Revision++
@@ -206,25 +206,43 @@ func decisionTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, proj
 // error must be committed and returned as the HTTP failure: it records budget
 // exhaustion and the one human question without creating another run.
 func ReserveTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, project, previous, profile string, cost *int64) (*workorders.Error, error) {
+	_, rejection, err := ReservePlacementTx(ctx, tx, p, ticket, project, previous, profile, cost)
+	return rejection, err
+}
+
+// ReservePlacementTx returns the exact admitted route before charging it.
+// Freeze this placement with the new run; resolving again would select the
+// next candidate because the admitted profile is now part of episode history.
+func ReservePlacementTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, project, previous, profile string, cost *int64) (*modelregistry.WorkPlacement, *workorders.Error, error) {
 	var currentProject string
 	if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1 AND deleted_at IS NULL`, ticket).Scan(&currentProject); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if currentProject != project {
-		return nil, workorders.Fail(409, "work project changed")
+		return nil, nil, workorders.Fail(409, "work project changed")
 	}
 	s, err := LoadTx(ctx, tx, ticket)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if s == nil || s.Status == "observing" || s.Status == "resolved" {
-		return nil, nil
+		return nil, nil, nil
+	}
+	if s.OriginalProfile == "" {
+		episode := ""
+		if s.Attempts > 0 {
+			episode = s.EpisodeID
+		}
+		s.OriginalProfile, err = modelregistry.EscalationOriginalTx(ctx, tx, ticket, episode)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	if err := authz.RequireTx(ctx, tx, p, "run.create", authz.Scope{ProjectID: project}); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if s.Status != "stuck" {
-		return nil, workorders.Fail(409, "stuck work awaits a Decision Desk decision")
+		return nil, nil, workorders.Fail(409, "stuck work awaits a Decision Desk decision")
 	}
 
 	var eligible bool
@@ -235,10 +253,10 @@ func ReserveTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, proje
  AND NOT EXISTS(SELECT 1 FROM harness_sessions h WHERE h.ticket_node_id=$2 AND NOT aeon_work_session_stopped(h.stopped_at,h.stop_reason))
  AND NOT EXISTS(SELECT 1 FROM agent_runs r JOIN nodes n ON n.id=r.work_order_id WHERE (n.parent_id=$2 OR r.queue_node_id=$2) AND r.status IN ('queued','starting','running','waiting'))`, previous, ticket).Scan(&eligible)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if !eligible {
-		return nil, workorders.Fail(409, "previous writer exit must be proven before escalation")
+		return nil, nil, workorders.Fail(409, "previous writer exit must be proven before escalation")
 	}
 	if cost == nil || *cost <= 0 || *cost > MaxCostMicros-s.HeldCost || s.Attempts >= MaxAttempts {
 		before := s.Public()
@@ -247,27 +265,61 @@ func ReserveTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, proje
 		s.PlannedProfile = ""
 		s.Revision++
 		if err := decisionTx(ctx, tx, p, ticket, project, s); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if err := save(ctx, tx, p, ticket, project, *s); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if _, err := events.Append(ctx, tx, p, events.Change{Type: "work.escalation_changed", NodeID: &ticket, Before: before, After: s.Public()}); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
-		return &workorders.Error{Status: 409, Message: "finite escalation cost and attempt budget required; work awaits a Decision Desk decision"}, nil
+		return nil, &workorders.Error{Status: 409, Message: "finite escalation cost and attempt budget required; work awaits a Decision Desk decision"}, nil
 	}
 	pick, err := route(ctx, tx, p, ticket, *s)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if pick.Profile == nil || pick.Profile.ID != profile {
-		return nil, workorders.Fail(409, "retry must use the current allowed escalation route")
+		return nil, nil, workorders.Fail(409, "retry must use the current allowed escalation route")
 	}
 	s.Attempts++
 	s.HeldCost += *cost
 	s.UsedProfiles = append(s.UsedProfiles, profile)
 	s.PlannedProfile = ""
 	s.Revision++
-	return nil, save(ctx, tx, p, ticket, project, *s)
+	id := pick.Profile.ID
+	placement := &modelregistry.WorkPlacement{PreferenceTrace: pick.Trace, PlannedProfileID: &id}
+	placement.Role, placement.ProjectID = pick.Role, project
+	return placement, nil, save(ctx, tx, p, ticket, project, *s)
+}
+
+// CheckLaunchTx closes every managed dispatch path on the live episode. The
+// caller holds the tenant/pairing/tree fences and final mutation authorization.
+// Queue entries have no finite retry reservation and remain parked; retries
+// must carry the same episode, lineage and charged profile through claim.
+func CheckLaunchTx(ctx context.Context, tx pgx.Tx, ticket, profile, previous string, admission json.RawMessage) error {
+	state, err := LoadTx(ctx, tx, ticket)
+	if err != nil {
+		return err
+	}
+	if state == nil || state.Status == "observing" || state.Status == "resolved" {
+		return nil
+	}
+	if state.Status != "stuck" {
+		return workorders.Fail(409, "stuck work awaits a Decision Desk decision")
+	}
+	var frozen State
+	if len(admission) > 0 {
+		if err := json.Unmarshal(admission, &frozen); err != nil {
+			return workorders.Fail(409, "invalid escalation admission")
+		}
+	}
+	sameEpisode := frozen.EpisodeID == state.EpisodeID
+	withinAttempts := frozen.Attempts >= 1 && frozen.Attempts <= state.Attempts && state.Attempts <= MaxAttempts
+	withinCost := frozen.HeldCost > 0 && frozen.HeldCost <= state.HeldCost && state.HeldCost <= MaxCostMicros
+	chargedProfile := slices.Contains(state.UsedProfiles, profile) && slices.Contains(frozen.UsedProfiles, profile)
+	if previous == "" || !sameEpisode || !withinAttempts || !withinCost || !chargedProfile {
+		return workorders.Fail(409, "stuck work requires a charged bounded retry lineage")
+	}
+	return nil
 }
