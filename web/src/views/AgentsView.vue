@@ -222,12 +222,14 @@ async function control(view: SessionView, kind: SessionControl['kind']) {
   } catch (e) { toast(message(e), { tone: 'error' }) }
 }
 // The live line's counts jump to the first session in that state; a folded
-// Sessions section opens for this visit to show it (AEON-784).
+// Sessions section opens for this visit to show it (AEON-784). The reveal is
+// recorded even when Sessions shows open, so a preference read that lands
+// after the jump cannot fold the row away.
 async function jump(state: AgentState) {
   const states = state === 'problem' ? ['problem', 'unresponsive'] : state === 'waiting' ? ['waiting'] : [state]
   const el = [...document.querySelectorAll<HTMLElement>('.agents-page .row[data-state]')].find(row => states.includes(row.dataset.state ?? ''))
   if (!el?.dataset.row) return
-  if (el.closest('[inert]') && sessionList.value?.reveal()) await nextTick()
+  if (sessionList.value?.reveal()) await nextTick()
   cursor.value = el.dataset.row
   el.focus({ preventScroll: true })
   el.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })

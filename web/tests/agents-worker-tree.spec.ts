@@ -230,6 +230,45 @@ test('a live-line count and the menu History open a folded Sessions section with
   expect(work.preferences['ui.agents.sections']).toMatchObject({ sessions: false })
 })
 
+// AEON-784 risk (fix round 3): a count jumps into Sessions while it still shows
+// open by default; the stored fold lands afterwards and hides the row it focused.
+test('a live-line count keeps Sessions open when the section preference lands after the jump', async ({ page }) => {
+  const { work } = await setup(page)
+  // The stored dial fold differs from the default, so the spec can see the late read land.
+  work.preferences['ui.agents.sections'] = { dial: false, accounts: false, sessions: false, queued: true }
+  // Barrier: the section read is answered only after the count has jumped.
+  let release!: () => void
+  const released = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/preferences/ui.agents.sections', async route => {
+    if (route.request().method() === 'GET') await released
+    return route.fallback()
+  })
+  const puts: string[] = []
+  page.on('request', request => { if (request.method() === 'PUT' && request.url().includes('/api/preferences/ui.agents.sections')) puts.push(request.url()) })
+  await page.goto('/agents')
+  const sessions = page.getByRole('region', { name: 'Sessions' })
+  const toggle = sessions.locator('.fs-head > .fs-tog')
+  const target = sessions.locator('.row[data-state="working"]').first()
+  // Before the read, Sessions shows open, so the jump needs no fold change to reach the row.
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await page.getByRole('group', { name: 'Live sessions' }).getByRole('button', { name: /^\d+ working\./ }).click()
+  await expect(target).toBeFocused()
+  const read = page.waitForResponse(r => r.request().method() === 'GET' && new URL(r.url()).pathname === '/api/preferences/ui.agents.sections')
+  release()
+  await read
+  // The late read did land: the dial follows the stored fold, Sessions keeps the jumped-to row shown.
+  await expect(page.getByRole('region', { name: 'Agents at once' }).locator('.fs-tog')).toHaveAttribute('aria-expanded', 'false')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  await expect(sessions.locator('.fs-body')).not.toHaveAttribute('inert', /.*/)
+  await expect(target).toBeVisible()
+  await expect(target).toBeFocused()
+  // Folding ends the visit's reveal and writes nothing: the preference already says folded.
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  expect(puts).toEqual([])
+  expect(work.preferences['ui.agents.sections']).toMatchObject({ sessions: false })
+})
+
 for (const theme of ['light', 'dark'] as const) {
   for (const width of [1440, 390]) {
     test(`worker tree fits ${width}px in ${theme}, passes axe, and captures coordinator evidence`, async ({ page }, testInfo) => {

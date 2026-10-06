@@ -140,6 +140,8 @@
     ,
     "browser:tests/agents-worker-tree.spec.ts:a live-line count and the menu History open a folded Sessions section without a preference write"
     ,
+    "browser:tests/agents-worker-tree.spec.ts:a live-line count keeps Sessions open when the section preference lands after the jump"
+    ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1024"
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1440"
@@ -5781,6 +5783,8 @@
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a lead with only stopped workers opens history only through its stopped count","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a live-line count and the menu History open a folded Sessions section without a preference write","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a live-line count keeps Sessions open when the section preference lands after the jump","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a stopped lead links its successor instead of claiming live workers","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
