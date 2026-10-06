@@ -4,47 +4,58 @@ import type { ModelEstimateHistory } from '../../lib/modelEstimates'
 export interface Choice { estimate?: ModelEstimateHistory; value: string; label: string; hint?: string; detail?: string }
 </script>
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { vClipTip } from '../../directives/clipTip'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import ModelEstimateHint from './ModelEstimateHint.vue'
 
 // A searchable single choice in a popover (time zone, language): type to narrow,
-// arrows to move, Enter to choose, Esc to close.
-const props = withDefaults(defineProps<{ estimateKind?: string; estimateBucket?: 'normal' | 'complex'; anchor: HTMLElement | null; label: string; choices: Choice[]; current: string; match?: (choice: Choice, needle: string) => boolean; limit?: number; placeholder?: string }>(), { match: undefined, limit: 80, placeholder: 'Search…' })
-const emit = defineEmits<{ choose: [value: string]; close: [restoreFocus: boolean] }>()
+// arrows to move, Enter to choose, Esc to close. A remote list's next page is the
+// last arrow stop, after the options; the next page then focuses its first option.
+const props = withDefaults(defineProps<{ estimateKind?: string; estimateBucket?: 'normal' | 'complex'; anchor: HTMLElement | null; label: string; choices: Choice[]; current: string; match?: (choice: Choice, needle: string) => boolean; limit?: number; placeholder?: string; settingsKeys?: boolean; remote?: boolean; loading?: boolean; hasMore?: boolean; error?: string }>(), { match: undefined, limit: 80, placeholder: 'Search…' })
+const emit = defineEmits<{ choose: [value: string]; close: [restoreFocus: boolean]; search: [term: string]; more: [] }>()
 const term = ref('')
-const list = ref<HTMLElement>()
+const list = ref<HTMLElement>(), nextPage = ref<HTMLButtonElement>()
+let pageFocus = false
+watch(term, value => { pageFocus = false; if (props.remote) emit('search', value) })
+watch(() => props.loading, async (loading, was) => {
+  if (loading || !was || !pageFocus) return
+  pageFocus = false; await nextTick()
+  ;(list.value?.querySelector<HTMLButtonElement>('button') ?? list.value?.parentElement?.querySelector<HTMLInputElement>('input'))?.focus()
+})
+function nextPageClick() { pageFocus = document.activeElement === nextPage.value; emit('more') }
 const hits = computed(() => {
   const needle = term.value.trim().toLowerCase()
-  if (!needle) return props.choices
+  if (!needle || props.remote) return props.choices
   return props.choices.filter(choice => props.match ? props.match(choice, needle) : `${choice.label} ${choice.hint ?? ''} ${choice.detail ?? ''}`.toLowerCase().includes(needle))
 })
 const shown = computed(() => hits.value.slice(0, props.limit))
 const more = computed(() => hits.value.length - shown.value.length)
 function move(event: KeyboardEvent) {
-  const items = [...(list.value?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+  const options = [...(list.value?.querySelectorAll<HTMLButtonElement>('button') ?? [])]
+  const items = nextPage.value && !nextPage.value.disabled ? [...options, nextPage.value] : options
   const index = items.indexOf(document.activeElement as HTMLButtonElement)
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault(); event.stopPropagation()
     const next = event.key === 'ArrowDown' ? Math.min(items.length - 1, index + 1) : index <= 0 ? -1 : index - 1
     if (next === -1) list.value?.parentElement?.querySelector<HTMLInputElement>('input')?.focus()
     else items[next]?.focus()
-  } else if (event.key === 'Enter' && document.activeElement?.tagName === 'INPUT' && items[0]) { event.preventDefault(); items[0].click() }
+  } else if (event.key === 'Enter' && document.activeElement?.tagName === 'INPUT' && options[0]) { event.preventDefault(); options[0].click() }
 }
 </script>
 
 <template>
-  <FloatingPanel :anchor="anchor" :width="320" :tallest="380" :label="label" @close="restore => emit('close', restore)">
+  <FloatingPanel :settings-keys="settingsKeys" :anchor="anchor" :width="320" :tallest="380" :label="label" @close="restore => emit('close', restore)">
     <div @keydown="move">
       <label class="search-field find">
         <AppIcon name="search" :size="13" />
         <input v-model="term" class="field" type="search" :placeholder="placeholder" :aria-label="`Search ${label.toLowerCase()}`" data-autofocus autocomplete="off" spellcheck="false" />
       </label>
+      <button v-if="remote" ref="nextPage" type="button" class="choice next-page" :disabled="loading || !hasMore" @click="nextPageClick">Next projects</button>
       <div ref="list" class="menu" role="listbox" :aria-label="label">
         <button
-          v-for="choice in shown" :key="choice.value" type="button" role="option" class="choice" :class="{ 'model-choice': estimateKind }" :aria-selected="choice.value === current"
+          v-for="choice in shown" :key="choice.value" type="button" role="option" class="choice" :class="{ 'model-choice': estimateKind, 'project-choice': remote }" :aria-selected="choice.value === current"
           @click="emit('choose', choice.value)"
         >
           <span class="text"><span v-clip-tip class="label">{{ choice.label }}</span><span v-if="choice.detail" v-clip-tip class="detail">{{ choice.detail }}</span><ModelEstimateHint v-if="estimateKind" :history="choice.estimate" :kind-label="estimateKind" :bucket="estimateBucket ?? 'normal'" /></span>
@@ -52,7 +63,9 @@ function move(event: KeyboardEvent) {
           <AppIcon :style="{ visibility: choice.value === current ? 'visible' : 'hidden' }" name="check" :size="14" class="tick" />
         </button>
       </div>
-      <p v-if="!shown.length" class="none">Nothing matches “{{ term.trim() }}”.</p>
+      <p v-if="error" class="none" role="alert">{{ error }}</p>
+      <p v-else-if="loading" class="none" role="status">Loading projects…</p>
+      <p v-else-if="!shown.length" class="none">Nothing matches “{{ term.trim() }}”.</p>
       <p v-else-if="more" class="none">{{ more }} more · keep typing to narrow</p>
     </div>
   </FloatingPanel>
@@ -64,6 +77,9 @@ function move(event: KeyboardEvent) {
 .menu { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .choice { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 4px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; font-weight: 600; text-align: left; }
 @media (hover: hover) { .choice:hover { background: var(--row-hover); } }
+.next-page { justify-content: flex-end; width: 100%; }.next-page:disabled { visibility: hidden; }
+.project-choice { height: 52px; overflow: hidden; }.project-choice .label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (pointer: coarse), (max-width: 720px) { .choice, .find .field { min-height: 44px; } }
 .model-choice { height: 64px; overflow: hidden; }
 .model-choice .label, .model-choice .detail { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .choice:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
