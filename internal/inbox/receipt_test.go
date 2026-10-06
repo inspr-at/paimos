@@ -405,7 +405,7 @@ func receiptAgentKey(t *testing.T, w *world, p tenant.Principal, scopes ...strin
 	secret := hex.EncodeToString(secretBytes[:])
 	prefix := strings.ReplaceAll(p.TenantID, "-", "") + hex.EncodeToString(keyID[:8])
 	hash := sha256.Sum256([]byte(secret))
-	if _, err := w.db.Admin.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1::uuid,$2::uuid,'receipt-test',$3,$4,$5)`, p.TenantID, p.ID, prefix, hex.EncodeToString(hash[:]), scopes); err != nil {
+	if _, err := w.db.Admin.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1::uuid,$2::uuid,'receipt-test',$3,$4,$5,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, p.TenantID, p.ID, prefix, hex.EncodeToString(hash[:]), scopes); err != nil {
 		t.Fatal(err)
 	}
 	return "aeon_" + prefix + "_" + secret

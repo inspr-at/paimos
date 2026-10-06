@@ -111,4 +111,8 @@ defineExpose({ toggle })
 .q-key.off { visibility: hidden; }
 @media (max-width: 600px) { .q-word, .q-key { display: none; } }
 @media (pointer: coarse) { .q-key { display: none; } }
+/* A narrow ticket dock (TicketHeaderBar's panel-bar container) keeps Close in
+   view with any system font: Queue goes icon-only, as on phones; its name and
+   tooltip still say what it does and that q triggers it. */
+@container panel-bar (max-width: 420px) { .q-word, .q-key { display: none; } }
 </style>

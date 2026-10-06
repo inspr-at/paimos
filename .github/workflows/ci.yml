@@ -223,8 +223,8 @@ jobs:
       matrix:
         # Use the same event/ref/attempt guards as runs-on when evaluated.
         # Re-run all jobs: partial reruns may retain earlier matrix values.
-        shard: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}
-    runs-on: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}
+        shard: ${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}
+    runs-on: ${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}
     services:
       postgres:
         image: pgvector/pgvector:pg18

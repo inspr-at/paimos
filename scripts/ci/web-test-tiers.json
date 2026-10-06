@@ -8280,6 +8280,20 @@
     ,
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption refusal reports failure and owned keys have no takeover action","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"cancel or untick a role extension writes nothing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"cancel, empty scope set, and expired keys","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8493,6 +8507,8 @@
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"phone: band, full-height panel and pinned sheet bar at 390 (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"phone: band, full-height panel and pinned sheet bar at 390 (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"ticket header keeps every action inside a 1024 side panel with a wide system font","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"ticket: Queue keeps its place through Queue and Queued, and the line shows where it stands","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14330,7 +14346,11 @@
     ,
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > retains membership and screen shortcuts outside the description and Escape inside it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"adoption confirmation is bound to the acting person and key","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"keeps an explicit custom-role recurrence grant and names the creator ceiling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"late adoption results cannot restore another person or a departed key","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"names the built-in Admin agent role as the recurrence ceiling","tier":"ESSENTIAL"}
     ,

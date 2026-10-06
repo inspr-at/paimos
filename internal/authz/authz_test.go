@@ -347,7 +347,7 @@ func TestLinkedAliasAndLegacyAgentMigration(t *testing.T) {
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'agent','aeon-coordinator') RETURNING id::text`, tid).Scan(&agentID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1::uuid,$2::uuid,'legacy','az1-migration','unused',$3)`, tid, agentID, scopes); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1::uuid,$2::uuid,'legacy','az1-migration','unused',$3,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, tid, agentID, scopes); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_principal($1::uuid,$2::uuid)`, tid, aliasID); err != nil {
