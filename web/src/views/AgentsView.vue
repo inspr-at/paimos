@@ -484,7 +484,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
   .connect { grid-area: connect; }
   .start-agent, .connect { min-height: 44px; justify-content: center; }
   .connect { height: auto; line-height: 1.2; white-space: normal; padding-top: 8px; padding-bottom: 8px; }
-  .head-links { grid-area: links; margin: 0 0 0 -10px; }
+  .head-links { grid-area: links; margin: 0 0 0 -10px; flex-wrap: wrap; }
   .context-link { height: 36px; }
   .freshness { order: 9; margin: 0 0 0 auto; height: 36px; padding-right: 0; }
 }

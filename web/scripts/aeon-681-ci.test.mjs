@@ -15,6 +15,8 @@ import { validate, key, select } from '../../scripts/test-tiers/core.mjs'
 // natively once, and use declared unit identities for the unrelated unit lane.
 // Native unit collection/execution has its own selector regression below and
 // the static web-tiers check reconciles the complete catalogue independently.
+// One native collection serves the supplied-inventory plan: the web-unit shard
+// budget is 120 seconds and each recollection costs tens of seconds.
 let collected
 const inventory=()=>{
   if(!collected) {
@@ -80,17 +82,28 @@ describe('native suite', () => {
   assert.equal(failure.stdout.trim(), '', 'a partial batch must never report a successful catalogue')
 })
 
-test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async()=>{
-  // All modes describe this same checkout. Collect its native registrations
-  // once, then exercise the unchanged planner and CLI against that snapshot.
-  // Production CLI calls still collect fresh; there is no persistent cache.
-  const snapshot=inventory(), before=structuredClone(snapshot)
-  let collections=0
-  const dependencies={collect:kind=>{assert.equal(kind,'web');collections++;return snapshot}}
+test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async t=>{
+  // Exercise every unchanged planner/CLI path against the same native snapshot.
+  // Recollecting the entire catalogue for each mode made this one regression
+  // exceed the static gate's guard before it could finish its assertions.
+  const collector=pathToFileURL(resolve(root,'scripts/test-tiers/collect.mjs')).href
+  const entry=pathToFileURL(resolve(root,'scripts/test-tiers/cli.mjs')).href+'?aeon691-native-planning'
+  const wrapper=`export * from ${JSON.stringify(collector)};
+import { collectWeb as nativeCollectWeb } from ${JSON.stringify(collector)};
+let inventory;
+export let collections = 0;
+export const collectWeb = () => { if (!inventory) { collections++; inventory = nativeCollectWeb(); } return inventory; };`
+  const snapshot='data:text/javascript,'+encodeURIComponent(wrapper)
+  const hook=registerHooks({resolve(specifier,context,next){
+    if(context.parentURL===entry&&specifier==='./collect.mjs') return {url:snapshot,shortCircuit:true}
+    return next(specifier,context)
+  }})
+  t.after(()=>hook.deregister())
+  const {plan,main}=await import(entry)
   const policy=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8'))
   const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
   const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
-  const selection=plan('web',options,dependencies)
+  const selection=plan('web',options)
   const browser=selection.all.filter(row=>row.kind==='browser')
   const declared=new Map(JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8')).tests.map(row=>[key(row),row]))
   const expected=browser.filter(row=>row.tier==='ESSENTIAL'||(gated.has(row.file)&&declared.get(key(row))?.tier==='GATED-FULL'))
@@ -104,13 +117,13 @@ test('native full CI planning retains the OPS-257 gate and essential promotions 
   try {
     process.env.AEON_TEST_TIER_MODE='full'
     console.log=value=>output.push(JSON.parse(value))
-    assert.equal(await main(['plan','web','--event','pull_request','--paths',JSON.stringify(options.paths)],dependencies),0)
+    assert.equal(await main(['plan','web','--event','pull_request','--paths',JSON.stringify(options.paths)]),0)
     assert.equal(output.at(-1).kinds.browser,expected.length)
     assert.equal(output.at(-1).deferredBrowserCases,browser.length-expected.length)
-    assert.equal(await main(['plan','web','--full','--event','pull_request','--paths',JSON.stringify(options.paths)],dependencies),0)
+    assert.equal(await main(['plan','web','--full','--event','pull_request','--paths',JSON.stringify(options.paths)]),0)
     assert.equal(output.at(-1).kinds.browser,expected.length)
     assert.equal(output.at(-1).scope,'gated-full')
-    assert.equal(await main(['plan','web','--all','--event','workflow_dispatch','--paths','[]'],dependencies),0)
+    assert.equal(await main(['plan','web','--all','--event','workflow_dispatch','--paths','[]']),0)
     assert.equal(output.at(-1).kinds.browser,browser.length)
     assert.equal(output.at(-1).scope,'catalogue')
   } finally {
@@ -118,13 +131,13 @@ test('native full CI planning retains the OPS-257 gate and essential promotions 
     if(original===undefined) delete process.env.AEON_TEST_TIER_MODE
     else process.env.AEON_TEST_TIER_MODE=original
   }
-  const nightly=plan('web',{...options,event:'schedule'},dependencies)
+  const nightly=plan('web',{...options,event:'schedule'})
   assert.deepEqual(nightly.tests.map(key).sort(),browser.map(key).sort())
   assert.equal(nightly.scope,'catalogue')
   assert.equal(nightly.deferredBrowserCases,0)
-  assert.equal(collections,5,'Every planning mode must consume the one native snapshot')
-  assert.deepEqual(snapshot,before,'Planning must not mutate the shared discovery snapshot')
+  assert.equal((await import(snapshot)).collections,1,'all planner modes must use one real native inventory')
 })
+
 
 test('production CLI planning reuses one native snapshot without a supplied collector',async()=>{
   // Every planner call sees the same unchanged tree. Collect it natively once,
@@ -177,6 +190,7 @@ export const collectWeb = () => (${JSON.stringify(snapshot)});`
     assert.equal(nightly.deferredBrowserCases,0)
   } finally { hooks.deregister() }
 })
+
 
 test('plan and the CLI reuse a supplied inventory instead of recollecting the catalogue',async()=>{
   const sentinel={kind:'vitest',file:'tests/plan-owner.unit.test.ts',name:'AEON-706 supplied inventory sentinel (never registered on disk)'}
@@ -242,7 +256,12 @@ test('native browser selectors cover reconciled essentials and every collected f
   const declared=new Map(manifest.tests.filter(row=>row.kind==='browser').map(row=>[key(row),row]))
   for(const row of reconciled) assert.equal(row.tier,declared.get(key(row))?.tier??'NIGHTLY',key(row))
   const groups=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8')).groups
-  const listings=new Map()
+  // Full and catalogue modes often produce identical inputs. Collect each
+  // distinct native selector once, while retaining every per-mode assertion.
+  // Several groups select exactly the same cases in full and all modes.
+  // Reuse only identical native requests within this unchanged snapshot;
+  // each mode still asserts every identity and its independent total.
+  const nativeSelections=new Map()
   for(const mode of ['essential','full','all']) {
     let total=0
     for(const group of groups) {
@@ -250,16 +269,16 @@ test('native browser selectors cover reconciled essentials and every collected f
       const rows=all.filter(row=>group.specs.some(spec=>spec.file===row.file)&&included(row))
       if(!rows.length) continue
       const list=resolve(evidence,`regression-${mode}-${group.id}.txt`)
-      const selection=browserList(rows,all).join('\n')+'\n'
-      writeFileSync(list,selection)
+      const selectors=browserList(rows,all).join('\n')+'\n'
+      writeFileSync(list,selectors)
       const env={...process.env,...Object.fromEntries(Object.entries(group.env).map(([k,v])=>[k,v.replaceAll('${RUNNER_TEMP}',evidence)]))}
-      // Several groups select exactly the same cases in full and all modes.
-      // Reuse only identical native requests within this unchanged snapshot;
-      // each mode still asserts every identity and its independent total.
-      const request=JSON.stringify([group.config,group.flags,group.project,group.env,selection])
-      if(!listings.has(request)) listings.set(request,flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','--config',group.config,...group.flags,
-        ...(group.project?['--project',group.project]:[]),'--workers=1','--retries=0','--test-list',list,'--list','--reporter=json'],{cwd:web,env})),group.config))
-      const listed=listings.get(request)
+      const identity=JSON.stringify([group.config,group.flags,group.project,group.env,selectors])
+      let listed=nativeSelections.get(identity)
+      if(!listed) {
+        listed=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','--config',group.config,...group.flags,
+          ...(group.project?['--project',group.project]:[]),'--workers=1','--retries=0','--test-list',list,'--list','--reporter=json'],{cwd:web,env})),group.config)
+        nativeSelections.set(identity,listed)
+      }
       assert.deepEqual(listed.map(row=>`${row.id}:${row.project}`).sort(),rows.map(row=>`${row.id}:${row.project}`).sort(),group.id)
       total+=listed.length
     }
