@@ -15,10 +15,14 @@ if (process.env.AEON_PW_TEST_ROOT_VERIFIED) {
   }
 }
 
-// A slow root: the supervisor must not give up on a start-up that outlasts
-// its attempt budget while the preload is still establishing identity.
+// A slow root start (a loaded host) must never decide the supervisor's verdict.
+// The reviewed barrier test sets AEON_PW_TEST_SLOW_START_MS. Main's blind
+// supervisor sets AEON_PW_TEST_START_DELAY_MS so a start that outlasts the
+// attempt budget still finishes while the preload establishes identity.
+const slowStart = Number(process.env.AEON_PW_TEST_SLOW_START_MS ?? 0)
 const startDelay = Number(process.env.AEON_PW_TEST_START_DELAY_MS ?? 0)
-if (startDelay > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, startDelay)
+const waitMs = (slowStart > 0 ? slowStart : 0) + (startDelay > 0 ? startDelay : 0)
+if (waitMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs)
 
 const original = childProcess.spawnSync
 // Keep the transient root alive until the supervisor verifies it. This is a

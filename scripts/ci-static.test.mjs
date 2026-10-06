@@ -222,9 +222,11 @@ test('skips report INCOMPLETE and code 3; allow-skips remains explicitly incompl
 test('fixed check environment removes caller flags and identity but supplies CI values', async t => {
   const cwd = temporary(t), source = { ...process.env, GOFLAGS: '-skip', AEON_TEST_TIER_MODE: 'essential', AEON_TEST_DATABASE_URL: 'fixture', RANDOM_EXTRA: 'fixture',
     NIX_CFLAGS_COMPILE: '-isystem /fixture/sdk/usr/include', NIX_LDFLAGS: '-L/fixture/sdk/usr/lib',
+    NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin: '/fixture/sdk',
+    NIX_CC_WRAPPER_TARGET_HOST_aarch64_unknown_linux_gnu: '1',
     DEVELOPER_DIR: '/fixture/apple-sdk', SDKROOT: '/fixture/apple-sdk/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk',
     NIX_LDFLAGS_FOR_BUILD: '-L/fixture/build-sdk/usr/lib', NIX_CFLAGS_COMPILE_FOR_TARGET: '-isystem /fixture/target-sdk/usr/include',
-    NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1', NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
+    NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
     NIX_CC_WRAPPER_TARGET_BUILD_arm64_apple_darwin: '1', NIX_BINTOOLS_WRAPPER_TARGET_TARGET_arm64_apple_darwin: '1',
     NIX_CC_WRAPPER_FLAGS_SET_arm64_apple_darwin: '1', NIX_DEBUG: '7', NIX_CC: 'fixture-cc' }
   await runChecks([{ id: 'env', command: 'true', cwd: '.', needs: [], timeout_seconds: 5 }], cwd, { env: source, run: async (_command, { env }) => {
@@ -233,11 +235,12 @@ test('fixed check environment removes caller flags and identity but supplies CI 
     assert.equal(env.CI, 'true'); assert.equal(env.CI_LANE, 'full')
     assert.equal(env.NIX_CFLAGS_COMPILE, source.NIX_CFLAGS_COMPILE)
     assert.equal(env.NIX_LDFLAGS, source.NIX_LDFLAGS)
+    assert.equal(env.NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin, source.NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin)
+    assert.equal(env.NIX_CC_WRAPPER_TARGET_HOST_aarch64_unknown_linux_gnu, '1')
     assert.equal(env.DEVELOPER_DIR, source.DEVELOPER_DIR)
     assert.equal(env.SDKROOT, source.SDKROOT)
     assert.equal(env.NIX_LDFLAGS_FOR_BUILD, source.NIX_LDFLAGS_FOR_BUILD)
     assert.equal(env.NIX_CFLAGS_COMPILE_FOR_TARGET, source.NIX_CFLAGS_COMPILE_FOR_TARGET)
-    assert.equal(env.NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin, '1')
     assert.equal(env.NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin, '1')
     assert.equal(env.NIX_CC_WRAPPER_TARGET_BUILD_arm64_apple_darwin, '1')
     assert.equal(env.NIX_BINTOOLS_WRAPPER_TARGET_TARGET_arm64_apple_darwin, '1')

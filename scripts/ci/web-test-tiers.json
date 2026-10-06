@@ -276,6 +276,14 @@
     ,
     "browser:tests/features.spec.ts:project OFF overrides workspace ON and inherit restores it"
     ,
+    "browser:tests/knowledge-learnings.spec.ts:a learning that changed after review is refused and shown again"
+    ,
+    "browser:tests/knowledge-learnings.spec.ts:leaving the knowledge view during a run sends no further step"
+    ,
+    "browser:tests/knowledge-learnings.spec.ts:on a phone the review sheet keeps its actions pinned through apply"
+    ,
+    "browser:tests/knowledge-learnings.spec.ts:pages that scanned no open learning still lead to older ones"
+    ,
     "browser:tests/knowledge.spec.ts:Decision entries expose active and superseded history without generic mutation controls"
     ,
     "browser:tests/no-shift.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
@@ -595,6 +603,24 @@
     "browser:tests/service-tier.spec.ts:320: phone Change tier menu opens and restores its actual trigger"
     ,
     "browser:tests/service-tier.spec.ts:390: phone Change tier menu opens and restores its actual trigger"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:Capacity and load: work days, nights and the editors, with controls that stay put"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:a failed Sprint is said as a failure, not as saved"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:a menu opened before the pool changed acts on nothing and says so"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:people without account management get no account menu and read-only pacing"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:phone: the editor is a full-height sheet and nothing scrolls sideways"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:the plan card for an existing schedule: Turn off keeps nothing for you"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:the plan card shows until it is answered: Looks right saves Auto, then it is gone"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:the plan card: Change leads to Capacity and load without saving"
     ,
     "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
     ,
@@ -4908,6 +4934,10 @@
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: tablet verification control is independent of the status label width","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-716: stalled verification reports the ownership fence and remains retryable after settlement","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-716: verification warnings preserve offline and account recovery controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Agents at once saves one ceiling and independent harness limits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Check now says what came back: a failure as a failure, still nothing, then the reading","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -5487,6 +5517,40 @@
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"typed totals clamp, invalid drafts do not write, and field shortcuts remain native","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"zero and thirty are real ceilings; idle glyph rests and disabled boundaries keep focus","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 dark: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 light: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 light: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 dark: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 light: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 light: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 dark: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 light: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 light: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"a stopped failed session still counts as needing attention","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"another person’s visible account never becomes your full account or your capacity","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"attention counts relevant descendants through family folds and stopped history","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"ended workers remain recoverable through an opt-in fold without cleanup writes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"live families count all external workers, hide hundreds of ended siblings and retain counts when folded","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-handover.spec.ts","name":"drag and drop moves only onto an authorized live lead","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -8398,13 +8462,25 @@
     ,
     {"kind":"browser","file":"tests/knowledge-graph.spec.ts","name":"the pane closes back to the graph, which keeps the display and filters","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a learning that changed after review is refused and shown again","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a person accepts a learning into the changelog and can dismiss another","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a person applies agent recommendations in one confirm, with one row left out","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a person can save a learning as a rule draft","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a suspected credential needs a person to confirm it is not one","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"an empty inbox leaves the knowledge tab in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"leaving the knowledge view during a run sends no further step","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"older learnings load after the newest 50","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"on a phone the review sheet keeps its actions pinned through apply","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"pages that scanned no open learning still lead to older ones","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"removing the last learning keeps focus on the search","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -8479,6 +8555,36 @@
     {"kind":"browser","file":"tests/knowledge.spec.ts","name":"the Knowledge tab groups by kind, filters, searches the text and moves with keys","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/knowledge.spec.ts","name":"the palette finds knowledge by its words and leads to the tab and the search","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: the expert setting reveals Start agent manually","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Start lead: the project holds still while its request is on the way, and the sheet still finishes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"every lead state keeps the primary action in one place and says what it needs","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"no lead: the band offers Start lead and the sheet requests one at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"no lead: the band offers Start lead and the sheet requests one at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"no lead: the band offers Start lead and the sheet requests one at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"no lead: the band offers Start lead and the sheet requests one at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"phone: band, full-height panel and pinned sheet bar at 390 (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"phone: band, full-height panel and pinned sheet bar at 390 (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"ticket header keeps every action inside a 1024 side panel with a wide system font","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"ticket: Queue keeps its place through Queue and Queued, and the line shows where it stands","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"ticket: queued without a lead offers Start lead; a parent queues its open leaves; manual start stays expert-only","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"working lead: the line opens the docked panel, questions go to the Decision Desk, Pause is revision-bound","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/list-columns.spec.ts","name":"assignee sort uses the live worker when nobody is stored, and progress and ETA stay compact","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10934,6 +11040,30 @@
     ,
     {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows light 390 detail open pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Capacity and load: work days, nights and the editors, with controls that stay put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Remove account… confirmed after the account was regrouped removes nothing and says so","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Remove account… says what stays untouched, and only Remove account removes it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"a failed Sprint is said as a failure, not as saved","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"a menu opened before the pool changed acts on nothing and says so","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"people without account management get no account menu and read-only pacing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"phone: the editor is a full-height sheet and nothing scrolls sideways","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the account menu sprints, holds until the time it showed, and goes back to the plan","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the plan card for an existing schedule: Turn off keeps nothing for you","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the plan card shows until it is answered: Looks right saves Auto, then it is gone","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the plan card: Change leads to Capacity and load without saving","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"a reader cannot confirm matching login hints","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"a row opens its detail: windows with source and freshness, and the last three readings","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -12374,6 +12504,8 @@
     ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"six blocked accounts of seven keep the full count and are not labeled ready","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/agent-pairing.test.ts","name":"stalled verification preserves offline, login and setup recovery progress","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"the Nix guide is additive, parsed as published, and never guesses a paired service option","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"the guide uses the server origin and stays available when the session is frozen","tier":"GATED-FULL"}
@@ -12390,9 +12522,9 @@
     ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"web fixes and labels follow the shared daemon/server vocabulary","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/agent-palettes.test.ts","name":"every palette colour is defined and readable as text on each surface of both themes","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/agent-palettes.test.ts","name":"every approved look defines five marks with 3:1 contrast on cards in both modes","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/agent-palettes.test.ts","name":"five named palettes, with the saved colour-blind choice read as Deutan","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/agent-palettes.test.ts","name":"seven approved looks, with the saved colour-blind choice read as Deutan","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agent-palettes.test.ts","name":"the system dark scheme and the explicit dark theme use the same state colours","tier":"GATED-FULL"}
     ,
@@ -13012,6 +13144,12 @@
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"a body heading that repeats the title, or starts it, is not shown twice","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/knowledge.test.ts","name":"a stopped run sends nothing after the stop","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/knowledge.test.ts","name":"applying recommendations sends only the chosen rows, and a failed row does not stop the rest","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/knowledge.test.ts","name":"each step sends the lesson and the learning text that were on screen, and a changed learning asks for a new review","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"method-learning errors stay specific when the status is also 403 or 404","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"slugs: suggestions from titles, unique, and the rules agents rely on","tier":"GATED-FULL"}
@@ -13019,6 +13157,30 @@
     {"kind":"node","file":"tests/knowledge.test.ts","name":"the docked entry lives in ?entry=<type>/<slug>, and only real kinds and slugs count","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"the docking width leaves the list 560px beside a 560px pane","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"Resume is only a restart after a confirmed stop; Pause needs an existing intent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"a parent queue reports queued, existing and skipped leaves and what remains","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"a ticket has exactly one current step on its way to Merged","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"every lifecycle state has one fitting action","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"model by role shows the configured line and effort, or nothing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"no lead: the band offers Start lead and counts queued work honestly","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"start checks: a fresh reading of a full gate is full, and past readings never read as current","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"start checks: the current wait reason wins, reported freshness follows, nothing is invented","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"the gate and today’s merges come from the latest reported decisions","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"the line shows counts, at most two keys and the rest as +n; unknown stays unknown","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"the workspace word reads lower case mid-sentence, keeps acronyms and pluralises","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"unreadable gates mean WAIT, never a start","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/list-views.test.ts","name":"a saved view is the list state with a name; order of values is no change","tier":"GATED-FULL"}
     ,
@@ -13610,6 +13772,8 @@
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"WCAG contrast measures the rounded hex and actual card surfaces","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"agent tokens preserve approved looks, Custom dark derivation, fading and drawn geometry","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"automatic dark mirrors lightness and fixes the unchanged green regression","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"first-paint bootstrap restores derived CSS before app startup with its CSP nonce","tier":"ESSENTIAL"}
@@ -14022,6 +14186,8 @@
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > carries real API room through accounts, pools and the dial when nothing runs","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > claims readiness only from confirmed room when unknown and zero room mix","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > explains routing blockers without calling scheduled, held or unapproved accounts full","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > keeps known room when another harness has no current advice","tier":"NIGHTLY"}
@@ -14033,6 +14199,8 @@
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > rejects stale projections and never doubles shared quota aliases across groups","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > reserves full for explicitly occupied slots and keeps absent accounts distinct","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > resolves a shared-quota alias measurement from the canonical gauge","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > retains server start advice while explaining unmeasured usage","tier":"NIGHTLY"}
     ,
@@ -14047,6 +14215,8 @@
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > includes all configured harnesses and counts beyond a lowered ceiling","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > keeps no own limit, numeric zero and off distinct","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > never calls missing account ownership or routing a full account","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > reports actual waiting work without simulating starts or inventing an empty queue","tier":"GATED-FULL"}
     ,
@@ -14165,6 +14335,14 @@
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"online, no readings yet > each account is ready, and capacity says honestly that nothing was read","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"online, no readings yet > is online, seen just now, with the full identities","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification reporting failures > explains a rejected report without blaming the vendor protocol or exposing raw errors","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification reporting failures > shows a stalled check as a problem without changing its active ownership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification warnings preserve recovery precedence > keeps failed and stalled checks behind sign-in and harness repair commands","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification warnings preserve recovery precedence > keeps failed verification behind offline, disconnecting and setup states","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"waits from the server routing > a ranked account with a free slot stays ready","tier":"GATED-FULL"}
     ,
@@ -15199,6 +15377,16 @@
     {"kind":"vitest","file":"tests/profile-form.unit.test.ts","name":"the preview > loads the preview’s fonts under a new name whenever the faces change","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/profile-permissions.unit.test.ts","name":"profile permissions describe the caller’s personal profile","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a newer read never yields to an older revision answered later","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a read that began before Pause cannot put the older lead back, and a fresh read follows","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"an unanswered question stays with the lead after its session stopped","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"gate and merged totals cover every generation and survive trimming the retained history","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"open questions are paged within a bound and a remainder is reported, never hidden","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a pending related lookup cannot navigate after the person changes","tier":"GATED-FULL"}
     ,
