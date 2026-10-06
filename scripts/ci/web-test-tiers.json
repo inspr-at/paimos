@@ -276,6 +276,14 @@
     ,
     "browser:tests/features.spec.ts:project OFF overrides workspace ON and inherit restores it"
     ,
+    "browser:tests/knowledge-learnings.spec.ts:a learning that changed after review is refused and shown again"
+    ,
+    "browser:tests/knowledge-learnings.spec.ts:leaving the knowledge view during a run sends no further step"
+    ,
+    "browser:tests/knowledge-learnings.spec.ts:on a phone the review sheet keeps its actions pinned through apply"
+    ,
+    "browser:tests/knowledge-learnings.spec.ts:pages that scanned no open learning still lead to older ones"
+    ,
     "browser:tests/knowledge.spec.ts:Decision entries expose active and superseded history without generic mutation controls"
     ,
     "browser:tests/no-shift.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
@@ -8436,13 +8444,25 @@
     ,
     {"kind":"browser","file":"tests/knowledge-graph.spec.ts","name":"the pane closes back to the graph, which keeps the display and filters","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a learning that changed after review is refused and shown again","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a person accepts a learning into the changelog and can dismiss another","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a person applies agent recommendations in one confirm, with one row left out","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a person can save a learning as a rule draft","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a suspected credential needs a person to confirm it is not one","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"an empty inbox leaves the knowledge tab in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"leaving the knowledge view during a run sends no further step","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"older learnings load after the newest 50","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"on a phone the review sheet keeps its actions pinned through apply","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"pages that scanned no open learning still lead to older ones","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"removing the last learning keeps focus on the search","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13053,6 +13073,12 @@
     {"kind":"node","file":"tests/knowledge.test.ts","name":"Decisions have a distinct icon from Guidelines in lists and graph legends","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"a body heading that repeats the title, or starts it, is not shown twice","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/knowledge.test.ts","name":"a stopped run sends nothing after the stop","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/knowledge.test.ts","name":"applying recommendations sends only the chosen rows, and a failed row does not stop the rest","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/knowledge.test.ts","name":"each step sends the lesson and the learning text that were on screen, and a changed learning asks for a new review","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"method-learning errors stay specific when the status is also 403 or 404","tier":"GATED-FULL"}
     ,
