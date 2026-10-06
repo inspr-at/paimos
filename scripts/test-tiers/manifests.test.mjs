@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { manifestPaths, formatManifest, normalizeManifest, checkManifests, writeManifests, mergeManifests, classifyManifest, fixCommand } from './manifests.mjs'
 import { classifyArgs, classify } from './cli.mjs'
 import { proveManifests, proveConversion } from './prove-manifests.mjs'
+import { command } from './collect.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const goFile = manifestPaths[0], webFile = manifestPaths[1], shardsFile = manifestPaths[2]
@@ -50,6 +51,53 @@ function assertUnresolved(result) {
   assert.match(result.output, /\n>>>>>>> theirs\n/m)
   assert.throws(() => JSON.parse(result.output), SyntaxError)
 }
+
+test('AEON-735 native collection failures retain bounded stdout and stderr diagnostics', t => {
+  const script = resolve(fixtureDirectory(t, 'aeon735-collection-'), 'failure.mjs')
+  for (const stderr of ['', 'stderr diagnostic']) {
+    writeFileSync(script, `
+      process.stdout.write('discarded stdout prefix' + 'x'.repeat(3000) + 'native collection failure');
+      process.stderr.write(${JSON.stringify(stderr)});
+      process.exit(7);
+    `)
+    assert.throws(() => command(process.execPath, [script]), error => {
+      assert.match(error.message, /failed \(7\)/)
+      assert.match(error.message, /native collection failure/)
+      if (stderr) assert.ok(error.message.endsWith(stderr))
+      assert.ok(!error.message.includes('discarded stdout prefix'))
+      assert.ok(error.message.length < 5000)
+      return true
+    })
+  }
+})
+
+test('AEON-735 native Go collection reports an earlier failed package before later successful output', t => {
+  const directory = fixtureDirectory(t, 'aeon735-go-collection-')
+  const failed = 'github.com/inspr-at/paimos/internal/failed'
+  const passed = 'github.com/inspr-at/paimos/internal/passed'
+  const output = [
+    { Action: 'build-output', ImportPath: failed, Output: 'native compiler diagnostic\n' },
+    { Action: 'build-fail', ImportPath: failed },
+    { Action: 'output', Package: failed, Output: 'native package diagnostic\n' },
+    { Action: 'fail', Package: failed },
+    { Action: 'output', Package: passed, Output: 'later successful output'.repeat(300) },
+    { Action: 'pass', Package: passed },
+  ].map(row => JSON.stringify(row)).join('\n') + '\n'
+  const script = resolve(directory, 'go')
+  for (const suffix of ['', 'interrupted JSON']) {
+    writeFileSync(script, `#!${process.execPath}\nprocess.stdout.write(${JSON.stringify(output + suffix)}); process.exit(1);\n`, { mode: 0o755 })
+    assert.throws(() => command('go', ['test', '-json'], { env: { PATH: directory } }), error => {
+      assert.match(error.message, /go test -json failed \(1\)/)
+      if (suffix) assert.ok(error.message.endsWith(suffix))
+      else {
+        assert.match(error.message, /internal\/failed: native compiler diagnostic\nnative package diagnostic/)
+        assert.ok(!error.message.includes('later successful output'))
+      }
+      assert.ok(error.message.length < 2500)
+      return true
+    })
+  }
+})
 
 test('OPS-257 committed CI manifests are canonical; failures name the fix command', t => {
   checkManifests(root)
