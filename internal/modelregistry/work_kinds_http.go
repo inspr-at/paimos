@@ -139,6 +139,10 @@ func (m *Module) writeWorkKind(w http.ResponseWriter, r *http.Request) {
 		writePreferenceError(w, prefFail(403, "person_required"))
 		return
 	}
+	if err := workBody(w, r); err != nil {
+		writePreferenceError(w, err)
+		return
+	}
 	id := r.PathValue("kindId")
 	if id != "" && !uuidRE.MatchString(id) {
 		writePreferenceError(w, prefFail(400, "invalid_kind_id"))

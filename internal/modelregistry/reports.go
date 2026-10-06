@@ -93,14 +93,19 @@ func authorizeObservation(ctx context.Context, tx pgx.Tx, p tenant.Principal, o 
 	return nil
 }
 
-func recordReports(ctx context.Context, tx pgx.Tx, p tenant.Principal, in []Observation, source, sessionID string) (ReportResult, error) {
-	out := ReportResult{}
+func recordReports(ctx context.Context, tx pgx.Tx, p tenant.Principal, in []Observation, source, sessionID string) (out ReportResult, err error) {
 	if err := validateObservations(in); err != nil {
 		return out, err
 	}
-	if err := ensureCatalog(ctx, tx, p); err != nil {
+	pending, err := prepareCatalogDeferred(ctx, tx, p)
+	if err != nil {
 		return out, err
 	}
+	defer func() {
+		if err == nil {
+			err = flushCatalogChanges(ctx, tx, p, pending)
+		}
+	}()
 	if err := catalogLock(ctx, tx); err != nil {
 		return out, err
 	}

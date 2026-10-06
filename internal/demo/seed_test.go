@@ -109,6 +109,31 @@ func TestDemoSeedTwice(t *testing.T) {
 	}
 }
 
+func TestDemoCatalogPreparationRollsBackWithSeed(t *testing.T) {
+	t.Setenv("AEON_ENV", "dev")
+	database := dbtest.Open(t)
+	id, err := tenantbootstrap.Create(t.Context(), database.App, "catalog-rollback-demo", "Catalog rollback demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := seedRows(t, database, id)
+	injected := errors.New("injected catalog bootstrap failure")
+	reached := false
+	_, err = seedWithHook(t.Context(), database.App, "catalog-rollback-demo", func(step string) error {
+		if step == "work" {
+			reached = true
+			return injected
+		}
+		return nil
+	})
+	if !reached || !errors.Is(err, injected) {
+		t.Fatalf("catalog-dependent seed did not reach the rollback barrier: reached=%v err=%v", reached, err)
+	}
+	if after := seedRows(t, database, id); !slices.Equal(before, after) {
+		t.Fatal("failed seed retained catalog, principal, work or event changes")
+	}
+}
+
 func TestDemoInterruptedRunRollsBackAndRetryConverges(t *testing.T) {
 	for _, step := range []string{"agents", "work"} {
 		t.Run(step, func(t *testing.T) { interruptedSeed(t, step) })

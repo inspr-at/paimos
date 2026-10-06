@@ -4757,7 +4757,7 @@ paths:
     get:
       operationId: getModelPreferences
       security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      description: Sparse Default → You → Project preferences, with canonical caller and edit capabilities in one read-only repeatable-read snapshot. Requires workspace models.read and nodes.read for a supplied live project. Independently authorized catalog preparation precedes the snapshot; no models.manage grant is required. Residency lock loosening is reported as a warning.
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
       responses:
@@ -4772,8 +4772,9 @@ paths:
     put:
       operationId: replaceModelPreferenceLevel
       security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
       parameters:
+        - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceLevelWrite'}}}}
@@ -4783,13 +4784,15 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
     delete:
       operationId: resetModelPreferenceLevel
       security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
       parameters:
+        - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
         - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
@@ -4799,13 +4802,15 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
   /model-preferences/levels/{level}/rows/{kindId}:
     put:
       operationId: setModelPreferenceRow
       security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
       parameters:
+        - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
         - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -4816,13 +4821,15 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
         '413': {$ref: '#/components/responses/Error'}
     delete:
       operationId: resetModelPreferenceRow
       security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
       parameters:
+        - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
         - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
         - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -4833,6 +4840,7 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
         '422': {$ref: '#/components/responses/Error'}
   /model-prices:
     get:
@@ -4864,6 +4872,7 @@ paths:
   /models:
     get:
       operationId: listModelProfiles
+      description: Catalog preparation commits separately under current read authority before the model snapshot is loaded. Denied preparation creates no profiles, routes or seed events.
       security: *auth
       responses:
         '200': {description: Tenant model registry, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelProfile'}}}}}
@@ -4957,13 +4966,14 @@ paths:
   /models/resolve:
     get:
       operationId: resolveModelRole
-      description: Replaces classic paimos model resolve. review-gate requires author_family and excludes that family; if no eligible candidate, owner_required is true. Candidate reasons include policy, account availability and allowance. Command templates are rendered from trusted local templates, never stored shell snippets.
+      description: Replaces classic paimos model resolve. role with optional project_id preserves the CLI role ladder and adds residency evidence only. Placement resolution is enabled by mode=placement or the placement-specific ticket, area, complexity or person_id parameters; managed reviews then enforce qualification and approved-account requirements. review-gate requires author_family and excludes that family; if no eligible candidate, owner_required is true. Candidate reasons include policy, account availability and allowance. Command templates are rendered from trusted local templates, never stored shell snippets.
       security: *auth
       parameters:
-        - {name: role, in: query, description: Required unless ticket supplies its route role., schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
-        - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
+        - {name: role, in: query, description: 'Required unless ticket supplies its route role. review-gate-security requires placement resolution; unavailable security ladders return owner_required with their explanation.', schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
+        - {name: author_family, in: query, description: "Required for review-gate and review-gate-security. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
-        - {name: project_id, in: query, description: Optional project for model preference placement and the starter's residency trace., schema: {type: string, format: uuid}}
+        - {name: project_id, in: query, description: Optional project for the starter's residency preference trace., schema: {type: string, format: uuid}}
+        - {name: mode, in: query, description: Explicitly enable placement resolution when only role and project_id are supplied., schema: {type: string, enum: [placement]}}
         - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible work item or legacy ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
         - {name: area, in: query, schema: {type: string, maxLength: 48}}
         - {name: complexity, in: query, schema: {type: string, enum: [S, M, L]}}
@@ -4974,13 +4984,35 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
   /models/routes:
+    get:
+      operationId: readModelRoutes
+      description: Read-only ladder for one role, requiring models.read. Never seeds the catalog or appends events. CLI uses ladder priority and harness health; ordinary managed review uses legacy family/tier order until an explicit saved-order activation, then saved priorities. Qualification floors, platform capability, approved accounts and preferences still apply. order_mode and managed_fallback_order (profile IDs before qualification/preferences) share the stored-row SQL snapshot; truncated order is incomplete. At most 50 steps, with explicit truncation. Complete snapshots include routes, a quoted strong edit_token over canonical role content (including full-precision expiry and reason), and can_edit for person plus models.manage. Truncated snapshots have no edit token and cannot be edited; no cursor. Unseeded tenants return setup false. Each read applies a five-second statement timeout.
+      security: *auth
+      parameters:
+        - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
+      responses:
+        '200': {description: Bounded tenant ladder snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRoutesRead'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '503': {description: Statement timeout; retry later, headers: {Retry-After: {schema: {type: integer}, description: Seconds before retrying}}, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     put:
       operationId: replaceModelRoutes
-      description: Admin atomically replaces the tenant's role ladders. Temporary unavailable/conserved/budget-limited entries require expiry and reason.
+      description: Person with workspace models.manage replaces routes under a tenant and registry fence with final authorization. Unqualified PUT preserves whole-tenant last-writer-wins compatibility. With role, replace only that complete role and require its quoted strong If-Match token; review-gate tokens include ordering mode. Explicit order_mode is allowed only for conditional review-gate writes; omission and legacy whole-tenant writes preserve the mode. Rows and mode change atomically, including mode-only audit events with before_order_mode/after_order_mode metadata; before/after arrays retain their shape; missing 428 revision_required, malformed 400 invalid_revision, mismatched 409 stale_revision. Never initializes in role mode. At most 50 rows per role and 300 total; audit before/after must be complete within those bounds. Unchanged stored expired holds may be reordered; new or changed holds require strictly future expiry sampled after fences. Conditional expiry_policy=clear compensation converts all desired expired holds to available with empty reason/null expiry. Invalid temporal conditional changes return 422 suppression_expired; legacy keeps 400. No-op emits no replacement event. Thirty-second request deadline; five-second lock and statement timeouts.
       security: [{session: []}]
-      requestBody: {required: true, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
+      parameters:
+        - {name: role, in: query, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
+        - {name: If-Match, in: header, description: Required in role mode; complete strong SHA-256 content token from GET. No wildcard or weak/list form., schema: {type: string, maxLength: 66}}
+        - {name: order_mode, in: query, description: Only with role=review-gate. saved explicitly activates saved managed fallback priorities; legacy compensates activation. Omission preserves current mode., schema: {type: string, enum: [legacy, saved]}}
+        - {name: expiry_policy, in: query, description: Allowed only with role. clear is for compensation; preserves future holds without extending them., schema: {type: string, enum: [preserve, clear], default: preserve}}
+      requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 300, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
       responses:
-        '200': {description: Ordered routes, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
+        '200': {description: Actual normalized stored routes for the addressed role or whole tenant, headers: {ETag: {description: New quoted strong role content token including ordinary review mode in conditional mode, schema: {type: string}}, Model-Order-Mode: {description: Actual stored ordinary review mode for role=review-gate, schema: {type: string, enum: [legacy, saved]}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
   /models/{id}/retire:
     post:
@@ -5656,7 +5688,7 @@ paths:
     post:
       operationId: requestTicketReview
       summary: Queue an independent managed review of a commit range
-      description: Requires work_orders.write and run.create on the work leaf (legacy tickets and tasks remain supported). Work parents cannot receive new review work orders. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection.
+      description: Requires work_orders.write and run.create on the work leaf (legacy tickets and tasks remain supported). Work parents cannot receive new review work orders. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection. Catalog preparation repeats current initiating-key and target permissions in its own fenced transaction. Review resources and their ordered events then commit atomically; replay retains the original immutable binding.
       security: *auth
       parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TicketReviewCreate'}}}}
@@ -8704,6 +8736,8 @@ paths:
       responses:
         '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     post:
       operationId: addWorkQueue
       description: Idempotently queue a ticket. People need run.create in its project; a live coordinator may queue visible tickets. Workers cannot. New and Backlog become Open; In progress with no assignee and no live run/session is stale and also becomes Open. Stale additions return a revision-bound Undo token. Blocked keeps its state and waits. Missing estimates are suggested by readiness and must be explicitly applied before queueing. Acceptance criteria and a named blocker are required. A target pins Start now to that agent and profile without overriding allowances; daemon claim performs pickup. Moving to done, cancelled, archived, delivered or accepted, or soft-deleting the ticket, cancels still-queued work and releases its holds atomically; reopening requires a new queue request.
@@ -8724,6 +8758,8 @@ paths:
       responses:
         '200': {description: Queued entry, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueueEntry'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '409': {description: Active run or changed target conflicts}
         '422': {description: 'Not ready; code queue_not_ready, error text and structured readiness with missing field names and suggested_estimate_hours'}
   /queue-snapshots/{snapshotId}:
@@ -8771,6 +8807,8 @@ paths:
       responses:
         '200': {description: Selection, content: {application/json: {schema: {type: object, required: [entry], properties: {wait_reason: {type: string}, entry: {oneOf: [{$ref: '#/components/schemas/WorkQueueEntry'}, {type: 'null'}]}}}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '409': {description: 'Lead proof missing, stale assignment, paused/revoked/archived lead, mandatory admission unavailable, or bounded scheduling snapshot overflow'}
   /queue/reset:
     post:
@@ -8780,6 +8818,8 @@ paths:
       responses:
         '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /queue/{nodeId}:
     parameters:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -8790,6 +8830,8 @@ paths:
       responses:
         '200': {description: Removed, content: {application/json: {schema: {type: object, properties: {removed: {type: boolean}}}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '409': {description: Run has already started}
   /queue/{nodeId}/estimate:
     post:
@@ -8806,6 +8848,8 @@ paths:
       responses:
         '200': {description: Readiness after estimate, content: {application/json: {schema: {$ref: '#/components/schemas/QueueReadiness'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /queue/{nodeId}/move:
     parameters:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -8821,6 +8865,8 @@ paths:
       responses:
         '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '409': {description: Targeted entry cannot be reordered}
   /queue/{nodeId}/readiness:
     get:
@@ -8832,6 +8878,8 @@ paths:
       responses:
         '200': {description: Readiness, content: {application/json: {schema: {$ref: '#/components/schemas/QueueReadiness'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /queue/{nodeId}/snapshots:
     post:
       operationId: captureParentQueueSnapshot
@@ -10622,7 +10670,7 @@ paths:
   /runs/{runId}/telemetry:
     post:
       operationId: reportRunTelemetry
-      description: "Daemon reports monotonic sequence numbers; exact duplicate is idempotent and divergent replay conflicts. Telemetry is content-free. Totals, run status and event update atomically; budget excess blocks further dispatch. Model-only or error-only status and turn reports may precede started after a successful claim; an omitted status preserves the current run state. After observing local exit, a daemon may settle a rejected outbox with a fresh minimal finished/failed report using reporter_unavailable; rejected usage remains unconfirmed, never invented. Lead assignments require local process evidence on finished reports. Unconfirmed ownership_lost remains fenced; a later finished exited report from the same authenticated daemon may reconcile it. No lead-generation change transfers the writer."
+      description: "Daemon reports monotonic sequence numbers; exact duplicate is idempotent and divergent replay conflicts. Telemetry is content-free. Totals, run status and event update atomically; budget excess blocks further dispatch. Model-only or error-only status and turn reports may precede started after a successful claim; an omitted status preserves the current run state. After observing local exit, a daemon may settle a rejected outbox with a fresh minimal finished/failed report using reporter_unavailable; rejected usage remains unconfirmed, never invented. The bounded report is decoded before catalog preparation. Eligible build completion, usage settlement, budget blocking, review resources and their ordered events commit together. Identical accepted sequence replay does not settle or queue twice; divergent replay is refused before setup. Lead assignments require local process evidence on finished reports. Unconfirmed ownership_lost remains fenced; a later finished exited report from the same authenticated daemon may reconcile it. No lead-generation change transfers the writer."
       security: [{agentKey: []}]
       parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunTelemetry'}}}}
@@ -16146,6 +16194,8 @@ components:
       type: object
       description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.
       properties:
+        selector: {$ref: '#/components/schemas/ModelSelector'}
+        order_mode: {type: string, enum: [legacy, saved], description: "Ordinary managed review fallback source captured with its ladder; preferences still apply within qualified candidates."}
         worker_assignment: {$ref: '#/components/schemas/WorkerHandoff'}
         project_lead:
           type: object
@@ -16155,7 +16205,6 @@ components:
             generation: {type: integer, format: int64, minimum: 1}
         role: {type: string}
         project_id: {type: string, format: uuid}
-        selector: {$ref: '#/components/schemas/ModelSelector'}
         ticket_requirement: {type: string, enum: [any, eu, local]}
         person_id: {type: [string, 'null'], format: uuid}
         residency:
@@ -16190,7 +16239,8 @@ components:
       type: object
       required: [residency, rows, changes]
       properties:
-        choices_truncated: {type: boolean, description: More than 256 non-retired profiles exist; picker choices and route counts cover only the returned profiles. Automatic routing still uses the full registry.}
+        choices_truncated: {type: boolean, description: More than 256 non-retired profiles exist; picker choices and route counts cover only the returned profiles. Live dispatch still uses the full registry.}
+        resolution_truncated: {type: boolean, description: A preview required more than 256 catalog profiles (including retired revisions) or role ladder steps. Affected cells have no selected profile and explain the incomplete preview in unavailable_reason and row warnings. Bounded reads are reused across levels and selectors; live dispatch remains authoritative.}
         choices:
           type: array
           maxItems: 256
@@ -16228,8 +16278,9 @@ components:
         changes: {type: integer, minimum: 0}
     ModelPreferenceWriteResult:
       type: object
-      required: [level, revision, running_outside, residency]
+      required: [person_id, level, revision, running_outside, residency]
       properties:
+        person_id: {type: [string, 'null'], format: uuid, description: Canonical caller confirmed in the fenced write; session principal remains audit actor.}
         level: {$ref: '#/components/schemas/ModelPreferenceLevel'}
         revision: {type: integer, format: int64}
         running_outside: {type: array, items: {type: string, format: uuid}}
@@ -16347,8 +16398,8 @@ components:
         owner_required: {type: boolean}
         source: {type: string, enum: [aeon]}
         trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
+        residency: {type: string, enum: [any, eu, local], description: Present for placement-aware resolution.}
         preference: {$ref: '#/components/schemas/ModelPreferenceDecision'}
-        residency: {type: string, enum: [any, eu, local]}
     ModelRetirement:
       type: object
       required: [profile_id, retired]
@@ -16367,11 +16418,35 @@ components:
       required: [role, priority, profile_id, state]
       properties:
         role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}
-        priority: {type: integer, minimum: 1}
+        priority: {type: integer, minimum: 1, maximum: 2147483647}
         profile_id: {type: string, format: uuid}
         state: {type: string, enum: [available, unavailable, conserved, budget_limited]}
         reason: {type: string}
         valid_until: {type: [string, 'null'], format: date-time}
+    ModelRoutesRead:
+      type: object
+      required: [role, steps, routes, edit_token, can_edit, setup, truncated, dispatch_family_order, review_floors]
+      properties:
+        role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}
+        routes: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/ModelRoute'}, description: Stored rows matching steps; conditional PUT sends this complete array.}
+        edit_token: {type: [string, 'null'], description: Quoted SHA-256 content token; null when truncated. Time passing alone never changes it.}
+        can_edit: {type: boolean, description: Person with models.manage and a complete initialized snapshot; source authorization still checked on save.}
+        steps:
+          type: array
+          maxItems: 50
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/ModelRoute'}
+              - type: object
+                required: [profile]
+                properties:
+                  profile: {$ref: '#/components/schemas/ModelProfile'}
+        setup: {type: boolean, description: Whether the tenant has any model profiles; false means the registry has not been set up.}
+        truncated: {type: boolean, description: More than 50 steps exist for this role; the omitted steps still apply.}
+        order_mode: {type: string, enum: [legacy, saved], description: Present for review-gate; absent metadata means legacy. Included in the complete token.}
+        managed_fallback_order: {type: array, maxItems: 50, items: {type: string, format: uuid}, description: Present for review-gate. Applied fallback order of the displayed profiles before qualification and model preferences; incomplete when truncated.}
+        dispatch_family_order: {type: array, items: {type: string}, description: 'Built-in family order used only by legacy ordinary review dispatch.'}
+        review_floors: {type: array, items: {type: string}, description: Existing review constraints in words; not new enforcement.}
     ModelSelector:
       type: object
       additionalProperties: false

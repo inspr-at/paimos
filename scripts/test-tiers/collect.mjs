@@ -20,7 +20,7 @@ export function command(bin, args, { cwd = root, env = process.env, timeout = 18
       } catch { /* Interrupted JSON falls back to the captured output tail. */ }
     }
     const diagnostic = [output, result.stderr].map(text => text?.slice(-2000)).filter(Boolean).join('\n')
-    throw new Error(`${bin} ${args.slice(0,4).join(' ')} failed (${result.status ?? result.error?.code}); ${diagnostic}`)
+    throw Object.assign(new Error(`${bin} ${args.slice(0,4).join(' ')} failed (${result.status ?? result.error?.code}); ${diagnostic}`), { stdout: result.stdout ?? '' })
   }
   return result.stdout
 }

@@ -334,7 +334,7 @@ func TestLeadSettingsConcurrentRevisionHasOneWinner(t *testing.T) {
 			UNION
 			SELECT a.pid FROM pg_stat_activity a JOIN blocked b ON b.pid=ANY(pg_blocking_pids(a.pid)) WHERE a.datname=current_database()
 		) SELECT count(*) FROM pg_stat_activity a JOIN blocked b USING(pid)
-			WHERE a.wait_event_type='Lock' AND a.query='SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE'`, blocker).Scan(&waiting); err != nil {
+			WHERE a.wait_event_type='Lock' AND a.query=$2`, blocker, db.TenantFenceSQL).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting == 2 {

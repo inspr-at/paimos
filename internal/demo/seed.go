@@ -12,6 +12,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
 )
@@ -54,10 +56,13 @@ func (s *seeder) run() error {
 		return fmt.Errorf("tenant %q: %w", s.slug, err)
 	}
 	s.tenantID = id
+	var catalogEvents []events.Change
 	// Serialize seeds for this tenant so a concurrent invocation sees the
 	// completion marker after the first transaction commits.
 	if err := db.InTenant(db.NoProjects(s.ctx, "demo seed"), s.pool, id, func(tx pgx.Tx) error {
-		return tx.QueryRow(s.ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, id).Scan(&id)
+		var err error
+		catalogEvents, err = modelregistry.BootstrapCatalogTx(s.ctx, tx)
+		return err
 	}); err != nil {
 		return fmt.Errorf("lock tenant %q: %w", s.slug, err)
 	}
@@ -78,6 +83,16 @@ func (s *seeder) run() error {
 	done, err := s.complete()
 	if err != nil {
 		return err
+	}
+	if err := db.InTenant(tenant.WithPrincipal(s.ctx, s.admin), s.pool, id, func(tx pgx.Tx) error {
+		for _, change := range catalogEvents {
+			if _, err := events.Append(s.ctx, tx, s.admin, change); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("catalog events: %w", err)
 	}
 	if done {
 		return s.finish(true)

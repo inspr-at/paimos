@@ -154,6 +154,83 @@ test('timeouts and cancellation terminate descendants before returning', async t
   assert.throws(() => process.kill(cancelledPid, 0), { code: 'ESRCH' })
 })
 
+async function stoppedDescendant(t, mode, { resistant = false, background = false, expectedCleanupError } = {}) {
+  const cwd = temporary(t), marker = join(cwd, 'child-started'), fixture = join(cwd, 'child.cjs')
+  writeFileSync(fixture, `${resistant ? "process.on('SIGTERM', () => {});" : ''}
+require('node:fs').writeFileSync(${JSON.stringify(marker)}, String(process.pid));
+setInterval(() => {}, 1000);
+`)
+  const controller = new AbortController()
+  let expire, readyObserved = false
+  if (mode === 'timeout') {
+    // Fire the deadline only after child readiness, independently of runner
+    // speed. Real time is reserved for a watchdog and shutdown escalation.
+    const realSetTimeout = globalThis.setTimeout
+    t.mock.method(globalThis, 'setTimeout', (callback, milliseconds, ...args) => {
+      if (milliseconds === 30_000) {
+        expire = callback
+        return realSetTimeout(callback, 10_000, ...args)
+      }
+      return realSetTimeout(callback, milliseconds, ...args)
+    })
+  }
+  // Stat polling observes an explicit child-ready barrier; no assumed sleep or
+  // elapsed-time assertion. It also works where sandboxed fs.watch is denied.
+  const ready = () => {
+    if (!existsSync(marker) || !readFileSync(marker, 'utf8')) return
+    readyObserved = true
+    unwatchFile(marker, ready)
+    if (mode === 'timeout') expire()
+    else controller.abort()
+  }
+  watchFile(marker, { interval: 10 }, ready)
+  t.after(() => unwatchFile(marker, ready))
+  const quote = value => "'" + value.replaceAll("'", "'\\''") + "'"
+  const command = `${quote(process.execPath)} ${quote(fixture)}${background ? ' >/dev/null 2>&1 & wait' : '; : '}`
+  const result = await runCommand(command, { cwd, timeout_seconds: 30, signal: controller.signal })
+  unwatchFile(marker, ready)
+  assert.ok(readyObserved, 'termination must follow the child-ready barrier')
+  assert.equal(result.status, expectedCleanupError ? 'failed' : mode === 'timeout' ? 'timeout' : 'interrupted')
+  assert.equal(result.cleanup_error, expectedCleanupError)
+  const cause = mode === 'timeout' ? 'exceeded timeout_seconds=30' : 'interrupted'
+  const named = `ci-static: command ${cause} after ${result.seconds}s (process group termination requested)`
+  if (expectedCleanupError) assert.ok(result.output.includes(named))
+  else assert.equal(result.output.split('\n').at(-1), named)
+  const pid = Number(readFileSync(marker, 'utf8'))
+  assert.ok(pid > 0)
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
+}
+
+test('owned descendants are gone before a timeout or cancellation returns', async t => {
+  for (const mode of ['timeout', 'cancellation']) {
+    await t.test(mode, childTest => stoppedDescendant(childTest, mode))
+  }
+})
+
+test('closed pipes and SIGTERM-resistant descendants are gone before returning', async t => {
+  for (const mode of ['timeout', 'cancellation']) {
+    await t.test(mode, childTest => stoppedDescendant(childTest, mode, { resistant: true, background: true }))
+  }
+})
+
+test('shutdown refuses completion when owned process group disappearance cannot be verified', async t => {
+  const realKill = process.kill
+  let now = 0, probes = 0
+  t.mock.method(performance, 'now', () => now)
+  t.mock.method(process, 'kill', (pid, signal) => {
+    if (pid < 0 && signal === 0) {
+      probes++
+      // Model a group surviving the full cleanup budget without waiting for
+      // real time. TERM/KILL and the fixture's PID assertion remain real.
+      now += 2100
+      throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' })
+    }
+    return realKill(pid, signal)
+  })
+  await stoppedDescendant(t, 'cancellation', { expectedCleanupError: 'Owned command process group survived shutdown' })
+  assert.equal(probes, 1)
+})
+
 test('timeout cleanup tolerates exited-group EPERM and ESRCH but preserves real signal failures', { skip: process.platform === 'win32' }, async t => {
   for (const [code, phase, visible] of [
     ['EPERM', 'close', false], ['ESRCH', 'close', false],

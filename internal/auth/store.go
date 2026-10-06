@@ -854,6 +854,9 @@ func (m *Module) revokeAgentKey(ctx context.Context, p tenant.Principal, id stri
 }
 
 func (m *Module) revokeAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string) error {
+	if err := db.LockTenant(ctx, tx, p.TenantID); err != nil {
+		return err
+	}
 	actorID := p.ID
 	via := "api"
 	if actorID == "" {

@@ -128,8 +128,11 @@ func publicProduct(ctx context.Context, tx pgx.Tx, slug string, lock bool) (prod
 }
 
 func publicWriteProduct(ctx context.Context, tx pgx.Tx, slug string) (productSettings, error) {
-	// Pairing -> tree -> tenant precedes product/resource rows and events.
+	// Tenant -> tree -> pairing precedes product/resource rows and events.
 	if err := agentpairing.LockMutation(ctx, tx); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return productSettings{}, errClosed
+		}
 		return productSettings{}, err
 	}
 	return publicProduct(ctx, tx, slug, true)

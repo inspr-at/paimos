@@ -171,7 +171,7 @@ func tagTenantPass(ctx context.Context, pool *pgxpool.Pool, tenantID string) (in
 	var run tagRun
 	err := db.InTenant(db.AllProjects(ctx, "method learning tagger"), pool, tenantID, func(tx pgx.Tx) error {
 		run = tagRun{}
-		// Match delete/updateNode and queue writers: pairing, then tree, then
+		// Match delete/updateNode and queue writers: tenant, tree, pairing, then
 		// rows. Node UPDATE triggers also take this tree lock; taking a node
 		// row first can deadlock with the status autopilot's startup pass.
 		if err := agentpairing.Lock(ctx, tx); err != nil {
