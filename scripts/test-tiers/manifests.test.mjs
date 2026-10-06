@@ -76,6 +76,8 @@ test('AEON-735 native Go collection reports an earlier failed package before lat
   const failed = 'github.com/inspr-at/paimos/internal/failed'
   const passed = 'github.com/inspr-at/paimos/internal/passed'
   const output = [
+    { Action: 'build-output', ImportPath: failed, Output: 'native compiler diagnostic\n' },
+    { Action: 'build-fail', ImportPath: failed },
     { Action: 'output', Package: failed, Output: 'native package diagnostic\n' },
     { Action: 'fail', Package: failed },
     { Action: 'output', Package: passed, Output: 'later successful output'.repeat(300) },
@@ -88,7 +90,7 @@ test('AEON-735 native Go collection reports an earlier failed package before lat
       assert.match(error.message, /go test -json failed \(1\)/)
       if (suffix) assert.ok(error.message.endsWith(suffix))
       else {
-        assert.match(error.message, /internal\/failed: native package diagnostic/)
+        assert.match(error.message, /internal\/failed: native compiler diagnostic\nnative package diagnostic/)
         assert.ok(!error.message.includes('later successful output'))
       }
       assert.ok(error.message.length < 2500)
