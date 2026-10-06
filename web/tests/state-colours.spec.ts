@@ -183,7 +183,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     expect(Math.abs(main.width - layout.width)).toBeLessThan(2)
     // Accounts sit above the sessions now (AEON-299); account management is in Settings.
     const sessions = (await page.locator('.sessions').boundingBox())!
-    const accounts = (await page.locator('.ac').boundingBox())!
+    const accounts = (await page.locator('.acc-section').boundingBox())!
     expect(accounts.y + accounts.height).toBeLessThanOrEqual(sessions.y)
     await page.locator('h1').scrollIntoViewIfNeeded()
     await page.mouse.move(0, 0)
