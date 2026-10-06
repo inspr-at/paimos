@@ -79,10 +79,15 @@ type Record struct {
 	ExitObserved  bool   `json:"exit_observed,omitempty"`
 	// LaunchRev and LaunchDefaultRev are the workspace HEAD and the default
 	// branch's commit at launch, the base of the run's commit evidence.
-	LaunchBranch     string            `json:"launch_branch,omitempty"`
-	LaunchRev        string            `json:"launch_rev,omitempty"`
-	LaunchDefaultRev string            `json:"launch_default_rev,omitempty"`
-	Pending          []Telemetry       `json:"pending,omitempty"`
+	LaunchBranch     string      `json:"launch_branch,omitempty"`
+	LaunchRev        string      `json:"launch_rev,omitempty"`
+	LaunchDefaultRev string      `json:"launch_default_rev,omitempty"`
+	Pending          []Telemetry `json:"pending,omitempty"`
+	// Rejected reports remain durable evidence, separate from the retry outbox.
+	DeadLetters      []Telemetry       `json:"dead_letters,omitempty"`
+	ReportRejections int               `json:"report_rejections,omitempty"`
+	TerminalRecovery bool              `json:"terminal_recovery,omitempty"`
+	ReportParked     bool              `json:"report_parked,omitempty"`
 	SettlementGap    bool              `json:"settlement_gap,omitempty"`
 	TenantID         string            `json:"tenant_id"`
 	PrincipalID      string            `json:"principal_id"`
@@ -512,10 +517,16 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 	if dispatch {
 		// Recover no-launch claims before a fresh probe changes generation.
 		recoveryErr = s.recoverUnlaunched(ctx)
-		s.settlePending(ctx)
+	}
+	// Probe-only polls run during retryable pairing outages too. Their probes
+	// must not rotate authority while a prior generation still needs to settle.
+	// Dispatch polls then reclaim agent recoveries after that settlement, so a
+	// fresh probe cannot change generation first.
+	settlementErr := s.settlePending(ctx)
+	if dispatch {
 		recoveryErr = errors.Join(recoveryErr, s.recoverAgents(ctx))
 	}
-	if err := pollContextError(ctx, recoveryErr); err != nil {
+	if err := pollContextError(ctx, recoveryErr, settlementErr); err != nil {
 		return err
 	}
 	if !s.probeAllowed() || dispatch && !s.dispatchAllowed("") {
@@ -537,7 +548,7 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			return err
 		}
 	}
-	failures := []error{recoveryErr}
+	failures := []error{recoveryErr, settlementErr}
 	s.mu.Lock()
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
 	adapters := map[string]Adapter{}
@@ -1642,7 +1653,7 @@ func (s *Supervisor) monitor(entry *owned) {
 		status, code = "cancelled", ""
 	}
 	if protocolFailed {
-		status, code = "failed", "app_server_protocol"
+		status, code = "failed", "reporter_unavailable"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1936,6 +1947,9 @@ func (s *Supervisor) update(ctx context.Context, entry *owned, t Telemetry) erro
 	t.ServiceTier = entry.harness.ServiceTier
 	if entry.record.Generation != s.generation && entry.record.LaunchState != launchPrepared {
 		return ErrGeneration
+	}
+	if entry.record.TerminalRecovery {
+		return s.flushReports(ctx, entry)
 	}
 	if t.Kind == "heartbeat" && (entry.record.State == "completed" || entry.record.State == "failed" || entry.record.State == "cancelled" || entry.record.State == "ownership_lost") {
 		return nil

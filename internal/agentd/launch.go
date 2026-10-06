@@ -151,7 +151,10 @@ func (s *Supervisor) hasUnresolvedOldClaim(account string) bool {
 	for _, entry := range s.runs {
 		entry.mu.Lock()
 		r := entry.record
-		pending := r.AccountID == account && r.Generation != s.generation && r.LaunchState == launchPrepared && (r.State == "claim_pending" || len(r.Pending) > 0 || r.SettlementGap)
+		// Exit proves process ownership, not server settlement. Preserve the
+		// claim's authority until its outbox and disputed usage are reconciled.
+		pending := r.AccountID == account && r.Generation != s.generation &&
+			(len(r.Pending) > 0 || r.SettlementGap || r.LaunchState == launchPrepared && r.State == "claim_pending")
 		entry.mu.Unlock()
 		if pending {
 			return true
