@@ -596,6 +596,8 @@
     ,
     "browser:tests/service-tier.spec.ts:390: phone Change tier menu opens and restores its actual trigger"
     ,
+    "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
+    ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 dark"
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 light"
@@ -10926,19 +10928,39 @@
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"Business shows the parts and the stored quote settings; a deep link rings its card","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/settings.spec.ts","name":"Projects lists the ticket types with their prefixes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"Vocabulary keeps ticket types and old Projects bookmarks","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/settings.spec.ts","name":"Workspace shows the workspace and my role; people and keys moved to Access","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"Workspace shows the workspace and role, with Brand and In-app AI","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"a greeting that cannot be saved goes back to how it was","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/settings.spec.ts","name":"at 390 the sections sit in a grid and nothing is cut","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"grouped navigation stays put across section changes and places policy cards in their new homes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members read Vocabulary as text and cannot invoke its write actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"members see Personal and Developer; an admin section explains itself","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/settings.spec.ts","name":"the account menu opens Settings on Personal: theme, greeting and keys","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"old workspace bookmarks redirect during section and hash changes inside Settings","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/settings.spec.ts","name":"the section nav stays put when switching sections, including wide Access","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"old workspace policy bookmarks open the moved card","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"phone section picker overlays content, changes sections, and restores keyboard focus","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"settings layout evidence in light and dark at phone, tablet and desktop sizes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"the account menu opens Settings on Personal: theme, greeting and keys","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"without Quotes the quote settings say so","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
