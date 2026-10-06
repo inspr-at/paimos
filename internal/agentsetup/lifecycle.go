@@ -111,11 +111,12 @@ func (e *Engine) Disconnect(ctx context.Context, accountID string) (Progress, er
 }
 
 func (e *Engine) proof(s *snapshot) ProofRequest {
+	refreshHookCapabilities(s)
 	tenant := s.Response.TenantID
 	if tenant == "" {
 		tenant = s.Request.TenantID
 	}
-	return ProofRequest{TenantID: tenant, RequestID: s.LifecycleRequestID, LifecycleSecret: s.Lifecycle}
+	return ProofRequest{HookCapabilities: s.HookCapabilities, TenantID: tenant, RequestID: s.LifecycleRequestID, LifecycleSecret: s.Lifecycle}
 }
 
 func (e *Engine) applyFences(ctx context.Context, s *snapshot, v View) error {
@@ -271,6 +272,20 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 			if len(local.SettlementPending) > 0 {
 				p.Action = "Local process exit confirmed; retained usage journal needs authorized server accounting recovery."
 			}
+			// User hook settings are shared by every enrollment of a harness.
+			// Keep them for connected accounts and for accounts whose local
+			// processes have not finished draining and cleanup yet.
+			shared := false
+			for _, other := range v.Enrollments {
+				if other.AccountID != a.AccountID && other.Harness == a.Harness && !known[other.AccountID] {
+					shared = true
+					break
+				}
+			}
+			if !shared {
+				e.removeUserHook(ctx, s, a.Harness)
+			}
+			p.HookCapabilities = s.HookCapabilities
 			if err = e.removeAccount(a.AccountID); err != nil {
 				return p, err
 			}
@@ -297,6 +312,8 @@ func (e *Engine) reconcile(ctx context.Context, s *snapshot) (Progress, error) {
 				if err = e.Store.RemoveExact("runtime.key", Hash(key)); err != nil {
 					return p, err
 				}
+				e.removeUserHooks(ctx, s)
+				p.HookCapabilities = s.HookCapabilities
 				s.ComputerCleaned = true
 				s.Runtime = ""
 				s.Device = ""

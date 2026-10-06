@@ -144,10 +144,10 @@ const isolatedGit = ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=fal
 export function fixedEnvironment(source = process.env, scratch) {
   const env = {}
   // Nix's compiler wrapper needs its SDK search paths when Go links cgo tests.
-  // NIX_LDFLAGS alone does not locate libresolv; the per-target wrapper host
-  // variable carries that SDK library path on Darwin. Other wrapper roles stay
-  // limited to their declared flags so cross-build variants pass through without
-  // wrapper state, debug flags or the caller's test options.
+  // NIX_LDFLAGS alone does not locate libresolv; NIX_CC_WRAPPER_TARGET_HOST_<triple>
+  // carries that target SDK library path on Darwin and is what lets clang find it.
+  // Other wrapper roles stay limited to their declared flags (value "1"), including
+  // cross-build variants, without wrapper state, debug flags or the caller's test options.
   const toolchain = ['NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'DEVELOPER_DIR', 'SDKROOT']
     .flatMap(key => ['', '_FOR_BUILD', '_FOR_TARGET'].map(suffix => key + suffix))
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN', ...toolchain]) {

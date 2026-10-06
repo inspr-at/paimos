@@ -61,8 +61,10 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
       // 'exit', not 'close': an orphan may still hold inherited output pipes.
       child.once('exit', (code, signal) => resolveExit({ code, signal }))
     })
-    // Inject only retry scheduling for deterministic exit/lookup interleavings;
-    // identity checks and the bounded attempt count remain in recordRootGroup.
+    // Inject only retry scheduling for deterministic exit/lookup interleavings.
+    // Tests can wait on a child-exit barrier without racing Node startup
+    // against the production retry window. Identity checks and the bounded
+    // attempt count remain in recordRootGroup.
     try { await recordRootGroup(child, entry => appendFileSync(groupLog, `${JSON.stringify(entry)}\n`), { wait: rootIdentityWait }) }
     catch (error) { await exited; throw error }
     if (interrupt) signalOwned(interrupt)

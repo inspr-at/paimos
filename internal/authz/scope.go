@@ -192,7 +192,7 @@ func routeTarget(pattern string, values map[string]string) (kind, id string) {
 		return "relation", values["relationId"]
 	case values["eventId"] != "":
 		return "event", values["eventId"]
-	case pattern == "GET /api/inbox/messages/{messageId}/receipt":
+	case pattern == "GET /api/inbox/messages/{messageId}/receipt" || pattern == "POST /api/inbox/messages/{messageId}/cancel":
 		return "inbox_receipt", values["messageId"]
 	case strings.HasSuffix(pattern, " /api/node-keys/{key}"):
 		return "node_key", values["key"]

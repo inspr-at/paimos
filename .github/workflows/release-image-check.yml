@@ -352,7 +352,9 @@ jobs:
           GOCACHE: ${{ runner.temp }}/go-build-agentd
           GOMODCACHE: ${{ runner.temp }}/go-mod
           GOFLAGS: -mod=readonly
-        run: bash scripts/build-release-binaries.sh darwin-agentd
+        run: |
+          bash scripts/build-release-binaries.sh darwin-agentd
+          GOCACHE="$RUNNER_TEMP/go-build-cli-darwin" bash scripts/build-release-binaries.sh cli-darwin
       - name: Native unsigned agent qualification
         env:
           AEON_DARWIN_ARCH: ${{ matrix.arch }}
@@ -360,7 +362,9 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: rehearsal-agentd-darwin-${{ matrix.arch }}
-          path: dist/paimos-agentd-darwin-${{ matrix.arch }}
+          path: |
+            dist/paimos-agentd-darwin-${{ matrix.arch }}
+            dist/aeon-cli-darwin-${{ matrix.arch }}
           if-no-files-found: error
           retention-days: 1
 

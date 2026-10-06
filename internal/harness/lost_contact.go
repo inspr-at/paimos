@@ -56,7 +56,8 @@ func (m *Module) getHeartbeatLost(r *http.Request, tx pgx.Tx, p tenant.Principal
 
 func (m *Module) putHeartbeatLost(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Minutes int `json:"heartbeat_lost_minutes"`
+		Minutes  int  `json:"heartbeat_lost_minutes"`
+		Expected *int `json:"expected_heartbeat_lost_minutes,omitempty"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -64,11 +65,25 @@ func (m *Module) putHeartbeatLost(r *http.Request, tx pgx.Tx, p tenant.Principal
 	if in.Minutes < minHeartbeatLostMinutes || in.Minutes > maxHeartbeatLostMinutes {
 		return nil, workorders.Fail(400, "heartbeat_lost_minutes must be from 5 to 1440")
 	}
+	if in.Expected != nil && (*in.Expected < 5 || *in.Expected > 1440) {
+		return nil, workorders.Fail(400, "expected value outside allowed range")
+	}
+	if err := lockAgentWorkSettings(r.Context(), tx, p); err != nil {
+		return nil, err
+	}
+	before, err := heartbeatLostMinutes(r.Context(), tx)
+	if err != nil {
+		return nil, err
+	}
+	if in.Expected != nil && *in.Expected != before {
+		return nil, workorders.Fail(409, "agent settings changed; reload before undoing")
+	}
 	if _, err := tx.Exec(r.Context(), `INSERT INTO harness_settings(tenant_id,heartbeat_lost_minutes) VALUES($1,$2)
 		ON CONFLICT (tenant_id) DO UPDATE SET heartbeat_lost_minutes=EXCLUDED.heartbeat_lost_minutes,updated_at=now()`, p.TenantID, in.Minutes); err != nil {
 		return nil, err
 	}
-	return map[string]int{"heartbeat_lost_minutes": in.Minutes}, nil
+	err = recordAgentWorkSetting(r.Context(), tx, p, "heartbeat_lost_minutes", before, in.Minutes)
+	return map[string]int{"heartbeat_lost_minutes": in.Minutes}, err
 }
 
 // lostContact reports a generation the sweeper closed and nobody archived.

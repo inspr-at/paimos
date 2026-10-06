@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -20,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -28,18 +28,23 @@ import (
 const scopeInboxSend = "inbox.send"
 
 type module struct {
+	attached   *attachedmsg.Service
 	pool       *pgxpool.Pool
 	heartbeat  time.Duration
 	waitNotify func(context.Context, *pgx.Conn, string, time.Time) error
 }
 
 // New returns the inbox HTTP module. See the package doc for coordinator wiring.
-func New(pool *pgxpool.Pool) httpapi.Module {
-	return newModule(pool)
+func New(pool *pgxpool.Pool, attached ...*attachedmsg.Service) httpapi.Module {
+	return newModule(pool, attached...)
 }
 
-func newModule(pool *pgxpool.Pool) *module {
-	return &module{pool: pool, heartbeat: 15 * time.Second, waitNotify: waitTenantNotify}
+func newModule(pool *pgxpool.Pool, attached ...*attachedmsg.Service) *module {
+	var service *attachedmsg.Service
+	if len(attached) > 0 {
+		service = attached[0]
+	}
+	return &module{pool: pool, heartbeat: 15 * time.Second, waitNotify: waitTenantNotify, attached: service}
 }
 
 func (m *module) Mount(mux *http.ServeMux) {
@@ -48,6 +53,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/inbox/stream", m.stream)
 	mux.HandleFunc("GET /api/inbox/messages/{messageId}/receipt", m.handleReceipt)
 	mux.HandleFunc("POST /api/inbox/messages/{messageId}/ack", m.handleAck)
+	mux.HandleFunc("POST /api/inbox/messages/{messageId}/cancel", m.cancelAttached)
 	mux.HandleFunc("GET /api/inbox/targets", m.handleListTargets)
 	mux.HandleFunc("POST /api/inbox/targets", m.handleCreateTarget)
 	mux.HandleFunc("DELETE /api/inbox/targets/{targetId}", m.handleDeleteTarget)
@@ -98,6 +104,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 func failure(w http.ResponseWriter, err error) {
+	if attachedmsg.WriteError(w, err) {
+		return
+	}
 	var he *httpError
 	if errors.As(err, &he) {
 		writeError(w, he.status, he.code, he.msg)
@@ -116,7 +125,6 @@ func failure(w http.ResponseWriter, err error) {
 	case errors.As(err, &pe) && pe.Code == "P0001":
 		writeError(w, 409, "conflict", "wake target does not belong to the recipient")
 	default:
-		slog.Error("inbox", "err", err)
 		writeError(w, 500, "internal_error", "internal error")
 	}
 }

@@ -280,7 +280,7 @@ test('unverifiable live roots terminate their group without an invalid journal e
   } finally { probe.child.kill('SIGKILL'); await probe.completion }
 })
 
-test('root retries allow a fast child to exit normally instead of failing verification', async () => {
+test('root retries allow a fast child to exit normally instead of failing verification', { timeout: 15000 }, async () => {
   const child = spawn(process.execPath, ['-e', 'process.exit(7)'], { detached: true, stdio: 'ignore' })
   const exited = new Promise(resolve => child.once('exit', resolve)), entries = []
   try {

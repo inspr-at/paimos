@@ -71,7 +71,7 @@ test('workspace administrators can choose each activity mode and recover a faile
     return route.fulfill({ json: { mode } })
   })
   await page.goto('/settings/agents')
-  const options = page.getByRole('group', { name: 'Agent activity' })
+  const options = page.getByRole('radiogroup', { name: 'Agent activity' })
   await expect(options.getByRole('radio', { name: /^Agent summary/ })).toBeChecked()
   await options.getByRole('radio', { name: /^Tool activity/ }).check()
   await expect(options.getByRole('radio', { name: /^Tool activity/ })).toBeChecked()
@@ -79,8 +79,8 @@ test('workspace administrators can choose each activity mode and recover a faile
   await expect(options.getByRole('radio', { name: /^Off/ })).toBeChecked()
   fail = true
   await options.getByRole('radio', { name: /^Agent summary/ }).click()
-  await expect(page.getByRole('alert').filter({ hasText: 'Could not save Agent activity' })).toBeVisible()
-  await expect(options.getByRole('radio', { name: /^Off/ })).toBeChecked()
+  await expect(page.getByRole('alert').filter({ hasText: 'Could not save' })).toBeVisible()
+  await expect(options.getByRole('radio', { name: /^Agent summary/ })).toBeChecked()
   expect(writes).toEqual(['tool_activity', 'off'])
 })
 

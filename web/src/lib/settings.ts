@@ -14,7 +14,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'theme', group: 'You', label: 'Theme', summary: 'Colours, agent looks', who: 'Everyone picks a theme and can make their own. Only admins change the workspace themes and the default.', admin: false },
   { id: 'developer', group: 'You', label: 'Developer', summary: 'For people working on Paimos itself', who: 'Everyone has this section. Changes apply only to you.', admin: false },
   { id: 'workspace', group: 'Workspace', label: 'Workspace', summary: 'Name, brand and in-app AI', who: 'Admins only see and change this section.', admin: true },
-  { id: 'vocabulary', group: 'Workspace', label: 'Vocabulary', summary: 'Level names and ticket types', who: 'Everyone sees these names. Only admins change them.', admin: false },
+  { id: 'vocabulary', group: 'Workspace', label: 'Vocabulary', summary: 'Agent names, level names and ticket types', who: 'Everyone sees these names. Only admins change them.', admin: false },
   { id: 'access', group: 'Workspace', label: 'Access', summary: 'People, roles and agents', who: 'People with See members or Read access log permission see this section. Only people with the corresponding manage permission change roles and invites.', admin: true, permission: ['members.read', 'audit.read'] },
   { id: 'policies', group: 'Agents and automation', label: 'Policies', summary: 'Who may do what, when', who: 'Everyone can read policies. Changes need the corresponding policy permission.', admin: false },
   { id: 'agents', group: 'Agents and automation', label: 'Agents', summary: 'Activity, estimates, models', who: 'Admins only change this section. It applies to every project.', admin: true },
