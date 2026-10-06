@@ -143,9 +143,11 @@ const isolatedGit = ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=fal
 
 export function fixedEnvironment(source = process.env, scratch) {
   const env = {}
-  // Nix's wrappers consume the SDK/search paths only for their declared roles.
-  // Keep this toolchain configuration, including cross-build role variants,
-  // without carrying wrapper state, debug flags or the caller's test options.
+  // Nix's compiler wrapper needs its SDK search paths when Go links cgo tests.
+  // NIX_LDFLAGS alone does not locate libresolv; the per-target wrapper host
+  // variable carries that SDK library path on Darwin. Other wrapper roles stay
+  // limited to their declared flags so cross-build variants pass through without
+  // wrapper state, debug flags or the caller's test options.
   const toolchain = ['NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'DEVELOPER_DIR', 'SDKROOT']
     .flatMap(key => ['', '_FOR_BUILD', '_FOR_TARGET'].map(suffix => key + suffix))
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN', ...toolchain]) {
@@ -158,7 +160,11 @@ export function fixedEnvironment(source = process.env, scratch) {
   const nixTargetBuildVariable = /^NIX_(?:(?:CC|BINTOOLS)_WRAPPER_TARGET_(?:BUILD|HOST|TARGET)|CFLAGS_(?:COMPILE(?:_BEFORE)?|LINK)|LDFLAGS(?:_BEFORE)?)_[a-z0-9]+(?:_[a-z0-9]+)+$/
   const nixWrapperRole = /^NIX_(?:CC|BINTOOLS)_WRAPPER_TARGET_(?:BUILD|HOST|TARGET)_[a-z0-9_]+$/
   for (const key of Object.keys(source)) {
-    if (nixTargetBuildVariable.test(key) && source[key] !== undefined) env[key] = source[key]
+    // Main copies every CC host SDK path, including a single-token suffix whose
+    // value is not the role marker "1". Multi-segment compiler roles keep their
+    // defined values. Any other single-token wrapper role is kept only as "1".
+    if (key.startsWith('NIX_CC_WRAPPER_TARGET_HOST_') && source[key] !== undefined) env[key] = source[key]
+    else if (nixTargetBuildVariable.test(key) && source[key] !== undefined) env[key] = source[key]
     else if (nixWrapperRole.test(key) && source[key] === '1') env[key] = '1'
   }
   Object.assign(env, { CI: 'true', CI_LANE: 'full', AEON_TEST_TIER_MODE: 'full', GIT_CONFIG_NOSYSTEM: '1',

@@ -487,16 +487,18 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const gated = balanceShards(real, 12).flatMap(s => s.specs)
   assert.ok(gated.some(spec => spec.file === 'tests/knowledge.spec.ts'), 'Decision Knowledge regressions must gate CI')
   assert.equal(gated.length, files(real).length - real.groups.find(g => g.id === 'remaining-ui').specs.length)
-  // Preserve the existing estimate budget while accounting for AEON-697's
-  // additional gated work. These weights are scheduling estimates, not a
-  // promise that the expanded gate executes within five hosted minutes.
+  // Preserve main's five-minute estimate for every gated group except
+  // AEON-697's attention spec. That spec is one file, so the balancer cannot
+  // spread it; the expanded gate may grow by its whole weight and no more.
+  // These weights are scheduling estimates, not a hosted-runtime promise.
   const attention = real.groups.find(group => group.id === 'needs-attention')
   assert.ok(attention, 'Attention regressions must remain in the gate')
   const priorGate = { ...real, groups: real.groups.filter(group => group !== attention) }
-  assert.ok(Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds)) < 300, 'prior gate exceeds its five-minute estimate budget')
-  const addedPerShard = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) / 12
-  assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < 300 + addedPerShard,
-    'expanded gate exceeds the prior estimate budget plus its added work per shard')
+  const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
+  assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0)
+  assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
+    'expanded gate exceeds the prior estimate plus the attention specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {
@@ -596,6 +598,15 @@ test('Settings cases stay classified: strict validation rejects stale and unclas
   assert.equal(evidence.length, 1)
   assert.equal(evidence[0].tier, 'NIGHTLY', 'screenshot evidence stays nightly')
   for (const row of rows) if (row !== evidence[0]) assert.ok(['ESSENTIAL', 'GATED-FULL'].includes(row.tier), `${key(row)} needs an explicit gate tier`)
+  for (const event of ['pull_request', 'merge_group']) {
+    const selected = select(rows, { event, paths: ['.github/workflows/ci.yml'] }).tests
+    assert.deepEqual(selected.map(key), rows.filter(row => row !== evidence[0]).map(key), `${event} must gate every functional Settings case`)
+  }
+  const policy = loadManifest()
+  const declarations = policy.groups.flatMap(group => group.specs.filter(spec => spec.file === file).map(spec => ({ group, spec })))
+  assert.equal(declarations.length, 1, 'Settings must have exactly one shard declaration')
+  assert.notEqual(declarations[0].group.gate, false, 'Settings must remain in the full browser gate')
+  assert.equal(declarations[0].spec.listedTests, collected.length)
 })
 
 // Native expansion catches parameterized routing cases; strict reconciliation

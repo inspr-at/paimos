@@ -27,7 +27,7 @@ import ExecutionMark from './ExecutionMark.vue'
 import SessionHost from './SessionHost.vue'
 import { listHostLabels } from '../../lib/agents'
 import { intendedResult, sessionContext, sessionExecution, sessionEtaEligible } from './sessionRow'
-import EtaCell from '../work/EtaCell.vue'
+import SessionEstimate from './SessionEstimate.vue'
 import { etaFromSession } from '../../lib/eta'
 import { brand } from '../../lib/brand'
 import { toast } from '../../lib/toast'
@@ -46,7 +46,7 @@ const serviceTiers = useServiceTiers()
 // opt-in for this mounted list only; refreshes never open it or persist it.
 const props = defineProps<{
   history?: SessionView[]; historyState?: 'idle' | 'loading' | 'ready' | 'error'; historyMore?: boolean; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
-  loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean
+  loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean; canLead?: boolean
 }>()
 const agentRecovery = useAgentRecovery()
 const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: [] }>()
@@ -76,6 +76,11 @@ const bucketOf = (group: SessionGroup): Bucket => group === 'stopped' ? 'stopped
 const roots = (bucket: Bucket) => showRemoved.value
   ? (bucket === 'stopped' ? forest.value : [])
   : forest.value.filter(branch => bucketOf(branch.group) === bucket)
+// Count sessions, including folded descendants, rather than family roots.
+const pausedCount = (branch: Branch): number => Number(branch.view.status.state === 'paused') + branch.children.reduce((sum, child) => sum + pausedCount(child), 0)
+const attentionCount = (branch: Branch): number => Number(bucketOf(branch.view.status.group) === 'attention') + branch.children.reduce((sum, child) => sum + attentionCount(child), 0)
+const bucketCount = (bucket: Bucket) => roots(bucket).reduce((sum, branch) => sum + (showRemoved.value || bucket === 'stopped' ? branch.count : bucket === 'paused' ? pausedCount(branch) : bucket === 'attention' ? attentionCount(branch) : branch.liveCount), 0)
+const countTip = (bucket: Bucket) => bucket === 'attention' ? 'Sessions needing attention, including collapsed workers' : bucket === 'paused' ? 'Paused sessions, including collapsed workers' : 'Live sessions in these families, including collapsed workers'
 const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
 const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)
@@ -145,7 +150,10 @@ const identity = useSession()
 const grant = computed<ControlGrant>(() => ({ person: identity.identity?.principal.kind === 'person', can }))
 // The chosen order is remembered per viewer in this browser; the page works without storage.
 const viewer = computed(() => identity.identity ? `${identity.identity.tenant.id}.${identity.identity.principal.id}` : '')
-watch(viewer, id => { sort.value = readSort(id) }, { immediate: true })
+watch(viewer, id => {
+  sort.value = readSort(id)
+  expanded.value = {}; history.value = {}; showStopped.value = false; showRemoved.value = false
+}, { immediate: true })
 const hostLabels = ref(new Map<string, string>())
 let hostRead = 0
 watch(viewer, async () => {
@@ -361,7 +369,7 @@ defineExpose({ toggleHistory })
       <div v-for="i in 5" :key="i" class="sk-row"><span class="skeleton dot" /><span class="skeleton" :style="{ width: `${18 + (i * 7) % 16}%` }" /><span class="skeleton key" /><span class="skeleton" style="width: 12%" /></div>
     </div>
     <p v-else-if="showRemoved && !removedCount" class="state" :role="historyState === 'error' ? 'alert' : undefined">{{ historyState === 'loading' ? 'Loading history…' : historyState === 'error' ? 'History could not be loaded.' : 'No ended sessions yet.' }}</p>
-    <ConnectHint v-else-if="!total && !showRemoved" :can-start="canStart" @start="emit('start')" />
+    <ConnectHint v-else-if="!total && !showRemoved" :can-start="canStart" :can-lead="canLead" @start="emit('start')" />
 
     <div v-else class="table" :class="{ 'has-eta': hasEta }" role="table" aria-label="Agent sessions">
       <div class="thead" role="row">
@@ -379,11 +387,11 @@ defineExpose({ toggleHistory })
       <template v-for="group in BUCKETS" :key="group.id">
         <div v-if="roots(group.id).length" class="group-row" :class="group.id" role="row">
           <span role="rowheader" class="group-label">
-            <template v-if="showRemoved">Ended<span class="mono">{{ roots(group.id).length }}</span></template>
+            <template v-if="showRemoved">Ended<span class="mono">{{ bucketCount(group.id) }}</span></template>
             <button v-else-if="group.id === 'stopped'" type="button" class="group-toggle" :aria-expanded="showStopped" @click="showStopped = !showStopped">
-              <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showStopped }" />{{ group.label }}<span class="mono">{{ roots(group.id).length }}</span>
+              <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showStopped }" />{{ group.label }}<span class="mono">{{ bucketCount(group.id) }}</span>
             </button>
-            <template v-else>{{ group.label }}<span class="mono">{{ roots(group.id).length }}</span></template>
+            <template v-else>{{ group.label }}<span class="mono" :data-tip="countTip(group.id)">{{ bucketCount(group.id) }}</span></template>
           </span>
         </div>
         <div
@@ -437,7 +445,7 @@ defineExpose({ toggleHistory })
           <span role="cell" class="c-ticket">
             <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
             <span v-else class="faint">{{ view.projectKey || '—' }}</span>
-            <EtaCell v-if="etaOf(view) || working(view)" class="row-eta" align="start" :eta="etaOf(view)" :now="now" :missing="working(view)" />
+            <SessionEstimate v-if="etaOf(view) || working(view)" class="row-eta" :eta="etaOf(view)" :now="now" :missing="working(view)" />
           </span>
           <span class="execution-host" role="presentation">
             <span role="cell" class="c-exec" :aria-label="[exec.model ? exec.providerLabel : '', exec.modelLine, exec.accountLine].filter(Boolean).join('. ')">
