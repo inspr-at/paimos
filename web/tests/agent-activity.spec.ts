@@ -70,7 +70,7 @@ test('workspace administrators can choose each activity mode and recover a faile
     }
     return route.fulfill({ json: { mode } })
   })
-  await page.goto('/settings/workspace')
+  await page.goto('/settings/agents')
   const options = page.getByRole('group', { name: 'Agent activity' })
   await expect(options.getByRole('radio', { name: /^Agent summary/ })).toBeChecked()
   await options.getByRole('radio', { name: /^Tool activity/ }).check()

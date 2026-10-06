@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -809,6 +810,14 @@ func TestBatchBudgetHonoursARevocationWhileWaiting(t *testing.T) {
 	project := w.layer(admin, Scope{Layer: "project", ProjectID: w.project})
 	w.publish(admin, w.set(admin, project, "Aeon", bulky("project", 19)...), "260928090011.0.0")
 	publisher, role := w.customPublisher("publisher", "rules.publish", "rules.write", "rules.read", "nodes.read")
+	// Prove that this fixture exposes sizes while rules.read is still granted;
+	// an always-hidden response must not make the revocation assertion pass.
+	before := w.set(admin, company, "Before", testRule("before", "A short rule."))
+	var readable BatchResult
+	body := w.call(publisher, "POST", "/api/rules/publish", batch("", item(before, "auto")), 200)
+	if err := json.Unmarshal(body, &readable); err != nil || readable.MaxBytes <= 0 {
+		t.Fatalf("a granted reader did not learn sizes: %s", body)
+	}
 	short := w.set(admin, company, "Short", testRule("short", "A short rule."))
 	access, err := w.d.Admin.Begin(t.Context())
 	if err != nil {
@@ -826,18 +835,61 @@ func TestBatchBudgetHonoursARevocationWhileWaiting(t *testing.T) {
 		body []byte
 	}
 	done := make(chan answer, 1)
+	finished := make(chan struct{})
 	go func() {
+		defer close(finished)
 		code, body := w.send(publisher, "POST", "/api/rules/publish", batch("", item(short, "auto")))
 		done <- answer{code, body}
 	}()
-	time.Sleep(300 * time.Millisecond)
+	defer func() {
+		// A failed barrier must release the fence and finish the request before
+		// the fixture's database is removed.
+		_ = access.Rollback(context.Background())
+		select {
+		case <-finished:
+		case <-time.After(5 * time.Second):
+			t.Error("publication goroutine did not finish during cleanup")
+		}
+	}()
+	// Match this revoker's backend and the exact access-fence query. Reaching
+	// it proves the request passed its initial checks while the uncommitted
+	// deletion was still invisible. Only a real lock wait releases revocation;
+	// the deadline is a hang guard, not evidence that the request got this far.
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	for {
+		select {
+		case got := <-done:
+			t.Fatalf("publication finished before waiting on the access fence: %d %s", got.code, got.body)
+		default:
+		}
+		var waiting bool
+		if err := w.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
+ WHERE datname=current_database() AND wait_event_type='Lock' AND query=$2
+ AND $1::int=ANY(pg_blocking_pids(pid)))`, access.Conn().PgConn().PID(),
+			`SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`).Scan(&waiting); err != nil {
+			t.Fatalf("publication did not reach the held access fence: %v", err)
+		}
+		if waiting {
+			break
+		}
+		runtime.Gosched()
+	}
 	if err = access.Commit(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	got := <-done
+	var got answer
+	select {
+	case got = <-done:
+	case <-ctx.Done():
+		t.Fatal("publication did not finish after revocation committed:", ctx.Err())
+	}
 	var ok BatchResult
 	if got.code != 200 || json.Unmarshal(got.body, &ok) != nil || ok.MaxBytes != 0 {
 		t.Fatalf("a revoked reader still learned sizes: %d %s", got.code, got.body)
+	}
+	if len(ok.Versions) != 1 || ok.Versions[0].SetID != short.ID || ok.Versions[0].Version == "" || w.published(short.ID) != ok.Versions[0].Version {
+		t.Fatalf("revoking rules.read prevented publication: %s", got.body)
 	}
 }
 

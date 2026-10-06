@@ -16,7 +16,9 @@ test('canonical journey parent groups count nested leaves once and exclude non-w
 })
 test('canonical journey grouping bounds cycles and retains legacy epic projection', () => {
   const cycle = [row('a', 'b', false), row('b', 'a', false), row('leaf', 'a', true)]
-  assert.equal(parentLeafGroups(cycle).get('a')?.length, 1)
+  const groups = parentLeafGroups(cycle)
+  assert.deepEqual(groups.get('a'), [cycle[2]])
+  assert.deepEqual(groups.get('b'), [cycle[2]])
   const legacy = { id: 'old', kind_slug: 'ticket', epic: { id: 'epic' } } as ListItem
   assert.equal(workParentId(legacy), 'epic')
   assert.equal(isWorkLeaf(legacy), true)
@@ -28,4 +30,19 @@ test('journey legacy ticket counts retain subdivisions until the canonical migra
   const task = { id: 'task', kind_slug: 'task', epic: { id: parent.id } } as ListItem
   assert.deepEqual([parent, ticket, task].filter(isJourneyLeaf).map(row => row.id), ['ticket'])
   assert.deepEqual(parentLeafGroups([parent, ticket, task]).get(parent.id)?.map(row => row.id), ['ticket'])
+})
+
+test('canonical journey parent totals include every leaf beyond 64 ancestors', () => {
+  for (const depth of [65, 999]) {
+    const parents = Array.from({ length: depth }, (_, i) => row(`parent-${i}`, i ? `parent-${i - 1}` : null, false))
+    const leaves = [row('deep-a', `parent-${depth - 1}`, true), row('deep-b', `parent-${depth - 1}`, true)]
+    const sibling = row('sibling', 'parent-0', true)
+    const memory = row('memory', `parent-${depth - 1}`, true, 'memory')
+    // Leaves precede their parents; list order must not affect ancestry totals.
+    const groups = parentLeafGroups([...leaves, memory, sibling, ...parents.reverse()])
+    assert.equal(groups.size, depth)
+    for (let i = 0; i < depth; i++) {
+      assert.deepEqual(groups.get(`parent-${i}`), i ? leaves : [...leaves, sibling], `ancestor ${i} at depth ${depth}`)
+    }
+  }
 })

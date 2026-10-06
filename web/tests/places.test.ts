@@ -6,6 +6,7 @@ import { PLACES, placeOf, releaseChordOpen, sequence, visiblePlaces } from '../s
 test('places are Projects, Agents, Business in that order; pages belong to one or none', () => {
   assert.deepEqual(PLACES.map(p => p.label), ['Projects', 'Agents', 'Business'])
   assert.equal(placeOf('/'), 'projects')
+  assert.equal(placeOf('/briefing'), null)
   assert.equal(placeOf('/p/PHAROS/PHAROS-11'), 'projects')
   assert.equal(placeOf('/agents/5e00'), 'agents')
   assert.equal(placeOf('/business/quotes'), 'business')

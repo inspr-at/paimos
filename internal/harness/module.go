@@ -71,6 +71,7 @@ import (
 )
 
 type Module struct {
+	leadAdmission  LeadAdmission
 	planningStart  func(context.Context, pgx.Tx, string, string) error
 	pool           *pgxpool.Pool
 	controlText    controlRelay
@@ -96,6 +97,11 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		status         int
 		fn             func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
 	}{
+		{"GET /api/projects/{projectId}/lead", "harness.read", false, 200, m.readLead},
+		{"POST /api/projects/{projectId}/lead", "harness.control", false, 200, m.startLead},
+		{"POST /api/projects/{projectId}/lead/claim", "harness.worker", true, 200, m.claimLead},
+		{"POST /api/projects/{projectId}/lead/pause", "harness.worker", false, 200, m.pauseLead},
+		{"POST /api/projects/{projectId}/lead/yield", "harness.worker", true, 200, m.yieldLead},
 		{"POST /api/projects/{projectId}/harness-sessions", "harness.write", false, 201, m.register},
 		{"GET /api/me/host-labels", "harness.read", false, 200, m.listHostLabels},
 		{"PUT /api/me/host-labels", "harness.read", false, 200, m.putHostLabel},
@@ -132,6 +138,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.read", false, 200, m.readProvenance},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.worker", true, 200, m.recordProvenance},
 		{"GET /api/projects/{projectId}/instruction-provenance", "harness.read", false, 200, m.queryInstructionSources},
+		{"GET /api/projects/{projectId}/lead-decisions", "nodes.read", false, 200, m.listLeadDecisions},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/lead-decisions", "harness.worker", true, 200, m.recordLeadDecision},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.read", false, 200, m.readRulesReceipts},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.worker", true, 200, m.recordRulesReceipt},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
@@ -270,8 +278,11 @@ type MetadataChange struct {
 }
 
 type Commit struct {
-	SHA     string `json:"sha"`
-	Subject string `json:"subject"`
+	SHA          string `json:"sha"`
+	Subject      string `json:"subject"`
+	LinesAdded   *int64 `json:"lines_added,omitempty"`
+	LinesDeleted *int64 `json:"lines_deleted,omitempty"`
+	FilesChanged *int64 `json:"files_changed,omitempty"`
 }
 
 type sessionText struct {
@@ -331,6 +342,18 @@ func validCommits(commits []Commit) error {
 	}
 	for i := range commits {
 		c := &commits[i]
+		present := 0
+		for _, n := range []*int64{c.LinesAdded, c.LinesDeleted, c.FilesChanged} {
+			if n != nil {
+				present++
+				if *n < 0 || *n > 1_000_000_000 {
+					return workorders.Fail(400, "invalid commit diff count")
+				}
+			}
+		}
+		if present != 0 && present != 3 {
+			return workorders.Fail(400, "commit diff counts must be reported together")
+		}
 		if len(c.SHA) < 7 || len(c.SHA) > 40 || strings.Trim(c.SHA, "0123456789abcdefABCDEF") != "" {
 			return workorders.Fail(400, "invalid commit SHA")
 		}
@@ -805,6 +828,9 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		return nil, err
 	}
 	ref, lease := digest("ref", in.SessionRef), digest("lease", in.WorkerLease)
+	if err = fenceLeadRegistration(ctx, tx, projectID, in, ref, lease); err != nil {
+		return nil, err
+	}
 	vendor, err := vendorRefDigest(in.SessionRef, in.WorkerLease, in.VendorSessionRef)
 	if err != nil {
 		return nil, err

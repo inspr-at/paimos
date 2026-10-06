@@ -468,6 +468,14 @@ P3 must use each pending effect's deadline rather than the source answer's human
 grace deadline. Corrections retain the original per-asker reuse pointers. Active
 Always publication and post-dispatch corrections remain P4/P3 responsibilities.
 
+AEON-503-simple reserves `1243_run_waiting_measurement.sql` for nullable
+`agent_runs.waiting_ms`. It sorts after release 123's 1240 using the coordinator's
+reserved number; work-node migrations keep their published filenames. The
+migration preserves legacy run fields, estimate snapshots and outcomes exactly.
+No historical timing is reconstructed. The field is personal agent-run timing
+telemetry, located by `(tenant_id,id)`; add this classification to the DSAR
+inventory when that independently owned inventory lands (absent on this base).
+
 AEON-619 release-123 merge-main round retains latest main `9d81acc6` in normal
 local merge `0045620f`, after preserving the inherited pending main merge as
 `d0eebb41`. The three conflicts retain both README sections, all exact-byte
@@ -486,6 +494,26 @@ checks do not claim that validation. Evidence is retained in
 `tmp/aeon619-merge-main/summary-r123.json`, `preservation-r123.json` and the
 `r123-*` logs. No feature change, origin push, deployment, migration renumbering,
 ticket status change or model review ran.
+
+AEON-503 merge-main round retains `origin/main` `4d7e7de34` in normal merge
+`3276ad4051`, preserving both migration README sections, both OpenAPI change
+sets and all route permissions. That earlier round retained the original
+reservation; fix round 3 renumbers the same SQL to 1243, after the released 1240
+migration. Independent preservation checks retained 23 branch and
+123 main files byte-for-byte, including main's deletions. Twelve unlisted Go
+cases are explicitly NIGHTLY, with post-gate provenance so the tier regression
+continues checking every legacy classification.
+
+Approved remote validation on mbp2606 passed all eleven affected Go packages
+(including OpenAPI reporter-contract checks), 26 migration-checker tests, the
+241-migration guard against `v261003095616.0.0`, 33 tier tests, web typecheck,
+lint and build, and 27 focused web tests across three files. The guard's missing
+remote release tag was supplied only in an isolated test repository using the
+verified release commit; shared release refs were unchanged. Go and migration
+tests ran at `3276ad4051`; the tier regression fix and remaining checks ran at
+`540a25677b`. Full repository and browser suites were not run in this scoped
+round. No feature behavior changed, migration was renumbered, origin push,
+deployment or model review ran.
 
 Migration 1230 also admits `status_autopilot.undone` to project-visible events,
 under the same target and referenced-node visibility checks. This lets another
@@ -561,3 +589,47 @@ using the legacy readiness helper (AEON-652), pending its consolidated lifecycle
 changes. Review both seams when merging siblings. Neither migration enables the
 rollout flag. Whole-chain acceptance, verified backup/rollback, push and deployment
 remain the coordinator's gates; this worker performs local checks and commits.
+
+## AEON-503 fix round 3
+
+Merged release-123 `origin/main` `73f40e0d8` in `2f17041d6`, preserving the
+updated Decision Desk documentation and both additive API changes. The combined
+session response adds optional commit counts to the published contract, so its
+header and schema pin now use `harness-session/2.8` (verified as a minor change).
+Every main test classification remains intact; explicit post-gate inventories
+preserve strict legacy tier assertions rather than exempting all NIGHTLY rows.
+
+`54449ea46` renumbers the unchanged waiting-measurement SQL to the coordinator's
+reserved `1243`, after release 123's `1240`. All 258 published SQL files remain
+byte-for-byte unchanged. The migration-order regression passes here and fails
+against `8e0e29c1`'s migration layout specifically because 1213 precedes 1240.
+The real Postgres upgrade test seeds two tenants before the work-kind upgrade,
+proves the waiting column is still absent at the release-123 boundary, preserves
+active time and exact historical snapshot/outcome bytes, and rejects reapplication.
+
+Local validation passed that database regression, reporter-contract tests,
+33 migration-checker tests, the 259-file guard against `v261005070923.0.0`,
+34 strict tier tests, and 19 focused web tests in usage-dashboard, usageWork and
+estimates. The approved remote Go runner transferred committed `54449ea46` but
+returned exit 3 because Colima was down, before running any package tests; its
+early refusal also bypasses its normal remote worktree cleanup. The remote
+browser launcher refused because OPS-247 bootstrap is pending. Broader affected
+Go suites, Linux Chromium and the previous-binary runtime compatibility probe
+remain unverified in this round and need the coordinator's working test lane or
+hosted CI. No assertions were loosened, origin push, deployment, ticket status
+change or model review ran.
+
+AEON-740 reserves **1259** for owner-bound parent queue snapshots, replacing
+the colliding unpublished 1258 reservation (AEON-734). `parent_queue_snapshots`
+contains personal work activity (`owner_id`, captured node identities/revisions,
+queue results and creation time), located by `(tenant_id,id)`. Classify it as
+personal in the AEON-490 DSAR inventory when that package is integrated;
+`internal/dsar/inventory.json` is absent from this branch and its pinned
+`origin/main`. Snapshots contain no credentials, prompts or account details.
+
+AEON-740 fix round 2 keeps this schema unchanged: the bounded JSON payload also
+retains server-held depth-first continuation cursors with exact sibling positions
+and ancestry. The API returns only `continuation_available`, never cursor paths;
+`continuation_of` refers to an owned snapshot of the same parent. Each capture
+creates independent explicit membership, and application rechecks canonical
+`aeon_work_busy` after identical shared-queue membership replay.

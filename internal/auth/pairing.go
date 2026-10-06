@@ -39,6 +39,12 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 			return deny
 		}
 		switch parts[1] {
+		case "status":
+			// A live paired computer may read the same tenant status metadata;
+			// this does not admit other paths or bypass pairing revocation.
+			if len(parts) == 3 && parts[2] == "help" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+				return nil
+			}
 		case "me":
 			if r.Method == "GET" && len(parts) == 2 {
 				return nil

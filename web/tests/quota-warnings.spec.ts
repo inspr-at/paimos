@@ -5,6 +5,7 @@ import { fixtures, me, mockWork } from './work-fixtures'
 import { mockBusiness, businessData } from './business-fixtures'
 import { settingsData, mockSettings } from './settings-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
+import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 
 for (const width of [390, 1440]) {
@@ -24,7 +25,12 @@ for (const width of [390, 1440]) {
       }
       return route.fulfill({ json: settings })
     })
-    await page.goto('/settings/workspace')
+    await page.route('**/api/me/permissions*', route => {
+      const permissions = mockEffectivePermissions('admin')
+      permissions.workspace.permissions.push('account.read')
+      return route.fulfill({ json: permissions })
+    })
+    await page.goto('/settings/accounts')
     const card = page.getByRole('region', { name: 'Low-quota warnings' })
     const early = card.getByLabel('Early notice (%)'), urgent = card.getByLabel('Urgent notice (%)')
     const save = card.getByRole('button', { name: 'Save thresholds' })

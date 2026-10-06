@@ -75,7 +75,7 @@ if [[ -n "${AEON_SMOKE_IMAGE:-}" ]]; then
   echo 'Using prebuilt release image for smoke gate'
 else
   echo 'Building release image for smoke gate'
-  docker build --build-arg "VERSION=${AEON_SMOKE_VERSION:-dev}" -t "$image" .
+  node scripts/assemble-image.mjs "$image"
 fi
 docker run --rm --entrypoint /bin/sh "$image" -c '
   test -s /usr/share/doc/aeon/NOTICE &&
