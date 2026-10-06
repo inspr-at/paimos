@@ -18,7 +18,8 @@ export function changedPaths(event, env=process.env, { fetchBase=false, exec=com
   } catch { return undefined }
 }
 
-export function schedulingMode(event,paths,exists=path=>existsSync(resolve(root,path))) {
+export function schedulingMode(event,paths,exists=path=>existsSync(resolve(root,path)),{mgReuse}={}) {
+  if(event==='merge_group'&&mgReuse==='on')return 'full'
   if(!['pull_request','merge_group'].includes(event)||!Array.isArray(paths)) return 'full'
   for(const path of paths) {
     if(/^(?:docs\/|README(?:\.|$)|LICENSE(?:\.|$)|CHANGELOG(?:\.|$))/.test(path))continue
@@ -40,7 +41,7 @@ export function schedulingMode(event,paths,exists=path=>existsSync(resolve(root,
 
 export function main(env=process.env) {
   const paths=changedPaths(env.GITHUB_EVENT_NAME,env,{fetchBase:true})
-  const mode=schedulingMode(env.GITHUB_EVENT_NAME,paths)
+  const mode=schedulingMode(env.GITHUB_EVENT_NAME,paths,undefined,{mgReuse:env.CI_MG_REUSE})
   if(!env.GITHUB_OUTPUT)throw new Error('Missing Actions output path')
   writeFileSync(env.GITHUB_OUTPUT,`mode=${mode}\n`,{flag:'a'})
   console.log(`Test tier scheduling: ${mode}; changed paths ${paths?.length??'unavailable'}`)

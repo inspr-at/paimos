@@ -20,7 +20,7 @@ export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',p
   const all=validate(manifest,inventory.tests)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
   const selection=select(all,{event,paths,imports:inventory.imports,
-    forceFull:full||schedulingMode(event,paths)==='full',forceAll:catalogue,
+    forceFull:full||schedulingMode(event,paths,undefined,{mgReuse:process.env.CI_MG_REUSE})==='full',forceAll:catalogue,
     webImports:kind==='web'?webGraph(web):{}})
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}

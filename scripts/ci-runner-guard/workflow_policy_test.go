@@ -492,7 +492,7 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 					t.Fatalf("legitimate %s gate rejected: %v", lane, err)
 				}
 				for name, expected := range values {
-					if name == "CI_LANE" || name == "REUSE" || name == "REUSE_PROOF" || name == "SOURCE_RUN" || name == "CACHE_PRIME" {
+					if name == "CI_LANE" || name == "REUSE" || name == "REUSE_PROOF" || name == "SOURCE_RUN" || name == "CACHE_PRIME" || strings.HasPrefix(name, "PR_CONFIRM_") {
 						continue
 					}
 					wrong := "success"

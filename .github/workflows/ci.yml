@@ -21,10 +21,14 @@ concurrency:
 permissions:
   contents: read
 
+# With queue reuse enabled, a miss must execute the complete tier.
+env:
+  CI_MG_REUSE: ${{ vars.CI_MG_REUSE }}
+
 jobs:
-  # Read-only exact-SHA proof. Lookup/checkout failure leaves reuse unset.
+  # Read-only proof. Merge-group lookup is opt-in; failures retain full CI.
   tree-reuse:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'merge_group' && vars.CI_MG_REUSE == 'on'
     permissions:
       contents: read
       actions: read
@@ -36,13 +40,18 @@ jobs:
       run: ${{ steps.proof.outputs.run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: github.event_name != 'merge_group' || github.event.merge_group.base_sha != ''
         with:
           persist-credentials: false
+          # MG verifies with immutable trusted base code, never candidate code.
+          ref: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_sha || github.sha }}
       - name: Verify the exact merge-group SHA
         id: proof
+        if: github.event_name != 'merge_group' || github.event.merge_group.base_sha != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CI_TREE_REUSE: ${{ vars.CI_TREE_REUSE }}
+          CI_MG_REUSE: ${{ vars.CI_MG_REUSE }}
         run: node scripts/ci-tree-reuse.mjs
 
   # Preserve main-scoped cache writes when the tests reuse a queue result.
@@ -144,6 +153,7 @@ jobs:
       lane: ${{ steps.plan.outputs.lane }}
       specs: ${{ steps.plan.outputs.specs }}
       nix_vendor: ${{ steps.plan.outputs.nix_vendor }}
+      pr_tree_proof: ${{ steps.pr-tree.outputs.proof }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -173,6 +183,27 @@ jobs:
             full_plan
           fi
 
+      # Value-free checkout identity; classifier still comes from the base copy.
+      - name: Capture PR checkout identity
+        id: pr-tree
+        continue-on-error: true
+        if: github.event_name == 'pull_request' && vars.CI_MG_REUSE == 'on'
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process';
+          import { appendFileSync } from 'node:fs';
+          const git = (...args) => execFileSync('git', args, { encoding: 'utf8' }).trim();
+          const { GITHUB_RUN_ID: run, GITHUB_RUN_ATTEMPT: attempt, GITHUB_SHA: sha, PR_HEAD_SHA: head, PR_BASE_SHA: base } = process.env;
+          const tree = git('rev-parse', 'HEAD^{tree}');
+          if (![sha, head, base, tree].every(x => /^[a-f0-9]{40}$/.test(x)) ||
+              ![run, attempt].every(x => /^[1-9][0-9]*$/.test(x)) || git('rev-parse', 'HEAD') !== sha ||
+              git('show', '-s', '--format=%P', 'HEAD') !== `${base} ${head}`) throw new Error('Unproven PR checkout');
+          appendFileSync(process.env.GITHUB_OUTPUT, `proof=pr-tree-v1:${run}:${attempt}:${head}:${base}:${sha}:${tree}\n`);
+          JS
+
   tier-plan:
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -199,7 +230,7 @@ jobs:
       required-idle-runners: 4
 
   go-test:
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.runner-route.result == 'success'
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.runner-route.result == 'success'
     needs: [runner-route, ci-plan, tree-reuse, tier-plan]
     strategy:
       fail-fast: false
@@ -337,7 +368,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: "1.26"
-          cache: true
+          cache: ${{ needs.tree-reuse.outputs.reuse != 'pull_request' }}
           cache-dependency-path: go.sum
       - name: Timing budgets, alone
         env:
@@ -365,7 +396,7 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version: "1.26"
-          cache: true
+          cache: ${{ needs.tree-reuse.outputs.reuse != 'pull_request' }}
           cache-dependency-path: go.sum
       - name: Forbid volatile CI identity reads in Go tests
         run: |
@@ -408,11 +439,33 @@ jobs:
     if: always()
     needs: [ci-plan, go-test, go-static, go-timing, tree-reuse, cache-prime, tier-plan]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.merge_group.base_sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        with:
+          node-version: "24"
+      - name: Revalidate PR execution proof
+        id: pr-confirm
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_MG_REUSE: ${{ vars.CI_MG_REUSE }}
+          CONFIRM_PR_RUN: ${{ needs.tree-reuse.outputs.run }}
+        run: node scripts/ci-tree-reuse.mjs
       - name: Require every Go shard and the static checks
         env:
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
           REUSE_PROOF: ${{ needs.tree-reuse.result }}
+          PR_CONFIRM_REUSE: ${{ steps.pr-confirm.outputs.reuse }}
+          PR_CONFIRM_RUN: ${{ steps.pr-confirm.outputs.run }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
           TIER_PLAN: ${{ needs.tier-plan.result }}
@@ -424,6 +477,21 @@ jobs:
         run: |
           set -euo pipefail
           test "$TIER_PLAN" = success
+          if [ "$REUSE" = pull_request ]; then
+            test "$GITHUB_EVENT_NAME" = merge_group
+            test "$PR_CONFIRM_REUSE" = pull_request
+            test "$PR_CONFIRM_RUN" = "$SOURCE_RUN"
+            test "$CI_PLAN" = success
+            test "$CI_LANE" = full
+            test "$REUSE_PROOF" = success
+            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
+            test "$CACHE_PRIME" = skipped
+            test "$GO_TEST" = skipped
+            test "$GO_STATIC" = success
+            test "$GO_TIMING" = success
+            echo "reused pull_request run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ "$REUSE" = merge_group ]; then
             test "$GITHUB_EVENT_NAME" = push
             test "$GITHUB_REF" = refs/heads/main
@@ -457,7 +525,7 @@ jobs:
   # the parallel web-unit matrix via the tier runner.
   web-setup:
     needs: [ci-plan, tree-reuse, tier-plan]
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group'
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
@@ -525,7 +593,7 @@ jobs:
 
   # Units start with the UI shards; setup only prepares their shared runtime.
   web-unit:
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.web-setup.result == 'success'
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.web-setup.result == 'success'
     needs: [ci-plan, web-setup, tree-reuse, tier-plan]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -584,7 +652,7 @@ jobs:
         run: npm run test:browser-safety
 
   web-shard:
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.web-setup.result == 'success'
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request' && needs.web-setup.result == 'success'
     needs: [ci-plan, web-setup, tree-reuse, tier-plan]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -674,11 +742,33 @@ jobs:
     if: always()
     needs: [ci-plan, web-setup, web-unit, web-shard, tree-reuse, cache-prime, tier-plan]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.merge_group.base_sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        with:
+          node-version: "24"
+      - name: Revalidate PR execution proof
+        id: pr-confirm
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_MG_REUSE: ${{ vars.CI_MG_REUSE }}
+          CONFIRM_PR_RUN: ${{ needs.tree-reuse.outputs.run }}
+        run: node scripts/ci-tree-reuse.mjs
       - name: Require setup, units and every web shard
         env:
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
           REUSE_PROOF: ${{ needs.tree-reuse.result }}
+          PR_CONFIRM_REUSE: ${{ steps.pr-confirm.outputs.reuse }}
+          PR_CONFIRM_RUN: ${{ steps.pr-confirm.outputs.run }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
           TIER_PLAN: ${{ needs.tier-plan.result }}
@@ -690,6 +780,21 @@ jobs:
         run: |
           set -euo pipefail
           test "$TIER_PLAN" = success
+          if [ "$REUSE" = pull_request ]; then
+            test "$GITHUB_EVENT_NAME" = merge_group
+            test "$PR_CONFIRM_REUSE" = pull_request
+            test "$PR_CONFIRM_RUN" = "$SOURCE_RUN"
+            test "$CI_PLAN" = success
+            test "$CI_LANE" = full
+            test "$REUSE_PROOF" = success
+            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
+            test "$CACHE_PRIME" = skipped
+            test "$WEB_SETUP" = skipped
+            test "$WEB_UNIT" = skipped
+            test "$WEB_SHARD" = skipped
+            echo "reused pull_request run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ "$REUSE" = merge_group ]; then
             test "$GITHUB_EVENT_NAME" = push
             test "$GITHUB_REF" = refs/heads/main
@@ -729,11 +834,33 @@ jobs:
     if: always()
     needs: [ci-plan, release-check-run, tree-reuse, cache-prime]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.merge_group.base_sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        with:
+          node-version: "24"
+      - name: Revalidate PR execution proof
+        id: pr-confirm
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_MG_REUSE: ${{ vars.CI_MG_REUSE }}
+          CONFIRM_PR_RUN: ${{ needs.tree-reuse.outputs.run }}
+        run: node scripts/ci-tree-reuse.mjs
       - name: Require full validation or the classified PR exemption
         env:
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
           REUSE_PROOF: ${{ needs.tree-reuse.result }}
+          PR_CONFIRM_REUSE: ${{ steps.pr-confirm.outputs.reuse }}
+          PR_CONFIRM_RUN: ${{ steps.pr-confirm.outputs.run }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
           CI_LANE: ${{ needs.ci-plan.outputs.lane }}
@@ -741,6 +868,19 @@ jobs:
           CHECK_RESULT: ${{ needs.release-check-run.result }}
         run: |
           set -euo pipefail
+          if [ "$REUSE" = pull_request ]; then
+            test "$GITHUB_EVENT_NAME" = merge_group
+            test "$PR_CONFIRM_REUSE" = pull_request
+            test "$PR_CONFIRM_RUN" = "$SOURCE_RUN"
+            test "$CI_PLAN" = success
+            test "$CI_LANE" = full
+            test "$REUSE_PROOF" = success
+            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
+            test "$CACHE_PRIME" = skipped
+            test "$CHECK_RESULT" = skipped
+            echo "reused pull_request run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ "$REUSE" = merge_group ]; then
             test "$GITHUB_EVENT_NAME" = push
             test "$GITHUB_REF" = refs/heads/main
@@ -767,7 +907,7 @@ jobs:
 
   release-check-run:
     needs: [ci-plan, tree-reuse]
-    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -827,11 +967,33 @@ jobs:
     if: always()
     needs: [ci-plan, e2e-run, tree-reuse, cache-prime]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.merge_group.base_sha }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        with:
+          node-version: "24"
+      - name: Revalidate PR execution proof
+        id: pr-confirm
+        if: needs.tree-reuse.outputs.reuse == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CI_MG_REUSE: ${{ vars.CI_MG_REUSE }}
+          CONFIRM_PR_RUN: ${{ needs.tree-reuse.outputs.run }}
+        run: node scripts/ci-tree-reuse.mjs
       - name: Require full validation or the classified PR exemption
         env:
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
           REUSE_PROOF: ${{ needs.tree-reuse.result }}
+          PR_CONFIRM_REUSE: ${{ steps.pr-confirm.outputs.reuse }}
+          PR_CONFIRM_RUN: ${{ steps.pr-confirm.outputs.run }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
           CI_LANE: ${{ needs.ci-plan.outputs.lane }}
@@ -839,6 +1001,19 @@ jobs:
           CHECK_RESULT: ${{ needs.e2e-run.result }}
         run: |
           set -euo pipefail
+          if [ "$REUSE" = pull_request ]; then
+            test "$GITHUB_EVENT_NAME" = merge_group
+            test "$PR_CONFIRM_REUSE" = pull_request
+            test "$PR_CONFIRM_RUN" = "$SOURCE_RUN"
+            test "$CI_PLAN" = success
+            test "$CI_LANE" = full
+            test "$REUSE_PROOF" = success
+            [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
+            test "$CACHE_PRIME" = skipped
+            test "$CHECK_RESULT" = skipped
+            echo "reused pull_request run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           if [ "$REUSE" = merge_group ]; then
             test "$GITHUB_EVENT_NAME" = push
             test "$GITHUB_REF" = refs/heads/main
@@ -865,7 +1040,7 @@ jobs:
 
   e2e-run:
     needs: [ci-plan, tree-reuse]
-    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
+    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.tree-reuse.outputs.reuse != 'pull_request'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -984,8 +1159,9 @@ jobs:
           bash scripts/migration-compat.sh "$PREVIOUS_TAG" "$PREVIOUS_DIGEST"
 
   tier-measurements:
+    name: ${{ github.event_name == 'pull_request' && vars.CI_MG_REUSE == 'on' && needs.ci-plan.outputs.pr_tree_proof != '' && format('tier-measurements / {0}', needs.ci-plan.outputs.pr_tree_proof) || 'tier-measurements' }}
     if: always()
-    needs: [go, web, release-check, e2e, migration-compat, tree-reuse, ci-plan]
+    needs: [go, web, release-check, e2e, migration-compat, tree-reuse, ci-plan, tier-plan]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1008,6 +1184,9 @@ jobs:
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node scripts/test-tiers/measure.mjs tmp/tier-job-evidence
+      - name: Confirm PR tree proof
+        if: github.event_name == 'pull_request' && vars.CI_MG_REUSE == 'on' && needs.ci-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode == 'full' && needs.go.result == 'success' && needs.web.result == 'success' && needs.release-check.result == 'success' && needs.e2e.result == 'success' && needs.migration-compat.result == 'success'
+        run: echo 'Full PR suite completed; checkout identity is bound in this job name.'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:

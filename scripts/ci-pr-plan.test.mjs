@@ -77,7 +77,7 @@ test('Markdown fixtures and implementation documentation require full validation
 
 function workflowPlanScript() {
   const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
-  const step = workflow.split('      - name: Classify local PR diff\n')[1].split(/\n\n  [a-z][a-z-]*:/)[0];
+  const step = workflow.split('      - name: Classify local PR diff\n')[1].split(/\n      - |\n\n  [a-z][a-z-]*:/)[0];
   const run = step.split('        run: ')[1];
   assert.ok(run, 'classifier step must execute a command');
   return run.startsWith('|\n') ? run.slice(2).replace(/^          /gm, '') : run.trim();
@@ -219,7 +219,8 @@ test('required aggregate checks never execute the checked-out classifier script'
   for (const id of ['go', 'web', 'release-check', 'e2e']) {
     const job = requiredJob(id);
     assert.doesNotMatch(job, /scripts\/ci-pr-plan\.mjs/, `${id} must not execute PR-owned gate code`);
-    assert.doesNotMatch(job, /uses: actions\/checkout@/, `${id} must judge results without a checkout`);
+    assert.match(job, /ref: \$\{\{ github.event.merge_group.base_sha \}\}/, `${id} must check out only trusted base proof code`);
+    assert.match(job, /if: needs.tree-reuse.outputs.reuse == 'pull_request'/, `${id} must check out only for PR proof revalidation`);
   }
 });
 

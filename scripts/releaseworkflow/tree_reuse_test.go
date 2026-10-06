@@ -105,8 +105,8 @@ func anySlice(value any) []any { a, _ := value.([]any); return a }
 func TestQueueProofFailureCannotSkipRequiredJobs(t *testing.T) {
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
 	proof := treeMap(jobs["tree-reuse"])
-	if proof["continue-on-error"] != true || proof["if"] != "github.event_name == 'push' && github.ref == 'refs/heads/main'" {
-		t.Fatal("proof must be push-only and fail back to full CI")
+	if proof["continue-on-error"] != true || proof["if"] != "github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'merge_group' && vars.CI_MG_REUSE == 'on'" {
+		t.Fatal("proof must be main or opt-in merge-group only and fail back to full CI")
 	}
 	if timeout, ok := proof["timeout-minutes"].(int); !ok || timeout < 5 || timeout > 10 {
 		t.Fatal("proof must have a bounded checkout/proof budget")
@@ -243,7 +243,7 @@ func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
 			t.Fatalf("%s rejects verified reuse: %v", id, err)
 		}
 		for key, expected := range values {
-			if key == "REUSE" {
+			if key == "REUSE" || strings.HasPrefix(key, "PR_CONFIRM_") {
 				continue
 			} // no reuse falls back to the classified gate, covered separately
 			wrong := "success"
@@ -278,6 +278,9 @@ func mergeGroupInventory(t *testing.T, w map[string]any) []string {
 		name := id
 		if n, ok := j["name"].(string); ok {
 			name = n
+			if id == "tier-measurements" {
+				name = "tier-measurements"
+			}
 		}
 		if uses, ok := j["uses"].(string); ok {
 			body, err := os.ReadFile(filepath.Join(root(t), uses))
@@ -425,6 +428,12 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 	}
 	want := cloneStep(t, before)
 	want["steps"] = wantSteps
+	setup = cloneStep(t, setup)
+	if condition, _ := setup["if"].(string); !strings.Contains(condition, " && needs.tree-reuse.outputs.reuse != 'pull_request'") {
+		t.Fatal("missing PR tree skip")
+	} else {
+		setup["if"] = strings.Replace(condition, " && needs.tree-reuse.outputs.reuse != 'pull_request'", "", 1)
+	}
 	if !reflect.DeepEqual(setup, want) {
 		t.Fatal("Parallel setup changed beyond moving units and their prerequisites/proofs")
 	}
@@ -487,7 +496,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 	}
 	w := treeWorkflow(t, "ci.yml")
 	jobs := treeMap(w["jobs"])
-	guard := regexp.MustCompile(`^always\(\) && needs.ci-plan.result == 'success' && (?:needs.tier-plan.result == 'success' && )?\((.*?)\) && needs.tree-reuse.outputs.reuse != 'merge_group'(?: && needs.(?:runner-route|web-setup).result == 'success')?$`)
+	guard := regexp.MustCompile(`^always\(\) && needs.ci-plan.result == 'success' && (?:needs.tier-plan.result == 'success' && )?\((.*?)\) && needs.tree-reuse.outputs.reuse != 'merge_group'(?: && needs.tree-reuse.outputs.reuse != 'pull_request')?(?: && needs.(?:runner-route|web-setup).result == 'success')?$`)
 	tierBody, err := os.ReadFile(filepath.Join(root(t), "scripts/releaseworkflow/testdata/ci-tiers-before-reuse.json"))
 	if err != nil {
 		t.Fatal(err)
@@ -524,6 +533,25 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 			}
 			value = j
 			normalizeNixVendorAdditions(t, id, j)
+			if id == "ci-plan" {
+				delete(treeMap(j["outputs"]), "pr_tree_proof")
+				steps := reuseSteps(j)
+				if treeMap(steps[len(steps)-1])["name"] != "Capture PR checkout identity" {
+					t.Fatal("missing PR identity capture")
+				}
+				j["steps"] = steps[:len(steps)-1]
+			}
+			if id == "go-static" || id == "go-timing" {
+				for _, v := range reuseSteps(j) {
+					step := treeMap(v)
+					if strings.HasPrefix(fmt.Sprint(step["uses"]), "actions/setup-go@") {
+						if treeMap(step["with"])["cache"] != "${{ needs.tree-reuse.outputs.reuse != 'pull_request' }}" {
+							t.Fatal("reused MG guard must not save caches")
+						}
+						treeMap(step["with"])["cache"] = true
+					}
+				}
+			}
 			if condition, ok := j["if"].(string); ok && strings.Contains(condition, "tree-reuse") {
 				match := guard.FindStringSubmatch(condition)
 				if len(match) != 2 {
@@ -561,6 +589,60 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 		}
 		if actual := fmt.Sprintf("%x", sha256.Sum256(encoded.Bytes())); actual != expected {
 			t.Fatalf("%s full fallback differs from accepted CI %s: %s", id, baseline.Source, actual)
+		}
+	}
+}
+
+func TestMergeGroupPRReuseAggregatesRequireConfirmedProof(t *testing.T) {
+	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
+	for _, id := range []string{"go", "web", "release-check", "e2e"} {
+		j := treeMap(jobs[id])
+		steps := reuseSteps(j)
+		gate := treeMap(steps[len(steps)-1])
+		confirm := reuseStep(t, j, "Revalidate PR execution proof")
+		if confirm["continue-on-error"] != nil || confirm["id"] != "pr-confirm" || treeMap(confirm["env"])["CONFIRM_PR_RUN"] != "${{ needs.tree-reuse.outputs.run }}" {
+			t.Fatal("revalidation must be mandatory and bind source run")
+		}
+		values := map[string]string{"REUSE": "pull_request", "REUSE_PROOF": "success", "PR_CONFIRM_REUSE": "pull_request", "PR_CONFIRM_RUN": "123", "SOURCE_RUN": "123", "CACHE_PRIME": "skipped", "CI_PLAN": "success", "CI_LANE": "full", "GITHUB_EVENT_NAME": "merge_group"}
+		for key := range treeMap(gate["env"]) {
+			if _, exists := values[key]; exists {
+				continue
+			}
+			values[key] = "skipped"
+			if key == "GO_STATIC" || key == "GO_TIMING" || key == "TIER_PLAN" {
+				values[key] = "success"
+			}
+		}
+		execute := func(key, value string) error {
+			cmd := exec.Command("bash", "-c", gate["run"].(string))
+			cmd.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
+			for name, result := range values {
+				if name == key {
+					result = value
+				}
+				cmd.Env = append(cmd.Env, name+"="+result)
+			}
+			return cmd.Run()
+		}
+		if err := execute("", ""); err != nil {
+			t.Fatalf("%s rejects valid PR reuse: %v", id, err)
+		}
+		for key, expected := range values {
+			wrong := "success"
+			if expected == "success" {
+				wrong = "skipped"
+			}
+			for _, value := range []string{"", "failure", "cancelled", wrong} {
+				if value == expected {
+					continue
+				}
+				if err := execute(key, value); err == nil {
+					t.Fatalf("%s accepts invalid proof %s=%q", id, key, value)
+				}
+			}
+		}
+		if err := execute("PR_CONFIRM_RUN", "124"); err == nil {
+			t.Fatalf("%s accepts confirmation of another run", id)
 		}
 	}
 }
