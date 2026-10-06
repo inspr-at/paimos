@@ -1,20 +1,35 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, writeFileSync, mkdirSync, mkdtempSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { registerHooks } from 'node:module'
 import { run, browserList, plan, main } from '../../scripts/test-tiers/cli.mjs'
-import { command, root, web, evidence, flattenBrowser, collectWeb } from '../../scripts/test-tiers/collect.mjs'
-import { resolve } from 'node:path'
+import { command, root, web, evidence, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
+import { resolve, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { registerHooks } from 'node:module'
 import { validate, key, select } from '../../scripts/test-tiers/core.mjs'
 
+// The planner assertions concern browser gates. Collect every browser case
+// natively once, and use declared unit identities for the unrelated unit lane.
+// Native unit collection/execution has its own selector regression below and
+// the static web-tiers check reconciles the complete catalogue independently.
 // One native collection serves the supplied-inventory plan: the web-unit shard
 // budget is 120 seconds and each recollection costs tens of seconds.
 let collected
-const inventory=()=>collected??=collectWeb()
+const inventory=()=>{
+  if(!collected) {
+    const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))
+    const tests=manifest.tests.filter(row=>row.kind!=='browser')
+    for(const config of ['playwright.ui.config.ts','playwright.perf.config.ts']) {
+      const rows=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','-c',config,'--list','--reporter=json'],{cwd:web})),config)
+      tests.push(...rows.filter(row=>config!=='playwright.ui.config.ts'||row.file!=='tests/performance.spec.ts'))
+    }
+    collected={tests}
+  }
+  return collected
+}
 
 test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async t=>{
   // Exercise every unchanged planner/CLI path against the same native snapshot.
@@ -127,11 +142,9 @@ test('native Node and Vitest selectors execute the requested registrations, rath
 test('native browser selectors cover reconciled essentials and every collected full-suite registration',()=>{
   mkdirSync(evidence,{recursive:true})
   const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))
-  const all=[]
-  for(const config of ['playwright.ui.config.ts','playwright.perf.config.ts']) {
-    const rows=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','-c',config,'--list','--reporter=json'],{cwd:web})),config)
-    all.push(...rows.filter(row=>config!=='playwright.ui.config.ts'||row.file!=='tests/performance.spec.ts'))
-  }
+  // The shared snapshot already lists both browser configs natively. Keep the
+  // same complete registration identities without listing the catalogue twice.
+  const all=inventory().tests.filter(row=>row.kind==='browser')
   const reconciled=validate({version:1,tests:manifest.tests.filter(row=>row.kind==='browser')},all)
   assert.deepEqual(reconciled.map(key).sort(),all.map(key).sort())
   const tiers=new Map(reconciled.map(row=>[key(row),row.tier]))
@@ -140,6 +153,9 @@ test('native browser selectors cover reconciled essentials and every collected f
   const groups=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8')).groups
   // Full and catalogue modes often produce identical inputs. Collect each
   // distinct native selector once, while retaining every per-mode assertion.
+  // Several groups select exactly the same cases in full and all modes.
+  // Reuse only identical native requests within this unchanged snapshot;
+  // each mode still asserts every identity and its independent total.
   const nativeSelections=new Map()
   for(const mode of ['essential','full','all']) {
     let total=0
@@ -162,6 +178,31 @@ test('native browser selectors cover reconciled essentials and every collected f
       total+=listed.length
     }
     assert.equal(total,mode==='all'?all.length:reconciled.filter(row=>row.tier==='ESSENTIAL'||(mode==='full'&&row.tier==='GATED-FULL')).length)
+  }
+})
+
+test('routing and login registrations keep explicit gate tiers after native collection', t => {
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-686-routing-tiers-'))
+  t.after(()=>rmSync(directory,{recursive:true,force:true}))
+  const file='tests/settings-routing.unit.test.ts', output=resolve(directory,'routing.json')
+  command(process.execPath,['node_modules/vitest/vitest.mjs','list',file,`--json=${output}`,
+    '--no-staticParse','--maxWorkers=1','--no-fileParallelism',
+    ...(process.env.VITE_CACHE_DIR?['--configLoader=runner']:[])],{cwd:web})
+  const routing=JSON.parse(readFileSync(output,'utf8')).map(row=>({kind:'vitest',file:relative(web,row.file),name:row.name}))
+  const loginFile='tests/agent-login.test.ts'
+  const login=JSON.parse(command(process.execPath,['--import',resolve(root,'scripts/test-tiers/node-collect-hook.mjs'),
+    resolve(root,'scripts/test-tiers/node-collect.mjs'),resolve(web,loginFile)],{cwd:web}))
+    .map(row=>({...row,kind:'node',file:loginFile}))
+  assert.ok(routing.length>=35,'native collection expands every moved Workspace bookmark')
+  assert.ok(login.some(row=>row.name==='CLI login names the instance after the workspace and never passes --instance (AEON-730)'))
+  const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))
+  const native=[...routing,...login]
+  const declared={version:1,tests:manifest.tests.filter(row=>[file,loginFile].includes(row.file))}
+  const rows=validate(declared,native,undefined,{strict:true})
+  for(const row of rows) assert.equal(row.tier,row.kind==='node'?'ESSENTIAL':'GATED-FULL',key(row))
+  for(const event of ['pull_request','merge_group']) {
+    const selected=select(rows,{event,paths:['.github/workflows/ci.yml']}).tests
+    assert.deepEqual(selected.map(key).sort(),native.map(key).sort(),`${event} retains every routing and login regression`)
   }
 })
 

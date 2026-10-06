@@ -4,7 +4,7 @@ import { readPreference, writePreference } from './preferences.ts'
 
 // Light, Dark, or System (follow the OS). A signed-in person's choice is a server
 // preference (key "theme"), so it survives reloads and follows them across devices;
-// there is still no browser storage.
+// the colour-token first-paint cache is separate from this mode preference.
 export type ThemeChoice = 'light' | 'dark' | 'system'
 const preference = window.matchMedia('(prefers-color-scheme: dark)')
 export const themeChoice = ref<ThemeChoice>('system')

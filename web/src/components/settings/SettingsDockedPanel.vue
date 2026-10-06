@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } fro
 import AppIcon, { type IconName } from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import { useVisualViewport } from '../../lib/visualViewport'
-import { isSettingsField } from '../../lib/settingsOverlays'
+import { isSettingsField, modalDialogOpen } from '../../lib/settingsOverlays'
 
 // Owns the Settings layout, so a section list keeps its column when a pane
 // opens. Consumers supply navigation, page content, pane content and its one
@@ -18,12 +18,16 @@ const props = defineProps<{
   opener?: HTMLElement | null
   contextKey?: string
   recordKey?: string
+  // A section embedded beside existing Settings navigation measures that
+  // containing frame for the shared 1200/720 layout rule.
+  layoutFrameSelector?: string
 }>()
 const emit = defineEmits<{ 'update:open': [open: boolean]; close: [] }>()
 const frame = ref<HTMLElement>()
 const navigation = ref<HTMLElement>()
 const content = ref<HTMLElement>()
 const panel = ref<HTMLElement>()
+const dock = ref<HTMLElement>()
 const paneTitle = ref<HTMLElement>()
 const titleId = useId()
 const width = ref(0)
@@ -31,7 +35,9 @@ const mode = computed(() => width.value >= 1200 ? 'dock' : width.value > 720 ? '
 const modal = computed(() => props.open && mode.value !== 'dock')
 const overlay = ref<Record<string, string>>({})
 const dockHeight = ref('calc(100dvh - 32px)')
+const dockPosition = ref<Record<string, string>>({})
 let observer: ResizeObserver | undefined
+let layoutFrame: HTMLElement | null = null
 let returnTo: HTMLElement | null = null
 let savedScroll: { element: HTMLElement; overflow: string; gutter: string; top: number; left: number }[] = []
 let preservedInert: { element: HTMLElement; inert: boolean }[] = []
@@ -41,7 +47,7 @@ useVisualViewport(frame, 720, fit)
 
 function fit() {
   if (!frame.value) return
-  const rect = frame.value.getBoundingClientRect()
+  const rect = (layoutFrame ?? frame.value).getBoundingClientRect()
   width.value = rect.width
   const viewportTop = parseFloat(frame.value.style.getPropertyValue('--vv-top')) || 0
   const viewportBottom = viewportTop + (parseFloat(frame.value.style.getPropertyValue('--vv-h')) || innerHeight)
@@ -49,6 +55,18 @@ function fit() {
   const bottom = Math.min(viewportBottom, rect.bottom)
   overlay.value = { left: `${Math.max(0, rect.left)}px`, top: `${top}px`, width: `${Math.max(0, Math.min(innerWidth, rect.right) - Math.max(0, rect.left))}px`, height: `${Math.max(0, bottom - top)}px` }
   dockHeight.value = `${Math.max(0, innerHeight - Math.max(16, rect.top) - 16)}px`
+  if (layoutFrame && mode.value === 'dock' && dock.value) {
+    // The existing shell owns scrolling. Pin this embedded dock within its
+    // visible viewport, so reaching a low list row cannot hide pane controls.
+    let scrollFrame: HTMLElement | null = frame.value.parentElement
+    while (scrollFrame && !/auto|scroll/.test(getComputedStyle(scrollFrame).overflowY)) scrollFrame = scrollFrame.parentElement
+    const bounds = scrollFrame?.getBoundingClientRect()
+    const dockRect = dock.value.getBoundingClientRect()
+    const dockTop = Math.max(viewportTop, bounds?.top ?? viewportTop) + 16
+    const dockBottom = Math.min(viewportBottom, bounds?.bottom ?? viewportBottom) - 16
+    dockHeight.value = `${Math.max(0, dockBottom - dockTop)}px`
+    dockPosition.value = { position: 'fixed', top: `${dockTop}px`, left: `${dockRect.left}px`, width: `${dockRect.width}px` }
+  } else dockPosition.value = {}
 }
 function releaseBackground() {
   for (const { element, inert } of preservedInert) element.inert = inert
@@ -63,7 +81,8 @@ function releaseBackground() {
 function holdBackground() {
   releaseBackground()
   if (!modal.value) return
-  for (const element of [navigation.value, content.value]) {
+  const externalNavigation = layoutFrame?.querySelector<HTMLElement>('.nav-col')
+  for (const element of [navigation.value, content.value, externalNavigation]) {
     if (element) { preservedInert.push({ element, inert: element.inert }); element.inert = true }
   }
   // Keep these elements as scroll containers: clip would reset their offsets.
@@ -95,8 +114,9 @@ function close(restore = true) {
 }
 function keys(event: KeyboardEvent) {
   if (!props.open || event.defaultPrevented) return
-  // An active shared popover owns the innermost Escape and Tab handling.
-  if (document.querySelector('.popover')) return
+  // The topmost layer owns Escape and Tab: an active shared popover, or a
+  // modal dialog whose native cancel and focus scope must stay intact.
+  if (document.querySelector('.popover') || modalDialogOpen()) return
   if (event.key === 'Escape') {
     event.preventDefault(); event.stopImmediatePropagation()
     if (isSettingsField(event.target) && panel.value?.contains(event.target)) {
@@ -162,7 +182,9 @@ watch(() => props.recordKey, async () => {
 })
 onMounted(async () => {
   observer = new ResizeObserver(fit)
+  layoutFrame = props.layoutFrameSelector ? frame.value?.closest<HTMLElement>(props.layoutFrameSelector) ?? null : null
   if (frame.value) observer.observe(frame.value)
+  if (layoutFrame) observer.observe(layoutFrame)
   fit()
   window.addEventListener('resize', fit)
   document.addEventListener('scroll', scroll, true)
@@ -181,8 +203,8 @@ defineExpose({ frame, close })
   <div ref="frame" class="settings-frame" :class="[`mode-${mode}`, { 'dock-open': open, 'has-navigation': !!$slots.navigation }]">
     <nav v-if="$slots.navigation" ref="navigation" class="dock-navigation" aria-label="Settings sections"><slot name="navigation" /></nav>
     <div ref="content" class="dock-content"><slot /></div>
-    <div v-if="open" class="dock" :class="{ modal }" :style="modal ? overlay : undefined" @pointerdown.self.prevent="close()">
-      <section ref="panel" class="panel pane" role="dialog" :aria-modal="modal || undefined" :aria-labelledby="titleId" :style="{ '--dock-h': dockHeight }">
+    <div v-if="open" ref="dock" class="dock" :class="{ modal }" :style="modal ? overlay : undefined" @pointerdown.self.prevent="close()">
+      <section ref="panel" class="panel pane" role="dialog" :aria-modal="modal || undefined" :aria-labelledby="titleId" :style="{ '--dock-h': dockHeight, ...dockPosition }">
         <header class="pane-bar">
           <AppIcon v-if="icon" :name="icon" />
           <div class="pane-title"><h2 :id="titleId" ref="paneTitle" tabindex="-1">{{ title }}</h2><p v-if="fact">{{ fact }}</p></div>
