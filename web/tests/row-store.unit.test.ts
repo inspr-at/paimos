@@ -179,6 +179,49 @@ describe('RowStore: revisions only move forward', () => {
   })
 })
 
+describe('RowStore: canonical work ancestry', () => {
+  const A = { id: 'work-a', key: 'PRJ-A', title: 'Work A', kind_slug: 'work' }
+  const B = { id: 'work-b', key: 'PRJ-B', title: 'Work B', kind_slug: 'work' }
+  const ancestor = ({ id, key, title }: typeof A) => ({ id, key, title })
+  const leaf = () => item('n1', 1, { kind_slug: 'work', kind_label: 'Work', parent_id: A.id, parent: A, epic: ancestor(A) })
+
+  it('a node read moving a canonical leaf from A to cached work B replaces both ancestry projections', () => {
+    const rows = new RowStore()
+    const row = rows.adopt(leaf(), rows.mark(), { show: true })!
+    rows.learnParent(B)
+    expect(rows.adoptNode(node('n1', 2, { parent_id: B.id }), rows.mark(), { show: true })).toBe(row)
+    expect(row.parent_id).toBe(B.id)
+    expect(row.parent).toEqual(B)
+    expect(row.epic).toEqual(ancestor(B))
+    expect(rows.latest('n1')?.epic).toEqual(ancestor(B))
+  })
+
+  it('an unresolved replacement parent clears old ancestry until an authoritative list supplies it', () => {
+    const rows = new RowStore()
+    const row = rows.adopt(leaf(), rows.mark(), { show: true })!
+    rows.adoptNode(node('n1', 2, { parent_id: B.id }), rows.mark(), { show: true })
+    expect(row.parent_id).toBe(B.id)
+    expect(row.parent).toBeNull()
+    expect(row.epic).toBeUndefined()
+    expect(rows.latest('n1')?.parent).toBeNull()
+    expect(rows.latest('n1')?.epic).toBeUndefined()
+    rows.adopt(item('n1', 2, { kind_slug: 'work', parent_id: B.id, parent: B, epic: ancestor(B) }), rows.mark(), { show: true })
+    expect(row.parent).toEqual(B)
+    expect(row.epic).toEqual(ancestor(B))
+  })
+
+  it('a cached non-grouping parent cannot retain the former work ancestor', () => {
+    const rows = new RowStore()
+    const row = rows.adopt(leaf(), rows.mark(), { show: true })!
+    const parent = { ...B, kind_slug: 'task' }
+    rows.learnParent(parent)
+    rows.adoptNode(node('n1', 2, { parent_id: parent.id }), rows.mark(), { show: true })
+    expect(row.parent_id).toBe(parent.id)
+    expect(row.parent).toEqual(parent)
+    expect(row.epic).toBeUndefined()
+  })
+})
+
 describe('RowStore: tombstones', () => {
   it('a late bulk answer cannot place a retained display object below a restore floor', () => {
     const rows = new RowStore()

@@ -57,7 +57,7 @@ test('timing failures restore confirmed values, keep both controls anchored and 
     return route.fulfill({ json: { interval_minutes: 21 } })
   })
   await page.route('**/api/settings/heartbeat-lost', route => route.fulfill({ json: { heartbeat_lost_minutes: 15 } }))
-  await page.goto('/settings/workspace')
+  await page.goto('/settings/agents')
   const estimates = page.getByLabel('Minutes between estimates'), lost = page.getByLabel('Minutes without a heartbeat')
   await expect(estimates).toHaveValue('10'); await expect(lost).toHaveValue('15')
   await estimates.fill('20'); await estimates.press('Tab')

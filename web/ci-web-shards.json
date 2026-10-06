@@ -19,6 +19,11 @@
       "note": "Browser-free native collection; each final group was also collected separately to verify exact files/config/flags. Counts are embedded per spec so CI does not need tmp artifacts."
     }
   },
+  "tierTimingSource": {
+    "runId": "37377299349",
+    "sha": "b2f9935a4264e932eae0fa2acd07c71e8d1fc417",
+    "basis": "Serial per-case result.duration seconds plus group stats.duration residual and apportioned tier execution residual, divided equally across collected cases. All 12 shard artifacts supplied; unmeasured specs keep historical serial estimates. Each clip half conservatively retains the full original launch overhead. weightSeconds preserves the historical exact-spec allocation, divided proportionally between the clip halves; tierTiming schedules the measured tier lane."
+  },
   "integrationNotes": [
     "AEON-676: OPS-257 runner/workflow and coverage guard integrated from dc61efd76ad7263749c3b70a515aad5e40df60ba. The clipped-names-and-preferences group gates clip-tip, aeon-632b-clip, key-trim and model-prefs once, with no clip-tip exclusion. The touch layout fix passed six variants x20 locally; hosted execution of this integrated revision still needs coordinator CI. Weights for these 247 tests remain scheduling estimates: clip-tip uses the complete local serial run plus a 20 percent margin; the other three use native test counts. Hosted runtimes remain unmeasured.",
     "OPS: group remaining-ui is ungated (gate:false). These 164 specs were never part of the CI gate and have no measured timing; the gate keeps today's measured coverage so the merge queue gets faster, not wider. Run them with --all (ci:web:shard -- --all i/N); a follow-up ticket measures them and decides whether they gate.",
@@ -30,7 +35,10 @@
     "PLAYWRIGHT_JSON_OUTPUT_FILE enables per-group JSON reports plus one combined report at that path; --reporter=json is also accepted. Prior report bytes are invalidated before launch so startup failure/interruption cannot reuse green evidence.",
     "Shard assignment is based on file names and timing weights only; groups execute sequentially with their own original policies. Weights for the 165 newly covered specs are estimates; hosted measurement is needed before claiming the 5-minute target.",
     "RUNNER_ENVIRONMENT must be github-hosted for execution; it is GitHub Actions built-in runner metadata. Local --list/--check remain browser-free. --last-failed preflights per-group state and refuses missing/invalid state instead of Playwright's full-selection fallback.",
-    "AEON-679 rule B: removed low-value capture, polish, duplicate scan and literal geometry cases; mixed protected cases remain. Changed spec listedTests use native collection; weights are proportional scheduling estimates, not measured runtime savings. Historical timingSource and ciInventory remain provenance only. The optional historical/current release-list screenshot jobs were retired with their capture case."
+    "AEON-679 rule B: removed low-value capture, polish, duplicate scan and literal geometry cases; mixed protected cases remain. Changed spec listedTests use native collection; weights are proportional scheduling estimates, not measured runtime savings. Historical timingSource and ciInventory remain provenance only. The optional historical/current release-list screenshot jobs were retired with their capture case.",
+    "OPS-257 round 3: the tier runner forces --workers=1. tierWeights converts historical per-file allocations from measured N-worker steps to N * weightSeconds serial estimates; local-serial and unmeasured test-count estimates stay unchanged. Original exact-spec weights, launch policies, gated membership and tier classifications are preserved. On the committed full-gate tier ledger, corrected LPT bins estimate 367.9\u2013371.8 seconds of tests (max/median 1.01, previously 266.1\u2013496.5 seconds under the same serial model). These are scheduling estimates derived from historical step timings, not new per-spec hosted measurements. Run 37333283440 had 5.3\u201310.4 minute jobs; runner setup, native collection and group launches remain additional costs.",
+    "OPS-257 fix1: hosted per-case tierTiming replaces serial historical allocations for 58 measured files. aeon-632b-clip has 39 cases / 432.3 seconds including group overhead: keep one worker and schedule it alone; no gated membership or launch flags change. Unmeasured files keep explicit historical estimates; the next hosted run must validate runner and native collection costs.",
+    "OPS-257 round 4 L3: refresh measured per-case browser and per-owner Go/unit costs from full PR run 37377299349 (b2f9935a4264e932eae0fa2acd07c71e8d1fc417). The 39 clip cases split into planning/touch (27) and settings/rules (12), with shared imported fixtures and unchanged policies/tiers. Browser costs include group and tier execution residuals; each clip half conservatively retains the full original launch overhead. Go costs include terminal package elapsed plus each shard's residual native enumeration/launch time shared equally by its owners. Unit costs include Vitest elapsed or top-level Node durations plus shared residual launch time. Runner setup and unit shard 1's separate safety checks are excluded; hosted CI must validate total wall time. Exact-spec weightSeconds retain their historical allocation model; only the old clip allocation is divided proportionally between the two new files. The full-gate tier scheduler uses the refreshed tierTiming costs. Unit tie preference assigns shard 1 last on equal loads, moving the largest file to shard 2 without estimating the separate safety-check duration."
   ],
   "configs": [
     {
@@ -77,16 +85,15 @@
     {
       "id": "web-2",
       "job": "web",
-      "name": "Usage dashboard and morning briefing regressions",
-      "command": "npx playwright test -c playwright.ui.config.ts tests/usage-dashboard.spec.ts tests/morning-briefing.spec.ts --workers=1",
+      "name": "Usage dashboard regressions",
+      "command": "npx playwright test -c playwright.ui.config.ts tests/usage-dashboard.spec.ts --workers=1",
       "config": "playwright.ui.config.ts",
       "project": null,
       "flags": [
         "--workers=1"
       ],
       "specs": [
-        "tests/usage-dashboard.spec.ts",
-        "tests/morning-briefing.spec.ts"
+        "tests/usage-dashboard.spec.ts"
       ],
       "env": {},
       "measuredSeconds": 37.0,
@@ -607,7 +614,7 @@
   ],
   "groups": [
     {
-      "id": "usage-briefing",
+      "id": "usage-dashboard",
       "config": "playwright.ui.config.ts",
       "project": null,
       "flags": [
@@ -623,13 +630,16 @@
           "file": "tests/usage-dashboard.spec.ts",
           "weightSeconds": 14.8,
           "weightSource": "web-2",
-          "listedTests": 10
-        },
-        {
-          "file": "tests/morning-briefing.spec.ts",
-          "weightSeconds": 22.2,
-          "weightSource": "web-2",
-          "listedTests": 15
+          "listedTests": 10,
+          "tierTiming": {
+            "seconds": 19.134431,
+            "selectedTests": 10,
+            "caseSeconds": {
+              "min": 1.018,
+              "median": 1.125,
+              "max": 3.25
+            }
+          }
         }
       ]
     },
@@ -654,43 +664,106 @@
           "file": "tests/release-header.spec.ts",
           "weightSeconds": 29.35359084,
           "weightSource": "web-4",
-          "listedTests": 23
+          "listedTests": 23,
+          "tierTiming": {
+            "seconds": 48.126901,
+            "selectedTests": 23,
+            "caseSeconds": {
+              "min": 0.905,
+              "median": 1.983,
+              "max": 4.276
+            }
+          }
         },
         {
           "file": "tests/release-codenames.spec.ts",
           "weightSeconds": 30.62983392,
           "weightSource": "web-4",
-          "listedTests": 24
+          "listedTests": 24,
+          "tierTiming": {
+            "seconds": 76.126791,
+            "selectedTests": 24,
+            "caseSeconds": {
+              "min": 1.213,
+              "median": 1.7745,
+              "max": 5.85
+            }
+          }
         },
         {
           "file": "tests/release-presentation.spec.ts",
           "weightSeconds": 8.933702,
           "weightSource": "web-4",
-          "listedTests": 7
+          "listedTests": 7,
+          "tierTiming": {
+            "seconds": 11.323162,
+            "selectedTests": 7,
+            "caseSeconds": {
+              "min": 1.188,
+              "median": 1.392,
+              "max": 1.762
+            }
+          }
         },
         {
           "file": "tests/version-reveal.spec.ts",
           "weightSeconds": 7.657459,
           "weightSource": "web-4",
-          "listedTests": 6
+          "listedTests": 6,
+          "tierTiming": {
+            "seconds": 14.20598,
+            "selectedTests": 6,
+            "caseSeconds": {
+              "min": 1.049,
+              "median": 1.456,
+              "max": 3.177
+            }
+          }
         },
         {
           "file": "tests/releases.spec.ts",
           "weightSeconds": 28.077347692,
           "weightSource": "web-4",
-          "listedTests": 22
+          "listedTests": 22,
+          "tierTiming": {
+            "seconds": 38.644366,
+            "selectedTests": 22,
+            "caseSeconds": {
+              "min": 0.89,
+              "median": 1.479,
+              "max": 2.369
+            }
+          }
         },
         {
           "file": "tests/header-menus.spec.ts",
           "weightSeconds": 114.861878,
           "weightSource": "web-4",
-          "listedTests": 90
+          "listedTests": 90,
+          "tierTiming": {
+            "seconds": 67.417583,
+            "selectedTests": 92,
+            "caseSeconds": {
+              "min": 0.0,
+              "median": 0.0,
+              "max": 4.504
+            }
+          }
         },
         {
           "file": "tests/brand.spec.ts",
           "weightSeconds": 2.552486,
           "weightSource": "web-4",
-          "listedTests": 2
+          "listedTests": 2,
+          "tierTiming": {
+            "seconds": 2.895969,
+            "selectedTests": 2,
+            "caseSeconds": {
+              "min": 0.888,
+              "median": 1.384,
+              "max": 1.88
+            }
+          }
         }
       ]
     },
@@ -711,7 +784,16 @@
           "file": "tests/service-tier.spec.ts",
           "weightSeconds": 91.0,
           "weightSource": "web-6",
-          "listedTests": 41
+          "listedTests": 41,
+          "tierTiming": {
+            "seconds": 110.591375,
+            "selectedTests": 41,
+            "caseSeconds": {
+              "min": 1.647,
+              "median": 2.296,
+              "max": 5.255
+            }
+          }
         }
       ]
     },
@@ -738,43 +820,106 @@
           "file": "tests/key-dialog.spec.ts",
           "weightSeconds": 23.879032,
           "weightSource": "web-8",
-          "listedTests": 9
+          "listedTests": 9,
+          "tierTiming": {
+            "seconds": 39.268633,
+            "selectedTests": 9,
+            "caseSeconds": {
+              "min": 2.153,
+              "median": 3.041,
+              "max": 7.161
+            }
+          }
         },
         {
           "file": "tests/new-agent.spec.ts",
           "weightSeconds": 31.83871,
           "weightSource": "web-8",
-          "listedTests": 12
+          "listedTests": 12,
+          "tierTiming": {
+            "seconds": 25.672507,
+            "selectedTests": 12,
+            "caseSeconds": {
+              "min": 1.009,
+              "median": 1.5415,
+              "max": 3.595
+            }
+          }
         },
         {
           "file": "tests/key-scopes.spec.ts",
           "weightSeconds": 42.451613,
           "weightSource": "web-8",
-          "listedTests": 16
+          "listedTests": 16,
+          "tierTiming": {
+            "seconds": 57.795015,
+            "selectedTests": 16,
+            "caseSeconds": {
+              "min": 0.754,
+              "median": 4.179,
+              "max": 5.013
+            }
+          }
         },
         {
           "file": "tests/key-expiry.spec.ts",
           "weightSeconds": 34.491935,
           "weightSource": "web-8",
-          "listedTests": 13
+          "listedTests": 13,
+          "tierTiming": {
+            "seconds": 36.975882,
+            "selectedTests": 13,
+            "caseSeconds": {
+              "min": 1.67,
+              "median": 1.946,
+              "max": 5.704
+            }
+          }
         },
         {
           "file": "tests/key-full-access.spec.ts",
           "weightSeconds": 53.064516,
           "weightSource": "web-8",
-          "listedTests": 20
+          "listedTests": 20,
+          "tierTiming": {
+            "seconds": 85.345406,
+            "selectedTests": 20,
+            "caseSeconds": {
+              "min": 2.445,
+              "median": 3.6495,
+              "max": 6.268
+            }
+          }
         },
         {
           "file": "tests/scope-codes.spec.ts",
           "weightSeconds": 31.83871,
           "weightSource": "web-8",
-          "listedTests": 12
+          "listedTests": 12,
+          "tierTiming": {
+            "seconds": 29.742261,
+            "selectedTests": 12,
+            "caseSeconds": {
+              "min": 1.928,
+              "median": 2.078,
+              "max": 3.276
+            }
+          }
         },
         {
           "file": "tests/access.spec.ts",
           "weightSeconds": 111.435484,
           "weightSource": "web-8",
-          "listedTests": 42
+          "listedTests": 42,
+          "tierTiming": {
+            "seconds": 171.773265,
+            "selectedTests": 42,
+            "caseSeconds": {
+              "min": 1.211,
+              "median": 2.363,
+              "max": 18.737
+            }
+          }
         }
       ]
     },
@@ -793,7 +938,16 @@
           "file": "tests/key-layout.spec.ts",
           "weightSeconds": 26.634146,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 12
+          "listedTests": 12,
+          "tierTiming": {
+            "seconds": 49.120865,
+            "selectedTests": 12,
+            "caseSeconds": {
+              "min": 2.322,
+              "median": 3.522,
+              "max": 7.039
+            }
+          }
         }
       ]
     },
@@ -814,7 +968,16 @@
           "file": "tests/planning-columns.spec.ts",
           "weightSeconds": 31.0,
           "weightSource": "web-9",
-          "listedTests": 14
+          "listedTests": 14,
+          "tierTiming": {
+            "seconds": 52.521732,
+            "selectedTests": 14,
+            "caseSeconds": {
+              "min": 1.686,
+              "median": 2.821,
+              "max": 9.513
+            }
+          }
         }
       ]
     },
@@ -835,7 +998,16 @@
           "file": "tests/work-queue.spec.ts",
           "weightSeconds": 29.0,
           "weightSource": "web-10",
-          "listedTests": 9
+          "listedTests": 9,
+          "tierTiming": {
+            "seconds": 80.005592,
+            "selectedTests": 24,
+            "caseSeconds": {
+              "min": 1.665,
+              "median": 2.2685,
+              "max": 14.201
+            }
+          }
         }
       ]
     },
@@ -856,19 +1028,46 @@
           "file": "tests/start-agent.spec.ts",
           "weightSeconds": 36.078431,
           "weightSource": "web-11",
-          "listedTests": 20
+          "listedTests": 20,
+          "tierTiming": {
+            "seconds": 49.726457,
+            "selectedTests": 21,
+            "caseSeconds": {
+              "min": 1.441,
+              "median": 1.901,
+              "max": 4.493
+            }
+          }
         },
         {
           "file": "tests/ticket-panel.spec.ts",
           "weightSeconds": 34.509803565,
           "weightSource": "web-11",
-          "listedTests": 22
+          "listedTests": 22,
+          "tierTiming": {
+            "seconds": 153.073566,
+            "selectedTests": 22,
+            "caseSeconds": {
+              "min": 1.652,
+              "median": 2.1055,
+              "max": 102.533
+            }
+          }
         },
         {
           "file": "tests/ticket-workers.spec.ts",
           "weightSeconds": 19.843137,
           "weightSource": "web-11",
-          "listedTests": 11
+          "listedTests": 11,
+          "tierTiming": {
+            "seconds": 40.719097,
+            "selectedTests": 11,
+            "caseSeconds": {
+              "min": 1.213,
+              "median": 2.098,
+              "max": 11.485
+            }
+          }
         }
       ]
     },
@@ -896,55 +1095,136 @@
           "file": "tests/no-shift.spec.ts",
           "weightSeconds": 114.05848,
           "weightSource": "web-13",
-          "listedTests": 46
+          "listedTests": 46,
+          "tierTiming": {
+            "seconds": 234.324689,
+            "selectedTests": 47,
+            "caseSeconds": {
+              "min": 0.151,
+              "median": 4.001,
+              "max": 19.97
+            }
+          }
         },
         {
           "file": "tests/approval-feedback.spec.ts",
           "weightSeconds": 32.233918,
           "weightSource": "web-13",
-          "listedTests": 13
+          "listedTests": 13,
+          "tierTiming": {
+            "seconds": 58.110583,
+            "selectedTests": 13,
+            "caseSeconds": {
+              "min": 0.039,
+              "median": 3.129,
+              "max": 7.243
+            }
+          }
         },
         {
           "file": "tests/managed-controls.spec.ts",
           "weightSeconds": 61.988304,
           "weightSource": "web-13",
-          "listedTests": 25
+          "listedTests": 25,
+          "tierTiming": {
+            "seconds": 50.762087,
+            "selectedTests": 25,
+            "caseSeconds": {
+              "min": 1.574,
+              "median": 1.823,
+              "max": 3.674
+            }
+          }
         },
         {
           "file": "tests/accounts-computers.spec.ts",
           "weightSeconds": 32.233918,
           "weightSource": "web-13",
-          "listedTests": 26
+          "listedTests": 26,
+          "tierTiming": {
+            "seconds": 30.144583,
+            "selectedTests": 13,
+            "caseSeconds": {
+              "min": 1.197,
+              "median": 2.018,
+              "max": 4.348
+            }
+          }
         },
         {
           "file": "tests/agents-top.spec.ts",
           "weightSeconds": 81.824561,
           "weightSource": "web-13",
-          "listedTests": 33
+          "listedTests": 33,
+          "tierTiming": {
+            "seconds": 74.572143,
+            "selectedTests": 33,
+            "caseSeconds": {
+              "min": 0.0,
+              "median": 2.31,
+              "max": 7.262
+            }
+          }
         },
         {
           "file": "tests/relations.spec.ts",
           "weightSeconds": 17.356725,
           "weightSource": "web-13",
-          "listedTests": 7
+          "listedTests": 7,
+          "tierTiming": {
+            "seconds": 74.004906,
+            "selectedTests": 7,
+            "caseSeconds": {
+              "min": 2.175,
+              "median": 3.777,
+              "max": 25.417
+            }
+          }
         },
         {
           "file": "tests/ticket-outcomes.spec.ts",
           "weightSeconds": 4.959064,
           "weightSource": "web-13",
-          "listedTests": 2
+          "listedTests": 2,
+          "tierTiming": {
+            "seconds": 4.832397,
+            "selectedTests": 2,
+            "caseSeconds": {
+              "min": 1.546,
+              "median": 2.322,
+              "max": 3.098
+            }
+          }
         },
         {
           "file": "tests/views-filters.spec.ts",
           "weightSeconds": 42.152047,
           "weightSource": "web-13",
-          "listedTests": 17
+          "listedTests": 17,
+          "tierTiming": {
+            "seconds": 61.40423,
+            "selectedTests": 17,
+            "caseSeconds": {
+              "min": 1.202,
+              "median": 2.377,
+              "max": 12.895
+            }
+          }
         },
         {
           "file": "tests/session-recovery.spec.ts",
           "weightSeconds": 37.192982,
           "weightSource": "web-13",
-          "listedTests": 15
+          "listedTests": 15,
+          "tierTiming": {
+            "seconds": 47.393598,
+            "selectedTests": 15,
+            "caseSeconds": {
+              "min": 2.012,
+              "median": 2.686,
+              "max": 4.771
+            }
+          }
         }
       ]
     },
@@ -996,7 +1276,16 @@
           "file": "tests/decision-desk.spec.ts",
           "weightSeconds": 128.0,
           "weightSource": "web-14",
-          "listedTests": 35
+          "listedTests": 35,
+          "tierTiming": {
+            "seconds": 133.356542,
+            "selectedTests": 35,
+            "caseSeconds": {
+              "min": 1.257,
+              "median": 1.782,
+              "max": 13.265
+            }
+          }
         }
       ]
     },
@@ -1020,31 +1309,76 @@
           "file": "tests/attach-discoverable.spec.ts",
           "weightSeconds": 81.316667,
           "weightSource": "web-15",
-          "listedTests": 41
+          "listedTests": 41,
+          "tierTiming": {
+            "seconds": 119.445446,
+            "selectedTests": 41,
+            "caseSeconds": {
+              "min": 1.11,
+              "median": 2.303,
+              "max": 9.262
+            }
+          }
         },
         {
           "file": "tests/attach-watch.spec.ts",
           "weightSeconds": 61.483333,
           "weightSource": "web-15",
-          "listedTests": 31
+          "listedTests": 31,
+          "tierTiming": {
+            "seconds": 86.085955,
+            "selectedTests": 31,
+            "caseSeconds": {
+              "min": 1.262,
+              "median": 2.897,
+              "max": 4.473
+            }
+          }
         },
         {
           "file": "tests/attach-security.spec.ts",
           "weightSeconds": 99.166667,
           "weightSource": "web-15",
-          "listedTests": 50
+          "listedTests": 50,
+          "tierTiming": {
+            "seconds": 86.253166,
+            "selectedTests": 50,
+            "caseSeconds": {
+              "min": 0.84,
+              "median": 1.3445,
+              "max": 6.215
+            }
+          }
         },
         {
           "file": "tests/classic-invite.spec.ts",
           "weightSeconds": 11.9,
           "weightSource": "web-15",
-          "listedTests": 6
+          "listedTests": 6,
+          "tierTiming": {
+            "seconds": 16.546452,
+            "selectedTests": 6,
+            "caseSeconds": {
+              "min": 0.881,
+              "median": 2.0525,
+              "max": 4.058
+            }
+          }
         },
         {
           "file": "tests/account-link.spec.ts",
           "weightSeconds": 19.833333,
           "weightSource": "web-15",
-          "listedTests": 10
+          "listedTests": 10,
+          "tierTiming": {
+            "seconds": 20.685759,
+            "selectedTests": 10,
+            "caseSeconds": {
+              "min": 0.733,
+              "median": 1.7945,
+              "max": 3.299
+            }
+          }
         }
       ]
     },
@@ -1067,31 +1401,76 @@
           "file": "tests/footer-release-pill.spec.ts",
           "weightSeconds": 27.96748,
           "weightSource": "footer-ui-2",
-          "listedTests": 40
+          "listedTests": 40,
+          "tierTiming": {
+            "seconds": 87.614969,
+            "selectedTests": 40,
+            "caseSeconds": {
+              "min": 0.89,
+              "median": 2.0035,
+              "max": 8.312
+            }
+          }
         },
         {
           "file": "tests/footer-flow-pill.spec.ts",
           "weightSeconds": 1.398374,
           "weightSource": "footer-ui-2",
-          "listedTests": 2
+          "listedTests": 2,
+          "tierTiming": {
+            "seconds": 27.863367,
+            "selectedTests": 2,
+            "caseSeconds": {
+              "min": 1.999,
+              "median": 12.1665,
+              "max": 22.334
+            }
+          }
         },
         {
           "file": "tests/developer-settings.spec.ts",
           "weightSeconds": 5.593496,
           "weightSource": "footer-ui-2",
-          "listedTests": 8
+          "listedTests": 8,
+          "tierTiming": {
+            "seconds": 29.211495,
+            "selectedTests": 8,
+            "caseSeconds": {
+              "min": 1.056,
+              "median": 2.7355,
+              "max": 7.875
+            }
+          }
         },
         {
           "file": "tests/tenant-brand.spec.ts",
           "weightSeconds": 10.487805,
           "weightSource": "footer-ui-2",
-          "listedTests": 15
+          "listedTests": 15,
+          "tierTiming": {
+            "seconds": 19.747428,
+            "selectedTests": 15,
+            "caseSeconds": {
+              "min": 0.0,
+              "median": 1.249,
+              "max": 3.203
+            }
+          }
         },
         {
           "file": "tests/shell.spec.ts",
           "weightSeconds": 22.373984,
           "weightSource": "footer-ui-2",
-          "listedTests": 32
+          "listedTests": 32,
+          "tierTiming": {
+            "seconds": 43.094797,
+            "selectedTests": 32,
+            "caseSeconds": {
+              "min": 0.774,
+              "median": 1.001,
+              "max": 3.212
+            }
+          }
         }
       ]
     },
@@ -1114,7 +1493,16 @@
           "file": "tests/status-help.spec.ts",
           "weightSeconds": 24.0,
           "weightSource": "status-help-ui-2",
-          "listedTests": 7
+          "listedTests": 7,
+          "tierTiming": {
+            "seconds": 15.042065,
+            "selectedTests": 7,
+            "caseSeconds": {
+              "min": 1.065,
+              "median": 1.401,
+              "max": 3.973
+            }
+          }
         }
       ]
     },
@@ -1135,13 +1523,31 @@
           "file": "tests/model-provider.spec.ts",
           "weightSeconds": 10.5,
           "weightSource": "e2e-4",
-          "listedTests": 3
+          "listedTests": 3,
+          "tierTiming": {
+            "seconds": 7.45261,
+            "selectedTests": 3,
+            "caseSeconds": {
+              "min": 0.533,
+              "median": 1.572,
+              "max": 3.347
+            }
+          }
         },
         {
           "file": "tests/model-refresh.spec.ts",
           "weightSeconds": 3.5,
           "weightSource": "e2e-4",
-          "listedTests": 1
+          "listedTests": 1,
+          "tierTiming": {
+            "seconds": 7.561739,
+            "selectedTests": 1,
+            "caseSeconds": {
+              "min": 4.248,
+              "median": 4.248,
+              "max": 4.248
+            }
+          }
         }
       ]
     },
@@ -1165,19 +1571,46 @@
           "file": "tests/status-autopilot.spec.ts",
           "weightSeconds": 22.794872,
           "weightSource": "status-autopilot-ui-2",
-          "listedTests": 7
+          "listedTests": 7,
+          "tierTiming": {
+            "seconds": 29.300782,
+            "selectedTests": 8,
+            "caseSeconds": {
+              "min": 0.771,
+              "median": 2.467,
+              "max": 10.514
+            }
+          }
         },
         {
           "file": "tests/settings.spec.ts",
           "weightSeconds": 32.564102381,
           "weightSource": "status-autopilot-ui-2",
-          "listedTests": 10
+          "listedTests": 10,
+          "tierTiming": {
+            "seconds": 14.45241,
+            "selectedTests": 6,
+            "caseSeconds": {
+              "min": 1.431,
+              "median": 1.774,
+              "max": 3.461
+            }
+          }
         },
         {
           "file": "tests/agent-activity.spec.ts",
           "weightSeconds": 35.820513,
           "weightSource": "status-autopilot-ui-2",
-          "listedTests": 11
+          "listedTests": 11,
+          "tierTiming": {
+            "seconds": 62.717406,
+            "selectedTests": 11,
+            "caseSeconds": {
+              "min": 2.291,
+              "median": 5.039,
+              "max": 12.795
+            }
+          }
         },
         {
           "file": "tests/features.spec.ts",
@@ -1202,7 +1635,16 @@
           "file": "tests/performance.spec.ts",
           "weightSeconds": 4.439024,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 2
+          "listedTests": 2,
+          "tierTiming": {
+            "seconds": 13.05212,
+            "selectedTests": 2,
+            "caseSeconds": {
+              "min": 4.753,
+              "median": 5.4585,
+              "max": 6.164
+            }
+          }
         }
       ]
     },
@@ -1221,9 +1663,33 @@
       "specs": [
         {
           "file": "tests/aeon-632b-clip.spec.ts",
-          "weightSeconds": 86.560976,
+          "weightSeconds": 45.283872,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 39
+          "listedTests": 27,
+          "tierTiming": {
+            "seconds": 245.962013,
+            "selectedTests": 27,
+            "caseSeconds": {
+              "min": 1.879,
+              "median": 4.688,
+              "max": 25.32
+            }
+          }
+        },
+        {
+          "file": "tests/aeon-632b-clip-settings.spec.ts",
+          "weightSeconds": 41.277104,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 12,
+          "tierTiming": {
+            "seconds": 224.199013,
+            "selectedTests": 12,
+            "caseSeconds": {
+              "min": 10.052,
+              "median": 17.17,
+              "max": 29.754
+            }
+          }
         },
         {
           "file": "tests/clip-tip.spec.ts",
@@ -1242,19 +1708,46 @@
             "marginPercent": 20,
             "reportSha256": "5ea979ac66d2b4576cff1eb8a47d1c5d954a89d399325808b105ee3fad20496f",
             "note": "Full local one-worker runtime plus 20 percent scheduling margin; conservative for the group with two workers. Scheduling estimate only; hosted runtime remains unmeasured."
+          },
+          "tierTiming": {
+            "seconds": 347.012002,
+            "selectedTests": 159,
+            "caseSeconds": {
+              "min": 0.791,
+              "median": 1.388,
+              "max": 23.431
+            }
           }
         },
         {
           "file": "tests/key-trim.spec.ts",
           "weightSeconds": 15.536585,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 7
+          "listedTests": 7,
+          "tierTiming": {
+            "seconds": 17.02266,
+            "selectedTests": 7,
+            "caseSeconds": {
+              "min": 1.115,
+              "median": 2.179,
+              "max": 3.607
+            }
+          }
         },
         {
           "file": "tests/model-prefs.spec.ts",
           "weightSeconds": 93.219512,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 42
+          "listedTests": 42,
+          "tierTiming": {
+            "seconds": 200.889631,
+            "selectedTests": 42,
+            "caseSeconds": {
+              "min": 2.114,
+              "median": 3.2395,
+              "max": 25.747
+            }
+          }
         }
       ]
     },
@@ -1337,7 +1830,16 @@
           "file": "tests/agent-pairing.spec.ts",
           "weightSeconds": 77.682927,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 35
+          "listedTests": 35,
+          "tierTiming": {
+            "seconds": 3.943477,
+            "selectedTests": 1,
+            "caseSeconds": {
+              "min": 1.871,
+              "median": 1.871,
+              "max": 1.871
+            }
+          }
         },
         {
           "file": "tests/agent-rules-budget-clients.spec.ts",
@@ -1361,7 +1863,16 @@
           "file": "tests/agent-rules-import.spec.ts",
           "weightSeconds": 19.97561,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 9
+          "listedTests": 9,
+          "tierTiming": {
+            "seconds": 7.591252,
+            "selectedTests": 1,
+            "caseSeconds": {
+              "min": 4.266,
+              "median": 4.266,
+              "max": 4.266
+            }
+          }
         },
         {
           "file": "tests/agent-rules-shots.spec.ts",
@@ -1397,7 +1908,7 @@
           "file": "tests/agents-dial.spec.ts",
           "weightSeconds": 66.585366,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 30
+          "listedTests": 23
         },
         {
           "file": "tests/agents-handover.spec.ts",
@@ -1457,13 +1968,31 @@
           "file": "tests/attachments.spec.ts",
           "weightSeconds": 26.634146,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 12
+          "listedTests": 12,
+          "tierTiming": {
+            "seconds": 15.877279,
+            "selectedTests": 2,
+            "caseSeconds": {
+              "min": 3.667,
+              "median": 6.187,
+              "max": 8.707
+            }
+          }
         },
         {
           "file": "tests/authz.spec.ts",
           "weightSeconds": 4.439024,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 2
+          "listedTests": 2,
+          "tierTiming": {
+            "seconds": 7.35399,
+            "selectedTests": 2,
+            "caseSeconds": {
+              "min": 1.701,
+              "median": 2.5475,
+              "max": 3.394
+            }
+          }
         },
         {
           "file": "tests/avatar-upload-bounds.spec.ts",
@@ -1481,7 +2010,16 @@
           "file": "tests/bulk.spec.ts",
           "weightSeconds": 15.536585,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 7
+          "listedTests": 7,
+          "tierTiming": {
+            "seconds": 33.050812,
+            "selectedTests": 2,
+            "caseSeconds": {
+              "min": 2.126,
+              "median": 15.335,
+              "max": 28.544
+            }
+          }
         },
         {
           "file": "tests/business.spec.ts",
@@ -1660,7 +2198,16 @@
           "file": "tests/html-sandbox.spec.ts",
           "weightSeconds": 22.195122,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 10
+          "listedTests": 10,
+          "tierTiming": {
+            "seconds": 5.420008,
+            "selectedTests": 1,
+            "caseSeconds": {
+              "min": 3.983,
+              "median": 3.983,
+              "max": 3.983
+            }
+          }
         },
         {
           "file": "tests/indicator-controls.spec.ts",
@@ -1941,7 +2488,16 @@
           "file": "tests/quote-editor-core.spec.ts",
           "weightSeconds": 8.878049,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 4
+          "listedTests": 4,
+          "tierTiming": {
+            "seconds": 2.007406,
+            "selectedTests": 1,
+            "caseSeconds": {
+              "min": 0.817,
+              "median": 0.817,
+              "max": 0.817
+            }
+          }
         },
         {
           "file": "tests/quote-editor-input.spec.ts",
@@ -1995,7 +2551,16 @@
           "file": "tests/quote-save-state.spec.ts",
           "weightSeconds": 15.536585,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 7
+          "listedTests": 7,
+          "tierTiming": {
+            "seconds": 5.094495,
+            "selectedTests": 1,
+            "caseSeconds": {
+              "min": 3.965,
+              "median": 3.965,
+              "max": 3.965
+            }
+          }
         },
         {
           "file": "tests/quote-showcase.spec.ts",
@@ -2085,7 +2650,16 @@
           "file": "tests/release-update-notice.spec.ts",
           "weightSeconds": 35.512195,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 16
+          "listedTests": 16,
+          "tierTiming": {
+            "seconds": 2.918008,
+            "selectedTests": 1,
+            "caseSeconds": {
+              "min": 1.481,
+              "median": 1.481,
+              "max": 1.481
+            }
+          }
         },
         {
           "file": "tests/reserved-versions.spec.ts",
@@ -2304,6 +2878,12 @@
           "listedTests": 9
         },
         {
+          "file": "tests/dialog-scale.spec.ts",
+          "weightSeconds": 17.756098,
+          "weightSource": "unmeasured-test-rate",
+          "listedTests": 8
+        },
+        {
           "file": "tests/dialog-full-text.spec.ts",
           "weightSeconds": 115.414634,
           "weightSource": "unmeasured-test-rate",
@@ -2393,7 +2973,16 @@
           "file": "tests/knowledge.spec.ts",
           "weightSeconds": 35.512195,
           "weightSource": "unmeasured-test-rate",
-          "listedTests": 16
+          "listedTests": 16,
+          "tierTiming": {
+            "seconds": 67.98165,
+            "selectedTests": 15,
+            "caseSeconds": {
+              "min": 2.057,
+              "median": 2.843,
+              "max": 13.298
+            }
+          }
         }
       ]
     },
@@ -2430,47 +3019,175 @@
       "specs": [
         {
           "file": "tests/parent-benefits.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 42.459187,
+            "selectedTests": 16,
+            "caseSeconds": {
+              "min": 1.232,
+              "median": 2.3735,
+              "max": 4.248
+            }
+          }
         },
         {
           "file": "tests/work-aggregates.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 106.028338,
+            "selectedTests": 29,
+            "caseSeconds": {
+              "min": 1.586,
+              "median": 3.728,
+              "max": 5.106
+            }
+          }
         },
         {
           "file": "tests/work-history-fix5.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 30.961454,
+            "selectedTests": 6,
+            "caseSeconds": {
+              "min": 4.16,
+              "median": 4.3555,
+              "max": 5.921
+            }
+          }
         },
         {
           "file": "tests/work-lifecycle-header.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 38.484393,
+            "selectedTests": 10,
+            "caseSeconds": {
+              "min": 2.824,
+              "median": 3.8555,
+              "max": 4.433
+            }
+          }
         },
         {
           "file": "tests/work-lifecycle.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 54.687758,
+            "selectedTests": 8,
+            "caseSeconds": {
+              "min": 1.746,
+              "median": 7.909,
+              "max": 8.857
+            }
+          }
         },
         {
           "file": "tests/work-parent-releases.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 51.890498,
+            "selectedTests": 6,
+            "caseSeconds": {
+              "min": 7.604,
+              "median": 8.0815,
+              "max": 9.332
+            }
+          }
         },
         {
           "file": "tests/work-parent-status.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 19.092666,
+            "selectedTests": 6,
+            "caseSeconds": {
+              "min": 2.54,
+              "median": 2.7835,
+              "max": 3.868
+            }
+          }
         },
         {
           "file": "tests/work-surfaces-fix2.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 45.858333,
+            "selectedTests": 12,
+            "caseSeconds": {
+              "min": 2.678,
+              "median": 3.728,
+              "max": 4.636
+            }
+          }
         },
         {
           "file": "tests/work-surfaces-fix3.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 23.904779,
+            "selectedTests": 6,
+            "caseSeconds": {
+              "min": 2.696,
+              "median": 3.3495,
+              "max": 4.953
+            }
+          }
         },
         {
           "file": "tests/work-surfaces-fix4.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 44.704208,
+            "selectedTests": 6,
+            "caseSeconds": {
+              "min": 6.15,
+              "median": 6.7135,
+              "max": 8.031
+            }
+          }
         },
         {
           "file": "tests/work-vocabulary.spec.ts",
-          "weightSeconds": 60
+          "weightSeconds": 60,
+          "tierTiming": {
+            "seconds": 134.573486,
+            "selectedTests": 18,
+            "caseSeconds": {
+              "min": 3.072,
+              "median": 3.472,
+              "max": 17.401
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "settings-shared",
+      "config": "playwright.ui.config.ts",
+      "project": null,
+      "flags": [
+        "--workers=1",
+        "--trace=retain-on-failure"
+      ],
+      "env": {},
+      "hostedOnly": true,
+      "sourceSteps": [],
+      "specs": [
+        {
+          "file": "tests/settings-shared.spec.ts",
+          "weightSeconds": 20,
+          "weightSource": "unmeasured-test-count-estimate",
+          "listedTests": 23,
+          "tierTiming": {
+            "seconds": 38.002851,
+            "selectedTests": 23,
+            "caseSeconds": {
+              "min": 0.409,
+              "median": 0.701,
+              "max": 6.613
+            }
+          }
         }
       ]
     }

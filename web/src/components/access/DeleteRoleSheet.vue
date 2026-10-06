@@ -46,7 +46,7 @@ async function remove() {
 </script>
 
 <template>
-  <AccessSheet :title="`Delete ${role.name}?`" size="center" @close="emit('close')">
+  <AccessSheet :title="`Delete ${role.name}?`" size="center" scale="s" @close="emit('close')">
     <div class="body">
       <ul class="points">
         <li><AppIcon name="info" :size="13" /><span>The role goes for good; built-in roles and other custom roles stay.</span></li>
