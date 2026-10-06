@@ -3,6 +3,17 @@
 import childProcess from 'node:child_process'
 import { appendFileSync, existsSync } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
+import { setTimeout as delay } from 'node:timers/promises'
+
+// Keep the preload behind the supervisor's identity check. Readiness, rather
+// than child startup speed, determines when this fixture may proceed.
+if (process.env.AEON_PW_TEST_ROOT_VERIFIED) {
+  const deadline = Date.now() + 15000
+  while (!existsSync(process.env.AEON_PW_TEST_ROOT_VERIFIED)) {
+    if (Date.now() >= deadline) throw new Error('Supervisor root verification barrier timed out')
+    await delay(10)
+  }
+}
 
 // A slow root: the supervisor must not give up on a start-up that outlasts
 // its attempt budget while the preload is still establishing identity.
