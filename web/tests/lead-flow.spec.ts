@@ -165,12 +165,16 @@ test('leaving the page that opened the docked lead panel closes it', async ({ pa
   await expect(panel(page)).toHaveCount(0)
 })
 
-test('ticket header keeps every action inside a 1024 side panel with a wide system font', async ({ page }) => {
-  await page.setViewportSize({ width: 1024, height: 1000 })
+test('ticket header keeps every action inside the default side panel with wide system fonts', async ({ page }) => {
   await mockLeadFlow(page, { lead: 'working', queue: [] })
-  // CI's Linux fonts run wider than macOS; Verdana/DejaVu reproduce that here.
-  const wide = '.panel-bar .btn, .panel-bar .btn * { font-family: Verdana, "DejaVu Sans", sans-serif !important; }'
-  for (const key of ['PHAROS-14', 'PHAROS-12']) {
+  // CI's Linux fonts (DejaVu Sans and Sans Mono) run wider than macOS's. Verdana
+  // is wider still, and Menlo shares DejaVu Sans Mono's metrics, so the whole
+  // bar, key and position included, is at least as wide here as on CI.
+  const wide = '.panel-bar, .panel-bar * { font-family: Verdana, "DejaVu Sans", sans-serif !important; } .panel-bar .mono, .panel-bar .mono *, .panel-bar .key-chip, .panel-bar .key-chip *, .panel-bar kbd { font-family: Menlo, "DejaVu Sans Mono", monospace !important; }'
+  // 1024 and 1440 open the dock at its default width (the CI stale-progress
+  // spec lost Close at both); the dock's own width decides, not the viewport.
+  for (const width of [1024, 1440]) for (const key of ['PHAROS-14', 'PHAROS-12']) {
+    await page.setViewportSize({ width, height: 1000 })
     await page.goto(`/p/PHAROS/${key}`)
     await page.addStyleTag({ content: wide })
     const drawer = page.getByRole('complementary', { name: 'Ticket details' })
@@ -179,16 +183,19 @@ test('ticket header keeps every action inside a 1024 side panel with a wide syst
     const frame = (await bar.boundingBox())!
     for (const name of ['Edit', 'More actions', 'Close ticket details']) {
       const box = (await drawer.getByRole('button', { name, exact: true }).boundingBox())!
-      expect(box.x + box.width, `${key}: ${name} stays inside the header`).toBeLessThanOrEqual(frame.x + frame.width + 0.5)
+      expect(box.x + box.width, `${width} ${key}: ${name} stays inside the header`).toBeLessThanOrEqual(frame.x + frame.width + 0.5)
+      expect(box.x + box.width, `${width} ${key}: ${name} stays inside the viewport`).toBeLessThanOrEqual(width + 0.5)
     }
-    expect(await bar.evaluate(el => el.scrollWidth - el.clientWidth), `${key}: the header does not overflow`).toBeLessThanOrEqual(0)
+    expect(await bar.evaluate(el => el.scrollWidth - el.clientWidth), `${width} ${key}: the header does not overflow`).toBeLessThanOrEqual(0)
+    // The fold gives up what More also offers first: the default desktop dock keeps Queue's word.
+    if (width === 1440) await expect(drawer.locator('.q-action .q-word').first()).toBeVisible()
   }
 })
 
 test('ticket header steps down at every dock width so Close stays inside with a wide system font', async ({ page }) => {
   // AEON-780: at 1440 on CI's Linux fonts the labelled Queue pushed Close out of
-  // the dock (work-queue.spec.ts:529). The whole page takes the wide font here.
-  const wide = ':root { --font: Verdana, "DejaVu Sans", sans-serif !important; } .panel-bar .btn, .panel-bar .btn *:not(kbd) { font-family: var(--font) !important; }'
+  // the dock (work-queue.spec.ts:529). Same wide fonts as the test above.
+  const wide = '.panel-bar, .panel-bar * { font-family: Verdana, "DejaVu Sans", sans-serif !important; } .panel-bar .mono, .panel-bar .mono *, .panel-bar .key-chip, .panel-bar .key-chip *, .panel-bar kbd { font-family: Menlo, "DejaVu Sans Mono", monospace !important; }'
   await mockLeadFlow(page, { lead: 'working', queue: [] })
   for (const key of ['PHAROS-14', 'PHAROS-12']) {
     await page.setViewportSize({ width: 1920, height: 1000 })
@@ -203,6 +210,9 @@ test('ticket header steps down at every dock width so Close stays inside with a 
     await expect(drawer.getByRole('button', { name: 'Open as full page', exact: true })).toBeVisible()
     for (const width of [1920, 1600, 1440, 1366, 1280, 1180, 1024, 900, 800, 721]) {
       await page.setViewportSize({ width, height: 1000 })
+      // The fold runs in a ResizeObserver callback before paint: measure after
+      // the next frame has rendered, as a person would see it.
+      await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
       const geometry = await bar.evaluate(el => {
         const frame = el.getBoundingClientRect()
         const buttons = [...el.querySelectorAll('button')].map(button => {
