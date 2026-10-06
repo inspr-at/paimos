@@ -27,6 +27,70 @@ const cases=[g('internal/auth','TestCeiling','ESSENTIAL'),g('internal/auth','Tes
 const fixture=()=>({version:1,tests:structuredClone(cases)})
 const noFlaky={version:1,entries:[]}
 
+test('AEON-707 work safety regressions remain classified and selected by every full gate',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
+  const protectedCases=[
+    ['internal/parentbenefits','TestRetryIsPersonOnlyAndRechecksPermission'],
+    ['internal/parentbenefits','TestRetryDeadlineBoundsBothBodyDecodes'],
+    ['internal/parentbenefits','TestLeaseRecoveryAndTenantIsolation'],
+    ['internal/parentbenefits','TestSummaryRejectsInvalidOrUnboundedModelOutput'],
+    ['internal/nodes','TestWorkAggregateLimitsAreExplicitHTTPFailures'],
+    ['internal/nodes','TestWorkScopeRootAndExpansionBudgets'],
+    ['internal/nodes','TestWorkLifecycleBackgroundCompletionAndRevocation'],
+    ['internal/releases','TestWorkParentPlacementRechecksRevokedGrantUnderFence'],
+  ].map(([pkg,name])=>({kind:'go',package:pkg,name}))
+  const rows=validate(manifest,manifest.tests)
+  for(const row of protectedCases) {
+    const declared=rows.find(candidate=>key(candidate)===key(row))
+    assert.ok(declared,`Missing work safety classification: ${key(row)}`)
+    assert.ok(['ESSENTIAL','GATED-FULL'].includes(declared.tier),`Work safety case deferred to NIGHTLY: ${key(row)}`)
+  }
+  const modes=[
+    {event:'push'},
+    {event:'workflow_dispatch'},
+    {event:'pull_request',paths:['README.md'],forceFull:true},
+    {event:'merge_group',paths:['README.md'],forceFull:true},
+    {event:'pull_request',paths:['scripts/test-tiers/core.mjs']},
+    {event:'merge_group',paths:['api/openapi.yaml']},
+    {event:'pull_request'},
+    {event:'merge_group'},
+  ]
+  for(const mode of modes) {
+    const selection=select(rows,mode)
+    assert.equal(selection.scope,'gated-full')
+    const selected=new Set(selection.tests.map(key))
+    for(const row of protectedCases) assert.ok(selected.has(key(row)),`${JSON.stringify(mode)} omitted ${key(row)}`)
+  }
+})
+
+test('AEON-707 work migration test files have explicit tiers without changing runtime drift policy',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
+  const files=[
+    'internal/parentbenefits/module_test.go',
+    'internal/parentbenefits/worker_test.go',
+    'internal/nodes/work_aggregates_test.go',
+    'internal/nodes/work_lifecycle_test.go',
+    'internal/releases/work_parents_test.go',
+  ]
+  const discovered=files.flatMap(file=>{
+    const source=readFileSync(new URL(`../../${file}`,import.meta.url),'utf8')
+    const names=[...source.matchAll(/^func (Test\w+)\(t \*testing\.T\)/gm)].map(match=>match[1])
+    assert.ok(names.length,`No test declarations found in ${file}`)
+    return names.map(name=>({kind:'go',package:file.slice(0,file.lastIndexOf('/')),name}))
+  })
+  const identities=new Set(discovered.map(key))
+  const owned={...manifest,tests:manifest.tests.filter(row=>identities.has(key(row)))}
+  assert.deepEqual(owned.tests.map(key).sort(),[...identities].sort(),'Work migration tests need explicit classifications')
+  const rows=validate(owned,discovered,undefined,{strict:true})
+  assert.equal(rows.length,discovered.length)
+  assert.ok(rows.every(row=>['ESSENTIAL','GATED-FULL'].includes(row.tier)))
+  // Unrelated future registrations still reconcile permissively to NIGHTLY.
+  const added={kind:'go',package:'internal/nodes',name:'TestFutureUnclassified',active:true}
+  const warnings=[]
+  assert.equal(validate(owned,[...discovered,added],undefined,{warn:warning=>warnings.push(warning)}).at(-1).tier,'NIGHTLY')
+  assert.deepEqual(warnings,[`::warning::Unclassified test (defaults to NIGHTLY; classify these): ${key(added)}`])
+})
+
 const replay=JSON.parse(readFileSync(new URL('./affected-replay.json',import.meta.url)))
 const legacy=await import(`data:text/javascript;base64,${Buffer.from(replay.legacySelector).toString('base64')}`)
 const replayRows=['go','web'].flatMap(kind=>JSON.parse(readFileSync(new URL(`../ci/${kind}-test-tiers.json`,import.meta.url))).tests)
@@ -1257,6 +1321,34 @@ test('committed allowlists preserve classifications, helpers and reviewed AEON-5
   assert.ok([...go.tests,...web.tests].filter(row=>row.tags?.includes('delete-candidate')).every(row=>row.tier==='GATED-FULL'||row.tier==='NIGHTLY'))
 })
 
+// These exact registrations were missing in the AEON-706 static report.
+// Keep AEON-707's reviewed work-order promotion and main's new nightly guards.
+for(const [label,pkg,tier,names] of [
+  ['work-order body guards','internal/workorders','GATED-FULL',[
+    'TestBufferBodyBoundsAndDecode','TestEndpointBodyNetworkDeadline','TestEndpointPositionedBodyNetworkDeadline',
+  ]],
+  ['builder and shared-runtime guards','scripts/releaseworkflow','NIGHTLY',[
+    'TestBuilderChecksumAndPluginPathFailClosed','TestBuilderVersionAssertionFailsClosed',
+    'TestRehearsedBuilderPins','TestParallelWebUnitsShareRuntimeAndRunOnce',
+  ]],
+]) test(`AEON-706 ${label} retain explicit classifications and intended gate execution`,()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
+  const discovered=names.map(name=>g(pkg,name))
+  const ids=discovered.map(key).sort(), required=new Set(ids)
+  const stored=manifest.tests.filter(row=>required.has(key(row)))
+  assert.deepEqual(stored.map(key).sort(),ids,'Every reported registration needs exactly one explicit classification')
+  const rows=validate({...manifest,tests:stored},discovered,noFlaky,{strict:true})
+  for(const row of rows) {
+    assert.equal(row.tier,tier,key(row))
+    assert.equal(manifest.postGateCases.includes(key(row)),tier==='NIGHTLY',`${key(row)} must retain its reviewed post-gate policy`)
+  }
+  for(const event of ['pull_request','merge_group','push','schedule']) {
+    const selected=select(rows,{event,forceFull:true}).tests.map(key).sort()
+    assert.deepEqual(selected,event==='schedule'||tier==='GATED-FULL'?ids:[],`${event}: preserve explicit gate scope`)
+  }
+  assert.deepEqual(select(rows,{event:'pull_request',forceAll:true}).tests.map(key).sort(),ids)
+})
+
 test('strict classification maintenance is scheduled separately and never a required PR or nightly test dependency',()=>{
   const nightly=readFileSync(new URL('../../.github/workflows/nightly-full.yml',import.meta.url),'utf8')
   const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
@@ -1343,6 +1435,23 @@ test('three-tier validation and reports retain GATED-FULL results and deletion c
   assert.deepEqual(validate(manifest,rows,known),rows)
   const promoted=rows.map(row=>({...row,tier:'ESSENTIAL',tags:[]}))
   assert.throws(()=>validate({version:1,tests:promoted},rows,known),/Known-flaky case cannot be ESSENTIAL/)
+})
+
+test('AEON-686 host-capacity bound and fence cases run in every PR gate',()=>{
+  // Unlisted cases default to NIGHTLY, so new Go tests in these files would
+  // silently leave the PR gate; derive the list from source, not by hand.
+  const go=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
+  const sources=[['internal/hostcapacity','policy_test.go'],['internal/agentpairing','host_capacity_test.go']]
+  const rows=sources.flatMap(([pkg,file])=>[...readFileSync(new URL(`../../${pkg}/${file}`,import.meta.url),'utf8')
+    .matchAll(/^func (Test\w+)\(t \*testing\.T\)/gm)].map(match=>`${pkg}:${match[1]}`))
+  for(const required of ['internal/hostcapacity:TestHostCapacityLargestEncodingsStayBounded',
+    'internal/agentpairing:TestHostCapacityBoundsHeldByWritersWithoutDatabaseChecks'])assert.ok(rows.includes(required),required)
+  for(const id of rows) {
+    const row=go.tests.find(row=>key(row)===id)
+    assert.equal(row?.tier,'ESSENTIAL',id)
+    for(const event of ['pull_request','merge_group'])
+      assert.ok(select(go.tests,{event,paths:['README.md']}).tests.some(selected=>key(selected)===id),`${event}: ${id}`)
+  }
 })
 
 test('three-tier manifests allow new NIGHTLY cases and never promote ungated browser cases',()=>{

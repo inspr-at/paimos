@@ -101,10 +101,13 @@ function collectWebNow() {
     }
   }
   visit('tests')
-  for (const file of nodeFiles.sort()) {
-    const rows = JSON.parse(command(process.execPath,['--import',resolve(root,'scripts/test-tiers/node-collect-hook.mjs'),
-      resolve(root,'scripts/test-tiers/node-collect.mjs'),resolve(web,file)],{cwd:web}))
-    unit.push(...rows.map(row=>({...row,kind:'node',file})))
+  const files = nodeFiles.sort()
+  const node = JSON.parse(command(process.execPath,['--import',resolve(root,'scripts/test-tiers/node-collect-hook.mjs'),
+    resolve(root,'scripts/test-tiers/node-collect.mjs'),'--batch',...files.map(file=>resolve(web,file))],{cwd:web}))
+  if (!Array.isArray(node) || node.length !== files.length) throw new Error('Node registration batch is incomplete')
+  for (const [index, file] of files.entries()) {
+    if (node[index]?.file !== resolve(web,file) || !Array.isArray(node[index]?.tests)) throw new Error(`Node registration batch mismatch: ${file}`)
+    unit.push(...node[index].tests.map(row=>({...row,kind:'node',file})))
   }
   const browser = flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','-c','playwright.ui.config.ts','--list','--reporter=json'],{cwd:web})), 'playwright.ui.config.ts')
   const performance = flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','-c','playwright.perf.config.ts','--list','--reporter=json'],{cwd:web})), 'playwright.perf.config.ts')

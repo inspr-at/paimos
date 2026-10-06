@@ -227,7 +227,7 @@ const toolbarColumns = computed(() => {
 // In a saved view the columns belong to the view (they become part of the list's
 // state); on the plain list they are the person's own for this project.
 function saveColumns(order: ColumnId[], visible: ColumnId[]) {
-  if (filters.value.view) { update({ cols: order.filter(id => visible.includes(id) && !PINNED.includes(id)) }); return }
+  if (filters.value.view || filters.value.cols) { update({ cols: order.filter(id => visible.includes(id) && !PINNED.includes(id)) }); return }
   listPref.value?.save({ ...(listPrefs.value ?? {}), order, visible }, 0)
 }
 function resetColumns() {
@@ -602,30 +602,38 @@ function toggleGroup(key: string) {
 const views = computed(() => viewsOf(projectId.value))
 const activeView = computed(() => filters.value.view ? views.value.items.find(view => view.id === filters.value.view) ?? null : null)
 const viewFilters = computed(() => activeView.value ? filtersFromView(activeView.value) : null)
-const customised = computed(() => hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed || !!filters.value.hideStates)
-const viewDirty = computed(() => !!viewFilters.value && !sameListState(filters.value, viewFilters.value))
+const savedFilters = computed(() => ({ ...filters.value, mode: activeTicketView.value.id as ListFilters['mode'], cols: toolbarColumns.value.order.filter(id => toolbarColumns.value.visible.includes(id) && !PINNED.includes(id)) }))
+const customised = computed(() => !!listPrefs.value?.visible || filters.value.mode !== 'list' || hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed || !!filters.value.hideStates)
+const viewDirty = computed(() => !!viewFilters.value && !sameListState(savedFilters.value, viewFilters.value))
 const canSaveView = computed(() => !journeyActive.value && !knowledgeActive.value && !settingsActive.value && (activeView.value ? viewDirty.value : customised.value))
 // The saved-view strip shows once there is a view to pick or a list worth keeping; the plain list alone needs no strip.
-const showViewBar = computed(() => !journeyActive.value && !knowledgeActive.value && !settingsActive.value && !graphActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
+const showViewBar = computed(() => !journeyActive.value && !knowledgeActive.value && !settingsActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
 const defaultViewId = computed(() => listPrefs.value?.defaultView ?? null)
 function viewQuery(view: SavedView | null): Record<string, string> {
   return view ? filtersToQuery(filtersFromView(view)) : {}
 }
 function hrefFor(id: string | null) {
   const view = id ? views.value.items.find(item => item.id === id) ?? null : null
-  const query = new URLSearchParams({ ...viewQuery(view), ...(outlineActive.value ? { view: 'outline' } : {}) }).toString()
+  const query = new URLSearchParams(view ? viewQuery(view) : { ...(activeTicketView.value.id !== 'list' ? { view: activeTicketView.value.id } : {}) }).toString()
   return `${sectionPath('tickets')}${query ? `?${query}` : ''}`
 }
 function openView(id: string | null, replace = false) {
   const view = id ? views.value.items.find(item => item.id === id) ?? null : null
   collapsed.value = new Set()
-  const query = { ...viewQuery(view), ...(outlineActive.value ? { view: 'outline' } : {}) }
+  const query = view ? viewQuery(view) : { ...(activeTicketView.value.id !== 'list' ? { view: activeTicketView.value.id } : {}) }
   const location = { path: sectionPath('tickets'), query }
   if (replace) void router.replace(location); else void router.push(location)
 }
 // A link to a view someone cannot see (private, or deleted) keeps its filters.
 watch([() => filters.value.view, () => views.value.loaded], ([id, loaded]) => {
-  if (id && loaded && !views.value.items.some(view => view.id === id)) update({ view: null })
+  if (!id || !loaded) return
+  const view = views.value.items.find(view => view.id === id)
+  if (!view) { update({ view: null }); return }
+  // Bare view links adopt the stored presentation; explicit URL edits stay dirty.
+  const query = { ...route.query }
+  if (query.view === undefined) query.view = view.mode
+  if (query.cols === undefined && view.columns.length) query.cols = view.columns.join(',')
+  if (query.view !== route.query.view || query.cols !== route.query.cols) void router.replace({ path: route.path, query })
 })
 // The project opens with the person's default view when nothing else was asked for.
 // The list waits for that answer, so it never shows the plain list first.
@@ -643,7 +651,7 @@ watch(projectId, async id => {
   if (projectId.value !== id) return
   const target = pref.value.value?.defaultView
   const view = target ? viewsOf(id).items.find(item => item.id === target) : null
-  if (view && plain()) await router.replace({ path: route.path, query: { ...viewQuery(view), ...modeQuery() } })
+  if (view && plain()) await router.replace({ path: route.path, query: viewQuery(view) })
   entryResolved.value = true
 }, { immediate: true })
 
@@ -1144,6 +1152,7 @@ const savePanel = ref<{ mode: 'create' | 'rename'; anchor: HTMLElement; view?: S
 const saveBusy = ref(false)
 const saveError = ref('')
 const viewBar = ref<InstanceType<typeof ViewBar>>()
+watch([projectId, () => me.value?.id], () => { savePanel.value = null; saveError.value = ''; saveBusy.value = false })
 function startSave(anchor: HTMLElement) {
   saveError.value = ''
   const base = activeView.value ? copyName(activeView.value.name, views.value.items.map(v => v.name)) : suggestName(filters.value, chipLabel)
@@ -1157,31 +1166,35 @@ function closeSave(restore: boolean) {
 }
 function problem(e: unknown) { return e instanceof Error ? e.message : 'Something went wrong' }
 async function submitSave(value: { name: string; shared: boolean; makeDefault: boolean }) {
-  const panel = savePanel.value, id = projectId.value
+  const panel = savePanel.value, id = projectId.value, person = me.value?.id, state = { ...savedFilters.value, view: null }
   if (!panel || !id) return
   saveBusy.value = true; saveError.value = ''
   try {
     if (panel.mode === 'rename' && panel.view) {
       const saved = await renameView(id, panel.view, value.name)
+      if (projectId.value !== id || me.value?.id !== person || savePanel.value !== panel) return
       toast(`Renamed the view to “${saved.name}”`)
     } else {
-      const saved = await saveNewView(id, value.name, { ...filters.value, view: null }, value.shared)
+      const saved = await saveNewView(id, value.name, state, value.shared)
+      if (projectId.value !== id || me.value?.id !== person || savePanel.value !== panel) return
       if (value.makeDefault) listPref.value?.save({ ...(listPrefs.value ?? {}), defaultView: saved.id }, 0)
-      update({ view: saved.id })
+      if (sameListState(savedFilters.value, state)) update({ view: saved.id, cols: filtersFromView(saved).cols })
       toast(`Saved the view “${saved.name}”${saved.shared ? ', shared with the project' : ''}`)
     }
     closeSave(false)
   } catch (e) {
-    saveError.value = problem(e)
+    if (projectId.value === id && savePanel.value === panel) saveError.value = problem(e)
   } finally {
     saveBusy.value = false
   }
 }
 async function saveActive(view: SavedView) {
-  const id = projectId.value
+  const id = projectId.value, person = me.value?.id, state = { ...savedFilters.value, view: null }
   if (!id) return
   try {
-    await saveViewState(id, view, { ...filters.value, view: null })
+    const saved = await saveViewState(id, view, state)
+    if (projectId.value !== id || me.value?.id !== person || filters.value.view !== view.id) return
+    if (sameListState(savedFilters.value, state)) update({ cols: filtersFromView(saved).cols })
     toast(`Saved the changes to “${view.name}”`)
   } catch (e) { toast(`The view was not saved: ${problem(e)}`, { tone: 'error' }) }
 }
@@ -1786,7 +1799,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections tips @select="setSection" />
         <span v-if="ticketsHeader" class="nav-divider" aria-hidden="true" />
       <ViewBar
-        v-if="(ticketsHeader && !graphActive) || showViewBar" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
+        v-if="ticketsHeader || showViewBar" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
         :me="me?.id ?? null" :href-for="hrefFor" @open="id => openView(id)" @save="saveActive" @save-as="startSave" @reset="openView(activeView?.id ?? null, true)"
         @rename="startRename" @duplicate="duplicate" @set-default="setDefaultView" @share="share" @copy-link="copyViewLink" @remove="remove"
       />

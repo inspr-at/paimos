@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/escalation"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/inbox"
 	"gopkg.in/yaml.v3"
@@ -420,4 +421,87 @@ func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T
 		t.Fatalf("attached completion=%v", got)
 	}
 	expect(t, v.runtimeCall(t, endpoint, completion), 200)
+}
+
+func TestAgentRecoveryBudgetRejectionCommitsDecisionWithoutContinuation(t *testing.T) {
+	v := recoveryAgent(t)
+	f := v.f
+	body := v.request(t)
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	v.claim(t)
+	expect(t, f.call(f.agent, "POST", v.path+"/stop", map[string]any{"reason": "stopped"}, v.lease), 200)
+	var order string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='cancelled',started_at=clock_timestamp()-interval '1 minute',ended_at=clock_timestamp() WHERE id=$1`, v.run); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT work_order_id::text FROM harness_sessions WHERE id=$1`, v.session).Scan(&order); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, order, f.ticket); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE work_orders SET max_cost_micros=1000000 WHERE node_id=$1`, order); err != nil {
+			return err
+		}
+		state, err := json.Marshal(escalation.State{EpisodeID: f.ticket, Status: "stuck", Reason: "failed_fix_rounds", Revision: 1, Attempts: escalation.MaxAttempts, HeldCost: 100, MaxAttempts: escalation.MaxAttempts, MaxCost: escalation.MaxCostMicros, OriginalProfile: v.profile})
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO work_escalations(tenant_id,ticket_node_id,project_id,state) VALUES($1,$2,$3,$4)`, f.person.TenantID, f.ticket, f.project, state)
+		return err
+	})
+	endpoint := "/api/harness-recoveries/" + body["request_id"].(string) + "/complete"
+	completion := map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation, "outcome": "exited"}
+	w := v.runtimeCall(t, endpoint, completion)
+	expect(t, w, 409)
+	var failure struct{ Error string }
+	if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	const want = "finite escalation cost and attempt budget required; work awaits a Decision Desk decision"
+	if failure.Error != want {
+		t.Fatalf("rejection=%s", w.Body.String())
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var status, reason, question string
+		var pending bool
+		if err := tx.QueryRow(t.Context(), `SELECT state->>'status',state->>'reason',coalesce(state->>'question_id',''),coalesce((state->>'question_pending')::boolean,false) FROM work_escalations WHERE ticket_node_id=$1`, f.ticket).Scan(&status, &reason, &question, &pending); err != nil {
+			return err
+		}
+		if status != "awaiting_decision" || reason != "escalation_budget_unavailable" || question == "" || pending {
+			t.Fatalf("decision status=%s reason=%s question=%s pending=%t", status, reason, question, pending)
+		}
+		var runs int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM agent_runs WHERE retry_of_run_id=$1`, v.run).Scan(&runs); err != nil {
+			return err
+		}
+		if runs != 0 {
+			t.Fatalf("budget refusal created %d continuations", runs)
+		}
+		var state, outcome, completionText string
+		var noNext bool
+		if err := tx.QueryRow(t.Context(), `SELECT state,outcome,completion,next_run_id IS NULL FROM harness_recoveries WHERE id=$1`, body["request_id"]).Scan(&state, &outcome, &completionText, &noNext); err != nil {
+			return err
+		}
+		if state != "completed" || outcome != "rejected" || completionText != "exited" || !noNext {
+			t.Fatalf("recovery state=%s outcome=%s completion=%s noNext=%t", state, outcome, completionText, noNext)
+		}
+		return nil
+	})
+	w = v.runtimeCall(t, endpoint, completion)
+	expect(t, w, 200)
+	if got := decode(t, w); got["outcome"] != "rejected" || got["next_run_id"] != nil {
+		t.Fatalf("retry=%v", got)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var runs int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM agent_runs WHERE retry_of_run_id=$1`, v.run).Scan(&runs); err != nil {
+			return err
+		}
+		if runs != 0 {
+			t.Fatalf("completion retry created %d continuations", runs)
+		}
+		return nil
+	})
 }
