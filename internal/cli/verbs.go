@@ -549,14 +549,14 @@ func (rt *runtime) cmdOnboard() *Command {
 	readingListSize := 10
 	return &Command{
 		Name:  "onboard",
-		Short: "Project briefing",
+		Short: "Project onboarding guide",
 		Use:   "onboard --project KEY",
 		addFlags: func(fs *flagSet) {
 			fs.string(&project, "project", 0, "project key (required)")
 			fs.string(&agent, "agent", 0, "agent name")
 			fs.string(&format, "format", 0, "md or html")
 			fs.string(&outPath, "out", 0, "output file or directory")
-			fs.bool(&check, "check", 0, "compare an existing managed briefing")
+			fs.bool(&check, "check", 0, "compare an existing managed onboarding guide")
 			fs.int(&readingListSize, "reading-list-size", "maximum reading list entries")
 			fs.bool(&includeLow, "include-low", 0, "include low confidence memories")
 		},

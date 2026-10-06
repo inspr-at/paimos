@@ -125,8 +125,8 @@ onMounted(() => { void projects.load() })
       <p v-if="error" class="error" role="alert">{{ error }}</p>
     </form>
     <template #foot>
+      <button type="submit" form="new-agent-form" class="btn primary" :disabled="busy || !allowed"><AppIcon name="plus" :size="14" /><span class="btn-label"><span>{{ busy ? 'Creating…' : 'Create agent' }}</span><span aria-hidden="true">Create agent</span></span><kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
       <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-      <button type="submit" form="new-agent-form" class="btn primary" :disabled="busy || !allowed"><AppIcon name="plus" :size="14" />{{ busy ? 'Creating…' : 'Create agent' }}<kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
     </template>
   </AccessSheet>
 </template>

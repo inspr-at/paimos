@@ -4,11 +4,14 @@ import assert from 'node:assert/strict'
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { validate, select, shard, key, exactPattern, webGraph, counts } from './core.mjs'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
-import { aggregate, jobMinutes } from './measure.mjs'
+import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
 import { changedPaths, schedulingMode } from './diff.mjs'
+import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
 const w=(file,name,tier='NIGHTLY')=>({kind:'node',file,name,tier})
@@ -274,6 +277,60 @@ test('two tier shards contain every selected identity exactly once, including eq
   assert.ok(pattern.test('test [1]'));assert.ok(!pattern.test('test 1'));assert.ok(!pattern.test('other ends.$'))
 })
 
+for(const [kind,maxShards,options] of [['go',7,{}],['browser',12,{}],['node',4,{}],['node',4,{firstShardLast:true}]]) {
+  test(`${kind}${options.firstShardLast?' (first shard last)':''} zero-weight owners fill shards before reusing tied bins for counts 1..${maxShards}`,()=>{
+    for(let count=1;count<=maxShards;count++) {
+      for(const ownerCount of new Set([0,1,Math.max(0,count-1),count,count+1,2*count+1])) {
+        for(const distribution of ['mixed','all-zero','equal-positive']) {
+          const owners=Array.from({length:ownerCount},(_,i)=>kind==='go'
+            ? `internal/owner-${String(i).padStart(2,'0')}`
+            : `tests/owner-${String(i).padStart(2,'0')}.${kind==='browser'?'spec':'test'}.ts`)
+          // Different registration counts ensure the tie-break counts owners,
+          // rather than splitting owners or comparing their number of tests.
+          const rows=owners.flatMap((owner,i)=>Array.from({length:1+i%3},(_,j)=>kind==='go'
+            ? g(owner,`TestCase${j}`) : {...w(owner,`case ${j}`),kind}))
+          const weights=Object.fromEntries(owners.map((owner,i)=>[owner,
+            distribution==='all-zero'?0:distribution==='mixed'?(i===0?1:0):1]))
+          const before={rows:structuredClone(rows),weights:{...weights}}
+          const bins=Array.from({length:count},(_,i)=>shard(rows,i+1,count,weights,options))
+          const ownerOf=row=>kind==='go'?row.package:row.file
+          const ownerBins=bins.map(bin=>[...new Set(bin.map(ownerOf))])
+          const context=`${kind}${options.firstShardLast?' (first shard last)':''}: ${count} shards, ${ownerCount} owners, ${distribution}`
+          assert.deepEqual(bins.flat().map(key).sort(),rows.map(key).sort(),context)
+          assert.equal(new Set(bins.flat().map(key)).size,rows.length,context)
+          assert.deepEqual(ownerBins.flat().sort(),owners,`${context}: owners stay whole`)
+          assert.equal(ownerBins.filter(bin=>bin.length).length,Math.min(count,ownerCount),`${context}: empty shards only when owners are fewer`)
+          for(let i=0;i<count;i++) {
+            assert.deepEqual(shard([...rows].reverse(),i+1,count,weights,options).map(key).sort(),bins[i].map(key).sort(),`${context}: input order cannot change assignment`)
+          }
+          if(distribution==='all-zero'&&!options.firstShardLast) {
+            // Equal weights and owner counts resolve by path then shard index.
+            assert.deepEqual(ownerBins,Array.from({length:count},(_,i)=>owners.filter((_,j)=>j%count===i)),context)
+          }
+          assert.deepEqual({rows,weights},before,`${context}: inputs remain unchanged`)
+        }
+      }
+    }
+  })
+}
+
+test('fewer owners than shards retain successful empty-shard reports in Go, unit and browser callers',async()=>{
+  const {run}=await import('./cli.mjs')
+  const env={RUNNER_ENVIRONMENT:'github-hosted',GITHUB_RUN_ID:'empty-shard',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'a'.repeat(40)}
+  for(const [kind,unit,count,row] of [['go',false,7,cases[0]],['web',true,4,cases[5]],
+    ['web',false,12,{kind:'browser',file:'tests/only.spec.ts',name:'only',tier:'ESSENTIAL'}]]) {
+    const owner=row.kind==='go'?row.package:row.file
+    const tests=shard([row],count,count,{[owner]:0})
+    assert.deepEqual(tests,[])
+    const job=`ops257r3-empty-${kind}-${unit?'unit':'cases'}`
+    assert.equal(await run(kind,{tests,all:[row],full:true,scope:'gated-full',reason:'fewer owners than shards'},
+      {unit,job,env}),0)
+    const report=JSON.parse(readFileSync(new URL(`../../tmp/test-tiers/${job}-measurement.json`,import.meta.url)))
+    assert.equal(checkFull(report,env),true)
+    assert.ok(Object.values(report.classes).every(tier=>tier.selected===0&&tier.run===0&&tier.passed===0&&tier.notRun===0&&tier.failed===0))
+  }
+})
+
 test('reports distinguish missing, skipped and failed outcomes; nested Go subtests cannot inflate totals',()=>{
   const text=[{Package:'github.com/inspr-at/paimos/internal/auth',Test:'TestCeiling',Action:'run'},
     {Package:'github.com/inspr-at/paimos/internal/auth',Test:'TestCeiling/sub',Action:'pass'},
@@ -298,6 +355,249 @@ test('job accounting includes setup in minutes and reports missing artifacts rat
   assert.equal(measurement.measured.goRunnerMinutes,2)
   assert.equal(measurement.coverage,'incomplete')
   assert.deepEqual(measurement.missingEvidence,['go-test-1'])
+})
+
+test('Actions skipped jobs with zero completed_at never invalidate PR, queue, push or nightly accounting',()=>{
+  // Exact shape returned for tree-reuse on the failing PR/merge-group runs.
+  const skipped={name:'tree-reuse',status:'completed',conclusion:'skipped',
+    started_at:'2026-10-05T10:00:00Z',completed_at:'0001-01-01T00:00:00Z',steps:[]}
+  const lanes={
+    pull_request:{names:['tree-reuse','cache-prime','go-test (1)','go-timing','web-setup','web-shard (1)'],options:{lane:'docs-only'},missing:[]},
+    merge_group:{names:['tree-reuse','cache-prime'],options:{lane:'full'},missing:[]},
+    push:{names:['go-test (1)','go-timing','web-setup','web-shard (1)','release-check-run','e2e-run'],options:{lane:'full',reusedFrom:'123'},missing:[]},
+    workflow_dispatch:{names:['tree-reuse','cache-prime'],options:{lane:'full'},missing:[]},
+    schedule:{names:['nightly-go-test (1)','nightly-go-timing','nightly-web-setup','nightly-web-shard (1)'],options:{},missing:['go-test-1','go-timing','web-unit','web-shard-1']},
+  }
+  for(const [event,{names,options,missing}] of Object.entries(lanes)) for(const timestamps of [
+    {},{started_at:'0001-01-01T00:00:00Z'},
+    {started_at:null,completed_at:null},{started_at:0,completed_at:0},
+  ]) {
+    const jobs=names.map(name=>({...skipped,name,...timestamps}))
+    const report=aggregate([],jobs,options)
+    assert.ok(report.jobs.every(job=>job.conclusion==='skipped'&&job.runnerMinutes===null),event)
+    assert.deepEqual(report.missingEvidence,missing,event)
+    assert.equal(report.coverage,missing.length?'incomplete':options.reusedFrom?'reused':'reported',event)
+    assert.equal(report.measured.goRunnerMinutes,0,event)
+    assert.equal(report.measured.webRunnerMinutes,0,event)
+    assert.deepEqual(report.classes,{},'Skipped jobs must not fabricate case passes')
+  }
+  assert.equal(jobMinutes({...skipped,status:'queued',conclusion:null}),null)
+  assert.equal(jobMinutes({...skipped,conclusion:'cancelled',runner_id:0}),null)
+  assert.throws(()=>jobMinutes({...skipped,conclusion:'cancelled',runner_id:1}),/Invalid job timestamps/)
+  assert.throws(()=>jobMinutes({...skipped,conclusion:'cancelled',runner_id:0,steps:[{name:'Checkout',conclusion:'success'}]}),/Invalid job timestamps/)
+})
+
+// Classification: fixed go-static/nightly-go-static CI checks, outside the
+// dynamically collected Go/web tier and browser-shard inventories.
+test('AEON-732 full and nightly skipped tier fixtures remain incomplete after upstream failures',()=>{
+  const finished={status:'completed',started_at:'2026-10-05T10:00:00Z',completed_at:'2026-10-05T10:02:00Z'}
+  const skipped={...finished,conclusion:'skipped',completed_at:'0001-01-01T00:00:00Z',steps:[]}
+  for(const lane of [undefined,'full']) for(const prerequisite of ['tier-plan','web-setup']) {
+    const jobs=[{...finished,name:prerequisite,conclusion:'failure'},
+      ...['go-test (1)','go-timing','web-unit (1)','web-shard (1)'].map(name=>({...skipped,name}))]
+    const report=aggregate([],jobs,{lane})
+    assert.equal(report.coverage,'incomplete')
+    assert.equal(report.coverageReason,'skipped after upstream failure')
+    assert.deepEqual(report.missingEvidence,['go-test-1','go-timing','web-unit-1','web-shard-1'])
+    assert.deepEqual(report.upstreamFailures,[{name:prerequisite,status:'completed',conclusion:'failure'}])
+    assert.deepEqual(report.skippedJobs,jobs.slice(1).map(job=>job.name))
+    assert.ok(report.jobs.slice(1).every(job=>job.runnerMinutes===null))
+    assert.equal(report.measured.goRunnerMinutes,0)
+    assert.equal(report.measured.webRunnerMinutes,prerequisite==='web-setup'?2:0)
+    assert.deepEqual(report.classes,{})
+    // Required skips remain incomplete even without prerequisite metadata.
+    const noPrerequisite=aggregate([],jobs.slice(1),{lane})
+    assert.equal(noPrerequisite.coverage,'incomplete')
+    assert.equal(noPrerequisite.coverageReason,'required tier jobs skipped')
+  }
+  const nightly=aggregate([], [{...finished,name:'nightly-web-setup',conclusion:'failure'},
+    {...skipped,name:'nightly-web-shard (1)'}])
+  assert.equal(nightly.coverage,'incomplete')
+  assert.equal(nightly.coverageReason,'skipped after upstream failure')
+  assert.deepEqual(nightly.missingEvidence,['web-unit','web-shard-1'])
+  assert.deepEqual(nightly.upstreamFailures,[{name:'nightly-web-setup',status:'completed',conclusion:'failure'}])
+  for(const name of ['tier-plan','web-setup','nightly-web-setup']) for(const conclusion of ['failure','cancelled','skipped']) {
+    const job={...finished,name,conclusion,...(conclusion==='skipped'?{completed_at:'0001-01-01T00:00:00Z'}:{})}
+    // Even a retained unit artifact cannot conceal a later setup/build failure.
+    const report=aggregate([reportCases([],[],0,'web-unit')],[job])
+    const skippedUnit=name==='nightly-web-setup'&&conclusion==='skipped'
+    assert.deepEqual(report.missingEvidence,skippedUnit?['web-unit']:[])
+    assert.equal(report.coverage,'incomplete')
+    assert.equal(report.coverageReason,skippedUnit?'skipped after upstream failure':'upstream jobs did not succeed')
+    assert.deepEqual(report.upstreamFailures,[{name,status:'completed',conclusion}])
+  }
+  const jobs=['go-test (1)','go-timing','web-unit (1)','web-shard (1)'].map(name=>({...skipped,name}))
+  const exact=aggregate([],jobs,{lane:'spec-only'})
+  assert.equal(exact.coverage,'untiered')
+  assert.deepEqual(exact.missingEvidence,[])
+  assert.deepEqual(exact.classes,{})
+  // Actions may skip a matrix before it expands, leaving the family name.
+  const unexpanded=aggregate([],jobs.map(job=>({...job,name:job.name.replace(/ \(\d+\)$/,'')})))
+  assert.equal(unexpanded.coverage,'incomplete')
+  assert.deepEqual(unexpanded.missingEvidence,['go-test','go-timing','web-unit','web-shard'])
+  const unexpected=aggregate([], [{...finished,name:'go-test (1)',conclusion:'success'}],{lane:'docs-only'})
+  assert.equal(unexpected.coverage,'incomplete','Executed docs-only jobs still require evidence')
+  const successful=aggregate([reportCases([],[],0,'go-test-1')],[{...finished,name:'go-test (1)',conclusion:'success'}],{lane:'full'})
+  assert.equal(successful.coverage,'reported')
+  assert.deepEqual(successful.missingEvidence,[])
+  const artifactForSkipped=aggregate([reportCases([],[],0,'go-test-1')],[jobs[0]],{lane:'full'})
+  assert.equal(artifactForSkipped.coverage,'incomplete')
+  assert.deepEqual(artifactForSkipped.missingEvidence,['go-test-1'])
+})
+
+test('AEON-732 measurement CLI fixtures expose upstream skips in JSON, summary and exit status',()=>{
+  const root=mkdtempSync(resolve(tmpdir(),'aeon-tier-measurement-'))
+  const finished={status:'completed',started_at:'2026-10-05T10:00:00Z',completed_at:'2026-10-05T10:02:00Z'}
+  const skipped={...finished,conclusion:'skipped',completed_at:'0001-01-01T00:00:00Z',steps:[]}
+  const jobs=[{...finished,name:'tier-plan',conclusion:'failure'},
+    ...['go-test (1)','go-timing','web-setup','web-unit (1)','web-shard (1)'].map(name=>({...skipped,name}))]
+  const evidence=resolve(root,'evidence'),summary=resolve(root,'summary.txt')
+  mkdirSync(evidence)
+  for(const fixture of [
+    {lane:'full',status:1,coverage:'incomplete',reason:'skipped after upstream failure'},
+    {lane:'docs-only',planned:true,status:0,coverage:'reported'},
+    {lane:'full',planned:true,reuse:'merge_group',status:0,coverage:'reused'},
+    {lane:'spec-only',planned:true,status:0,coverage:'untiered'},
+    {lane:'spec-only',status:1,coverage:'incomplete',reason:'upstream jobs did not succeed'},
+  ]) {
+    const fixtureJobs=jobs.map(job=>fixture.planned&&(job.name==='tier-plan'||fixture.lane==='spec-only'&&job.name.startsWith('web-'))
+      ? {...job,...finished,conclusion:'success'}:job)
+    writeFileSync(resolve(root,'gh'),`#!${process.execPath}\nif (process.argv[2] !== 'api' || process.argv[3] !== 'repos/example/aeon/actions/runs/123/attempts/2/jobs?per_page=100&page=1') process.exit(2)\nprocess.stdout.write(${JSON.stringify(JSON.stringify({total_count:fixtureJobs.length,jobs:fixtureJobs}))})\n`,{mode:0o755})
+    writeFileSync(summary,'')
+    const result=spawnSync(process.execPath,[fileURLToPath(new URL('./measure.mjs',import.meta.url)),evidence],{
+      cwd:root,encoding:'utf8',timeout:10_000,
+      env:{PATH:root,GITHUB_REPOSITORY:'example/aeon',GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:'a'.repeat(40),
+        GITHUB_STEP_SUMMARY:summary,CI_LANE:fixture.lane,REUSE:fixture.reuse??'',SOURCE_RUN:fixture.reuse?'456':''},
+    })
+    assert.ifError(result.error)
+    assert.equal(result.status,fixture.status,result.stderr)
+    assert.equal(result.stderr,'')
+    const report=JSON.parse(readFileSync(resolve(root,'tmp/test-tier-run-measurement.json'),'utf8'))
+    const output=JSON.parse(result.stdout)
+    for(const evidence of [report,output]) {
+      assert.equal(evidence.coverage,fixture.coverage)
+      assert.equal(evidence.coverageReason,fixture.reason)
+      assert.deepEqual(evidence.classes,{})
+    }
+    assert.ok(readFileSync(summary,'utf8').includes(`Test tiers: ${fixture.coverage}${fixture.reason?` — ${fixture.reason}`:''};`))
+    if(fixture.lane==='full'&&!fixture.reuse) {
+      assert.deepEqual(report.missingEvidence,['go-test-1','go-timing','web-unit-1','web-shard-1'])
+      assert.ok(readFileSync(summary,'utf8').includes('tier-plan (failure), web-setup (skipped)'))
+      assert.equal(report.measured.sharedPlanningRunnerMinutes,2)
+      assert.equal(report.measured.goRunnerMinutes,0)
+      assert.equal(report.measured.webRunnerMinutes,0)
+    } else assert.deepEqual(report.missingEvidence,[])
+  }
+})
+
+test('completed jobs that ran still reject absent, zero, invalid and reversed timestamps',()=>{
+  const job={name:'go-test (1)',status:'completed',started_at:'2026-10-05T10:00:00Z',completed_at:'2026-10-05T10:02:00Z'}
+  for(const conclusion of ['success','failure','cancelled']) for(const timestamps of [
+    {started_at:null},{completed_at:null},{started_at:undefined},{completed_at:undefined},
+    {started_at:''},{completed_at:''},{started_at:0},{completed_at:0},
+    {started_at:'0001-01-01T00:00:00Z'},{completed_at:'0001-01-01T00:00:00Z'},
+    {started_at:'invalid'},{completed_at:'2026-10-05T09:59:59Z'},
+  ]) assert.throws(()=>aggregate([], [{...job,conclusion,...timestamps}]),/Invalid job timestamps: go-test \(1\)/)
+})
+
+test('four unit shards partition the existing ledger by file with every identity selected once',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
+  for(const event of ['pull_request','merge_group','push','workflow_dispatch','schedule']) {
+    const selected=select(manifest.tests,{event,paths:['.github/workflows/ci.yml']}).tests.filter(row=>row.kind!=='browser')
+    const bins=Array.from({length:4},(_,i)=>shard(selected,i+1,4))
+    assert.deepEqual(bins.flat().map(key).sort(),selected.map(key).sort(),event)
+    const owners=new Map()
+    bins.forEach((rows,i)=>rows.forEach(row=>{
+      if(owners.has(row.file))assert.equal(owners.get(row.file),i,'A file must not run twice')
+      owners.set(row.file,i)
+    }))
+    const sizes=bins.map(rows=>rows.length).sort((a,b)=>a-b)
+    // Nightly retains a large parameterized file; it is intentionally kept
+    // whole and does not participate in the four full-gate unit jobs.
+    if(event!=='schedule')assert.ok(sizes[3]<=1.3*(sizes[1]+sizes[2])/2,`Unit registration balance: ${sizes}`)
+  }
+})
+
+test('serial tier weights rebalance the twelve browser shards without changing full or changed-area coverage',()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../../web/ci-web-shards.json',import.meta.url)))
+  const rows=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url))).tests
+  const graph=Object.fromEntries([...new Set(rows.map(row=>row.file))].map(file=>[file,[]]))
+  for(const options of [
+    {event:'pull_request',paths:['.github/workflows/ci.yml']},
+    {event:'merge_group',paths:['web/tests/clip-tip.spec.ts'],webImports:graph},
+    {event:'push'}, {event:'workflow_dispatch'}, {event:'schedule'},
+  ]) {
+    const selected=select(rows,options).tests.filter(row=>row.kind==='browser')
+    const weights=tierWeights(manifest,selected)
+    const bins=Array.from({length:12},(_,i)=>shard(selected,i+1,12,weights))
+    assert.deepEqual(bins.flat().map(key).sort(),selected.map(key).sort(),options.event)
+    if(options.paths?.[0]==='.github/workflows/ci.yml'||options.event==='push') {
+      const loads=bins.map(bin=>[...new Set(bin.map(row=>row.file))].reduce((n,file)=>n+weights[file],0)).sort((a,b)=>a-b)
+      assert.ok(loads[11]<=1.3*(loads[5]+loads[6])/2,`Serial scheduling estimates: ${loads}`)
+      assert.ok(loads[11]<=1.25*(loads[5]+loads[6])/2,`Hosted scheduling estimates: ${loads}`)
+    }
+  }
+})
+
+test('hosted unit and Go weights preserve files/packages and every selected identity',()=>{
+  for(const kind of ['web','go']) {
+    const manifest=JSON.parse(readFileSync(new URL(`../ci/${kind}-test-tiers.json`,import.meta.url)))
+    for(const event of ['pull_request','merge_group','push','schedule']) {
+      const rows=select(manifest.tests,{event,paths:['.github/workflows/ci.yml']}).tests.filter(row=>kind==='web'?row.kind!=='browser':row.lane!=='timing')
+      const weights=measuredWeights(manifest,rows),count=kind==='web'?4:7
+      const bins=Array.from({length:count},(_,i)=>shard(rows,i+1,count,weights,{firstShardLast:kind==='web'}))
+      assert.deepEqual(bins.flat().map(key).sort(),rows.map(key).sort())
+      const owners=new Map()
+      bins.forEach((bin,i)=>bin.forEach(row=>{
+        const owner=kind==='go'?row.package:row.file
+        if(owners.has(owner))assert.equal(owners.get(owner),i,'An owner cannot run twice')
+        owners.set(owner,i)
+      }))
+    }
+  }
+})
+
+test('unit tie preference keeps the heaviest file away from shard 1 extra checks without losing cases',()=>{
+  const rows=[...Array(4)].flatMap((_,i)=>[1,2].map(n=>({kind:'node',file:`tests/unit-${i}.test.ts`,name:`case ${n}`})))
+  const weights=Object.fromEntries(rows.map(row=>[row.file, row.file.includes('unit-0')?44:30]))
+  const bins=Array.from({length:4},(_,i)=>shard(rows,i+1,4,weights,{firstShardLast:true}))
+  assert.deepEqual(bins.flat().map(key).sort(),rows.map(key).sort())
+  assert.deepEqual(bins[1],rows.slice(0,2))
+  assert.ok(bins[0].every(row=>row.file!=='tests/unit-0.test.ts'))
+  assert.deepEqual(shard(rows,1,1,weights,{firstShardLast:true}).map(key).sort(),rows.map(key).sort())
+  assert.deepEqual(shard(rows,1,4,weights),rows.slice(0,2),'Go/browser default tie policy stays unchanged')
+})
+
+test('measured weights scale the selected slice, retain zero elapsed and reject invalid data',()=>{
+  const manifest={timingWeights:{owners:{'tests/scope.test.ts':{seconds:10,selectedTests:2}}}}
+  assert.deepEqual(measuredWeights(manifest,[cases[5]]),{'tests/scope.test.ts':5})
+  assert.deepEqual(measuredWeights(manifest,cases),{'tests/scope.test.ts':10})
+  manifest.timingWeights.owners['tests/scope.test.ts'].seconds=0
+  assert.deepEqual(measuredWeights(manifest,cases),{'tests/scope.test.ts':0})
+  for(const timing of [{seconds:-1,selectedTests:2},{seconds:NaN,selectedTests:2},{seconds:1,selectedTests:0},{seconds:1,selectedTests:1.5}]) {
+    manifest.timingWeights.owners['tests/scope.test.ts']=timing
+    assert.throws(()=>measuredWeights(manifest,cases),/Invalid measured timing: tests\/scope.test.ts/)
+  }
+})
+
+test('unit measurement artifacts are required for every executed shard and legacy nightly units',()=>{
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-unit-measurements-'))
+  const job=name=>({name,status:'completed',conclusion:'success',started_at:'2026-10-05T10:00:00Z',completed_at:'2026-10-05T10:02:00Z'})
+  const names=['web-unit-1','web-unit-2','web-unit-3','web-unit-4']
+  for(const name of names)writeFileSync(resolve(directory,`${name}-measurement.json`),JSON.stringify(reportCases([],[],0,name)))
+  const jobs=names.map((_,i)=>job(`web-unit (${i+1})`))
+  const reports=readReports(directory)
+  assert.equal(reports.length,4)
+  assert.equal(aggregate(reports,jobs).coverage,'reported')
+  for(const name of names)assert.deepEqual(aggregate(reports.filter(r=>r.job!==name),jobs).missingEvidence,[name])
+  assert.deepEqual(aggregate([], [job('nightly-web-setup')]).missingEvidence,['web-unit'])
+  assert.deepEqual(aggregate([], [job('web-setup')]).missingEvidence,[],'Main setup no longer executes units')
+  const exact=aggregate([], [job('web-unit (1)'),job('web-shard (1)')],{lane:'spec-only'})
+  assert.equal(exact.coverage,'untiered')
+  assert.deepEqual(exact.classes,{})
+  assert.deepEqual(exact.missingEvidence,[])
+  assert.match(exact.caseScope,/no tier passes are claimed/)
+  assert.deepEqual(aggregate([], [job('web-unit (1)'),job('web-shard (1)')],{lane:'full'}).missingEvidence,['web-unit-1','web-shard-1'])
 })
 
 test('rerun measurements reject earlier-attempt artifacts instead of replaying case passes',()=>{
@@ -358,7 +658,7 @@ test('nightly runs every tier and fixed gate; PR/MQ aggregates and compatibility
   for(const command of ['run go --all --shard','run web --all --unit','run web --all --shard'])assert.ok(nightly.includes(command))
   for(const id of ['go-static','go-timing','migration-compat','e2e','release-check'])assert.ok(nightly.includes(`  nightly-${id}:`))
   assert.match(ci,/  go:\n\s+if: always\(\)\n\s+needs: \[ci-plan, go-test, go-static, go-timing, tree-reuse, cache-prime, tier-plan\]/)
-  assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[ci-plan, web-setup, web-shard, tree-reuse, cache-prime, tier-plan\]/)
+  assert.match(ci,/  web:\n\s+name: web\n\s+if: always\(\)\n\s+needs: \[ci-plan, web-setup, web-unit, web-shard, tree-reuse, cache-prime, tier-plan\]/)
   assert.match(ci,/  migration-compat:\n\s+permissions:/)
   assert.doesNotMatch(ci,/ci-flake-guard\.mjs --kind/)
 })

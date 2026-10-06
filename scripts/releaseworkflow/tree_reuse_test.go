@@ -60,7 +60,7 @@ func TestQueuePushReuseRetainsMainStructureAndFallback(t *testing.T) {
 			}
 		}
 	}
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
 		j := treeMap(jobs[id])
 		condition, _ := j["if"].(string)
 		if !strings.Contains(condition, "always()") || !strings.Contains(condition, "needs.ci-plan.result == 'success'") || !strings.Contains(condition, fullQueueFallback) || !containsNeed(j["needs"], "tree-reuse") {
@@ -133,7 +133,7 @@ func TestDirectPushCannotSkipWithoutQueueProof(t *testing.T) {
 		t.Fatalf("direct push proof: %v\n%s", err, out)
 	}
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
 		condition, _ := treeMap(jobs[id])["if"].(string)
 		if !strings.Contains(condition, fullQueueFallback) || !strings.Contains(condition, "always()") {
 			t.Fatalf("%s must run full work after absent proof", id)
@@ -363,6 +363,7 @@ func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
 	}
 	reuseStep(t, treeMap(jobs["go-test"]), "Test this shard (essential plus changed area, or full on main)")
 	reuseStep(t, treeMap(jobs["web-shard"]), "Run selected UI cases without retries")
+	reuseStep(t, treeMap(jobs["web-unit"]), "Run selected web units without retries")
 	// A new job or matrix row must invalidate the proof inventory.
 	jobs["new-required-job"] = map[string]any{"runs-on": "ubuntu-latest"}
 	if reflect.DeepEqual(proof.RequiredJobs, mergeGroupInventory(t, w)) {
@@ -372,6 +373,96 @@ func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
 	treeMap(treeMap(treeMap(jobs["web-shard"])["strategy"])["matrix"])["shard"] = []any{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13}
 	if reflect.DeepEqual(proof.RequiredJobs, mergeGroupInventory(t, w)) {
 		t.Fatal("new matrix row escaped drift check")
+	}
+}
+
+// Restore the historical setup for its immutable hash check only after proving
+// the new setup and parallel unit job preserve every moved check byte for byte.
+func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(root(t), "scripts/releaseworkflow/testdata/ci-web-setup-before-parallel.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var historical map[string]any
+	if err := yaml.Unmarshal(body, &historical); err != nil {
+		t.Fatal(err)
+	}
+	before := treeMap(historical["web-setup"])
+	setup, unit := treeMap(jobs["web-setup"]), treeMap(jobs["web-unit"])
+	wantSteps := []any{}
+	for _, value := range reuseSteps(before) {
+		old := treeMap(value)
+		name, _ := old["name"].(string)
+		var moved map[string]any
+		switch name {
+		case "Install shells used by command round-trip unit tests":
+			moved = reuseStep(t, unit, name)
+		case "Web unit checks (once)":
+			moved = cloneStep(t, reuseStep(t, unit, "Run selected web units without retries"))
+			moved["name"] = name
+			moved["run"] = strings.Replace(moved["run"].(string), `if [ "${{ matrix.shard }}" = 1 ]; then npm run ci:web:shard:test; fi`, "npm run ci:web:shard:test", 1)
+			moved["run"] = strings.Replace(moved["run"].(string), "--unit --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-unit-${{ matrix.shard }}", "--unit --job web-unit", 1)
+		case "Confirm full tier execution":
+			moved = cloneStep(t, reuseStep(t, unit, name))
+			treeMap(moved["env"])["TIER_REPORT"] = strings.Replace(treeMap(moved["env"])["TIER_REPORT"].(string), "web-unit-${{ matrix.shard }}", "web-unit", 1)
+		case "Preserve unit tier measurements":
+			moved = cloneStep(t, reuseStep(t, unit, name))
+			treeMap(moved["with"])["name"] = strings.Replace(treeMap(moved["with"])["name"].(string), "web-unit-${{ matrix.shard }}", "web-unit", 1)
+		case "Browser runner safety (no browsers)":
+			moved = cloneStep(t, reuseStep(t, unit, name))
+			if moved["if"] != "matrix.shard == 1" {
+				t.Fatal("Browser safety must run once")
+			}
+			delete(moved, "if")
+		default:
+			wantSteps = append(wantSteps, value)
+			continue
+		}
+		if !reflect.DeepEqual(moved, old) {
+			t.Fatalf("Moved check %s changed: got %v want %v", name, moved, old)
+		}
+	}
+	want := cloneStep(t, before)
+	want["steps"] = wantSteps
+	if !reflect.DeepEqual(setup, want) {
+		t.Fatal("Parallel setup changed beyond moving units and their prerequisites/proofs")
+	}
+	return before
+}
+
+func cloneStep(t *testing.T, value map[string]any) map[string]any {
+	t.Helper()
+	body, err := yaml.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var copy map[string]any
+	if err := yaml.Unmarshal(body, &copy); err != nil {
+		t.Fatal(err)
+	}
+	return copy
+}
+
+func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
+	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
+	normalizeParallelWebSetup(t, jobs)
+	unit, browser := treeMap(jobs["web-unit"]), treeMap(jobs["web-shard"])
+	for _, j := range []map[string]any{unit, browser} {
+		if !reflect.DeepEqual(j["needs"], []any{"ci-plan", "web-setup", "tree-reuse", "tier-plan"}) {
+			t.Fatal("Unit and browser shards must start together from setup, without depending on each other")
+		}
+		if treeMap(reuseStep(t, j, "Download shared web runtime")["with"])["name"] != "web-runtime" || reuseStep(t, j, "Restore web runtime")["run"] != `tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"` {
+			t.Fatal("Unit and browser shards must restore the same prepared runtime")
+		}
+	}
+	run := reuseStep(t, unit, "Run selected web units without retries")["run"].(string)
+	if strings.Count(run, "npm run test:unit:core") != 1 || !strings.Contains(run, `if [ "${{ matrix.shard }}" = 1 ]; then npm run ci:web:shard:test; fi`) {
+		t.Fatal("Spec-only units and full-lane shard regressions must each run once")
+	}
+	measure := treeMap(jobs["tier-measurements"])
+	if !containsNeed(measure["needs"], "ci-plan") || treeMap(reuseStep(t, measure, "Report cases and complete job runner minutes")["env"])["CI_LANE"] != "${{ needs.ci-plan.outputs.lane }}" {
+		t.Fatal("Tier measurements must report spec-only's untiered scope")
 	}
 }
 
@@ -428,6 +519,9 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 		value := w["concurrency"]
 		if id != "concurrency" {
 			j := treeMap(jobs[id])
+			if id == "web-setup" {
+				j = normalizeParallelWebSetup(t, jobs)
+			}
 			value = j
 			normalizeNixVendorAdditions(t, id, j)
 			if condition, ok := j["if"].(string); ok && strings.Contains(condition, "tree-reuse") {
@@ -451,7 +545,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 			for _, v := range reuseSteps(j) {
 				s := treeMap(v)
 				if s["name"] == "PR classification and exact-SHA reuse regressions" {
-					if s["run"] != "node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs" {
+					if s["run"] != "node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs" {
 						t.Fatal("unreviewed verifier regression command")
 					}
 					s["name"] = "PR classification regressions"

@@ -305,7 +305,7 @@ func TestRehearsalBuildsAndReceiptCannotSkip(t *testing.T) {
 	}
 	_, export := named(t, w.Jobs["image-dry-run"], "Export production image with provenance locally")
 	_, push := named(t, r.Jobs["image-platform"], "Build and push")
-	for _, key := range []string{"context", "platforms", "provenance", "cache-from", "build-args"} {
+	for _, key := range []string{"context", "platforms", "provenance", "cache-from", "build-args", "build-contexts"} {
 		if export.With[key] != push.With[key] {
 			t.Fatalf("export differs: %s", key)
 		}
@@ -324,8 +324,8 @@ func TestRehearsalBuildsAndReceiptCannotSkip(t *testing.T) {
 		}
 	}
 	web := readWorkflow(t, "docker-web-check.yml")
-	_, build := named(t, web.Jobs["docker-web-stage"], "Build the production Docker web stage")
-	if build.With["context"] != "." || build.With["target"] != "web" || build.With["push"] != "false" {
-		t.Fatal("PR misses real Docker web context")
+	_, build := named(t, web.Jobs["docker-web-stage"], "Build the production web inputs")
+	if build.Run != "node scripts/build-image-inputs.mjs web" {
+		t.Fatal("PR misses production host web compilation")
 	}
 }

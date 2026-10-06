@@ -46,7 +46,7 @@ for (const width of sizes) for (const theme of ['light', 'dark']) {
   test(`work vocabulary and surfaces ${width} ${theme}`, async ({ page }) => {
     await mkdir(shots, { recursive: true }); await page.setViewportSize({ width, height: 1000 })
     const w = await world(page, theme), errors = watchErrors(page)
-    await page.goto('/settings/workspace')
+    await page.goto('/settings/vocabulary')
     const screenshot = async (surface: string) => { await expect(page.locator('html')).toHaveAttribute('data-theme', theme); await page.screenshot({ path: `${shots}/${surface}-${width}-${theme}.png`, fullPage: true }) }
     const card = page.locator('#work-vocabulary')
     await expect(card.getByLabel('Leaf name')).toHaveValue('Arbeitsschritt')

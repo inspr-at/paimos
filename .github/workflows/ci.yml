@@ -454,7 +454,7 @@ jobs:
   # The former footer-ui, status-help-ui and status-autopilot-ui jobs and the e2e
   # model-settings step ran specs that the shards now own (groups footer,
   # status-help, status-autopilot, model-settings); their unit tests run once in
-  # web-setup via npm run test:unit.
+  # the parallel web-unit matrix via the tier runner.
   web-setup:
     needs: [ci-plan, tree-reuse, tier-plan]
     if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group'
@@ -492,44 +492,11 @@ jobs:
         run: npm ci
       - name: Check Docker web inputs without Docker
         run: node --test scripts/docker-web-inputs.test.mjs
-      - name: Install shells used by command round-trip unit tests
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh
       - working-directory: web
         run: npm run typecheck
       # The session and run ledger fences (AEON-449): endpoints only in lib/agentRows.ts, wire rows only through the ledger.
       - working-directory: web
         run: npm run lint
-      - name: Web unit checks (once)
-        env:
-          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
-          AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
-        working-directory: web
-        run: |
-          if [ "$CI_LANE" = spec-only ]; then
-            # New specs need no tier entry for this lane's exact-spec run.
-            node --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs
-            npm run test:unit:core
-          else
-            npm run ci:web:shard:test
-            node ../scripts/test-tiers/cli.mjs run web --unit --job web-unit
-          fi
-      - name: Confirm full tier execution
-        if: needs.ci-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential'
-        env:
-          TIER_REPORT: tmp/test-tiers/web-unit-measurement.json
-        run: node scripts/test-tiers/check-full.mjs
-      - name: Preserve unit tier measurements
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: web-unit-tier-measurements
-          path: tmp/test-tiers/
-          if-no-files-found: warn
-          retention-days: 8
-          overwrite: true
-      - name: Browser runner safety (no browsers)
-        working-directory: web
-        run: npm run test:browser-safety
       - name: Build web
         working-directory: web
         run: npm run build
@@ -555,6 +522,66 @@ jobs:
           retention-days: 1
           overwrite: true
           if-no-files-found: error
+
+  # Units start with the UI shards; setup only prepares their shared runtime.
+  web-unit:
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.web-setup.result == 'success'
+    needs: [ci-plan, web-setup, tree-reuse, tier-plan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Spec-only retains the existing exact-spec lane's once-only unit command.
+        shard: ${{ fromJSON(needs.ci-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4]') }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+      - name: Download shared web runtime
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: web-runtime
+          path: ${{ runner.temp }}/web-runtime
+      - name: Restore web runtime
+        run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
+      - name: Install shells used by command round-trip unit tests
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh
+      - name: Run selected web units without retries
+        env:
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
+          AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
+        working-directory: web
+        run: |
+          if [ "$CI_LANE" = spec-only ]; then
+            # New specs need no tier entry for this lane's exact-spec run.
+            node --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs
+            npm run test:unit:core
+          else
+            if [ "${{ matrix.shard }}" = 1 ]; then npm run ci:web:shard:test; fi
+            node ../scripts/test-tiers/cli.mjs run web --unit --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-unit-${{ matrix.shard }}
+          fi
+      - name: Confirm full tier execution
+        if: needs.ci-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential'
+        env:
+          TIER_REPORT: tmp/test-tiers/web-unit-${{ matrix.shard }}-measurement.json
+        run: node scripts/test-tiers/check-full.mjs
+      - name: Preserve unit tier measurements
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: web-unit-${{ matrix.shard }}-tier-measurements
+          path: tmp/test-tiers/
+          if-no-files-found: warn
+          retention-days: 8
+          overwrite: true
+      - name: Browser runner safety (no browsers)
+        if: matrix.shard == 1
+        working-directory: web
+        run: npm run test:browser-safety
 
   web-shard:
     if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.web-setup.result == 'success'
@@ -645,10 +672,10 @@ jobs:
   web:
     name: web
     if: always()
-    needs: [ci-plan, web-setup, web-shard, tree-reuse, cache-prime, tier-plan]
+    needs: [ci-plan, web-setup, web-unit, web-shard, tree-reuse, cache-prime, tier-plan]
     runs-on: ubuntu-latest
     steps:
-      - name: Require setup and every web shard
+      - name: Require setup, units and every web shard
         env:
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
           REUSE_PROOF: ${{ needs.tree-reuse.result }}
@@ -658,6 +685,7 @@ jobs:
           CI_PLAN: ${{ needs.ci-plan.result }}
           CI_LANE: ${{ needs.ci-plan.outputs.lane }}
           WEB_SETUP: ${{ needs.web-setup.result }}
+          WEB_UNIT: ${{ needs.web-unit.result }}
           WEB_SHARD: ${{ needs.web-shard.result }}
         run: |
           set -euo pipefail
@@ -671,23 +699,27 @@ jobs:
             [[ "$SOURCE_RUN" =~ ^[1-9][0-9]*$ ]] || exit 1
             test "$CACHE_PRIME" = success
             test "$WEB_SETUP" = skipped
+            test "$WEB_UNIT" = skipped
             test "$WEB_SHARD" = skipped
             echo "reused merge_group run $SOURCE_RUN" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
-          echo "web-setup=${WEB_SETUP} web-shard=${WEB_SHARD}"
+          echo "web-setup=${WEB_SETUP} web-unit=${WEB_UNIT} web-shard=${WEB_SHARD}"
           test "$CI_PLAN" = success
           case "$CI_LANE" in
             docs-only)
               test "$WEB_SETUP" = skipped
+              test "$WEB_UNIT" = skipped
               test "$WEB_SHARD" = skipped
               echo 'docs-only: web checks skipped' >> "$GITHUB_STEP_SUMMARY" ;;
             spec-only)
               test "$WEB_SETUP" = success
+              test "$WEB_UNIT" = success
               test "$WEB_SHARD" = success
               echo 'spec-only: changed specs passed' >> "$GITHUB_STEP_SUMMARY" ;;
             full)
               test "$WEB_SETUP" = success
+              test "$WEB_UNIT" = success
               test "$WEB_SHARD" = success
               ;;
             *) exit 1 ;;
@@ -775,7 +807,7 @@ jobs:
           python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'
           python3 -B scripts/audit/covcheck.py --summary
       - name: PR classification and exact-SHA reuse regressions
-        run: node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs
+        run: node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs
       - name: Full UI QA workflow regressions
         run: node --test scripts/full-ui-qa.test.mjs
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -953,7 +985,7 @@ jobs:
 
   tier-measurements:
     if: always()
-    needs: [go, web, release-check, e2e, migration-compat, tree-reuse]
+    needs: [go, web, release-check, e2e, migration-compat, tree-reuse, ci-plan]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -971,6 +1003,7 @@ jobs:
           path: tmp/tier-job-evidence
       - name: Report cases and complete job runner minutes
         env:
+          CI_LANE: ${{ needs.ci-plan.outputs.lane }}
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
