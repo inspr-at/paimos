@@ -37,8 +37,10 @@ export function runnerSelection(tests,options,candidate,planner) {
   return selection
 }
 
-export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,plannerMode=process.env.AEON_TEST_TIER_MODE,plannerLayout=process.env.AEON_TEST_TIER_LAYOUT,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false}={}) {
-  const inventory=target(kind)
+// Programmatic comparisons can share one native snapshot of an unchanged
+// checkout. Normal CLI invocations always use fresh discovery.
+export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,plannerMode=process.env.AEON_TEST_TIER_MODE,plannerLayout=process.env.AEON_TEST_TIER_LAYOUT,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false}={}, { collect=target }={}) {
+  const inventory=collect(kind)
   const manifest=load(kind)
   const all=validate(manifest,inventory.tests)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
@@ -177,7 +179,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   return report.exitCode
 }
 
-export async function main(args) {
+export async function main(args, dependencies={}) {
   const [mode,kind,...flags]=args
   if(!['go','web'].includes(kind)||!['collect','check','classify','plan','run'].includes(mode)) throw new Error('Usage: cli.mjs collect|check|classify|plan|run go|web [--full | --all] [--unit] [--shard i/N] [--paths JSON] [check: --strict]')
   const options={unit:false,full:false,all:false,job:`${kind}-tiers`}
@@ -220,7 +222,7 @@ export async function main(args) {
     saveManifest(manifestFile(kind),manifest);return 0
   }
   if(options.paths===undefined) options.paths=changedPaths(options.event??process.env.GITHUB_EVENT_NAME,process.env,{fetchBase:true})
-  const selection=plan(kind,options)
+  const selection=plan(kind,options,dependencies)
   console.log(JSON.stringify({kind,full:selection.full,layout:selection.layout??'full',reason:selection.reason,scope:selection.scope??'changed-area',deferredBrowserCases:selection.deferredBrowserCases??0,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
   if(mode==='run') return run(kind,selection,options)
   return 0
