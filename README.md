@@ -4064,12 +4064,17 @@ AEON-655 Outline roots load incrementally with one unified cursor. Page sizes re
 
 AEON-655 completion validation covers migrated `work` and legacy `ticket` records. Creating or moving a work item into Done, Accepted or Delivered requires both pill and benefit texts in English and German, including when hidden from release notes. Already completed history remains editable; reopening restores the next-completion requirement. The workspace offers the same benefit reading section, editor and completion prompt for work items. Outline rendering traverses explicit frames rather than the JavaScript call stack; a 3600-row path (1800 ancestors plus 1800 matches) has regression coverage.
 
-Release image publication compares architecture, OS, variant, ordered rootfs
-diff IDs and runtime configuration from `docker image inspect` between the pushed
-image and the image that passed smoke, before attestation and release index
-publication. Both exports share `SOURCE_DATE_EPOCH` from
-`git show -s --format=%ct HEAD`; image IDs, `created`, history and provenance index
-digests are not compared. The PDF visual diff gate returns
+Release image publication runs two gates before attestation and release index
+publication. First, the pushed digest is walked to its platform manifest, whose
+image config digest must equal the smoked build's config digest exactly; that
+config includes `created` and history, so both exports share `SOURCE_DATE_EPOCH`
+from `git show -s --format=%ct HEAD` and use `rewrite-timestamp`. Second, the
+runtime comparison reads architecture, OS, variant, ordered rootfs diff IDs and
+runtime configuration from `docker image inspect` for the pushed image and the
+image that passed smoke. Only this runtime comparison excludes image IDs,
+`created`, history and provenance index digests; a build that differs only in
+its clock passes the runtime comparison but fails the config digest gate.
+The PDF visual diff gate returns
 exit 2 for any missing page, including blank pages, independently of pixel tolerance.
 
 ### Ticket work measurement (AEON-503)
