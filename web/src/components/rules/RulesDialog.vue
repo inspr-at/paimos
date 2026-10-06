@@ -48,8 +48,8 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 .size-center, .size-wide { position: fixed; inset: 96px 0 auto; width: min(560px, calc(100vw - 24px)); margin: 0 auto; }
 .size-wide { width: min(760px, calc(100vw - 24px)); }
 .size-center .card, .size-wide .card { max-height: min(760px, calc(100dvh - 112px)); border-radius: 16px; }
-.size-side, .size-sheet { position: fixed; inset: 0 0 0 auto; width: min(560px, 100vw); height: 100%; margin: 0; }
-.size-sheet { width: min(860px, 100vw); }
+.size-side, .size-sheet { position: fixed; inset: 0 0 0 auto; width: min(var(--dialog-m), 100vw); height: 100%; margin: 0; }
+.size-sheet { width: min(var(--dialog-l), 100vw); }
 .size-side .card, .size-sheet .card { height: 100%; border-radius: 16px 0 0 16px; }
 .head { flex: none; display: flex; align-items: flex-start; gap: 12px; padding: 18px 20px 12px; }
 .titles { flex: 1; min-width: 0; }

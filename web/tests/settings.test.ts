@@ -4,10 +4,13 @@ import assert from 'node:assert/strict'
 import { keyState, sectionOf, senderLine, settingsLink, visibleSections, type AgentKey } from '../src/lib/settings.ts'
 
 test('Personal, Developer and Policies are for everyone; workspace sections follow their grants', () => {
-  assert.deepEqual(visibleSections(false).map(s => s.id), ['personal', 'theme', 'developer', 'policies'])
-  assert.deepEqual(visibleSections(true).map(s => s.label), ['Personal', 'Theme', 'Developer', 'Policies', 'Workspace', 'Business', 'Projects', 'Product portal'])
-  assert.equal(sectionOf('business'), 'business')
+  assert.deepEqual(visibleSections(false).map(s => s.id), ['personal', 'theme', 'developer', 'vocabulary', 'policies'])
+  assert.deepEqual(visibleSections(true).map(s => s.label), ['Personal', 'Theme', 'Developer', 'Workspace', 'Vocabulary', 'Policies', 'Agents', 'Autopilot', 'Business', 'Product portal'])
+  assert.equal(sectionOf('projects'), 'vocabulary')
+  assert.equal(sectionOf('agents'), 'agents')
+  assert.equal(sectionOf('autopilot'), 'autopilot')
   assert.equal(sectionOf('theme'), 'theme')
+  assert.equal(sectionOf('business'), 'business')
   assert.equal(sectionOf('developer'), 'developer')
   assert.equal(sectionOf(undefined), 'personal')
   assert.equal(sectionOf('nope'), 'personal')

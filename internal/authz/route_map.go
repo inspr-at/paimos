@@ -24,6 +24,13 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	// Lead handlers retain their actor/owner checks inside the final transaction.
+	"GET /api/projects/{projectId}/lead":                            "harness.read",
+	"POST /api/projects/{projectId}/lead":                           "harness.control",
+	"POST /api/projects/{projectId}/lead/yield":                     "harness.worker",
+	"POST /api/projects/{projectId}/lead/claim":                     "harness.worker",
+	"POST /api/projects/{projectId}/lead/pause":                     "harness.control|harness.worker",
+	"GET /api/projects/{projectId}/lead/usage":                      "harness.read",
 	"POST /api/projects/{projectId}/chat-roles":                     "chat.bind",
 	"POST /api/projects/{projectId}/chat-threads/resolve":           "chat.read",
 	"GET /api/chat-threads/{id}":                                    "chat.read",
@@ -148,6 +155,10 @@ var RoutePermissions = map[string]string{
 	"POST /api/queue/{nodeId}/undo":                                           "nodes.read", // Handler rechecks queue write permission and receipt ownership in the mutation transaction.
 	"GET /api/queue":                                                          "nodes.read",
 	"POST /api/queue":                                                         "nodes.read",
+	"POST /api/queue/{nodeId}/snapshots":                                      "nodes.read",
+	"GET /api/queue-snapshots/{snapshotId}":                                   "nodes.read",
+	"POST /api/queue-snapshots/{snapshotId}/apply":                            "nodes.read",
+	"DELETE /api/queue-snapshots/{snapshotId}":                                "nodes.read",
 	"DELETE /api/queue/{nodeId}":                                              "nodes.read",
 	"POST /api/queue/{nodeId}/move":                                           "nodes.read",
 	"POST /api/queue/reset":                                                   "nodes.read",
@@ -333,7 +344,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/inbox/stream":                                                  "inbox.read",
 	"GET /api/inbox/targets":                                                 "inbox.read",
 	"GET /api/kinds":                                                         "nodes.read",
-	"GET /api/status/help":                                                   "nodes.read",
+	"GET /api/status/help":                                                   "nodes.read", // Authenticated agents have a read-only exception in RequirePattern.
 	"GET /api/kinds/{kindId}":                                                "nodes.read",
 	"GET /api/knowledge":                                                     "knowledge.read",
 	"GET /api/knowledge/graph":                                               "knowledge.read",
@@ -352,6 +363,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/models/resolve":                                                "models.read",
 	"GET /api/models/routes":                                                 "models.read",
 	"GET /api/node-keys/{key}":                                               "nodes.read",
+	"GET /api/outcomes/measurement":                                          "outcome.read",
 	"GET /api/outcomes":                                                      "outcome.read",
 	"GET /api/nodes":                                                         "nodes.read",
 	"GET /api/nodes/lookup":                                                  "nodes.read",
@@ -545,6 +557,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/model-prices":                                                                     "harness.read",
 	"POST /api/model-prices":                                                                    "models.manage",
 	"GET /api/projects/{projectId}/instruction-provenance":                                      "harness.read",
+	"GET /api/projects/{projectId}/lead-decisions":                                              "nodes.read",
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/lead-decisions":                  "harness.worker",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/provenance":                     "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/usage":                          "harness.read",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/provenance":                    "harness.worker",
@@ -710,6 +724,7 @@ func PatternIsPublic(pattern string) bool {
 // route's own capability or login checks in place. An authenticated declaration
 // requires the trusted principal set by authentication. Quote portal declarations
 // allow either staff or customer authority; the handler checks ownership.
+// Status help is scope-free tenant metadata for agents; people retain nodes.read.
 func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	declaration, ok := PermissionForPattern(pattern)
 	if !ok {
@@ -717,6 +732,15 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 	}
 	if declaration == PublicRoute {
 		return nil
+	}
+	if pattern == "GET /api/status/help" {
+		p, ok := tenant.PrincipalFrom(ctx)
+		if !ok || p.ID == "" || p.TenantID == "" {
+			return ErrForbidden
+		}
+		if p.Kind == tenant.Agent {
+			return nil
+		}
 	}
 	if declaration == AuthenticatedRoute {
 		if p, ok := tenant.PrincipalFrom(ctx); ok && p.ID != "" && p.TenantID != "" {
