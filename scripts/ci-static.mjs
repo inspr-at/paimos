@@ -216,15 +216,20 @@ export function reuseDependencies(root, tree) {
   return true
 }
 
-export function runCommand(command, { cwd, timeout_seconds, env = process.env, signal } = {}) {
+export function runCommand(command, { cwd, timeout_seconds, env = process.env, signal, id = 'command', killProcess = process.kill } = {}) {
   return new Promise(resolveResult => {
     const begin = performance.now()
     let output = '', expired = false, interrupted = false, timer, killTimer
     const child = spawn('/bin/sh', ['-c', command], { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] })
     const tail = data => { output = (output + data.toString()).slice(-65536) }
     child.stdout.on('data', tail); child.stderr.on('data', tail)
-    function kill(sig) {
-      try { process.platform === 'win32' ? child.kill(sig) : process.kill(-child.pid, sig) } catch (error) { if (error.code !== 'ESRCH') tail(error.message) }
+    function kill(sig, afterClose = false) {
+      try { process.platform === 'win32' ? child.kill(sig) : killProcess(-child.pid, sig) }
+      catch (error) {
+        // Darwin can report EPERM for an exited, zombie-only process group.
+        // Before close, EPERM must still be reported as a signal failure.
+        if (error.code !== 'ESRCH' && !(afterClose && process.platform !== 'win32' && error.code === 'EPERM')) tail(error.message)
+      }
     }
     function stop() { kill('SIGTERM'); killTimer ??= setTimeout(() => kill('SIGKILL'), 500) }
     const abort = () => { interrupted = true; stop() }
@@ -232,10 +237,15 @@ export function runCommand(command, { cwd, timeout_seconds, env = process.env, s
     timer = setTimeout(() => { expired = true; stop() }, timeout_seconds * 1000)
     child.on('error', error => tail(error.message))
     child.on('close', (code, sig) => {
-      if (expired || interrupted) kill('SIGKILL')
+      if (expired || interrupted) kill('SIGKILL', true)
       clearTimeout(timer); clearTimeout(killTimer); signal?.removeEventListener('abort', abort)
+      const seconds = Math.round((performance.now() - begin) / 10) / 100
+      if (expired || interrupted) {
+        const cause = expired ? `exceeded timeout_seconds=${timeout_seconds}` : 'interrupted'
+        tail(`\nci-static: ${id} ${cause} after ${seconds}s (process group termination requested)`)
+      }
       resolveResult({ status: expired ? 'timeout' : interrupted ? 'interrupted' : code === 0 ? 'passed' : 'failed',
-        seconds: Math.round((performance.now() - begin) / 10) / 100, code, signal: sig,
+        seconds, code, signal: sig,
         output: output.trimEnd().split('\n').slice(-40).join('\n') })
     })
     if (signal?.aborted) abort()
@@ -286,7 +296,7 @@ export async function runChecks(checks, root, { jobs = 4, baseRef, signal, run =
             writeFileSync(join(typecheckDir, 'tsconfig.json'), JSON.stringify({ files: [], references: [{ path: './app.json' }, { path: './node.json' }] }))
             executed += ' ' + shellQuote(join(typecheckDir, 'tsconfig.json'))
           }
-          results[i] = { ...base, executed_command: executed, ...await run(executed, { cwd: resolve(root, check.cwd), timeout_seconds: check.timeout_seconds, env, signal }) }
+          results[i] = { ...base, executed_command: executed, ...await run(executed, { cwd: resolve(root, check.cwd), timeout_seconds: check.timeout_seconds, env, signal, id: check.id }) }
         }
       }
     }))
