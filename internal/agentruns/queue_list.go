@@ -14,7 +14,23 @@ import (
 )
 
 func (m *module) queueEntries(ctx context.Context, tx pgx.Tx) ([]queueEntry, error) {
-	rows, err := tx.Query(ctx, workqueue.CTE+`SELECT queue_node_id::text,project_id::text,key,title,state,fields,id::text FROM queue_ordered ORDER BY queue_target_agent_id NULLS FIRST,queue_position`)
+	return m.queueEntriesFor(ctx, tx, "", "", false)
+}
+
+// Limit the lead pickup snapshot and fields on the wire before decoding or
+// loading per-entry run/projection data. Overflow is never a partial success.
+func (m *module) queueEntriesFor(ctx context.Context, tx pgx.Tx, project, node string, bounded bool) ([]queueEntry, error) {
+	q := workqueue.CTE + `SELECT queue_node_id::text,project_id::text,key,title,state,`
+	if bounded {
+		q += `CASE WHEN octet_length(fields::text)<=65536 THEN fields END`
+	} else {
+		q += `fields`
+	}
+	q += `,id::text FROM queue_ordered WHERE ($1::uuid IS NULL OR project_id=$1) AND ($2::uuid IS NULL OR queue_node_id=$2) ORDER BY queue_target_agent_id NULLS FIRST,queue_position`
+	if bounded {
+		q += ` LIMIT 201`
+	}
+	rows, err := tx.Query(ctx, q, optional(project), optional(node))
 	if err != nil {
 		return nil, err
 	}
@@ -25,6 +41,14 @@ func (m *module) queueEntries(ctx context.Context, tx pgx.Tx) ([]queueEntry, err
 		if err = rows.Scan(&item.NodeID, &item.ProjectID, &item.Key, &item.Title, &item.State, &fields, &item.Run.ID); err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if bounded && fields == nil {
+			rows.Close()
+			return nil, workorders.Fail(409, "lead scheduling fields exceed bound")
+		}
+		if bounded && len(items) == 200 {
+			rows.Close()
+			return nil, workorders.Fail(409, "lead scheduling snapshot exceeds bound")
 		}
 		f := workqueue.Fields(fields)
 		item.Hours = workqueue.Hours(f)
@@ -74,7 +98,10 @@ func (m *module) queueEntries(ctx context.Context, tx pgx.Tx) ([]queueEntry, err
 	return items, nil
 }
 func (m *module) queueEntry(ctx context.Context, tx pgx.Tx, id string) (queueEntry, error) {
-	entries, err := m.queueEntries(ctx, tx)
+	return m.queueEntryFor(ctx, tx, id, "", false)
+}
+func (m *module) queueEntryFor(ctx context.Context, tx pgx.Tx, id, project string, bounded bool) (queueEntry, error) {
+	entries, err := m.queueEntriesFor(ctx, tx, project, id, bounded)
 	if err != nil {
 		return queueEntry{}, err
 	}
