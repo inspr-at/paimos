@@ -233,9 +233,8 @@ func load(ctx context.Context, tx pgx.Tx, project, release string) (Walker, erro
 			return out, err
 		}
 		out.Tickets = append(out.Tickets, t)
-		// R1 uses 'done' for completed nodes. Other tenant-defined states are not
-		// guessed to be completion evidence.
-		if t.FeatureID != nil && state != "done" {
+		// Use the same terminal states as membership and the ticket picker.
+		if t.FeatureID != nil && !closedTicketState(state) {
 			c := counts[*t.FeatureID]
 			c[0]++
 			if t.Included {
