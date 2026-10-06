@@ -10,6 +10,7 @@ import { runPlaywright } from '../playwright-safe.mjs'
 import { loadManifest as loadBrowserPolicy, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import { changedPaths, schedulingDecision, eventBase, sourceTree, promotionsBetween } from './diff.mjs'
 import { boundedText } from './inputs.mjs'
+import { manifestsMain, classifyManifest } from './manifests.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
@@ -177,7 +178,43 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   return report.exitCode
 }
 
+export function classifyArgs(flags) {
+  const options = {}, legacy = ['go', 'web'].includes(flags[0])
+  let rest = flags
+  if (legacy) { options.kind = flags[0]; rest = flags.slice(1) }
+  for (let i = 0; i < rest.length; i++) {
+    const flag = rest[i]
+    if (!['--tier', '--kind', '--only'].includes(flag) || Object.hasOwn(options, flag.slice(2))) throw new Error(`Unknown or repeated classify flag: ${flag}`)
+    const value = rest[++i]
+    if (!value || value.startsWith('--')) throw new Error(`Missing value: ${flag}`)
+    options[flag.slice(2)] = value
+  }
+  if (options.kind !== undefined && !['go', 'web'].includes(options.kind)) throw new Error('Expected --kind go|web')
+  if (options.only !== undefined && options.only.length > 1024) throw new Error('Expected --only pattern of at most 1024 characters')
+  if (legacy && options.tier === undefined) options.tier = 'NIGHTLY'
+  if (!['ESSENTIAL', 'GATED-FULL', 'NIGHTLY'].includes(options.tier)) throw new Error('classify requires --tier ESSENTIAL|GATED-FULL|NIGHTLY')
+  return { ...options, strict: legacy && options.only === undefined }
+}
+
+export function classify(flags, { collect = target, read = load, save = saveManifest } = {}) {
+  const options = classifyArgs(flags), outputs = []
+  for (const kind of options.kind ? [options.kind] : ['go', 'web']) {
+    const inventory = collect(kind), manifest = read(kind)
+    validate(manifest, inventory.tests, undefined, { warn: () => {} })
+    const result = classifyManifest(manifest, inventory.tests, options)
+    validate(result.manifest, inventory.tests, undefined, { strict: options.strict, warn: () => {} })
+    outputs.push({ kind, ...result })
+  }
+  for (const { kind, manifest, added } of outputs) {
+    save(manifestFile(kind), manifest)
+    console.log(JSON.stringify({ kind, classified: added.length, tier: options.tier }))
+  }
+  return 0
+}
+
 export async function main(args) {
+  if (args[0] === 'manifests') return manifestsMain(args.slice(1), root)
+  if (args[0] === 'classify') return classify(args.slice(1))
   const [mode,kind,...flags]=args
   if(!['go','web'].includes(kind)||!['collect','check','classify','plan','run'].includes(mode)) throw new Error('Usage: cli.mjs collect|check|classify|plan|run go|web [--full | --all] [--unit] [--shard i/N] [--paths JSON] [check: --strict]')
   const options={unit:false,full:false,all:false,job:`${kind}-tiers`}
@@ -210,15 +247,6 @@ export async function main(args) {
     if(JSON.stringify(listed.sort())!==JSON.stringify(expected))throw new Error('Native Go -list inventory differs from classified source')
     console.log(JSON.stringify({nativeGoCases:listed.length,inventory:counts(all)}));return 0
   }
-  if(mode==='classify') {
-    const inventory=target(kind),manifest=load(kind),known=new Set(manifest.tests.map(key))
-    for(const row of inventory.tests) if(!known.has(key(row))) {
-      const {leaf,line,id,active,file,...entry}=row
-      manifest.tests.push({...entry,...(kind==='web'?{file}:{}),tier:'NIGHTLY'})
-    }
-    validate(manifest,inventory.tests,undefined,{strict:true}) // stale entries require an explicit edit
-    saveManifest(manifestFile(kind),manifest);return 0
-  }
   if(options.paths===undefined) options.paths=changedPaths(options.event??process.env.GITHUB_EVENT_NAME,process.env,{fetchBase:true})
   const selection=plan(kind,options)
   console.log(JSON.stringify({kind,full:selection.full,layout:selection.layout??'full',reason:selection.reason,scope:selection.scope??'changed-area',deferredBrowserCases:selection.deferredBrowserCases??0,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
@@ -227,5 +255,8 @@ export async function main(args) {
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try { process.exitCode=await main(process.argv.slice(2)) }
-  catch(error) { console.error(error.message);process.exitCode=1 }
+  catch(error) {
+    console.error(error.message)
+    process.exitCode=process.argv[2]==='manifests'&&process.argv[3]==='merge-driver'?3:1
+  }
 }
