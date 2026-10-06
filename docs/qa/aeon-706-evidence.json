@@ -400,5 +400,69 @@
       "Native planning still reports unrelated pre-existing unclassified registrations in agents-working.unit.test.ts and settings-owner.unit.test.ts. They are outside the supplied report findings and remain unchanged.",
       "No pushes, deploys, production writes, model review gates, ticket-status changes, secret reads, hook bypasses or amendments."
     ]
+  },
+  "fix_round_8": {
+    "baseline": "7324f7a04",
+    "review": "Brief typo review-review-static330.out.out resolved to qa/review-static330.out; report contains seven missing Go classifications and no product behavior findings or lows.",
+    "main": "2c36963df",
+    "merge": "c37fdb7dd: newest fetched origin/main merged cleanly on assigned branch before fixes. Main supplied the three workorders and shared-runtime classifications using the explicit NIGHTLY post-gate policy.",
+    "findings_fixed": [
+      "All seven reported Go registrations are explicitly classified. Three remaining release-builder tests added as NIGHTLY with matching postGateCases through the canonical native source collector/classify command.",
+      "All 4013 existing classifications and policy metadata are unchanged; main owns the four inherited classifications. No established case was demoted and the required CI gate is unchanged.",
+      "Two regression cases check exact registration coverage, strict scoped validation, retained post-gate policy and nightly/all selection while preserving full PR, merge-group and push scope."
+    ],
+    "regression_evidence": {
+      "before": "Both final regression cases fail on the exact 7324f7a0 go-test-tiers.json at the missing explicit-classification assertion; 0 pass, 2 fail. The merged manifest was restored in finally. The builder case also fails on merged main before adding the remaining three rows.",
+      "after": "The same two cases pass with unchanged assertions. Deferred/browser/product tests were not changed.",
+      "log": "tmp/test-tiers/aeon-706-fix8-before.txt"
+    },
+    "ownership": "Verified ppm INSPR tenant / workstation-agents principal, gh markus-barta, assigned branch and current coordinator builder marker on AEON-706 before edits. Ticket status and release gates remain coordinator-owned.",
+    "design": "Classification-only fix; no new product behavior, layout, API, migration or version change beyond the authorized upstream merge. No conflict with approved design decisions.",
+    "validation": [
+      {
+        "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+        "result": "175 passed, 0 failed, 0 skipped; includes both regressions and existing gate-preservation checks. Log: tmp/test-tiers/aeon-706-fix8-tiers.txt."
+      },
+      {
+        "command": "node --test web/scripts/ci-web-shard.test.mjs",
+        "result": "27 passed, 0 failed, 0 skipped, including native routing and login registration checks."
+      },
+      {
+        "command": "python3 -B -m unittest discover -s scripts/audit",
+        "result": "33 passed; no new source files or ownership-map changes."
+      },
+      {
+        "command": "GOTOOLCHAIN=local GOMAXPROCS=2 go test -p 2 ./internal/reportercontract/ -count=1",
+        "result": "Passed. The single permitted small local Go package validates OpenAPI changes and response pins imported from main."
+      },
+      {
+        "command": "collectGo() source inventory + validate(goManifest, inventory.tests, strict=true)",
+        "result": "4016 source registrations classified; 436 ESSENTIAL, 3289 GATED-FULL, 291 NIGHTLY. Zero missing/stale entries. All seven reported registrations are active and explicitly NIGHTLY. Evidence: tmp/test-tiers/aeon-706-fix8-source-inventory.json. This does not run full native go test -list ./... compilation/parity."
+      },
+      {
+        "command": "Focused Vitest runs, one file/worker at a time, retry=0",
+        "result": "plan-owner.unit.test.ts: 28 passed; existing-ticket-picker.unit.test.ts: 19 passed."
+      },
+      {
+        "command": "node scripts/test-tiers/cli.mjs manifests --check; node web/scripts/ci-web-shard.mjs --check --strict",
+        "result": "Passed: all three manifests canonical; 82 gated and 166 ungated browser specs explicitly accounted for."
+      },
+      {
+        "command": "Exact manifest data comparison against local merged HEAD",
+        "result": "All 4013 prior classifications and all policy metadata preserved; exactly three NIGHTLY rows and their matching postGateCases added."
+      },
+      {
+        "command": "git merge-base --is-ancestor 2c36963df HEAD; git diff --check",
+        "result": "Passed; latest main fetched before work is included, and whitespace checks pass."
+      }
+    ],
+    "follow_ups": [
+      "None from the supplied static report; all seven missing classifications resolved. Remote/full static gates remain coordinator-owned validation, listed under limits."
+    ],
+    "limits": [
+      "The direct user instruction forbids all pushes and deployments. remote-test.sh and ci-static-locked.sh/ci-static-remote.sh push temporary refs, so they were not invoked. The full local static/Go fallback is forbidden by worker-common; the full ci-static --merge-main, remote Go/full web suites and Linux Chromium remain unverified coordinator gates.",
+      "Local focused checks only; no claim of full native go test -list ./... parity or browser geometry verification.",
+      "No pushes, deployments, production writes, model review gates, ticket-status changes, credential reads, hook bypasses or amendments."
+    ]
   }
 }
