@@ -90,9 +90,19 @@ describe('online, no readings yet', () => {
     expect(cards[0].accounts.map(a => a.readiness.kind)).toEqual(['ready', 'ready'])
     expect(cards[0].accounts[0].capacity).toEqual({ kind: 'none' })
     // Cursor has no quota reader, independently of whether learning has begun.
-    expect(cards[0].accounts[1].capacity).toEqual({ kind: 'quiet', text: "Cursor doesn't show its limit · one run at a time by day" })
+    expect(cards[0].accounts[1].capacity).toEqual({ kind: 'quiet', text: 'Usage unknown · reserve not enforceable' })
+    expect(cards[0].accounts[1].learnedUse).toBe('')
     expect(cards[0].legend).toBe(false)
     expect(readySummary(cards)).toEqual({ text: '2 of 2 ready', tone: 'ok' })
+  })
+  it('shows observed spend when the vendor reports no window', () => {
+    const cap = capacity()
+    cap[1].learning = { windows: [], tokens: 24000, cost_micros: 0, runs: 3, limit_hits: 0 }
+    const [card] = buildComputerCards({ computers: [computer()], rows: buildRows(inputs('online'), cap), now: NOW })
+    const cursor = card.accounts[1]
+    expect(cursor.capacity).toEqual({ kind: 'quiet', text: 'Usage unknown · reserve not enforceable' })
+    expect(cursor.learnedUse).toBe('3 runs · 24k tokens')
+    expect(cursor.capacity.kind).not.toBe('bar')
   })
 })
 

@@ -485,6 +485,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
               </span>
               <span v-else-if="line.capacity.kind === 'offline'" class="quiet">No reading while the computer is offline</span>
               <span v-else class="quiet">{{ line.capacity.text }}</span>
+              <p v-if="line.learnedUse" class="learned-use">{{ line.learnedUse }}</p>
               <CapacityLearning :learning="line.row.learning" :host="card.name" :now="now" :may-manage="mayManage" :saving="busy" @hours="useHours(line.row)" @away="openEditor('keep')" />
             </div>
             <div role="cell" class="row-more">
@@ -685,6 +686,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 .fix { min-height: 26px; height: auto; max-width: 100%; padding-block: 5px; margin-left: -4px; color: var(--ink-2); font: 500 12px/1.4 var(--mono); white-space: normal; overflow-wrap: anywhere; text-align: left; }
 .acct-cap { min-width: 0; }
 .quiet { color: var(--ink-3); font-size: 13px; }
+.learned-use { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.4; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .no-reading { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .check-now { background: color-mix(in srgb, var(--teal) 8%, transparent); color: var(--teal-ink); }
 @media (hover: hover) { .check-now:hover:not(:disabled) { background: color-mix(in srgb, var(--teal) 14%, transparent); } }
