@@ -375,7 +375,7 @@ and 164 ungated specs across 12 shards. No behavior or assertion was changed.
 The worker is forbidden to push; local checks do not close this gate. The
 coordinator must complete `CI` on the integrated branch (PR or branch dispatch,
 keeping mbp2606 off limits). Retain the run URL, checked-out SHA, logs/reports
-showing `clip-tip`, `aeon-632b-clip`, `key-trim` and `model-prefs` actually
+showing `clip-tip`, `aeon-632b-clip`, `aeon-632b-clip-settings`, `key-trim` and `model-prefs` actually
 executed without skips, and successful `web-setup`, all 12 `web-shard` jobs
 and the required `web` aggregate. A later revision must retain these fixes
 and identify its exact SHA; selection-only output or a run on an unrelated

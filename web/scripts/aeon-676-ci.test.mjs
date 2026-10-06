@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
-const requiredSpecs = ['clip-tip', 'aeon-632b-clip', 'key-trim', 'model-prefs']
+const requiredSpecs = ['clip-tip', 'aeon-632b-clip', 'aeon-632b-clip-settings', 'key-trim', 'model-prefs']
   .map(name => `tests/${name}.spec.ts`)
 
 test('AEON-676 regressions retain hosted launch policy and full nightly coverage after tiering', () => {
@@ -53,7 +53,7 @@ test('AEON-676 regressions retain hosted launch policy and full nightly coverage
     requiredSpecs.some(file => entry.id.includes(file.split('/').at(-1)))), 'AEON-676 specs must block CI on failure')
 })
 
-test('default twelve-shard execution selects all four specs once and preserves each failure', async () => {
+test('default twelve-shard execution selects all five specs once and preserves each failure', async () => {
   const { loadManifest, main, webRoot } = await import('./ci-web-shard.mjs')
   const manifest = loadManifest()
   assert.equal(manifest.defaultShards, 12)

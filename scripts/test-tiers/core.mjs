@@ -173,7 +173,7 @@ export function measuredWeights(manifest, rows) {
   return weights
 }
 
-export function shard(rows, index, count, weights = {}) {
+export function shard(rows, index, count, weights = {}, { firstShardLast = false } = {}) {
   if (!Number.isInteger(count) || count < 1 || count > 64 || !Number.isInteger(index) || index < 1 || index > count) throw new Error('Invalid shard i/N')
   // Keep packages/files together to avoid compiling or launching a server for
   // each individual test. Measured tier costs override historical/count estimates.
@@ -184,10 +184,13 @@ export function shard(rows, index, count, weights = {}) {
     groups.get(owner).push(row)
   }
   const bins = Array.from({length: count}, () => ({ weight: 0, owners: 0, rows: [] }))
+  // Unit shard 1 also runs workflow and browser-supervisor regressions. Give
+  // equally loaded peers first choice without inventing a hosted overhead cost.
+  const preference = firstShardLast ? [...bins.slice(1), bins[0]] : bins
   for (const [owner, entries] of [...groups].sort(([a,ar],[b,br]) => (weights[b] ?? br.length)-(weights[a] ?? ar.length) || a.localeCompare(b))) {
     // Zero-duration owners still need a shard. On equal loads prefer fewer
     // owners, then retain shard order for a deterministic final tie-break.
-    const bin = bins.reduce((a,b) => b.weight < a.weight || (b.weight === a.weight && b.owners < a.owners) ? b : a)
+    const bin = preference.reduce((a,b) => b.weight < a.weight || (b.weight === a.weight && b.owners < a.owners) ? b : a)
     bin.rows.push(...entries)
     bin.owners++
     bin.weight += weights[owner] ?? entries.length
