@@ -196,7 +196,7 @@ func (m *Module) residencyEvidence(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var out residencyEvidenceRecord
-	// Writes share pairing -> tree -> tenant ordering with readiness and lifecycle
+	// Writes share tenant -> pairing -> tree ordering with readiness and lifecycle
 	// mutations. Advisory GETs need only a tenant-scoped snapshot: they must
 	// not acquire write fences or wait for an account mutation.
 	inTenant := m.in
