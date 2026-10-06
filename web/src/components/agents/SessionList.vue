@@ -75,7 +75,8 @@ const roots = (bucket: Bucket) => showRemoved.value
   ? (bucket === 'stopped' ? forest.value : [])
   : forest.value.filter(branch => bucketOf(branch.group) === bucket)
 // Count sessions, including folded descendants, rather than family roots.
-const bucketCount = (bucket: Bucket) => roots(bucket).reduce((sum, branch) => sum + (showRemoved.value || bucket === 'stopped' ? branch.count : branch.liveCount), 0)
+const pausedCount = (branch: Branch): number => Number(branch.view.status.state === 'paused') + branch.children.reduce((sum, child) => sum + pausedCount(child), 0)
+const bucketCount = (bucket: Bucket) => roots(bucket).reduce((sum, branch) => sum + (showRemoved.value || bucket === 'stopped' ? branch.count : bucket === 'paused' ? pausedCount(branch) : branch.liveCount), 0)
 const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
 const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)

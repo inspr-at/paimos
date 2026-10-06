@@ -121,6 +121,11 @@ test('ended workers remain recoverable through an opt-in fold without cleanup wr
   await expect(row(page, 10)).toHaveCount(0)
   expect(data.sessions.filter(session => session.stopped_at)).toHaveLength(3)
   expect(calls.filter(call => call.path.includes('harness-sessions') && call.method !== 'GET')).toEqual([])
+  // Main's durable paused sessions are stopped, but still belong to Paused.
+  for (const session of data.sessions.filter(session => !session.stopped_at)) Object.assign(session, { phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'paused', pause: { state: 'paused' } })
+  await page.reload()
+  await expect(page.locator('.sessions .group-row.paused .mono')).toHaveText('4')
+  await expect(liveCount(page)).toHaveCount(0)
 })
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
