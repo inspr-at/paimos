@@ -265,7 +265,8 @@ const footerWind = computed(() => {
 })
 // What this screen lists: live sessions, plus those paused on purpose.
 useFooterSummary(() => {
-  if (!session.identity) return null
+  // A first read that failed shows its own error; the footer does not wait for it.
+  if (!session.identity || (!agents.loaded && agents.sessionsError)) return null
   const live = agents.views.filter(v => !v.session.stopped_at && v.session.phase !== 'stopped')
   const states = (groups: string[]) => live.filter(v => groups.includes(v.status.group)).length
   const paused = agents.views.filter(v => v.status.state === 'paused').length

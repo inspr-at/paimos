@@ -94,6 +94,7 @@ const sequence = computed(() => groups.value.flatMap(group => group.shown))
 // The footer says what the list shows: entries, and the proposed ones to review (AEON-785).
 useFooterSummary(() => {
   const act = { review: () => setQuery({ status: 'proposed' }) }
+  if (!loaded.value && error.value) return null
   if (!loaded.value) return knowledgeFooter({ loaded: false, entries: 0, toReview: 0, updatedAt: null, now: now.value, act })
   const updated = visible.value.reduce((latest, item) => Math.max(latest, Date.parse(item.updated_at) || 0), 0)
   return knowledgeFooter({ loaded: true, entries: visible.value.length, toReview: visible.value.filter(item => item.status === 'proposed').length, updatedAt: updated || null, now: now.value, act })

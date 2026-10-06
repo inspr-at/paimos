@@ -310,6 +310,18 @@
     ,
     "browser:tests/footer-summary.spec.ts:settings stay silent when calm, and a failed save says so until it is saved again"
     ,
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 1024 in dark"
+    ,
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 1024 in light"
+    ,
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 1440 in dark"
+    ,
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 1440 in light"
+    ,
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 390 in dark"
+    ,
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 390 in light"
+    ,
     "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (full at 1440)"
     ,
     "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (short at 390)"
@@ -7249,6 +7261,18 @@
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"releases on their way are counted, a failed run is the exception, and the sheet gives the footer back when it closes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"settings stay silent when calm, and a failed save says so until it is saved again","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 1024 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 1024 in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 1440 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 1440 in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 390 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 390 in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"tickets say count, agents and the blocked ones, and the click adds the filter (full at 1440)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

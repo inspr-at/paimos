@@ -155,3 +155,25 @@ test('releases on their way are counted, a failed run is the exception, and the 
   await expect(page.getByRole('dialog', { name: 'PAIMOS AEON releases' })).toBeHidden()
   await expect(sum(page)).toHaveCount(0)
 })
+
+for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
+  test(`the summary sits between the mark and the release without touching either at ${width} in ${colorScheme}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 })
+    await page.emulateMedia({ colorScheme })
+    await connectedStream(page)
+    const data = fixtures()
+    data.nodes.find(node => node.id === 'n-4')!.state = 'blocked'
+    await mockWork(page, data)
+    await page.goto('/p/PHAROS/tickets')
+    await expect(sum(page)).toHaveAttribute('data-conn', 'on')
+    const box = async (selector: string) => (await page.locator(selector).first().boundingBox())!
+    const mark = await box('footer.app-footer .footer-wordmark'), centre = await box('footer.app-footer .sum'), release = await box('footer.app-footer .version-pill')
+    expect(mark.x + mark.width).toBeLessThanOrEqual(centre.x + .5)
+    expect(centre.x + centre.width).toBeLessThanOrEqual(release.x + .5)
+    // Phones keep a 44 px target; wider footers centre the summary on the page.
+    if (width <= 600) expect(centre.height).toBeGreaterThanOrEqual(44)
+    else expect(Math.abs(centre.x + centre.width / 2 - width / 2)).toBeLessThanOrEqual(width < 1100 ? 40 : 2)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBe(0)
+    await page.screenshot({ path: info.outputPath(`footer-${width}-${colorScheme}.png`), clip: { x: 0, y: 900 - 56, width, height: 56 } })
+  })
+}

@@ -89,7 +89,7 @@ watch(() => ({ source: footerSource.value, at: footerLive.value?.updatedAt ?? nu
 }, { flush: 'sync', immediate: true })
 // Polite announcement only when the tone turns problem.
 const announcement = ref('')
-watch(() => summary.value?.tone === 'problem' ? summary.value.aria : '', text => { announcement.value = text })
+watch(() => summary.value?.tone, (tone, before) => { announcement.value = tone === 'problem' && before !== 'problem' ? summary.value?.aria ?? '' : '' })
 function activate() { if (!paused.value) summary.value?.action?.() }
 const version = useVersion()
 const releases = useReleases()

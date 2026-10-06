@@ -786,7 +786,7 @@
         ,
         {"file":"tests/first-run.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/footer-summary.spec.ts","listedTests":7,"weightSeconds":12,"weightSource":"estimate"}
+        {"file":"tests/footer-summary.spec.ts","listedTests":13,"weightSeconds":20,"weightSource":"estimate"}
         ,
         {"file":"tests/from-classic.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,

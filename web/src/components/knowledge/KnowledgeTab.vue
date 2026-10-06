@@ -143,6 +143,7 @@ function showAll() { updateFilters({ status: 'all' }) }
 
 // The footer says what this list shows: entries, and the proposed ones a person has to review (AEON-785).
 useFooterSummary(() => {
+  if (!props.state.loaded.value && props.state.error.value) return null
   if (!props.state.loaded.value) return knowledgeFooter({ loaded: false, entries: 0, toReview: 0, updatedAt: null, now: props.now, act: { review: showReview, sort: showRecent } })
   const items = props.state.visible.value
   const updated = items.reduce((latest, item) => Math.max(latest, Date.parse(item.updated_at) || 0), 0)

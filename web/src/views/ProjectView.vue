@@ -549,7 +549,8 @@ function setSort(sort: SortKey[]) { update({ sort }) }
 // ---------- Footer summary (AEON-785): what this list shows ----------
 // The same total the toolbar counts; blocked from the state counts, workers from the live read.
 useFooterSummary(() => {
-  if (!session.identity || !project.value || !liveActive.value) return null
+  // A first read that failed shows its own error; the footer does not wait for it.
+  if (!session.identity || !project.value || !liveActive.value || (list.error.value && !list.loadedOnce.value)) return null
   const states = list.facets.value.state ?? {}
   const blocked = Object.entries(states).reduce((sum, [state, n]) => sum + (normaliseState(state) === 'blocked' ? n : 0), 0)
   const loaded = new Set((outlineActive.value ? outline.rows.value : list.rows.value).map(row => row.id))

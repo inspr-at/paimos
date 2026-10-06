@@ -196,6 +196,7 @@ const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
 // While the sheet is open it speaks in the footer: releases on their way (reserved or
 // tagged, not yet published) and the one whose checks failed. Hidden reservations stay uncounted (AEON-785).
 useFooterSummary(() => {
+  if (!history.value && store.error) return null
   const coming = eligible.value.filter(planned), risky = coming.filter(atRisk)
   return releasesFooter({ loaded: !!history.value, planned: coming.length, atRisk: risky.length, act: { risk: () => { if (risky[0]) publishSelection(risky[0].version) } } })
 })

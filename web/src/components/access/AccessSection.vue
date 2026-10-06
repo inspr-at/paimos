@@ -72,7 +72,7 @@ watch(needsMembers, yes => { if (yes) void access.load() })
 watch(seesKeys, yes => { if (yes) void access.loadKeys() })
 // The footer says who is here, how many agent keys, and the keys that expire soon (AEON-785).
 useFooterSummary(() => {
-  if (!session.identity || !needsMembers.value) return null
+  if (!session.identity || !needsMembers.value || (access.state === 'error' && !access.members)) return null
   const agents = access.agents.filter(agent => !agent.service)
   const keys = access.keys
   const expiring = seesKeys.value && keys ? keys.filter(key => keyState(key) === 'active' && keyExpiry(key).soon && agents.some(agent => agent.principal_id === key.principal_id)).length : null
