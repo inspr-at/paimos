@@ -807,7 +807,7 @@ jobs:
           python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'
           python3 -B scripts/audit/covcheck.py --summary
       - name: PR classification and exact-SHA reuse regressions
-        run: node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs
+        run: node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs
       - name: Full UI QA workflow regressions
         run: node --test scripts/full-ui-qa.test.mjs
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0

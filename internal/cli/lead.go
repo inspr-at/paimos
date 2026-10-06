@@ -10,12 +10,12 @@ import (
 )
 
 func (rt *runtime) cmdLead() *Command {
-	return &Command{Name: "lead", Short: "Read or control the explicitly owned project lead", Use: "lead <status|start|claim|pause|handoff>", subs: []*Command{rt.leadCommand("status"), rt.leadCommand("start"), rt.leadCommand("claim"), rt.leadCommand("pause"), rt.leadHandoffCommand()}}
+	return &Command{Name: "lead", Short: "Read or control the explicitly owned project lead", Use: "lead <status|start|claim|pause|yield|handoff>", subs: []*Command{rt.leadCommand("status"), rt.leadCommand("start"), rt.leadCommand("claim"), rt.leadCommand("pause"), rt.leadCommand("yield"), rt.leadHandoffCommand()}}
 }
 func (rt *runtime) leadCommand(action string) *Command {
 	var project, session, leaseFile string
 	revision, generation := -1, -1
-	return &Command{Name: action, Short: map[string]string{"status": "Read lead state", "start": "Request a lead; no process is launched", "claim": "Bind a proven owned coordinator generation", "pause": "Fence dispatch and request cooperative handover"}[action], Use: "lead " + action + " --project KEY", maxArgs: 0, addFlags: func(fs *flagSet) {
+	return &Command{Name: action, Short: map[string]string{"status": "Read lead state", "start": "Request a lead; no process is launched", "claim": "Bind a proven owned coordinator generation", "pause": "Fence dispatch and request cooperative handover", "yield": "Checkpoint idle work and yield through confirmed exit"}[action], Use: "lead " + action + " --project KEY", maxArgs: 0, addFlags: func(fs *flagSet) {
 		fs.string(&project, "project", 'p', "project key or UUID")
 		if action != "status" {
 			fs.int(&revision, "expected-revision", "revision shown by lead status")
@@ -24,7 +24,7 @@ func (rt *runtime) leadCommand(action string) *Command {
 			fs.string(&session, "session", 0, "explicit coordinator session UUID")
 			fs.string(&leaseFile, "worker-lease-file", 0, "private generation lease file, or - for stdin")
 		}
-		if action == "pause" {
+		if action == "pause" || action == "yield" {
 			fs.int(&generation, "generation", "generation shown by lead status")
 			fs.string(&leaseFile, "worker-lease-file", 0, "private lease for worker idle pause; omit for person control")
 		}
@@ -38,12 +38,12 @@ func (rt *runtime) leadCommand(action string) *Command {
 		if action == "claim" && !validUUID(session) {
 			return usagef("--session must be a UUID")
 		}
-		if action == "pause" && generation < 0 {
+		if (action == "pause" || action == "yield") && (generation < 0 || action == "yield" && generation == 0) {
 			return usagef("--generation is required")
 		}
 		var lease string
 		var err error
-		if action == "claim" || leaseFile != "" {
+		if action == "claim" || action == "yield" || leaseFile != "" {
 			lease, err = rt.harnessSecret(leaseFile, "worker-lease-file")
 			if err != nil {
 				return err
@@ -63,8 +63,8 @@ func (rt *runtime) leadCommand(action string) *Command {
 			path += "/claim"
 			body["session_id"] = session
 		}
-		if action == "pause" {
-			path += "/pause"
+		if action == "pause" || action == "yield" {
+			path += "/" + action
 			body["generation"] = generation
 		}
 		var out harness.Lead

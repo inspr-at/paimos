@@ -33,7 +33,7 @@ import (
 func (rt *runtime) cmdHarnessV2() *Command {
 	return &Command{Name: "harness", Short: "Manage durable harness generations", Use: "harness <command>", subs: []*Command{
 		rt.harnessDecision(),
-		rt.harnessRegister(), rt.harnessLeavingAt(), rt.harnessPauseDefault(), rt.harnessPause("pause"), rt.harnessPause("resume"), rt.harnessWorker("pause-plan"), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessRun(), rt.harnessProvenance(), rt.harnessInvoke(),
+		rt.harnessRegister(), rt.harnessLeadUsage(), rt.harnessLeavingAt(), rt.harnessPauseDefault(), rt.harnessPause("pause"), rt.harnessPause("resume"), rt.harnessWorker("pause-plan"), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessRun(), rt.harnessProvenance(), rt.harnessInvoke(),
 	}}
 }
 
