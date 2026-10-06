@@ -9671,79 +9671,148 @@ paths:
         '200': {description: Selected account, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRoute'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases:
+    get:
+      operationId: listPlanningReleases
+      summary: Read recent release planning metadata
+      description: "Returns at most 100 releases, newest first. The truncated flag reports another page. Pass the last returned number as before_number for bounded keyset pagination."
+      security: *auth
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: before_number, in: query, schema: {type: integer, minimum: 1, maximum: 2147483647}}
+      responses:
+        '200':
+          description: Recent releases
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [releases, truncated]
+                properties:
+                  truncated: {type: boolean}
+                  releases:
+                    type: array
+                    maxItems: 100
+                    items:
+                      type: object
+                      required: [id, title, number, state]
+                      properties:
+                        id: {type: string, format: uuid}
+                        title: {type: string}
+                        number: {type: integer, minimum: 1}
+                        state: {type: string}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createPlanningRelease
+      summary: Open a planning release with existing work
+      description: "Person-only atomic release creation and membership. A repeated idempotency key returns the originally created release. Existing active releases must be finished first. No Flow stages, gates or handoffs run."
+      security: [{session: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [idempotency_key, ticket_node_ids]
+              properties:
+                idempotency_key: {type: string, minLength: 1, maxLength: 96}
+                ticket_node_ids: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}}
+      responses:
+        '200': {description: Original release membership, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseMembershipResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /journey/next-actions:
     get:
+      deprecated: true
       operationId: listJourneyNextActions
       summary: Read derived next actions for a batch of projects
-      description: Person-only snapshot. Reads all projection inputs in one query and derives actions with the existing journey rules. Requires journey.read and journey.act in each project. Invisible or unauthorized projects are omitted. No initialization, mutations or approval decisions.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters:
         - {name: project_ids, in: query, required: true, schema: {type: string}, description: 'Comma-separated unique project UUIDs; at most 100.'}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Current actions, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {type: object, required: [project_node_id, next_action], properties: {project_node_id: {type: string, format: uuid}, next_action: {$ref: '#/components/schemas/JourneyNextAction'}}}}}}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/journey:
     get:
+      deprecated: true
       operationId: getProjectJourney
       summary: Read a project's derived journey
-      description: ProjectId names a live project node. Stage and the single next action are derived from the current brief, decision, agreed requirements, release, handoff results and R2 decisions; clients cannot set them. project_node_id, project_key and tenant_slug are read from the project node and tenant row so a consumer can verify its configured binding. Query parameters and request bodies do not supply them.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Journey projection, headers: {Aeon-Contract: {$ref: '#/components/headers/JourneyContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
         '404': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/journey/profile:
     put:
+      deprecated: true
       operationId: setJourneyProfile
       summary: Choose a journey profile
-      description: Person chooses Personal, Professional or Enterprise; expected_revision prevents a stale profile or gate edit. Profile changes never erase recorded decisions.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: [{session: []}]
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyProfileWrite'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Journey projection, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/journey/actions:
     post:
+      deprecated: true
       operationId: advanceProjectJourney
       summary: Apply the project's next action
-      description: Applies one currently offered action after checking the matching R2 approval where required; never creates an approval decision. Idempotency key and expected_revision fence retries and stale UI actions.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyActionWrite'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Updated journey, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/requirements:
     get:
+      deprecated: true
       operationId: listJourneyRequirements
       summary: List project requirements
       security: *auth
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Requirements and generated node links, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/JourneyRequirement'}}}}}
         '404': {$ref: '#/components/responses/Error'}
     post:
+      deprecated: true
       operationId: createJourneyRequirement
       summary: Add a draft requirement
-      description: A person adds a requirement node in the current draft revision. Later edits use the R1 node API and invalidate any stale Aithema draft or agreement gate.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: [{session: []}]
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyRequirementCreate'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '201': {description: Requirement, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyRequirement'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/requirements/agree:
     post:
+      deprecated: true
       operationId: agreeJourneyRequirements
       summary: Agree a requirements revision
-      description: A person-approved R2 requirements gate pins a revision and atomically creates one epic per functional requirement and idempotent ticket nodes from accepted breakdowns. Nonfunctional requirements become acceptance criteria or knowledge nodes. Drafts alone never generate work.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: [{session: []}]
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RequirementsAgreement'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Agreed requirements, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/JourneyRequirement'}}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
@@ -9950,33 +10019,27 @@ paths:
         '503': {$ref: '#/components/responses/IntakeError'}
   /stage-handoffs:
     post:
+      deprecated: true
       operationId: requestStageHandoff
       summary: Request a stage operation
-      description: The journey coordinator creates a fenced request for a registered first-party stage plugin. Janus prepare may precede Pharos deploy; Janus apply follows deployment and permit approval. Server resolves owner, permissions, lineage, evidence ceiling and approved gate; caller cannot supply authority or result.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoffWrite'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '201': {description: Handoff, headers: {Aeon-Contract: {$ref: '#/components/headers/StageHandoffsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoff'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}:
     get:
+      deprecated: true
       operationId: getStageHandoff
       summary: Read a stage handoff
-      description: >
-        Allowed with stage_handoffs.read, or with the handoff's own operation
-        scope (stage.prepare, stage.deploy, stage.verify or stage.apply) when
-        the caller is the active agent principal whose name is the plugin the
-        operation routes to (pharos for deploy and verify, janus for prepare
-        and apply). Any other principal is refused, including one that holds
-        the operation scope. prerequisite_seal_sha256 is the stored seal that
-        a terminal result must echo. attempt and authority_epoch identify this
-        attempt; superseded_by points to the latest newer attempt for the same
-        release, stage and operation. authority_open is the current server
-        projection of whether this attempt can accept another action.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Safe handoff projection, headers: {Aeon-Contract: {$ref: '#/components/headers/StageHandoffsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoff'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -9985,21 +10048,25 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
+      deprecated: true
       operationId: getNativeCandidateArtifact
       summary: Read a release's immutable candidate artifact and version pin
-      description: Requires stage_handoffs.read in the project. Registration is null before any built artifact is recorded. Recorded metadata is historical evidence, never launch authority.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Release identity and recorded candidate, content: {application/json: {schema: {$ref: '#/components/schemas/NativeCandidateArtifact'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
     put:
+      deprecated: true
       operationId: registerNativeCandidateArtifact
       summary: Pin a built artifact for a current native deployment handoff
-      description: Requires stage_handoffs.write in the project and the handoff requester or stage_handoffs.decide in that project. Fences the exact release, handoff, attempt, epoch and journey revision. Requires live candidate and deploy gates. Pins a null release version without changing journey or release revision; existing version and full artifact identity across attempts must match. Exact same-principal receipt replay has no side effects, including after authority closes. Divergent replay conflicts. Registration records provenance without approving gates, admitting launch or deploying a host.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NativeCandidateArtifactWrite'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Recorded candidate or exact replay, content: {application/json: {schema: {$ref: '#/components/schemas/NativeCandidateArtifact'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -10007,9 +10074,10 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/classic-batch-alias:
     post:
+      deprecated: true
       operationId: bindClassicBatchAlias
       summary: Bind an imported classic batch ID to an Aeon delivery handoff
-      description: Stores provenance for compatibility lookups; the handoff remains the delivery attempt and owner of evidence.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody:
@@ -10029,11 +10097,13 @@ paths:
                 account_key: {type: string}
                 runtime_generation: {type: string}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '201': {description: Alias bound to the handoff, headers: {Aeon-Contract: {$ref: '#/components/headers/BaselineBatchesContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/ClassicBatchAliasResponse'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt:
     post:
+      deprecated: true
       operationId: reportClassicBatchBuilt
       summary: Record classic shaped built evidence on the aliased Aeon handoff
       security: *auth
@@ -10042,103 +10112,69 @@ paths:
         - {name: batchId, in: path, required: true, schema: {type: integer, minimum: 1}}
       requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Classic batch projection from imported provenance, headers: {Aeon-Contract: {$ref: '#/components/headers/BaselineBatchesContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/ClassicBatchBuiltResponse'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/evidence:
     post:
+      deprecated: true
       operationId: appendStageEvidence
       summary: Append typed stage evidence
-      description: >
-        The bound plugin appends monotonic typed evidence. Exact replay is
-        idempotent; divergent replay and stale authority are conflicts. Janus
-        evidence is value-free. Kind launch_readiness is Pharos observation on
-        a deploy handoff. It requires reviewed_plan_digest (lowercase sha256),
-        host, all_host_eval_passed, target_build_passed, backup_ready,
-        backup_observed_at, restart_required, running_kernel and expected_kernel.
-        Those fields are forbidden on every other kind. Admission treats the
-        flags as authority and ignores the outcome word.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: [{agentKey: []}]
       parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageEvidenceWrite'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '201': {description: Evidence, headers: {Aeon-Contract: {$ref: '#/components/headers/StageEvidenceContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageEvidence'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/result:
     post:
+      deprecated: true
       operationId: closeStageHandoff
       summary: Record a terminal stage result
-      description: A terminal result requires current lineage, required prerequisite seal and typed evidence. Failed or stale results never advance the journey.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: [{agentKey: []}]
       parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageResultWrite'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Result, headers: {Aeon-Contract: {$ref: '#/components/headers/StageResultContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageResult'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/launch/admit:
     post:
+      deprecated: true
       operationId: admitStageLaunch
       summary: Admit one Pharos launch
-      description: >
-        Issues one launch admission for an active Pharos deploy handoff after
-        the live stage.deploy grant, approved candidate and deploy gates, the
-        release version and EvidenceLaunchChecks all agree. The admit body must
-        equal the artifact Aeon stored for that handoff in
-        stage_handoff_build_evidence (digest_sha256 is the OCI config digest,
-        manifest_digest_sha256 is the release manifest digest). The body is
-        confirmation, not evidence. A launch_readiness row for this handoff and
-        its current authority_epoch must have all_host_eval_passed,
-        target_build_passed and backup_ready true, and observed_at within 900
-        seconds of Aeon's clock. That window is LaunchFreshness. The caller
-        cannot pass it. A later launch_readiness row with a false flag or a
-        different reviewed_plan_digest contradicts the claim and is refused.
-        binding_digest_sha256 is hex(sha256("inspr.aeon.launch-binding.v1" +
-        NUL + canonical JSON)). The JSON object has sorted keys, no whitespace
-        and UTF-8, and is exactly artifact_digest_sha256, authority_epoch
-        (a JSON number), handoff_id, release_node_id and reviewed_plan_digest.
-        Idempotency-Key is a required UUID. An exact replay by the same routed
-        principal and key returns the original admission without a new event,
-        even after consumption. A different body or principal using that key
-        returns 409 idempotency_conflict. A new key cannot issue a second live
-        admission. Replays end 24 hours after the handoff's terminal result.
-        Refused when the handoff is closed, stale, or not an active Pharos deploy.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters:
         - {name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageArtifact'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Original launch admission, headers: {Aeon-Contract: {$ref: '#/components/headers/StageLaunchContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchAdmission'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/launch/consume:
     post:
+      deprecated: true
       operationId: consumeStageLaunch
       summary: Consume one launch admission
-      description: >
-        Marks the admission consumed. Exactly one new key wins, including under
-        concurrent requests. An exact replay with the original UUID
-        Idempotency-Key, routed principal and canonical body returns the
-        original receipt with consumed_at and no new event, including after a
-        terminal result. A different body or principal using that key returns
-        409 idempotency_conflict. A new key after consumption returns 409.
-        Replays end 24 hours after the handoff's terminal result.
-        Consume recomputes binding_digest_sha256 from the current handoff, the
-        stored candidate artifact and the qualifying launch_readiness row, and
-        refuses when any of those drifted. The admission must belong to this
-        handoff. Missing, foreign, expired and already-consumed admissions are
-        refused. A new consume requires the same live stage.deploy grant as
-        admission; an exact replay checks the active routed principal.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters:
         - {name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchConsume'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Consumption receipt, headers: {Aeon-Contract: {$ref: '#/components/headers/StageLaunchContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchConsumption'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}

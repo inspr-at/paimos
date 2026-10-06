@@ -1245,9 +1245,8 @@ coverage or omitted failures. These unsigned diagnostic records do not mint
 receipts, baseline credit, certificates or success checks. No workflow, required
 check, runner route, queue reuse, timing reuse or UI selection changes in C.
 
-Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
-`/p/KEY/knowledge`. A ticket uses `/p/KEY/TICKET`; `?section=journey` or
-`?section=knowledge` retains its background section. Tickets is the default,
+Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/knowledge`, and `/p/KEY/settings`. A ticket uses
+`/p/KEY/TICKET`; `?section=knowledge` retains its background section. Tickets is the default,
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
@@ -1359,12 +1358,16 @@ the counter before its handler as a lower bound and runs once. A page covering
 the hint that triggered its batch updates the row immediately; newer hints
 remain queued for a follow-up read, so busy tenants do not need a quiet gap.
 
-The flow UI is hidden by default. People working on Paimos itself can enable
-**Show the flow controls (not yet tested end to end)** under **Settings →
-Developer** (`/settings/developer#flow-controls`). This per-person, per-workspace
-preference reveals the footer flow pill, Journey tab, stages and release walker;
-it does not grant action permissions. Journey bookmarks explain the opt-in while
-it is off. Turning it off removes the flow UI again.
+The INSPR Flow is retired (AEON-723). Journey stages, the Journey project view,
+the footer Flow pill, stage handoffs, and the external-stage CLI are removed.
+Old Journey bookmarks open the project's tickets. Stored Flow data is preserved;
+deprecated Journey, requirements and handoff APIs return authenticated 410 errors
+without executing stage actions. Existing reporter success schemas and contract
+headers remain pinned for PHAROS/JANUS compatibility. Ordinary release creation
+and membership use the native release APIs, independently of Flow gates.
+No table or column is dropped in this release. Contract-phase cleanup needs a
+separate follow-up, including migrating the legacy-named release ledger and
+historical provenance before removing dormant Flow tables and compatibility routes.
 
 Reserved, never-published versions are hidden in the release history by default.
 **Show reserved versions** under **Settings → Developer**
@@ -1373,29 +1376,6 @@ workspace, including comparison choices and previous/next navigation. Statistics
 and result counts always include reservations; the footer's **N new** count
 includes only visible versions. A direct link still opens a hidden reservation
 with a quiet explanation of the setting.
-
-If a standing candidate or deployment gate expires or is revoked before
-deployment finishes, Journey offers renewal on the Deploy stage. An agent
-requests a fresh release-bound approval; its person decider applies it with
-`renew_candidate` or `renew_deploy` through the journey actions API, including
-the current `release_id` and `expected_revision`. Candidate renewal precedes
-deployment renewal and preserves enterprise reviewer independence. Each renewal
-appends gate history and advances the journey revision without changing the
-release identity. Existing handoffs lose authority; terminal evidence from
-before either renewal is historical, so rerun preparation after both renewals,
-then request a new deployment. Journey contract `journey/1.2` adds the optional
-`next_action.renewal_action`; clients must use it when present. Existing action
-keys and reporter major versions remain unchanged.
-
-Journey contract `journey/1.4` adds the optional
-`next_action.access_renewal_action` without extending the existing renewal enum.
-An expired or revoked Access permit can be replaced with `renew_permit`, using
-its fresh approval, current release ID and journey revision. The original
-approval and evidence remain in history; stale Access handoffs cannot report
-new results. The completed deployment remains valid. Both terminal handoff
-paths (verification without Access, and Access apply) use the same transactional
-settlement as journey actions: pin the deployment version, supersede prior live
-releases, and trigger ticket publication once.
 
 Native intake drafts accept an optional Aithema `extensions` map and the
 original review snapshot as `document_bytes` alongside the required native
@@ -3460,15 +3440,12 @@ Deploy approvals can carry optional `target` metadata: `hosts` or `environment`,
 card, Needs you, and approval history; missing targets read “Target not
 named” and keep existing approval behavior. `target_digest_sha256` identifies the
 recorded metadata and does not add an authority check (enforcement is AEON-287).
-The additive contracts are `approvals/1.1` and `journey/1.3`. Stage handoff
-responses remain byte-compatible `stage-handoffs/1.0` for strict PHAROS readers;
-targets stay in storage and audit events, and the web reads them from the journey
-deploy stage or approval, labelled “named by the agent”.
-Managed agents can pass `target` and an optional `release_node_id` to
-`aeon_request_approval`; `paimos external-stage request --operation deploy`
-accepts an optional `--target-file JSON`. Verify handoffs retain the preceding
-deploy handoff's recorded target internally when present; neither handoff body
-emits target fields.
+The approval contract is `approvals/1.1`. Targets stay in storage and audit events,
+and the web reads them from approvals, labelled “named by the agent”. Managed
+agents can pass `target` and an optional `release_node_id` to
+`aeon_request_approval`. AEON-723 retires the Journey deployment view,
+stage handoffs and the external-stage CLI; compatibility paths retain their
+reporter contract headers and return authenticated 410 errors.
 
 ### Owner workstation confirmation (AEON-580)
 
