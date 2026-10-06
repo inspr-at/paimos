@@ -140,6 +140,8 @@
     ,
     "browser:tests/agents-worker-tree.spec.ts:a live-line count keeps Sessions open when the section preference lands after the jump"
     ,
+    "browser:tests/agents-worker-tree.spec.ts:the footer problem jump switches a Working filter to Problem and focuses the folded row"
+    ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1024"
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1440"
@@ -5829,6 +5831,8 @@
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"idle follows working; newly stopped workers hide immediately and histories stay independent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"nested live workers stay visible through stopped parents and each level closes its last connector","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"the footer problem jump switches a Working filter to Problem and focuses the folded row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"worker tree fits 1440px in dark, passes axe, and captures coordinator evidence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

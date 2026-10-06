@@ -744,7 +744,7 @@
         ,
         {"file":"tests/agents-phone-rows.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/agents-worker-tree.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agents-worker-tree.spec.ts","listedTests":10,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/agents.spec.ts","listedTests":29,"weightSeconds":64.365854,"weightSource":"unmeasured-test-rate"}
         ,

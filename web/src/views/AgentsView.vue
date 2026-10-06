@@ -27,7 +27,7 @@ import { useServiceTiers } from '../stores/serviceTiers'
 import { controlPermitted } from '../lib/managedControl'
 import SessionPanel from '../components/agents/SessionPanel.vue'
 import HeadCounts from '../components/agents/HeadCounts.vue'
-import type { HeadFilter } from '../components/agents/headCounts'
+import { FILTER_LABEL, matchesFilter, type HeadFilter } from '../components/agents/headCounts'
 import AccountsComputers from '../components/agents/AccountsComputers.vue'
 import { openModelPrefs } from '../lib/modelPrefsCommand'
 import AgentsWorking from '../components/agents/AgentsWorking.vue'
@@ -267,6 +267,12 @@ function clearFilter() {
 async function jump(state: AgentState) {
   const target = jumpTarget(agents.views, state)
   if (!target) return
+  // An active Sessions filter that hides the row moves to the footer's own state: the chip stays where it is and only its word changes.
+  const view = agents.views.find(v => v.session.id === target.id)
+  if (filter.value && view && !matchesFilter(view, filter.value)) {
+    filter.value = matchesFilter(view, state as HeadFilter) ? state as HeadFilter : null
+    announce(filter.value ? `Sessions now show ${FILTER_LABEL[filter.value].toLowerCase()} only` : 'Sessions now show all')
+  }
   sessionList.value?.revealSession(target.id)
   await nextTick()
   cursor.value = `s:${target.id}`
