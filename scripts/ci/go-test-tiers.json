@@ -6,7 +6,6 @@
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)",
   "postGateCases": [
     "internal/harness:TestAgentWorkSettingsRecordChangesAndReverseWrites",
-
     "internal/agentruns:TestWaitingClockTerminalWithoutStatusAndLifetimeBounds",
     "internal/agentruns:TestTerminalTelemetrySurvivesTimingHistoryLimit",
     "internal/agentruns:TestTerminalWithoutStatusClosesWaitingSpan",
@@ -3965,8 +3964,7 @@
     {"kind":"go","package":"internal/harness","name":"TestLeadDecisionRequestIdentitySurvivesChangedVisibility","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/harness","name":"TestLeadDecisionRequestUniquenessScope","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIReadAndRecord","tier":"GATED-FULL"},
-    {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIRejectsUnboundedAndPrivateEvidence","tier":"GATED-FULL"}
-,
+    {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIRejectsUnboundedAndPrivateEvidence","tier":"GATED-FULL"},
     {"kind":"go","package":"internal/harness","name":"TestAgentWorkSettingsRecordChangesAndReverseWrites","tier":"NIGHTLY"}
   ],
   "timingWeights": {
