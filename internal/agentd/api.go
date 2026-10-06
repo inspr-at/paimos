@@ -209,6 +209,9 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 		"account_label":           s.AccountLabel,
 		"advertised_capabilities": caps, "harness_session_ref": s.ID, "worker_lease": s.Lease,
 	}
+	if s.DisplayLabel != nil {
+		body["display_label"] = *s.DisplayLabel
+	}
 	if s.Model != "" {
 		body["model"] = s.Model
 		if modelreport.ValidTuple(s.Model, s.ReasoningEffort) {
@@ -260,6 +263,9 @@ func (r *Remote) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, ph
 	body := map[string]any{
 		"max_session_file_bytes": rules.SessionFileLimit(s.Harness), "rules_client_version": version.Version,
 		"phase": phase, "activity": activity, "activity_sequence": sequence, "process_ownership": s.Ownership,
+	}
+	if s.AttachedHook {
+		body["attached_hook"] = true
 	}
 	if s.Model != "" {
 		body["model"] = s.Model

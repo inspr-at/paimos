@@ -109,6 +109,17 @@ func TestPairedServeContinuesAfterAttachRegistrationRefusal(t *testing.T) {
 					_ = json.NewEncoder(w).Encode([]any{})
 				case "/api/agent-accounts/" + account + "/probe":
 					w.WriteHeader(204)
+				case "/api/harness-recoveries/claim":
+					// The runtime polls recovery commands with its own daemon
+					// identity; nothing is pending for this fixture.
+					var claim struct{ DaemonID, Generation string }
+					if r.Method != http.MethodPost || json.NewDecoder(r.Body).Decode(&struct {
+						DaemonID   *string `json:"daemon_id"`
+						Generation *string `json:"generation"`
+					}{&claim.DaemonID, &claim.Generation}) != nil || claim.DaemonID != view.DaemonID || claim.Generation == "" {
+						t.Error("recovery claim poll did not carry the paired daemon identity")
+					}
+					_ = json.NewEncoder(w).Encode([]any{})
 				default:
 					t.Errorf("unexpected paired runtime route: %s", r.URL.Path)
 					w.WriteHeader(404)
