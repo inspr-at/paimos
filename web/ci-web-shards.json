@@ -1117,7 +1117,7 @@
       "project": null
       ,
       "specs": [
-        {"file":"tests/agent-pause.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agent-pause.spec.ts","listedTests":15,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,

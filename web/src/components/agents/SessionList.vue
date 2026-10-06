@@ -715,7 +715,10 @@ defineExpose({ toggleHistory })
      through confirmation, price feedback and Undo so neighbours stay put. */
   .phone-tier :deep(.tier-mark) { width: 72px; }
   .phone-tier :deep(.price) { max-width: 44px; overflow: hidden; text-overflow: ellipsis; }
-  .group-row { display: block; margin: 12px 8px 2px; padding: 0 8px; }
+  /* Flex, not an inline line box: the Ended toggle is a button and its baseline
+     made that header ~20px taller than the text headers, so the row jumped
+     when a phone session moved from Pausing to Ended (AEON-790). */
+  .group-row { display: flex; align-items: center; height: 26px; margin: 12px 8px 2px; padding: 0 8px; }
   .row { --tree-joint: 25px; display: grid; grid-template-columns: 30px auto minmax(0, 1fr) 44px; grid-template-rows: auto auto auto auto; grid-template-areas: ". . . actions" ". . . actions" ". . . actions" ". . . actions"; column-gap: 8px; row-gap: 0; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span, .execution-host > span { padding: 0; }
   .row > .c-agent { grid-column: 1 / 4; grid-row: 1 / 5; display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid; align-items: start; padding-block: 0; }
