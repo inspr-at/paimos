@@ -158,6 +158,30 @@ for (const look of ['light', 'dark'] as const) test(`Agents page: one line per l
   await expect(panel(page)).toBeVisible()
 })
 
+test('Start lead: the project holds still while its request is on the way, and the sheet still finishes', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const { state } = await mockLeadFlow(page, { lead: 'none', aeon: 'none' })
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/projects/*/lead', async route => { if (route.request().method() === 'POST') await held; await route.fallback() })
+  await page.goto('/agents')
+  await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
+  await page.getByRole('menuitem', { name: /^Start lead…/ }).click()
+  const sheet = page.getByRole('dialog', { name: /^Start lead for / }), start = sheet.locator('[data-act="start"]')
+  const choices = sheet.getByRole('radiogroup', { name: 'Project' }).getByRole('radio')
+  await expect(choices).toHaveCount(2)
+  await expect(start).toHaveAttribute('aria-disabled', 'false')
+  const heading = await sheet.getByRole('heading').textContent()
+  await start.click()
+  await expect(start).toHaveAttribute('aria-disabled', 'true')
+  await sheet.locator('.project-choices [aria-checked="false"]').dispatchEvent('click')
+  await expect(sheet.getByRole('heading')).toHaveText(heading!)
+  release()
+  await expect(sheet).toHaveCount(0)
+  const posts = state.calls.filter(c => c.method === 'POST' && /\/lead$/.test(c.path))
+  expect(posts.map(c => c.path)).toEqual([`/api/projects/${heading!.includes('AEON') ? 'p-aeon' : 'p-pharos'}/lead`])
+})
+
 test('Agents page: the expert setting reveals Start agent manually', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await mockLeadFlow(page, { lead: 'working', aeon: 'working', expert: true })

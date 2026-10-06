@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  atGate, canPause, canResume, decisionLine, leadBand, leadLine, leadWords, mergedToday, modelByRole, pluralWord, startChecks, ticketSteps, waitCopy,
+  atGate, canPause, canResume, checksSummary, decisionLine, leadBand, leadLine, leadWords, mergedToday, modelByRole, pluralWord, startChecks, ticketSteps, waitCopy,
   type LeadDecision, type ProjectLead,
 } from '../src/lib/lead.ts'
 import { parentQueueSummary, type ParentQueueSnapshot } from '../src/lib/workQueue.ts'
@@ -93,6 +93,22 @@ test('start checks: the current wait reason wins, reported freshness follows, no
   assert.equal(checks[0]!.detail, '3 of 5 running')
   assert.equal(startChecks(lead(), [], null)[2]!.detail, 'Checked at the next start')
   assert.equal(startChecks(lead({ reason: 'dial_full' }), [], { running: 5, total: 5 })[0]!.detail, '5 of 5 · full')
+})
+
+test('start checks: a fresh reading of a full gate is full, and past readings never read as current', () => {
+  const fresh = (['dial', 'harness', 'account_room', 'host_load'] as const).map(kind => ({ kind, freshness: 'fresh' as const }))
+  const waited = { ...decision(2, 'admission', 'wait', 't1', '2026-10-06T10:00:00Z', fresh), reason_codes: ['gates_ready', 'account_room_full'] }
+  const checks = startChecks(lead({ state: 'waiting_for_room', reason: 'awaiting_generation' }), [waited], null)
+  assert.deepEqual(checks.map(c => c.state), ['ok', 'ok', 'full', 'ok'])
+  assert.match(checks[2]!.detail, /^Full at \d\d:\d\d$/)
+  assert.equal(checksSummary(checks), 'A limit is full')
+  // The server may also carry the full state only in the reported gates.
+  const gated = decision(3, 'admission', 'wait', 't1', '2026-10-06T10:00:00Z', fresh)
+  gated.request.gates = [{ kind: 'host_load', state: 'full', observed_at: '2026-10-06T09:59:30Z' }]
+  assert.equal(startChecks(lead(), [gated], null)[3]!.state, 'full')
+  const passed = startChecks(lead(), [decision(4, 'admission', 'selected', 't1', '2026-10-06T10:00:00Z', fresh)], null)
+  assert.equal(checksSummary(passed), 'All passed at the last start')
+  assert.notEqual(checksSummary(passed), 'All checks pass')
 })
 
 test('a ticket has exactly one current step on its way to Merged', () => {

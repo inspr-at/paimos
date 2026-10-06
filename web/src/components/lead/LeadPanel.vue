@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, toRef, watch } fro
 import { useRouter } from 'vue-router'
 import { api } from '../../lib/api'
 import { can } from '../../lib/authz'
-import { canPause, canResume, decisionLine, LEAD_WORDS, startChecks } from '../../lib/lead'
+import { canPause, canResume, checksSummary, decisionLine, LEAD_WORDS, startChecks } from '../../lib/lead'
 import { closeLeadPanel, leadOverlay, openLeadPause } from '../../lib/leadOverlay'
 import { toast } from '../../lib/toast'
 import { usePoller } from '../../lib/usePolledData'
@@ -24,7 +24,7 @@ const props = defineProps<{ projectId: string; projectKey: string; routeKey: str
 const w = LEAD_WORDS
 const leads = useProjectLeads(), queue = useWorkQueue(), session = useSession(), router = useRouter()
 const summary = useLeadSummary(toRef(props, 'projectId'), toRef(props, 'projectKey'))
-const { view, lead, band, queued, leadSession, workers, decisions, complete, gateIds, mergedIds, questions, keyOf } = summary
+const { view, lead, band, queued, leadSession, workers, decisions, complete, gateIds, mergedIds, questions, questionsPartial, keyOf } = summary
 const closeButton = ref<HTMLButtonElement>()
 const dial = ref<{ running: number; total: number } | null>(null)
 // Relative times move on while the panel is open.
@@ -67,7 +67,6 @@ const reported = computed(() => {
   return seconds < 90 ? `Reported ${seconds} seconds ago` : `Reported ${Math.round(seconds / 60)} minutes ago`
 })
 const checks = computed(() => startChecks(lead.value, decisions.value, dial.value))
-const unreadable = computed(() => checks.value.some(c => c.state === 'unreadable'))
 const recent = computed(() => [...decisions.value].reverse().slice(0, 6).map(d => ({ id: d.event_id, at: time(d.recorded_at), text: decisionLine(d, id => keyOf(id) ?? 'a ticket') })))
 const next = computed(() => (queued.value ?? []).filter(item => !item.target_agent_id).slice(0, 3))
 const href = (key: string) => `/p/${encodeURIComponent(props.routeKey)}/${encodeURIComponent(key)}`
@@ -102,6 +101,7 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
         <p>{{ questions[0]!.input.question }}</p>
         <RouterLink class="btn primary sm" :to="{ path: '/decision-desk', query: { needs: `q:${questions[0]!.id}` } }">Answer</RouterLink>
       </div>
+      <p v-if="questionsPartial" class="small warn" data-partial><RouterLink to="/decision-desk">Not every open question could be read here; see the Decision Desk</RouterLink></p>
       <section class="p-sec" aria-labelledby="lp-now">
         <div class="p-head"><h3 id="lp-now">Right now</h3><span class="small">{{ reported }}</span></div>
         <p class="now-line">
@@ -137,7 +137,7 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
         </div>
       </section>
       <section class="p-sec" aria-labelledby="lp-checks">
-        <div class="p-head"><h3 id="lp-checks">Before every start</h3><span class="small">{{ unreadable ? 'A check can’t be read' : checks.every(c => c.state === 'ok') ? 'All checks pass' : 'Checked again at every start' }}</span></div>
+        <div class="p-head"><h3 id="lp-checks">Before every start</h3><span class="small">{{ checksSummary(checks) }}</span></div>
         <ul class="checks">
           <li v-for="c in checks" :key="c.kind" :class="{ 'bad-row': c.state === 'unreadable' || c.state === 'full' }" :data-check="c.kind">
             <span :class="c.state === 'ok' ? 'ok' : c.state === 'unknown' ? 'unknown' : 'bad'"><AppIcon :name="c.state === 'ok' ? 'check' : c.state === 'unknown' ? 'clock' : 'alert'" :size="14" /></span>

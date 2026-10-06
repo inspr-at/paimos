@@ -22,7 +22,7 @@ const props = defineProps<{ projectId: string; projectKey: string; routeKey: str
 const w = LEAD_WORDS
 const leads = useProjectLeads(), queue = useWorkQueue(), session = useSession(), router = useRouter()
 const summary = useLeadSummary(toRef(props, 'projectId'), toRef(props, 'projectKey'))
-const { lead, band, leadSession, workers, stations, questions } = summary
+const { lead, band, leadSession, workers, stations, questions, questionsPartial } = summary
 const person = computed(() => session.identity?.principal.kind === 'person')
 const mayControl = computed(() => person.value && can('harness.control', props.projectId))
 const mayStart = computed(() => mayControl.value && can('run.create', props.projectId))
@@ -125,14 +125,15 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
     <template v-else>
       <p v-if="nowLine" class="lead-now">{{ nowLine }}</p>
       <LeadLine :stations="stations" :route-key="routeKey" :empty="band.state === 'starting'" @open="openPanel" />
-      <div v-if="questions.length" class="asks">
+      <div v-if="questions.length || questionsPartial" class="asks">
         <div v-for="q in questions.slice(0, 2)" :key="q.id" class="ask">
           <span class="ask-icon"><AppIcon name="inbox" :size="16" /></span>
           <h3>{{ q.input.question }}</h3>
           <p>The {{ projectKey }} {{ w.l }} asks. {{ q.input.options.length }} {{ q.input.options.length === 1 ? 'option' : 'options' }}<template v-if="q.input.recommend"> and its recommendation</template> wait on the Decision Desk.</p>
           <RouterLink class="btn primary sm" :to="deskLink(q.id)">Answer</RouterLink>
         </div>
-        <p v-if="questions.length > 2" class="asks-more"><RouterLink to="/decision-desk">{{ questions.length - 2 }} more on the Decision Desk</RouterLink></p>
+        <p v-if="questions.length > 2" class="asks-more"><RouterLink to="/decision-desk">{{ questions.length - 2 }} more{{ questionsPartial ? ' and possibly others' : '' }} on the Decision Desk</RouterLink></p>
+        <p v-else-if="questionsPartial" class="asks-more" data-partial><RouterLink to="/decision-desk">Not every open question could be read here; see the Decision Desk</RouterLink></p>
       </div>
     </template>
     <p class="lead-foot"><AppIcon name="shield" :size="14" /><span>{{ band.foot }}</span></p>

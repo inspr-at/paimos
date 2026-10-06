@@ -3,6 +3,7 @@
 // lifecycle (AEON-734) is authoritative and every write carries its revision.
 // Inside PAIMOS it is always "lead"; people read the workspace word (LeadWords).
 import { api, APIError } from './api.ts'
+import type { Question, QuestionPage } from './decisionDeskApi.ts'
 
 export type LeadState = 'none' | 'starting' | 'working' | 'waiting_for_room' | 'paused' | 'cannot_start'
 export interface ProjectLead {
@@ -14,7 +15,7 @@ export type DecisionStage = 'queue' | 'admission' | 'review' | 'release_handoff'
 export type DecisionOutcome = 'selected' | 'wait' | 'requested' | 'passed' | 'failed' | 'handoff' | 'partial'
 export interface LeadDecision {
   event_id: number; project_id: string; session_id: string; recorded_at: string
-  request: { ticket_node_id?: string; stage: DecisionStage; outcome: DecisionOutcome; reason_codes: string[]; attempt: number }
+  request: { ticket_node_id?: string; stage: DecisionStage; outcome: DecisionOutcome; reason_codes: string[]; attempt: number; gates?: { kind: GateKind; state: 'ready' | 'full' | 'unreadable'; observed_at?: string | null }[] }
   outcome: DecisionOutcome; reason_codes: string[]
   gate_freshness: { kind: GateKind; freshness: 'fresh' | 'stale' | 'unreadable' }[]
   results: { kind: 'run' | 'review' | 'release'; id: string }[]
@@ -48,18 +49,29 @@ export function modelByRole(settings: LeadSettings | null): string {
   if (!cell || cell.mode === 'auto' || !(cell.line || cell.family)) return ''
   return [cell.line || cell.family, cell.effort && `${cell.effort} thinking`].filter(Boolean).join(', ')
 }
-/** Oldest-first pages after a cursor, at most `pages` × 200 decisions per call. */
-export async function readLeadDecisions(id: string, session: string, after = 0, pages = 5): Promise<{ items: LeadDecision[]; after: number; caughtUp: boolean }> {
+/** The project's whole history across lead generations, oldest first: at most `pages` × 200 decisions per call. */
+export async function readLeadDecisions(id: string, after = 0, pages = 5): Promise<{ items: LeadDecision[]; after: number; caughtUp: boolean }> {
   const items: LeadDecision[] = []
   let cursor = after
   for (let page = 0; page < pages; page++) {
-    const result = await leadRequest<DecisionPage>(`${project(id)}/lead-decisions?session_id=${encodeURIComponent(session)}&limit=200&after=${cursor}`)
+    const result = await leadRequest<DecisionPage>(`${project(id)}/lead-decisions?limit=200&after=${cursor}`)
     if (result.items.length > 200) throw new Error('The lead history page exceeded its limit.')
     items.push(...result.items)
     if (result.next_after === null || result.next_after <= cursor) return { items, after: items.at(-1)?.event_id ?? cursor, caughtUp: true }
     cursor = result.next_after
   }
   return { items, after: cursor, caughtUp: false }
+}
+/** Open questions in one project, at most `pages` × 100; `more` says some were not read. */
+export async function readOpenQuestions(id: string, pages = 5): Promise<{ items: Question[]; more: boolean }> {
+  const items = new Map<string, Question>()
+  for (let page = 0; page < pages; page++) {
+    const result = await leadRequest<QuestionPage>(`${project(id)}/questions?state=open&limit=100&offset=${page * 100}`)
+    if (result.items.length > 100) throw new Error('The question page exceeded its limit.')
+    for (const question of result.items) items.set(question.id, question)
+    if (!result.has_more) return { items: [...items.values()], more: false }
+  }
+  return { items: [...items.values()], more: true }
 }
 
 // ---------- Words ----------
@@ -167,19 +179,26 @@ export function leadLine(input: LineInput): Station[] {
 }
 
 // ---------- Decisions: what the lead reported ----------
-/** Latest review decision per ticket says whether it waits at the gate. */
-export function atGate(decisions: LeadDecision[]): string[] {
-  const latest = new Map<string, LeadDecision>()
-  for (const d of decisions) if (d.request.stage === 'review' && d.request.ticket_node_id) latest.set(d.request.ticket_node_id, d)
-  return [...latest.entries()].filter(([, d]) => d.outcome === 'requested').map(([id]) => id)
+/** Per-ticket totals folded as pages arrive, so trimming the retained decisions never loses them. */
+export interface DecisionFold { review: Record<string, DecisionOutcome>; handoff: Record<string, string> }
+export const emptyFold = (): DecisionFold => ({ review: {}, handoff: {} })
+/** Folds oldest-first decisions: the latest review per ticket and its latest release handoff. */
+export function foldDecisions(fold: DecisionFold, decisions: LeadDecision[]): DecisionFold {
+  for (const d of decisions) {
+    const id = d.request.ticket_node_id
+    if (!id) continue
+    if (d.request.stage === 'review') fold.review[id] = d.outcome
+    else if (d.request.stage === 'release_handoff' && d.outcome === 'handoff') fold.handoff[id] = d.recorded_at
+  }
+  return fold
 }
 const sameDay = (iso: string, now: Date) => { const d = new Date(iso); return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate() }
+/** Latest review decision per ticket says whether it waits at the gate. */
+export const gateOf = (fold: DecisionFold) => Object.entries(fold.review).filter(([, outcome]) => outcome === 'requested').map(([id]) => id)
 /** Release handoffs happen after the merge; today's handoffs are today's merges. */
-export function mergedToday(decisions: LeadDecision[], now = new Date()): string[] {
-  const ids = new Set<string>()
-  for (const d of decisions) if (d.request.stage === 'release_handoff' && d.outcome === 'handoff' && d.request.ticket_node_id && sameDay(d.recorded_at, now)) ids.add(d.request.ticket_node_id)
-  return [...ids]
-}
+export const mergedOf = (fold: DecisionFold, now = new Date()) => Object.entries(fold.handoff).filter(([, at]) => sameDay(at, now)).map(([id]) => id)
+export const atGate = (decisions: LeadDecision[]) => gateOf(foldDecisions(emptyFold(), decisions))
+export const mergedToday = (decisions: LeadDecision[], now = new Date()) => mergedOf(foldDecisions(emptyFold(), decisions), now)
 export function decisionLine(d: LeadDecision, key: (id: string) => string): string {
   const t = d.request.ticket_node_id ? key(d.request.ticket_node_id) : 'a ticket'
   const why = d.reason_codes.map(code => code.replaceAll('_', ' ')).join(', ')
@@ -195,18 +214,30 @@ export type CheckState = 'ok' | 'full' | 'unreadable' | 'unknown'
 export interface StartCheck { kind: GateKind; label: string; state: CheckState; detail: string }
 const GATE_REASON: Record<GateKind, string> = { dial: 'dial', harness: 'harness', account_room: 'account', host_load: 'host' }
 const GATE_LABEL: Record<GateKind, string> = { dial: 'Dial', harness: 'Harness limits', account_room: 'Account room', host_load: 'Host load' }
-/** One row per mandatory gate: the current wait reason wins, then the lead's latest admission report. */
+/** One row per mandatory gate: the current wait reason wins, then the lead's latest admission report.
+ *  A report is a reading taken at that start, never a promise about the next one. */
 export function startChecks(lead: ProjectLead | null, decisions: LeadDecision[], dial: { running: number; total: number } | null): StartCheck[] {
   const admission = [...decisions].reverse().find(d => d.request.stage === 'admission' && d.gate_freshness.length)
+  const at = admission ? new Date(admission.recorded_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''
   return (['dial', 'harness', 'account_room', 'host_load'] as GateKind[]).map(kind => {
     const reason = lead?.reason ?? '', prefix = GATE_REASON[kind]
     const reported = admission?.gate_freshness.find(g => g.kind === kind)?.freshness
+    // A fresh reading can still be a full gate: the server records it as a reason code.
+    const reportedFull = !!admission && (admission.reason_codes.includes(`${kind}_full`) || !!admission.request.gates?.some(g => g.kind === kind && g.state === 'full'))
     const dialText = kind === 'dial' && dial ? `${dial.running} of ${dial.total} running` : ''
     if (reason === `${prefix}_full`) return { kind, label: GATE_LABEL[kind], state: 'full', detail: dialText ? `${dial!.running} of ${dial!.total} · full` : 'Full' }
     if (reason === `${prefix}_unavailable` || reported === 'unreadable' || reported === 'stale') return { kind, label: GATE_LABEL[kind], state: 'unreadable', detail: reported === 'stale' ? 'Last reading too old' : 'Can’t be read' }
-    if (reported === 'fresh') return { kind, label: GATE_LABEL[kind], state: 'ok', detail: dialText || `Passed at ${new Date(admission!.recorded_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` }
+    if (reported === 'fresh' && reportedFull) return { kind, label: GATE_LABEL[kind], state: 'full', detail: `Full at ${at}` }
+    if (reported === 'fresh') return { kind, label: GATE_LABEL[kind], state: 'ok', detail: dialText || `Passed at ${at}` }
     return { kind, label: GATE_LABEL[kind], state: 'unknown', detail: dialText || 'Checked at the next start' }
   })
+}
+/** The heading over the checks: past readings never read as current availability. */
+export function checksSummary(checks: StartCheck[]): string {
+  if (checks.some(c => c.state === 'unreadable')) return 'A check can’t be read'
+  if (checks.some(c => c.state === 'full')) return 'A limit is full'
+  if (checks.length && checks.every(c => c.state === 'ok')) return 'All passed at the last start'
+  return 'Checked again at every start'
 }
 
 // ---------- A ticket on the line ----------

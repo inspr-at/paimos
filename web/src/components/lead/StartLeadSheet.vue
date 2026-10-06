@@ -29,7 +29,7 @@ const hostOpen = ref(false), host = ref<'auto' | string>('auto'), hostNote = ref
 const dial = ref<number | null>(null)
 const busy = ref(false), error = ref('')
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
-let generation = 0
+let generation = 0, submission = 0
 const identity = () => `${session.identity?.tenant.id}:${session.identity?.principal.id}`
 
 const queued = computed(() => queue.snapshots[chosen.value]?.items.length ?? null)
@@ -58,9 +58,11 @@ function pickHost(id: string, disabled: boolean) {
   host.value = id
   hostNote.value = id === 'auto' ? `Automatic: the ${w.l} runs where there is room now; its workers go wherever the checks pass.` : `The ${w.l} stays on ${hostName(id)}. If it is offline, it waits instead of moving.`
 }
+function choose(id: string) { if (!busy.value) chosen.value = id }
+// Submission state is its own: switching what loads never strands the sheet busy.
 async function start() {
   if (busy.value) return
-  const turn = generation, who = identity(), id = chosen.value, lead = leads.views[id]?.lead
+  const turn = generation, mine = ++submission, who = identity(), id = chosen.value, lead = leads.views[id]?.lead
   if (!lead) { error.value = `The ${w.l} could not be read. Try again.`; return }
   if (lead.state !== 'none' && !(lead.state === 'cannot_start' && lead.reason === 'owner_revoked')) { error.value = `${key.value} already has a ${w.l}. Open it from the project.`; return }
   busy.value = true; error.value = ''
@@ -78,7 +80,7 @@ async function start() {
     close(false)
   } catch (e) {
     if (turn === generation && who === identity()) error.value = e instanceof Error ? e.message : `The ${w.l} was not started.`
-  } finally { if (turn === generation) busy.value = false }
+  } finally { if (mine === submission) busy.value = false }
 }
 function close(restore = true) { generation++; dialog.value?.close(); closeLeadSheet(restore) }
 function keydown(event: KeyboardEvent) {
@@ -107,7 +109,7 @@ watch(() => leadOverlay.start, value => { if (!value) generation++ })
           <span class="fl-label">Project</span>
           <p class="fl-value">{{ key }}<small>{{ projects.length }} projects have no {{ w.l }}. One per project.</small></p>
           <div class="choices project-choices" role="radiogroup" aria-label="Project">
-            <button v-for="id in projects" :key="id" type="button" class="choice" role="radio" :aria-checked="chosen === id" @click="chosen = id">
+            <button v-for="id in projects" :key="id" type="button" class="choice" role="radio" :aria-checked="chosen === id" :aria-disabled="busy && chosen !== id" @click="choose(id)">
               <span class="radio" /><span class="glyph"><AppIcon name="folder" :size="14" /></span><span><b>{{ projectStore.byId(id)?.routeKey ?? '—' }}</b><span class="small">{{ projectStore.byId(id)?.title ?? '' }}</span></span><span />
             </button>
           </div>
