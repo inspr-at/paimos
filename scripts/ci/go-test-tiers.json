@@ -3024,7 +3024,23 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestAccountMetadataScopeAtMiddleware","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestAdoptAgentKeyAuthorizationTenantAndState","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestAdoptAgentKeyConcurrentNoTakeover","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestAdoptAgentKeyFencesQueuedCreatorlessRequest","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestAdoptAgentKeyPreservesSecretAndAudits","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestAdoptAgentKeyRechecksPermissionInsideWrite","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestAdoptAgentKeyRejectsStaleCreatorAuthority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestAdoptAgentKeyWaitsForAdmittedUse","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestAgentKeyBuildHistoryReadScope","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestAgentKeyCreationRequiresPersonCreator","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestAgentKeyPrincipalScopeAndCeiling","tier":"GATED-FULL"}
     ,
@@ -4188,6 +4204,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestIssueUpdateRefusesMissingRevision","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestKeyAdoptPersonSessionMetadataAndRefusal","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestKeyScopesPersonSessionAndAtomicDelta","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestKeyScopesRefusesRedirectAndRedactsErrors","tier":"ESSENTIAL"}
@@ -4725,6 +4743,8 @@
     {"kind":"go","package":"internal/crossreview","name":"TestUnpublishableReviewCannotHideGreenStatusOwner","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestWebhookAuthenticationReplayAndFailedRevocation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestAgentKeyPersonOwnerExpansionPreservesLegacyWriters","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestAgentRoleModelsBackfillAcrossTenantsUnderRLS","tier":"GATED-FULL"}
     ,

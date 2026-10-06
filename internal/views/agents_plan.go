@@ -42,8 +42,12 @@ func (m *Module) getAgentsPlan(w http.ResponseWriter, r *http.Request) {
 		for _, scope := range p.Scopes {
 			hasScope = hasScope || strings.ReplaceAll(scope, ":", ".") == agentplan.ReadScope
 		}
-		if !hasScope || p.KeyCreatorID == "" {
-			httpapi.WriteError(w, http.StatusForbidden, "person creator and agents.plan.read scope required")
+		if !hasScope {
+			httpapi.WriteError(w, http.StatusForbidden, "agents.plan.read scope missing")
+			return
+		}
+		if p.KeyCreatorID == "" {
+			httpapi.WriteError(w, http.StatusForbidden, "key has no person owner — adopt it in Settings › Keys")
 			return
 		}
 		owner = p.KeyCreatorID

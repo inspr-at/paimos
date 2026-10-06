@@ -58,7 +58,7 @@ func scopedForeignAgent(t *testing.T, m *Module, owner tenant.Principal, release
 		if _, err := tx.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1::uuid,$2::uuid,id,'workspace' FROM roles WHERE tenant_id=$1::uuid AND key='member'`, owner.TenantID, p.ID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1::uuid,$2::uuid,'test',$3,$4,ARRAY[$5])`, owner.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]), scope); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1::uuid,$2::uuid,'test',$3,$4,ARRAY[$5],(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, owner.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]), scope); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO approval_requests(tenant_id,proposed_by_principal_id,agent_principal_id,scope,resource_kind,resource_id,rationale,expires_at) VALUES($1::uuid,$2::uuid,$2::uuid,$3,'node',$4::uuid,'Route regression',now()+interval '1 hour') RETURNING id::text`, owner.TenantID, p.ID, scope, release).Scan(&approval); err != nil {

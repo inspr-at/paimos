@@ -16,8 +16,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const routedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
-const routedGoShards = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
+const mainRoutedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
+
+const routedRunner = `${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
+const routedGoShards = `${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
 
 const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.ref || github.event.pull_request.number || github.run_id }}`
 
@@ -199,7 +201,38 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 			reject("pull_request outside ci.yml requires nonempty paths or paths-ignore")
 		}
 	}
+	if name == "test-runner-route.yml" {
+		if err := checkRunnerRoute(workflow); err != nil {
+			reject(err.Error())
+		}
+	}
 	return problems
+}
+
+func checkRunnerRoute(workflow map[string]any) error {
+	steps, _ := mapping(mapping(workflow["jobs"])["route"])["steps"].([]any)
+	for _, value := range steps {
+		step := mapping(value)
+		if step["id"] != "route" {
+			continue
+		}
+		env := mapping(step["env"])
+		for name, source := range map[string]string{
+			"AEON_POOL_EVENTS":           "${{ vars.AEON_POOL_EVENTS }}",
+			"AEON_PR_HEAD_REPOSITORY":    "${{ github.event.pull_request.head.repo.full_name }}",
+			"AEON_MBP2606_AVAILABILITY":  "${{ vars.AEON_MBP2606_AVAILABILITY }}",
+			"AEON_REQUIRED_IDLE_RUNNERS": "${{ inputs.required-idle-runners }}",
+		} {
+			if env[name] != source {
+				return fmt.Errorf("pool router must bind %s to %s", name, source)
+			}
+		}
+		if step["run"] != "node scripts/ci-runner-route.mjs" {
+			return fmt.Errorf("pool router must execute the event and capacity policy")
+		}
+		return nil
+	}
+	return fmt.Errorf("pool router policy step is missing")
 }
 
 // Full QA is an explicit label opt-in across all changed paths. This exception
@@ -293,9 +326,12 @@ func checkRunnerJobs(name string, workflow map[string]any) []string {
 	if name == "test-runner-smoke.yml" {
 		routeID = "smoke-route"
 	}
-	// The smoke caller has a distinct identity but identical event/ref/attempt
-	// guards. No other caller can rename the reviewed router dependency.
-	runnerExpression := strings.ReplaceAll(routedRunner, "needs.runner-route.", "needs."+routeID+".")
+	// The manual smoke caller retains its main-only event/ref/attempt guards.
+	// CI also admits opted-in same-repo PRs and merge groups through the router.
+	runnerExpression := routedRunner
+	if name == "test-runner-smoke.yml" {
+		runnerExpression = strings.ReplaceAll(mainRoutedRunner, "needs.runner-route.", "needs."+routeID+".")
+	}
 	for id, value := range jobs {
 		job := mapping(value)
 		reject := func(reason string) { problems = append(problems, name+"/"+id+": "+reason) }
@@ -347,7 +383,7 @@ func checkRunnerJobs(name string, workflow map[string]any) []string {
 			}
 		}
 		if !allHosted(job["runs-on"]) {
-			reject("runner selection is not proven hosted or event-guarded; mbp2606 is forbidden on PRs")
+			reject("runner selection is not proven hosted or event-guarded through the pool router")
 		}
 	}
 	return problems

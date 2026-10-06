@@ -5029,6 +5029,28 @@ paths:
         '403': {description: Person key-management or live grant authority denied}
         '404': {description: Proposal not found in this tenant}
         '409': {description: 'Restore window closed, scopes changed, key inactive, or conflicting replay'}
+  /agent-keys/{id}/adopt:
+    post:
+      operationId: adoptAgentKey
+      summary: Make the current person the owner of a creatorless key
+      description: Requires a person session and keys.manage in the same tenant. Only creatorless keys can be adopted. Audited; no rotation or secret change. Existing ownership cannot be taken over.
+      security: [{session: []}]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '200':
+          description: Adopted key metadata, without secret material
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AgentKey'}
+        '400': {description: Invalid key id}
+        '401': {description: Authentication required}
+        '403': {description: Person session and keys.manage required}
+        '404': {description: Key not found in this tenant}
+        '409': {description: Key already has an owner or is inactive}
   /agent-keys/{id}/scopes:
     parameters:
       - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
@@ -19866,6 +19888,7 @@ components:
       type: object
       required: [id, principal_id, name, prefix, scopes, created_at]
       properties:
+        created_by_principal_id: {type: [string, 'null'], format: uuid, description: Person owner; null for legacy creatorless keys}
         owner_workstation: {type: boolean}
         workstation_computer_id: {type: [string, 'null'], format: uuid}
         id:

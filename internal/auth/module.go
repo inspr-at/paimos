@@ -110,6 +110,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/me", reportercontract.WithHeader(reportercontract.Me, m.handleMe))
 	mux.HandleFunc("POST /api/agent-keys", m.handleCreateAgentKey)
 	mux.HandleFunc("GET /api/agent-keys", m.handleListAgentKeys)
+	mux.HandleFunc("POST /api/agent-keys/{id}/adopt", m.handleAdoptAgentKey)
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
 	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
@@ -177,6 +178,16 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				}
 				agentpairing.WriteError(w, err)
 				return
+			}
+			if r.Pattern == "GET /api/agents/plan" {
+				if !hasScope(p.Scopes, "agents.plan.read") {
+					httpapi.WriteError(w, http.StatusForbidden, "agents.plan.read scope missing")
+					return
+				}
+				if p.KeyCreatorID == "" {
+					httpapi.WriteError(w, http.StatusForbidden, "key has no person owner — adopt it in Settings › Keys")
+					return
+				}
 			}
 			scope, controlled := coreAgentScope(r)
 			if authz.OwnerWorkstation(p) && workstationGovernance(r) && !strings.HasSuffix(r.Pattern, "/owner-workstation") {
