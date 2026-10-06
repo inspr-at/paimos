@@ -15,6 +15,8 @@ import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDeci
 import { runnerDecision, runnerSelection } from './cli.mjs'
 import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs'
 import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
+import './manifests.test.mjs'
+import './tiers-merge-driver.test.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
 const w=(file,name,tier='NIGHTLY')=>({kind:'node',file,name,tier})
@@ -451,7 +453,7 @@ test('trusted tier planner uses base classifier and base graph despite candidate
   const git=args=>execFileSync('git',args,{cwd:directory,env,encoding:'utf8'})
   const file=(path,source)=>{mkdirSync(resolve(directory,path,'..'),{recursive:true});writeFileSync(resolve(directory,path),source)}
   git(['init','-q'])
-  for(const name of ['core.mjs','diff.mjs','collect.mjs','inputs.mjs','migration.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
+  for(const name of ['core.mjs','diff.mjs','collect.mjs','inputs.mjs','migration.mjs','manifests.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
   file('scripts/ci/web-test-tiers.json',JSON.stringify({tests:[]}))
   file('scripts/ci/go-test-tiers.json',JSON.stringify({tests:[]}))
   file('web/src/unused.ts','export {}')
