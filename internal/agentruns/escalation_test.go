@@ -40,7 +40,9 @@ func TestEscalatedClaimRequiresFreshMeasuredRoom(t *testing.T) {
 	})
 	request()
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET capacity_read_at=clock_timestamp() WHERE account_id=(SELECT account_id FROM agent_runs WHERE id=$1)`, v.ID)
+		// Stay inside the fresh window without coupling the fixture to exact
+		// clock agreement between the database host and the request host.
+		_, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET capacity_read_at=clock_timestamp()-interval '1 minute' WHERE account_id=(SELECT account_id FROM agent_runs WHERE id=$1)`, v.ID)
 		return err
 	})
 	f.call(t, f.agent, "POST", path, body, 200, &v)

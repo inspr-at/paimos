@@ -162,7 +162,7 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
   .btn, .icon-btn, .seg button, .row-menu-item, .status-btn,
   .title-link, .jump, .who, .res-key, .date-trigger, .link-btn,
   .ticket-chip, .more-link, .reach-link, .hours-chip, .prop-btn, .key-chip,
-  .project-link, .ekey, .journey-chip, .row-main, .twisty, .tier-mark {
+  .project-link, .ekey, .row-main, .twisty, .tier-mark {
     position: relative;
   }
   .btn::before, .icon-btn::before, .seg button::before, .row-menu-item::before,
@@ -171,7 +171,7 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
   .ticket-chip::before, .more-link::before, .reach-link::before,
   .hours-chip::before,
   .prop-btn::before, .key-chip::before, .project-link::before,
-  .ekey::before, .journey-chip::before, .row-main::before,
+  .ekey::before, .row-main::before,
   .twisty::before, .tier-mark::before {
     content: '';
     position: absolute;

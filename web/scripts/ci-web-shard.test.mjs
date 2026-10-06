@@ -136,6 +136,36 @@ test('LPT balancing distributes a known fixture optimally and covers it exactly 
   assert.deepEqual(balanceShards(uneven, 2), balanced, 'Swap selection must not depend on source order')
 })
 
+test('indivisible specs rebalance after LPT without changing weights, coverage or launch policy', () => {
+  // LPT alone assigns [8, 5, 4] and [7, 6]: 17/13 despite a 15/15 fit.
+  const manifest = { version: 1, groups: [group('a', [8, 7, 6]), group('b', [5, 4])] }
+  const before = structuredClone(manifest), shards = balanceShards(manifest, 2)
+  assert.deepEqual(shards.map(shard => shard.weightSeconds), [15, 15])
+  assert.deepEqual(checkCoverage(manifest, shards, files(manifest)), { specs: 5, shards: 2 })
+  for (const shard of shards) {
+    assert.equal(shard.weightSeconds, shard.specs.reduce((total, spec) => total + spec.weightSeconds, 0))
+    for (const spec of shard.specs) {
+      const owner = manifest.groups.find(group => group.id === spec.groupId)
+      assert.deepEqual(spec, { ...owner.specs.find(row => row.file === spec.file), groupId: owner.id })
+    }
+  }
+  assert.deepEqual(manifest, before)
+  const reordered = structuredClone(manifest)
+  reordered.groups.reverse().forEach(group => group.specs.reverse())
+  assert.deepEqual(balanceShards(reordered, 2), shards)
+})
+
+test('multi-spec exchanges lower a peak that pairwise swaps leave in place', () => {
+  // LPT plus one-for-one swaps stops at 51/47/46 for these weights. A three-spec
+  // exchange reaches the even 48/48/48 split, which is what merged gate weights need.
+  const manifest = { version: 1, groups: [group('peak', [40, 21, 20, 19, 18, 8, 7, 6, 5])] }
+  const shards = balanceShards(manifest, 3)
+  assert.deepEqual(shards.map(shard => shard.weightSeconds), [48, 48, 48])
+  assert.deepEqual(checkCoverage(manifest, shards, files(manifest)), { specs: 9, shards: 3 })
+  manifest.groups[0].specs.reverse()
+  assert.deepEqual(balanceShards(manifest, 3).map(shard => shard.weightSeconds), [48, 48, 48])
+})
+
 test('one-worker tier weights convert measured parallel steps but retain serial and unmeasured estimates', async () => {
   const { tierWeights } = await import('./ci-web-shard.mjs')
   const manifest = fixture()

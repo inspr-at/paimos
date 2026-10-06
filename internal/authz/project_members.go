@@ -166,31 +166,16 @@ func (m *Module) authorizeProjectMutation(ctx context.Context, tx pgx.Tx, p tena
 	return nil
 }
 
-// LockProjectMutation fences project-scoped writes against tree moves and
-// access changes. Take the tenant fence before the tree advisory and resource
-// rows, matching Undo and operator calls. Call before reading targets or grants
-// and hold through commit; never hold these locks while reading a request body.
-// NO KEY UPDATE remains compatible with tenant foreign-key KEY SHARE locks.
+// LockProjectMutation fences placement and access through commit. Tenant's
+// FK-compatible fence precedes tree and resource locks; decode before entry.
 func LockProjectMutation(ctx context.Context, tx pgx.Tx, tenantID string) error {
-	var id string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&id); err != nil {
-		return err
-	}
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID)
-	return err
+	return db.LockTree(ctx, tx, tenantID)
 }
 
-// LockProjectWrite holds project placement and authority steady for a resource
-// write that does not change bindings. Tenant precedes tree, as for membership
-// edits, but SHARE suffices to fence their NO KEY UPDATE lock. It remains
-// compatible with tenant FK KEY SHARE locks taken by resource/event writers.
+// LockProjectWrite uses the same exclusive non-key fence as mutations. A shared
+// tenant lock followed by a later upgrade could deadlock concurrent re-entries.
 func LockProjectWrite(ctx context.Context, tx pgx.Tx, tenantID string) error {
-	var id string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR SHARE`, tenantID).Scan(&id); err != nil {
-		return err
-	}
-	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID)
-	return err
+	return db.LockTree(ctx, tx, tenantID)
 }
 
 func bindableTx(ctx context.Context, tx pgx.Tx, tenantID, principalID string) error {

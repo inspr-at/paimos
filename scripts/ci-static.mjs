@@ -233,7 +233,9 @@ export function runCommand(command, { cwd, timeout_seconds, env = process.env, s
   return new Promise(resolveResult => {
     const begin = performance.now()
     let output = '', expired = false, interrupted = false, timer, killTimer
-    const child = spawn('/bin/sh', ['-c', command], { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] })
+    // Keep the waiting shell alive on TERM so it can reap its foreground child.
+    // A caught (rather than ignored) signal retains the child's default handler.
+    const child = spawn('/bin/sh', ['-c', `trap ':' TERM\n${command}`], { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] })
     const tail = data => { output = (output + data.toString()).slice(-65536) }
     child.stdout.on('data', tail); child.stderr.on('data', tail)
     function kill(sig, afterClose = false) {
@@ -249,16 +251,40 @@ export function runCommand(command, { cwd, timeout_seconds, env = process.env, s
     signal?.addEventListener('abort', abort, { once: true })
     timer = setTimeout(() => { expired = true; stop() }, timeout_seconds * 1000)
     child.on('error', error => tail(error.message))
-    child.on('close', (code, sig) => {
+    child.on('close', async (code, sig) => {
+      // afterClose suppresses Darwin's EPERM for an already-exited group.
+      // The probe below still waits until that group is gone.
       if (expired || interrupted) kill('SIGKILL', true)
       clearTimeout(timer); clearTimeout(killTimer); signal?.removeEventListener('abort', abort)
+      let cleanupError
+      if ((expired || interrupted) && child.pid && process.platform !== 'win32') {
+        // Closing the shell's pipes does not mean its descendants have exited
+        // or been reaped. Probe only our spawned group; never signal it again
+        // after it disappears, since its numeric identity could then be reused.
+        const deadline = performance.now() + 2000
+        try {
+          for (;;) {
+            try { process.kill(-child.pid, 0) }
+            catch (error) {
+              if (error.code === 'ESRCH') break
+              // Darwin can report EPERM while a killed, reparented member is
+              // awaiting reaping. It still proves presence, never completion.
+              if (error.code !== 'EPERM') throw error
+            }
+            if (performance.now() >= deadline) throw new Error('Owned command process group survived shutdown')
+            await new Promise(done => setTimeout(done, 10))
+          }
+        } catch (error) { cleanupError = error.message }
+      }
       const seconds = Math.round((performance.now() - begin) / 10) / 100
       if (expired || interrupted) {
         const cause = expired ? `exceeded timeout_seconds=${timeout_seconds}` : 'interrupted'
         tail(`\nci-static: ${id} ${cause} after ${seconds}s (process group termination requested)`)
       }
-      resolveResult({ status: expired ? 'timeout' : interrupted ? 'interrupted' : code === 0 ? 'passed' : 'failed',
+      if (cleanupError) tail(`\n${cleanupError}`)
+      resolveResult({ status: cleanupError ? 'failed' : expired ? 'timeout' : interrupted ? 'interrupted' : code === 0 ? 'passed' : 'failed',
         seconds, code, signal: sig,
+        ...(cleanupError ? { cleanup_error: cleanupError } : {}),
         output: output.trimEnd().split('\n').slice(-40).join('\n') })
     })
     if (signal?.aborted) abort()
