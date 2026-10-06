@@ -137,6 +137,26 @@ test('ticket: queued without a lead offers Start lead; a parent queues its open 
   expect(state.calls.find(c => c.path === '/api/queue/n-2/snapshots')?.body).toEqual({ expected_revision: expect.any(String) })
 })
 
+test('ticket header keeps every action inside a 1024 side panel with a wide system font', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 1000 })
+  await mockLeadFlow(page, { lead: 'working', queue: [] })
+  // CI's Linux fonts run wider than macOS; Verdana/DejaVu reproduce that here.
+  const wide = '.panel-bar .btn, .panel-bar .btn * { font-family: Verdana, "DejaVu Sans", sans-serif !important; }'
+  for (const key of ['PHAROS-14', 'PHAROS-12']) {
+    await page.goto(`/p/PHAROS/${key}`)
+    await page.addStyleTag({ content: wide })
+    const drawer = page.getByRole('complementary', { name: 'Ticket details' })
+    const bar = drawer.locator('.panel-bar-main')
+    await expect(drawer.locator('.q-action')).toBeVisible()
+    const frame = (await bar.boundingBox())!
+    for (const name of ['Edit', 'More actions', 'Close ticket details']) {
+      const box = (await drawer.getByRole('button', { name, exact: true }).boundingBox())!
+      expect(box.x + box.width, `${key}: ${name} stays inside the header`).toBeLessThanOrEqual(frame.x + frame.width + 0.5)
+    }
+    expect(await bar.evaluate(el => el.scrollWidth - el.clientWidth), `${key}: the header does not overflow`).toBeLessThanOrEqual(0)
+  }
+})
+
 for (const look of ['light', 'dark'] as const) test(`Agents page: one line per lead; + offers Start lead only while a project has none (${look})`, async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await mockLeadFlow(page, { lead: 'working', aeon: 'none', queue: ['n-4', 'n-a1'] })
