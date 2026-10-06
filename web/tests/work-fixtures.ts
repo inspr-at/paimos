@@ -36,9 +36,11 @@ export interface MockView {
   created_at: string; updated_at: string; deleted_at: string | null
 }
 // A saved view as the server stores it (ids are UUIDs, like the server's).
+// Normal views carry a column snapshot; columns: [] is an explicit legacy
+// fixture, soft-deleted by AEON-718 rather than offered in the view bar.
 export function mockView(partial: Partial<MockView> & Pick<MockView, 'id' | 'name'>): MockView {
   return {
-    owner_principal_id: me.id, project_id: 'p-pharos', filters: {}, sort: { field: 'position', direction: 'asc' }, sort_keys: [], group_by: 'none', mode: 'list', columns: [], shared: false,
+    owner_principal_id: me.id, project_id: 'p-pharos', filters: {}, sort: { field: 'position', direction: 'asc' }, sort_keys: [], group_by: 'none', mode: 'list', columns: ['key', 'title', 'status', 'priority', 'updated'], shared: false,
     created_at: ago(24 * 3), updated_at: ago(24 * 3), deleted_at: null, ...partial,
   }
 }

@@ -193,6 +193,9 @@ test('view menu: rename, duplicate, default on the next visit, share, copy link 
   const calls = await mockWork(page, data)
   await page.goto(`/p/PHAROS?priority=high&v=${MINE}`)
   await expect(rows(page)).toHaveCount(2)
+  // Normal saved views include their column snapshot, so opening one without
+  // edits must stay clean (empty columns describe a removed legacy view).
+  await expect(bar(page).getByRole('img', { name: 'changed since saved' })).toHaveCount(0)
   const options = (name: string) => bar(page).getByRole('button', { name: `Options for view ${name}`, exact: true })
   await options('Mine').click()
   let menu = page.getByRole('menu', { name: 'View Mine' })
@@ -223,6 +226,7 @@ test('view menu: rename, duplicate, default on the next visit, share, copy link 
   // for Team to be current before resolving its options, rather than capturing
   // the old view's button while the router is still changing the selection.
   await expect(bar(page).getByRole('link', { name: 'Team', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(bar(page).getByRole('img', { name: 'changed since saved' })).toHaveCount(0)
   await expect(rows(page)).toHaveCount(2)
   await options('Team').click()
   menu = page.getByRole('menu', { name: 'View Team' })
@@ -230,6 +234,8 @@ test('view menu: rename, duplicate, default on the next visit, share, copy link 
   await expect(menu.getByRole('menuitem', { name: 'Delete view' })).toHaveCount(0)
   await menu.getByRole('menuitem', { name: 'Copy to my views' }).click()
   await expect(bar(page).getByRole('link', { name: 'Team copy' })).toHaveAttribute('aria-current', 'page')
+  await expect(bar(page).getByRole('img', { name: 'changed since saved' })).toHaveCount(0)
+  expect(data.views.find(view => view.name === 'Team copy')).toMatchObject({ columns: data.views.find(view => view.id === SHARED)!.columns, mode: 'list' })
   // Delete, then Undo brings the view back with its id.
   await options('Team copy').click()
   await page.getByRole('menu', { name: 'View Team copy' }).getByRole('menuitem', { name: 'Delete view' }).click()
