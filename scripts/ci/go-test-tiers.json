@@ -578,7 +578,13 @@
     ,
     "internal/workorders:TestEndpointPositionedBodyNetworkDeadline"
     ,
+    "scripts/releaseworkflow:TestBuilderChecksumAndPluginPathFailClosed"
+    ,
+    "scripts/releaseworkflow:TestBuilderVersionAssertionFailsClosed"
+    ,
     "scripts/releaseworkflow:TestParallelWebUnitsShareRuntimeAndRunOnce"
+    ,
+    "scripts/releaseworkflow:TestRehearsedBuilderPins"
   ]
   ,
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)"
@@ -8538,9 +8544,9 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestAnnotatedTagGuardFailsClosed","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"scripts/releaseworkflow","name":"TestBuilderChecksumAndPluginPathFailClosed","tier":"GATED-FULL"}
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestBuilderChecksumAndPluginPathFailClosed","tier":"NIGHTLY"}
     ,
-    {"kind":"go","package":"scripts/releaseworkflow","name":"TestBuilderVersionAssertionFailsClosed","tier":"GATED-FULL"}
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestBuilderVersionAssertionFailsClosed","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestComposeAppProbesReadiness","tier":"GATED-FULL"}
     ,
@@ -8600,7 +8606,7 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestRehearsalReleaseTagValidation","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"scripts/releaseworkflow","name":"TestRehearsedBuilderPins","tier":"GATED-FULL"}
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestRehearsedBuilderPins","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReleaseBinariesRefuseWarmOrUnverifiedGo","tier":"ESSENTIAL"}
     ,
