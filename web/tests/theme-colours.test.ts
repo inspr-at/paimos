@@ -87,6 +87,8 @@ test('first-paint bootstrap restores derived CSS before app startup with its CSP
   const css = themeCss(PORCELAIN)
   const result = bootstrap(JSON.stringify({ principal: 'tenant/person', css }))
   assert.deepEqual(result.styles, [{ id: 'aeon-theme', nonce: 'test-nonce', textContent: css }])
+  const upperCss = themeCss({ ...PORCELAIN, primary: { light: '#0E6F6C', dark: '#A4E5DF' }, recurring_marker: { source: 'custom', custom: '#BF3D6D' } })
+  assert.equal(bootstrap(JSON.stringify({ principal: 'tenant/person', css: upperCss })).styles[0]?.textContent, upperCss)
   assert.ok(source.indexOf('aeon-theme-boot') < source.indexOf('<div id="app">'))
 })
 test('first-paint bootstrap tolerates unavailable storage and rejects corrupt, oversized or unsafe CSS', () => {
