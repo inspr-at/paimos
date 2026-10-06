@@ -92,10 +92,10 @@ func TestBuiltinIsSealed(t *testing.T) {
 		t.Fatal(err)
 	}
 	items := reg.list()
-	if len(items) != 2 || items[0].Manifest.ID != "janus" || items[1].Manifest.ID != "pharos" {
+	if len(items) != 0 {
 		t.Fatalf("builtin = %#v", ids(items))
 	}
-	if err := reg.Register(items[0]); err == nil {
+	if err := reg.Register(mustPlugin(t, kindPlugin("widget", "widget", nil, `{}`))); err == nil {
 		t.Fatal("sealed registry accepted a plugin")
 	}
 }

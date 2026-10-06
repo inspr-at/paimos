@@ -50,7 +50,6 @@ import { can } from '../../lib/authz'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
 import { openedMembershipMessage, releaseViewIsParent, type NativeReleaseView } from '../../lib/releaseMembership'
 import ReleasePicker from './ReleasePicker.vue'
-import { useJourney } from '../../stores/journey'
 import QueueAction from './QueueAction.vue'
 import WorkLifecycleSheet from './WorkLifecycleSheet.vue'
 import QueueDetails from './QueueDetails.vue'
@@ -192,7 +191,6 @@ onBeforeUnmount(() => queuePoller.stop())
 const canQueue = computed(() => props.item?.is_leaf !== false && !ticket.readOnly.value && !ticket.gone.value && can('run.create', props.project.id))
 const canRelease = computed(() => editable.value && !!props.item && can('releases.write', props.project.id))
 const releaseView = computed(() => props.nativeReleases?.get(props.item?.id ?? ''))
-const journeys = useJourney()
 
 // ---------- Following links: a modified click opens a new tab ----------
 let modifiedClick = false
@@ -474,7 +472,6 @@ async function chooseRelease(target: ReleaseTarget) {
   menu.value = null
   try {
     const outcome = await assignToRelease(projectId, [ticket], target)
-    if (outcome.journey) journeys.set(projectId, outcome.journey)
     if (!releaseChoiceAlive || props.project.id !== projectId || props.item?.id !== ticket.id) return
     const changed = outcome.opened ? openedMembershipMessage(outcome.opened) : null
     if (changed) {

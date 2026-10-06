@@ -3,14 +3,11 @@ package auth
 
 import (
 	"context"
-	"fmt"
-	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
-	"github.com/inspr-at/paimos/internal/journey"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -37,51 +34,4 @@ func OperatorCreateAgentKey(ctx context.Context, pool *pgxpool.Pool, tenantID, n
 func OperatorRevokeAgentKey(ctx context.Context, pool *pgxpool.Pool, tenantID, id string) error {
 	m := &Module{pool: pool, inTenant: db.InTenant}
 	return m.revokeAgentKey(db.NoProjects(ctx, "operator agent key"), tenant.Principal{TenantID: tenantID}, id)
-}
-
-// OperatorGrantJourneyScopes adds the two legacy journey gate prefixes to one
-// newly created demo key. They are outside the agent permission registry, so
-// the ordinary key creation path cannot accept them.
-func OperatorGrantJourneyScopes(ctx context.Context, pool *pgxpool.Pool, tenantID, keyID, principalID string) error {
-	m := &Module{pool: pool, inTenant: db.InTenant}
-	return m.grantJourneyScopes(db.NoProjects(ctx, "operator agent key"), tenantID, keyID, principalID, []string{journey.ScopeRequirements, journey.ScopeBuild})
-}
-
-// JourneyGateScopes accepts only the gate names checked by the journey module.
-// Ordinary agent-key creation still uses the permission registry and cannot
-// grant these scopes through the HTTP API.
-func JourneyGateScopes(gates []string) ([]string, error) {
-	allowed := map[string]string{
-		journey.GateShape:        journey.ScopeShape,
-		journey.GateRequirements: journey.ScopeRequirements,
-		journey.GateBuild:        journey.ScopeBuild,
-		journey.GateCandidate:    journey.ScopeCandidate,
-		journey.GateDeploy:       journey.ScopeDeploy,
-		journey.GateAccess:       journey.ScopeAccess,
-	}
-	if len(gates) == 0 {
-		return nil, fmt.Errorf("at least one journey gate is required")
-	}
-	scopes := make([]string, 0, len(gates))
-	for _, gate := range gates {
-		scope, ok := allowed[gate]
-		if !ok {
-			return nil, fmt.Errorf("unknown journey gate %q", gate)
-		}
-		if !slices.Contains(scopes, scope) {
-			scopes = append(scopes, scope)
-		}
-	}
-	return scopes, nil
-}
-
-// OperatorAddJourneyGateScopes extends one existing key, attributing the
-// before/after scope event to the tenant's Access operator.
-func OperatorAddJourneyGateScopes(ctx context.Context, pool *pgxpool.Pool, tenantID, keyID string, gates []string) ([]string, error) {
-	scopes, err := JourneyGateScopes(gates)
-	if err != nil {
-		return nil, err
-	}
-	m := &Module{pool: pool, inTenant: db.InTenant}
-	return scopes, m.grantJourneyScopes(db.NoProjects(ctx, "operator agent key"), tenantID, keyID, "", scopes)
 }

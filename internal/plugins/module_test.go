@@ -21,7 +21,6 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/plugins/fence"
-	"github.com/inspr-at/paimos/internal/plugins/pharos"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
 
@@ -35,7 +34,11 @@ func TestInstallationIsAuditedAndTenantScoped(t *testing.T) {
 	agent := insertPrincipal(t, database, tenantA, tenant.Agent, "Agent", []string{"admin"})
 	other := insertPrincipal(t, database, tenantB, tenant.Person, "Bea", []string{"admin"})
 
-	mod := New(database.App)
+	reg, err := Builtin(testStagePlugin("janus"), testStagePlugin("pharos"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mod := NewWithRegistry(database.App, reg)
 	mux := http.NewServeMux()
 	mod.Mount(mux)
 	call := func(p *tenant.Principal, method, path, body string) (int, []byte) {
@@ -144,11 +147,11 @@ func TestInstallationIsAuditedAndTenantScoped(t *testing.T) {
 		t.Fatal("identical pin wrote another event")
 	}
 
-	decision, err := mod.Request(ctx, admin, "pharos", StepRequest{Stage: "deploy", Operation: "deploy", Payload: deployFacts()})
-	if err != nil || !decision.Proceed || !decision.ConsumeLaunchAdmission || decision.AdvancesRelease || decision.AdvancesAccess {
+	decision, err := mod.Request(ctx, admin, "pharos", StepRequest{Stage: "deploy", Operation: "deploy", Payload: struct{}{}})
+	if err != nil || !decision.Proceed || decision.AdvancesRelease || decision.AdvancesAccess {
 		t.Fatalf("request = %#v %v", decision, err)
 	}
-	if _, err := mod.Request(ctx, other, "pharos", StepRequest{Stage: "deploy", Operation: "deploy", Payload: deployFacts()}); !errors.Is(err, ErrClosed) {
+	if _, err := mod.Request(ctx, other, "pharos", StepRequest{Stage: "deploy", Operation: "deploy", Payload: struct{}{}}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("other tenant request = %v", err)
 	}
 	status, body = call(&other, http.MethodGet, "/api/plugins", "")
@@ -168,7 +171,7 @@ func TestInstallationIsAuditedAndTenantScoped(t *testing.T) {
 	if status, body = put(admin, "pharos", pharosItem.DigestSHA256, true, []string{fence.PermStepsEvaluate}); status != http.StatusOK {
 		t.Fatalf("narrow = %d %s", status, body)
 	}
-	if _, err := mod.Request(ctx, admin, "pharos", StepRequest{Stage: "deploy", Operation: "deploy", Payload: deployFacts()}); !errors.Is(err, ErrDenied) {
+	if _, err := mod.Request(ctx, admin, "pharos", StepRequest{Stage: "deploy", Operation: "deploy", Payload: struct{}{}}); !errors.Is(err, ErrDenied) {
 		t.Fatalf("narrowed request = %v", err)
 	}
 	var firstPerms []string
@@ -182,7 +185,7 @@ func TestInstallationIsAuditedAndTenantScoped(t *testing.T) {
 	if status, body = put(admin, "pharos", pharosItem.DigestSHA256, false, []string{fence.PermStepsEvaluate}); status != http.StatusOK {
 		t.Fatalf("disable = %d %s", status, body)
 	}
-	if _, err := mod.Evaluate(ctx, admin, "pharos", StepRequest{Stage: "deploy", Operation: "deploy", Payload: deployFacts()}); !errors.Is(err, ErrClosed) {
+	if _, err := mod.Evaluate(ctx, admin, "pharos", StepRequest{Stage: "deploy", Operation: "deploy", Payload: struct{}{}}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("disabled evaluate = %v", err)
 	}
 	if countEvents(t, database, tenantA, eventInstallation) != 3 {
@@ -200,7 +203,7 @@ func TestInstallationIsAuditedAndTenantScoped(t *testing.T) {
 	if catalog[1].DigestSHA256 == catalog[1].Installation.ManifestDigestSHA256 {
 		t.Fatal("tampered pin matched the compiled digest")
 	}
-	if _, err := mod.Evaluate(ctx, admin, "pharos", StepRequest{Operation: "deploy", Stage: "deploy", Payload: deployFacts()}); !errors.Is(err, ErrClosed) {
+	if _, err := mod.Evaluate(ctx, admin, "pharos", StepRequest{Operation: "deploy", Stage: "deploy", Payload: struct{}{}}); !errors.Is(err, ErrClosed) {
 		t.Fatalf("mismatched digest = %v", err)
 	}
 
@@ -344,21 +347,6 @@ func (k *kindSwitch) NodeKinds(context.Context, Call) ([]NodeKind, error) {
 		return []NodeKind{{Slug: "widget", FieldSchema: json.RawMessage(`{"type":"string"}`)}}, nil
 	}
 	return k.kinds, nil
-}
-
-func deployFacts() pharos.Facts {
-	artifact := pharos.Artifact{
-		VersionScheme: "inspr-calendar-v2", Version: "260923161128.0.0", ReleaseChannel: "stable",
-		ReleaseSequence: 1, DigestSHA256: strings.Repeat("ab", 32), CommitDigest: "abc123",
-		ManifestCoordinate: "pharos/aeon", ManifestDigestSHA256: strings.Repeat("cd", 32),
-	}
-	return pharos.Facts{
-		Operation: pharos.OperationDeploy, Artifact: artifact, Expected: artifact,
-		BackupReady: true, Readiness: true, PersonApproved: true,
-		Admission: pharos.Admission{Present: true, BindingMatches: true, AuthorityMatches: true},
-		Workflow:  "ship", Environment: "prod",
-		ObservedAt: time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC),
-	}
 }
 
 func insertTenant(t *testing.T, database *dbtest.DB, slug string) string {

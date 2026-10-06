@@ -20,7 +20,6 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/harness"
-	"github.com/inspr-at/paimos/internal/journey"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbootstrap"
@@ -56,7 +55,7 @@ func TestDemoSeedTwice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first.Already || first.Projects != 3 || first.Tickets < 40 || first.Stage != "build" {
+	if first.Already || first.Projects != 3 || first.Tickets < 40 || first.Stage != "" {
 		t.Fatalf("summary %+v", first)
 	}
 	if legacy := scalar(t, database, id, `SELECT count(*) FROM node_kinds WHERE slug IN ('epic','ticket','task')`); legacy != 0 {
@@ -94,7 +93,7 @@ func TestDemoSeedTwice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !second.Already || second.Projects != first.Projects || second.Tickets != first.Tickets || second.Stage != "build" {
+	if !second.Already || second.Projects != first.Projects || second.Tickets != first.Tickets || second.Stage != "" {
 		t.Fatalf("second summary %+v", second)
 	}
 	if again := scalar(t, database, first.TenantID, `SELECT count(*) FROM events`); again != events {
@@ -149,42 +148,6 @@ func interruptedSeed(t *testing.T, interruptAt string) {
 	}
 }
 
-func TestDemoJourneyScopesOnlyExtendNewKey(t *testing.T) {
-	t.Setenv("AEON_ENV", "dev")
-	database := dbtest.Open(t)
-	ctx := t.Context()
-	tenantID, err := tenantbootstrap.Create(ctx, database.App, "keys-demo", "Keys Demo")
-	if err != nil {
-		t.Fatal(err)
-	}
-	oldKey, principalID, _, err := auth.OperatorCreateAgentKey(ctx, database.App, tenantID, "Lumen Scribe", "", []string{"nodes.read"}, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Seed(ctx, database.App, "keys-demo"); err != nil {
-		t.Fatal(err)
-	}
-	var oldScopes, newScopes []string
-	var newKey, eventKey string
-	err = db.InTenant(dbtest.Seed(ctx), database.App, tenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `SELECT scopes FROM agent_keys WHERE id=$1::uuid`, oldKey).Scan(&oldScopes); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(ctx, `SELECT id::text,scopes FROM agent_keys WHERE principal_id=$1::uuid AND id<>$2::uuid`, principalID, oldKey).Scan(&newKey, &newScopes); err != nil {
-			return err
-		}
-		return tx.QueryRow(ctx, `SELECT after->>'key_id' FROM events WHERE type='agent_key.scopes_extended'`).Scan(&eventKey)
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(oldScopes, []string{"nodes.read"}) || !slices.Contains(newScopes, "journey.requirements") || !slices.Contains(newScopes, "journey.build") || eventKey != newKey {
-		t.Fatalf("old scopes %v, new scopes %v, new key %s, event key %s", oldScopes, newScopes, newKey, eventKey)
-	}
-}
-
-// seedRows compares row contents, including IDs, keys, scopes, and event
-// snapshots. Counts alone would miss changed or duplicated resources.
 func seedRows(t *testing.T, database *dbtest.DB, tenantID string) []string {
 	t.Helper()
 	queries := []string{
@@ -335,13 +298,10 @@ func assertShowcaseState(t *testing.T, database *dbtest.DB, tenantID string) {
 func assertCaptureState(t *testing.T, database *dbtest.DB, tenantID string) {
 	t.Helper()
 	var admin tenant.Principal
-	var ticket, glass, project, sessionID, scribeID string
+	var ticket, project, sessionID, scribeID string
 	err := db.InTenant(dbtest.Seed(t.Context()), database.App, tenantID, func(tx pgx.Tx) error {
 		admin.TenantID, admin.Kind = tenantID, tenant.Person
 		if err := tx.QueryRow(t.Context(), `SELECT id::text,name FROM principals WHERE name='Demo Operator'`).Scan(&admin.ID, &admin.Name); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM nodes WHERE key='NGLASS-1'`).Scan(&glass); err != nil {
 			return err
 		}
 		return tx.QueryRow(t.Context(), `SELECT s.id::text,s.project_id::text,s.ticket_node_id::text,s.agent_principal_id::text FROM harness_sessions s WHERE s.harness='codex'`).Scan(&sessionID, &project, &ticket, &scribeID)
@@ -354,25 +314,8 @@ func assertCaptureState(t *testing.T, database *dbtest.DB, tenantID string) {
 		t.Fatal(err)
 	}
 	assertHarnessMix(t, api, admin)
-	view, err := (&seeder{api: api, admin: admin}).journeyView(glass)
-	if err != nil || view.Stage != "requirements" || view.RequirementsScope == "" {
-		t.Fatalf("pending journey: %+v, error %v", view, err)
-	}
-	if n := scalar(t, database, tenantID, `SELECT count(*) FROM approval_requests a JOIN nodes n ON n.id=a.resource_id AND n.tenant_id=a.tenant_id WHERE n.key='NGLASS-1' AND a.scope LIKE 'journey.requirements.%' AND a.expires_at>now() AND NOT EXISTS (SELECT 1 FROM approval_decisions d WHERE d.request_id=a.id AND d.tenant_id=a.tenant_id)`); n != 1 {
-		t.Fatal("missing pending revision-bound gate")
-	}
-	var gateView journey.Journey
-	if err := api.do(admin, "", http.MethodGet, "/api/projects/"+glass+"/journey", nil, http.StatusOK, &gateView, nil); err != nil {
-		t.Fatal(err)
-	}
-	gateVisible := false
-	for _, stage := range gateView.Stages {
-		if stage.Key == "requirements" && stage.GateOfferID != nil && stage.GateOfferState == "pending" && stage.GateScope == view.RequirementsScope {
-			gateVisible = true
-		}
-	}
-	if !gateVisible {
-		t.Fatal("GateApprovals has no pending requirements offer")
+	if n := scalar(t, database, tenantID, `SELECT count(*) FROM journey_gates`); n != 0 {
+		t.Fatal("demo initialized retired gates")
 	}
 	var session harness.Session
 	path := "/api/projects/" + project + "/harness-sessions/" + sessionID

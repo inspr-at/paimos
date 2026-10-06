@@ -1,14 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Putting tickets into a release: an open planning release, or a new one.
 // A ticket that already sits in another planning release is moved only after a yes.
-// A new release is one journey action. A definite rejection rolls it back.
-// A lost response stays unconfirmed: the same tickets replay that action and
-// do not send a membership write. The action response is the current journey,
-// so the tickets' native membership decides which release, if any, to name.
+// New releases and membership are one native release transaction.
 
 import { APIError } from './api.ts'
 import { confirmAction } from './confirm.ts'
-import { getWalker, type Journey } from './journey.ts'
+import { getWalker } from './releaseData.ts'
 import {
   addReleaseMembership, assertReleaseOpen, isMoveConflict, isStaleRevision, listNativeMemberships, newReleaseFailure, openReleaseWithTickets,
   reconcileOpenedMembership, ReleaseUnconfirmed,
@@ -26,7 +23,6 @@ export interface AssignOutcome {
   releaseId: string
   releaseTitle: string
   result: MembershipResult | null
-  journey: Journey | null
   skipped: { key: string; reason: string }[]
   // Set when the journey action is confirmed. Absent for an existing release.
   opened?: OpenedMembership
@@ -69,8 +65,7 @@ export async function assignToRelease(projectId: string, tickets: AssignTicket[]
       return {
         releaseId: membership.status === 'added' ? membership.releaseId : '',
         releaseTitle: membership.status === 'added' ? membership.releaseTitle : target.title,
-        result: null,
-        journey: opened.journey,
+        result: opened.result,
         skipped,
         opened: membership,
       }
@@ -102,7 +97,7 @@ export async function assignToRelease(projectId: string, tickets: AssignTicket[]
         result = await write(true)
       } else throw error
     }
-    return { releaseId, releaseTitle: into, result, journey: null, skipped }
+    return { releaseId, releaseTitle: into, result, skipped }
   } catch (error) {
     if (error instanceof AssignCancelled) throw error
     if (error instanceof APIError && (error.status === 404 || error.status === 405)) throw new Error('This server cannot add tickets to a release yet.')
