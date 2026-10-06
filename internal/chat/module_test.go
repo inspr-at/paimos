@@ -67,7 +67,7 @@ func newFixture(t *testing.T) *fixture {
 	prefix := strings.ReplaceAll(tid, "-", "") + "fixture"
 	secret := uid()
 	sum := sha256.Sum256([]byte(secret))
-	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,prefix,hash,scopes,name) VALUES($1,$2,$3,$4,$5,'chat fixture')`, tid, f.agent.ID, prefix, hex.EncodeToString(sum[:]), f.agent.Scopes); err != nil {
+	if _, err := f.d.Admin.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,prefix,hash,scopes,name,created_by_principal_id) VALUES($1,$2,$3,$4,$5,'chat fixture',(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, tid, f.agent.ID, prefix, hex.EncodeToString(sum[:]), f.agent.Scopes); err != nil {
 		t.Fatal(err)
 	}
 	f.key = "aeon_" + prefix + "_" + secret

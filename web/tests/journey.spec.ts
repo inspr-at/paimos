@@ -22,6 +22,82 @@ async function open(page: Page, start: JourneyStart = 'plan', path = '/p/PHAROS?
 const rail = (page: Page) => page.getByRole('navigation', { name: 'Project journey' })
 const writes = (calls: { method: string; path: string }[], suffix: string) => calls.filter(c => c.method !== 'GET' && c.path.endsWith(suffix))
 
+test('Journey hides partial work totals on pagination failure and retries the complete list', async ({ page }) => {
+  const errors = watchErrors(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockWork(page, fixtures())
+  await mockJourney(page, journeyWorld('build'))
+  let workReads = 0
+  let finishFailedRetry!: () => void
+  let finishSuccessfulRetry!: () => void
+  const failedRetry = new Promise<void>(resolve => { finishFailedRetry = resolve })
+  const successfulRetry = new Promise<void>(resolve => { finishSuccessfulRetry = resolve })
+  await page.route('**/api/nodes?**', async route => {
+    const query = new URL(route.request().url()).searchParams
+    if (query.get('kind') !== 'work,epic,ticket,task') return route.fallback()
+    workReads++
+    if (workReads === 13) {
+      await failedRetry
+      return route.fulfill({ status: 503, json: { error: 'Project work is temporarily unavailable. Try again once the service recovers.' } })
+    }
+    if (workReads > 13) { await successfulRetry; return route.fallback() }
+    await route.fulfill({ json: { items: [{ id: 'n-1', state: 'done', kind_slug: 'work', is_leaf: true }], next_cursor: `more-${workReads}` } })
+  })
+  await page.goto('/p/PHAROS?view=journey')
+  const alert = page.locator('.journey-view [role="alert"]')
+  await expect(alert).toContainText('The project has more work than Journey can load (6,000 rows). Counts and progress are unavailable.')
+  expect(workReads).toBe(12)
+  await expect(page.locator('.journey-view .progress, .journey-view .tally, .journey-view .j-count')).toHaveCount(0)
+  await page.keyboard.press('w')
+  await expect(page.getByRole('dialog', { name: 'Release walker', exact: true })).toHaveCount(0)
+  await expect(page).not.toHaveURL(/walk=/)
+  const navigation = rail(page)
+  const stageButtons = navigation.getByRole('button')
+  await expect(stageButtons).toHaveCount(8)
+  const stages = {
+    'stage navigation': navigation,
+    'stage selector group': navigation.locator('.stages'),
+    ...Object.fromEntries(['Inspire', 'Shape', 'Requirements', 'Plan', 'Build', 'Deploy', 'Access', 'Live'].map((stage, index) => [`${stage} stage`, stageButtons.nth(index)])),
+  }
+  const retryButton = alert.getByRole('button', { name: 'Try again' })
+  // The retry disappears after recovery; stage controls survive every state.
+  const navigationGuard = await controlStability(page, stages)
+  const retryGuard = await controlStability(page, { ...stages, 'retry work': retryButton })
+  await navigationGuard.check(async () => {
+    await retryGuard.check(async () => {
+      await retryButton.click()
+      await expect(retryButton).toBeDisabled()
+      await expect.poll(() => workReads).toBe(13)
+      await expect(page.locator('.journey-view .progress, .journey-view .tally, .journey-view .j-count')).toHaveCount(0)
+    })
+  })
+  await navigationGuard.check(async () => {
+    await retryGuard.check(async () => {
+      finishFailedRetry()
+      await expect(alert).toContainText('Project work is temporarily unavailable. Try again once the service recovers.')
+      await expect(retryButton).toBeEnabled()
+      await expect(page.locator('.journey-view .progress, .journey-view .tally, .journey-view .j-count')).toHaveCount(0)
+    })
+  })
+  await navigationGuard.check(async () => {
+    await retryGuard.check(async () => {
+      await retryButton.click()
+      await expect(retryButton).toBeDisabled()
+      await expect.poll(() => workReads).toBe(14)
+      await expect(page.locator('.journey-view .progress, .journey-view .tally, .journey-view .j-count')).toHaveCount(0)
+    })
+  })
+  retryGuard.done()
+  await navigationGuard.check(async () => {
+    finishSuccessfulRetry()
+    await expect(alert).toHaveCount(0)
+    await expect(page.locator('.journey-view .progress')).toBeVisible()
+  })
+  navigationGuard.done()
+  expect(workReads).toBe(14)
+  expect(errors).toEqual([])
+})
+
 test('Journey is a third view of the project, with the stage and next action in the footer', async ({ page }) => {
   const errors = watchErrors(page)
   await page.setViewportSize({ width: 1440, height: 900 })
