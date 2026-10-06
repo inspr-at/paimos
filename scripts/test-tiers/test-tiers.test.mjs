@@ -11,7 +11,7 @@ import { validate, select, shard, key, exactPattern, webGraph, counts, measuredW
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
-import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, sourceTree, promotionsBetween } from './diff.mjs'
+import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, effectiveLane, sourceTree, promotionsBetween } from './diff.mjs'
 import { runnerDecision, runnerSelection } from './cli.mjs'
 import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs'
 import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
@@ -201,6 +201,9 @@ test('R4 migrations map recognised schema objects to referencing packages; unrea
   assert.ok(readers.size>=1)
   for(const pkg of readers) assert.ok(goPackages(selected).has(pkg),pkg)
   assert.match(selected.reason,/R4: migration schema consumers: .*; consumer packages: /)
+  const unrelated=replayRows.find(row=>row.kind==='go'&&row.tier==='GATED-FULL'&&row.package!=='internal/db'&&!readers.has(row.package))
+  assert.ok(unrelated,'fixture must include an unrelated gated package')
+  assert.ok(!selected.tests.includes(unrelated),'narrow SQL selection must omit unrelated gated tests')
   assert.equal(webFiles(selected).size,0,'browser specs are API-mocked; the real server runs in e2e')
   assert.equal(decide([narrow]).mode,'full','the real migration contains unsupported policy and constraint expressions')
   const decision=decide([narrow],{readFile:()=>simple})
@@ -222,7 +225,8 @@ test('R4 migrations map recognised schema objects to referencing packages; unrea
 
 test('R4 never narrows partially understood SQL or omits quoted, qualified or string-adjacent targets',()=>{
   const path='internal/db/migrations/9999_fixture.sql'
-  const rows=[g('internal/core','TestCore','ESSENTIAL'),g('internal/billing','TestBilling','GATED-FULL')]
+  const rows=[g('internal/core','TestCore','ESSENTIAL'),g('internal/billing','TestBilling','GATED-FULL'),
+    g('internal/db','TestMigrations','GATED-FULL'),g('internal/unrelated','TestUnrelated','GATED-FULL')]
   const tree={go:new Map([['internal/billing/billing.go','SELECT * FROM billing_records']]),webTests:new Map()}
   const selection=sql=>select(rows,{event:'pull_request',affectedLane:'on',paths:[path],tree,readFile:()=>sql})
   const safe="CREATE TABLE harmless (id uuid, note text DEFAULT 'a--b /* literal */');"
@@ -254,7 +258,11 @@ test('R4 never narrows partially understood SQL or omits quoted, qualified or st
   for(const target of ['billing_records','public.billing_records','"billing_records"','"public"."billing_records"']) {
     const sql=`${safe} UPDATE ${target} SET value=1 WHERE id=2;`
     assert.deepEqual([...migrationObjects(sql)],['harmless','billing_records'])
-    assert.ok(selection(sql).tests.includes(rows[1]),target)
+    const selected=selection(sql)
+    assert.equal(selected.full,false,target)
+    assert.deepEqual(selected.tests,rows.slice(0,3),target)
+    assert.ok(selected.tests.includes(rows[1]),target)
+    assert.ok(!selected.tests.includes(rows[3]),target)
   }
   assert.deepEqual([...migrationObjects("CREATE TABLE harmless (note text DEFAULT '--'); DELETE FROM billing_records;")],['harmless','billing_records'])
   assert.deepEqual([...migrationObjects('/* outer /* DELETE FROM fake */ end */ DELETE FROM "public"."billing_records"; -- tail')],['billing_records'])
@@ -487,6 +495,22 @@ test('trusted tier planner uses base classifier and base graph despite candidate
   assert.equal(checkFull({...reportCases(rows,rows.map(row=>({key:key(row),status:'passed',started:true})),1,'web-unit-1'),
     full:selected.full,scope:selected.scope,exitCode:0,runId:'1',attempt:'1',sha:'a'},
     {GITHUB_RUN_ID:'1',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'a'}),true)
+  // A newly added browser spec is raw spec-only, but absent from the base
+  // graph. The effective lane must reach tier inventory/full checks, rather
+  // than bypassing them through the old exact-spec branch.
+  const browserPath='web/tests/new-feature.spec.ts'
+  file(browserPath,'export {}')
+  const browserTrusted=run([browserPath])
+  const browserGraph=webGraph(resolve(directory,'web'))
+  const browserCandidate=schedulingDecision('pull_request',[browserPath],()=>true,{affectedLane:'on',graph:browserGraph,checkout:directory})
+  assert.equal(browserTrusted.mode,'full')
+  assert.equal(browserCandidate.mode,'essential')
+  assert.equal(effectiveLane('spec-only',{...browserTrusted,event:'pull_request',affectedLane:'on'}),'full')
+  assert.equal(effectiveLane('spec-only',{...browserTrusted,event:'pull_request',affectedLane:'off'}),'spec-only')
+  const browserRows=[rows[0],{kind:'browser',file:browserPath.slice(4),name:'new feature',tier:'GATED-FULL'}]
+  const browserSelected=runnerSelection(browserRows,{...options,paths:[browserPath],webImports:browserGraph},browserCandidate,browserTrusted)
+  assert.equal(browserSelected.full,true)
+  assert.deepEqual(browserSelected.tests,browserRows)
   const deleted=['web/tests/deleted.unit.test.ts']
   const deletedPlan=run(deleted)
   assert.equal(deletedPlan.mode,'full')
@@ -529,7 +553,12 @@ test('merge-group planner writes full without needing payload, checkout history 
   for(const affectedLane of ['','off','on']) {
     const output=resolve(directory,`output-${affectedLane}`)
     assert.equal(tierPlanMain({GITHUB_EVENT_NAME:'merge_group',CI_AFFECTED_LANE:affectedLane,GITHUB_OUTPUT:output}),0)
-    assert.equal(readFileSync(output,'utf8'),'mode=full\nlayout=full\n')
+    assert.equal(readFileSync(output,'utf8'),'mode=full\nlayout=full\nlane=full\n')
+    for(const raw of ['full','spec-only','docs-only']) {
+      writeFileSync(output,'')
+      tierPlanMain({GITHUB_EVENT_NAME:'merge_group',CI_PLAN_LANE:raw,CI_AFFECTED_LANE:affectedLane,GITHUB_OUTPUT:output})
+      assert.equal(readFileSync(output,'utf8'),`mode=full\nlayout=full\nlane=${affectedLane==='on'?'full':raw}\n`)
+    }
   }
 })
 
@@ -543,7 +572,7 @@ test('impact bounds reject malformed and oversized paths before building a graph
   }
 })
 
-test('offline replay CLI prints every real PR with selected counts, preserved aggregate lane and reasons',()=>{
+test('offline replay CLI prints every real PR with selected counts, effective lane and reasons',()=>{
   const result=spawnSync(process.execPath,[fileURLToPath(new URL('./replay.mjs',import.meta.url)),'--json'],{encoding:'utf8',timeout:30_000})
   assert.equal(result.status,0,result.stderr)
   const report=JSON.parse(result.stdout)
@@ -783,7 +812,8 @@ test('lean tier-plan skips setup, deep checkout and non-premerge checkout work',
   assert.doesNotMatch(planner,/setup-node|setup-go|npm ci|fetch-depth: 0/)
   assert.match(planner,/if: contains\(fromJSON\('\["pull_request","merge_group"\]'\), github.event_name\)/)
   assert.match(planner,/pull_request\|merge_group\) node scripts\/test-tiers\/diff.mjs/)
-  assert.match(planner,/\*\) printf 'mode=full\\nlayout=full\\n' >> "\$GITHUB_OUTPUT"/)
+  assert.match(planner,/printf 'mode=full\\nlayout=full\\nlane=%s\\n'/)
+  assert.match(planner,/CI_PLAN_LANE: \$\{\{ needs.ci-plan.outputs.lane \}\}/)
   assert.match(planner,/^      layout: \$\{\{ steps.tiers.outputs.layout \}\}$/m)
 })
 

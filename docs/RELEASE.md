@@ -404,6 +404,20 @@ because the two essential Go shards carry about one full hosted shard each and a
 wider set is cheaper on the seven-shard layout. `consumerCaseBound` in
 `scripts/test-tiers/core.mjs` is the knob; hosted timings calibrate it.
 
+With `CI_AFFECTED_LANE=on`, `tier-plan.outputs.lane` is the single effective
+workflow lane. Wider trusted coverage wins: `full`, `essential` and `static`
+planner modes force the `full` aggregate lane, with the trusted layout deciding
+which jobs execute. `spec-only` is retained only when both classifiers say
+`spec-only`; `docs-only` only when the trusted planner says `docs`. A raw `full`
+lane never narrows. Missing or invalid planner data fails closed to full; merge
+queue, main and manual events stay full. With the flag off (including unset or
+any value other than exact `on`), the raw `ci-plan` lane is preserved unchanged.
+Every execution condition, shard matrix, runner tier selection, full-execution
+check, required aggregate and tier measurement uses this effective output.
+Only `tier-plan` reads the raw classifier lane. All consumers depend on successful
+tier planning; a new spec missing from the trusted graph therefore runs full
+validation and inventory checks, even if the raw classifier called it spec-only.
+
 The runner honours `AEON_TEST_TIER_MODE` from the trusted planner (full,
 essential, static or spec-only); a candidate graph cannot narrow a supplied
 full decision. Candidate uncertainty or an explicit planner/candidate layout
@@ -423,13 +437,15 @@ counts and reasons). The fixture pins the old selector and Go graph to
 `b6f74faa11d506efd3d21387ca4e2f5a9c687dcf`; replay uses the current manifest
 catalogue, web graph, Go sources and migrations rather than each historical PR
 tree, and cannot reconstruct historical manifest promotions (R1 edits replay as
-registration-only). Result after OPS-257 L4 fix round 1: old lane 16 of 80
+registration-only). Result after OPS-257 L4 fix round 2: old lane 16 of 80
 essential (20%); new lane 36 of 80 narrowed (45%: 20 newly essential,
 16 unchanged, 0 static
 because every sampled manifest or audit PR also changed sources). Projected
-hosted jobs for the sample fall from 2710 to 2410 (full 37, essential 22,
+hosted jobs for the sample fall from 2710 to 2420 (full 37, essential 22,
 static 16, spec-only 12, docs-only 9). The pre-fix lane narrowed 38; two of
-those PRs now correctly stay full on unsupported SQL. The 44 PRs that stay
+those PRs now correctly stay full on unsupported SQL. PR 235 retains its
+essential tier selection but widens its raw spec-only workflow lane to full
+(22 jobs rather than 12), following trusted planner precedence. The 44 PRs that stay
 full: CI machinery
 18 (mostly `ci.yml`), R3 helpers above 15 specs 9 (`work-fixtures.ts`,
 `agents-fixtures.ts`, `capacity-fixtures.ts`), unnarrowed `internal/db/`

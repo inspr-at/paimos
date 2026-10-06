@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { select, webGraph } from './core.mjs'
-import { schedulingDecision, sourceTree } from './diff.mjs'
+import { schedulingDecision, effectiveLane, sourceTree } from './diff.mjs'
 import { boundedText } from './inputs.mjs'
 import { classifyPaths } from '../ci-pr-plan.mjs'
 
@@ -22,9 +22,11 @@ const readFile=path=>boundedText(root,path)
 const exists=path=>readFile(path)!==undefined
 const replay=fixture.prs.map(({number,paths})=>{
   const options={event:'pull_request',paths,imports:fixture.goImports,webImports:graph}
-  const lane=classifyPaths(paths).lane
+  const classifiedLane=classifyPaths(paths).lane
   const before=schedulingDecision('pull_request',paths,undefined,{graph})
   const after=schedulingDecision('pull_request',paths,exists,{affectedLane:'on',graph,tree,promotions})
+  const oldLane=effectiveLane(classifiedLane,{...before,event:'pull_request',affectedLane:'off'})
+  const lane=effectiveLane(classifiedLane,{...after,event:'pull_request',affectedLane:'on'})
   const old=legacy.select(rows,{...options,forceFull:before.mode==='full'})
   const next=select(rows,{...options,affectedLane:'on',forceFull:after.mode==='full',tree,promotions,readFile})
   const risk=select(rows,{...options,affectedLane:'on',tree,promotions,readFile})
@@ -32,10 +34,10 @@ const replay=fixture.prs.map(({number,paths})=>{
   // All-success PR path in today's ci.yml. Reusable route contributes one
   // hosted job; skipped tree-reuse/cache-prime do not contribute runner jobs.
   // Static layout drops go-test (7), go-timing, web-shard (12) and e2e-run.
-  const jobs=(mode,layout)=>lane==='docs-only'?9:lane==='spec-only'?12:mode!=='essential'?37:layout==='static'?16:22
+  const jobs=(lane,mode,layout)=>lane==='docs-only'?9:lane==='spec-only'?12:mode!=='essential'?37:layout==='static'?16:22
   const label=decision=>decision.mode==='essential'&&decision.layout==='static'?'static':decision.mode
-  return {number,lane,old:before.mode,new:label(after),oldCases:old.tests.length,newCases:next.tests.length,
-    oldKinds:kinds(old),newKinds:kinds(next),oldJobs:jobs(before.mode,'full'),newJobs:jobs(after.mode,after.layout),
+  return {number,classifiedLane,oldLane,lane,old:before.mode,new:label(after),oldCases:old.tests.length,newCases:next.tests.length,
+    oldKinds:kinds(old),newKinds:kinds(next),oldJobs:jobs(oldLane,before.mode,'full'),newJobs:jobs(lane,after.mode,after.layout),
     reason:risk.full?risk.reason:after.reason}
 })
 const rule=reason=>/^(?:R\d|CI machinery|consumer fan-out|unnarrowed|unmapped|missing|web module|browser fan-out|invalid)/.exec(reason)?.[0]??'other'

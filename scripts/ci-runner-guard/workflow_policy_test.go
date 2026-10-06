@@ -178,6 +178,26 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		}
 	}
 
+	for _, id := range []string{"go-test", "go-timing", "go-static", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run", "go", "web", "release-check", "e2e", "tier-measurements"} {
+		add("raw-lane-consumer/"+id, "ci.yml", "effective tier-plan lane", func(w map[string]any) {
+			job := mapping(mapping(w["jobs"])[id])
+			if condition, ok := job["if"].(string); ok && strings.Contains(condition, "needs.tier-plan.outputs.lane") {
+				job["if"] = strings.ReplaceAll(condition, "needs.tier-plan.outputs.lane", "needs.ci-plan.outputs.lane")
+				return
+			}
+			for _, value := range job["steps"].([]any) {
+				env := mapping(mapping(value)["env"])
+				if env["CI_LANE"] == "${{ needs.tier-plan.outputs.lane }}" {
+					env["CI_LANE"] = "${{ needs.ci-plan.outputs.lane }}"
+					return
+				}
+			}
+			t.Fatalf("mutation fixture %s has no effective lane consumer", id)
+		})
+	}
+	add("effective-lane-publisher-missing", "ci.yml", "publish the effective lane", func(w map[string]any) {
+		delete(mapping(mapping(mapping(w["jobs"])["tier-plan"])["outputs"]), "lane")
+	})
 	// All contexts and supporting job identities are reserved, even on a
 	// path-filtered workflow, and even when a different id sets a reserved name.
 	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-setup", "web-unit", "web-shard", "e2e-run", "release-check-run", "cross-family", "gate/cross-family"} {
@@ -302,7 +322,7 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 			})
 		}
 		if id == "runner-route" || id == "ci-plan" || id == "migration-compat" {
-			for _, condition := range []any{false, "success()", nil, "needs.ci-plan.outputs.lane == 'full'"} {
+			for _, condition := range []any{false, "success()", nil, "needs.tier-plan.outputs.lane == 'full'"} {
 				add(fmt.Sprintf("conditional/%s/%v", id, condition), "ci.yml", "must run without an if condition", func(w map[string]any) { mapping(mapping(w["jobs"])[id])["if"] = condition })
 			}
 			continue
@@ -315,8 +335,8 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	for _, id := range []string{"go", "web", "release-check", "e2e"} {
 		add("renamed-check-context/"+id, "ci.yml", "renamed to", func(w map[string]any) { mapping(mapping(w["jobs"])[id])["name"] = "other" })
 	}
-	add("missing-go-dependency", "ci.yml", "go must gate every", func(w map[string]any) { mapping(mapping(w["jobs"])["go"])["needs"] = []any{"go-test", "go-timing"} })
-	add("missing-web-dependency", "ci.yml", "web must gate setup, every unit shard and every UI shard", func(w map[string]any) { mapping(mapping(w["jobs"])["web"])["needs"] = []any{"web-setup"} })
+	add("missing-go-dependency", "ci.yml", "effective lane publisher", func(w map[string]any) { mapping(mapping(w["jobs"])["go"])["needs"] = []any{"go-test", "go-timing"} })
+	add("missing-web-dependency", "ci.yml", "effective lane publisher", func(w map[string]any) { mapping(mapping(w["jobs"])["web"])["needs"] = []any{"web-setup"} })
 	add("web-skipped-on-failure", "ci.yml", "web must report failures", func(w map[string]any) { delete(mapping(mapping(w["jobs"])["web"]), "if") })
 	add("web-full-shards-omitted", "ci.yml", "web shard matrix must retain", func(w map[string]any) {
 		mapping(mapping(mapping(mapping(w["jobs"])["web-shard"])["strategy"])["matrix"])["shard"] = []any{1}
@@ -531,7 +551,7 @@ func TestCIClassifiedWebShardMatrix(t *testing.T) {
 		for _, event := range []string{"pull_request", "merge_group", "push", "workflow_dispatch"} {
 			for _, mode := range []string{"full", "essential"} {
 				const premerge = `contains(fromJSON('["pull_request","merge_group"]'), github.event_name)`
-				got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{"needs.ci-plan.outputs.lane": lane, "needs.tier-plan.outputs.mode": mode, premerge: map[bool]string{true: "yes", false: ""}[event == "pull_request" || event == "merge_group"]})
+				got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{"needs.tier-plan.outputs.lane": lane, "needs.tier-plan.outputs.mode": mode, premerge: map[bool]string{true: "yes", false: ""}[event == "pull_request" || event == "merge_group"]})
 				want := "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]"
 				if lane == "spec-only" {
 					want = "[1]"

@@ -400,7 +400,7 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 		var moved map[string]any
 		switch name {
 		case "Install shells used by command round-trip unit tests":
-			moved = reuseStep(t, unit, name)
+			moved = cloneStep(t, reuseStep(t, unit, name))
 		case "Web unit checks (once)":
 			moved = cloneStep(t, reuseStep(t, unit, "Run selected web units without retries"))
 			moved["name"] = name
@@ -422,16 +422,63 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 			wantSteps = append(wantSteps, value)
 			continue
 		}
+		normalizeEffectiveLane(t, "web-unit", moved)
 		if !reflect.DeepEqual(moved, old) {
 			t.Fatalf("Moved check %s changed: got %v want %v", name, moved, old)
 		}
 	}
 	want := cloneStep(t, before)
 	want["steps"] = wantSteps
+	setup = cloneStep(t, setup)
+	normalizeEffectiveLane(t, "web-setup", setup)
 	if !reflect.DeepEqual(setup, want) {
 		t.Fatal("Parallel setup changed beyond moving units and their prerequisites/proofs")
 	}
 	return before
+}
+
+// Project the reviewed effective-lane wiring back onto immutable historical
+// pins. Commands and historical fixtures remain byte-for-byte checked.
+func normalizeEffectiveLane(t *testing.T, id string, value map[string]any) {
+	t.Helper()
+	var visit func(map[string]any)
+	visit = func(m map[string]any) {
+		for key, raw := range m {
+			switch v := raw.(type) {
+			case string:
+				m[key] = strings.ReplaceAll(v, "needs.tier-plan.outputs.lane", "needs.ci-plan.outputs.lane")
+			case map[string]any:
+				if layout, exists := v["AEON_TEST_TIER_LAYOUT"]; exists {
+					if layout != "${{ needs.tier-plan.outputs.layout }}" {
+						t.Fatal("unreviewed tier runner layout input")
+					}
+					delete(v, "AEON_TEST_TIER_LAYOUT")
+				}
+				visit(v)
+			case []any:
+				for _, child := range v {
+					if nested, ok := child.(map[string]any); ok {
+						visit(nested)
+					}
+				}
+			}
+		}
+	}
+	visit(value)
+	if id == "go-static" || id == "release-check-run" {
+		condition, _ := value["if"].(string)
+		if !strings.Contains(condition, "needs.tier-plan.result == 'success' && ") || !containsNeed(value["needs"], "tier-plan") {
+			t.Fatal("effective lane consumer must gate its publisher")
+		}
+		value["if"] = strings.Replace(condition, "needs.tier-plan.result == 'success' && ", "", 1)
+		var needs []any
+		for _, need := range anySlice(value["needs"]) {
+			if need != "tier-plan" {
+				needs = append(needs, need)
+			}
+		}
+		value["needs"] = needs
+	}
 }
 
 func cloneStep(t *testing.T, value map[string]any) map[string]any {
@@ -464,7 +511,7 @@ func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
 		t.Fatal("Spec-only units and full-lane shard regressions must each run once")
 	}
 	measure := treeMap(jobs["tier-measurements"])
-	if !containsNeed(measure["needs"], "ci-plan") || treeMap(reuseStep(t, measure, "Report cases and complete job runner minutes")["env"])["CI_LANE"] != "${{ needs.ci-plan.outputs.lane }}" {
+	if !containsNeed(measure["needs"], "ci-plan") || treeMap(reuseStep(t, measure, "Report cases and complete job runner minutes")["env"])["CI_LANE"] != "${{ needs.tier-plan.outputs.lane }}" {
 		t.Fatal("Tier measurements must report spec-only's untiered scope")
 	}
 }
@@ -526,6 +573,8 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 			if id == "web-setup" {
 				j = normalizeParallelWebSetup(t, jobs)
 			}
+			j = cloneStep(t, j)
+			normalizeEffectiveLane(t, id, j)
 			value = j
 			normalizeNixVendorAdditions(t, id, j)
 			if condition, ok := j["if"].(string); ok && strings.Contains(condition, "tree-reuse") {

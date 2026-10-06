@@ -138,6 +138,17 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
   return {mode:'essential',layout:risk.layout,reason:risk.reasons.join('; ')||'essential plus changed area and reverse dependencies'}
 }
 
+// One precedence rule for every workflow consumer. Only matching trusted
+// exemptions can keep a narrow PR lane. Essential/static are wider layouts.
+// Off returns the frozen classifier value unchanged, regardless of mode/event.
+export function effectiveLane(lane,{mode,event,affectedLane}={}) {
+  if(affectedLane!=='on')return lane
+  if(event!=='pull_request')return 'full'
+  if(lane==='spec-only'&&mode==='spec-only')return lane
+  if(lane==='docs-only'&&mode==='docs')return lane
+  return 'full'
+}
+
 export function schedulingMode(event,paths,exists,options) {
   return schedulingDecision(event,paths,exists,options).mode
 }
@@ -174,9 +185,10 @@ export function main(env=process.env) {
   const {mode,reason}=decision
   const layout=mode==='full'?'full':decision.layout??'full'
   if(!env.GITHUB_OUTPUT)throw new Error('Missing Actions output path')
-  writeFileSync(env.GITHUB_OUTPUT,`mode=${mode}\nlayout=${layout}\n`,{flag:'a'})
-  console.log(`Test tier scheduling: ${mode} (${layout} layout); ${reason}; changed paths ${paths?.length??'unavailable'}`)
-  if(env.GITHUB_STEP_SUMMARY)writeFileSync(env.GITHUB_STEP_SUMMARY,`Test tier scheduling: ${mode} (${layout} layout); ${reason}\n`,{flag:'a'})
+  const lane=effectiveLane(env.CI_PLAN_LANE??'full',{mode,event:env.GITHUB_EVENT_NAME,affectedLane:env.CI_AFFECTED_LANE})
+  writeFileSync(env.GITHUB_OUTPUT,`mode=${mode}\nlayout=${layout}\nlane=${lane}\n`,{flag:'a'})
+  console.log(`Test tier scheduling: ${mode} (${layout} layout, ${lane} effective lane); ${reason}; changed paths ${paths?.length??'unavailable'}`)
+  if(env.GITHUB_STEP_SUMMARY)writeFileSync(env.GITHUB_STEP_SUMMARY,`Test tier scheduling: ${mode} (${layout} layout, ${lane} effective lane); ${reason}\n`,{flag:'a'})
   return 0
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
