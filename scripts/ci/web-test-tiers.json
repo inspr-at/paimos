@@ -596,6 +596,8 @@
     ,
     "browser:tests/service-tier.spec.ts:390: phone Change tier menu opens and restores its actual trigger"
     ,
+    "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
+    ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 dark"
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 light"

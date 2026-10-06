@@ -1328,16 +1328,12 @@ test('three-tier manifests allow new NIGHTLY cases and never promote ungated bro
   // An explicit inventory keeps the assertion strict for every legacy case.
   const postGateCases=new Set([...(go.postGateCases??[]),...(web.postGateCases??[])])
   assert.equal(postGateCases.size,(go.postGateCases??[]).length+(web.postGateCases??[]).length)
-  // AEON-734 keeps screenshot evidence nightly while gating Settings regressions.
-  const settingsEvidence='browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes'
-  assert.equal(web.tests.find(row=>key(row)===settingsEvidence)?.tier,'NIGHTLY')
   for(const id of postGateCases) {
     const row=[...go.tests,...web.tests].find(row=>key(row)===id)
     assert.ok(row,`Unknown post-gate case: ${id}`)
     assert.equal(row.tier,'NIGHTLY',id)
   }
   for(const row of [...go.tests,...web.tests]) {
-    if(key(row)===settingsEvidence)continue
     if(postGateCases.has(key(row)))continue
     if(row.tier==='ESSENTIAL')continue
     assert.equal(row.tier,row.kind!=='browser'||gated.has(row.file)?'GATED-FULL':'NIGHTLY',key(row))
