@@ -18,6 +18,7 @@ import { useCapacity } from '../stores/capacity'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
+import KeyCap from '../components/KeyCap.vue'
 import ApprovalQueue from '../components/agents/ApprovalQueue.vue'
 import SessionList from '../components/agents/SessionList.vue'
 import ChangeTierPopover from '../components/agents/ChangeTierPopover.vue'
@@ -446,7 +447,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <QuotaWarnings v-if="agents.loaded && showCapacity" :sessions="agents.views" />
         <RunQueue v-if="agents.loaded" ref="runQueue" @emptied="pageTitle?.focus()" />
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
-          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap">←</kbd><kbd class="keycap">→</kbd> fold · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
+          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <KeyCap k="left" /><KeyCap k="right" /> fold · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
       </div>
     </div>

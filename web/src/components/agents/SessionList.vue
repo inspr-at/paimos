@@ -467,7 +467,7 @@ defineExpose({ toggleHistory, menuHistory, reveal })
             <span v-if="row.depth" class="sr-only">Worker of {{ row.parent?.view.name }}. </span>
             <button
               v-if="row.foldable" type="button" class="tree-fold" data-fold="family" tabindex="-1" :aria-expanded="row.open" :aria-label="foldLabel(row)"
-              :data-tip="row.open ? 'Fold · ←' : 'Unfold · →'" @click="toggle(row.branch)"
+              :data-tip="row.open ? 'Fold · Left arrow' : 'Unfold · Right arrow'" @click="toggle(row.branch)"
             ><AppIcon name="chevron-right" :size="14" class="chev" :class="{ turned: row.open }" /></button>
             <span v-else class="tree-fold-space" aria-hidden="true" />
             <RouterLink class="agent-link" :to="`/agents/${row.view.session.id}`" :aria-label="`${row.view.harness} ${row.view.name}, ${row.view.status.label}${row.lead ? ', lead' : ''}${row.under.problem ? `, ${rollLabel(row)}` : ''}. ${row.primary}. ${row.context}`">
