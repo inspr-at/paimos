@@ -477,11 +477,11 @@ defineExpose({ toggleHistory })
               <RouterLink :to="`/agents/${row.view.session.handed_over_to_id}`" :title="`Handed over to ${lineageName(row.view.session.handed_over_to_id)}`">Handed over to {{ lineageName(row.view.session.handed_over_to_id) }}</RouterLink>
               <button v-if="stoppedChildren(row.branch)" type="button" class="worker-toggle history-toggle" :aria-expanded="!!history[row.view.session.id]" :aria-label="`Show stopped workers of ${row.view.name}`" @click="toggleStopped(row.branch)">{{ stoppedChildren(row.branch) }} stopped</button>
             </span>
-            <span v-else-if="(row.foldable && !row.open) || stoppedChildren(row.branch)" class="worker-tools">
-              <template v-if="row.foldable && !row.open">
-                <span class="kid-count">{{ plural(row.sub, 'sub-agent') }}</span>
-                <span v-if="row.under.problem || row.under.ask" class="roll" :class="row.under.problem ? 'problem' : 'ask'" :title="(row.under.problem ? row.under.names.problem : row.under.names.ask).join(', ')">{{ rollLabel(row) }}</span>
-              </template>
+            <!-- A parent's line stays whether it is open or folded, so a fold never moves the row's controls.
+                 Folded, a problem or ask below joins it at the line end. -->
+            <span v-else-if="row.foldable || stoppedChildren(row.branch)" class="worker-tools">
+              <span v-if="row.foldable" class="kid-count">{{ plural(row.sub, 'sub-agent') }}</span>
+              <span v-if="row.foldable && !row.open && (row.under.problem || row.under.ask)" class="roll" :class="row.under.problem ? 'problem' : 'ask'" :title="`${rollLabel(row)}: ${(row.under.problem ? row.under.names.problem : row.under.names.ask).join(', ')}`">{{ rollLabel(row) }}</span>
               <button
                 v-if="stoppedChildren(row.branch)" type="button" class="worker-toggle history-toggle" :aria-expanded="!!history[row.view.session.id]"
                 :aria-label="`${history[row.view.session.id] ? 'Hide' : 'Show'} stopped workers of ${row.view.name}: ${stoppedChildren(row.branch)} stopped`" @click="toggleStopped(row.branch)"
@@ -679,10 +679,13 @@ defineExpose({ toggleHistory })
 .roll-dot { position: absolute; top: -1px; right: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 1.5px var(--surface-raised); }
 /* A folded parent says what is under it; a problem or ask below in its tone. */
 .kid-count { padding-inline: 4px 2px; color: var(--ink-2); font-weight: 550; white-space: nowrap; }
-.roll { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+.roll { display: block; flex: 0 1 auto; min-width: 0; height: 20px; padding: 0 8px; border-radius: 999px; font-weight: 600; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A folded parent's line never wraps, so folding never changes the row's height; a narrow
+   column shortens the chip, whose names stay in its tooltip and the row's accessible name. */
+.worker-tools > :not(.roll) { flex: none; }
 .roll.problem { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); }
 .roll.ask { background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); color: var(--queue-wait-ink); }
-.worker-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; flex-basis: 100%; min-height: 28px; padding: 0 0 6px 70px; color: var(--ink-2); font-size: 11.5px; }
+.worker-tools { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 6px; flex-basis: 100%; min-height: 28px; padding: 0 0 6px 70px; color: var(--ink-2); font-size: 11.5px; }
 .worker-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 28px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-weight: 550; white-space: nowrap; }
 .worker-toggle:hover:not(:disabled) { background: var(--row-hover); }
 .worker-toggle:disabled { cursor: default; }
@@ -846,7 +849,8 @@ defineExpose({ toggleHistory })
   .c-state { grid-column: 2 / 4; grid-row: 3; min-width: 0; margin-top: 4px; min-height: 22px; }
   .c-state :deep(.agent-state-label) { min-width: 0; max-width: 100%; align-items: flex-start; }
   .c-state :deep(.state-word) { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
-  .c-ticket { grid-column: 4; grid-row: 3; justify-self: start; min-width: 0; overflow: hidden; margin-top: 4px; min-height: 22px; }
+  /* The actions sit on the title line, so the ticket and its estimate may use their column below. */
+  .c-ticket { grid-column: 4 / -1; grid-row: 3; justify-self: start; min-width: 0; overflow: hidden; margin-top: 4px; min-height: 22px; }
   .row > .c-ticket { padding-block: 0; }
   .c-beat { display: none; }
   /* AEON-280 x AEON-304: no beat cell on phones, so the listening cue joins the state line as
@@ -861,7 +865,9 @@ defineExpose({ toggleHistory })
 /* AEON-304: the overflow sits top-right, its icon centred on the title's first line. */
 @container sessions (max-width: 880px) {
   .row > .c-actions { align-self: start; margin-top: calc(var(--title-line) / 2 - 22px); }
-  /* Phone tools: 44 px icon buttons; their names stay for screen readers. */
+  /* Phone tools: 44 px icon buttons; their names stay for screen readers. The head
+     keeps their height when it folds and they leave, so the fold control stays put. */
+  .sessions > :deep(.fs-head) { min-height: 60px; }
   .head-tools .btn { min-width: 44px; min-height: 44px; justify-content: center; }
   .head-tools .tool-label { display: none; }
 }

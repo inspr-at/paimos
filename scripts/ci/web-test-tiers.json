@@ -126,6 +126,14 @@
     ,
     "browser:tests/agents-dial.spec.ts:AEON-781: the chevron comes first, folding moves nothing above the body, and the fold follows the person"
     ,
+    "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 1600px"
+    ,
+    "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 1600px with reported metadata"
+    ,
+    "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 390px"
+    ,
+    "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 390px with reported metadata"
+    ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1024"
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1440"
@@ -5620,13 +5628,13 @@
     ,
     {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"live tiles show current steps and rows nest workers with stopped history collapsed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide meets the child glyph at 1600px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide joins the parent's fold button to the child at 1600px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide meets the child glyph at 1600px with reported metadata","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide joins the parent's fold button to the child at 1600px with reported metadata","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide meets the child glyph at 390px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide joins the parent's fold button to the child at 390px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide meets the child glyph at 390px with reported metadata","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide joins the parent's fold button to the child at 390px with reported metadata","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-order.spec.ts","name":"at 390 px the compact sort control orders by Ticket, reverses, and restores the default","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5719,6 +5727,8 @@
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"work days and nights: presets save the schedule at once","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"work week editor: a custom week with its own hours, live preview, Save","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a deep problem marks every ancestor, folded parents name it, and arrow keys fold and walk the tree","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a lead with only stopped workers opens history only through its stopped count","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15681,6 +15691,12 @@
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a slow poll cannot overwrite the reply loaded after a send","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"filters before limiting and keeps two sessions of one principal separate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > keeps a deep match with its ancestors as unfolded context, even where a person folded them","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > lays out any depth with levels, sibling positions and guides, and a fold hides the whole subtree","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > rolls a deep problem up to every ancestor and counts asks separately","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"Back returns to the previous section after following a legacy bookmark","tier":"GATED-FULL"}
     ,

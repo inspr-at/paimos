@@ -69,7 +69,7 @@ test('four live workers lead eight collapsed stopped workers, and labels disting
   await page.goto('/agents')
   await expect(expand(page)).toHaveAttribute('aria-label', 'Fold Release lead: 4 sub-agents, 4 working')
   await expect(history(page)).toHaveText('8 stopped')
-  await expect(row(page, lead).locator('.worker-tools')).toHaveText('8 stopped')
+  await expect(row(page, lead).locator('.worker-tools')).toHaveText(/^4 sub-agents\s*8 stopped$/)
   await expect(history(page)).toHaveAttribute('aria-expanded', 'false')
   // Equal start times: session ID decides, never the latest heartbeat (AEON-468).
   await expect.poll(() => order(page)).toEqual([id(2), id(3), id(4), id(5)])
