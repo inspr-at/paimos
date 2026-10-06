@@ -545,7 +545,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 			for _, v := range reuseSteps(j) {
 				s := treeMap(v)
 				if s["name"] == "PR classification and exact-SHA reuse regressions" {
-					if s["run"] != "node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs" {
+					if s["run"] != "node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs" {
 						t.Fatal("unreviewed verifier regression command")
 					}
 					s["name"] = "PR classification regressions"
