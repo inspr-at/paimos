@@ -55,6 +55,9 @@ let opener: HTMLElement | null = null
 let controller: AbortController | undefined
 
 const shown = computed(() => (showAll.value || items.value.length <= inboxPreview) ? items.value : items.value.slice(0, inboxPreview))
+// A server scan can end before it finds an open learning; that empty page still
+// continues, so the inbox stays with Load older until the scan is exhausted.
+const inboxShown = computed(() => items.value.length > 0 || truncated.value || !!error.value)
 
 const canDecide = computed(() => props.person && props.canWrite)
 const choices = computed(() => {
@@ -111,6 +114,8 @@ async function load() {
   } catch (e) {
     if (current.signal.aborted) return
     items.value = []
+    truncated.value = false
+    nextCursor.value = ''
     error.value = e instanceof Error ? e.message : 'Method learnings could not be loaded.'
   }
 }
@@ -252,7 +257,7 @@ async function settleFocus(removedId: string, before: MethodLearning[]) {
     return
   }
   // The inbox unmounts with its last row, so the heading is gone.
-  if ((items.value.length || error.value) && heading.value) {
+  if (inboxShown.value && heading.value) {
     heading.value.focus()
     return
   }
@@ -443,7 +448,7 @@ function closeReview(restore: boolean | Event = true) {
     const applied = appliedIds
     appliedIds = new Set()
     items.value = items.value.filter(item => !applied.has(item.id))
-    if (!items.value.length && !error.value) {
+    if (!inboxShown.value) {
       emit('emptied')
       return
     }
@@ -511,7 +516,7 @@ async function undo(eventId: number) {
 </script>
 
 <template>
-  <section v-if="items.length || error" class="learnings glass-card" aria-labelledby="method-learnings-title">
+  <section v-if="inboxShown" class="learnings glass-card" aria-labelledby="method-learnings-title">
     <div class="head">
       <span class="mark" aria-hidden="true"><AppIcon name="sparkle" :size="15" /></span>
       <div class="head-copy">
@@ -548,7 +553,7 @@ async function undo(eventId: number) {
       </li>
     </ul>
     <button v-if="items.length > inboxPreview" type="button" class="btn ghost disclose" @click="showAll = !showAll">{{ showAll ? 'Show fewer' : `Show all ${items.length}` }}</button>
-    <p v-if="truncated" class="more">Showing the {{ items.length }} newest. Load older from the top.</p>
+    <p v-if="truncated" class="more">{{ items.length ? `Showing the ${items.length} newest.` : 'None open among the newest.' }} Load older from the top.</p>
 
     <dialog ref="review" class="review-dialog" aria-labelledby="learn-review-title" @cancel.prevent="closeReview" @click="reviewBackdrop">
       <form v-if="reviewOpen" class="review-card" @submit.prevent="applyChosen">

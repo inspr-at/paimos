@@ -26,7 +26,7 @@ function learnings(now = Date.now()): MockLearning[] {
   ]
 }
 
-async function open(page: Page, options: { readOnly?: boolean; agent?: boolean; learnings?: MockLearning[]; inbox?: boolean; rules?: string[] } = {}) {
+async function open(page: Page, options: { readOnly?: boolean; agent?: boolean; learnings?: MockLearning[]; inbox?: boolean; rules?: string[]; emptyScans?: number } = {}) {
   await mockWork(page, fixtures(), { readOnly: options.readOnly })
   if (options.agent) {
     await page.route('**/api/me', route => route.fulfill({
@@ -35,6 +35,7 @@ async function open(page: Page, options: { readOnly?: boolean; agent?: boolean; 
   }
   const world = knowledgeWorld()
   world.learnings = options.learnings ?? learnings()
+  world.emptyScans = options.emptyScans ?? 0
   const calls = await mockKnowledge(page, world, { readOnly: options.readOnly })
   const extra = options.rules
   if (extra) {
@@ -430,6 +431,25 @@ test('older learnings load after the newest 50', async ({ page }) => {
   await expect(rows(page)).toHaveCount(55)
   await expect(card(page, 'Learning number 54')).toBeVisible()
   expect(calls.some(call => call.method === 'GET' && call.query.get('cursor') === '50')).toBe(true)
+})
+
+test('pages that scanned no open learning still lead to older ones', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const errors = watchErrors(page)
+  const { calls } = await open(page, { emptyScans: 2 })
+  const older = page.getByRole('button', { name: 'Load older' })
+  await expect(page.getByText('None open among the newest. Load older from the top.')).toBeVisible()
+  await expect(rows(page)).toHaveCount(0)
+  await older.click()
+  await expect.poll(() => calls.filter(call => call.method === 'GET' && call.query.get('cursor') === 'scan-1').length).toBe(1)
+  await expect(older).toBeEnabled()
+  await expect(rows(page)).toHaveCount(0)
+  await older.click()
+  await expect(card(page, 'Write the release note in the same turn')).toBeVisible()
+  await expect(card(page, 'Renumber at integration')).toBeVisible()
+  await expect(older).toHaveCount(0)
+  expect(calls.some(call => call.method === 'GET' && call.query.get('cursor') === 'scan-2')).toBe(true)
+  expect(errors).toEqual([])
 })
 
 test('on a phone the review sheet keeps its actions pinned through apply', async ({ page }) => {

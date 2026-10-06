@@ -116,6 +116,9 @@ export function knowledgeWorld(options: { empty?: boolean } = {}) {
     renames: { 'deploy-flow': 'k-deploy' } as Record<string, string>,
     counter: { next: 90, event: 500, clock: 0 },
     learnings: [] as MockLearning[],
+    // Full server scans that end before any open learning (AEON-788): each is an
+    // empty page with a continuation cursor.
+    emptyScans: 0,
     decisions: [] as { event_id: number; item: MockLearning; reason?: string; lesson?: string }[],
   }
 }
@@ -198,6 +201,10 @@ export async function mockKnowledge(page: Page, world: KnowledgeWorld, options: 
     const parts = url.pathname.replace(/^\/api\/knowledge\/?/, '').split('/').filter(Boolean)
     if (parts[0] === 'learnings') {
       if (method === 'GET') {
+        const scan = Number(query.get('cursor')?.match(/^scan-(\d+)$/)?.[1] ?? 0)
+        if (scan < world.emptyScans && !/^\d+$/.test(query.get('cursor') ?? '')) {
+          return json(route, 200, { items: [], truncated: true, next_cursor: `scan-${scan + 1}` })
+        }
         // 50 per page like the server; the mock cursor is the next offset.
         const offset = Number(query.get('cursor') ?? '0') || 0
         const page = world.learnings.slice(offset, offset + 50).map(({ sensitive: _sensitive, ...item }) => item)

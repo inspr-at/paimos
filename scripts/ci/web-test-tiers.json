@@ -282,6 +282,8 @@
     ,
     "browser:tests/knowledge-learnings.spec.ts:on a phone the review sheet keeps its actions pinned through apply"
     ,
+    "browser:tests/knowledge-learnings.spec.ts:pages that scanned no open learning still lead to older ones"
+    ,
     "browser:tests/knowledge.spec.ts:Decision entries expose active and superseded history without generic mutation controls"
     ,
     "browser:tests/no-shift.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
@@ -8407,6 +8409,8 @@
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"older learnings load after the newest 50","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"on a phone the review sheet keeps its actions pinned through apply","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"pages that scanned no open learning still lead to older ones","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"removing the last learning keeps focus on the search","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
