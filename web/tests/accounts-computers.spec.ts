@@ -308,6 +308,40 @@ test('Away with an expired verification keeps the head inside the card and its c
   await card.evaluate(el => { (el as HTMLElement).style.width = '' })
 })
 
+// A wide status (a font wider than ours) pushes Away to the row below the state, where Verify again
+// joins it. Verify again leaving on unfold must not change that row's height, or Away (centred in
+// the row) drops half the difference: back.y moved 1 px on the CI Linux fonts at 720 (AEON-782 gate).
+// Widening the state's letters stands in for the font, so this holds on any machine.
+test('Away stays put when unfolding removes Verify again beside it, even with a wide status', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 3000 })
+  const { capacity } = await setup(page, { away: true, thresholds: { early_percent: 10, urgent_percent: 3 } })
+  expireClaude(capacity)
+  await open(page)
+  await page.addStyleTag({ content: '.acc-section .fs-sum .t { letter-spacing: 2px; }' })
+  const card = section(page)
+  const verify = card.locator('.fs-act').getByRole('button', { name: 'Verify again' })
+  const away = card.locator('.away')
+  const back = card.getByRole('button', { name: 'Back now: end Away' })
+  const measure = async () => ({ away: (await away.boundingBox())!, back: (await back.boundingBox())! })
+  let shared = 0
+  for (let width = 1100; width >= 700; width -= 10) {
+    await page.setViewportSize({ width, height: 3000 })
+    await expect(verify).toBeVisible()
+    const folded = await measure()
+    const beside = Math.abs((await verify.boundingBox())!.y + 14 - (folded.away.y + 13)) <= 1
+    await title(page).click()
+    await expect(verify).toHaveCount(0)
+    const unfolded = await measure()
+    await title(page).click()
+    await expect(verify).toBeVisible()
+    expect(Math.abs(unfolded.away.y - folded.away.y), `away.y at ${width}`).toBeLessThanOrEqual(0.5)
+    expect(Math.abs(unfolded.back.y - folded.back.y), `back.y at ${width}`).toBeLessThanOrEqual(0.5)
+    if (beside) shared++
+  }
+  // The scan must really have met the case it guards: Away and Verify again on one row.
+  expect(shared, 'widths where Away and Verify again share a row').toBeGreaterThan(0)
+})
+
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
   test(`the head and the body keep their controls put through fold, verify and refresh at ${width} ${theme}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1100 })
