@@ -596,6 +596,20 @@
     ,
     "browser:tests/service-tier.spec.ts:390: phone Change tier menu opens and restores its actual trigger"
     ,
+    "browser:tests/settings-account-pacing.spec.ts:Capacity and load: work days, nights and the editors, with controls that stay put"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:a failed Sprint is said as a failure, not as saved"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:people without account management get no account menu and read-only pacing"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:phone: the editor is a full-height sheet and nothing scrolls sideways"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:the plan card for an existing schedule: Turn off keeps nothing for you"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:the plan card shows until it is answered: Looks right saves Auto, then it is gone"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:the plan card: Change leads to Capacity and load without saving"
+    ,
     "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 dark"
@@ -10917,6 +10931,24 @@
     {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows light 390 detail open pass 1","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows light 390 detail open pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Capacity and load: work days, nights and the editors, with controls that stay put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Remove account… says what stays untouched, and only Remove account removes it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"a failed Sprint is said as a failure, not as saved","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"people without account management get no account menu and read-only pacing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"phone: the editor is a full-height sheet and nothing scrolls sideways","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the account menu sprints, holds until the time it showed, and goes back to the plan","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the plan card for an existing schedule: Turn off keeps nothing for you","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the plan card shows until it is answered: Looks right saves Auto, then it is gone","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the plan card: Change leads to Capacity and load without saving","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"a reader cannot confirm matching login hints","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
