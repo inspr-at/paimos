@@ -5138,6 +5138,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestActivityNotesValidationHistoryAndIsolation","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryBudgetRejectionCommitsDecisionWithoutContinuation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryDiagnosisDoesNotGuessExitOrAuth","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryOpenAPIContractsAgree","tier":"ESSENTIAL"}
