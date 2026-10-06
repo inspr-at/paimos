@@ -4550,6 +4550,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestWorkMigrationPreflightPagesAllTenantsWithoutWrites","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestWorkNodesBackupUsesFixtureConnection","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestWorkNodesMigrationBusyGuardAndAtomicRetry","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestWorkNodesMigrationExactNumbers","tier":"GATED-FULL"}
