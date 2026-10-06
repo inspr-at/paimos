@@ -492,8 +492,6 @@
     ,
     "internal/releases:TestLeafParentRoundTripPreservesPlanningMetadata"
     ,
-    "internal/releases:TestLeafShapeChangesPreserveCompleteProjectionAndUndo"
-    ,
     "internal/releases:TestLeafShapeChangesReconcileMovedAndRestoredChildren"
     ,
     "internal/releases:TestNativeWorkMembershipReadProjection"
@@ -7322,7 +7320,7 @@
     ,
     {"kind":"go","package":"internal/releases","name":"TestLeafParentRoundTripPreservesPlanningMetadata","tier":"NIGHTLY"}
     ,
-    {"kind":"go","package":"internal/releases","name":"TestLeafShapeChangesPreserveCompleteProjectionAndUndo","tier":"NIGHTLY"}
+    {"kind":"go","package":"internal/releases","name":"TestLeafShapeChangesPreserveCompleteProjectionAndUndo","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/releases","name":"TestLeafShapeChangesReconcileMovedAndRestoredChildren","tier":"NIGHTLY"}
     ,

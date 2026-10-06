@@ -147,6 +147,12 @@ export function fixedEnvironment(source = process.env, scratch) {
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN', 'NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS']) {
     if (source[key] !== undefined) env[key] = source[key]
   }
+  // Nix wrappers need their target role markers before they consume SDK flags.
+  // Preserve only qualified compiler configuration, never caller test selectors.
+  const nixTargetBuildVariable = /^NIX_(?:(?:CC|BINTOOLS)_WRAPPER_TARGET_(?:BUILD|HOST|TARGET)|CFLAGS_(?:COMPILE(?:_BEFORE)?|LINK)|LDFLAGS(?:_BEFORE)?)_[a-z0-9]+(?:_[a-z0-9]+)+$/
+  for (const key of Object.keys(source)) {
+    if (nixTargetBuildVariable.test(key) && source[key] !== undefined) env[key] = source[key]
+  }
   Object.assign(env, { CI: 'true', CI_LANE: 'full', AEON_TEST_TIER_MODE: 'full', GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', npm_config_audit: 'false', npm_config_fund: 'false' })
   if (scratch) Object.assign(env, { npm_config_cache: join(scratch, 'npm'), XDG_CACHE_HOME: scratch,

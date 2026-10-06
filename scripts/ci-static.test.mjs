@@ -206,6 +206,28 @@ test('fixed check environment removes caller flags and identity but supplies CI 
   assert.equal(fixedEnvironment({ PATH: '/bin', GIT_CONFIG_COUNT: '1' }).GIT_CONFIG_COUNT, undefined)
 })
 
+test('fixed check environment retains Nix compiler role markers and SDK flags without caller selection flags', () => {
+  const flags = {
+    NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
+    NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
+    NIX_CC_WRAPPER_TARGET_BUILD_x86_64_apple_darwin: '1',
+    NIX_BINTOOLS_WRAPPER_TARGET_TARGET_aarch64_unknown_linux_gnu: '1',
+    NIX_CFLAGS_COMPILE_arm64_apple_darwin: '-isystem /fixture/sdk/usr/include',
+    NIX_CFLAGS_LINK_arm64_apple_darwin: '-F/fixture/sdk/System/Library/Frameworks',
+    NIX_LDFLAGS_BEFORE_arm64_apple_darwin: '-L/fixture/sdk/usr/lib',
+    NIX_LDFLAGS_arm64_apple_darwin: '-L/fixture/sdk/usr/lib',
+    NIX_LDFLAGS_x86_64_apple_darwin: '-L/fixture/intel-sdk/usr/lib',
+    NIX_LDFLAGS_aarch64_unknown_linux_gnu: '-L/fixture/linux-sdk/lib',
+  }
+  const env = fixedEnvironment({ ...flags, GOFLAGS: '-run=^$', AEON_TEST_TIER_MODE: 'essential',
+    NIX_AUTH_TOKEN: 'fixture', NIX_LDFLAGS_SECRET: 'fixture' })
+  for (const [key, value] of Object.entries(flags)) assert.equal(env[key], value, key)
+  assert.equal(env.GOFLAGS, undefined)
+  assert.equal(env.AEON_TEST_TIER_MODE, 'full')
+  assert.equal(env.NIX_AUTH_TOKEN, undefined)
+  assert.equal(env.NIX_LDFLAGS_SECRET, undefined)
+})
+
 test('version warnings compare installed versions with workflow pins', t => {
   const cwd = temporary(t)
   for (const [name, version] of [['node', 'v23.0.0'], ['go', 'go version go1.25.0 darwin/arm64']]) {
