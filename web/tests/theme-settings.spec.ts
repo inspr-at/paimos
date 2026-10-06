@@ -63,7 +63,7 @@ async function colour(page: Page, label: string, hex: string, screenshot?: strin
   await page.getByRole('button', { name: /^Done/ }).click()
 }
 for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
-  test(`Theme settings ${width} ${mode}: preview, Suggest, marker and overlay stay still`, async ({ page }) => {
+  test(`Theme settings ${width} ${mode}: preview, derived colours, marker and overlay stay still`, async ({ page }) => {
     await page.setViewportSize({ width, height: 950 })
     const errors = watchErrors(page)
     await setup(page, { admin: true }); await page.goto('/settings/theme')
@@ -78,7 +78,7 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
       { name: 'reset primary dark to derived', run: async () => { await page.getByRole('button', { name: 'Use derived primary dark' }).click(); await expect(page.getByRole('button', { name: 'Use derived primary dark' })).toBeDisabled() } },
       { name: 'reset secondary dark to derived', run: async () => { await page.getByRole('button', { name: 'Use derived secondary dark' }).click(); await expect(page.getByRole('button', { name: 'Use derived secondary dark' })).toBeDisabled() } },
       { name: 'set secondary dark by hand', run: async () => { await colour(page, 'Secondary accent, dark', '#123456'); await expect(page.getByRole('button', { name: 'Use derived secondary dark' })).toBeEnabled() } },
-      { name: 'Suggest only failing light', run: async () => { await page.getByRole('button', { name: 'Suggest readable primary light' }).click(); await expect(page.getByTestId('primary-light-contrast')).not.toContainText('below') } },
+      { name: 'derived text remains readable', run: async () => { await expect(page.getByTestId('primary-light-contrast')).not.toContainText('below'); await expect(page.getByRole('button', { name: /Suggest readable/ })).toHaveCount(0) } },
       { name: 'marker Primary', run: async () => { await page.getByRole('radio', { name: 'Primary', exact: true }).click() } },
       { name: 'marker Secondary', run: async () => { await page.getByRole('radio', { name: 'Secondary', exact: true }).click() } },
       { name: 'marker Neutral grey', run: async () => { await page.getByRole('radio', { name: 'Neutral grey', exact: true }).click() } },
@@ -121,16 +121,29 @@ test('save preserves Agents, manual dark and derived reset; invalid hex never wr
   expect(data.items[2]!.values.agents).toEqual(record('copper', 'Copper', 'personal').values.agents)
   expect(data.writes.filter(write => write.method === 'PATCH')).toHaveLength(1)
 })
-test('Suggest touches only a failing mode and warnings never block Save', async ({ page }) => {
+test('derived contrast preserves chosen colours and staged edits apply only after Save', async ({ page }) => {
   const data = await setup(page); await page.goto('/settings/theme')
-  await page.getByRole('button', { name: 'Suggest readable secondary light', exact: true }).click()
-  await bar(page).getByRole('button', { name: /^Save/ }).click(); await expect(bar(page)).toHaveCount(0)
-  expect(data.items[2]!.values.secondary.dark).toBe('#e2b45a')
+  const primary = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim())
+  await expect.poll(primary).toBe('#0e6f6c')
   await colour(page, 'Primary accent, light', '#ffffff')
-  await expect(page.getByTestId('primary-light-contrast')).toContainText('below 4.5:1')
+  await expect(page.getByTestId('primary-light-contrast')).not.toContainText('below 4.5:1')
+  await expect(page.getByRole('button', { name: /Suggest readable/ })).toHaveCount(0)
+  expect(await primary()).toBe('#0e6f6c')
   await expect(bar(page).getByRole('button', { name: /^Save/ })).toBeEnabled()
   await bar(page).getByRole('button', { name: /^Save/ }).click(); await expect(bar(page)).toHaveCount(0)
   expect(data.items[2]!.values.primary.light).toBe('#ffffff')
+  await expect.poll(primary).toBe('#ffffff')
+  expect(data.items[2]!.values.secondary.dark).toBe('#e2b45a')
+  const css = await page.locator('#aeon-theme').textContent()
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+  expect(await primary()).not.toBe('#ffffff')
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
+  expect(await primary()).toBe('#ffffff')
+  await page.evaluate(() => { delete document.documentElement.dataset.theme })
+  expect(await primary()).not.toBe('#ffffff')
+  expect(await page.locator('#aeon-theme').textContent()).toBe(css)
+  await expect(page.locator('#aeon-theme')).toHaveCount(1)
 })
 test('workspace themes are read-only to members; duplicate and delete use captured revisions', async ({ page }) => {
   const data = await setup(page); await page.goto('/settings/theme')
