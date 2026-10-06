@@ -6,6 +6,7 @@ package agentd
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -46,24 +47,25 @@ var (
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
-	RecoveryBrief             string  `json:"recovery_brief,omitempty"`
-	RecoveryTier              string  `json:"recovery_service_tier,omitempty"`
-	RecoveryLabel             *string `json:"recovery_display_label,omitempty"`
-	ReadOnlyReview            bool    `json:"read_only_review,omitempty"`
-	RetryOfRunID              string  `json:"retry_of_run_id"`
-	CapacityHandoff           bool    `json:"capacity_handoff,omitempty"`
-	Purpose                   string  `json:"purpose,omitempty"`
-	VerificationTask          string  `json:"verification_task,omitempty"`
-	MaxDurationSeconds        *int64  `json:"max_duration_seconds,omitempty"`
-	VerificationPolicy        string  `json:"verification_policy,omitempty"`
-	RepositoryMutationAllowed *bool   `json:"repository_mutation_allowed,omitempty"`
-	ID                        string  `json:"id"`
-	WorkOrderID               string  `json:"work_order_id"`
-	AgentPrincipalID          string  `json:"agent_principal_id"`
-	ModelProfileID            string  `json:"model_profile_id"`
-	AccountID                 string  `json:"account_id"`
-	RequestedAccountID        string  `json:"requested_account_id"`
-	Status                    string  `json:"status"`
+	Trace                     json.RawMessage `json:"trace,omitempty"`
+	RecoveryBrief             string          `json:"recovery_brief,omitempty"`
+	RecoveryTier              string          `json:"recovery_service_tier,omitempty"`
+	RecoveryLabel             *string         `json:"recovery_display_label,omitempty"`
+	ReadOnlyReview            bool            `json:"read_only_review,omitempty"`
+	RetryOfRunID              string          `json:"retry_of_run_id"`
+	CapacityHandoff           bool            `json:"capacity_handoff,omitempty"`
+	Purpose                   string          `json:"purpose,omitempty"`
+	VerificationTask          string          `json:"verification_task,omitempty"`
+	MaxDurationSeconds        *int64          `json:"max_duration_seconds,omitempty"`
+	VerificationPolicy        string          `json:"verification_policy,omitempty"`
+	RepositoryMutationAllowed *bool           `json:"repository_mutation_allowed,omitempty"`
+	ID                        string          `json:"id"`
+	WorkOrderID               string          `json:"work_order_id"`
+	AgentPrincipalID          string          `json:"agent_principal_id"`
+	ModelProfileID            string          `json:"model_profile_id"`
+	AccountID                 string          `json:"account_id"`
+	RequestedAccountID        string          `json:"requested_account_id"`
+	Status                    string          `json:"status"`
 }
 
 // requestedAccount retains the approved enrollment before Route fills AccountID.
@@ -156,6 +158,7 @@ type WorkCriterion struct {
 // Telemetry carries content-free, nonnegative deltas. TurnCountDelta is one
 // accepted user turn; token and cost deltas come from vendor usage reports.
 type Telemetry struct {
+	ProcessState           string                  `json:"process_state,omitempty"`
 	ServiceTier            string                  `json:"service_tier,omitempty"`
 	ReviewRange            *reviewgate.CommitRange `json:"review_range,omitempty"`
 	LimitWindow            string                  `json:"limit_window,omitempty"`

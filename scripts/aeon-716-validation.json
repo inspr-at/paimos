@@ -569,5 +569,31 @@
       "internal/agentd/telemetry_lifecycle_test.go": "baa71f8985d16b15d29e56322ca6161e949cff220b648248c59cb1dea37f8091",
       "scripts/ci/go-test-tiers.json": "389d6c79a96746160497d7afbfe210111d152465ae4e76fad3751cb5995bdcdf"
     }
+  },
+  "merge_main_round_6": {
+    "reviewed_head": "c5141a0b2bb37394508d7eddeddec7a62114b0f9",
+    "main_commit": "fc5a1e5e77045cf6238ce2e6362567c53741a466",
+    "scope": "Normal merge of fetched newest origin/main on work/aeon-716-verify; no feature changes, PR merge, push or deployment.",
+    "preservation": [
+      "All 27 incoming files checked against both parents. Main-only and branch-only files match their owning parent byte-for-byte.",
+      "All added/replacement blocks from both parents retained in the four overlapping Go files.",
+      "OpenAPI sole conflict resolved by retaining every sentence from both telemetry descriptions. Every other added OpenAPI line from both parents retained.",
+      "Go tier manifest is the exact semantic union of both parents with no duplicate rows or policy metadata changes.",
+      "All 268 migration numbers unique; no migration changes or renumbering."
+    ],
+    "passed": [
+      "Full internal/reportercontract package locally, GOMAXPROCS=2 go test -p 2: 2.248s.",
+      "All 33 scripts/check-migrations.test.mjs tests locally.",
+      "node scripts/check-migrations.mjs --base-ref v261005070923.0.0: passed against latest published release.",
+      "node scripts/ci-static.mjs --list: static registry validates (not check execution).",
+      "git diff --check and git diff --cached --check.",
+      "node --test scripts/test-tiers/test-tiers.test.mjs: 173 passed, 0 failed, 0 skipped."
+    ],
+    "limitations": [
+      "Direct user no-push instruction overrides runner temporary-ref pushes: remote-test.sh and ci-static-locked.sh were inspected and not invoked. Required affected remote Go suites and complete ci-static exit-0 gate remain unverified. No heavy local suite substituted.",
+      "Conflicts touched no web spec; no browser suite run. Coordinator must prove hosted CI after its push.",
+      "Pre-existing untracked scripts/audit/__pycache__/ preserved."
+    ],
+    "safety": "Selected ppm instance, workstation-agents principal, INSPR tenant and GitHub markus-barta verified. Coordinator attribution recorded per worker-common. Only assigned worktree/branch edited; no secret reads, model CLI review, hook bypass, origin/test-ref push, deployment, production mutation or ticket status change."
   }
 }

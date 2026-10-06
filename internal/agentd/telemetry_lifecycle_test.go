@@ -130,12 +130,22 @@ func TestTelemetryProtocolStopsOnlyOwnedChild(t *testing.T) {
 				w.WriteHeader(http.StatusNoContent)
 			})
 			// Another owned child, sharing the same account, must stay alive.
+			// Give the sibling its read-only verification scratch so the fixture
+			// never requires two writers in the same physical checkout.
 			sibling := &fakeProcess{stopped: make(chan struct{})}
 			t.Cleanup(func() { _ = sibling.Stop(context.Background()) })
-			s.adapters[Codex] = &fakeAdapter{proc: sibling}
-			api.run.ID = "sibling"
-			if err := s.StartRun(t.Context(), api.run); err != nil {
+			siblingAdapter := &verificationFakeAdapter{fakeAdapter: fakeAdapter{proc: sibling}}
+			s.adapters[Codex] = siblingAdapter
+			siblingRun := api.run
+			siblingRun.ID, siblingRun.AccountID = "sibling", "account"
+			no, duration := false, int64(60)
+			siblingRun.Purpose, siblingRun.VerificationTask, siblingRun.VerificationPolicy = VerificationPurpose, VerificationTask, "read_only"
+			siblingRun.RepositoryMutationAllowed, siblingRun.MaxDurationSeconds = &no, &duration
+			if err := s.StartRun(t.Context(), siblingRun); err != nil {
 				t.Fatal(err)
+			}
+			if siblingAdapter.request.Workspace == s.workspace || siblingAdapter.request.Tools != nil {
+				t.Fatal("sibling verification was not isolated")
 			}
 			api.run.ID = "run"
 			s.adapters[Codex] = &fakeAdapter{proc: proc}
