@@ -8488,6 +8488,64 @@
     ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"three places in order of use; the active one is highlighted and the breadcrumb continues from it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"Apply, Dismiss and Undo retain rows and control boxes on desktop and phone, in both themes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a delayed action cannot resolve a different filtered record or offer stale Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"an unavailable queue shows an honest error and Retry without moving its controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"bulk Apply has no glow and keeps visible keyboard focus at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"bulk Apply has no glow and keeps visible keyboard focus at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"bulk Apply has no glow and keeps visible keyboard focus at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"bulk Apply has no glow and keeps visible keyboard focus at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"bulk Apply has no glow and keeps visible keyboard focus at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"bulk Apply has no glow and keeps visible keyboard focus at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"bulk Apply reports a partial result, retains every row, and Undo all reverses only confirmed writes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"kind counts, project facets and search filter the URL; scrolling loads the next 50","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"partial errors leave adjacent actions unobscured and stationary at 1024px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"partial errors leave adjacent actions unobscured and stationary at 1440px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"partial errors leave adjacent actions unobscured and stationary at 390px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"partial results keep toasts above selection controls at 1024px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"partial results keep toasts above selection controls at 1440px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"partial results keep toasts above selection controls at 390px","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"person switch clears previous facets while the replacement read waits and fails","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"read-only rows and unavailable release targets explain their permissions before acting","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"release receipts refresh the retained row and siblings for subsequent Apply and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"workspace switch clears previous facets while the replacement read waits and fails","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/new-agent.spec.ts","name":"Escape leaves the key and the command before Key ready closes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/new-agent.spec.ts","name":"agent has no new-agent action","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -10962,6 +11020,18 @@
     ,
     {"kind":"browser","file":"tests/shell.spec.ts","name":"home 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"home attention entry fits and stays still at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"home attention entry fits and stays still at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"home attention entry fits and stays still at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"home attention entry fits and stays still at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"home attention entry fits and stays still at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/shell.spec.ts","name":"home attention entry fits and stays still at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/shell.spec.ts","name":"server-authorized email login and account logout use POST","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/shell.spec.ts","name":"session outages show retry rather than authenticated content","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -11616,6 +11686,18 @@
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"at 390px the view bar and toolbar never overflow the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"coarse-pointer project attention link › expanded project attention target activates without moving controls at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"coarse-pointer project attention link › expanded project attention target activates without moving controls at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"coarse-pointer project attention link › expanded project attention target activates without moving controls at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"coarse-pointer project attention link › expanded project attention target activates without moving controls at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"coarse-pointer project attention link › expanded project attention target activates without moving controls at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"coarse-pointer project attention link › expanded project attention target activates without moving controls at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"filters and views have no axe violations in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"filters and views have no axe violations in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -11623,6 +11705,18 @@
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"grouping by assignee, priority and label counts its groups; groups collapse together","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"in a view the column set belongs to the view; row height is the person’s own","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"project attention navigation fits and stays still at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"project attention navigation fits and stays still at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"project attention navigation fits and stays still at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"project attention navigation fits and stays still at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"project attention navigation fits and stays still at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"project attention navigation fits and stays still at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"saving a view: named from its filters, shared, then the bar shows it and changes mark it until saved","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -13945,6 +14039,10 @@
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: a mutation between rows and digest retries the entire snapshot","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"ignores failed or incomplete release receipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"refreshes matching sibling identities and sends both resource revisions on the next action","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/auth-tabs.unit.test.ts","name":"a delayed storage event uses the latest generation instead of rolling back a newer local sign-in","tier":"ESSENTIAL"}
     ,

@@ -4852,6 +4852,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestAithemaContentMigrationLockReleaseAndUniqueRecovery","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestAttentionEventsMigrationUpgradeAndReapply","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestBillingSnapshotMigrationBoundsLockWaitAndRetries","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestBriefingMigrationDoesNotBlockLogWritersRegression","tier":"GATED-FULL"}
@@ -8261,6 +8263,34 @@
     {"kind":"go","package":"internal/sessionusage","name":"TestWrongVendorNestedUsageAndCompetingFormats","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/stagehandoff","name":"TestRetiredHandoffsNeverTouchStorageOrAdmitLaunch","tags":[],"tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAdditionalAttentionFencePreservesAuthenticationGuard","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionApplyAndUndoDeriveParentStatuses","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionApplyDismissUndoAndSuppression","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkMissedReleaseSharesCapturedRevision","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkReturnsPartialResultsAndGuardsUndo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionChecksRevocationUnderFinalWriteFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionMissedReleaseApplyUndoApplyRefreshesIdentity","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionMissedReleaseUsesPlanningMembershipAndUndo","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionPaginationFiltersAndProjectVisibility","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionProposalsReappearAndApplyAfterUndo","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionReleaseUndoRejectsExternalProjectAndReleaseChanges","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionResolutionVisibilityPreservesHiddenReferences","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionSharedReleaseBulkUndoUsesRefreshedFences","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionUndoRequiresPermissionAndActorOwnership","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAutopilotHumanCheckObjectionAndStaleUndo","tier":"GATED-FULL"}
     ,
