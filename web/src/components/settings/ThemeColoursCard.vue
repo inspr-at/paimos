@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import type { ThemeRecord } from '../../lib/themes'
-import { CARD_COLOURS, colourContrast, derivedDark, suggestColour, type ColourMode } from '../../lib/themeColours'
+import { CARD_COLOURS, colourContrast, deriveDark, roles, themeTokens, type ColourMode } from '../../lib/themeEngine'
 import SettingsCard from './SettingsCard.vue'
 import ThemeColourPicker from './ThemeColourPicker.vue'
 import AppIcon from '../AppIcon.vue'
@@ -15,11 +15,11 @@ type AccentKey = 'primary' | 'secondary'
 type Pick = { accent: AccentKey; mode: ColourMode } | { marker: true }
 const picker = ref<Pick | null>(null)
 let opener: HTMLElement | null = null
-const accents = [{ key: 'primary' as const, label: 'Primary accent', hint: 'Buttons, links, selection, focus and progress' }, { key: 'secondary' as const, label: 'Secondary accent', hint: 'Stars, highlights, warnings and waiting work' }]
+const accents = [{ key: 'primary' as const, label: 'Primary accent', hint: 'Buttons, links, selection, focus and progress' }, { key: 'secondary' as const, label: 'Secondary accent', hint: 'Stars, highlights and waiting work' }]
 const modes: ColourMode[] = ['light', 'dark']
 const markers = [{ value: 'primary' as const, label: 'Primary' }, { value: 'secondary' as const, label: 'Secondary' }, { value: 'neutral' as const, label: 'Neutral grey' }, { value: 'custom' as const, label: 'Custom' }]
-const value = (key: AccentKey, mode: ColourMode) => props.draft.values[key][mode] ?? derivedDark(props.draft.values[key].light)
-const ratio = (key: AccentKey, mode: ColourMode) => colourContrast(value(key, mode), CARD_COLOURS[mode])
+const value = (key: AccentKey, mode: ColourMode) => props.draft.values[key][mode] ?? deriveDark(props.draft.values[key].light)
+const ratio = (key: AccentKey, mode: ColourMode) => colourContrast(roles(value(key, mode), mode).ink, CARD_COLOURS[mode])
 const pickerValue = computed(() => !picker.value ? '#0e6f6c' : 'marker' in picker.value ? props.draft.values.recurring_marker.custom ?? '#8547b0' : value(picker.value.accent, picker.value.mode))
 const pickerTitle = computed(() => !picker.value ? '' : 'marker' in picker.value ? 'Recurring marker · custom' : `${picker.value.accent === 'primary' ? 'Primary' : 'Secondary'} accent · ${picker.value.mode}`)
 function edit(fn: (theme: ThemeRecord) => void) { if (!props.editable) return; const copy = JSON.parse(JSON.stringify(props.draft)) as ThemeRecord; fn(copy); emit('change', copy) }
@@ -38,7 +38,7 @@ function markerColour(mode: ColourMode) {
   const choice = props.draft.values.recurring_marker
   if (choice.source === 'primary' || choice.source === 'secondary') return value(choice.source, mode)
   if (choice.source === 'neutral') return mode === 'light' ? '#7c8c8d' : '#8aa3a2'
-  return mode === 'light' ? choice.custom ?? '#8547b0' : derivedDark(choice.custom ?? '#8547b0')
+  return mode === 'light' ? choice.custom ?? '#8547b0' : deriveDark(choice.custom ?? '#8547b0')
 }
 watch([() => props.draft.id, () => props.editable], () => { picker.value = null })
 </script>
@@ -55,7 +55,7 @@ watch([() => props.draft.id, () => props.editable], () => { picker.value = null 
           </div>
           <div class="derived"><span>{{ draft.values[accent.key].dark === null ? 'Dark derived from light' : 'Dark set by hand' }}</span><button type="button" class="text-link" :disabled="!editable || draft.values[accent.key].dark === null" :aria-label="`Use derived ${accent.key} dark`" @click="edit(theme => theme.values[accent.key].dark = null)">Use derived</button></div>
           <div class="contrast-lines">
-            <p v-for="mode in modes" :key="mode" :class="{ warning: ratio(accent.key, mode) < 4.5 }" :data-testid="`${accent.key}-${mode}-contrast`"><AppIcon :name="ratio(accent.key, mode) < 4.5 ? 'alert' : 'check'" :size="13" /><span>{{ mode === 'light' ? 'Light' : 'Dark' }} {{ (Math.floor(ratio(accent.key, mode) * 10) / 10).toFixed(1) }}:1 on cards<span v-if="ratio(accent.key, mode) < 4.5"> · below 4.5:1</span></span><button type="button" class="text-link suggest" :style="{ visibility: ratio(accent.key, mode) < 4.5 && editable ? 'visible' : 'hidden' }" :disabled="!editable || ratio(accent.key, mode) >= 4.5" :aria-label="`Suggest readable ${accent.key} ${mode}`" @click="edit(theme => theme.values[accent.key][mode] = suggestColour(value(accent.key, mode), mode))">Suggest</button></p>
+            <p v-for="mode in modes" :key="mode" :class="{ warning: ratio(accent.key, mode) < 4.5 }" :data-testid="`${accent.key}-${mode}-contrast`"><AppIcon :name="ratio(accent.key, mode) < 4.5 ? 'alert' : 'check'" :size="13" /><span>{{ mode === 'light' ? 'Light' : 'Dark' }} {{ (Math.floor(ratio(accent.key, mode) * 10) / 10).toFixed(1) }}:1 on cards<span v-if="ratio(accent.key, mode) < 4.5"> · below 4.5:1</span></span></p>
           </div>
         </div>
         <div class="colour-field">
@@ -65,7 +65,7 @@ watch([() => props.draft.id, () => props.editable], () => { picker.value = null 
       </div>
       <aside class="previews" aria-label="Live colour preview">
         <p class="eyebrow">Preview · light and dark</p>
-        <section v-for="mode in modes" :key="mode" class="colour-preview" :class="mode" :aria-label="`${mode} colour preview`" :style="{ '--preview-primary': value('primary', mode), '--preview-secondary': value('secondary', mode), '--preview-marker': markerColour(mode) }">
+        <section v-for="mode in modes" :key="mode" class="colour-preview" :class="mode" :aria-label="`${mode} colour preview`" :style="{ ...themeTokens(draft.values, mode), '--preview-primary': roles(value('primary', mode), mode).ink, '--preview-secondary': roles(value('secondary', mode), mode).ink, '--preview-marker': markerColour(mode) }">
           <header><strong>{{ mode === 'light' ? 'Light' : 'Dark' }}</strong><span>Ticket list</span></header>
           <div class="preview-row"><span class="preview-key">AEON-24</span><span>Build the next small thing</span><AppIcon name="star" :size="14" class="preview-star" /></div>
           <div class="preview-row selected"><span class="preview-key">AEON-25</span><span>Weekly workspace check</span><AppIcon name="refresh" :size="14" class="preview-marker" /></div>

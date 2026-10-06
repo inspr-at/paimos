@@ -120,9 +120,10 @@ export function balanceShards(manifest, count, { all = false } = {}) {
     shard.weightSeconds += spec.weightSeconds
   }
   // Indivisible files can leave LPT just over the gate budget even when there
-  // is room. Each move/swap lowers the affected pair's maximum; no other shard
-  // grows. Bound refinement independently of convergence and keep all weights,
-  // owning groups and launch policies intact.
+  // is room. Each move or swap lowers the affected pair's maximum; no other
+  // shard grows. Bound refinement independently of convergence and keep all
+  // weights, owning groups and launch policies intact. Swaps cover the peak
+  // reduction main added; moves keep a 15/15 fit when no exchange can.
   for (let pass = 0; pass < Math.min(specs.length, 256); pass++) {
     const high = shards.reduce((best, candidate) => candidate.weightSeconds > best.weightSeconds ? candidate : best)
     let best, bestMaximum = high.weightSeconds

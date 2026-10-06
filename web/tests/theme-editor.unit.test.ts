@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { effectScope, nextTick, reactive } from 'vue'
 import type { ActiveTheme, ThemeRecord, ThemesPage } from '../src/lib/themes'
 const mocks = vi.hoisted(() => ({ session: { identity: null as unknown }, permissions: new Set<string>() }))
@@ -7,6 +7,7 @@ vi.mock('../src/stores/session', () => ({ useSession: () => mocks.session }))
 vi.mock('../src/lib/authz', () => ({ can: (permission: string) => mocks.permissions.has(permission) }))
 vi.mock('../src/lib/themes', () => ({ listThemes: vi.fn(), getActiveTheme: vi.fn(), getTheme: vi.fn(), selectTheme: vi.fn(), updateTheme: vi.fn(), duplicateTheme: vi.fn(), deleteTheme: vi.fn() }))
 import * as api from '../src/lib/themes'
+import { themeCss } from '../src/lib/themeEngine'
 import { agentTheme, resetAgentTheme, restoreAgentTheme } from '../src/lib/agentTheme'
 import {
   SELECTION, canDelete, canEdit, canReload, canSave, createThemeEditor, feedback, initialState, isConflicted, isDirty, transition, useThemeEditor,
@@ -359,7 +360,7 @@ describe('theme editor runner', () => {
 // lifecycle event is placed between the request and its answer without sleeps.
 
 const avatar = (theme: ThemeRecord, value: ThemeRecord['values']['agents']['avatar'], revision = theme.revision): ThemeRecord =>
-  ({ ...theme, revision, values: { ...theme.values, agents: { ...theme.values.agents, avatar: value } } })
+  ({ ...theme, revision, values: { ...theme.values, primary: { light: ({ 'robot-1': '#0e6f6c', sprite: '#3a5fc4', orbit: '#8547b0', quill: '#bf3d6d', 'robot-3': '#b5642a', 'robot-4': '#5b52c9', 'robot-2': '#2f7a5a' } as Record<string, string>)[value] ?? '#0e6f6c', dark: null }, agents: { ...theme.values.agents, avatar: value } } })
 const R_COPPER = avatar(COPPER, 'robot-1'), R_OTHER = avatar(OTHER, 'sprite'), R_DEFAULT = avatar(DEFAULT, 'orbit')
 const R_COPY = avatar(COPY, 'quill'), R_SAVED = avatar(COPPER, 'sprite', 5), R_BOB = avatar(record('bob', 'Bob', 'personal', 1), 'robot-3')
 const R_FRESH = avatar(COPPER, 'robot-4', 6), R_AGAIN = avatar(COPPER, 'robot-2', 7)
@@ -385,7 +386,7 @@ const MUTATIONS: Record<string, Mutation> = {
   },
   'save': {
     arrange: () => { const d = deferred<unknown>(); vi.mocked(api.updateTheme).mockReturnValue(d.promise as Promise<ThemeRecord>); return d },
-    act: theme => { theme.update(draft => { draft.values.agents.avatar = 'sprite' }); return theme.save() }, committed: 'sprite', shows: 'copper',
+    act: theme => { theme.update(draft => { draft.values.agents.avatar = 'sprite'; draft.values.primary = { ...R_SAVED.values.primary } }); return theme.save() }, committed: 'sprite', shows: 'copper',
   },
   'duplicate and select': {
     arrange: () => { const d = deferred<unknown>(); vi.mocked(api.duplicateTheme).mockResolvedValue(R_COPY); vi.mocked(api.selectTheme).mockReturnValue(d.promise as Promise<ActiveTheme>); return d },
@@ -461,6 +462,11 @@ const LIFECYCLES: Record<string, { between: Lifecycle; fails?: boolean }> = {
 }
 
 describe('runtime appearance follows every confirmed theme', () => {
+  const cache = new Map<string, string>()
+  beforeEach(() => {
+    cache.clear()
+    vi.stubGlobal('localStorage', { getItem: (key: string) => cache.get(key) ?? null, setItem: (key: string, value: string) => cache.set(key, value), removeItem: (key: string) => cache.delete(key) })
+  })
   afterEach(() => { vi.unstubAllGlobals(); afterCommit = null })
   const cells = Object.keys(MUTATIONS).flatMap(mutation => Object.keys(LIFECYCLES).map(lifecycle => [mutation, lifecycle] as const))
   it.each(cells)('%s %s', async (mutationName, lifecycleName) => {
@@ -483,7 +489,10 @@ describe('runtime appearance follows every confirmed theme', () => {
     expect(agentTheme.value?.avatar ?? null).toBe(want.runtime)
     expect(theme.active.value?.theme.id ?? null).toBe(want.shows)
     // Runtime and the editor never disagree about the confirmed theme.
-    if (theme.active.value) expect(agentTheme.value).toEqual(theme.active.value.theme.values.agents)
+    if (theme.active.value) {
+      expect(agentTheme.value).toEqual(theme.active.value.theme.values.agents)
+      expect(JSON.parse(cache.get('aeon.theme.v1')!)).toEqual({ principal: theme.state.value.identity, css: themeCss(theme.active.value.theme.values) })
+    } else expect(cache.has('aeon.theme.v1')).toBe(false)
     if (afterCommit) {
       // Restoration cannot undo the operation's confirmed theme.
       await afterCommit(); afterCommit = null

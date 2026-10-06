@@ -526,6 +526,5 @@ RETURNING l.tenant_id::text,l.account_id::text,l.account_revision,c.principal_id
 }
 
 func accountLinkEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, event, account, person string, revision int64) error {
-	_, err := events.Append(ctx, tx, p, events.Change{Type: event, After: map[string]any{"account_id": account, "person_id": person, "revision": revision}})
-	return err
+	return appendEvent(ctx, tx, p, events.Change{Type: event, After: map[string]any{"account_id": account, "person_id": person, "revision": revision}})
 }

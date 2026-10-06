@@ -43,6 +43,7 @@ func LockMutation(ctx context.Context, tx pgx.Tx) error {
 }
 
 type disconnectInput struct {
+	SuppressAudit    bool   `json:"-"`
 	ExpectedRevision *int64 `json:"expected_revision,omitempty"`
 	Mode             string `json:"mode"`
 	AccountID        string `json:"account_id,omitempty"`
@@ -189,6 +190,9 @@ func disconnectTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, computer s
 	}
 	if _, err = tx.Exec(ctx, `UPDATE agent_pairing_computers SET revision=revision+1 WHERE id=$1`, computer); err != nil {
 		return err
+	}
+	if in.SuppressAudit {
+		return nil
 	}
 	return audit(ctx, tx, p, "agent_pairing.disconnected", map[string]any{"computer_id": computer, "account_id": in.AccountID, "mode": in.Mode, "local_cleanup": "pending", "local_processes": "unconfirmed"})
 }

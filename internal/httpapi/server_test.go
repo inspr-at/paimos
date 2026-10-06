@@ -211,6 +211,34 @@ func TestHandlersAndMiddleware(t *testing.T) {
 		if !strings.Contains(api.Header().Get("Content-Type"), "application/json") {
 			t.Fatalf("api content type %s", api.Header().Get("Content-Type"))
 		}
+		t.Run("theme bootstrap nonce", func(t *testing.T) {
+			page := []byte(`<script id="aeon-theme-boot" nonce="__AEON_THEME_NONCE__">/* cache bootstrap */</script>`)
+			app := (&Server{Web: fstest.MapFS{"index.html": {Data: page}}}).Handler()
+			seen := map[string]bool{}
+			for _, route := range []string{"/", "/index.html", "/settings/theme"} {
+				response := get(t, app, route, "")
+				policy := response.Header().Get("Content-Security-Policy")
+				body := response.Body.String()
+				_, tail, found := strings.Cut(body, `nonce="`)
+				nonce, _, closed := strings.Cut(tail, `"`)
+				if response.Code != http.StatusOK || !found || !closed || len(nonce) != 32 || seen[nonce] || strings.Contains(body, "__AEON_THEME_NONCE__") {
+					t.Fatalf("bootstrap nonce missing, reused or unrendered for %s", route)
+				}
+				seen[nonce] = true
+				for _, directive := range []string{"script-src", "style-src"} {
+					if !strings.Contains(policy, directive+" 'self' 'nonce-"+nonce+"'") {
+						t.Fatalf("%s nonce missing from policy for %s", directive, route)
+					}
+				}
+				if strings.Contains(policy, "unsafe-inline") || !strings.Contains(policy, "object-src 'none'") || response.Header().Get("Cache-Control") != "no-cache" {
+					t.Fatal("bootstrap relaxed unrelated CSP controls or caching")
+				}
+			}
+			plain := get(t, app, "/api/version", "")
+			if strings.Contains(plain.Header().Get("Content-Security-Policy"), "nonce-") {
+				t.Fatal("API policy inherited an application nonce")
+			}
+		})
 	})
 }
 

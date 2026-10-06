@@ -209,7 +209,7 @@ export function reuseDependencies(root, tree) {
   return true
 }
 
-export function runCommand(command, { cwd, timeout_seconds, env = process.env, signal } = {}) {
+export function runCommand(command, { cwd, timeout_seconds, env = process.env, signal, id = 'command', killProcess = process.kill } = {}) {
   return new Promise(resolveResult => {
     const begin = performance.now()
     let output = '', expired = false, interrupted = false, timer, killTimer
@@ -218,8 +218,13 @@ export function runCommand(command, { cwd, timeout_seconds, env = process.env, s
     const child = spawn('/bin/sh', ['-c', `trap ':' TERM\n${command}`], { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] })
     const tail = data => { output = (output + data.toString()).slice(-65536) }
     child.stdout.on('data', tail); child.stderr.on('data', tail)
-    function kill(sig) {
-      try { process.platform === 'win32' ? child.kill(sig) : process.kill(-child.pid, sig) } catch (error) { if (error.code !== 'ESRCH') tail(error.message) }
+    function kill(sig, afterClose = false) {
+      try { process.platform === 'win32' ? child.kill(sig) : killProcess(-child.pid, sig) }
+      catch (error) {
+        // Darwin can report EPERM for an exited, zombie-only process group.
+        // Before close, EPERM must still be reported as a signal failure.
+        if (error.code !== 'ESRCH' && !(afterClose && process.platform !== 'win32' && error.code === 'EPERM')) tail(error.message)
+      }
     }
     function stop() { kill('SIGTERM'); killTimer ??= setTimeout(() => kill('SIGKILL'), 500) }
     const abort = () => { interrupted = true; stop() }
@@ -227,7 +232,9 @@ export function runCommand(command, { cwd, timeout_seconds, env = process.env, s
     timer = setTimeout(() => { expired = true; stop() }, timeout_seconds * 1000)
     child.on('error', error => tail(error.message))
     child.on('close', async (code, sig) => {
-      if (expired || interrupted) kill('SIGKILL')
+      // afterClose suppresses Darwin's EPERM for an already-exited group.
+      // The probe below still waits until that group is gone.
+      if (expired || interrupted) kill('SIGKILL', true)
       clearTimeout(timer); clearTimeout(killTimer); signal?.removeEventListener('abort', abort)
       let cleanupError
       if ((expired || interrupted) && child.pid && process.platform !== 'win32') {
@@ -247,10 +254,16 @@ export function runCommand(command, { cwd, timeout_seconds, env = process.env, s
             if (performance.now() >= deadline) throw new Error('Owned command process group survived shutdown')
             await new Promise(done => setTimeout(done, 10))
           }
-        } catch (error) { cleanupError = error.message; tail(`\n${cleanupError}`) }
+        } catch (error) { cleanupError = error.message }
       }
+      const seconds = Math.round((performance.now() - begin) / 10) / 100
+      if (expired || interrupted) {
+        const cause = expired ? `exceeded timeout_seconds=${timeout_seconds}` : 'interrupted'
+        tail(`\nci-static: ${id} ${cause} after ${seconds}s (process group termination requested)`)
+      }
+      if (cleanupError) tail(`\n${cleanupError}`)
       resolveResult({ status: cleanupError ? 'failed' : expired ? 'timeout' : interrupted ? 'interrupted' : code === 0 ? 'passed' : 'failed',
-        seconds: Math.round((performance.now() - begin) / 10) / 100, code, signal: sig,
+        seconds, code, signal: sig,
         ...(cleanupError ? { cleanup_error: cleanupError } : {}),
         output: output.trimEnd().split('\n').slice(-40).join('\n') })
     })
@@ -302,7 +315,7 @@ export async function runChecks(checks, root, { jobs = 4, baseRef, signal, run =
             writeFileSync(join(typecheckDir, 'tsconfig.json'), JSON.stringify({ files: [], references: [{ path: './app.json' }, { path: './node.json' }] }))
             executed += ' ' + shellQuote(join(typecheckDir, 'tsconfig.json'))
           }
-          results[i] = { ...base, executed_command: executed, ...await run(executed, { cwd: resolve(root, check.cwd), timeout_seconds: check.timeout_seconds, env, signal }) }
+          results[i] = { ...base, executed_command: executed, ...await run(executed, { cwd: resolve(root, check.cwd), timeout_seconds: check.timeout_seconds, env, signal, id: check.id }) }
         }
       }
     }))

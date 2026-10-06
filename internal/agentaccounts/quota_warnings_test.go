@@ -535,3 +535,15 @@ func TestQuotaWarningsConcurrentComputersDeduplicate(t *testing.T) {
 		t.Fatalf("overlapping reports duplicated suppressed early receipt: %d", n)
 	}
 }
+
+func TestQuotaWarningSettingsUndoRejectsInterveningWrite(t *testing.T) {
+	f := readinessWorld(t, "quota-undo", time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC))
+	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/settings/quota-warnings", `{"early_percent":20,"urgent_percent":5,"expected_early_percent":10,"expected_urgent_percent":3}`, 200, nil)
+	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/settings/quota-warnings", `{"early_percent":25,"urgent_percent":6}`, 200, nil)
+	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/settings/quota-warnings", `{"early_percent":10,"urgent_percent":3,"expected_early_percent":20,"expected_urgent_percent":5}`, 409, nil)
+	var actual QuotaWarningSettings
+	callStatus(t, f.mod, &f.admin, "", "GET", "/api/settings/quota-warnings", "", 200, &actual)
+	if actual != (QuotaWarningSettings{25, 6}) {
+		t.Fatal("stale Undo overwrote another manager", actual)
+	}
+}

@@ -301,7 +301,8 @@ for (const theme of ['light', 'dark'] as const) {
       await page.goto('/settings/accounts')
       await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
       const accounts = page.locator('#agent-accounts')
-      await expect(accounts.locator('.account').first()).toBeVisible()
+      // AEON-686: the Accounts overview lists each account as a row; its logins open in the docked panel.
+      await expect(accounts.locator('.list-row[data-account]').first()).toBeVisible()
       await accounts.screenshot({ path: `../.agent-shots/acu1-accounts-${width}-${theme}.png` })
       await open(page)
       await ready(page)
