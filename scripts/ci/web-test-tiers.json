@@ -8032,11 +8032,39 @@
     ,
     {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"candidate renewal stays in Deploy when reviewing Build history","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"decision card uses neutral elevation without a coloured glow in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"decision card uses neutral elevation without a coloured glow in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renewal confirmation rejects a changed renewal action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renewal requires a fresh live grant","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renewal requires a fresh request","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1024 dark · Access-Genehmigung erneuern","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1024 dark · Renew Access permit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1024 light · Access-Genehmigung erneuern","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1024 light · Renew Access permit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1440 dark · Access-Genehmigung erneuern","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1440 dark · Renew Access permit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1440 light · Access-Genehmigung erneuern","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 1440 light · Renew Access permit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 390 dark · Access-Genehmigung erneuern","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 390 dark · Renew Access permit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 390 light · Access-Genehmigung erneuern","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews an expired Access permit without moving the control or redeploying at 390 light · Renew Access permit","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/journey-renewal.spec.ts","name":"renews both standing gates with fresh exact requests at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

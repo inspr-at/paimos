@@ -3413,8 +3413,8 @@
     ]
   },
   "journey": {
-    "version": "journey/1.3",
-    "sha256": "15118ef0d5da8215ba685594976671a6850d9f082140dcaf1343bbf41a30f317",
+    "version": "journey/1.4",
+    "sha256": "6908725d898bcccf2f9860392fa4ec11f9ce9893336ae93553c09162336a3cd8",
     "shape": {
       "GET /projects/{projectId}/journey 200": {
         "properties": {
@@ -3448,6 +3448,12 @@
           },
           "next_action": {
             "properties": {
+              "access_renewal_action": {
+                "enum": [
+                  "renew_permit"
+                ],
+                "type": "string"
+              },
               "approval_request_id": {
                 "format": "uuid",
                 "type": [
