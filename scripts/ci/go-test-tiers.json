@@ -172,6 +172,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestLeadQueueFairRoutingUsesLiveSecurityRoute","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentruns","name":"TestLeadQueueFairRoutingSkipsLeadWithoutDispatchAuthority","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/agentruns","name":"TestLeadQueueFairRoutingThroughProductionAuthentication","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/agentruns","name":"TestLeadQueueFairRoutingBindsLeadDispatchCredential","tier":"ESSENTIAL"},
+    {"kind":"go","package":"internal/auth","name":"TestQueueDispatcherQualifiesOnlyTheBoundKey","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadLifecycleAndExplicitMigration","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadAdmissionIsFreshAndFailClosed","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/harness","name":"TestProjectLeadLostContactDoesNotPermitSuccession","tier":"ESSENTIAL"},

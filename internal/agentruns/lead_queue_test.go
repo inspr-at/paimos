@@ -23,6 +23,22 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// bindLeadKey records token's key row as the project lead's dispatch
+// credential, as a claim or proven pickup through that key would. Tokens are
+// aeon_<prefix>_<secret>; only the prefix identifies the row.
+func bindLeadKey(t *testing.T, f *fixture, project, token string) string {
+	t.Helper()
+	parts := strings.Split(token, "_")
+	if len(parts) != 3 {
+		t.Fatalf("unexpected key token shape")
+	}
+	var id string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `UPDATE project_leads SET dispatch_key_id=(SELECT id FROM agent_keys WHERE prefix=$2) WHERE project_id=$1 RETURNING dispatch_key_id::text`, project, parts[1]).Scan(&id)
+	})
+	return id
+}
+
 func leadQueueFixture(t *testing.T) (*fixture, tenant.Principal, string, string, string, qEntry) {
 	t.Helper()
 	f := setup(t)
@@ -222,7 +238,8 @@ func TestLeadQueueFairRoutingUsesLiveSecurityRoute(t *testing.T) {
 	for _, change := range []string{"field", "title", "body"} {
 		t.Run(change, func(t *testing.T) {
 			f, coordinator, olderProject, olderSession, olderLease, older := leadQueueFixture(t)
-			f.key(t, coordinator, authz.CoordinatorKeyScopes)
+			coordinatorToken := f.key(t, coordinator, authz.CoordinatorKeyScopes)
+			bindLeadKey(t, f, olderProject, coordinatorToken)
 			project, session := uuid(), uuid()
 			lease := "live-route-fixture-lease-0000000000000"
 			refDigest := sha256.Sum256([]byte("aeon.harness.ref\x00live-route-reference"))
@@ -246,6 +263,7 @@ func TestLeadQueueFairRoutingUsesLiveSecurityRoute(t *testing.T) {
 				return err
 			})
 			younger := f.addQueue(t, id, nil)
+			bindLeadKey(t, f, project, coordinatorToken)
 			at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 			f.tx(t, f.person, func(tx pgx.Tx) error {
 				if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_at=$2 WHERE id=$1`, older.Run.ID, at); err != nil {
@@ -328,7 +346,7 @@ func TestLeadQueueFairRoutingSkipsLeadWithoutDispatchAuthority(t *testing.T) {
 	younger := tenant.Principal{ID: uuid(), TenantID: f.person.TenantID, Kind: tenant.Agent, Scopes: authz.CoordinatorKeyScopes}
 	project, session := uuid(), uuid()
 	lease := "dispatch-authority-lease-00000000000000"
-	f.key(t, older, authz.CoordinatorKeyScopes)
+	bindLeadKey(t, f, olderProject, f.key(t, older, authz.CoordinatorKeyScopes))
 	refDigest := sha256.Sum256([]byte("aeon.harness.ref\x00dispatch-authority-reference"))
 	leaseDigest := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
 	f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -350,7 +368,7 @@ func TestLeadQueueFairRoutingSkipsLeadWithoutDispatchAuthority(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,session_id,generation,state) VALUES($1,$2,$3,$4,1,'working')`, f.person.TenantID, project, f.person.ID, session)
 		return err
 	})
-	f.key(t, younger, authz.CoordinatorKeyScopes)
+	bindLeadKey(t, f, project, f.key(t, younger, authz.CoordinatorKeyScopes))
 	id := f.ticket(t, "open", "low", nil)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, id, project)
@@ -446,6 +464,7 @@ func TestLeadQueueFairRoutingThroughProductionAuthentication(t *testing.T) {
 	f, scoped, scopedProject, scopedSession, scopedLease, scopedWork := leadQueueFixture(t)
 	// The oldest lead reports with a key that lacks the coordinator ceiling.
 	scopedToken := f.key(t, scoped, []string{"harness.read", "harness.write", "harness.worker", "nodes.read"})
+	bindLeadKey(t, f, scopedProject, scopedToken)
 	var creatorRole string
 	creator := tenant.Principal{ID: uuid(), TenantID: f.person.TenantID, Kind: tenant.Person}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -498,6 +517,7 @@ func TestLeadQueueFairRoutingThroughProductionAuthentication(t *testing.T) {
 			return err
 		})
 		c.token = f.key(t, c.agent, authz.CoordinatorKeyScopes)
+		bindLeadKey(t, f, c.project, c.token)
 		if keyCreator != "" {
 			f.tx(t, f.person, func(tx pgx.Tx) error {
 				_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$2 WHERE principal_id=$1`, c.agent.ID, keyCreator)
@@ -677,6 +697,9 @@ func TestLeadQueueFairRoutingAndWorkerRestartPriority(t *testing.T) {
 		}
 		return nil
 	})
+	for _, project := range projects {
+		bindLeadKey(t, f, project, coordinatorToken)
+	}
 	tickets := []string{f.ticket(t, "open", "low", nil), f.ticket(t, "open", "high", nil), f.ticket(t, "open", "urgent", nil)}
 	runs := []string{}
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -906,4 +929,205 @@ func TestLeadQueuePickupBoundsBeforeMaterialization(t *testing.T) {
 			})
 		})
 	}
+}
+
+// A lead's dispatch authority is the key bound to its generation, not the
+// strongest key its principal owns. A lead that claims and reports with a
+// restricted key holds no turn while a stronger unused key exists; claiming
+// again with the stronger key binds it; revoking the bound key ends the turn
+// even though the restricted key keeps reporting; a proven pickup through
+// another live key rebinds the generation to that key.
+func TestLeadQueueFairRoutingBindsLeadDispatchCredential(t *testing.T) {
+	f, older, olderProject, olderSession, olderLease, olderWork := leadQueueFixture(t)
+	restricted := f.key(t, older, []string{"harness.read", "harness.write", "harness.worker", "nodes.read"})
+	strong := f.key(t, older, authz.CoordinatorKeyScopes)
+	younger := tenant.Principal{ID: uuid(), TenantID: f.person.TenantID, Kind: tenant.Agent, Scopes: authz.CoordinatorKeyScopes}
+	project, session := uuid(), uuid()
+	lease := "bound-credential-lease-000000000000000"
+	refDigest := sha256.Sum256([]byte("aeon.harness.ref\x00bound-credential-reference"))
+	leaseDigest := sha256.Sum256([]byte("aeon.harness.lease\x00" + lease))
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'build',1,$2)`, f.person.TenantID, f.profile); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'agent','Younger lead')`, f.person.TenantID, younger.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE key='lead_queue_test'`, f.person.TenantID, younger.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title) SELECT $1,$2,'LQ-4',id,'Younger project' FROM node_kinds WHERE slug='project'`, f.person.TenantID, project); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,phase,heartbeat_at,ref_digest,lease_digest) VALUES($1,$2,$3,$4,$5,'codex','local','unmanaged','coordinator','working',clock_timestamp(),$6,$7)`, f.person.TenantID, session, project, younger.ID, f.person.ID, refDigest[:], leaseDigest[:]); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,session_id,generation,state) VALUES($1,$2,$3,$4,1,'working')`, f.person.TenantID, project, f.person.ID, session)
+		return err
+	})
+	youngerToken := f.key(t, younger, authz.CoordinatorKeyScopes)
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	youngerRuns := []string{}
+	for i := 1; i <= 2; i++ {
+		id := f.ticket(t, "open", "low", nil)
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, id, project)
+			return err
+		})
+		run := f.addQueue(t, id, nil).Run.ID
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_at=$2 WHERE id=$1`, run, at.Add(time.Duration(i)*time.Minute))
+			return err
+		})
+		youngerRuns = append(youngerRuns, run)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET queue_at=$2 WHERE id=$1`, olderWork.Run.ID, at)
+		return err
+	})
+	admission := func(ctx context.Context, tx pgx.Tx, _ tenant.Principal, _ string, _ harness.Session) (harness.LeadChecks, error) {
+		var now time.Time
+		err := tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now)
+		g := harness.LeadGate{State: "available", CheckedAt: now}
+		return harness.LeadChecks{Dial: g, Harness: g, Account: g, Host: g}, err
+	}
+	f.mux = http.NewServeMux()
+	workorders.New(f.d.App).Mount(f.mux)
+	agentruns.NewWithLeadAdmission(f.d.App, admission).Mount(f.mux)
+	harness.NewWithLeadAdmission(f.d.App, admission).Mount(f.mux)
+	authn, err := auth.New(auth.Config{Env: "prod", SessionKey: bytes.Repeat([]byte{7}, 32)}, f.d.App)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secured := authn.Middleware(f.mux)
+	call := func(token, method, path string, body any, session, lease string, want int) string {
+		t.Helper()
+		raw, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := httptest.NewRequest(method, path, strings.NewReader(string(raw)))
+		r.Header.Set("Authorization", "Bearer "+token)
+		if session != "" {
+			r.Header.Set("X-Aeon-Lead-Session", session)
+			r.Header.Set("X-Aeon-Lead-Generation", "1")
+		}
+		r.Header.Set("X-Aeon-Worker-Lease", lease)
+		_, r.Pattern = f.mux.Handler(r)
+		w := httptest.NewRecorder()
+		secured.ServeHTTP(w, r)
+		if w.Code != want {
+			t.Fatalf("%s %s: got %d want %d: %s", method, path, w.Code, want, w.Body.String())
+		}
+		return w.Body.String()
+	}
+	next := func(token, session, lease string, code int) (string, string) {
+		t.Helper()
+		body := call(token, "POST", "/api/queue/next", map[string]any{}, session, lease, code)
+		if code != 200 {
+			return "", body
+		}
+		var out struct {
+			Entry  *qEntry `json:"entry"`
+			Reason string  `json:"wait_reason"`
+		}
+		if err := json.Unmarshal([]byte(body), &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Entry == nil {
+			return "", out.Reason
+		}
+		if out.Entry.Run.QueueRoutedAt == nil {
+			t.Fatalf("next returned an unrouted entry: %s", body)
+		}
+		return out.Entry.Run.ID, out.Reason
+	}
+	claim := func(token string, revision int64) int64 {
+		t.Helper()
+		body := call(token, "POST", "/api/projects/"+olderProject+"/lead/claim", map[string]any{"expected_revision": revision, "session_id": olderSession}, "", olderLease, 200)
+		var out struct {
+			State    string `json:"state"`
+			Revision int64  `json:"revision"`
+		}
+		if err := json.Unmarshal([]byte(body), &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.State != "working" {
+			t.Fatalf("claim left the older lead %s: %s", out.State, body)
+		}
+		return out.Revision
+	}
+	olderUnchanged := func() {
+		t.Helper()
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			var unchanged bool
+			if err := tx.QueryRow(t.Context(), `SELECT queue_routed_at IS NULL AND model_profile_id IS NULL AND agent_principal_id=tenant_id AND (SELECT last_turn_at IS NULL FROM project_leads WHERE project_id=$2) FROM agent_runs WHERE id=$1`, olderWork.Run.ID, olderProject).Scan(&unchanged); err != nil {
+				return err
+			}
+			if !unchanged {
+				t.Fatal("fairness changed the older assignment or turn")
+			}
+			return nil
+		})
+	}
+	heartbeat := map[string]any{"phase": "working", "activity": "idle", "activity_sequence": 1}
+	// A routed assignment occupies its worker until the daemon starts it; the
+	// shared worker route stays free for the next contender once it has.
+	started := func(run string) {
+		t.Helper()
+		f.tx(t, f.person, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='running' WHERE id=$1`, run)
+			return err
+		})
+	}
+	// The older lead claims and reports with its restricted key. Production
+	// refuses that key at pickup, so the lead holds no turn: the stronger key
+	// of the same principal is not what this generation dispatches with.
+	revision := claim(restricted, 1)
+	call(restricted, "POST", "/api/projects/"+olderProject+"/harness-sessions/"+olderSession+"/heartbeat", heartbeat, "", olderLease, 200)
+	if _, body := next(restricted, olderSession, olderLease, 403); !strings.Contains(body, "forbidden") {
+		t.Fatalf("restricted pickup denied for the wrong reason: %s", body)
+	}
+	if run, reason := next(youngerToken, session, lease, 200); run != youngerRuns[0] || reason != "" {
+		t.Fatalf("restricted lead held the turn through an unused stronger key: run=%q reason=%q", run, reason)
+	}
+	olderUnchanged()
+	started(youngerRuns[0])
+	// Claiming again with the stronger key binds it; the older work now holds the turn.
+	revision = claim(strong, revision)
+	if run, reason := next(youngerToken, session, lease, 200); run != "" || reason != "project_turn_wait" {
+		t.Fatalf("younger turn against a lead bound to a live dispatch key: run=%q reason=%q", run, reason)
+	}
+	olderUnchanged()
+	// Revoking the bound key ends the turn, although the restricted key still reports.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET revoked_at=clock_timestamp() WHERE prefix=$1`, strings.Split(strong, "_")[1])
+		return err
+	})
+	next(strong, olderSession, olderLease, 401)
+	call(restricted, "POST", "/api/projects/"+olderProject+"/harness-sessions/"+olderSession+"/heartbeat", heartbeat, "", olderLease, 200)
+	if run, reason := next(youngerToken, session, lease, 200); run != youngerRuns[1] || reason != "" {
+		t.Fatalf("lead bound to a revoked key still held the turn: run=%q reason=%q", run, reason)
+	}
+	olderUnchanged()
+	started(youngerRuns[1])
+	// A proven pickup through another live key of the lead rebinds the generation to it.
+	rotated := f.key(t, older, authz.CoordinatorKeyScopes)
+	if run, reason := next(rotated, olderSession, olderLease, 200); run != olderWork.Run.ID || reason != "" {
+		t.Fatalf("rotated key pickup: run=%q reason=%q", run, reason)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var bound bool
+		if err := tx.QueryRow(t.Context(), `SELECT l.dispatch_key_id=k.id FROM project_leads l JOIN agent_keys k ON k.prefix=$2 WHERE l.project_id=$1`, olderProject, strings.Split(rotated, "_")[1]).Scan(&bound); err != nil {
+			return err
+		}
+		if !bound {
+			t.Fatal("proven pickup did not rebind the generation to its dispatching key")
+		}
+		return nil
+	})
+	if _, body := next(restricted, olderSession, olderLease, 403); !strings.Contains(body, "forbidden") {
+		t.Fatalf("rebinding widened the restricted key: %s", body)
+	}
+	_ = revision
 }

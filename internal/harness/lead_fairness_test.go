@@ -208,7 +208,7 @@ func TestLeadFairTurnsAndUnavailableContender(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,phase,heartbeat_at,ref_digest,lease_digest) SELECT tenant_id,$2,$3,agent_principal_id,owner_principal_id,harness,'other',management,role,'working',clock_timestamp(),decode(repeat('ab',32),'hex'),decode(repeat('cd',32),'hex') FROM harness_sessions WHERE project_id=$1`, f.project, session, other); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,session_id,generation,state) VALUES($1,$2,$3,$4,1,'working')`, f.person.TenantID, other, f.person.ID, session)
+		_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,session_id,generation,state,dispatch_key_id) VALUES($1,$2,$3,$4,1,'working',$5)`, f.person.TenantID, other, f.person.ID, session, f.agent.AuthKeyID)
 		return err
 	})
 	w := f.call(f.person, "POST", "/api/queue", map[string]any{"node_id": ticket}, "")
@@ -351,7 +351,7 @@ func TestLeadSingleDialProgressAfterWorkerYield(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,id,project_id,agent_principal_id,owner_principal_id,harness,host,management,role,phase,ref_digest,lease_digest) SELECT tenant_id,$2,$3,agent_principal_id,owner_principal_id,harness,host,management,role,phase,decode(repeat('ef',32),'hex'),decode(repeat('fa',32),'hex') FROM harness_sessions WHERE id=$1`, session, otherSession, other); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,session_id,generation,state) VALUES($1,$2,$3,$4,1,'working')`, f.person.TenantID, other, f.person.ID, otherSession); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,session_id,generation,state,dispatch_key_id) VALUES($1,$2,$3,$4,1,'working',$5)`, f.person.TenantID, other, f.person.ID, otherSession, f.agent.AuthKeyID); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'dial-worker','1','codex','openai','test-model','high','strong')`, f.person.TenantID, profile); err != nil {

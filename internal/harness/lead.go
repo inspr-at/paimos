@@ -30,6 +30,9 @@ type Lead struct {
 	Reason        string  `json:"reason"`
 	ProcessActive bool    `json:"process_active"`
 	owner         string
+	// dispatchKey is the agent key row bound at claim or last proven pickup.
+	// Fair turns qualify exactly this credential; it is never projected.
+	dispatchKey string
 }
 
 // LeadGate is supplied by the existing admission owners, never by an API body.
@@ -87,11 +90,11 @@ func leadWait(checks LeadChecks, now time.Time) string {
 // for claim, projection, dispatch and assigned-worker eligibility.
 const leadReportingFreshSQL = `coalesce(heartbeat_at,created_at) BETWEEN clock_timestamp()-interval '2 minutes' AND clock_timestamp()`
 
-const leadColumns = `project_id::text,session_id::text,generation,revision,state,reason,owner_principal_id::text`
+const leadColumns = `project_id::text,session_id::text,generation,revision,state,reason,owner_principal_id::text,coalesce(dispatch_key_id::text,'')`
 
 func scanLead(row pgx.Row) (Lead, error) {
 	var l Lead
-	err := row.Scan(&l.ProjectID, &l.SessionID, &l.Generation, &l.Revision, &l.State, &l.Reason, &l.owner)
+	err := row.Scan(&l.ProjectID, &l.SessionID, &l.Generation, &l.Revision, &l.State, &l.Reason, &l.owner, &l.dispatchKey)
 	return l, err
 }
 func loadLead(ctx context.Context, tx pgx.Tx, projectID string, lock bool) (Lead, error) {
@@ -366,7 +369,10 @@ func (m *Module) claimLead(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	if reason != "" {
 		l, err = scanLead(tx.QueryRow(ctx, `UPDATE project_leads SET state='waiting_for_room',reason=$2,revision=revision+1,updated_at=clock_timestamp() WHERE project_id=$1 RETURNING `+leadColumns, id, reason))
 	} else {
-		l, err = scanLead(tx.QueryRow(ctx, `UPDATE project_leads SET generation=generation+CASE WHEN session_id IS DISTINCT FROM $2::uuid THEN 1 ELSE 0 END,session_id=$2,state='working',reason='',revision=revision+1,updated_at=clock_timestamp() WHERE project_id=$1 RETURNING `+leadColumns, id, s.ID))
+		// The claiming key becomes the generation's dispatch credential. Fair
+		// turns qualify this exact key; a claim through a weaker key cannot
+		// borrow a stronger key the same principal happens to hold.
+		l, err = scanLead(tx.QueryRow(ctx, `UPDATE project_leads SET generation=generation+CASE WHEN session_id IS DISTINCT FROM $2::uuid THEN 1 ELSE 0 END,session_id=$2,dispatch_key_id=nullif($3,'')::uuid,state='working',reason='',revision=revision+1,updated_at=clock_timestamp() WHERE project_id=$1 RETURNING `+leadColumns, id, s.ID, p.AuthKeyID))
 	}
 	if err != nil {
 		return nil, err
@@ -559,6 +565,17 @@ func RequireLeadDispatchTx(ctx context.Context, tx pgx.Tx, r *http.Request, p te
 	}
 	if err = RequireCurrentLeadTx(ctx, tx, p, projectID, id, generation); err != nil {
 		return err
+	}
+	// RequireCurrentLeadTx proved p is this generation's own agent, under the
+	// locked lead row. The key it dispatches with becomes the generation's
+	// dispatch credential, so fair turns follow the key the lead actually
+	// uses; the binding names that credential, while its dispatch authority is
+	// always re-proven live (queuePermission here, RequireQueueDispatcherTx
+	// for competing turns), so binding a weaker key grants nothing.
+	if p.AuthKeyID != "" {
+		if _, err = tx.Exec(ctx, `UPDATE project_leads SET dispatch_key_id=$2::uuid WHERE project_id=$1 AND dispatch_key_id IS DISTINCT FROM $2::uuid`, projectID, p.AuthKeyID); err != nil {
+			return err
+		}
 	}
 	proofRequest := r.Clone(ctx)
 	proofRequest.SetPathValue("projectId", projectID)

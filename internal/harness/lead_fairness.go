@@ -190,10 +190,12 @@ func (m *Module) leadScheduleWait(ctx context.Context, tx pgx.Tx, p tenant.Princ
 				// Actual pickup authenticates the dispatching agent's key and its
 				// live queue-coordinator grants in its project (queuePermission).
 				// Claiming and reporting need only harness.worker, so the lead's
-				// authority is proven through its own live keys, with their
-				// ceiling and creator bounds, never through an assumed ceiling. A
-				// lead that cannot dispatch is refused there and cannot hold a turn.
-				if err = authz.RequireQueueDispatcherTx(ctx, step, p.TenantID, candidate.AgentPrincipalID, d.project); errors.Is(err, authz.ErrForbidden) {
+				// authority is proven through the key bound to its generation at
+				// claim or last proven pickup, with that key's ceiling, creator
+				// and revocation bounds. Another key of the same principal is not
+				// its dispatch credential. A lead that cannot dispatch is refused
+				// there and cannot hold a turn.
+				if err = authz.RequireQueueDispatcherTx(ctx, step, p.TenantID, candidate.AgentPrincipalID, other.dispatchKey, d.project); errors.Is(err, authz.ErrForbidden) {
 					continue
 				} else if err != nil {
 					return "", err

@@ -31,13 +31,13 @@ paths:
               properties:
                 expected_revision: {type: integer, minimum: 0}
       responses:
-        '200': {description: Explicit lead intent, with unavailable gates shown as waiting_for_room}
+        '200': {description: 'Explicit lead intent, with unavailable gates shown as waiting_for_room'}
         '403': {description: Person or live owner permission required}
         '409': {description: Revision conflict or predecessor exit is unconfirmed}
   /api/projects/{projectId}/lead/claim:
     post:
       summary: Bind a proven coordinator generation to the project lead intent
-      description: Agent-only harness.worker. X-Aeon-Worker-Lease proves the named session; its canonical person owner must match the explicit intent. The session heartbeat (or creation before its first heartbeat) must be no more than two minutes old and not future-dated, allowing the default 50-second CLI reporting cadence plus a missed beat. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. No process is launched.
+      description: Agent-only harness.worker. X-Aeon-Worker-Lease proves the named session; its canonical person owner must match the explicit intent. The session heartbeat (or creation before its first heartbeat) must be no more than two minutes old and not future-dated, allowing the default 50-second CLI reporting cadence plus a missed beat. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. The authenticating agent key becomes the generation's dispatch credential, so fair-turn scheduling qualifies exactly that key and never another key of the same principal; a proven pickup through a different live key rebinds it. No process is launched.
       parameters:
         - $ref: '#/components/parameters/projectId'
         - {in: header, name: X-Aeon-Worker-Lease, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
@@ -54,8 +54,8 @@ paths:
                 session_id: {type: string, format: uuid}
       responses:
         '200': {description: Bound generation or truthful admission wait}
-        '403': {description: Lease, live authority or owned intent rejected}
-        '409': {description: Concurrent claim, unconfirmed stop or revision conflict}
+        '403': {description: 'Lease, live authority or owned intent rejected'}
+        '409': {description: 'Concurrent claim, unconfirmed stop or revision conflict'}
   /api/projects/{projectId}/lead/pause:
     post:
       summary: Checkpoint and cooperatively pause the current lead
@@ -98,7 +98,7 @@ paths:
       responses:
         '200': {description: Cooperative checkpoint requested; process remains counted until exit}
         '403': {description: Current worker lease or live owner authority rejected}
-        '409': {description: Stale identity, useful current turn, unavailable scheduling evidence or unavailable handover delivery}
+        '409': {description: 'Stale identity, useful current turn, unavailable scheduling evidence or unavailable handover delivery'}
   /api/projects/{projectId}/harness-sessions:
     get:
       operationId: listHarnessSessions
