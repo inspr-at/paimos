@@ -105,6 +105,8 @@ for(const platform of ['MacIntel','Linux x86_64'])for(const width of [390,1440])
  if(editor==='ladder'){
   try{
    await catalog!.started
+   await field.press(`${modifier}+a`);await field.press('Backspace')
+   await expect(field).toHaveValue('')
    await field.fill('2')
    // The pending catalog causes a render before blur. It must not replace
    // the position the user just typed with the old selected index.

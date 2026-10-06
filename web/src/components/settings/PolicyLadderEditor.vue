@@ -17,6 +17,9 @@ const editor = createPolicyEditor<EditableLadder, LadderMutation>(() => props.ow
 })
 const { snapshot, draft, busy, loading, needsReload, message, undo, phase } = editor
 const selected = ref(0), profiles = ref<PolicyStep['profile'][]>([]), profileError = ref(''), catalogTruncated = ref(false)
+// Keep incomplete typing across catalog/permission renders until blur commits it.
+const positionText = ref('1')
+watch(selected, index => { positionText.value = String(index + 1) }, { flush: 'sync' })
 const scope = createScope(() => `${props.owner}/${props.role}`)
 const rows = computed(() => phase.value === 'saving' && draft.value ? draft.value.routes : snapshot.value?.routes ?? [])
 const authority = computed(() => props.person && can('models.read') && can('models.manage'))
@@ -24,9 +27,9 @@ const editable = computed(() => authority.value && !!snapshot.value?.can_edit &&
 const displayed = computed(() => draft.value?.routes ?? snapshot.value?.routes ?? [])
 const route = computed(() => displayed.value[selected.value])
 const opened = ref(false)
-function cancel() { if (!busy.value) { editor.cancel(); opened.value = false } }
+function cancel() { if (!busy.value) { editor.cancel(); positionText.value = String(selected.value + 1); opened.value = false } }
 async function load() {
-  opened.value = false; editor.reset(); scope.reset(); selected.value = 0; profiles.value = []; profileError.value = ''; catalogTruncated.value = false
+  opened.value = false; editor.reset(); scope.reset(); selected.value = 0; positionText.value = '1'; profiles.value = []; profileError.value = ''; catalogTruncated.value = false
   await editor.load()
 }
 watch(() => [props.owner, props.role, authority.value], load, { immediate: true, flush: 'sync' })
@@ -49,7 +52,7 @@ function move(position: number) {
   if (!draft.value || busy.value || !route.value || !Number.isInteger(position)) return
   const target = Math.max(0, Math.min(draft.value.routes.length - 1, position - 1))
   const next = [...draft.value.routes], [item] = next.splice(selected.value, 1)
-  next.splice(target, 0, item!); selected.value = target
+  next.splice(target, 0, item!); selected.value = target; positionText.value = String(target + 1)
   draft.value = { ...draft.value, routes: next.map((row, index) => ({ ...row, priority: index + 1 })) }
 }
 function update(field: 'state' | 'reason' | 'valid_until', value: string) {
@@ -82,7 +85,7 @@ function submit() { if (editable.value) void editor.submit() }
       <template #status>{{ message || (loading ? 'Loading the saved order…' : snapshot?.truncated ? 'The complete order is needed before it can be changed.' : !editable ? 'A person with See models and Manage models may change a complete order.' : 'Model registry owns this order. Save changes only the selected job role.') }}<span v-if="draft && !draft.routes.length"> The empty order leaves no configured fallback for this role.</span></template>
       <div class="ladder-fields">
         <label>Step<select :value="selected" aria-label="Selected ladder step" :disabled="busy || !draft" @change="selected = Number(($event.target as HTMLSelectElement).value)"><option v-for="(item,index) in displayed" :key="index" :value="index">{{ index + 1 }} · {{ name(item.profile_id) }}</option></select></label>
-        <label>Position<input aria-label="Ladder position" type="number" min="1" :max="displayed.length || 1" :value="selected + 1" :disabled="busy || !draft || !route" @input="move(Number(($event.target as HTMLInputElement).value))" /></label>
+        <label>Position<input v-model="positionText" aria-label="Ladder position" type="number" min="1" :max="displayed.length || 1" :disabled="busy || !draft || !route" @change="move(Number(positionText))" /></label>
         <label>Availability<select aria-label="Ladder availability" :value="route?.state ?? 'available'" :disabled="busy || !draft || !route" @change="update('state', ($event.target as HTMLSelectElement).value)"><option value="available">Available</option><option value="unavailable">Unavailable</option><option value="conserved">Conserved</option><option value="budget_limited">Budget limited</option></select></label>
         <label>Add a model<select aria-label="Add ladder model" :disabled="busy || !draft || displayed.length >= 50" value="" @change="add"><option value="">Choose a profile</option><option v-for="profile in profiles" :key="profile.id" :value="profile.id" :disabled="displayed.some(row => row.profile_id === profile.id)">{{ profile.display_name || profile.model }} · {{ profile.harness }} · {{ profile.effort }}</option></select></label>
         <label>Reason<input aria-label="Hold reason" maxlength="500" :value="route?.reason ?? ''" :disabled="busy || !draft || !route || route.state === 'available'" @input="update('reason', ($event.target as HTMLInputElement).value)" /></label>
