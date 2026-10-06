@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { readFileSync, existsSync, writeFileSync, mkdtempSync, realpathSync, statSync, readdirSync } from 'node:fs'
+import { readFileSync, existsSync, writeFileSync, mkdtempSync, realpathSync, statSync, readdirSync, lstatSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { command, root } from './collect.mjs'
+import { boundedText, inputMetadata, readInput, inputBounds } from './inputs.mjs'
 import { reverseDependants, webGraph, impactRisk, validImpactPaths, manifestPromotions, tierManifestPattern } from './core.mjs'
 
 export function changedPaths(event, env=process.env, { fetchBase=false, exec=command }={}) {
@@ -36,22 +37,43 @@ export function eventBase(env=process.env) {
 // Go sources and web tests of one checkout, read once per process. Bounded
 // walk: the consumer rules only need internal/, cmd/, scripts/ and web/tests.
 const trees=new Map()
-export function sourceTree(checkout=root) {
-  if(trees.has(checkout))return trees.get(checkout)
-  const go=new Map(),webTests=new Map()
-  const visit=(directory,into,accept)=>{
+export function sourceTree(checkout=root, { bounds=inputBounds, read=readInput }={}) {
+  const cached=bounds===inputBounds&&read===readInput
+  if(cached&&trees.has(checkout))return trees.get(checkout)
+  const go=new Map(),webTests=new Map(), files=[]
+  let entries=0,totalBytes=0
+  const visit=(directory,into,accept,optional=false)=>{
     const absolute=resolve(checkout,directory)
-    if(!existsSync(absolute))return
+    let stat
+    try { stat=lstatSync(absolute) } catch(error) { if(optional&&error.code==='ENOENT')return;throw error }
+    if(!stat.isDirectory()||stat.isSymbolicLink())throw new Error('non-directory or symlink in consumer scan')
     for(const entry of readdirSync(absolute,{withFileTypes:true})) {
+      if(++entries>=bounds.entries)throw new Error('consumer entry count bound reached')
       const file=`${directory}/${entry.name}`
+      if(entry.isSymbolicLink())throw new Error('symlink in consumer scan')
       if(entry.isDirectory()) { if(!['node_modules','testdata','dist'].includes(entry.name)) visit(file,into,accept) }
-      else if(entry.isFile()&&accept(file)&&into.size<20000) into.set(file,readFileSync(resolve(checkout,file),'utf8'))
+      else if(accept(file)) {
+        const metadata=inputMetadata(checkout,file,bounds.fileBytes)
+        if(files.length+1>=bounds.files)throw new Error('consumer file count bound reached')
+        totalBytes+=metadata.size
+        if(totalBytes>=bounds.totalBytes)throw new Error('consumer total byte bound reached')
+        files.push({file,into,metadata})
+      }
     }
   }
-  for(const directory of ['internal','cmd','scripts']) visit(directory,go,file=>file.endsWith('.go'))
-  visit('web/tests',webTests,file=>/\.(?:ts|mjs|js)$/.test(file))
-  const tree={go,webTests:new Map([...webTests].map(([file,text])=>[file.slice(4),text]))}
-  trees.set(checkout,tree)
+  let tree
+  try {
+    if(!statSync(realpathSync(checkout)).isDirectory())throw new Error('missing consumer checkout')
+    // Preflight the complete file set and all sizes before the first read.
+    for(const directory of ['internal','cmd','scripts']) visit(directory,go,file=>file.endsWith('.go'),true)
+    visit('web/tests',webTests,file=>/\.(?:ts|mjs|js)$/.test(file),true)
+    for(const {file,into,metadata} of files)into.set(file,read(metadata,bounds.fileBytes))
+    tree={complete:true,go,webTests:new Map([...webTests].map(([file,text])=>[file.slice(4),text]))}
+  } catch(error) {
+    // Discard every partial result; no consumer rule may use a truncated tree.
+    tree={complete:false,reason:error.message,go:new Map(),webTests:new Map()}
+  }
+  if(cached)trees.set(checkout,tree)
   return tree
 }
 
@@ -79,7 +101,7 @@ export function promotionsBetween(base,{cwd=root,exec=command,baseDirectory}={})
   } catch { return undefined }
 }
 
-export function schedulingDecision(event,paths,exists,{affectedLane,graph,checkout=root,base,tree,promotions}={}) {
+export function schedulingDecision(event,paths,exists,{affectedLane,graph,checkout=root,base,tree,promotions,readFile}={}) {
   exists??=path=>existsSync(resolve(checkout,path))
   const full=reason=>({mode:'full',layout:'full',reason})
   if(event!=='pull_request'||!Array.isArray(paths)) return full('full event or missing diff')
@@ -94,7 +116,7 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
   const manifests=on?manifestsAt(file=>existsSync(resolve(checkout,file))?readFileSync(resolve(checkout,file),'utf8'):undefined):{}
   const tests=on?Object.values(manifests).flatMap(manifest=>manifest.tests??[]):[]
   const risk=impactRisk(paths,{event,affectedLane,webImports:graph,tree,promotions,tests,
-    readFile:path=>exists(path)?readFileSync(resolve(checkout,path),'utf8'):undefined})
+    readFile:readFile??(path=>exists(path)?boundedText(checkout,path):undefined)})
   if(risk.full)return full(risk.reasons.join('; ')||'full event or uncertain impact')
   for(const path of paths) {
     if(risk.handled.has(path))continue

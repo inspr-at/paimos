@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, extname, resolve, relative } from 'node:path'
+import { migrationObjects } from './migration.mjs'
 
 export const key = row => row.kind === 'go' ? `${row.package}:${row.name}` : `${row.kind}:${row.file}:${row.name}${row.occurrence===undefined?'':`#${row.occurrence}`}`
 export const escapeRE = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -99,23 +100,7 @@ export function manifestPromotions(base = {}, head = {}) {
   return { keys: new Set(promoted.map(key)), kinds: new Set(promoted.map(row => row.kind)), count: promoted.length }
 }
 
-// Schema objects a migration defines or writes: DDL object names, the ON
-// targets of indexes, policies and triggers, and top-level DML targets.
-// Function bodies, strings and comments are stripped first; reads are ignored.
-export function migrationObjects(sql) {
-  const text = sql.replace(/--[^\n]*/g, ' ').replace(/\/\*[\s\S]*?\*\//g, ' ')
-    .replace(/\$([A-Za-z_]*)\$[\s\S]*?\$\1\$/g, ' $body$ ').replace(/'(?:[^']|'')*'/g, "''")
-  const name = '(?:[A-Za-z_][A-Za-z0-9_]*\\.)?"?([A-Za-z_][A-Za-z0-9_]*)"?'
-  const objects = new Set()
-  for (const statement of text.split(';')) {
-    const s = statement.trim().replace(/\s+/g, ' ')
-    let match
-    if ((match = new RegExp(`^(?:CREATE|ALTER|DROP) (?:OR REPLACE )?(?:UNLOGGED |TEMP |TEMPORARY )?(?:MATERIALIZED )?(?:TABLE|VIEW|FUNCTION|PROCEDURE|TYPE|SEQUENCE|DOMAIN|AGGREGATE) (?:IF (?:NOT )?EXISTS )?(?:ONLY )?${name}`, 'i').exec(s))) objects.add(match[1].toLowerCase())
-    else if (/^(?:CREATE|ALTER|DROP) (?:UNIQUE )?(?:INDEX|POLICY|TRIGGER|RULE)\b/i.test(s) && (match = new RegExp(` ON (?:ONLY )?${name}`, 'i').exec(s))) objects.add(match[1].toLowerCase())
-    else if ((match = new RegExp(`^(?:INSERT INTO|UPDATE|DELETE FROM|TRUNCATE(?: TABLE)?|REFRESH MATERIALIZED VIEW(?: CONCURRENTLY)?) (?:ONLY )?${name}`, 'i').exec(s))) objects.add(match[1].toLowerCase())
-  }
-  return objects
-}
+export { migrationObjects } from './migration.mjs'
 
 // Packages and web test files whose source mentions a needle. A source tree is
 // {go: Map(file -> text), webTests: Map(file -> text)}; package = directory.
@@ -178,6 +163,7 @@ export function impactRisk(paths, { event, affectedLane, webImports = {}, tree, 
     return { full: paths.some(uncertain), reasons: [], layout: 'full', handled: new Set(), goSeeds: new Set(), webSeeds: new Set(), promoted: new Set() }
   const reasons = [], handled = new Set(), goSeeds = new Set(), webSeeds = new Set()
   const full = reason => ({ full: true, reasons: [reason], layout: 'full', handled, goSeeds, webSeeds, promoted: new Set() })
+  if (tree?.complete === false) return full(`incomplete consumer scan: ${tree.reason}`)
   const rules = paths.map(path => [path, affectedRisk(path, webImports)])
   const failed = rules.find(([, rule]) => rule.full)
   if (failed) return full(failed[1].reason)
@@ -191,9 +177,11 @@ export function impactRisk(paths, { event, affectedLane, webImports = {}, tree, 
     if (rule.skip) handled.add(path)
     if (rule.reason && rule.rule !== 'docs') reasons.push(rule.reason)
     if (rule.sql) {
-      const sql = readFile?.(path)
+      let sql
+      try { sql = readFile?.(path) } catch { return full(`R4 full: migration unreadable: ${path}`) }
       if (typeof sql !== 'string') return full(`R4 full: migration unreadable: ${path}`)
       const objects = migrationObjects(sql)
+      if (!objects) return full(`R4 full: unsupported or incomplete SQL: ${path}`)
       if (!objects.size) return full(`R4 full: no schema object recognised: ${path}`)
       for (const object of objects) sqlNeedles.add(object)
     }

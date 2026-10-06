@@ -352,9 +352,15 @@ catches it:
   layout bound applies. Harness pages loaded by URL are not import edges (an
   experiment with page edges cost more PRs to the 300-case bound than it won).
 - **R4 migrations** (`internal/db/migrations/*.sql`): essential/full layout.
-  The candidate migration is parsed for the schema objects it defines or
-  writes (DDL object names, the `ON` targets of indexes, policies and triggers,
-  top-level DML targets; function bodies, strings and comments are stripped).
+  A SQL-aware tokenizer handles strings, quoted identifiers, dollar quotes,
+  and nested block/line comments together. Only completely parsed statements
+  may narrow: simple CREATE TABLE, ALTER TABLE ADD COLUMN, CREATE INDEX, and
+  INSERT/UPDATE/DELETE on a plain named table with constant values and simple
+  predicates. Quoted names and the `public` schema are supported. Every token
+  must belong to the whitelist. Any unsupported statement or tail, DO/function
+  body, CTE, TRUNCATE, complex expression/constraint/policy, ambiguous escape,
+  malformed quote/comment or empty intermediate statement makes the **whole
+  migration full**, even if preceding statements have known objects.
   Every Go package whose sources mention one of those identifiers runs, plus
   `internal/db` itself (the owning package: migration runner, RLS bootstrap and
   split-parity tests), bounded reverse dependants, `migration-compat` as always
@@ -398,25 +404,39 @@ because the two essential Go shards carry about one full hosted shard each and a
 wider set is cheaper on the seven-shard layout. `consumerCaseBound` in
 `scripts/test-tiers/core.mjs` is the knob; hosted timings calibrate it.
 
+The runner honours `AEON_TEST_TIER_MODE` from the trusted planner (full,
+essential, static or spec-only); a candidate graph cannot narrow a supplied
+full decision. Candidate uncertainty or an explicit planner/candidate layout
+disagreement widens to full. `AEON_TEST_TIER_LAYOUT`, when supplied, preserves
+the planner's layout. Explicit `--full`/`--all` retain their existing meanings.
+
+Consumer scans preflight the complete file set before reading: reaching 20,000
+files, 100,000 walked entries, 64 MiB total or 2 MiB per file invalidates the
+whole scan. Source and migration reads are bounded, reject binary/invalid UTF-8
+and non-regular files, check file identity/size around reads, and reject symlink
+escapes. Scan errors and symlinks discard partial results and force full for
+the whole affected selection. These checks do not alter the flag-off selector.
+
 Replay the 80 recorded merged PR file lists without browsers using
 `node scripts/test-tiers/replay.mjs` (`--json` adds a summary and exact per-PR
 counts and reasons). The fixture pins the old selector and Go graph to
 `b6f74faa11d506efd3d21387ca4e2f5a9c687dcf`; replay uses the current manifest
 catalogue, web graph, Go sources and migrations rather than each historical PR
 tree, and cannot reconstruct historical manifest promotions (R1 edits replay as
-registration-only). Result on this tree: old lane 16 of 80 essential (20%);
-new lane 38 of 80 narrowed (47.5%: 22 newly essential, 16 unchanged, 0 static
+registration-only). Result after OPS-257 L4 fix round 1: old lane 16 of 80
+essential (20%); new lane 36 of 80 narrowed (45%: 20 newly essential,
+16 unchanged, 0 static
 because every sampled manifest or audit PR also changed sources). Projected
-hosted jobs for the sample fall from 2710 to 2380 (full 37, essential 22,
-static 16, spec-only 12, docs-only 9). The 42 PRs that stay full: CI machinery
+hosted jobs for the sample fall from 2710 to 2410 (full 37, essential 22,
+static 16, spec-only 12, docs-only 9). The pre-fix lane narrowed 38; two of
+those PRs now correctly stay full on unsupported SQL. The 44 PRs that stay
+full: CI machinery
 18 (mostly `ci.yml`), R3 helpers above 15 specs 9 (`work-fixtures.ts`,
 `agents-fixtures.ts`, `capacity-fixtures.ts`), unnarrowed `internal/db/`
-sources or ad-hoc scripts 8, consumer fan-out above the bound 4 (migrations on
-`nodes`, `events`, `tenants`, `harness_sessions`), one browser fan-out above
+sources or ad-hoc scripts 8, unsupported SQL migrations 6, one browser fan-out above
 300, one deleted-file replay artifact (PR 224 narrows on its live tree) and one
-`.dockerignore`. The 50% target is missed by two PRs on this sample; the two
-knobs that would reach it are the R3 spec bound (kept per phase 1) and the
-consumer bound.
+`.dockerignore`. The 50% target is missed by four PRs on this sample; SQL
+uncertainty is a safety fallback, not a reason to loosen the whitelist.
 
 Rollout stays coordinator-owned: keep the variable unset while this change is
 reviewed and merged, measure the next full runs (rule reasons, selected cases,

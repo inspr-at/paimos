@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, truncateSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync, execFileSync } from 'node:child_process'
@@ -12,6 +12,8 @@ import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
 import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, sourceTree, promotionsBetween } from './diff.mjs'
+import { runnerDecision, runnerSelection } from './cli.mjs'
+import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs'
 import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
@@ -181,44 +183,173 @@ test('R2 contract diffs run the Go packages that read the contract and keep web 
 
 test('R4 migrations map recognised schema objects to referencing packages; unreadable, unparseable or wide diffs stay full',()=>{
   assert.deepEqual([...migrationObjects(`-- comment CREATE TABLE ignored
-    SET LOCAL lock_timeout = '5s';
     CREATE TABLE desk_claims (id uuid, note text DEFAULT 'INSERT INTO fake');
     ALTER TABLE ONLY public.project_leads ADD COLUMN dispatch_key_id uuid;
     CREATE UNIQUE INDEX desk_claims_idx ON desk_claims (id);
-    CREATE POLICY p ON "quoted_table" USING (true);
-    CREATE OR REPLACE FUNCTION aeon_guard() RETURNS trigger AS $$ BEGIN INSERT INTO events VALUES (1); END $$ LANGUAGE plpgsql;
-    CREATE TRIGGER t AFTER INSERT OR UPDATE ON themes FOR EACH ROW EXECUTE FUNCTION aeon_guard();
-    INSERT INTO settings (k) SELECT k FROM old_settings;
+    INSERT INTO settings (k) VALUES ('new');
     UPDATE nodes SET kind = 'x' WHERE kind = 'y';
-    DROP FUNCTION IF EXISTS legacy_fn;
-    DO $do$ BEGIN DELETE FROM hidden; END $do$;`)].sort(),
-    ['aeon_guard','desk_claims','legacy_fn','nodes','project_leads','quoted_table','settings','themes'])
-  assert.deepEqual([...migrationObjects("DO $$ BEGIN PERFORM 1; END $$;")],[])
+    DELETE FROM old_settings WHERE k = 'old';`)].sort(),
+    ['desk_claims','nodes','old_settings','project_leads','settings'])
+  assert.equal(migrationObjects('DO $$ BEGIN PERFORM 1; END $$;'),undefined)
   assert.deepEqual([...consumers({go:new Map([['internal/a/a.go','SELECT * FROM desk_claims'],['internal/b/b.go','desk_claims_extra']]),webTests:new Map()},{words:['desk_claims']}).goPackages],['internal/a'])
   const narrow='internal/db/migrations/1124_desk_notification_claims.sql'
-  const selected=on([narrow])
+  const simple='CREATE TABLE desk_notification_claims (id uuid, note text);'
+  const selected=on([narrow],{readFile:()=>simple})
   assert.equal(selected.full,false)
   assert.ok(goPackages(selected).has('internal/db'),'the migration runner package always runs')
-  const readers=consumers(repoTree,{words:[...migrationObjects(readRepo(narrow))]}).goPackages
+  const readers=consumers(repoTree,{words:[...migrationObjects(simple)]}).goPackages
   assert.ok(readers.size>=1)
   for(const pkg of readers) assert.ok(goPackages(selected).has(pkg),pkg)
   assert.match(selected.reason,/R4: migration schema consumers: .*; consumer packages: /)
   assert.equal(webFiles(selected).size,0,'browser specs are API-mocked; the real server runs in e2e')
-  const decision=decide([narrow])
+  assert.equal(decide([narrow]).mode,'full','the real migration contains unsupported policy and constraint expressions')
+  const decision=decide([narrow],{readFile:()=>simple})
   assert.deepEqual([decision.mode,decision.layout],['essential','full'])
   assert.ok(selected.reason.endsWith(decision.reason))
   const wide='internal/db/migrations/1206_themes.sql'
-  assert.match(on([wide]).reason,new RegExp(`^consumer fan-out exceeds ${consumerCaseBound} gated Go cases`))
+  assert.match(on([wide]).reason,/^R4 full: unsupported or incomplete SQL/)
   assert.equal(decide([wide]).mode,'full')
   assert.match(on(['internal/db/migrations/9999_missing.sql']).reason,/^R4 full: migration unreadable/)
   assert.match(decide(['internal/db/migrations/9999_missing.sql']).reason,/^R4 full: migration unreadable/)
   assert.match(on([narrow],{readFile:()=>'-- nothing'}).reason,/^R4 full: no schema object recognised/)
-  assert.match(on([narrow],{tree:{go:new Map(),webTests:new Map()}}).reason,/^R4 full: no Go package references desk_notification_claims/)
+  assert.match(on([narrow],{readFile:()=>simple,tree:{go:new Map(),webTests:new Map()}}).reason,/^R4 full: no Go package references desk_notification_claims/)
   // Other database internals stay full; the migrations README belongs to internal/db.
   assert.match(on(['internal/db/db.go']).reason,/^unnarrowed risk: internal\/db\/db\.go/)
   const readme=on(['internal/db/migrations/README.md'])
   assert.equal(readme.full,false);assert.ok(goPackages(readme).has('internal/db'))
   assert.equal(decide(['internal/db/migrations/README.md']).layout,'full')
+})
+
+test('R4 never narrows partially understood SQL or omits quoted, qualified or string-adjacent targets',()=>{
+  const path='internal/db/migrations/9999_fixture.sql'
+  const rows=[g('internal/core','TestCore','ESSENTIAL'),g('internal/billing','TestBilling','GATED-FULL')]
+  const tree={go:new Map([['internal/billing/billing.go','SELECT * FROM billing_records']]),webTests:new Map()}
+  const selection=sql=>select(rows,{event:'pull_request',affectedLane:'on',paths:[path],tree,readFile:()=>sql})
+  const safe="CREATE TABLE harmless (id uuid, note text DEFAULT 'a--b /* literal */');"
+  for(const sql of [
+    `${safe} DO $$ BEGIN UPDATE billing_records SET value=1; END $$;`,
+    `${safe} WITH changed AS (SELECT 1) INSERT INTO billing_records (value) VALUES (1);`,
+    `${safe} WITH changed AS (SELECT 1) UPDATE billing_records SET value=1;`,
+    `${safe} WITH changed AS (SELECT 1) DELETE FROM billing_records;`,
+    `${safe} TRUNCATE harmless, billing_records;`,
+    `${safe} CREATE FUNCTION f() RETURNS void AS $body_42$ DELETE FROM billing_records; $body_42$ LANGUAGE sql;`,
+    `${safe} SELECT update_billing_records();`,
+    `${safe} INSERT INTO harmless (id) SELECT id FROM billing_records;`,
+    `${safe} UPDATE harmless SET id=(DELETE FROM billing_records RETURNING id);`,
+    `${safe} CREATE TABLE other (id uuid REFERENCES billing_records(id));`,
+    `${safe} CREATE INDEX i ON harmless (write_billing_records());`,
+    `${safe} UPDATE harmless SET note=E'billing_records';`,
+    `${safe} INSERT INTO harmless (note) VALUES ($x_1$billing_records$x_1$);`,
+    `${safe} ALTER TABLE harmless ADD COLUMN id uuid; billing_records`,
+    `${safe} /* billing_records`, `${safe} 'billing_records`, `${safe} "billing_records`,
+    `${safe} $tag_1$billing_records`, `${safe}; DELETE FROM billing_records;`,
+  ]) {
+    assert.equal(migrationObjects(sql),undefined,sql)
+    const selected=selection(sql)
+    assert.equal(selected.full,true,sql)
+    assert.deepEqual(selected.tests,rows,sql)
+    assert.match(selected.reason,/R4 full: unsupported or incomplete SQL/)
+    assert.equal(schedulingDecision('pull_request',[path],()=>true,{affectedLane:'on',tree,readFile:()=>sql}).mode,'full',sql)
+  }
+  for(const target of ['billing_records','public.billing_records','"billing_records"','"public"."billing_records"']) {
+    const sql=`${safe} UPDATE ${target} SET value=1 WHERE id=2;`
+    assert.deepEqual([...migrationObjects(sql)],['harmless','billing_records'])
+    assert.ok(selection(sql).tests.includes(rows[1]),target)
+  }
+  assert.deepEqual([...migrationObjects("CREATE TABLE harmless (note text DEFAULT '--'); DELETE FROM billing_records;")],['harmless','billing_records'])
+  assert.deepEqual([...migrationObjects('/* outer /* DELETE FROM fake */ end */ DELETE FROM "public"."billing_records"; -- tail')],['billing_records'])
+  assert.equal(migrationObjects('DELETE FROM other.billing_records;'),undefined)
+  assert.equal(migrationObjects('DELETE FROM "Public"."billing_records";'),undefined)
+  assert.equal(migrationObjects('CREATE TABLE harmless (note text DEFAULT \'broken\\\'string\'); DELETE FROM billing_records;'),undefined)
+  assert.equal(migrationObjects('x'.repeat(inputBounds.fileBytes)),undefined)
+})
+
+test('R4 seeded comment, string and dollar-body perturbations never hide an unparsed affected object',()=>{
+  let seed=257
+  const random=()=>{seed=(Math.imul(seed,1664525)+1013904223)>>>0;return seed}
+  const gaps=[' ','\n','/* billing_records */','-- billing_records\n','/* nested /* body */ end */']
+  const valid="CREATE TABLE harmless (id uuid, note text DEFAULT 'a--b');"
+  for(let n=0;n<160;n++) {
+    const gap=()=>gaps[random()%gaps.length]
+    const body=[
+      ['DO',`$tag_${n}$ BEGIN UPDATE billing_records SET note='-- /* */'; END $tag_${n}$`],
+      ['WITH','q','AS','(','SELECT',"'-- billing_records'",')','DELETE','FROM','billing_records'],
+      ['TRUNCATE','harmless',',','billing_records'],
+      ['CREATE','FUNCTION','f','(',')','RETURNS','void','AS',`$$ DELETE FROM billing_records; $$`,'LANGUAGE','sql'],
+    ][random()%4].join(gap())
+    const sql=`${gap()}${valid}${gap()}${body};${gap()}`
+    assert.equal(migrationObjects(sql),undefined,`seed case ${n}: ${sql}`)
+  }
+})
+
+test('consumer scans preflight file, aggregate, per-file and traversal bounds before reading',()=>{
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-consumer-bounds-'))
+  const file=(path,text)=>{mkdirSync(resolve(directory,path,'..'),{recursive:true});writeFileSync(resolve(directory,path),text)}
+  file('internal/a/a.go','api/contract.json')
+  file('cmd/b/b.go','billing_records')
+  file('web/tests/reader.test.ts','version.json')
+  let reads=0
+  const read=(...args)=>{reads++;return readInput(...args)}
+  for(const [bounds,reason] of [
+    [{...inputBounds,files:3},/file count/],
+    [{...inputBounds,totalBytes:10},/total byte/],
+    [{...inputBounds,fileBytes:5},/per-file byte/],
+    [{...inputBounds,entries:2},/entry count/],
+  ]) {
+    reads=0
+    const tree=sourceTree(directory,{bounds,read})
+    assert.equal(tree.complete,false)
+    assert.match(tree.reason,reason)
+    assert.equal(reads,0,'all bounds must be checked before any file read')
+    assert.equal(tree.go.size+tree.webTests.size,0)
+    for(const path of ['api/contract.json','version.json','internal/db/migrations/9999_test.sql','internal/a/a.go']) {
+      const options={event:'pull_request',affectedLane:'on',paths:[path],tree,readFile:()=>'DELETE FROM billing_records;'}
+      assert.equal(select(cases,options).full,true,path)
+      assert.equal(schedulingDecision('pull_request',[path],()=>true,{affectedLane:'on',tree}).mode,'full',path)
+    }
+  }
+  const complete=sourceTree(directory,{read})
+  assert.equal(complete.complete,true)
+  assert.deepEqual([...complete.go.keys()].sort(),['cmd/b/b.go','internal/a/a.go'])
+  assert.equal(complete.webTests.get('tests/reader.test.ts'),'version.json')
+  const failed=sourceTree(directory,{read:()=>{throw new Error('fixture read error')}})
+  assert.equal(failed.complete,false);assert.match(failed.reason,/fixture read error/)
+  assert.equal(failed.go.size,0)
+  assert.equal(sourceTree(resolve(directory,'missing')).complete,false)
+  // Sparse files test real default bounds without allocating/reading their bytes.
+  file('internal/a/huge.go','')
+  truncateSync(resolve(directory,'internal/a/huge.go'),inputBounds.fileBytes)
+  reads=0
+  assert.equal(sourceTree(directory,{read}).complete,false)
+  assert.equal(reads,0)
+  assert.equal(boundedText(directory,'internal/a/huge.go'),undefined)
+})
+
+test('consumer scans reject binary, malformed UTF-8 and escaping symlinks, discarding partial reads',()=>{
+  for(const bytes of [Buffer.from([0,1,2]),Buffer.from([1,2,3]),Buffer.from([0xff,0xfe])]) {
+    const directory=mkdtempSync(resolve(tmpdir(),'aeon-consumer-binary-'))
+    mkdirSync(resolve(directory,'internal/a'),{recursive:true})
+    writeFileSync(resolve(directory,'internal/a/binary.go'),bytes)
+    assert.equal(sourceTree(directory).complete,false)
+    assert.equal(boundedText(directory,'internal/a/binary.go'),undefined)
+  }
+  for(const directoryLink of [false,true]) {
+    const directory=mkdtempSync(resolve(tmpdir(),'aeon-consumer-link-'))
+    const outside=mkdtempSync(resolve(tmpdir(),'aeon-consumer-outside-'))
+    mkdirSync(resolve(directory,'internal/a'),{recursive:true})
+    writeFileSync(resolve(outside,'escape.go'),'api/contract.json')
+    symlinkSync(directoryLink?outside:resolve(outside,'escape.go'),resolve(directory,'internal/a',directoryLink?'escape':'escape.go'))
+    const tree=sourceTree(directory)
+    assert.equal(tree.complete,false);assert.match(tree.reason,/symlink/)
+    assert.equal(tree.go.size,0)
+    assert.equal(boundedText(directory,directoryLink?'internal/a/escape/escape.go':'internal/a/escape.go'),undefined)
+  }
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-consumer-growth-'))
+  const path=resolve(directory,'migration.sql')
+  writeFileSync(path,'DELETE FROM billing_records;')
+  const metadata=inputMetadata(directory,'migration.sql')
+  writeFileSync(path,'DELETE FROM billing_records; SELECT unknown();')
+  assert.throws(()=>readInput(metadata),/changed during scan/)
 })
 
 test('R5 audit tooling and R9 always-on migration tests take the static layout; their executables stay full',()=>{
@@ -312,7 +443,7 @@ test('trusted tier planner uses base classifier and base graph despite candidate
   const git=args=>execFileSync('git',args,{cwd:directory,env,encoding:'utf8'})
   const file=(path,source)=>{mkdirSync(resolve(directory,path,'..'),{recursive:true});writeFileSync(resolve(directory,path),source)}
   git(['init','-q'])
-  for(const name of ['core.mjs','diff.mjs','collect.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
+  for(const name of ['core.mjs','diff.mjs','collect.mjs','inputs.mjs','migration.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
   file('scripts/ci/web-test-tiers.json',JSON.stringify({tests:[]}))
   file('scripts/ci/go-test-tiers.json',JSON.stringify({tests:[]}))
   file('web/src/unused.ts','export {}')
@@ -340,8 +471,57 @@ test('trusted tier planner uses base classifier and base graph despite candidate
   assert.match(run(['web/tests/helpers/shared.ts']).reason,/R3:.*1 specs/)
   assert.equal(run(['scripts/test-tiers/core.mjs','web/tests/helpers/shared.ts']).mode,'full')
   assert.equal(run(['web/tests/extra-0.spec.ts','web/tests/helpers/shared.ts']).mode,'full','new candidate graph nodes must not narrow themselves')
+  file('web/tests/new-feature.unit.test.ts','export {}')
+  const paths=['web/tests/new-feature.unit.test.ts']
+  const trusted=run(paths)
+  const candidateGraph=webGraph(resolve(directory,'web'))
+  const candidate=schedulingDecision('pull_request',paths,()=>true,{affectedLane:'on',graph:candidateGraph,checkout:directory})
+  assert.equal(trusted.mode,'full','the base graph has no new file')
+  assert.equal(candidate.mode,'essential','the candidate graph can map its new file')
+  const rows=[w('tests/core.test.ts','core','ESSENTIAL'),{kind:'vitest',file:'tests/new-feature.unit.test.ts',name:'new feature',tier:'GATED-FULL'}]
+  const options={event:'pull_request',paths,affectedLane:'on',webImports:candidateGraph,tree:sourceTree(directory)}
+  const selected=runnerSelection(rows,options,candidate,trusted)
+  assert.equal(selected.full,true)
+  assert.equal(selected.scope,'gated-full')
+  assert.deepEqual(selected.tests,rows)
+  assert.equal(checkFull({...reportCases(rows,rows.map(row=>({key:key(row),status:'passed',started:true})),1,'web-unit-1'),
+    full:selected.full,scope:selected.scope,exitCode:0,runId:'1',attempt:'1',sha:'a'},
+    {GITHUB_RUN_ID:'1',GITHUB_RUN_ATTEMPT:'1',GITHUB_SHA:'a'}),true)
+  const deleted=['web/tests/deleted.unit.test.ts']
+  const deletedPlan=run(deleted)
+  assert.equal(deletedPlan.mode,'full')
+  assert.equal(runnerSelection(rows,{...options,paths:deleted},candidate,deletedPlan).full,true)
+  const staticPaths=['scripts/audit/check.py']
+  const staticPlan=run(staticPaths)
+  const staticCandidate=schedulingDecision('pull_request',staticPaths,()=>true,{affectedLane:'on',checkout:directory})
+  const staticSelection=runnerSelection(rows,{...options,paths:staticPaths},staticCandidate,staticPlan)
+  assert.equal(staticSelection.full,false)
+  assert.equal(staticSelection.layout,'static')
+  assert.deepEqual(staticSelection.tests,[rows[0]])
+  // A missing/old classifier is represented by the planner's explicit full
+  // fallback. The runner must retain it even with candidate graph metadata.
+  let fallback
+  try { fallback=trustedSchedulingDecision('0'.repeat(40),paths,env,{cwd:directory}) }
+  catch { fallback={mode:'full',layout:'full',reason:'trusted affected classification unavailable'} }
+  assert.equal(fallback.reason,'trusted affected classification unavailable')
+  assert.equal(runnerSelection(rows,options,candidate,fallback).full,true)
   assert.throws(()=>run(['x'.repeat(4097)]),/Invalid trusted paths/)
   assert.throws(()=>trustedSchedulingDecision('--bad',[],env,{cwd:directory}),/Invalid trusted planner base/)
+})
+
+test('runner modes honour planner input and candidate disagreement only widens',()=>{
+  const candidate={mode:'essential',layout:'full',reason:'candidate mapping'}
+  const staticCandidate={...candidate,layout:'static'}
+  assert.equal(runnerDecision(candidate,{mode:'full'}).mode,'full')
+  for(const mode of ['essential','spec-only'])assert.deepEqual(runnerDecision(candidate,{mode}),candidate)
+  assert.deepEqual(runnerDecision(staticCandidate,{mode:'static'}),staticCandidate)
+  assert.deepEqual(runnerDecision(staticCandidate,{mode:'essential',layout:'static'}),staticCandidate)
+  assert.equal(runnerDecision(candidate,{mode:'static'}).mode,'full')
+  assert.equal(runnerDecision(staticCandidate,{mode:'essential',layout:'full'}).mode,'full')
+  for(const mode of ['essential','static','spec-only'])assert.equal(runnerDecision({mode:'full',layout:'full',reason:'candidate uncertainty'},{mode}).mode,'full')
+  for(const mode of ['',null,'FULL','bogus'])assert.equal(runnerDecision(candidate,{mode}).mode,'full')
+  assert.equal(runnerDecision(candidate,{mode:'essential',layout:'bogus'}).mode,'full')
+  assert.deepEqual(runnerDecision(candidate),candidate)
 })
 
 test('merge-group planner writes full without needing payload, checkout history or a network fetch',()=>{
@@ -369,8 +549,8 @@ test('offline replay CLI prints every real PR with selected counts, preserved ag
   const report=JSON.parse(result.stdout)
   assert.equal(report.replay.length,80)
   // Measured on the current tree (consumers, migrations); deleted files replay as full.
-  assert.deepEqual(report.transitions,{'full->full':42,'full->essential':22,'essential->essential':16})
-  assert.equal(report.summary.newNarrowed,38)
+  assert.deepEqual(report.transitions,{'full->full':44,'full->essential':20,'essential->essential':16})
+  assert.equal(report.summary.newNarrowed,36)
   assert.equal(report.summary.oldEssential,16)
   assert.ok(report.summary.fullReasons['CI machinery']>=15)
   for(const row of report.replay) {

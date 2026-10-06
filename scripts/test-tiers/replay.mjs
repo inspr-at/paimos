@@ -2,10 +2,10 @@
 // Offline manifest-level replay, without native test collection or browsers.
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { readFileSync as read } from 'node:fs'
 import { resolve } from 'node:path'
 import { select, webGraph } from './core.mjs'
 import { schedulingDecision, sourceTree } from './diff.mjs'
+import { boundedText } from './inputs.mjs'
 import { classifyPaths } from '../ci-pr-plan.mjs'
 
 const fixture=JSON.parse(readFileSync(new URL('./affected-replay.json',import.meta.url)))
@@ -18,7 +18,7 @@ const graph=webGraph(resolve(root,'web'))
 // registration-only (no promoted cases), which hosted runs confirm per PR.
 const tree=sourceTree(root)
 const promotions={keys:new Set(),kinds:new Set(),count:0}
-const readFile=path=>{ try { return read(resolve(root,path),'utf8') } catch { return undefined } }
+const readFile=path=>boundedText(root,path)
 const exists=path=>readFile(path)!==undefined
 const replay=fixture.prs.map(({number,paths})=>{
   const options={event:'pull_request',paths,imports:fixture.goImports,webImports:graph}

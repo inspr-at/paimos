@@ -9,12 +9,35 @@ import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { runPlaywright } from '../playwright-safe.mjs'
 import { loadManifest as loadBrowserPolicy, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import { changedPaths, schedulingDecision, eventBase, sourceTree, promotionsBetween } from './diff.mjs'
+import { boundedText } from './inputs.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
 const target = kind => kind==='go' ? collectGo() : collectWeb()
 
-export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false}={}) {
+// Planner input is authoritative. Candidate uncertainty can widen it to full,
+// but candidate graph additions can never narrow the base planner's full gate.
+export function runnerDecision(candidate,{mode,layout}={}) {
+  if (mode === undefined) return candidate
+  if (!['full','essential','static','spec-only'].includes(mode) ||
+      layout !== undefined && !['full','static'].includes(layout))
+    return {mode:'full',layout:'full',reason:'invalid supplied planner decision'}
+  if (mode === 'full' || candidate.mode === 'full')
+    return {mode:'full',layout:'full',reason:mode === 'full'?'trusted planner requires full':candidate.reason}
+  const plannedLayout=layout ?? (mode === 'static'?'static':undefined)
+  if (plannedLayout !== undefined && plannedLayout !== candidate.layout)
+    return {mode:'full',layout:'full',reason:'candidate and planner layouts disagree'}
+  return {...candidate,layout:plannedLayout??candidate.layout}
+}
+
+export function runnerSelection(tests,options,candidate,planner) {
+  const decision=runnerDecision(candidate,planner)
+  const selection=select(tests,{...options,forceFull:options.forceFull||decision.mode==='full'})
+  selection.layout=selection.full?'full':decision.layout
+  return selection
+}
+
+export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,plannerMode=process.env.AEON_TEST_TIER_MODE,plannerLayout=process.env.AEON_TEST_TIER_LAYOUT,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false}={}) {
   const inventory=target(kind)
   const manifest=load(kind)
   const all=validate(manifest,inventory.tests)
@@ -25,12 +48,11 @@ export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',p
   const on=affectedLane==='on'&&event==='pull_request'&&Array.isArray(paths)
   const tree=on?sourceTree(root):undefined
   const promotions=on&&paths.some(path=>tierManifestPattern.test(path))?promotionsBetween(eventBase(),{cwd:root}):undefined
-  const readFile=path=>readFileSync(resolve(root,path),'utf8')
-  const decision=schedulingDecision(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined,tree,promotions})
-  const selection=select(all,{event,paths,imports:inventory.imports,affectedLane,
-    forceFull:full||decision.mode==='full',forceAll:catalogue,
-    webImports:graph,tree,promotions,readFile})
-  selection.layout=selection.full?'full':decision.layout
+  const readFile=path=>boundedText(root,path)
+  const candidate=schedulingDecision(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined,tree,promotions})
+  const selection=runnerSelection(all,{event,paths,imports:inventory.imports,affectedLane,
+    forceFull:full,forceAll:catalogue,webImports:graph,tree,promotions,readFile},candidate,
+    {mode:plannerMode,layout:plannerLayout})
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}
   if(kind==='web'&&!unit) Object.assign(weights,tierWeights(browserPolicy,filtered))
