@@ -77,6 +77,9 @@ test('workspace administrators can choose each activity mode and recover a faile
   await expect(options.getByRole('radio', { name: /^Tool activity/ })).toBeChecked()
   await options.getByRole('radio', { name: /^Off/ }).check()
   await expect(options.getByRole('radio', { name: /^Off/ })).toBeChecked()
+  // The radio is checked before its PUT returns; wait for the write, so the failure below cannot hit it.
+  await expect.poll(() => writes).toEqual(['tool_activity', 'off'])
+  await expect(options).toBeEnabled()
   fail = true
   await options.getByRole('radio', { name: /^Agent summary/ }).click()
   await expect(page.getByRole('alert').filter({ hasText: 'Could not save' })).toBeVisible()
