@@ -120,6 +120,8 @@
     ,
     "browser:tests/agents-dial.spec.ts:AEON-781: a held + speeds up, pauses before a mode boundary and saves only the final value once"
     ,
+    "browser:tests/agents-dial.spec.ts:AEON-781: a save conflict ends a hold; the next step needs a fresh press"
+    ,
     "browser:tests/agents-dial.spec.ts:AEON-781: an arrow key keeps its own pace; leaving, blur and a disabled end stop a hold"
     ,
     "browser:tests/agents-dial.spec.ts:AEON-781: the chevron comes first, folding moves nothing above the body, and the fold follows the person"
@@ -5469,6 +5471,8 @@
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: a dial folded before the fold sections stays folded","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: a held + speeds up, pauses before a mode boundary and saves only the final value once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: a save conflict ends a hold; the next step needs a fresh press","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: an arrow key keeps its own pace; leaving, blur and a disabled end stop a hold","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13922,6 +13926,8 @@
     ,
     {"kind":"vitest","file":"tests/agents-live.unit.test.ts","name":"tier and completion events wake consumers while heartbeats remain quiet","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a conflict ends the hold it interrupts: later steps are dropped until a fresh press","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a hold saves only its final value, once, after release","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a hold that starts during an in-flight write never saves its intermediate steps","tier":"GATED-FULL"}
@@ -13932,6 +13938,8 @@
     ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a released edit is dropped, never written, when the viewer changes before it settles","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a viewer change after leaving the view still cancels the released value","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > does not choose a total when the canonical read is forbidden","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > does not save an unchanged total or harness selection","tier":"GATED-FULL"}
@@ -13941,6 +13949,8 @@
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > failure is visible and restores the last confirmed ceiling without touching running work","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > leaving the page within the settle time still sends the released value","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > leaving the view during an outstanding write still sends the released value after it","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > loads the canonical owner count and saves only total and limits, never session controls","tier":"GATED-FULL"}
     ,

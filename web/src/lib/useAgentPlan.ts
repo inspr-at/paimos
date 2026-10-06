@@ -18,7 +18,11 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
   let pending: { value: WorkingPreference; version: number } | undefined
   let writer = false, reconciling = false
   // Steps made while − or + is held (and briefly after) only change the screen; the final value is saved once.
-  let holds = 0, settle: ReturnType<typeof setTimeout> | undefined, leaving = false
+  let holds = 0, settle: ReturnType<typeof setTimeout> | undefined, leaving = false, disposed = false
+  // A conflict ends the gesture it interrupts: its later steps are dropped until release, and a fresh press starts over.
+  let interrupted = false
+  /** Counts conflicts; − and + end an active hold whenever it changes. */
+  const interrupts = ref(0)
   const current = (turn: number, who: string) => generation === turn && viewer() === who && !!who
   async function refresh(reconcile = false) {
     const turn = generation, who = viewer(), edit = version, read = ++readVersion
@@ -60,12 +64,15 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
           // A queued edit was made against the same stale plan. Drop it too;
           // the next deliberate click must start from the newly read revision.
           pending = undefined; version++
+          if (holds) interrupted = true
           plan.value = confirmed && planValue(confirmed)
           saveError.value = 'The total or limits changed elsewhere. Review the latest values and try again.'
+          if (disposed) break
           reconciling = true
           await refresh(true)
           if (!current(turn, who)) return
           reconciling = false
+          interrupts.value++
           break
         }
         if (!response.ok) throw new Error('Couldn’t save the total and limits. Please try again.')
@@ -87,10 +94,10 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
     if (!current(turn, who)) return
     writer = false; saving.value = false
     // Retain an unsuccessful write's feedback until the next deliberate change.
-    if (!saveError.value) void refresh()
+    if (!saveError.value && !disposed) void refresh()
   }
   function save(next: WorkingPreference) {
-    if (!plan.value || !snapshot.value || !viewer() || reconciling) return
+    if (!plan.value || !snapshot.value || !viewer() || reconciling || interrupted) return
     if (next.total === plan.value.total && Object.keys(next.limits).length === Object.keys(plan.value.limits).length && Object.entries(next.limits).every(([key, limit]) => plan.value!.limits[key] === limit)) return
     plan.value = planValue(next); saveError.value = ''
     pending = { value: planValue(next), version: ++version }
@@ -103,12 +110,13 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
     if (active) { holds++; return }
     holds = Math.max(0, holds - 1)
     if (holds) return
+    interrupted = false
     const turn = generation, who = viewer()
     settle = setTimeout(() => { settle = undefined; void drain(turn, who) }, SETTLE_MS)
   }
   watch(viewer, who => {
     // A held or settling edit belongs to the viewer who made it and is dropped, never written for the next one.
-    clearTimeout(settle); settle = undefined; holds = 0
+    clearTimeout(settle); settle = undefined; holds = 0; interrupted = false
     generation++
     version = 0; readVersion++; writer = false; reconciling = false; pending = undefined; confirmed = null; confirmedAt = null
     snapshot.value = null; plan.value = null; waiting.value = null; readError.value = ''; saveError.value = ''; saving.value = false
@@ -120,7 +128,7 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
   // Leaving the view or the page within the settle time still sends the released value.
   function flush() {
     if (!settle && !holds) return
-    clearTimeout(settle); settle = undefined; holds = 0
+    clearTimeout(settle); settle = undefined; holds = 0; interrupted = false
     void drain(generation, viewer())
   }
   function pageHide() { leaving = true; flush() }
@@ -128,9 +136,9 @@ export function useAgentPlan(viewer: () => string, harnessForProfile: (id: strin
   if (typeof window !== 'undefined') { window.addEventListener('pagehide', pageHide); window.addEventListener('pageshow', pageShow) }
   onScopeDispose(() => {
     if (typeof window !== 'undefined') { window.removeEventListener('pagehide', pageHide); window.removeEventListener('pageshow', pageShow) }
-    // The answer is ignored once the view is gone.
+    // The released value still follows a write in flight; only a changed viewer cancels it.
+    disposed = true; poller.stop()
     flush()
-    generation++; pending = undefined; poller.stop()
   })
-  return { snapshot, plan, error, saving, waiting, save, hold, refresh: () => refresh() }
+  return { snapshot, plan, error, saving, waiting, interrupts, save, hold, refresh: () => refresh() }
 }

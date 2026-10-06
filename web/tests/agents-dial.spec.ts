@@ -586,6 +586,56 @@ test('AEON-781: an arrow key keeps its own pace; leaving, blur and a disabled en
   await expect.poll(() => work.preferences['agents.working']).toMatchObject({ total: 0 })
 })
 
+test('AEON-781: a save conflict ends a hold; the next step needs a fresh press', async ({ page }) => {
+  await page.clock.install({ time: NOW })
+  const { work } = await setup(page, 'wind')
+  let revision: string | null = null, answer!: () => void
+  const gate = new Promise<void>(resolve => { answer = resolve })
+  const puts: { value: { total: number }; expected_updated_at: string | null }[] = []
+  await page.route('**/api/agents/plan', route => route.fulfill({ json: { ...work.preferences['agents.working'], principal_id: me.id, running: {}, running_total: 0, source: 'plan', updated_at: revision } }))
+  await page.route('**/api/preferences/agents.working', async route => {
+    if (route.request().method() !== 'PUT') return route.fallback()
+    const request = route.request().postDataJSON()
+    puts.push(request)
+    if (puts.length === 1) {
+      await gate
+      work.preferences['agents.working'] = { total: 12, limits: {} }
+      revision = '2026-10-02T18:00:00.000001Z'
+      return route.fulfill({ status: 409, json: { error: 'changed' } })
+    }
+    work.preferences['agents.working'] = request.value
+    revision = '2026-10-02T18:00:00.000002Z'
+    return route.fulfill({ json: { key: 'agents.working', value: request.value, updated_at: revision } })
+  })
+  await page.goto('/agents')
+  const total = dial(page).locator('.f-num'), more = totalMore(page), said = dial(page).locator('.f-pm-total [aria-live]')
+  await expect(total).toHaveText('5')
+  await page.clock.pauseAt(NOW + 60_000)
+  await more.click()
+  await page.clock.runFor(SETTLE_MS)
+  await expect.poll(() => puts.length).toBe(1)
+  // A hold starts while that write is still out.
+  await more.hover(); await page.mouse.down()
+  await expect(total).toHaveText('7')
+  answer()
+  await expect(dial(page).locator('.f-live')).toContainText('changed elsewhere')
+  await expect(total).toHaveText('12')
+  // The hold has ended: still held, nothing repeats, the warning stays and the newly read total is announced.
+  await expect(said).toHaveText('Run up to 12 at once')
+  await page.clock.runFor(5_000)
+  await expect(total).toHaveText('12')
+  await expect(dial(page).locator('.f-live')).toContainText('changed elsewhere')
+  await page.mouse.up()
+  await page.clock.runFor(SETTLE_MS)
+  expect(puts).toHaveLength(1)
+  // A fresh press edits the newly read revision.
+  await page.mouse.down(); await page.mouse.up()
+  await expect(total).toHaveText('13')
+  await page.clock.runFor(SETTLE_MS)
+  await expect.poll(() => puts.length).toBe(2)
+  expect(puts[1]).toEqual({ value: { total: 13, limits: {} }, expected_updated_at: '2026-10-02T18:00:00.000001Z' })
+})
+
 test('AEON-781: the chevron comes first, folding moves nothing above the body, and the fold follows the person', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await page.emulateMedia({ reducedMotion: 'no-preference' })

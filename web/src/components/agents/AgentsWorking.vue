@@ -15,7 +15,7 @@ import WorkingStepper from './WorkingStepper.vue'
 const agents = useAgents(), capacity = useCapacity(), session = useSession(), sections = useSectionPrefs()
 const viewer = () => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : ''
 const control = useAgentPlan(viewer, key => agents.models.find(m => m.id === key)?.harness)
-const { snapshot, plan, saving, waiting, save, hold } = control
+const { snapshot, plan, saving, waiting, interrupts, save, hold } = control
 const folded = computed(() => !sections.open.dial)
 const error = computed(() => control.error.value || sections.error)
 // A remembered numeric ceiling is a convenience, not a minimum or reservation.
@@ -94,14 +94,14 @@ function modeKeys(event: KeyboardEvent, key: string) {
             <path v-else class="rest" d="M8.2 13.2q1.2 1.2 2.4 0M13.4 13.2q1.2 1.2 2.4 0M11 17.1h2" />
           </g></svg>
           <span>Run up to</span>
-          <WorkingStepper :value="total" :effective="total" :viewer="viewer()" :revision="snapshot.updated_at" label="Agents at once" total @step="changeTotal" @edit="editTotal" @hold="hold" />
+          <WorkingStepper :value="total" :effective="total" :viewer="viewer()" :revision="snapshot.updated_at" :interrupt="interrupts" label="Agents at once" total @step="changeTotal" @edit="editTotal" @hold="hold" />
           <span class="f-unit"><span><span class="f-opt">{{ total === 1 ? 'agent ' : 'agents ' }}</span>at once.</span><span class="f-ghost" aria-hidden="true"><span class="f-opt">{{ 'agents ' }}</span>at once.</span></span>
         </div>
         <div v-if="folded" class="f-chips" role="group" aria-label="Each harness">
           <span class="f-vsep" aria-hidden="true" />
           <div v-for="row in rows" :key="row.key" class="f-chip" :class="`is-${row.mode}`" :data-harness="row.key">
             <button type="button" class="f-mode" :aria-label="cycleLabel(row)" :data-tip="`${cycleLabel(row)}${row.mode === 'none' ? '\n' + noOwnTip(row.key, total) : ''}`" @click="changeMode(row.key, nextMode(row.key))"><HarnessMark :harness="row.key" :size="14" /></button>
-            <WorkingStepper :value="row.limit" :effective="row.effective" :label="row.label" :viewer="viewer()" :revision="snapshot.updated_at" @step="changeLimit(row.key, $event)" @edit="editLimit(row.key, $event)" @boundary="changeMode(row.key, $event)" @hold="hold" />
+            <WorkingStepper :value="row.limit" :effective="row.effective" :label="row.label" :viewer="viewer()" :revision="snapshot.updated_at" :interrupt="interrupts" @step="changeLimit(row.key, $event)" @edit="editLimit(row.key, $event)" @boundary="changeMode(row.key, $event)" @hold="hold" />
           </div>
         </div>
         <p class="f-live" :data-tip="error || status" :class="{ failed: error }" role="status"><span class="live-mark" aria-hidden="true" /><span>{{ error || live }}</span><span v-if="saving" class="sr-only">Saving</span></p>
@@ -120,7 +120,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
                   <button v-for="[mode, label] in modes" :key="mode" type="button" role="radio" :data-mode="mode" :aria-checked="row.mode === mode" :tabindex="row.mode === mode ? 0 : -1" @click="changeMode(row.key, mode)">{{ label }}</button>
                 </div>
                 <div class="lim-step">
-                  <WorkingStepper :value="row.limit" :effective="row.effective" :label="row.label" :viewer="viewer()" :revision="snapshot.updated_at" @step="changeLimit(row.key, $event)" @edit="editLimit(row.key, $event)" @boundary="changeMode(row.key, $event)" @hold="hold" />
+                  <WorkingStepper :value="row.limit" :effective="row.effective" :label="row.label" :viewer="viewer()" :revision="snapshot.updated_at" :interrupt="interrupts" @step="changeLimit(row.key, $event)" @edit="editLimit(row.key, $event)" @boundary="changeMode(row.key, $event)" @hold="hold" />
                 </div>
                 <span class="lim-word" :data-tip="row.mode === 'none' ? noOwnTip(row.key, total) : undefined">{{ row.mode === 'max' ? '' : row.words }}</span>
               </div>

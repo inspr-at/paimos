@@ -5,7 +5,8 @@ import { CAP_MAX, limitMode, stepHarnessLimit, typedLimit, typedTotal, type Harn
 import { startHold } from '../../lib/pressHold'
 import AppIcon from '../AppIcon.vue'
 
-const props = defineProps<{ value: HarnessLimit | undefined; effective: number; label: string; viewer: string; revision: string | null; total?: boolean }>()
+// interrupt changes when a save conflicts: an active hold ends and needs a fresh press.
+const props = defineProps<{ value: HarnessLimit | undefined; effective: number; label: string; viewer: string; revision: string | null; total?: boolean; interrupt?: number }>()
 // hold: true while − or + is held (pointer or arrow key); the parent saves only once it is false again.
 const emit = defineEmits<{ step: [delta: number]; edit: [value: HarnessLimit]; boundary: [mode: 'off' | 'none']; hold: [active: boolean] }>()
 const editing = ref(false), draft = ref(''), input = ref<HTMLInputElement>(), valueButton = ref<HTMLButtonElement>(), group = ref<HTMLElement>()
@@ -130,8 +131,8 @@ function keys(event: KeyboardEvent) {
 function keyUp(event: KeyboardEvent) { if (held?.key && held.key === event.key) release() }
 // A draft belongs to the viewer and value on screen when editing started.
 watch(() => [props.viewer, props.value, props.revision], () => { if (editing.value) finishEdit(true) }, { flush: 'sync' })
-// A changed viewer never inherits a hold.
-watch(() => props.viewer, release, { flush: 'sync' })
+// A changed viewer never inherits a hold, and a conflict ends one.
+watch([() => props.viewer, () => props.interrupt], release, { flush: 'sync' })
 onBeforeUnmount(release)
 </script>
 
