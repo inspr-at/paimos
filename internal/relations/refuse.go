@@ -27,8 +27,8 @@ func acyclic(relType string) bool {
 	return false
 }
 
-// Bounds keep the loop search linear and cheap on large imported graphs. A
-// chain longer than this is not refused; the database constraints still hold.
+// Bounds keep the loop search cheap on imported graphs. An unexplored frontier
+// is refused: exhaustion cannot prove that an acyclic link is safe.
 const (
 	maxLoopDepth   = 64
 	maxLoopVisited = 5000
@@ -111,7 +111,14 @@ func loopPath(ctx context.Context, tx pgx.Tx, tenantID, source, target, relType 
 		}
 		frontier = next
 	}
+	if len(frontier) > 0 {
+		return nil, loopSearchLimit()
+	}
 	return nil, nil
+}
+
+func loopSearchLimit() error {
+	return refusal{"Cannot prove this link is acyclic within the search limit. Shorten or simplify the relation graph before trying again."}
 }
 
 func step(ctx context.Context, tx pgx.Tx, tenantID, relType string, frontier []string, source string, parent map[string]string) ([]string, bool, error) {
@@ -119,19 +126,27 @@ func step(ctx context.Context, tx pgx.Tx, tenantID, relType string, frontier []s
 		FROM node_relations r
 		JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.target_node_id AND n.deleted_at IS NULL
 		WHERE r.tenant_id=$1 AND r.type=$2 AND r.source_node_id = ANY($3::uuid[])
-		ORDER BY r.source_node_id, r.target_node_id`, tenantID, relType, frontier)
+		ORDER BY r.source_node_id, r.target_node_id LIMIT $4`, tenantID, relType, frontier, maxLoopVisited+1)
 	if err != nil {
 		return nil, false, err
 	}
 	defer rows.Close()
 	var next []string
+	scanned := 0
 	for rows.Next() {
+		scanned++
+		if scanned > maxLoopVisited {
+			return nil, false, loopSearchLimit()
+		}
 		var from, to string
 		if err := rows.Scan(&from, &to); err != nil {
 			return nil, false, err
 		}
 		if _, seen := parent[to]; seen {
 			continue
+		}
+		if len(parent) >= maxLoopVisited {
+			return nil, false, loopSearchLimit()
 		}
 		parent[to] = from
 		if to == source {
