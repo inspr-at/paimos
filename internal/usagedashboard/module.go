@@ -23,6 +23,7 @@ func New(pool *pgxpool.Pool) httpapi.Module { return &Module{pool: pool} }
 
 // Mount registers the dashboard read.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/projects/{projectId}/lead/usage", boundedLearning(workorders.Endpoint(m.pool, "harness.read", false, http.StatusOK, m.leadUsage)))
 	mux.HandleFunc("GET /api/usage/model-estimates", boundedLearning(workorders.Endpoint(m.pool, "harness.read", false, http.StatusOK, m.modelEstimates)))
 	mux.HandleFunc("GET /api/usage/dashboard", workorders.Endpoint(m.pool, "harness.read", false, http.StatusOK, m.dashboard))
 }

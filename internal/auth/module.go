@@ -328,6 +328,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "status":
+		// Definitions and live limits are read-only tenant metadata. Project
+		// overrides remain confined by the handler's project visibility.
+		if len(parts) == 2 && parts[1] == "help" && read {
+			return authz.AuthenticatedRoute, true
+		}
 	case "recurrences":
 		// This is an explicit agent allowlist. Every recurrence handler also
 		// checks the custom role and recurrences.manage key scope in its tenant.
@@ -401,6 +407,17 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "lead":
+			if len(parts) == 4 && parts[3] == "usage" && read {
+				return "harness.read", true
+			}
+			// Starting a lead remains person-only, regardless of key scopes.
+			if len(parts) == 3 && read {
+				return "harness.read", true
+			}
+			if len(parts) == 4 && r.Method == http.MethodPost && (parts[3] == "claim" || parts[3] == "pause" || parts[3] == "yield") {
+				return "harness.worker", true
+			}
 		case "questions":
 			if len(parts) == 3 && read {
 				return "questions.read", true
@@ -675,7 +692,7 @@ func harnessScope(parts []string, read bool) string {
 const selfScope = "self"
 
 func agentHasScope(have []string, want string) bool {
-	if want == selfScope {
+	if want == selfScope || want == authz.AuthenticatedRoute {
 		return true
 	}
 	if want == "stage.<op>" {
