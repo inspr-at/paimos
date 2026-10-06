@@ -1,0 +1,202 @@
+{
+  "ticket": "AEON-697",
+  "fix_round": 15,
+  "scope": "Resolve static merge conflict against refreshed main while preserving all behavior assertions.",
+  "review": {
+    "brief_path_missing": true,
+    "located_filename": "review-static278.out",
+    "finding": "HEAD could not merge with main because web/scripts/ci-web-shard.test.mjs conflicted.",
+    "new_behavior_findings": 0
+  },
+  "ownership": {
+    "tracker": "ppm",
+    "account": "INSPR",
+    "branch": "work/aeon-697-set",
+    "session": {
+      "ticket": "AEON-697",
+      "session_name": "aeon-697-set-fix15",
+      "session_id": "192c15ca-75ef-483b-a927-15f564ae245d",
+      "role": "builder",
+      "started": "2026-10-06T12:51:23.932250+00:00"
+    },
+    "marker_recorded_before_edits": true,
+    "release_gates": "Coordinator owned; no review, approval, origin push, deployment, or ticket status change."
+  },
+  "source_commit": "7d25081af6789e00d785152cd24228c0776ca737",
+  "main": "58ef9532724a308fe11ec4d491691e78f0e5bd37",
+  "verification": {
+    "current_merge_clean": true,
+    "resolved_conflicts": [
+      "scripts/check-migrations.test.mjs",
+      "scripts/migration-policy-exceptions.json",
+      "scripts/playwright-safe.test.mjs",
+      "web/ci-web-shards.json",
+      "web/tests/views-filters.spec.ts"
+    ],
+    "go_classifications_missing_or_demoted_from_either_parent": 0,
+    "web_classifications_missing_or_demoted_from_either_parent": 0,
+    "both_view_regression_blocks_preserved_byte_for_byte": true,
+    "view_cases": 32,
+    "assertions_removed_or_loosened": false,
+    "new_behavior_changes": true,
+    "regression_baseline": "The unchanged tier regression fails with exact baseline manifests; the new compiler-context regression fails with exact baseline fixedEnvironment implementation. Neither failure is a harness/import error.",
+    "dedicated_attention_shard_preserved": true,
+    "migration_bytes_unchanged": true,
+    "classification_correction": {
+      "case": "internal/releases:TestLeafShapeChangesPreserveCompleteProjectionAndUndo",
+      "tier": "GATED-FULL",
+      "change": "Remove stale postGateCases nightly-only marker; retain the explicit gated attention regression and both unchanged tier assertions.",
+      "temporary_nightly_attempt": "Rejected by full static attention safety guard; corrected before final delivery."
+    },
+    "tier_regression_red": {
+      "baseline": "9ceccbe1",
+      "status": "failed with expected GATED-FULL != NIGHTLY assertion",
+      "test_body_byte_for_byte_existing": true,
+      "log": "tmp/aeon-697-fix15-tier-red.log"
+    },
+    "tier_regression_green": {
+      "status": "both unchanged checks passed together",
+      "tests": [
+        "AEON-697 Go attention regressions are classified and permission and revision guards remain essential",
+        "three-tier manifests allow new NIGHTLY cases and never promote ungated browser cases"
+      ],
+      "log": "tmp/aeon-697-fix15-tier-both-green.log"
+    },
+    "application_behavior_changes": false,
+    "ci_behavior_change": "Preserve target-qualified Nix compiler role and SDK configuration while retaining the filtered full-test environment.",
+    "sdk_regression": {
+      "baseline": "9ceccbe1",
+      "red": "Failed for missing NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin",
+      "green": "Both compiler-context and original environment-filter regressions passed",
+      "baseline_function_exact": true,
+      "test_body_exact": true,
+      "red_log": "tmp/aeon-697-fix15-sdk-red-baseline.log",
+      "green_log": "tmp/aeon-697-fix15-sdk-green.log",
+      "registration": "Existing ci-plan-tests registry command runs scripts/ci-static.test.mjs without a case filter; no new Go/web test file added."
+    }
+  },
+  "validation": {
+    "static": {
+      "status": "passed",
+      "exit_code": 0,
+      "checks_passed": 36,
+      "checks_failed": 0,
+      "checks_skipped": 0,
+      "seconds": 65.27,
+      "source_commit": "c8840bc7a3fa3814540e990d1d2fe7368c422040",
+      "main": "70babd810dc23fa7bcdfe4fe11c578c25caf76d1",
+      "command": "ci-static-locked.sh (approved remote node scripts/ci-static.mjs --merge-main)",
+      "log": "tmp/aeon-697-fix15-static-final.log",
+      "previous_attempts": [
+        {
+          "source_commit": "7d25081af6",
+          "passed": 34,
+          "failed": [
+            "contradictory nightly-only marker for gated projection regression",
+            "native Go linker SDK context"
+          ],
+          "log": "tmp/aeon-697-fix15-static.log"
+        },
+        {
+          "source_commit": "21c3830eda",
+          "passed": 34,
+          "failed": [
+            "attention gated-case assertion rejected attempted nightly classification",
+            "native Go linker SDK context"
+          ],
+          "log": "tmp/aeon-697-fix15-static-retry1.log"
+        }
+      ]
+    },
+    "remote_go": {
+      "status": "passed",
+      "exit_code": 0,
+      "source_commit": "7d25081af6789e00d785152cd24228c0776ca737",
+      "packages": [
+        "internal/statusautopilot",
+        "internal/releases",
+        "internal/authz",
+        "internal/events",
+        "internal/reportercontract",
+        "internal/views"
+      ],
+      "final_go_sources_unchanged_since_run": true
+    },
+    "remote_web": {
+      "status": "passed",
+      "initial_refusal_exit_code": 3,
+      "launch_error": "Migration checker invocation omitted required --base-ref; no browser or unit failure occurred.",
+      "latest_published_release": "v261005070923.0.0",
+      "build": "passed",
+      "list_view_node_tests": 10,
+      "attention_vitest_tests": 2,
+      "browser_cases": 99,
+      "browser_workers": 1,
+      "browser_retries": 0,
+      "browser_status": "passed",
+      "platform": "macOS bundled Chromium",
+      "linux_ci": "Approved offload runner is macOS; Linux hosted Chromium proof remains coordinator-owned.",
+      "exit_code": 0,
+      "browser_passed": 99,
+      "browser_failed": 0,
+      "browser_skipped": 0,
+      "source_commit": "21c3830eda8267f1f6f3ed8f44c1b7e4a904e5e4",
+      "log": "tmp/aeon-697-fix15-web-retry2.log",
+      "supervision": {
+        "before": 0,
+        "peak": 5,
+        "after": 0,
+        "remaining_processes": 0
+      },
+      "final_application_sources_unchanged_since_run": true
+    },
+    "remote_migrations": {
+      "status": "passed",
+      "cases": [
+        "TestAttentionEventsMigrationUpgradeAndReapply",
+        "TestRunMeasurementUpgradeFromRelease122PreservesEvidence"
+      ],
+      "policy_tests_passed": 34
+    },
+    "native_go_diagnostic": {
+      "status": "passed",
+      "exit_code": 0,
+      "active_cases": 4043,
+      "failed_packages": 0,
+      "database_environment": "explicitly absent to match static checker",
+      "log": "tmp/aeon-697-fix15-native-go.log",
+      "initial_failure_reason": "The static collector suppressed Go stdout on failure; standalone identical native listing produced no package failure. Full static repeat remains required."
+    },
+    "native_go_restricted_diagnostic": {
+      "status": "failed",
+      "exit_code": 1,
+      "failed_build_packages": 8,
+      "log": "tmp/aeon-697-fix15-native-fixed-env.log",
+      "investigation": "Standalone native listing passed with the Nix shell environment; reproducing static fixedEnvironment causes eight daemon-dependent build failures. Checking the omitted compiler configuration on one package next; first attempt refused due load 21 >18.",
+      "root_cause": "The environment filter dropped NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin and NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin. Nix wrappers ignore inherited SDK flags without these role markers; Darwin cgo links then fail to find libresolv."
+    },
+    "compiler_context_probe": {
+      "status": "passed",
+      "package": "internal/agentd",
+      "role_markers_retained": 2,
+      "additional_compiler_settings": 0,
+      "log": "tmp/aeon-697-fix15-linker-roles-retry1.log"
+    }
+  },
+  "preserved_preexisting_local_change": {
+    "file": "docs/qa/aeon-697-fix14-evidence.json",
+    "included_in_fix15_commits": false,
+    "sha256": "b177ed90d08c62fbc4ce5ea3586fd7ff80f73ce9cb98402427097c695a4b8714"
+  },
+  "follow_ups": [
+    {
+      "item": "Hosted Linux Chromium proof",
+      "reason": "Approved offload host is macOS. All 99 serial bundled Chromium cases passed there; Linux hosted validation and release review remain coordinator-owned."
+    }
+  ],
+  "updated_at": "2026-10-06T13:16:18.688321+00:00",
+  "classification_commit": "21c3830eda8267f1f6f3ed8f44c1b7e4a904e5e4",
+  "final_code_commit": "c8840bc7a3fa3814540e990d1d2fe7368c422040",
+  "status": "completed locally; no origin push or deployment",
+  "summary": "Merged current main and resolved all five conflicts additively, retaining both branches tests and migration exception bytes. Reconciled a stale nightly-only annotation while keeping the attention projection regression gated. Corrected static runner environment filtering to retain target-qualified Nix compiler role markers and SDK flags; otherwise Darwin native Go collection ignored SDK linker paths and failed to find libresolv. Existing assertions remain intact, and both configuration regressions fail for the intended reason against 9ceccbe1. All affected application and mandatory static checks passed remotely."
+}
