@@ -3,7 +3,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { brand } from '../lib/brand'
 import { footerReleaseContent } from '../lib/footerRelease'
-import { footerLive, footerSource, footerSummary, landed, PAUSED_FULL, PAUSED_SHORT, pingGate, said, type FooterPart, type FooterSummary } from '../lib/footerSummary'
+import { footerLive, footerSource, footerSummary, landed, PAUSED_FULL, PAUSED_SHORT, phoneRoom, pingGate, said, type FooterPart, type FooterSummary } from '../lib/footerSummary'
 import { codenameOf, releaseAria } from '../lib/codenames'
 import { useReleases } from '../stores/releases'
 import { useSession } from '../stores/session'
@@ -112,7 +112,7 @@ const label = computed(() => {
 </script>
 
 <template>
-  <footer class="app-footer" :class="{ hidden, speaking: !!summary }" :inert="hidden || undefined">
+  <footer class="app-footer" :class="{ hidden, speaking: phoneRoom(summary) }" :inert="hidden || undefined">
     <span class="footer-name"><span class="footer-wordmark">{{ brand.wordmark }}</span></span>
     <div class="foot-c">
       <component :is="summary.action && !paused ? 'button' : 'span'" v-if="summary" class="sum" :class="{ loading: summary.loading }" :type="summary.action && !paused ? 'button' : undefined"

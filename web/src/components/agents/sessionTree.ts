@@ -85,3 +85,47 @@ export function treeRows<T extends Viewish>(roots: SessionBranch<T>[], options: 
   walk(roots, 0, [], null)
   return out
 }
+
+// The first session in a state, including one a fold hides, and the ancestors
+// that have to open before its row exists. A problem includes a lost heartbeat.
+// Ancestors are the parents that are in this list, root first.
+export function jumpTarget<T extends { session: { id: string; parent_harness_session_id?: string | null }; status: { state: string } }>(views: readonly T[], state: string): { id: string; ancestors: string[] } | null {
+  const states = state === 'problem' ? ['problem', 'unresponsive'] : [state]
+  const byId = new Map(views.map(view => [view.session.id, view]))
+  const children = new Map<string, T[]>()
+  const roots: T[] = []
+  for (const view of views) {
+    const parent = view.session.parent_harness_session_id
+    if (parent && parent !== view.session.id && byId.has(parent)) {
+      const list = children.get(parent)
+      if (list) list.push(view)
+      else children.set(parent, [view])
+    } else roots.push(view)
+  }
+  const ancestorsOf = (view: T) => {
+    const chain: string[] = []
+    const seen = new Set([view.session.id])
+    let parent = view.session.parent_harness_session_id
+    while (parent && byId.has(parent) && !seen.has(parent)) {
+      chain.push(parent)
+      seen.add(parent)
+      parent = byId.get(parent)?.session.parent_harness_session_id
+    }
+    return chain.reverse()
+  }
+  const seen = new Set<string>()
+  const walk = (view: T): T | undefined => {
+    if (seen.has(view.session.id)) return
+    seen.add(view.session.id)
+    if (states.includes(view.status.state)) return view
+    for (const child of children.get(view.session.id) ?? []) {
+      const found = walk(child)
+      if (found) return found
+    }
+  }
+  for (const view of [...roots, ...views]) {
+    const found = walk(view)
+    if (found) return { id: found.session.id, ancestors: ancestorsOf(found) }
+  }
+  return null
+}

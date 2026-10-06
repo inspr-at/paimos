@@ -22,6 +22,8 @@ export interface FooterSummary {
   action?: () => void
   // A skeleton bar of fixed width: nothing to say yet, no ping.
   loading?: boolean
+  // A line that appears and disappears (Saving, Not saved). It must not change who the neighbours are.
+  transient?: boolean
 }
 // When the screen's data last landed, and whether it has stopped arriving.
 export interface FooterLive { updatedAt: number | null; paused: boolean }
@@ -30,6 +32,10 @@ export const count = (value: number | string): FooterPart => ({ text: typeof val
 export const said = (text: string): FooterPart => ({ text })
 export const exception = (text: string): FooterPart => ({ text, as: 'exception' })
 export const plain = (parts: readonly FooterPart[]) => parts.map(part => part.text).join('')
+// Phones hide the release time only for a summary that stays. A transient line keeps the control where it was.
+export function phoneRoom(summary: FooterSummary | null) {
+  return !!summary && !summary.transient
+}
 export const noun = (n: number, one: string, many = `${one}s`) => n === 1 ? one : many
 
 export const LOADING: FooterSummary = { tone: 'idle', full: [], short: [], aria: 'Loading', loading: true }

@@ -156,6 +156,87 @@ test('releases on their way are counted, a failed run is the exception, and the 
   await expect(sum(page)).toHaveCount(0)
 })
 
+test('the release at risk opens from inside the sheet', async ({ page }) => {
+  await connectedStream(page)
+  await mockWork(page, fixtures())
+  const history = presentedHistory()
+  const [first, second] = history.releases as unknown as { version: string; state: string; evidence: { ci: unknown } }[]
+  first.state = second.state = 'candidate'
+  second.evidence.ci = { name: 'ci', url: '', status: 'completed', conclusion: 'failure' }
+  await mockReleases(page, history)
+  await page.goto('/releases')
+  const dialog = page.getByRole('dialog', { name: 'PAIMOS AEON releases' })
+  await expect(dialog).toBeVisible()
+  // The page footer is under the modal. The risk action has to live in the sheet.
+  const risk = dialog.getByRole('button', { name: /Open the release at risk/ })
+  await expect(risk).toBeVisible()
+  await risk.click()
+  await expect(page).toHaveURL(new RegExp(`/releases/${second.version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`))
+  await expect(dialog.locator('[aria-selected="true"]')).toHaveAttribute('id', `release-${second.version.replaceAll('.', '-')}`)
+})
+
+test('a review filter stays through search and kind, and All entries clears it', async ({ page }) => {
+  await mockWork(page, fixtures())
+  await mockKnowledge(page, knowledgeWorld())
+  await page.goto('/knowledge')
+  await expect(sum(page)).toContainText(/to review/)
+  await sum(page).click()
+  await expect(page).toHaveURL(/status=proposed/)
+  await expect(page.getByText('Showing entries to review')).toBeVisible()
+  await page.getByRole('button', { name: /^Memory/ }).click()
+  await expect(page).toHaveURL(/type=memory/)
+  await expect(page).toHaveURL(/status=proposed/)
+  await page.getByRole('searchbox', { name: 'Search knowledge in every project' }).fill('Hetzner')
+  await expect(page).toHaveURL(/[?&]q=Hetzner/)
+  await expect(page).toHaveURL(/status=proposed/)
+  await page.getByRole('button', { name: 'All entries' }).click()
+  await expect(page).not.toHaveURL(/status=/)
+  await expect(page.getByText('Showing entries to review')).toHaveCount(0)
+})
+
+test('a phone save does not move the release control', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 800 })
+  await mockWork(page, fixtures())
+  let fail = true
+  const pending: (() => void)[] = []
+  await page.route('**/api/preferences/footer-summary-probe', async route => {
+    if (route.request().method() !== 'PUT') return route.fulfill({ json: { key: 'footer-summary-probe', value: null, updated_at: null } })
+    await new Promise<void>(resolve => { pending.push(resolve) })
+    return fail
+      ? route.fulfill({ status: 500, json: { error: 'unavailable' } })
+      : route.fulfill({ json: { key: 'footer-summary-probe', value: { a: 1 }, updated_at: new Date().toISOString() } })
+  })
+  await page.goto('/settings/personal')
+  await expect(page.getByRole('heading', { name: 'Settings', level: 1 })).toBeVisible()
+  const pill = page.locator('footer.app-footer .version-pill')
+  await expect(pill).toBeVisible()
+  const place = async () => {
+    const box = await pill.boundingBox()
+    expect(box).not.toBeNull()
+    return box!
+  }
+  const still = async (before: { x: number; width: number }) => {
+    const after = await place()
+    expect(Math.abs(after.x - before.x)).toBeLessThanOrEqual(0.5)
+    expect(Math.abs(after.width - before.width)).toBeLessThanOrEqual(0.5)
+  }
+  const resting = await place()
+  await page.evaluate(async () => { const { usePreference } = await import('/src/lib/preferences.ts'); usePreference('footer-summary-probe').save({ a: 1 }, 0) })
+  await expect(sum(page)).toContainText('Saving…')
+  await expect.poll(() => pending.length).toBe(1)
+  await still(resting)
+  pending.shift()?.()
+  await expect(sum(page)).toContainText('Not saved')
+  await still(resting)
+  fail = false
+  await sum(page).click()
+  await expect.poll(() => pending.length).toBe(1)
+  await still(resting)
+  pending.shift()?.()
+  await expect(sum(page)).toHaveCount(0)
+  await still(resting)
+})
+
 for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
   test(`the summary sits between the mark and the release without touching either at ${width} in ${colorScheme}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 })

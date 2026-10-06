@@ -44,6 +44,7 @@ import WindDownPanel from '../components/agents/WindDownPanel.vue'
 import FloatingPanel from '../components/work/FloatingPanel.vue'
 import { useAgentPause } from '../stores/agentPause'
 import { agentsFooter } from '../lib/footerProviders'
+import { jumpTarget } from '../components/agents/sessionTree'
 import { useFooterSummary } from '../lib/footerSummary'
 import { clockTime, liveSession } from '../lib/agentPause'
 
@@ -242,13 +243,13 @@ async function control(view: SessionView, kind: SessionControl['kind']) {
 // recorded even when Sessions shows open, so a preference read that lands
 // after the jump cannot fold the row away.
 async function jump(state: AgentState) {
-  const states = state === 'problem' ? ['problem', 'unresponsive'] : state === 'waiting' ? ['waiting'] : [state]
-  const el = [...document.querySelectorAll<HTMLElement>('.agents-page .row[data-state]')].find(row => states.includes(row.dataset.state ?? ''))
-  if (!el?.dataset.row) return
-  if (sessionList.value?.reveal()) await nextTick()
-  cursor.value = el.dataset.row
-  el.focus({ preventScroll: true })
-  el.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+  // The row may be a folded descendant: pick it from the sessions, open its ancestors, then focus it.
+  const target = jumpTarget(agents.views, state)
+  if (!target) return
+  sessionList.value?.revealSession(target.id)
+  await nextTick()
+  cursor.value = `s:${target.id}`
+  focusRow(cursor.value)
 }
 function review(approval: Approval) {
   if (window.innerWidth < 1100) void closePanel()
@@ -275,6 +276,10 @@ useFooterSummary(() => {
     loaded: agents.loaded,
     total: live.length + paused,
     working: states(['working']),
+    idle: states(['idle']),
+    throttled: states(['throttled']),
+    awaiting: states(['awaiting']),
+    pausing: states(['pausing']),
     problems: states(['problem', 'unresponsive']),
     asks: agents.needsCount,
     paused,

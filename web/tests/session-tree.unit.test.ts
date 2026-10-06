@@ -4,7 +4,7 @@
 // and a filter must keep a deep match with its ancestors as context.
 import { describe, expect, it } from 'vitest'
 import type { SessionBranch, SessionGroup, SessionStatus } from '../src/lib/agentState'
-import { below, shownBelow, treeRows } from '../src/components/agents/sessionTree'
+import { below, jumpTarget, shownBelow, treeRows } from '../src/components/agents/sessionTree'
 
 type View = { session: { id: string }; status: SessionStatus; name: string }
 type Branch = SessionBranch<View>
@@ -41,6 +41,17 @@ describe('session tree rows', () => {
     expect(below(a, v => v.name).problem).toBe(1)
     expect(below(a.children[0]!, v => v.name).problem).toBe(1)
     expect(below(a.children[0]!.children[0]!, v => v.name).problem).toBe(0)
+  })
+
+  it('names a problem hidden by a fold, including a lost heartbeat, and the ancestors that must open', () => {
+    const view = (id: string, state: string, parent: string | null) => ({ session: { id, parent_harness_session_id: parent }, status: { state } })
+    const views = [view('lead', 'working', null), view('a', 'working', 'lead'), view('a1x', 'problem', 'a'), view('solo', 'working', null)]
+    expect(jumpTarget(views, 'problem')).toEqual({ id: 'a1x', ancestors: ['lead', 'a'] })
+    expect(jumpTarget([view('lost', 'unresponsive', 'lead'), view('lead', 'working', null)], 'problem')).toEqual({ id: 'lost', ancestors: ['lead'] })
+    expect(jumpTarget(views, 'paused')).toBeNull()
+    // A fold drops the problem from the rendered rows, which is why searching the page misses it.
+    const folded = treeRows(tree(), { children: all, isOpen: branch => branch.view.session.id !== 'a' })
+    expect(folded.map(row => row.branch.view.session.id)).not.toContain('a1x')
   })
 
   it('keeps a deep match with its ancestors as unfolded context, even where a person folded them', () => {

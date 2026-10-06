@@ -67,9 +67,11 @@ function tabKeys(event: KeyboardEvent) {
 const needsMembers = computed(() => can('members.read'))
 // Keys are read only for people who may see them; the footer counts what the Agents tab would list.
 const seesKeys = computed(() => session.identity?.principal.kind === 'person' && can('keys.manage') && needsMembers.value)
-onMounted(() => { if (needsMembers.value) void access.load(); if (seesKeys.value) void access.loadKeys() })
+// A failed key read leaves the last keys. The Agents tab is the place that says the read failed.
+function readKeys() { void access.loadKeys().catch(() => {}) }
+onMounted(() => { if (needsMembers.value) void access.load(); if (seesKeys.value) readKeys() })
 watch(needsMembers, yes => { if (yes) void access.load() })
-watch(seesKeys, yes => { if (yes) void access.loadKeys() })
+watch(seesKeys, yes => { if (yes) readKeys() })
 // The footer says who is here, how many agent keys, and the keys that expire soon (AEON-785).
 useFooterSummary(() => {
   if (!session.identity || !needsMembers.value || (access.state === 'error' && !access.members)) return null

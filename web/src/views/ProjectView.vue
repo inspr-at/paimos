@@ -36,7 +36,7 @@ import { PROJECT_COLUMN_BY_ID, projectProgressTip } from '../lib/projectColumns'
 import { absoluteTime, cycleSort, normaliseState, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
 import { useProjects } from '../stores/projects'
 import { useLiveAgents } from '../stores/liveAgents'
-import { ticketsFooter } from '../lib/footerProviders'
+import { ticketsFooter, withAgentsIsPartial } from '../lib/footerProviders'
 import { useFooterSummary } from '../lib/footerSummary'
 import { useSession } from '../stores/session'
 import { useWorkQueue } from '../stores/workQueue'
@@ -553,11 +553,15 @@ useFooterSummary(() => {
   if (!session.identity || !project.value || !liveActive.value || (list.error.value && !list.loadedOnce.value)) return null
   const states = list.facets.value.state ?? {}
   const blocked = Object.entries(states).reduce((sum, [state, n]) => sum + (normaliseState(state) === 'blocked' ? n : 0), 0)
-  const loaded = new Set((outlineActive.value ? outline.rows.value : list.rows.value).map(row => row.id))
+  const loadedRows = outlineActive.value ? outline.rows.value : list.rows.value
+  const loaded = new Set(loadedRows.map(row => row.id))
+  const hasMore = outlineActive.value ? outline.hasMoreRoot.value || !!list.cursor.value : !!list.cursor.value
   const worked = new Set(liveAgents.forProject(project.value.id).flatMap(agent => agent.ticket ? [agent.ticket.id] : []))
+  const partial = withAgentsIsPartial(filtered.value, loaded.size, total.value, hasMore)
   return ticketsFooter({
     loaded: list.loadedOnce.value, total: total.value, blocked, filtered: filtered.value,
     withAgents: filtered.value ? [...worked].filter(id => loaded.has(id)).length : worked.size,
+    withAgentsPartial: partial,
     act: {
       blocked: () => { if (!filters.value.status.some(state => normaliseState(state) === 'blocked')) toggleValue('status', 'blocked') },
       top: () => { if (scrollRoot.value) scrollRoot.value.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }) },

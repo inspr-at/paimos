@@ -300,6 +300,10 @@
     ,
     "browser:tests/features.spec.ts:project OFF overrides workspace ON and inherit restores it"
     ,
+    "browser:tests/footer-summary.spec.ts:a phone save does not move the release control"
+    ,
+    "browser:tests/footer-summary.spec.ts:a review filter stays through search and kind, and All entries clears it"
+    ,
     "browser:tests/footer-summary.spec.ts:access says people, agent keys and the key that expires soon, and the click opens it"
     ,
     "browser:tests/footer-summary.spec.ts:agents › say how many there are and the one exception, and the click goes to it"
@@ -309,6 +313,8 @@
     "browser:tests/footer-summary.spec.ts:releases on their way are counted, a failed run is the exception, and the sheet gives the footer back when it closes"
     ,
     "browser:tests/footer-summary.spec.ts:settings stay silent when calm, and a failed save says so until it is saved again"
+    ,
+    "browser:tests/footer-summary.spec.ts:the release at risk opens from inside the sheet"
     ,
     "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 1024 in dark"
     ,
@@ -866,6 +872,10 @@
     ,
     "node:tests/work-vocabulary.test.ts:workspace names depend on leaf shape first, then project-relative depth"
     ,
+    "vitest:tests/access-keys.unit.test.ts:drops a stale key read and keeps the last keys when the newest read fails"
+    ,
+    "vitest:tests/access-keys.unit.test.ts:refreshes the shared key cache when access settles after a key change"
+    ,
     "vitest:tests/agent-pause-store.unit.test.ts:Resume all sends only the selected paused generations"
     ,
     "vitest:tests/agent-pause-store.unit.test.ts:Undo cannot revive an earlier request after another cancellation"
@@ -966,9 +976,15 @@
     ,
     "vitest:tests/footer-summary.unit.test.ts:what each screen says > counts a release as at risk only while it is on its way and a run failed"
     ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > does not call idle, throttled, awaiting or a paused mix all working"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > keeps a transient settings line from taking the phone release slot"
+    ,
     "vitest:tests/footer-summary.unit.test.ts:what each screen says > knowledge calm"
     ,
     "vitest:tests/footer-summary.unit.test.ts:what each screen says > knowledge to review"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > labels a with-agents count that does not cover the filtered list"
     ,
     "vitest:tests/footer-summary.unit.test.ts:what each screen says > no agents"
     ,
@@ -1145,6 +1161,8 @@
     "vitest:tests/row-store.unit.test.ts:derived parent status > successive same-revision node refreshes each apply their status to a full cache"
     ,
     "vitest:tests/row-store.unit.test.ts:derived parent status > updates a full cached row without changing the edit revision or opening a conflict"
+    ,
+    "vitest:tests/session-tree.unit.test.ts:session tree rows > names a problem hidden by a fold, including a lost heartbeat, and the ancestors that must open"
     ,
     "vitest:tests/theme-editor.unit.test.ts:runtime appearance follows every confirmed theme > a settings card unmounting never stops the shared editor"
     ,
@@ -7252,6 +7270,10 @@
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"unknown count reserves no badge; failed versions still open history","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"a phone save does not move the release control","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"a review filter stays through search and kind, and All entries clears it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"access says people, agent keys and the key that expires soon, and the click opens it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"agents › say how many there are and the one exception, and the click goes to it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -7261,6 +7283,8 @@
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"releases on their way are counted, a failed run is the exception, and the sheet gives the footer back when it closes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"settings stay silent when calm, and a failed save says so until it is saved again","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the release at risk opens from inside the sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 1024 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13670,6 +13694,10 @@
     ,
     {"kind":"node","file":"tests/work.test.ts","name":"statuses read the same in every spelling and carry product labels","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/access-keys.unit.test.ts","name":"drops a stale key read and keeps the last keys when the newest read fails","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/access-keys.unit.test.ts","name":"refreshes the shared key cache when access settles after a key change","tier":"NIGHTLY"}
+    ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > accepts percent readings and structured first-run waits without inventing headroom","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > accepts the nested catalog and rejects the old flat launch catalog","tier":"GATED-FULL"}
@@ -14272,9 +14300,15 @@
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > counts a release as at risk only while it is on its way and a run failed","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > does not call idle, throttled, awaiting or a paused mix all working","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > keeps a transient settings line from taking the phone release slot","tier":"NIGHTLY"}
+    ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > knowledge calm","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > knowledge to review","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > labels a with-agents count that does not cover the filtered list","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > no agents","tier":"NIGHTLY"}
     ,
@@ -15559,6 +15593,8 @@
     {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > keeps a deep match with its ancestors as unfolded context, even where a person folded them","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > lays out any depth with levels, sibling positions and guides, and a fold hides the whole subtree","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > names a problem hidden by a fold, including a lost heartbeat, and the ancestors that must open","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > rolls a deep problem up to every ancestor and counts asks separately","tier":"GATED-FULL"}
     ,

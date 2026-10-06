@@ -166,6 +166,11 @@ const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowled
       </div>
     </div>
 
+    <p v-if="proposedOnly" class="kp-review">
+      <span>Showing entries to review</span>
+      <button type="button" @click="setQuery({ status: '' })">All entries</button>
+    </p>
+
     <div v-if="error" class="kp-state" role="alert">
       <h2>{{ loaded ? 'Search could not be refreshed' : 'Knowledge could not be loaded' }}</h2>
       <p>{{ error }}</p>
@@ -233,6 +238,9 @@ const listCommand = computed(() => `${brand.value.product.toLowerCase()} knowled
 .kp-lead { max-width: 760px; margin-top: 10px; font-size: 14px; line-height: 1.55; color: var(--ink-2); }
 .kp-lead code { padding: 1px 5px; border-radius: 5px; background: var(--code-bg); font-size: 12px; color: var(--ink); white-space: nowrap; }
 .kp-controls { display: grid; gap: 12px; margin: 22px 0 18px; }
+.kp-review { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 32px; margin: -6px 0 14px; font-size: 13px; color: var(--ink-2); }
+.kp-review button { min-height: 32px; padding: 0 2px; border: 0; background: transparent; color: var(--teal-ink); font: 600 13px/1 var(--font); cursor: pointer; }
+.kp-review button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .kp-retained { margin: 12px 0; font-size: 13px; color: var(--ink-2); }
 .kp-search .field { height: 46px; padding-left: 40px; padding-right: 40px; border-radius: 14px; font-size: 15.5px; }
 .kp-search > svg { left: 14px; }
@@ -300,6 +308,7 @@ li + li .kp-row::before { content: ''; position: absolute; top: 0; left: 50px; r
 .sk-line { width: 70%; height: 9px; }
 @media (max-width: 720px) {
   .knowledge-page { padding: 18px 12px 16px; }
+  .kp-review, .kp-review button { min-height: 44px; }
   .kp-lead code { white-space: normal; overflow-wrap: anywhere; }
   .kp-kinds { flex-wrap: nowrap; overflow-x: auto; margin: 0 -12px; padding: 2px 12px 4px; scrollbar-width: none; }
   .kp-kinds::-webkit-scrollbar { display: none; }

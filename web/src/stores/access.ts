@@ -25,7 +25,10 @@ export const useAccess = defineStore('access', () => {
   const session = useSession()
   const owner = () => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : ''
   let heldFor = owner()
-  function reset() { registry.value = []; roles.value = []; members.value = null; keys.value = null; state.value = 'idle'; error.value = ''; request = undefined; heldFor = owner() }
+  // A key read belongs to the person who asked. A newer read wins; a failed one leaves the last keys.
+  let keysWanted = false
+  let keysGen = 0
+  function reset() { registry.value = []; roles.value = []; members.value = null; keys.value = null; keysWanted = false; keysGen++; state.value = 'idle'; error.value = ''; request = undefined; heldFor = owner() }
   // A 401 clears identity but leaves this view mounted so drafts and one-time
   // links survive. A subsequent sign-in starts with fresh access data.
   watch([owner, () => session.requiresSignIn], ([now, needsSignIn]) => {
@@ -77,6 +80,8 @@ export const useAccess = defineStore('access', () => {
         members.value = nextMembers
         state.value = 'ready'
         error.value = ''
+        // A key change settles through this reload. The footer reads the same cache as the Agents tab.
+        if (keysWanted) { try { await loadKeys() } catch { /* the Agents tab says when keys cannot be read */ } }
       } catch (e) {
         if (asker !== heldFor) return
         if (state.value !== 'ready') state.value = 'error'
@@ -89,8 +94,21 @@ export const useAccess = defineStore('access', () => {
   // An answer to a question asked for someone else is dropped; a failed read leaves what was known.
   async function loadKeys() {
     if (session.requiresSignIn) return
+    keysWanted = true
     const asker = heldFor
-    try { const read = await listAgentKeys(); if (asker === heldFor) keys.value = read } catch { /* the Agents tab says when keys cannot be read */ }
+    const gen = ++keysGen
+    try {
+      const read = await listAgentKeys()
+      if (asker === heldFor && gen === keysGen) keys.value = read
+    } catch (e) {
+      if (asker !== heldFor || gen !== keysGen) return
+      throw e
+    }
+  }
+  // One key changed in place (adoption). The list stays the one the footer counts.
+  function noteKey(next: AgentKey) {
+    if (!keys.value) return
+    keys.value = keys.value.map(key => key.id === next.id ? next : key)
   }
   // After a change: the lists again, and my own permissions.
   // My own access may have changed too: every cached answer is asked again.
@@ -114,7 +132,7 @@ export const useAccess = defineStore('access', () => {
   function agent(id: string): Agent | undefined { return agents.value.find(a => a.principal_id === id) }
 
   return {
-    registry, roles, members, keys, loadKeys, state, error, people, agents, invites, imported, roleById, runtimeRoleDetails, names,
+    registry, roles, members, keys, loadKeys, noteKey, state, error, people, agents, invites, imported, roleById, runtimeRoleDetails, names,
     load, settle, person, agent, setWorkspaceRole, deactivate, reactivate, linkAlias, unlinkAlias, invite, retryInviteProvision, revokeInvite,
     createRole, updateRole, deleteRole, setProjectRole, removeProjectMember,
   }

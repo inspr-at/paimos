@@ -21,6 +21,11 @@ export interface AgentsFooter {
   // Requests waiting on this person.
   asks: number
   paused: number
+  // Live sessions that are not working. Omitted counts as zero.
+  idle?: number
+  throttled?: number
+  awaiting?: number
+  pausing?: number
   wind: { left: number; by: string } | null
   act: { problem: () => void; ask: () => void; wind: () => void; paused: () => void; top: () => void }
 }
@@ -45,7 +50,37 @@ export function agentsFooter(a: AgentsFooter): FooterSummary {
     return build('attention', [count(a.total), said(` ${noun(a.total, 'agent')} · `), exception(x)], [exception(x)],
       `${n}, ${x}. Go to the ${a.asks === 1 ? 'request' : 'requests'}.`, a.act.ask)
   }
-  return build('calm', [count(a.total), said(` ${noun(a.total, 'agent')} · all working`)], [said(`${a.total} working`)], `${n}, all working. Back to the top.`, a.act.top)
+  return agentsCalm(a, n)
+}
+
+// "All working" is true only when every counted session is working. Anything else is named.
+function agentsCalm(a: AgentsFooter, n: string): FooterSummary {
+  const agents = ` ${noun(a.total, 'agent')}`
+  if (a.working === a.total) return build('calm', [count(a.total), said(`${agents} · all working`)], [said(`${a.total} working`)], `${n}, all working. Back to the top.`, a.act.top)
+  // Most urgent remainder is the one exception. Paused is already handled when it is everyone.
+  const rest: { n: number; one: string; all: string; tone: FooterTone; warn: boolean }[] = []
+  const add = (countOf: number | undefined, one: string, all: string, tone: FooterTone, warn: boolean) => { if (countOf) rest.push({ n: countOf, one, all, tone, warn }) }
+  add(a.awaiting, 'awaiting heartbeat', 'all awaiting heartbeat', 'attention', true)
+  add(a.throttled, 'throttled', 'all throttled', 'attention', true)
+  add(a.pausing, 'pausing', 'all pausing', 'idle', false)
+  add(a.paused, 'paused', 'all paused', 'idle', false)
+  add(a.idle, 'idle', 'all idle', 'idle', false)
+  const only = rest.length === 1 ? rest[0] : undefined
+  if (only && a.working === 0 && only.n === a.total) {
+    return build(only.tone, [count(a.total), said(`${agents} · ${only.all}`)], [said(`${a.total} ${only.one}`)], `${n}, ${only.all}. Back to the top.`, a.act.top)
+  }
+  const urgent = rest[0]
+  if (urgent && a.working > 0 && a.working + rest.reduce((sum, row) => sum + row.n, 0) === a.total) {
+    const phrase = `${urgent.n} ${urgent.one}`
+    const tail = urgent.warn ? exception(phrase) : said(phrase)
+    return build(urgent.warn ? urgent.tone : 'calm', [count(a.total), said(`${agents} · ${a.working} working · `), tail], [urgent.warn ? exception(phrase) : said(`${a.working} working`)],
+      `${n}, ${a.working} working, ${phrase}. Back to the top.`, a.act.top)
+  }
+  if (urgent) {
+    const phrase = `${urgent.n} ${urgent.one}`
+    return build(urgent.tone, [count(a.total), said(`${agents} · `), urgent.warn ? exception(phrase) : said(phrase)], [said(phrase)], `${n}, ${phrase}. Back to the top.`, a.act.top)
+  }
+  return build('calm', [count(a.total), said(`${agents} · ${a.working} working`)], [said(`${a.working} working`)], `${n}, ${a.working} working. Back to the top.`, a.act.top)
 }
 
 // ---------- Tickets ----------
@@ -54,6 +89,8 @@ export interface TicketsFooter {
   // The list as filtered; null while it is still being counted.
   total: number | null
   withAgents: number
+  // The with-agents figure is only the loaded page of a filtered list.
+  withAgentsPartial?: boolean
   blocked: number
   filtered: boolean
   act: { blocked: () => void; top: () => void; clear: () => void }
@@ -65,13 +102,19 @@ export function ticketsFooter(t: TicketsFooter): FooterSummary {
       ? build('idle', [said('No tickets match')], [said('No matches')], 'No tickets match. Clear the filters.', t.act.clear)
       : build('idle', [said('No tickets yet')], [said('No tickets')], 'No tickets yet.')
   }
-  const mid = t.withAgents ? ` ${noun(t.total, 'ticket')} · ${t.withAgents} with ${noun(t.withAgents, 'agent')}` : ` ${noun(t.total, 'ticket')}`
-  const aria = `${t.total} ${noun(t.total, 'ticket')}${t.withAgents ? `, ${t.withAgents} with ${noun(t.withAgents, 'agent')}` : ''}`
+  const agents = t.withAgents || t.withAgentsPartial ? `${t.withAgents} with ${noun(t.withAgents, 'agent')}${t.withAgentsPartial ? ' loaded' : ''}` : ''
+  const mid = agents ? ` ${noun(t.total, 'ticket')} · ${agents}` : ` ${noun(t.total, 'ticket')}`
+  const aria = `${t.total} ${noun(t.total, 'ticket')}${agents ? `, ${agents}` : ''}`
   if (t.blocked) {
     const x = `${t.blocked} blocked`
     return build('attention', [count(t.total), said(`${mid} · `), exception(x)], [exception(x)], `${aria}, ${x}. Show the blocked tickets.`, t.act.blocked)
   }
   return build('calm', [count(t.total), said(mid)], [said(`${t.total.toLocaleString('en-GB')} ${noun(t.total, 'ticket')}`)], `${aria}. Back to the top of the list.`, t.act.top)
+}
+
+// A filtered list's total is every match. The with-agents figure is partial while a later page is not loaded.
+export function withAgentsIsPartial(filtered: boolean, loaded: number, total: number | null, hasMore: boolean) {
+  return filtered && (hasMore || total === null || loaded < total)
 }
 
 // ---------- Releases ----------
@@ -122,8 +165,9 @@ export const settingsNeeds = ref(0)
 export interface SettingsFooter { saving: boolean; failed: boolean; needs: number; act: { retry: () => void; needs: () => void } }
 // Calm says nothing: the centre stays empty.
 export function settingsFooter(s: SettingsFooter): FooterSummary | null {
-  if (s.failed) return build('attention', [exception('Not saved'), said(' · Try again')], [exception('Not saved')], 'Not saved. Save again.', s.act.retry)
-  if (s.saving) return build('idle', [said('Saving…')], [said('Saving…')], 'Saving.')
+  // Saving and a failed save come and go. They must not change the phone release layout.
+  if (s.failed) return { ...build('attention', [exception('Not saved'), said(' · Try again')], [exception('Not saved')], 'Not saved. Save again.', s.act.retry), transient: true }
+  if (s.saving) return { ...build('idle', [said('Saving…')], [said('Saving…')], 'Saving.'), transient: true }
   if (s.needs) {
     const x = `${s.needs} ${s.needs === 1 ? 'needs' : 'need'} you`
     return build('attention', [exception(x)], [exception(x)], `${x}. Open Accounts and computers at Needs you.`, s.act.needs)

@@ -2,8 +2,8 @@
 // AEON-785: the footer's centre says what the screen shows, one screen at a time.
 import { effectScope, nextTick, ref } from 'vue'
 import { describe, expect, it } from 'vitest'
-import { accessFooter, agentsFooter, atRisk, knowledgeFooter, releasesFooter, settingsFooter, ticketsFooter } from '../src/lib/footerProviders'
-import { footerSummary, landed, pingGate, plain, useFooterSummary, type FooterSummary } from '../src/lib/footerSummary'
+import { accessFooter, agentsFooter, atRisk, knowledgeFooter, releasesFooter, settingsFooter, ticketsFooter, withAgentsIsPartial } from '../src/lib/footerProviders'
+import { footerSummary, landed, phoneRoom, pingGate, plain, useFooterSummary, type FooterSummary } from '../src/lib/footerSummary'
 
 const noop = () => undefined
 const said = (summary: FooterSummary | null) => summary ? { tone: summary.tone, full: plain(summary.full), short: plain(summary.short), plainText: !summary.action } : null
@@ -13,7 +13,7 @@ describe('what each screen says', () => {
   it.each([
     ['agents with a problem', agentsFooter({ ...agents, problems: 1 }), { tone: 'problem', full: '11 agents · 10 working · 1 problem', short: '1 problem', plainText: false }],
     ['agents that ask', agentsFooter({ ...agents, working: 9, asks: 2 }), { tone: 'attention', full: '11 agents · 2 ask you', short: '2 ask you', plainText: false }],
-    ['agents all working', agentsFooter(agents), { tone: 'calm', full: '11 agents · all working', short: '11 working', plainText: false }],
+    ['agents all working', agentsFooter({ ...agents, working: 11 }), { tone: 'calm', full: '11 agents · all working', short: '11 working', plainText: false }],
     ['agents winding down', agentsFooter({ ...agents, wind: { left: 7, by: '19:44' } }), { tone: 'deliberate', full: 'Winding down · 7 left · by 19:44', short: 'Winding down', plainText: false }],
     ['agents all paused', agentsFooter({ ...agents, paused: 11 }), { tone: 'idle', full: '11 agents · all paused', short: '11 paused', plainText: false }],
     ['no agents', agentsFooter({ ...agents, total: 0, working: 0 }), { tone: 'idle', full: 'No agents running', short: 'None running', plainText: true }],
@@ -33,6 +33,33 @@ describe('what each screen says', () => {
     expect(said(summary)).toEqual(expected)
     // Count noun · state · the one exception: never more than three parts.
     expect(plain(summary?.full ?? []).split(' · ').length).toBeLessThanOrEqual(3)
+  })
+
+  it('does not call idle, throttled, awaiting or a paused mix all working', () => {
+    const text = (patch: Partial<typeof agents>) => plain(agentsFooter({ ...agents, problems: 0, asks: 0, wind: null, ...patch }).full)
+    expect(text({ total: 4, working: 0, idle: 4 })).toBe('4 agents · all idle')
+    expect(text({ total: 3, working: 0, throttled: 3 })).toBe('3 agents · all throttled')
+    expect(text({ total: 2, working: 0, awaiting: 2 })).toBe('2 agents · all awaiting heartbeat')
+    expect(text({ total: 5, working: 3, paused: 2 })).toBe('5 agents · 3 working · 2 paused')
+    expect(text({ total: 4, working: 0 })).not.toContain('all working')
+  })
+
+  it('labels a with-agents count that does not cover the filtered list', () => {
+    const summary = ticketsFooter({ loaded: true, total: 40, withAgents: 1, withAgentsPartial: true, blocked: 0, filtered: true, act: { blocked: noop, top: noop, clear: noop } })
+    expect(plain(summary.full)).toBe('40 tickets · 1 with agent loaded')
+    expect(plain(summary.full)).not.toBe('40 tickets · 1 with agent')
+    expect(withAgentsIsPartial(true, 20, 40, false)).toBe(true)
+    expect(withAgentsIsPartial(true, 40, 40, false)).toBe(false)
+    expect(withAgentsIsPartial(false, 20, 40, true)).toBe(false)
+    expect(withAgentsIsPartial(true, 0, null, false)).toBe(true)
+  })
+
+  it('keeps a transient settings line from taking the phone release slot', () => {
+    const act = { retry: noop, needs: noop }
+    expect(phoneRoom(settingsFooter({ saving: true, failed: false, needs: 0, act }))).toBe(false)
+    expect(phoneRoom(settingsFooter({ saving: false, failed: true, needs: 0, act }))).toBe(false)
+    expect(phoneRoom(settingsFooter({ saving: false, failed: false, needs: 0, act }))).toBe(false)
+    expect(phoneRoom(settingsFooter({ saving: false, failed: false, needs: 2, act }))).toBe(true)
   })
 
   it('says nothing when settings are calm, and a skeleton while a screen loads', () => {

@@ -376,7 +376,23 @@ function rowClick(event: MouseEvent, id: string) {
 function menuHistory() {
   if (!reveal() || !showRemoved.value) toggleHistory()
 }
-defineExpose({ toggleHistory, menuHistory, reveal })
+// A footer jump may name a session this list has folded away. Open its
+// ancestors (and the ended bucket, when it lives there) before the page focuses the row.
+function revealSession(id: string) {
+  showRemoved.value = false
+  const open = (branch: Branch, ancestors: string[]): boolean => {
+    if (branch.view.session.id === id) {
+      for (const ancestor of ancestors) expanded.value[ancestor] = true
+      return true
+    }
+    return branch.children.some(child => open(child, [...ancestors, branch.view.session.id]))
+  }
+  forest.value.some(branch => open(branch, []))
+  const holds = (branch: Branch): boolean => branch.view.session.id === id || branch.children.some(holds)
+  if (roots('stopped').some(holds)) showStopped.value = true
+  reveal()
+}
+defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 </script>
 
 <template>
