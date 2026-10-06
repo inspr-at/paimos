@@ -3,6 +3,7 @@ package db
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -12,6 +13,27 @@ import (
 )
 
 type keyScopeUseContextKey struct{}
+
+// ErrKeyAuthorityChanged rejects a request authenticated before key adoption.
+// The caller must authenticate again to capture the current person ceiling.
+var ErrKeyAuthorityChanged = errors.New("agent key authority changed")
+
+// ValidateKeyCreatorTx checks the authenticated creator snapshot under the
+// key-use fence, before visibility or permission decisions use that snapshot.
+// It takes no row locks; adoption holds the same admission fence until commit.
+func ValidateKeyCreatorTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	if p.Kind != tenant.Agent || p.KeyID == "" {
+		return nil
+	}
+	var creator string
+	err := tx.QueryRow(ctx, `SELECT coalesce(created_by_principal_id::text,'') FROM agent_keys
+	 WHERE tenant_id=$1::uuid AND id=$2::uuid AND principal_id=$3::uuid`, p.TenantID, p.KeyID, p.ID).Scan(&creator)
+	if errors.Is(err, pgx.ErrNoRows) || err == nil && !strings.EqualFold(creator, p.KeyCreatorID) {
+		return ErrKeyAuthorityChanged
+	}
+	return err
+}
+
 type keyScopeUseBatch struct {
 	tenantID string
 	keyIDs   []string

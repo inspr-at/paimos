@@ -266,27 +266,25 @@ test('old workspace policy bookmarks open the moved card', async ({ page }) => {
 test('old workspace bookmarks redirect during section and hash changes inside Settings', async ({ page }) => {
   await setup(page)
   await page.goto('/settings/personal')
-  // Bookmark arrival deliberately scrolls to its card. Compare sticky controls
-  // at the same scroll position, preserving the guard's full geometry checks.
-  async function resetScroll() {
+  // Bookmark arrival deliberately scrolls to its card and rings it. The card
+  // renders only once its data is in, and the arrival watcher polls for it, so
+  // the scroll trails the card by up to one poll. The ring is the barrier: only
+  // after it shows has the scroll happened, and resetting afterwards compares
+  // the sticky controls at the same scroll position (a reset before the scroll
+  // let the scroll land between reset and measurement; CI saw navigation.y
+  // off by 192 px, AEON-724 PR #299).
+  async function arrivedThenReset(id: string) {
+    await expect(page.locator(`#${id}`)).toBeVisible()
+    await expect(page.locator(`#${id}.arrived`)).toBeVisible()
     await page.locator('main').evaluate(el => el.scrollTo(0, 0))
     await expect.poll(() => page.locator('main').evaluate(el => el.scrollTop)).toBe(0)
-  }
-  // The card renders once its data has loaded; the deep link then scrolls to it
-  // and marks it arrived. Resetting before that mark races the arrival scroll,
-  // which then wins and leaves the body scrolled (CI, PR #310).
-  async function arrivedAt(id: string) {
-    const card = page.locator(`#${id}`)
-    await expect(card).toBeVisible()
-    await expect(card).toHaveClass(/\barrived\b/)
-    await resetScroll()
   }
   const guard = await controlStability(page, { navigation: sections(page), personal: sections(page).getByRole('link', { name: /^Personal/ }) })
   for (const anchor of ['estimates', 'agent-activity', 'silent-sessions']) {
     await guard.check(async () => {
       await page.evaluate(id => import('/src/router.ts').then(({ router }) => router.push(`/settings/workspace?source=bookmark#${id}`)), anchor)
       await expect(page).toHaveURL(`/settings/agents?source=bookmark#${anchor}`)
-      await arrivedAt(anchor)
+      await arrivedThenReset(anchor)
     })
   }
   await guard.check(async () => {
@@ -294,12 +292,12 @@ test('old workspace bookmarks redirect during section and hash changes inside Se
     await expect(page).toHaveURL('/settings/workspace')
     await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push({ hash: '#status-autopilot' })))
     await expect(page).toHaveURL('/settings/autopilot#status-autopilot')
-    await arrivedAt('status-autopilot')
+    await arrivedThenReset('status-autopilot')
   })
   await guard.check(async () => {
     await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/settings/workspace#work-vocabulary')))
     await expect(page).toHaveURL('/settings/vocabulary#work-vocabulary')
-    await arrivedAt('work-vocabulary')
+    await arrivedThenReset('work-vocabulary')
   })
   guard.done()
 })

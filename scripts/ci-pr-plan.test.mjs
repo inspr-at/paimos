@@ -64,6 +64,26 @@ test('real rename/delete diff widens specs and includes a rename source outside 
   }
 });
 
+test('instruction-only PRs require full CI while ordinary documentation stays docs-only (AEON-766)', () => {
+  for (const [path, lane] of [['AGENTS.md', 'full'], ['CLAUDE.md', 'full'],
+    ['README.md', 'docs-only'], ['docs/x.md', 'docs-only']]) {
+    const repo = repository();
+    repo.file(path, 'changed\n');
+    const head = repo.commit();
+    assert.equal(classifyPR('pull_request', repo.event(head), { git: repo.git }).lane, lane, path);
+  }
+  const rollout = JSON.parse(readFileSync(new URL('./rules-bootstrap/rollout.json', import.meta.url), 'utf8'));
+  const pinned = rollout.targets.flatMap(({ target, candidate }) => [target, candidate]);
+  for (const path of [...pinned, 'docs/AGENTS.md', 'docs/nested/CLAUDE.md', 'web/AGENTS.md',
+    'internal/auth/CLAUDE.md', 'cmd/aeon/AGENTS.md', 'internal/rulesimport/testdata/pack/AGENTS.md',
+    'scripts/audit/AGENTS.md', 'agents.md', 'docs/claude.MD', 'internal/auth/cLaUdE.mD']) {
+    assert.equal(classifyPaths([path]).lane, 'full', path);
+    assert.equal(classifyPaths(['README.md', path]).lane, 'full', path);
+  }
+  for (const path of ['README.md', 'docs/x.md', 'docs/guide.txt', 'CHANGELOG.md', 'LICENSE'])
+    assert.equal(classifyPaths([path]).lane, 'docs-only', path);
+});
+
 test('Markdown fixtures and implementation documentation require full validation', () => {
   for (const path of ['internal/rulesimport/testdata/pack/AGENTS.md',
     'internal/db/migrations/README.md', 'scripts/audit/rubric.md', 'web/tests/fixture.md',
@@ -378,6 +398,7 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
       // the full layout; narrowed modes in this matrix use their wider layout.
       const layout = flag === 'on' && event === 'pull_request' && mode === 'static' ? 'static' : 'full';
       const context = {'github.event_name': event, 'github.ref': 'refs/heads/main', 'github.run_attempt': '1',
+        'github.repository': 'inspr-at/paimos', 'github.event.pull_request.head.repo.full_name': 'inspr-at/paimos',
         'needs.ci-plan.outputs.lane': raw, 'needs.ci-plan.result': 'success',
         'needs.tier-plan.outputs.lane': lane, 'needs.tier-plan.outputs.mode': mode,
         'needs.tier-plan.outputs.layout': layout, 'needs.tier-plan.result': 'success',
@@ -432,6 +453,7 @@ test('merge-group workflow retains full matrices, job gates and execution proofs
     for (const mode of ['essential', 'full']) for (const layout of ['static', 'full']) {
       const label = `${event}/${mode}/${layout}`;
       const context = {'github.event_name': event, 'github.ref': 'refs/heads/main', 'github.run_attempt': '1',
+        'github.repository': 'inspr-at/paimos', 'github.event.pull_request.head.repo.full_name': 'inspr-at/paimos',
         'needs.ci-plan.result': 'success', 'needs.tier-plan.result': 'success',
         'needs.tier-plan.outputs.lane': 'full', 'needs.tier-plan.outputs.mode': mode,
         'needs.tier-plan.outputs.layout': layout, 'needs.tree-reuse.outputs.reuse': 'none',

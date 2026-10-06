@@ -130,6 +130,7 @@ export const createAgent = (body: { name: string; description?: string; workspac
 // Agent keys (existing endpoints): a new key's secret is shown only once.
 export interface AgentKeyCreated { id: string; token: string; prefix: string; name: string; expires_at: string | null }
 export const createAgentKey = (agent: PrincipalRef, expiresAt: string | null, scopes: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { principal_id: agent.principal_id, name: agent.name, scopes, ...(expiresAt ? { expires_at: expiresAt } : {}) })
+export const adoptAgentKey = (keyId: string) => call<AgentKey>(`/agent-keys/${id(keyId)}/adopt`, 'POST')
 export const revokeAgentKey = (keyId: string) => call<void>(`/agent-keys/${id(keyId)}`, 'DELETE')
 export const getAgentKeyScopes = (keyId: string) => call<{ key: AgentKey; grantable_scopes: string[]; agent_role?: Role | null; role_grantable_scopes?: string[] }>(`/agent-keys/${id(keyId)}/scopes`)
 export const changeAgentKeyScopes = (keyId: string, add: string[], remove: string[], roleExtension?: { role_id: string; add: string[] }, expiresAt?: string | null) => call<AgentKey>(`/agent-keys/${id(keyId)}/scopes`, 'PATCH', { add, remove, ...(roleExtension ? { role_extension: roleExtension } : {}), ...(expiresAt === undefined ? {} : { expires_at: expiresAt }) })
