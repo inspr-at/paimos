@@ -21,11 +21,13 @@ func TestOwnerWorkstationAuthLockInventory(t *testing.T) {
 		"owner_workstation.go:auditWorkstation":       "tenant:NO KEY UPDATE",
 		"owner_workstation.go:handleOwnerWorkstation": "pairing.Mutation",
 		"store.go:resolveOIDCPerson":                  "tenant:NO KEY UPDATE",
-		"store.go:issueAgentKeyTx":                    "operator.Ensure tenant:UPDATE",
-		"store.go:grantJourneyScopes":                 "operator.Ensure",
-		"store.go:revokeAgentKey":                     "tenant:NO KEY UPDATE",
-		"store.go:revokeAgentKeyTx":                   "tenant.NO_KEY_UPDATE operator.Ensure",
-		"store.go:rotateAgentKeyWithScopes":           "tenant:UPDATE",
+		// AEON-724: the tenant fence precedes the operator actor (tenant -> tree);
+		// key adoption fences the tenant, then authorizes and updates the key row.
+		"store.go:issueAgentKeyTx":          "tenant:NO KEY UPDATE operator.Ensure",
+		"key_adopt.go:adoptAgentKey":        "tenant:NO KEY UPDATE",
+		"store.go:revokeAgentKey":           "tenant:NO KEY UPDATE",
+		"store.go:revokeAgentKeyTx":         "tenant.NO_KEY_UPDATE operator.Ensure",
+		"store.go:rotateAgentKeyWithScopes": "tenant:UPDATE",
 	}
 	files, err := filepath.Glob(filepath.Join("..", "auth", "*.go"))
 	if err != nil || len(files) == 0 {
