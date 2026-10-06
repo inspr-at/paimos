@@ -418,3 +418,67 @@ test('AEON-685: queued verification reports a failed pairing refresh', async ({ 
   await panel(page).locator(`[data-account="${ACCOUNTS.claude}"]`).getByRole('button', { name: 'Verify again', exact: true }).click()
   await expect(page.locator('.toast').filter({ hasText: 'Verification was queued, but the account list could not refresh.' })).toBeVisible()
 })
+
+
+test('AEON-716: stalled verification reports the ownership fence and remains retryable after settlement', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 1100 })
+  const { capacity } = await setup(page)
+  const c = capacity.computers[0] as unknown as PairingView
+  const e = c.enrollments.find(e => e.account_id === ACCOUNTS.claude)!
+  Object.assign(e, { can_verify: true, verification_state: 'starting', verification_stalled: true, verification_error: 'verification_timeout' })
+  Object.assign(c, { revision: 1, harness_statuses: { claude: 'ready' }, harness_details: { claude: { state: 'ready' } }, verification_capabilities: { claude: { supported: true, policy: 'read_only', reason: '' } } })
+  let attempts = 0
+  await page.route('**/api/agent-pairing/computers/*/enrollments/*/verify', route => {
+    expect(route.request().postDataJSON()).toEqual({ expected_revision: 1, expected_verification_run_id: e.verification_run_id })
+    attempts++
+    if (attempts === 1) return route.fulfill({ status: 409, json: { code: 'verification_active' } })
+    Object.assign(e, { verification_run_id: 'b0000000-0000-4000-8000-000000000716', verification_state: 'queued', verification_stalled: false, verification_error: '' })
+    return route.fulfill({ json: { account_id: e.account_id, run_id: e.verification_run_id } })
+  })
+  await page.goto(`/agents?verify_account=${ACCOUNTS.claude}`)
+  const row = panel(page).locator(`[data-account="${ACCOUNTS.claude}"]`)
+  const button = row.getByRole('button', { name: 'Verify again', exact: true })
+  await expect(row.getByText('Verification stalled', { exact: true })).toBeVisible()
+  await expect(button).toBeEnabled()
+  await expectStableControls({
+    controls: { verify: button, more: row.getByRole('button', { name: /^More for/ }), clickedRow: row },
+    scrollAreas: { panel: panel(page) },
+    interactions: [
+      { name: 'unconfirmed process cannot be replaced', run: async () => {
+        await button.click()
+        await expect(page.getByText('The helper must confirm that the previous check stopped and settle its reports before another can start.', { exact: true })).toBeVisible()
+        await expect(row.getByText('Verification stalled', { exact: true })).toBeVisible()
+        await expect(button).toBeEnabled()
+      } },
+      { name: 'settled failure permits a fresh owner request', run: async () => {
+        await button.click()
+        await expect(row.getByText('Verification queued', { exact: true })).toBeVisible()
+        await expect(button).toBeEnabled()
+      } },
+    ],
+  })
+  expect(attempts).toBe(2)
+})
+
+test('AEON-716: verification warnings preserve offline and account recovery controls', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 1100 })
+  const { capacity } = await setup(page)
+  const c = capacity.computers[0] as unknown as PairingView
+  const e = c.enrollments.find(e => e.account_id === ACCOUNTS.claude)!
+  Object.assign(e, { can_verify: true, verification_state: 'failed', verification_error: 'reporter_unavailable' })
+  Object.assign(c, { connectivity: 'offline', harness_statuses: { claude: 'ready' }, harness_details: { claude: { state: 'ready' } } })
+  await page.goto(`/agents?verify_account=${ACCOUNTS.claude}`)
+  const row = panel(page).locator(`[data-account="${ACCOUNTS.claude}"]`)
+  await expect(row.getByText('Paused · computer offline', { exact: true })).toBeVisible()
+  await expect(row.getByText('Verification failed', { exact: true })).toHaveCount(0)
+  Object.assign(c, { connectivity: 'online', harness_statuses: { claude: 'login_required' }, harness_details: { claude: { state: 'login_required', reason: 'login_required' } } })
+  await page.reload()
+  await expect(row.getByText('Signed out', { exact: true })).toBeVisible()
+  await expect(row.getByRole('button', { name: 'claude auth login', exact: true })).toBeVisible()
+  Object.assign(e, { verification_state: 'starting', verification_stalled: true })
+  Object.assign(c, { harness_statuses: { claude: 'blocked' }, harness_details: { claude: { state: 'blocked', reason: 'dependency_invalid' } } })
+  await page.reload()
+  await expect(row.getByText('Dependency needs repair', { exact: true })).toBeVisible()
+  await expect(row.getByRole('button', { name: 'aeon-agentd repin --harness claude', exact: true })).toBeVisible()
+  await expect(row.getByText('Verification stalled', { exact: true })).toHaveCount(0)
+})
