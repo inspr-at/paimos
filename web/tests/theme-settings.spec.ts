@@ -4,10 +4,13 @@ import { mkdir } from 'node:fs/promises'
 import { fixtures, mockWork, me, watchErrors } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { ActiveTheme, ThemeRecord } from '../src/lib/themes'
+import { CARD_COLOURS, colourContrast } from '../src/lib/themeEngine'
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
 const record = (id: string, name: string, scope: ThemeRecord['scope']): ThemeRecord => ({ id, name, scope, tenant_id: 't1', owner_principal_id: scope === 'personal' ? me.id : null, revision: 3, created_at: '', updated_at: '', values: { primary: { light: '#0e6f6c', dark: null }, secondary: { light: '#d69b31', dark: '#e2b45a' }, recurring_marker: { source: 'secondary', custom: null }, agents: { avatar: 'robot-5', ring: 'still', hover: true, size: 90, palette: 'deutan' } } })
-async function setup(page: Page, options: { admin?: boolean; fail?: number; defaultLater?: boolean } = {}) {
-  await mockWork(page, fixtures(), { admin: options.admin })
+async function setup(page: Page, options: { admin?: boolean; fail?: number; defaultLater?: boolean; markdownBody?: string } = {}) {
+  const work = fixtures()
+  if (options.markdownBody) work.nodes.find(node => node.key === 'PHAROS-12')!.body = options.markdownBody
+  await mockWork(page, work, { admin: options.admin })
   const data = { items: [record('default', 'Porcelain', 'default'), record('contrast', 'High contrast', 'workspace'), record('copper', 'Copper', 'personal')], selected: 'copper', revision: 17, writes: [] as { method: string; path: string; body: Record<string, unknown> | null }[], fail: options.fail ?? 0, copies: 0 }
   const active = (): ActiveTheme => ({ theme: data.items.find(item => item.id === data.selected)!, default_theme_id: 'default', selected_theme_id: data.selected === 'default' ? null : data.selected, revision: data.revision, fallback_notice: null })
   await page.route('**/api/**', async route => {
@@ -144,6 +147,83 @@ test('derived contrast preserves chosen colours and staged edits apply only afte
   expect(await primary()).not.toBe('#ffffff')
   expect(await page.locator('#aeon-theme').textContent()).toBe(css)
   await expect(page.locator('#aeon-theme')).toHaveCount(1)
+})
+function rgbHex(value: string) {
+  const match = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(value)
+  expect(match, `expected an opaque rendered colour: ${value}`).not.toBeNull()
+  return '#' + match!.slice(1).map(channel => Number(channel).toString(16).padStart(2, '0')).join('')
+}
+async function saveExtremePrimary(page: Page) {
+  await colour(page, 'Primary accent, light', '#ffffff')
+  await colour(page, 'Primary accent, dark', '#000000')
+  await bar(page).getByRole('button', { name: /^Save/ }).click()
+  await expect(bar(page)).toHaveCount(0)
+  await expect(page.locator('.theme-status')).toContainText('Saved.')
+}
+test('saved extreme primary accents keep ordinary and Markdown links readable', async ({ page }, testInfo) => {
+  await setup(page, { markdownBody: '[Dokumentation für wiederkehrende Aufgaben](https://example.com/docs)' })
+  await page.goto('/settings/theme')
+  await saveExtremePrimary(page)
+  await page.goto('/p/PHAROS/PHAROS-12')
+  const markdown = page.locator('.ticket-ws .markdown-body a[href="https://example.com/docs"]')
+  await expect(markdown).toBeVisible()
+  // An ordinary anchor beside the real Markdown component exercises base.css
+  // without inheriting MarkdownBody's scoped link rule. Both use the card surface.
+  await markdown.evaluate(link => {
+    const card = link.closest('.markdown-body')!.parentElement!
+    card.style.backgroundColor = 'var(--surface-raised)'
+    const ordinary = document.createElement('a')
+    ordinary.href = 'https://example.com/ordinary'
+    ordinary.textContent = 'Arbeitsbereich für persönliche Farbgestaltung'
+    ordinary.dataset.testid = 'theme-base-link'
+    card.append(ordinary)
+  })
+  const ordinary = page.getByTestId('theme-base-link')
+  for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 950 })
+    await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+    for (const link of [ordinary, markdown]) {
+      await expect(link).toBeVisible()
+      const rendered = await link.evaluate(el => ({ colour: getComputedStyle(el).color,
+        surface: getComputedStyle(el.closest('.markdown-body')?.parentElement ?? el.parentElement!).backgroundColor }))
+      expect(rgbHex(rendered.surface)).toBe(CARD_COLOURS[mode])
+      expect(colourContrast(rgbHex(rendered.colour), rgbHex(rendered.surface)), `${width} ${mode}: link text contrast`).toBeGreaterThanOrEqual(4.5)
+    }
+    await markdown.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`links-${width}-${mode}.png`) })
+  }
+})
+test('saved extreme primary accents retain visible keyboard focus without moving controls', async ({ page }, testInfo) => {
+  await setup(page)
+  await page.goto('/settings/theme')
+  await saveExtremePrimary(page)
+  const primary = page.getByRole('button', { name: 'Primary accent, light', exact: true })
+  const secondary = page.getByRole('button', { name: 'Secondary accent, light', exact: true })
+  for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 950 })
+    await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+    await primary.scrollIntoViewIfNeeded()
+    await expectStableControls({ controls: { primary, secondary }, scrollAreas: { page: page.locator('.settings-page') }, interactions: [{
+      name: `${width} ${mode}: keyboard focus`, run: async () => {
+        await primary.focus()
+        await page.keyboard.press('Shift+Tab')
+        await page.keyboard.press('Tab')
+        await expect(primary).toBeFocused()
+        expect(await primary.evaluate(el => el.matches(':focus-visible'))).toBe(true)
+        const rendered = await primary.evaluate(el => {
+          const css = getComputedStyle(el)
+          return { shadow: css.boxShadow, outline: css.outlineColor, style: css.outlineStyle, width: css.outlineWidth }
+        })
+        const ring = /^(rgb\(\d+, \d+, \d+\)) 0px 0px 0px 2px$/.exec(rendered.shadow)
+        expect(ring, 'one opaque focus ring without glow').not.toBeNull()
+        expect(colourContrast(rgbHex(ring![1]!), CARD_COLOURS[mode])).toBeGreaterThanOrEqual(3)
+        expect(rendered.style).toBe('solid')
+        expect(rendered.width).toBe('2px')
+        expect(colourContrast(rgbHex(rendered.outline), CARD_COLOURS[mode])).toBeGreaterThanOrEqual(3)
+      },
+    }] })
+    await page.screenshot({ path: testInfo.outputPath(`focus-${width}-${mode}.png`) })
+  }
 })
 test('workspace themes are read-only to members; duplicate and delete use captured revisions', async ({ page }) => {
   const data = await setup(page); await page.goto('/settings/theme')

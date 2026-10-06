@@ -11330,6 +11330,10 @@
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"save preserves Agents, manual dark and derived reset; invalid hex never writes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents keep ordinary and Markdown links readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents retain visible keyboard focus without moving controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"selection after a deletion conflict restores editable Colours and Save","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"unsaved edits survive navigating away and back; a clean return refreshes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13375,6 +13379,8 @@
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"first-paint bootstrap restores derived CSS before app startup with its CSP nonce","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"first-paint bootstrap tolerates unavailable storage and rejects corrupt, oversized or unsafe CSS","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"keyboard focus is a solid contrast-safe ring for extreme primary accents","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"token aliases follow both accents and every marker source without theming semantic colours","tier":"ESSENTIAL"}
     ,

@@ -77,6 +77,16 @@ test('token aliases follow both accents and every marker source without theming 
     assert.equal(themeTokens(edited, mode)['--secondary'], tokens['--secondary'])
   }
 })
+test('keyboard focus is a solid contrast-safe ring for extreme primary accents', () => {
+  for (const hex of ['#000000', '#ffffff', '#ff0000', '#0000ff']) {
+    for (const mode of ['light', 'dark'] as const) {
+      const tokens = themeTokens({ ...PORCELAIN, primary: { light: hex, dark: hex } }, mode)
+      const ring = /^0 0 0 2px (#[0-9a-f]{6})$/i.exec(tokens['--focus-ring']!)
+      assert.ok(ring, `${hex} ${mode}: one opaque ring without a glow`)
+      assert.ok(colourContrast(ring[1]!, CARD_COLOURS[mode]) >= 3, `${hex} ${mode}: visible focus on cards`)
+    }
+  }
+})
 test('Porcelain generated accent blocks cannot drift from the engine in CI', () => {
   const css = readFileSync(new URL('../src/styles/tokens.css', import.meta.url), 'utf8')
   const blocks = [...css.matchAll(/^[ \t]*\/\* BEGIN GENERATED THEME (light|dark)[^\n]*\*\/[\s\S]*?^[ \t]*\/\* END GENERATED THEME \1 \*\//gm)]

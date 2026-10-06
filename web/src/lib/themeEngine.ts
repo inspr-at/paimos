@@ -121,7 +121,7 @@ export function themeTokens(v: ThemeValues, mode: ColourMode): Record<string, st
     '--seg-on': light ? `linear-gradient(180deg, #fff, ${P.t3})` : `linear-gradient(180deg, ${mix(P.fill, 24)}, ${mix(P.fill, 12)})`,
     '--btn-bg-hover': light ? `linear-gradient(180deg, #fff, ${mix(P.t3, 80)})` : `linear-gradient(180deg, ${mix(P.fill, 18)}, ${mix(P.fill, 8)})`,
     '--glass-rim': light ? mix(P.t1, 45) : mix(P.fill, 18), '--wash-1': light ? mix(P.t2, 85) : mix(P.fill, 12),
-    '--focus-ring': light ? `0 0 0 2px ${P.t1}, 0 0 18px ${mix(P.t1, 80)}` : `0 0 0 2px ${mix(P.fill, 75)}, 0 0 16px ${mix(P.fill, 35)}`,
+    '--focus-ring': `0 0 0 2px ${P.line}`,
     '--avatar-bg': light ? `radial-gradient(circle at 30% 25%, #fff, ${P.t2})` : `radial-gradient(circle at 30% 25%, ${mix(P.fill, 35)}, ${mix(P.fill, 10)})`,
     '--mark-hl': light ? mix(S.t1, 70) : mix(S.fill, 35), '--wash-3': light ? mix(S.t1, 16) : mix(S.fill, 8),
   }

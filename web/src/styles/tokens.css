@@ -156,7 +156,7 @@
   --btn-bg-hover: linear-gradient(180deg, #fff, color-mix(in srgb, #e4f7f6 80%, transparent));
   --glass-rim: color-mix(in srgb, #9fe5e1 45%, transparent);
   --wash-1: color-mix(in srgb, #c4f0ed 85%, transparent);
-  --focus-ring: 0 0 0 2px #9fe5e1, 0 0 18px color-mix(in srgb, #9fe5e1 80%, transparent);
+  --focus-ring: 0 0 0 2px #0e6f6c;
   --avatar-bg: radial-gradient(circle at 30% 25%, #fff, #c4f0ed);
   --mark-hl: color-mix(in srgb, #f0d1a2 70%, transparent);
   --wash-3: color-mix(in srgb, #f0d1a2 16%, transparent);
@@ -235,7 +235,7 @@
   --btn-bg-hover: linear-gradient(180deg, color-mix(in srgb, #a4e5df 18%, transparent), color-mix(in srgb, #a4e5df 8%, transparent));
   --glass-rim: color-mix(in srgb, #a4e5df 18%, transparent);
   --wash-1: color-mix(in srgb, #a4e5df 12%, transparent);
-  --focus-ring: 0 0 0 2px color-mix(in srgb, #a4e5df 75%, transparent), 0 0 16px color-mix(in srgb, #a4e5df 35%, transparent);
+  --focus-ring: 0 0 0 2px #a4e5df;
   --avatar-bg: radial-gradient(circle at 30% 25%, color-mix(in srgb, #a4e5df 35%, transparent), color-mix(in srgb, #a4e5df 10%, transparent));
   --mark-hl: color-mix(in srgb, #e2b45a 35%, transparent);
   --wash-3: color-mix(in srgb, #e2b45a 8%, transparent);
@@ -315,7 +315,7 @@
     --btn-bg-hover: linear-gradient(180deg, color-mix(in srgb, #a4e5df 18%, transparent), color-mix(in srgb, #a4e5df 8%, transparent));
     --glass-rim: color-mix(in srgb, #a4e5df 18%, transparent);
     --wash-1: color-mix(in srgb, #a4e5df 12%, transparent);
-    --focus-ring: 0 0 0 2px color-mix(in srgb, #a4e5df 75%, transparent), 0 0 16px color-mix(in srgb, #a4e5df 35%, transparent);
+    --focus-ring: 0 0 0 2px #a4e5df;
     --avatar-bg: radial-gradient(circle at 30% 25%, color-mix(in srgb, #a4e5df 35%, transparent), color-mix(in srgb, #a4e5df 10%, transparent));
     --mark-hl: color-mix(in srgb, #e2b45a 35%, transparent);
     --wash-3: color-mix(in srgb, #e2b45a 8%, transparent);
