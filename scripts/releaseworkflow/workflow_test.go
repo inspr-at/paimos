@@ -25,9 +25,11 @@ type step struct {
 }
 
 type job struct {
-	RunsOn   string `yaml:"runs-on"`
-	If       string
-	Strategy struct {
+	TimeoutMinutes int `yaml:"timeout-minutes"`
+	Env            map[string]string
+	RunsOn         string `yaml:"runs-on"`
+	If             string
+	Strategy       struct {
 		FailFast bool `yaml:"fail-fast"`
 		Matrix   struct {
 			Include []struct {
@@ -45,6 +47,7 @@ type job struct {
 }
 
 type workflow struct {
+	Env         map[string]string
 	On          map[string]any
 	Permissions map[string]string
 	Jobs        map[string]job
