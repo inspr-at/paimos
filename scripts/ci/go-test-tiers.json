@@ -2932,6 +2932,10 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyTrimTenantIsolationAndBoundedInput","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestLeadSettingsAgentRoutesReadOnly","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestLeadSettingsProductionMiddleware","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestLeadUsageAgentRouteCeiling","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestLinkedIdentityEmailFallback","tier":"GATED-FULL"}
@@ -3959,6 +3963,10 @@
     {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIReadAndRecord","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIRejectsUnboundedAndPrivateEvidence","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestLeadSettingsCLIContractAndValidation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestLeadSettingsCLIUsesExplicitPersonSession","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestLegacyCodexStateDoesNotRecount","tier":"GATED-FULL"}
     ,
@@ -5658,6 +5666,18 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestLatestPreferencesAcceptEveryProfileHarness","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadPolicyInheritanceAndBounds","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsArchivedKindsRemainReadableAndResettable","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsConcurrentRevisionHasOneWinner","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsInputAndCurrentBindings","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsRevisionsOwnershipInheritanceAndRedaction","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsWriteRechecksRevocation","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelKeyMatchesAliasesAndAPIIDs","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestNewHarnessProfileValidation","tier":"GATED-FULL"}
@@ -6741,6 +6761,8 @@
     {"kind":"go","package":"internal/reportercontract","name":"TestHarnessSharedComponentAddition","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestHarnessStatusAndHeartbeatContract","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestLeadSettingsStartGatesSchema","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestNoRequestStatusAndHeartbeatAreByteIdenticalToV1","tier":"ESSENTIAL"}
     ,

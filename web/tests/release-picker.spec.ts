@@ -288,6 +288,103 @@ test('Plan adds three existing tickets in one go and Start build counts them', a
 })
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`retained existing picker refreshes revision and keeps controls stable ${width} ${theme}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    await page.addInitScript(value => {
+      const apply = () => { document.documentElement.dataset.theme = value }
+      if (document.documentElement) apply()
+      else document.addEventListener('DOMContentLoaded', apply, { once: true })
+    }, theme)
+    const errors = watchErrors(page)
+    await mockWork(page, fixtures())
+    const world = journeyWorld('plan')
+    await mockJourney(page, world)
+    const calls = await install(page, world)
+    let release!: () => void, started!: () => void
+    const hold = new Promise<void>(resolve => { release = resolve })
+    const requested = new Promise<void>(resolve => { started = resolve })
+    await page.route('**/releases/r-2/plan', async route => {
+      started()
+      await hold
+      const included = new Set(route.request().postDataJSON().included_ticket_ids)
+      const walker = world.walkers['r-2']
+      walker.tickets = walker.tickets.map(ticket => ({ ...ticket, included: included.has(ticket.ticket_node_id) }))
+      walker.revision = 20
+      world.journey.revision++
+      await route.fulfill({ json: walker })
+    })
+    try {
+      await page.goto('/p/PHAROS/journey')
+      await page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 2 of 3/ }).click()
+      await requested
+      await page.getByRole('button', { name: 'Add existing', exact: true }).click()
+      const picker = page.getByRole('dialog', { name: 'Add existing tickets' })
+      const list = picker.getByRole('listbox', { name: 'Existing tickets' })
+      const row = list.getByRole('option').filter({ hasText: 'PHAROS-21' })
+      const add = picker.getByRole('button', { name: 'Add selected' })
+      await expect(row).toBeVisible()
+      await expectStableControls({
+        controls: { add, cancel: picker.getByRole('button', { name: 'Cancel' }), search: picker.getByLabel('Find a ticket'),
+          status: picker.getByLabel('Status', { exact: true }), epic: picker.getByLabel('Epic', { exact: true }),
+          type: picker.getByLabel('Type', { exact: true }), filters: picker.locator('.filters'), list, row,
+          ...(width === 390 ? { frame: picker } : {}) },
+        scrollAreas: { picker, list },
+        interactions: [
+          { name: 'retain a selection', run: async () => { await row.click(); await expect(row).toHaveAttribute('aria-selected', 'true') } },
+          { name: 'refresh the owner and options', run: async () => {
+            const refreshed = page.waitForResponse(response => response.url().includes('/ticket-options') && response.request().method() === 'GET')
+            release()
+            await refreshed
+            await expect(row).toHaveAttribute('aria-selected', 'true')
+            await expect(add).toBeEnabled()
+          } },
+        ],
+      })
+      const evidence = resolve('test-results/aeon-706-planbind')
+      mkdirSync(evidence, { recursive: true })
+      await page.screenshot({ path: resolve(evidence, `picker-refresh-${width}-${theme}.png`), animations: 'disabled' })
+      await add.click()
+      await expect(picker).toHaveCount(0)
+      expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership')).map(call => call.body)).toEqual([
+        { expected_revision: 20, ticket_node_ids: ['n-21'], confirm_move: false },
+      ])
+      await expect(page.locator('.toast').filter({ hasText: 'Added 1 leaf to release 2.' })).toBeVisible()
+      expect(errors).toEqual([])
+    } finally { release() }
+  })
+}
+
+test('existing picker recovers a revision conflict without losing the selection', async ({ page }) => {
+  const errors = watchErrors(page)
+  await mockWork(page, fixtures())
+  const world = journeyWorld('plan')
+  await mockJourney(page, world)
+  const calls = await install(page, world)
+  await page.goto('/p/PHAROS/journey')
+  await page.getByRole('button', { name: 'Add existing', exact: true }).click()
+  const picker = page.getByRole('dialog', { name: 'Add existing tickets' })
+  const selected = picker.getByRole('checkbox', { name: 'Select PHAROS-21' })
+  const add = picker.getByRole('button', { name: 'Add selected' })
+  await selected.check()
+  world.walkers['r-2'].revision = 20
+  const refreshed = page.waitForResponse(response => response.url().includes('/ticket-options') && response.request().method() === 'GET')
+  await add.click()
+  await refreshed
+  await expect(picker.getByRole('alert')).toContainText('The release changed')
+  await expect(selected).toBeChecked()
+  await expect(page.locator('.toast').filter({ hasText: /Added .* to release/ })).toHaveCount(0)
+  await add.click()
+  await expect(picker).toHaveCount(0)
+  expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/membership')).map(call => call.body)).toEqual([
+    { expected_revision: 7, ticket_node_ids: ['n-21'], confirm_move: false },
+    { expected_revision: 20, ticket_node_ids: ['n-21'], confirm_move: false },
+  ])
+  await expect(page.locator('.toast').filter({ hasText: 'Added 1 leaf to release 2.' })).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`existing parent picker counts leaves ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.emulateMedia({ colorScheme: theme })
