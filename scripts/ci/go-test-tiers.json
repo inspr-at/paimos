@@ -8152,6 +8152,10 @@
     ,
     {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageHoldsReleaseAndRetryDoNotDoubleCount","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsagePrivacyIdentifierCIBody","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsagePrivacyIdentifierDigitsAreNotTheQuantity","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageSharedRunNeverAddsLeadAndWorkerCounters","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageStableAttemptsAndReplay","tier":"ESSENTIAL"}
