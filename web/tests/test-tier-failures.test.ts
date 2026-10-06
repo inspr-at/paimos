@@ -220,17 +220,7 @@ export const collectWeb = () => {
   appendFileSync(${JSON.stringify(calls)},'collection\\n');
   return ${JSON.stringify({tests:[essential,nightly]})};
 };`
-  // The intentionally two-case inventory needs its own exception manifest;
-  // unrelated real deletion groups are outside this collection-count fixture.
-  const tierFile=fileURLToPath(new URL('../../scripts/ci/web-test-tiers.json',import.meta.url))
-  writeFileSync(hook,`import fs from 'node:fs';
-import {registerHooks,syncBuiltinESMExports} from 'node:module';
-const read=fs.readFileSync;
-fs.readFileSync=function(path,...args) {
-  if(String(path)===${JSON.stringify(tierFile)}) return ${JSON.stringify(JSON.stringify({version:1,implicitTier:'GATED-FULL',tests:[essential,nightly]}))};
-  return read.call(this,path,...args);
-};
-syncBuiltinESMExports();
+  writeFileSync(hook,`import {registerHooks} from 'node:module';
 registerHooks({load(url,context,next) {
   if(url===${JSON.stringify(collector)}) return {format:'module',source:${JSON.stringify(wrapper)},shortCircuit:true};
   return next(url,context);

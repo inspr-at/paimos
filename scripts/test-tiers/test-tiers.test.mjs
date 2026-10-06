@@ -16,6 +16,7 @@ import { runnerDecision, runnerSelection } from './cli.mjs'
 import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs'
 import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import { collectGo } from './collect.mjs'
+import { planningWebCases } from './planning-web.mjs'
 import './manifests.test.mjs'
 import './tiers-merge-driver.test.mjs'
 
@@ -40,6 +41,7 @@ const webManifest=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',im
 const fixtureWeb=[...webManifest.tests]
 for(const file of Object.keys(replayGraph)) if (/^tests\/.*\.(?:spec|test)\.ts$/.test(file)&&!fixtureWeb.some(row=>row.file===file&&row.tier!=='ESSENTIAL')) {
   const kind=file.endsWith('.spec.ts')?'browser':file.endsWith('.unit.test.ts')?'vitest':'node'
+  if (kind==='browser' && planningWebCases(repoTree.webTests.get(file))<=fixtureWeb.filter(row=>row.file===file).length) continue
   fixtureWeb.push({kind,file,name:'implicit source-owner fixture',...(kind==='browser'?{config:file==='tests/performance.spec.ts'?'playwright.perf.config.ts':'playwright.ui.config.ts',project:''}:{})})
 }
 const flakyRegistry=JSON.parse(readFileSync(new URL('../ci/known-flaky.json',import.meta.url)))
@@ -49,15 +51,20 @@ for(const entry of flakyRegistry.entries.filter(entry=>entry.key.startsWith('bro
 }
 const knowledge={kind:'browser',file:'tests/knowledge.spec.ts',name:'the Knowledge tab groups by kind, filters, searches the text and moves with keys',config:'playwright.ui.config.ts',project:''}
 if (!fixtureWeb.some(row=>key(row)===key(knowledge))) fixtureWeb.push(knowledge)
-const policyInventories = { go: collectGo(), web: {tests:fixtureWeb} }
+let goInventory
+const policyInventories = { get go() {
+  try { return goInventory ??= collectGo() }
+  catch (error) { throw new Error(`This test requires native Go collection; install Go or run in the offline development shell: ${error.message}`, {cause:error}) }
+}, web: {tests:fixtureWeb} }
 const catalogue = kind => validate(JSON.parse(readFileSync(new URL(`../ci/${kind}-test-tiers.json`,import.meta.url))), policyInventories[kind].tests)
-const replayRows=['go','web'].flatMap(catalogue)
+let cachedReplayRows
+const getReplayRows=()=>cachedReplayRows??=['go','web'].flatMap(catalogue)
 const noPromotions={keys:new Set(),kinds:new Set(),count:0}
 const readRepo=path=>{ try { return readFileSync(resolve(repoRoot,path),'utf8') } catch { return undefined } }
 const realPaths=[...new Set(replay.prs.flatMap(pr=>pr.paths))]
 // Affected-lane policy selection against native Go plus web owner fixtures.
-const on=(paths,extra={})=>select(replayRows,{event:'pull_request',paths,affectedLane:'on',webImports:replayGraph,imports:replay.goImports,tree:repoTree,promotions:noPromotions,readFile:readRepo,...extra})
-const decide=(paths,extra={})=>schedulingDecision('pull_request',paths,path=>readRepo(path)!==undefined,{affectedLane:'on',graph:replayGraph,tree:repoTree,promotions:noPromotions,tests:replayRows,...extra})
+const on=(paths,extra={})=>select(getReplayRows(),{event:'pull_request',paths,affectedLane:'on',webImports:replayGraph,imports:replay.goImports,tree:repoTree,promotions:noPromotions,readFile:readRepo,...extra})
+const decide=(paths,extra={})=>schedulingDecision('pull_request',paths,path=>readRepo(path)!==undefined,{affectedLane:'on',graph:replayGraph,tree:repoTree,promotions:noPromotions,tests:getReplayRows(),...extra})
 const goPackages=selection=>new Set(selection.tests.filter(row=>row.kind==='go'&&row.tier!=='ESSENTIAL').map(row=>row.package))
 const webFiles=selection=>new Set(selection.tests.filter(row=>row.kind!=='go'&&row.tier!=='ESSENTIAL').map(row=>row.file))
 const essentialOnly=selection=>selection.tests.every(row=>row.tier==='ESSENTIAL')
@@ -72,17 +79,17 @@ test('affected kill switch off exactly equals the frozen old selector for all 80
     ['version.json'],['internal/auth/testdata/key_scope_ceiling.json'],['web/tests/settings-shared-harness.html'],['scripts/check-migrations.test.mjs'],['AGENTS.md'],['internal/db/migrations/README.md']]
   for(const {number,paths} of [...replay.prs,...synthetic.map(paths=>({number:paths[0],paths}))]) {
     const options={event:'pull_request',paths,imports:replay.goImports,webImports:replayGraph}
-    const expected=legacy.select(replayRows,options)
+    const expected=legacy.select(getReplayRows(),options)
     for(const affectedLane of [undefined,'','off','ON','true',' on','on '])
-      assert.deepEqual(select(replayRows,{...options,affectedLane,tree:repoTree,promotions:noPromotions,readFile:readRepo}),expected,`PR ${number}, switch ${affectedLane}`)
+      assert.deepEqual(select(getReplayRows(),{...options,affectedLane,tree:repoTree,promotions:noPromotions,readFile:readRepo}),expected,`PR ${number}, switch ${affectedLane}`)
     assert.deepEqual(schedulingDecision('pull_request',paths,()=>true,{graph:replayGraph}),schedulingDecision('pull_request',paths,()=>true,{affectedLane:'off',graph:replayGraph}),`PR ${number}`)
   }
 })
 
 test('merge groups always use the exact full gate with either switch state, including every real diff',()=>{
-  const expected=replayRows.filter(row=>row.tier==='ESSENTIAL'||row.tier==='GATED-FULL')
+  const expected=getReplayRows().filter(row=>row.tier==='ESSENTIAL'||row.tier==='GATED-FULL')
   for(const affectedLane of [undefined,'off','on'])for(const paths of [[],['README.md'],['internal/auth/key.go'],...replay.prs.map(pr=>pr.paths)]) {
-    const selected=select(replayRows,{event:'merge_group',paths,affectedLane,webImports:replayGraph,tree:repoTree,promotions:noPromotions,readFile:readRepo})
+    const selected=select(getReplayRows(),{event:'merge_group',paths,affectedLane,webImports:replayGraph,tree:repoTree,promotions:noPromotions,readFile:readRepo})
     assert.equal(selected.full,true)
     assert.equal(selected.scope,'gated-full')
     assert.deepEqual(selected.tests,expected)
@@ -223,7 +230,7 @@ test('R4 migrations map recognised schema objects to referencing packages; unrea
   assert.ok(readers.size>=1)
   for(const pkg of readers) assert.ok(goPackages(selected).has(pkg),pkg)
   assert.match(selected.reason,/R4: migration schema consumers: .*; consumer packages: /)
-  const unrelated=replayRows.find(row=>row.kind==='go'&&row.tier==='GATED-FULL'&&row.package!=='internal/db'&&!readers.has(row.package))
+  const unrelated=getReplayRows().find(row=>row.kind==='go'&&row.tier==='GATED-FULL'&&row.package!=='internal/db'&&!readers.has(row.package))
   assert.ok(unrelated,'fixture must include an unrelated gated package')
   assert.ok(!selected.tests.includes(unrelated),'narrow SQL selection must omit unrelated gated tests')
   assert.equal(webFiles(selected).size,0,'browser specs are API-mocked; the real server runs in e2e')
@@ -437,7 +444,7 @@ test('R3 real helpers retain essentials and select every mapped importing case, 
     assert.equal(selected.full,false,path)
     assert.match(selected.reason,/R3: helper reverse dependants/)
     const impacted=legacy.reverseDependants(new Set([path.slice(4)]),replayGraph)
-    assert.deepEqual(selected.tests,replayRows.filter(row=>row.tier==='ESSENTIAL'||row.kind!=='go'&&impacted.has(row.file)))
+    assert.deepEqual(selected.tests,getReplayRows().filter(row=>row.tier==='ESSENTIAL'||row.kind!=='go'&&impacted.has(row.file)))
   }
   assert.ok(narrowed>0,'The real data must exercise narrowing')
   const graph={'tests/helpers/shared.ts':[],'tests/helpers/reexport.ts':['tests/helpers/shared.ts'],
@@ -473,13 +480,13 @@ test('trusted tier planner uses base classifier and base graph despite candidate
   const git=args=>execFileSync('git',args,{cwd:directory,env,encoding:'utf8'})
   const file=(path,source)=>{mkdirSync(resolve(directory,path,'..'),{recursive:true});writeFileSync(resolve(directory,path),source)}
   git(['init','-q'])
-  for(const name of ['core.mjs','diff.mjs','collect.mjs','inputs.mjs','migration.mjs','manifests.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
+  for(const name of ['core.mjs','diff.mjs','planning-web.mjs','collect.mjs','inputs.mjs','migration.mjs','manifests.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
   file('scripts/ci/web-test-tiers.json',JSON.stringify({version:1,implicitTier:'GATED-FULL',tests:[]}))
   file('scripts/ci/go-test-tiers.json',JSON.stringify({version:1,implicitTier:'GATED-FULL',tests:[]}))
   file('web/src/unused.ts','export {}')
   file('web/e2e/unused.ts','export {}')
   file('web/tests/helpers/shared.ts','export const value=1')
-  file('web/tests/importer.spec.ts','import "./helpers/shared"')
+  file('web/tests/importer.spec.ts','import {test} from "@playwright/test";\nimport "./helpers/shared";\ntest("case",async()=>{})')
   git(['add','.']);git(['commit','-qm','trusted fixture'])
   const base=git(['rev-parse','HEAD']).trim()
   // The candidate classifier lies, and candidate graph gains 16 importers.
@@ -496,9 +503,11 @@ test('trusted tier planner uses base classifier and base graph despite candidate
   assert.deepEqual([manifest.mode,manifest.layout],['essential','full'])
   file('scripts/ci/web-test-tiers.json',JSON.stringify({version:1,implicitTier:'GATED-FULL',tests:[]}))
   assert.deepEqual(run(['scripts/ci/web-test-tiers.json','README.md']),{mode:'essential',layout:'static',reason:'R1: manifest/static checks: scripts/ci/web-test-tiers.json'})
-  assert.equal(run(['web/tests/helpers/shared.ts']).mode,'full')
+  assert.equal(run(['web/tests/helpers/shared.ts']).mode,'essential',run(['web/tests/helpers/shared.ts']).reason)
   assert.equal(run(['web/tests/helpers/shared.ts']).layout,'full')
-  assert.match(run(['web/tests/helpers/shared.ts']).reason,/browser fan-out unavailable/)
+  assert.match(run(['web/tests/helpers/shared.ts']).reason,/R3: helper reverse dependants/)
+  file('web/tests/importer.spec.ts', 'import "./helpers/shared";\n' + Array.from({length:301},(_,i)=>`test("case ${i}",()=>{});`).join('\n'))
+  assert.equal(run(['web/tests/helpers/shared.ts']).mode,'essential','candidate source cannot rewrite the trusted browser bound')
   assert.equal(run(['scripts/test-tiers/core.mjs','web/tests/helpers/shared.ts']).mode,'full')
   assert.equal(run(['web/tests/extra-0.spec.ts','web/tests/helpers/shared.ts']).mode,'full','new candidate graph nodes must not narrow themselves')
   file('web/tests/new-feature.unit.test.ts','export {}')
@@ -700,7 +709,7 @@ test('OPS-257 lightweight fan-out includes implicit Go functions and widens unkn
   assert.match(impact.reasons[0],/consumer fan-out/)
   const decision = schedulingDecision('pull_request',['web/tests/implicit.spec.ts'],()=>true,{graph:{'tests/implicit.spec.ts':[]}})
   assert.equal(decision.mode,'full')
-  assert.match(decision.reason,/browser fan-out unavailable/)
+  assert.match(decision.reason,/browser fan-out exceeds 300 cases/)
 })
 
 test('runtime reconciliation escapes warning titles and retains browser configuration validation',()=>{
@@ -710,6 +719,30 @@ test('runtime reconciliation escapes warning titles and retains browser configur
   assert.deepEqual(rows.at(-1),{...row,tier:'GATED-FULL',active:true})
   assert.deepEqual(warnings,[])
   for(const strict of [false,true]) assert.throws(()=>validate({version:1,implicitTier:'GATED-FULL',tests:[{...row,config:'old.config.ts',tier:'ESSENTIAL'}]},[row],noFlaky,{strict}),/Changed browser configuration/)
+})
+
+test('deleted deletion-candidate specs warn like stale rows while live essential-only groups remain invalid', () => {
+  const file='tests/deleted.spec.ts', warnings=[]
+  const manifest={version:1,implicitTier:'GATED-FULL',tests:[],deleteCandidateGroups:[{file,tag:'delete-candidate'}]}
+  assert.deepEqual(validate(manifest,[],noFlaky,{warn:text=>warnings.push(text)}),[])
+  assert.deepEqual(warnings,[`::warning::Stale deletion candidate group (dropped): ${file}`])
+  const row={kind:'node',file,name:'live',tier:'ESSENTIAL'}
+  assert.throws(()=>validate({...manifest,tests:[row]},[row],noFlaky),/Invalid deletion candidate group/)
+  assert.throws(()=>validate({...manifest,deleteCandidateGroups:[{file,tag:'invalid'}]},[],noFlaky),/Invalid deletion candidate group/)
+})
+
+test('lightweight browser bounds count parameter loops and fail closed on unsupported registrations', () => {
+  const source=n=>`import {test} from '@playwright/test';\n${Array.from({length:n},(_,i)=>`test('case ${i}',async()=>{ for (;;) {} });`).join('\n')}`
+  for (const n of [300,301]) {
+    const file='tests/bounded.spec.ts',tree={complete:true,webTests:new Map([[file,source(n)]])}
+    for (const affectedLane of [undefined,'on']) {
+      const decision=schedulingDecision('pull_request',[`web/${file}`],()=>true,{affectedLane,graph:{[file]:[]},tree,tests:[g('internal/auth','TestCore','ESSENTIAL')]})
+      assert.equal(decision.mode,n<=300?'essential':'full')
+    }
+  }
+  assert.equal(planningWebCases("for (const width of [390,1024,1440]) for (const theme of ['light','dark']) { test('case',async()=>{}); }"),6)
+  assert.equal(planningWebCases("test.describe('group',()=>{for(const value of [1,2]) test.only('case',()=>{});})"),2)
+  for (const text of [undefined,"for (const x of externalValues) test('case',()=>{})","registerTests()","const rows=registerTests();","const values=[1,2]; const alias=values; alias.push(3); for(const value of values)test('case',()=>{});","const register=test; register('case',()=>{})","test('broken'", "const widths=[1,2]; widths.length=500; for(const width of widths)test('case',()=>{})"]) assert.ok(planningWebCases(text)>300,String(text))
 })
 
 test('reconciliation never hides malformed, duplicate or known-flaky ESSENTIAL classifications',()=>{

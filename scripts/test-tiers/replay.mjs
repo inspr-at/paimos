@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Offline native-catalogue replay; collection never launches browsers.
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdtempSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
 import { select, validate, webGraph } from './core.mjs'
@@ -8,6 +10,7 @@ import { collectGo, collectWeb } from './collect.mjs'
 import { schedulingDecision, effectiveLane, sourceTree } from './diff.mjs'
 import { boundedText } from './inputs.mjs'
 import { classifyPaths } from '../ci-pr-plan.mjs'
+import { planningWebCases, browserCaseLimit } from './planning-web.mjs'
 
 const fixture=JSON.parse(readFileSync(new URL('./affected-replay.json',import.meta.url)))
 const legacy=await import(`data:text/javascript;base64,${Buffer.from(fixture.legacySelector).toString('base64')}`)
@@ -15,17 +18,35 @@ const inventories = {go: collectGo(), web: collectWeb()}
 const rows=['go','web'].flatMap(kind=>validate(JSON.parse(readFileSync(new URL(`../ci/${kind}-test-tiers.json`,import.meta.url))), inventories[kind].tests))
 const root=fileURLToPath(new URL('../../',import.meta.url))
 const graph=webGraph(resolve(root,'web'))
+const compareIndex=process.argv.indexOf('--compare-base')
+let baseline, comparisonBase
+if(compareIndex>=0) {
+  const requested=process.argv[compareIndex+1]
+  if(!/^[a-f0-9]{7,40}$/.test(requested??''))throw new Error('Expected local base commit SHA')
+  comparisonBase=execFileSync('git',['rev-parse',`${requested}^{commit}`],{cwd:root,encoding:'utf8',timeout:30_000}).trim()
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-replay-base-'))
+  const archive=execFileSync('git',['archive',comparisonBase,'scripts/test-tiers','scripts/ci'],{cwd:root,timeout:30_000,maxBuffer:64*1024*1024})
+  execFileSync('tar',['-x','-C',directory],{input:archive,timeout:30_000})
+  baseline=(await import(resolve(directory,'scripts/test-tiers/diff.mjs'))).schedulingDecision
+}
 // Replay reads consumers and migrations from the current tree. Historical
 // manifest promotions are not reconstructed: manifest edits replay as
 // registration-only (no promoted cases), which hosted runs confirm per PR.
 const tree=sourceTree(root)
+const nativeBrowserCounts=new Map()
+for(const row of inventories.web.tests.filter(row=>row.kind==='browser'))nativeBrowserCounts.set(row.file,(nativeBrowserCounts.get(row.file)??0)+1)
+const bounds=[...nativeBrowserCounts].map(([file,native])=>({file,native,bound:planningWebCases(tree.webTests.get(file))}))
+const undercounts=bounds.filter(row=>row.bound<=browserCaseLimit&&row.bound<row.native)
+if(undercounts.length)throw new Error(`Browser source bound undercounts native inventory: ${JSON.stringify(undercounts)}`)
+const browserBounds={specs:bounds.length,boundedSpecs:bounds.filter(row=>row.bound<=browserCaseLimit).length,
+  overLimitOrUnsupported:bounds.filter(row=>row.bound>browserCaseLimit).length,undercounts}
 const promotions={keys:new Set(),kinds:new Set(),count:0}
 const readFile=path=>boundedText(root,path)
 const exists=path=>readFile(path)!==undefined
 const replay=fixture.prs.map(({number,paths})=>{
   const options={event:'pull_request',paths,imports:fixture.goImports,webImports:graph}
   const classifiedLane=classifyPaths(paths).lane
-  const before=schedulingDecision('pull_request',paths,undefined,{graph,tests:rows})
+  const before=schedulingDecision('pull_request',paths,undefined,{graph,tree})
   const after=schedulingDecision('pull_request',paths,exists,{affectedLane:'on',graph,tree,promotions,tests:rows})
   const oldLane=effectiveLane(classifiedLane,{...before,event:'pull_request',affectedLane:'off'})
   const lane=effectiveLane(classifiedLane,{...after,event:'pull_request',affectedLane:'on'})
@@ -38,7 +59,9 @@ const replay=fixture.prs.map(({number,paths})=>{
   // Static layout drops go-test (7), go-timing, web-shard (12) and e2e-run.
   const jobs=(lane,mode,layout)=>lane==='docs-only'?9:lane==='spec-only'?12:mode!=='essential'?37:layout==='static'?16:22
   const label=decision=>decision.mode==='essential'&&decision.layout==='static'?'static':decision.mode
+  const baseDecision=baseline?.('pull_request',paths,exists,{graph})
   return {number,classifiedLane,oldLane,lane,old:before.mode,new:label(after),oldCases:old.tests.length,newCases:next.tests.length,
+    ...(baseDecision?{baselineMode:baseDecision.mode,baselineLane:effectiveLane(classifiedLane,{...baseDecision,event:'pull_request'})}:{}),
     oldKinds:kinds(old),newKinds:kinds(next),oldJobs:jobs(oldLane,before.mode,'full'),newJobs:jobs(lane,after.mode,after.layout),
     reason:risk.full?risk.reason:after.reason}
 })
@@ -54,7 +77,11 @@ const narrowed=replay.filter(row=>row.new!=='full').length
 const summary={prs:replay.length,oldEssential:replay.filter(row=>row.old==='essential').length,newNarrowed:narrowed,
   newStatic:replay.filter(row=>row.new==='static').length,percentNarrowed:Math.round(100*narrowed/replay.length),
   oldJobs:replay.reduce((sum,row)=>sum+row.oldJobs,0),newJobs:replay.reduce((sum,row)=>sum+row.newJobs,0),fullReasons}
-if(process.argv[2]==='--json')console.log(JSON.stringify({base:fixture.base,transitions,summary,replay},null,2))
+const laneComparison=baseline?{base:comparisonBase,affectedLane:'unset',prs:replay.length,
+  matching:replay.filter(row=>row.old===row.baselineMode&&row.oldLane===row.baselineLane).length,
+  differences:replay.filter(row=>row.old!==row.baselineMode||row.oldLane!==row.baselineLane)
+    .map(row=>({number:row.number,baseMode:row.baselineMode,currentMode:row.old,baseLane:row.baselineLane,currentLane:row.oldLane}))}:undefined
+if(process.argv.includes('--json'))console.log(JSON.stringify({base:fixture.base,transitions,summary,browserBounds,...(laneComparison?{laneComparison}:{}),replay},null,2))
 else {
   console.table(replay.map(row=>({PR:row.number,lane:row.lane,old:row.old,new:row.new,
     cases:`${row.oldCases}->${row.newCases}`,jobs:`${row.oldJobs}->${row.newJobs}`,reason:row.reason.slice(0,110)})))

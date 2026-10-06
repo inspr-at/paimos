@@ -211,6 +211,7 @@ export function writeManifests(root) {
 export function classifyManifest(manifest, discovered, { tier, only } = {}) {
   if (!tiers.includes(tier)) throw new ManifestInputError('classify requires --tier ESSENTIAL|GATED-FULL|NIGHTLY')
   if (only !== undefined && (typeof only !== 'string' || !only || only.length > 1024)) throw new ManifestInputError('Expected nonempty --only pattern (at most 1024 characters)')
+  if (tier !== implicitTier && only === undefined) throw new ManifestInputError('ESSENTIAL/NIGHTLY classification requires --only; unlisted tests already gate GATED-FULL')
   // --only is a literal identity substring, not an unbounded regular expression.
   const declared = rowMap(manifest.tests, { identity: testIdentity }, 'tests', true)
   const found = rowMap(discovered, { identity: testIdentity }, 'inventory', true)

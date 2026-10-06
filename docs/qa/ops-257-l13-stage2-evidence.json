@@ -1,11 +1,11 @@
 {
   "ticket": "OPS-257",
   "package": "L13 stage 2",
-  "workerAttribution": "I work on this — session: codex-sol-ops257-l13s2 (1286b8da-59c2-4c57-bae8-b1a52b6e1270); role: builder; started: 2026-10-06T06:31:14Z",
+  "workerAttribution": "I work on this \u2014 session: codex-sol-ops257-l13s2 (1286b8da-59c2-4c57-bae8-b1a52b6e1270); role: builder; started: 2026-10-06T06:31:14Z",
   "branch": "work/ops-257-l13-stage2",
-  "state": "uncommitted; no push, PR, rebase or deployment",
+  "state": "Stage 2 committed by OPS at 1f25979829d29cc4f2b4cd2e9abda2e0cdbe86c1; fix round 1 uncommitted on top; no commit, push, PR change, rebase or deployment by this worker",
   "mergeGate": "OPS merges only after release 124 is cut",
-  "trackedSourcePatchSha256": "ee95fd008720a2950ee6dbd48249f0b99774ca7c2217186d4ff2e71895e17e13",
+  "trackedSourcePatchSha256": "aa4d1756f44e6d55a0388bcce3bdbc0b88fbe1b85a76ce9c9ce7dc309009e821",
   "proof": {
     "base": "601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
     "files": [
@@ -228,7 +228,7 @@
           "vitest:tests/settings-owner.unit.test.ts:a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-a\"},\"principal\":{\"id\":\"person-b\"}})",
           "vitest:tests/settings-owner.unit.test.ts:a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-b\"},\"principal\":{\"id\":\"person-a\"}})",
           "vitest:tests/settings-owner.unit.test.ts:same-owner refresh keeps mounted state, but lost permission closes Access",
-          "vitest:tests/settings-owner.unit.test.ts:a new owner without Access cannot resurrect the previous owner’s shown section on expiry",
+          "vitest:tests/settings-owner.unit.test.ts:a new owner without Access cannot resurrect the previous owner\u2019s shown section on expiry",
           "vitest:tests/settings-owner.unit.test.ts:an incoming owner clears frozen Access before fresh permissions arrive",
           "vitest:tests/settings-routing.unit.test.ts:direct Workspace #work-vocabulary entry keeps the query and opens vocabulary",
           "vitest:tests/settings-routing.unit.test.ts:direct Workspace #ticket-types entry keeps the query and opens vocabulary",
@@ -362,33 +362,34 @@
     {
       "name": "requested-node-suite",
       "command": "node --test --test-concurrency=1 scripts/test-tiers/*.test.mjs scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs web/scripts/ci-web-shard.test.mjs web/scripts/aeon-676-ci.test.mjs web/scripts/aeon-681-ci.test.mjs",
-      "passed": 429,
+      "passed": 435,
       "failed": 0,
-      "logSha256": "2502bb630d96804d4a23c791dec0308ed5d4385b918f889a7d02fa035f756c64"
+      "logSha256": "3730e72335aa2cfdd3defe6b5f448b407dbcae0dc30a88fc16eedaec5a38fb67"
     },
     {
       "name": "go-static-with-no-web-dependencies",
-      "command": "NODE_OPTIONS=--import=/private/tmp/ops257-no-web-deps.mjs node --test scripts/test-tiers/test-tiers.test.mjs",
-      "passed": 184,
+      "command": "NODE_OPTIONS=--import=/private/tmp/ops257-fix1-no-web-deps.mjs node --test scripts/test-tiers/test-tiers.test.mjs",
+      "passed": 188,
       "failed": 0,
-      "logSha256": "5120556a2b20abaff5f011b6884c01d1c88d1044e25eba318112c6ac9b988bca"
+      "logSha256": "682f275f8b4f90a8bc37488ff7014b4a5a3f21efa85efe30cccde0cf681f5780"
     },
     {
       "name": "web-failure-reporting-native-node-runner",
       "command": "node --experimental-strip-types --test web/tests/test-tier-failures.test.ts",
       "passed": 8,
       "failed": 0,
-      "logSha256": "4366881b58cd77e2e2ab04ad6986a624d861a71b89c4542c611e4dff9fd47b9a"
+      "logSha256": "25402df7d2482c35c575c5a12b28faee8e2ed0e6de2711e68687e444fccd6f32"
     },
     {
       "name": "go-packages",
       "command": "go test ./scripts/ci-runner-guard ./scripts/releaseworkflow ./scripts/ci-go-shards -count=1",
       "passedPackages": 3,
       "output": [
-        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-runner-guard\t4.420s",
-        "ok  \tgithub.com/inspr-at/paimos/scripts/releaseworkflow\t4.579s",
-        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-go-shards\t6.141s"
-      ]
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-runner-guard\t3.560s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/releaseworkflow\t5.279s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-go-shards\t5.982s"
+      ],
+      "logSha256": "a0d2afba257cca6fb9f677d7c7e3520a9507831184a32862ebb308045f944c99"
     },
     {
       "command": "node scripts/test-tiers/cli.mjs manifests --check",
@@ -400,7 +401,17 @@
     },
     {
       "command": "node scripts/test-tiers/prove-manifests.mjs 601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
-      "passed": true
+      "passed": true,
+      "logSha256": "efb8b88d7fc2ff4e192d3eca00a45151cd57796c1e711546ed7ab1ea3856fa27"
+    },
+    {
+      "name": "planner-base-replay",
+      "command": "node scripts/test-tiers/replay.mjs --json --compare-base 601dbaa4f",
+      "passed": true,
+      "prs": 80,
+      "matches": 80,
+      "differences": [],
+      "logSha256": "d30bab6117efa4b4dc75042f8ba142fb9f99f05e270507e0925f0a510132ae1f"
     }
   ],
   "nodeSuiteFiles": [
@@ -415,12 +426,12 @@
     "web/scripts/aeon-681-ci.test.mjs"
   ],
   "environment": {
-    "network": "No network; npm ci --offline --ignore-scripts used the existing cache",
-    "go": "Installed Nix-store Go 1.26.7, GOCACHE=/private/tmp/ops257-go-cache, GOPROXY=off, GOTOOLCHAIN=local",
-    "nixDevelopOffline": "Attempted; sandbox denies Nix daemon access after redirecting cache. Used the existing store toolchain directly.",
-    "web": "Native Node/Vitest/Playwright collection only; no browser launch; VITE_CACHE_DIR=/private/tmp/ops257-vite",
+    "network": "No network; existing dependencies reused; no browser launch, Docker, secrets, push or deployment.",
+    "go": "Installed Nix-store Go 1.26.7; GOCACHE=/private/tmp/ops257-fix1-gocache, GOPROXY=off, GOTOOLCHAIN=local",
+    "nixDevelopOffline": "Attempted; sandbox denies writes to Nix fetcher cache. Used installed store Go directly with downloads disabled.",
+    "web": "Native Node/Vitest/Playwright collection only; no browser launch; VITE_CACHE_DIR=/private/tmp/ops257-fix1-vite",
     "noWebDependencyGuard": "import {registerHooks} from 'node:module'\nregisterHooks({resolve(specifier,context,next){const result=next(specifier,context);if(result.url.includes('/node_modules/'))throw new Error('go-static must not import web dependencies');return result}})\n",
-    "postSuiteEdits": "Only two synthetic test title strings and README/RELEASE prose changed after the final Node suite; no behavior or commands changed."
+    "postSuiteEdits": "Only evidence and git-ignored progress metadata updated after final suite start."
   },
   "consumerAudit": {
     "searchRoots": [
@@ -456,11 +467,15 @@
       "collect.saveManifest": "Already uses canonical formatManifest; cannot persist redundant full rows.",
       "ci-web-shard.mjs": "Reads launch/shard policy, not tier exceptions; tierWeights consumes resolved selected rows.",
       "static-checks.json/workflow commands/pinned Go command assertions": "Command strings, cwd and step names unchanged; registry and Go contract tests pass."
+    },
+    "fix1PinnedTextSearch": {
+      "command": "git grep -n -E 'classify go|classify web|classify --tier (ESSENTIAL|NIGHTLY)|unclassified tests|browser fan-out unavailable|widens impacted browser|native equivalence' -- README.md docs/RELEASE.md scripts web '*.go' '*_test.go'",
+      "result": "Seven matches: bounded examples and intentional obsolete-syntax errors/assertions. No pinned Go test assertion needs changes; no obsolete browser-widening prose remains outside historical evidence."
     }
   },
   "risks": [
     "Hosted merge-group execution/time remains unmeasured; runtime estimates use historical owner/file timings and one second per unmeasured Go/unit case.",
-    "Trusted lightweight planning widens impacted browser specs without native inventory, and conservative Go source counting can widen fan-out.",
+    "Conservative Go source counting and unsupported browser registration syntax can widen fan-out. On all 80 recorded PR file lists the affected-switch-unset lane and mode match the base; all 246 current native browser specs have no undercounts (202 bounded, 44 over-limit or unsupported).",
     "Installed external merge-driver copies need refreshing by the coordinator; no external copy was changed."
   ],
   "staleExplicitRowsAfter": {
@@ -478,5 +493,522 @@
   },
   "notes": [
     "The four stale legacy web rows were plain GATED-FULL and disappear during compaction. The current native catalogue has no stale explicit exceptions."
-  ]
+  ],
+  "fix1WorkerAttribution": "I work on this \u2014 session: codex-sol-ops257-l13s2-fix1 (95abfc14-7062-4945-8f2a-9371d2ce4467); role: builder; started: 2026-10-06T07:06:57Z",
+  "head": "1f25979829d29cc4f2b4cd2e9abda2e0cdbe86c1",
+  "proofScope": {
+    "lanes": [
+      "gated-full (merge_group)",
+      "essential (README-only pull_request)",
+      "catalogue (schedule)"
+    ],
+    "comparison": "Native Go and web inventories resolved by the base and current selectors; essential and catalogue equal; full adds exactly 141 Go and 59 web cases.",
+    "notProved": [
+      "Affected-lane (L4) selection equivalence",
+      "Shard assignment equivalence",
+      "Hosted execution duration"
+    ],
+    "separatePlannerReplay": "Recorded file lists evaluated on the current source tree/common current dependency graph with CI_AFFECTED_LANE unset, comparing the frozen 601dbaa4f planner and full base manifest against the current source-bound planner. Not historical per-PR tree reconstruction."
+  },
+  "plannerReplay": {
+    "command": "node scripts/test-tiers/replay.mjs --json --compare-base 601dbaa4f",
+    "laneComparison": {
+      "base": "601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
+      "affectedLane": "unset",
+      "prs": 80,
+      "matching": 80,
+      "differences": []
+    },
+    "browserBounds": {
+      "specs": 246,
+      "boundedSpecs": 202,
+      "overLimitOrUnsupported": 44,
+      "undercounts": []
+    },
+    "affectedLaneReplaySummary": {
+      "prs": 80,
+      "oldEssential": 16,
+      "newNarrowed": 36,
+      "newStatic": 0,
+      "percentNarrowed": 45,
+      "oldJobs": 2710,
+      "newJobs": 2420,
+      "fullReasons": {
+        "CI machinery": 18,
+        "R3": 9,
+        "R4": 6,
+        "unnarrowed": 8,
+        "missing": 1,
+        "browser fan-out": 1,
+        "unmapped": 1
+      }
+    },
+    "affectedLaneReplayTransitions": {
+      "full->full": 44,
+      "full->essential": 20,
+      "essential->essential": 16
+    },
+    "logSha256": "d30bab6117efa4b4dc75042f8ba142fb9f99f05e270507e0925f0a510132ae1f",
+    "perPRMatches": [
+      {
+        "pr": 199,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 200,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 201,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 202,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 203,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 204,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 205,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 206,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 208,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 210,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 211,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 213,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 214,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 216,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 217,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 219,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 220,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 221,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 222,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 223,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 224,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 225,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 226,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 227,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 228,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 229,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 230,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 231,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 232,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 233,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 234,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 235,
+        "mode": "essential",
+        "lane": "spec-only"
+      },
+      {
+        "pr": 236,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 237,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 239,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 240,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 241,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 242,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 243,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 244,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 245,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 246,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 247,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 248,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 249,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 250,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 251,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 252,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 253,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 254,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 255,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 256,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 257,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 259,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 260,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 261,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 262,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 263,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 264,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 265,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 266,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 267,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 268,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 269,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 270,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 272,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 273,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 275,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 280,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 283,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 284,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 286,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 288,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 289,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 290,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 291,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 294,
+        "mode": "essential",
+        "lane": "full"
+      },
+      {
+        "pr": 295,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 296,
+        "mode": "full",
+        "lane": "full"
+      },
+      {
+        "pr": 297,
+        "mode": "full",
+        "lane": "full"
+      }
+    ],
+    "perPRMatchesMeaning": "Each listed mode/lane equals the baseline mode/lane; differences are separately enumerated by laneComparison."
+  },
+  "fix1Findings": [
+    {
+      "severity": "HIGH",
+      "finding": "Unbounded implicit-case reclassification",
+      "fix": "ESSENTIAL/NIGHTLY require --only in CLI and manifest helper; legacy classify go|web errors before collection or writes; README/RELEASE examples updated.",
+      "regression": "Implicit inventory plus legacy call writes no NIGHTLY rows; both exception tiers reject missing --only."
+    },
+    {
+      "severity": "MEDIUM",
+      "finding": "Web PR lane widening",
+      "fix": "Bounded source registration counting with finite parameter-loop expansion, unsupported syntax over-limit, and trusted base snapshot binding.",
+      "regression": "300/301 cases, literal/nested loops, unsupported patterns, and candidate source rewrites; 80/80 replay matches; 246 native specs checked without undercounts."
+    },
+    {
+      "severity": "LOW",
+      "finding": "Deleted deletion-candidate spec throws",
+      "fix": "Empty discovered group emits stale warning; removed readFileSync override.",
+      "regression": "Deleted group warns, invalid tags and live essential-only groups still reject; all eight failure-reporting tests pass."
+    },
+    {
+      "severity": "LOW",
+      "finding": "Stale/narrow evidence",
+      "fix": "Refreshed HEAD/state, patch and untracked-source hashes, native proof, exact scope and full planner replay."
+    },
+    {
+      "severity": "LOW",
+      "finding": "Go collected at module load",
+      "fix": "Lazy cached Go inventory and replay rows; missing Go errors within dependent tests.",
+      "regression": "Subprocesses with empty PATH prove non-Go tests load and native-Go tests fail individually with a clear requirement."
+    }
+  ],
+  "trackedSourcePatchHashScope": "git diff --binary 601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f -- . :(exclude)docs/qa/ops-257-l13-stage2-evidence.json; evidence excludes itself; untracked source files are bound separately below",
+  "untrackedSourceSha256": {
+    "scripts/test-tiers/planning-web.mjs": "4c39daa25621f33e01b79d9c070f0a7a7770338733089a3961119107781e959f"
+  },
+  "changedSourceFileSha256": {
+    "README.md": "b4db9670795e3d7e73100528364a86f74df91bad1d1ba825c1b1d0c192d339e8",
+    "docs/RELEASE.md": "3e3282cdd5fa01177d98b9b69c0d0d0100b789d791711a456dea94ccb77ee32c",
+    "scripts/ci/go-test-tiers.json": "cced66abd43558aaca46688d1dc90a766ee0f71d2fcb16c80e45a6b7b4713402",
+    "scripts/ci/web-test-tiers.json": "a8eff91ef87f137942b3f33f37c16cf2e05f73a11688a73a9f6517df69a8d96b",
+    "scripts/test-tiers/cli.mjs": "5a34e34bf43bbdf17337cab4917927dc04856384c14dbaf9f089339a36597224",
+    "scripts/test-tiers/core.mjs": "14559a34a5813954b9559579902ba867c60a15eabb2ff019bc44cf1af60145a7",
+    "scripts/test-tiers/diff.mjs": "46befc81ed7480a5d02485fcdf5b60916b6ae727cc2108d130a4d5db566f2945",
+    "scripts/test-tiers/manifests.mjs": "9a288346404ae3470efc61831f317ecac7228f15004d3026c54ac1293e67ff00",
+    "scripts/test-tiers/manifests.test.mjs": "ce8e0970f08936a5335bd5a569b6410b266f959b2d7d3c433ee62dbeefb6ef04",
+    "scripts/test-tiers/planning-web.mjs": "4c39daa25621f33e01b79d9c070f0a7a7770338733089a3961119107781e959f",
+    "scripts/test-tiers/prove-manifests.mjs": "0043efefb881a4682f7ca861f134e442c371ecae3cde57d9b3ad29ddb07fa6bb",
+    "scripts/test-tiers/replay.mjs": "e65fe13e51f6bac0cb921c5635df561c2cb4d927c523dcf8de7e3f36a862ee90",
+    "scripts/test-tiers/report.mjs": "9c4adb9a2242e060584340df69458eed8fc83d9cfc6ebd44eb4c08bd44116e8c",
+    "scripts/test-tiers/test-tiers.test.mjs": "d58e217bc59b408f64e020a653328c900effe3edcdc2f4da317824cfb937644f",
+    "scripts/test-tiers/tiers-merge-driver.mjs": "a068eb5410389309a1f7b9c8a278dc271b3b5ef1dc57b98796bcdfb53e1d339d",
+    "scripts/test-tiers/tiers-merge-driver.test.mjs": "03a7dca1903e879ad51232c90407cb667e39affbb121ae3cdd7ee242aa416195",
+    "web/scripts/aeon-676-ci.test.mjs": "0b9551e932ed3a0a9144f16e1d810fb636940e3777978c5966e7efee887bce61",
+    "web/scripts/aeon-681-ci.test.mjs": "ddb22cf9c3c02086f2115e223a4491a5dd1a7723e2593bfe4befc76cdb9e9fb4",
+    "web/scripts/ci-web-shard.test.mjs": "0f796bd94b5fa905154c087e7b0ea888496be54c154df4e6d5e99a031c89677e"
+  },
+  "changedSourceClosureSha256": "0f2dc8633adc7143dbdd4e0492c7311bbafacafe3f24af9e72d1fbc80f034176",
+  "changedSourceClosureScope": "Final bytes of tracked files changed since the proof base plus untracked source files, excluding this self-referential evidence file; SHA256 of the sorted compact JSON digest map."
 }

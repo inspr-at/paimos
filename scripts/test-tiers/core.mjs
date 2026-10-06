@@ -42,9 +42,6 @@ export function validate(manifest, discovered, knownFlaky = JSON.parse(readFileS
     if (row.tier === 'ESSENTIAL' && flaky.has(key(row))) throw new Error(`Known-flaky case cannot be ESSENTIAL: ${key(row)} (${flaky.get(key(row))})`)
     declared.set(key(row), row)
   }
-  for(const group of manifest.deleteCandidateGroups??[]) {
-    if(group.tag!=='delete-candidate'||![...manifest.tests,...discovered].some(row=>row.file===group.file&&resolvedTier(declared.get(key(row)))!=='ESSENTIAL'))throw new Error(`Invalid deletion candidate group: ${group.file}`)
-  }
   const found = new Map()
   const drift = []
   for (const row of discovered) {
@@ -55,6 +52,12 @@ export function validate(manifest, discovered, knownFlaky = JSON.parse(readFileS
     if (row.kind === 'browser' && (stored.config !== row.config || stored.project !== row.project)) throw new Error(`Changed browser configuration: ${key(row)}`)
   }
   for (const id of declared.keys()) if (!found.has(id)) drift.push(`Stale manifest entry (dropped): ${id}`)
+  for(const group of manifest.deleteCandidateGroups??[]) {
+    if(group.tag!=='delete-candidate')throw new Error(`Invalid deletion candidate group: ${group.file}`)
+    const rows=discovered.filter(row=>row.file===group.file)
+    if(!rows.length)drift.push(`Stale deletion candidate group (dropped): ${group.file}`)
+    else if(!rows.some(row=>resolvedTier(declared.get(key(row)))!=='ESSENTIAL'))throw new Error(`Invalid deletion candidate group: ${group.file}`)
+  }
   if (strict && drift.length) throw new Error(`Tier manifest drift; classify these:\n${drift.join('\n')}`)
   // Unlisted discoveries gate without a warning; stale exceptions drop.
   // Escape Actions command data so parameterized titles stay one warning each.

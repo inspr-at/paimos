@@ -193,16 +193,28 @@ test('OPS-257 classify selects only new matching identities, strips discovery da
   const browser = { kind: 'browser', file: 'tests/a.spec.ts', name: 'case', config: 'playwright.ui.config.ts', project: '', occurrence: 2, id: 'native', line: 11, leaf: 'case', active: true }
   assert.deepEqual(classifyManifest(manifest([]), [browser], { tier: 'GATED-FULL' }).added, [{ kind: 'browser', file: browser.file, name: 'case', config: browser.config, project: '', occurrence: 2, tier: 'GATED-FULL' }])
   assert.throws(() => classifyManifest(source, discovered, { tier: 'UNKNOWN' }), /requires --tier/)
-  assert.throws(() => classifyManifest(source, [discovered[0], discovered[0]], { tier: 'NIGHTLY' }), /Duplicate key/)
+  assert.throws(() => classifyManifest(source, [discovered[0], discovered[0]], { tier: 'NIGHTLY', only: 'Test' }), /Duplicate key/)
   assert.throws(() => classifyManifest(source, discovered, { tier: 'NIGHTLY', only: '' }), /--only pattern/)
 })
 
-test('OPS-257 classify CLI requires an explicit tier in new syntax while retaining legacy NIGHTLY', t => {
+test('OPS-257 classify CLI requires an explicit tier and bounded exception selection; legacy syntax fails', t => {
   assert.deepEqual(classifyArgs(['--tier', 'ESSENTIAL', '--kind', 'web', '--only', 'case']), { tier: 'ESSENTIAL', kind: 'web', only: 'case', strict: false })
-  assert.deepEqual(classifyArgs(['go']), { kind: 'go', tier: 'NIGHTLY', strict: true })
+  assert.throws(() => classifyArgs(['go']), /unclassified tests no longer exist/)
   for (const flags of [[], ['--tier'], ['--tier', 'OTHER'], ['--tier', 'NIGHTLY', '--kind', 'unknown'], ['--tier', 'NIGHTLY', '--tier', 'ESSENTIAL'], ['--wat'], ['--only', '--tier']]) assert.throws(() => classifyArgs(flags))
   const result = spawnSync(process.execPath, [resolve(root, 'scripts/test-tiers/cli.mjs'), 'classify', '--tier', 'OTHER'], { encoding: 'utf8' })
   assert.equal(result.status, 1); assert.match(result.stderr, /requires --tier/)
+})
+
+test('OPS-257 implicit tests cannot become exceptions through an unbounded or legacy classify call', () => {
+  const source = manifest([]), discovered = [row('TestImplicit')], saves = []
+  const deps = { read: () => source, collect: () => ({tests:discovered}), save: (_, data) => saves.push(data) }
+  for (const kind of ['go', 'web']) assert.throws(() => classify([kind], deps), /unclassified tests no longer exist/)
+  for (const tier of ['ESSENTIAL', 'NIGHTLY']) {
+    assert.throws(() => classify(['--tier', tier, '--kind', 'go'], deps), /requires --only/)
+    assert.throws(() => classifyManifest(source, discovered, {tier}), /requires --only/)
+  }
+  assert.deepEqual(saves, [])
+  assert.deepEqual(source.tests, [])
 })
 
 test('OPS-257 classify CLI saves canonical rows through discovery and validates both kinds before writing', t => {
@@ -211,10 +223,10 @@ test('OPS-257 classify CLI saves canonical rows through discovery and validates 
   assert.equal(classify(['--tier', 'GATED-FULL', '--kind', 'go'], deps), 0)
   assert.deepEqual(saves[0].data.tests, [row('TestKnown'), row('TestNew')])
   saves.length = 0
-  assert.throws(() => classify(['--tier', 'NIGHTLY'], { ...deps, collect: kind => { if (kind === 'web') throw new Error('collection failed'); return deps.collect() } }), /collection failed/)
+  assert.throws(() => classify(['--tier', 'NIGHTLY', '--only', 'Test'], { ...deps, collect: kind => { if (kind === 'web') throw new Error('collection failed'); return deps.collect() } }), /collection failed/)
   assert.deepEqual(saves, [])
   const known = row('TestSourceRequestCapAndDelay', 'ESSENTIAL', 'internal/importer')
-  assert.throws(() => classify(['--tier', 'ESSENTIAL', '--kind', 'go'], { ...deps, collect: () => ({ tests: [row('TestKnown'), known] }) }), /Known-flaky case cannot be ESSENTIAL/)
+  assert.throws(() => classify(['--tier', 'ESSENTIAL', '--kind', 'go', '--only', 'Test'], { ...deps, collect: () => ({ tests: [row('TestKnown'), known] }) }), /Known-flaky case cannot be ESSENTIAL/)
   assert.deepEqual(saves, [])
 })
 
@@ -392,4 +404,16 @@ test('OPS-257 conflict markers fail the canonical checker before staging', t => 
   assert.throws(() => checkManifests(directory), error => error.message.includes(goFile) && error.message.includes('JSON'))
   assert.throws(() => writeManifests(directory), SyntaxError)
   assert.equal(readFileSync(resolve(directory, goFile), 'utf8'), result.output)
+})
+
+
+test('tier policy tests load without Go; collection-dependent tests fail individually with a clear requirement', () => {
+  const file=resolve(root,'scripts/test-tiers/test-tiers.test.mjs')
+  const env={...process.env,PATH:''}
+  delete env.NODE_TEST_CONTEXT
+  const clean=spawnSync(process.execPath,['--test','--test-name-pattern=lightweight browser bounds',file],{env,encoding:'utf8',timeout:10_000})
+  assert.equal(clean.status,0,clean.stderr+clean.stdout)
+  const needsGo=spawnSync(process.execPath,['--test','--test-name-pattern=R2 contract diffs run',file],{env,encoding:'utf8',timeout:10_000})
+  assert.equal(needsGo.status,1,needsGo.stderr+needsGo.stdout)
+  assert.match(needsGo.stdout+needsGo.stderr,/This test requires native Go collection/)
 })

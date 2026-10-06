@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { command, root } from './collect.mjs'
+import { planningWebCases, browserCaseLimit } from './planning-web.mjs'
 import { boundedText, inputMetadata, readInput, inputBounds } from './inputs.mjs'
 import { reverseDependants, webGraph, impactRisk, validImpactPaths, manifestPromotions, tierManifestPattern, key, implicitTier, validateImplicitTier } from './core.mjs'
 
@@ -119,7 +120,7 @@ export function planningGoCases(manifest, tree) {
   return [...rows.values()]
 }
 
-export function schedulingDecision(event,paths,exists,{affectedLane,graph,checkout=root,base,tree,promotions,readFile,tests}={}) {
+export function schedulingDecision(event,paths,exists,{affectedLane,graph,checkout=root,base,tree,webTree,promotions,readFile,tests}={}) {
   exists??=path=>existsSync(resolve(checkout,path))
   const full=reason=>({mode:'full',layout:'full',reason})
   if(event!=='pull_request'||!Array.isArray(paths)) return full('full event or missing diff')
@@ -155,12 +156,15 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
     if(webChanges.some(file=>file.startsWith('src/'))&&![...impacted].some(file=>/^tests\/.*\.(?:spec|test)\.ts$/.test(file)))return full('web module has no mapped test importer')
     // Large mapped fan-outs use the old full layout too. The tier selector
     // still records the exact essential/changed union within those runners.
-    // Native inventory can prove the bound. Without it, exception rows are
-    // never a complete browser count: widen for any impacted browser spec.
-    if ([...impacted].some(file => file.endsWith('.spec.ts'))) {
+    const specs = [...impacted].filter(file => file.endsWith('.spec.ts'))
+    if (specs.length) {
       const browser = tests.filter(row => row.kind === 'browser')
-      if (!browser.length) return full('browser fan-out unavailable without native inventory')
-      if(browser.filter(row=>impacted.has(row.file)).length>300)return full('browser fan-out exceeds 300 cases')
+      // A native runner inventory is complete. The lightweight planner reads
+      // bounded source bytes from its own (trusted, for L4) tree snapshot.
+      webTree ??= tree ?? sourceTree(checkout)
+      const bound = browser.length ? browser.filter(row => impacted.has(row.file)).length
+        : specs.reduce((sum, file) => sum + planningWebCases(webTree.complete ? webTree.webTests.get(file) : undefined), 0)
+      if (bound > browserCaseLimit) return full('browser fan-out exceeds 300 cases (or source bound unavailable)')
     }
   }
   return {mode:'essential',layout:risk.layout,reason:risk.reasons.join('; ')||'essential plus changed area and reverse dependencies'}
@@ -229,7 +233,7 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
       const checkout=process.env.AEON_TIER_CHECKOUT
       const promotions=paths.some(path=>tierManifestPattern.test(path))?promotionsBetween(undefined,{cwd:checkout,baseDirectory:root}):undefined
       console.log(JSON.stringify(schedulingDecision(process.env.GITHUB_EVENT_NAME,paths,
-        path=>existsSync(resolve(checkout,path)),{affectedLane:process.env.CI_AFFECTED_LANE,checkout,promotions})))
+        path=>existsSync(resolve(checkout,path)),{affectedLane:process.env.CI_AFFECTED_LANE,checkout,promotions,webTree:sourceTree(root)})))
     } else process.exitCode=main()
   } catch(error) { console.error(error.message);process.exitCode=1 }
 }

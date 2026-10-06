@@ -191,9 +191,8 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
 }
 
 export function classifyArgs(flags) {
-  const options = {}, legacy = ['go', 'web'].includes(flags[0])
-  let rest = flags
-  if (legacy) { options.kind = flags[0]; rest = flags.slice(1) }
+  if (['go', 'web'].includes(flags[0])) throw new Error('Legacy classify go|web is obsolete: unclassified tests no longer exist; use --tier and --only to select explicit exceptions')
+  const options = {}, rest = flags
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i]
     if (!['--tier', '--kind', '--only'].includes(flag) || Object.hasOwn(options, flag.slice(2))) throw new Error(`Unknown or repeated classify flag: ${flag}`)
@@ -203,9 +202,9 @@ export function classifyArgs(flags) {
   }
   if (options.kind !== undefined && !['go', 'web'].includes(options.kind)) throw new Error('Expected --kind go|web')
   if (options.only !== undefined && options.only.length > 1024) throw new Error('Expected --only pattern of at most 1024 characters')
-  if (legacy && options.tier === undefined) options.tier = 'NIGHTLY'
   if (!['ESSENTIAL', 'GATED-FULL', 'NIGHTLY'].includes(options.tier)) throw new Error('classify requires --tier ESSENTIAL|GATED-FULL|NIGHTLY')
-  return { ...options, strict: legacy && options.only === undefined }
+  if (options.tier !== 'GATED-FULL' && !options.only) throw new Error('ESSENTIAL/NIGHTLY classification requires --only; unlisted tests already gate GATED-FULL')
+  return { ...options, strict: false }
 }
 
 export function classify(flags, { collect = target, read = load, save = saveManifest } = {}) {

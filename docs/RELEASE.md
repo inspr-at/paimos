@@ -1898,8 +1898,8 @@ manifests list ESSENTIAL and NIGHTLY exceptions plus full rows with additional
 metadata (deletion tags, timing lanes, occurrence or other fields). Plain full
 rows are redundant: `--write` omits them and `--check` names them as errors.
 Timing weights, post-gate history and deletion candidate groups remain intact.
-Runtime checks warn only about stale explicit rows, which drop in memory;
-`check --strict` rejects those stale exceptions, not new implicit tests.
+Runtime checks warn about stale explicit rows and deletion candidate groups with
+no discovered rows. `check --strict` rejects stale entries, not new implicit tests.
 
 Implicit browser rows use config/project from native discovery. Moving their
 routing cannot demote them: they still gate, and launch policy validation still
@@ -1907,8 +1907,9 @@ checks their file. Explicit exception/metadata rows retain the config/project
 change fence. A new browser file still needs its launch policy. The lightweight
 trusted planner counts Go Test/Fuzz identifiers from its bounded test-source
 snapshot, including references, comments and inactive candidates conservatively.
-Without a native browser inventory it widens impacted browser specs to full rather than counting only
-exceptions. Runners with native inventories retain the 300-case fan-out bound.
+Without a native browser inventory it bounds registrations from the trusted source
+snapshot, including literal parameter loops. Unsupported syntax or counts over 300
+widen to full. Runners with native inventories retain the same 300-case bound.
 Removing a NIGHTLY exception promotes that registration to full and must execute
 it in the affected lane; exception removal never narrows the gate.
 
@@ -1947,28 +1948,31 @@ retain separate opening and closing lines. Sorted edits spread additions through
 the file; concurrent additions into the same gap can still conflict in GitHub's
 text merge. GitHub's merge queue ignores local custom merge drivers.
 
-Classify discovered, currently unclassified tests without hand-editing JSON:
+Select explicit exceptions or reset matching exceptions to implicit GATED-FULL without hand-editing JSON:
 
 ```sh
 node scripts/test-tiers/cli.mjs classify --tier GATED-FULL --kind go --only internal/auth:
-node scripts/test-tiers/cli.mjs classify --tier NIGHTLY --kind web
+node scripts/test-tiers/cli.mjs classify --tier NIGHTLY --kind web --only tests/example.spec.ts:case-name
 ```
 
 `--kind` omitted covers both inventories. `--only` is a literal substring of
 the existing discovery identity (package/file/name), not a regular expression.
-ESSENTIAL/NIGHTLY classification adds only new matching exceptions and preserves
-known classifications. `--tier GATED-FULL` resets matching existing exceptions to
+ESSENTIAL/NIGHTLY classification requires `--only`, adds only new matching
+exceptions and preserves known classifications. Unlisted tests already gate full CI.
+`--tier GATED-FULL` resets matching existing exceptions to
 the implicit full tier: plain rows disappear, additional metadata stays. Unmatched
 rows retain their policy. Known-flaky ESSENTIAL restrictions still apply. Legacy
-`classify go|web` keeps its explicit NIGHTLY choice and strict stale check, and
-writes canonical form. Web discovery lists cases without launching browsers.
+`classify go|web` fails because unclassified tests no longer exist. Web discovery
+lists cases without launching browsers.
 
 The driver accepts old `defaultNewTier: NIGHTLY` sides and explicit plain full
 rows, normalizing each side to the new exception layout before the keyed merge.
 An old side's plain full additions disappear; its ESSENTIAL/NIGHTLY edit beats
 an unchanged side. Divergent exception or metadata edits remain conflicts.
-OPS merges stage 2 only after release 124 is cut. Native equivalence, strengthened
-case names, runtime estimates and command results are recorded in
+OPS merges stage 2 only after release 124 is cut. The native proof compares full,
+essential and catalogue selection; it does not prove affected-lane (L4) selection
+or shard assignment equivalence. Strengthened case names, runtime estimates,
+planner replay results and command results are recorded in
 [the stage-2 evidence](qa/ops-257-l13-stage2-evidence.json).
 
 Once per clone, install the self-contained driver at a stable absolute path

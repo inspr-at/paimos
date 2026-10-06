@@ -1003,8 +1003,10 @@ Reports name the selection `scope` (`gated-full`, `catalogue` or `changed-area`)
 `deferredBrowserCases`; deferred cases are not reported as passes or skips.
 Tier exceptions and scheduling/deletion metadata live in the [Go manifest](scripts/ci/go-test-tiers.json)
 and [web manifest](scripts/ci/web-test-tiers.json). Use
-`node scripts/test-tiers/cli.mjs classify go` (or `web`) for new NIGHTLY cases,
-then `check`. CI reconciles manifests at runtime: unlisted cases default to
+`node scripts/test-tiers/cli.mjs classify --tier NIGHTLY --kind go --only internal/auth:TestName`
+(or `--kind web` with a matching case identity) for explicit NIGHTLY exceptions,
+then `check`. ESSENTIAL/NIGHTLY require `--only`; legacy `classify go|web` is obsolete.
+CI reconciles manifests at runtime: unlisted cases default to
 GATED-FULL (`implicitTier` is validated), stale explicit entries are dropped,
 and named Actions warnings report only stale exceptions. New cases gate full CI
 without manifest edits. Plain GATED-FULL rows are omitted by the canonical writer;
