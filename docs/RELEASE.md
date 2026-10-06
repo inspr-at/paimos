@@ -1890,6 +1890,147 @@ AEON-655 ledger entry remains a coordinator action. Linux browser CI and
 OPS-247 remain unverified; local single-file Chromium evidence is not a
 replacement release gate. This fix round neither pushes to origin nor deploys.
 
+## Merge-friendly CI manifests (OPS-257 L13, stage 1)
+
+Maintain `scripts/ci/{go,web}-test-tiers.json` and `web/ci-web-shards.json`
+with `node scripts/test-tiers/cli.mjs manifests --write`; verify with
+`node scripts/test-tiers/cli.mjs manifests --check`. The existing fixed
+`go-static`/nightly script-test command checks canonical form; these root script
+tests are outside the dynamically collected Go and `web/tests/` inventories.
+No workflow command or static-check registry changes are needed.
+`node scripts/test-tiers/prove-manifests.mjs [FULL_BASE_SHA]` independently
+compares against the local pre-conversion commit (default: HEAD), allowing only
+row-list order changes. It checks every tier, timing weight and metadata value,
+retains duplicate multiplicity, and emits the base SHA and row counts as JSON.
+
+Tests sort by `(kind, owner, name, occurrence)` using ordinal comparison: owner
+is package for Go and file for every other kind, even if a row carries package
+metadata. Occurrence preserves distinct native registrations with identical
+titles; Go rows reject occurrence because Go identity is package plus name.
+Post-gate identities, deletion candidate rows and other keyed row lists sort by
+identity. Timing owner maps sort by owner, with one complete timing value per line.
+Shard specs sort by file within their group; group order, flags, tiers and weights
+stay intact. Row fields use `kind, package, file, name, occurrence` first and
+ordinal key order afterwards, including nested objects. Exact duplicate rows can
+be deduplicated by `--write`; differing values under one identity are errors.
+
+Each row occupies one line, with JSON commas on separate lines. Inserting or
+removing a row changes its line and one separator line, never a neighboring row,
+even at a list boundary. Strict JSON cannot support a one-line edit at every
+boundary without introducing a sentinel or changing the data model. Empty lists
+retain separate opening and closing lines. Sorted edits spread additions through
+the file; concurrent additions into the same gap can still conflict in GitHub's
+text merge. GitHub's merge queue ignores local custom merge drivers.
+
+Classify discovered, currently unclassified tests without hand-editing JSON:
+
+```sh
+node scripts/test-tiers/cli.mjs classify --tier GATED-FULL --kind go --only internal/auth:
+node scripts/test-tiers/cli.mjs classify --tier NIGHTLY --kind web
+```
+
+`--kind` omitted covers both inventories. `--only` is a literal substring of
+the existing discovery identity (package/file/name), not a regular expression.
+Known rows retain their classifications; unmatched and stale rows retain the
+existing runtime warning/default policy. Known-flaky ESSENTIAL restrictions still
+apply. Legacy `classify go|web` keeps its NIGHTLY default and strict stale check,
+and now writes canonical form. Web discovery lists cases without launching browsers.
+
+Once per clone, install the self-contained driver at a stable absolute path
+outside the repository, then configure local merge-main rounds. This copy uses
+only Node built-ins and works while an old PR branch without the new tooling (or
+with a different `core.mjs`) is checked out. Refresh the copy when the driver is
+updated; its parity tests enforce the same behavior as the in-repo command.
+
+```sh
+mkdir -p "$HOME/.local/share/aeon-ci"
+cp <repo>/scripts/test-tiers/tiers-merge-driver.mjs "$HOME/.local/share/aeon-ci/tiers-merge-driver.mjs"
+# Replace /absolute/path/to/node with the absolute path from command -v node.
+git -C <repo> config merge.tiers.driver '"/absolute/path/to/node" "$HOME/.local/share/aeon-ci/tiers-merge-driver.mjs" %O %A %B %P'
+```
+
+Git runs the driver through a shell, so `$HOME` resolves outside the checkout;
+`~` does not expand inside the double-quoted script path. Use an absolute Node
+executable path so a different shell PATH cannot select another runtime. For another install location, replace only the stable
+script path in that configuration. The executable takes `BASE OURS THEIRS PATH`;
+PATH selects one of the three manifest families. The repository's `.gitattributes` provides these attributes.
+Also add the following lines once to `$GIT_COMMON_DIR/info/attributes` so branches
+that predate `.gitattributes` use the driver. Resolve that directory with
+`git -C <repo> rev-parse --path-format=absolute --git-common-dir`; preserve any
+existing attributes rather than replacing the file.
+
+```gitattributes
+scripts/ci/go-test-tiers.json merge=tiers
+scripts/ci/web-test-tiers.json merge=tiers
+web/ci-web-shards.json merge=tiers
+```
+
+The driver accepts both old and canonical layouts. It merges keyed row sets:
+independent additions survive; deletion wins over an unchanged row; deletion
+versus change and divergent edits to one row (including tiers/weights) conflict.
+Group specs merge independently. A unilateral reorder of surviving groups is
+taken alongside the other side's content edits; matching reorders are taken,
+divergent reorders conflict. New groups append in identity order. The same order
+rule applies to integration notes. Launch policy and unrelated metadata changes
+merge by field. Timing-owner records merge atomically.
+A clean exit 0 means the canonical merged result has been written to OURS,
+even when the inputs were unchanged old-layout manifests. Exit 1 means a real
+disagreement: OURS contains deliberately invalid JSON with git-style diff3
+conflict markers and the complete OURS, BASE and THEIRS versions. Unresolved
+markers fail JSON parsing and the canonical check. Usage/parse/IO errors
+(including malformed JSON, duplicate input identities, Go occurrence and
+unsupported paths) exit 2; unexpected crashes exit 3. Those failures leave OURS
+byte-for-byte untouched, so it may still be valid JSON. Every replacement,
+including conflict output, writes a sibling temporary file, fsyncs it, then
+renames it atomically. Failure before rename leaves OURS unchanged. Stderr names
+the offending path/key. The driver never selects a tier or weight to resolve
+contradictory edits. It is a local convenience, not a GitHub queue fix.
+
+If `merge=tiers` is set but `merge.tiers.driver` is not configured, Git falls back
+to its built-in text merge. A configured but missing driver script makes Node
+exit 1 with `MODULE_NOT_FOUND`, which looks like a real disagreement but leaves
+OURS untouched. **Any nonzero driver result means UNRESOLVED: read stderr and
+never `git add` the working file as is.** Git keeps the path unmerged; a valid
+JSON file alone does not prove that THEIRS' classifications survived.
+
+`git checkout --merge -- <path>` re-runs the configured `merge=tiers` driver;
+it cannot recover text conflicts independently of a missing or failing driver.
+Instead, merge the three index versions directly with `git merge-file`, which
+does not consult merge attributes. Use three regular temporary input files with
+this POSIX-shell recipe (also bash/zsh): process substitutions such as `<(git show ...)`
+can be read as empty files by `git merge-file` (verified with Git 2.55.0),
+silently producing empty output and exit 0.
+
+```sh
+path=scripts/ci/go-test-tiers.json # Replace with the unmerged manifest path.
+merge_tmp=$(mktemp -d "${TMPDIR:-/tmp}/tiers-reconcile.XXXXXX")
+if git show ":2:$path" > "$merge_tmp/ours" &&
+   git show ":1:$path" > "$merge_tmp/base" &&
+   git show ":3:$path" > "$merge_tmp/theirs"; then
+  merge_status=0
+  git merge-file -p --diff3 -L ours -L base -L theirs \
+    "$merge_tmp/ours" "$merge_tmp/base" "$merge_tmp/theirs" > "$merge_tmp/result" || merge_status=$?
+  if [ "$merge_status" -le 127 ]; then
+    cat "$merge_tmp/result" > "$path"
+  else
+    echo 'Text merge failed; working file left untouched' >&2
+  fi
+fi
+# Inspect the result, then trash this run's temporary directory.
+trash "$merge_tmp"
+```
+
+Confirm stages 1, 2 and 3 exist before using the recipe. `git merge-file` returns
+0 for a clean text merge, a positive conflict count (at most 127) for conflict markers,
+and a negative error code (reported as 255 by the shell) for a failure. Stop on
+an error; conflict markers still require explicit reconciliation. Alternatively,
+start from THEIRS with `git show :3:<path> > <path>` and re-apply OURS' missing classification rows using
+`node scripts/test-tiers/cli.mjs classify --tier <T> ...`. Explicitly reconcile
+conflicting tiers, weights, order and metadata against both index versions.
+Finish with `node scripts/test-tiers/cli.mjs manifests --write` and
+`node scripts/test-tiers/cli.mjs manifests --check`, then inspect the complete
+resolved diff against both sides before staging.
+
 ## Local static CI pre-filter (OPS-257)
 
 Before pushing, run `node scripts/ci-static.mjs --here` from any directory
