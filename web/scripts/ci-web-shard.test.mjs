@@ -87,7 +87,7 @@ test('source manifest accounts for every spec, including nested files, before re
   const manifest = loadManifest(), discovered = discoverSpecs(webRoot, manifest.specDirectories)
   assert.deepEqual(checkSpecInventory(manifest, discovered), { specs: discovered.length, excluded: 0 })
   assert.deepEqual(manifest.exclusions, [])
-  for (const file of ['tests/clip-tip.spec.ts', 'tests/aeon-632b-clip.spec.ts', 'tests/key-trim.spec.ts', 'tests/model-prefs.spec.ts', 'tests/record-ownership.spec.ts']) {
+  for (const file of ['tests/clip-tip.spec.ts', 'tests/aeon-632b-clip.spec.ts', 'tests/aeon-632b-clip-settings.spec.ts', 'tests/key-trim.spec.ts', 'tests/model-prefs.spec.ts', 'tests/record-ownership.spec.ts']) {
     assert.equal(balanceShards(manifest, 12).flatMap(shard => shard.specs).filter(spec => spec.file === file).length, 1, `${file} must gate exactly once`)
   }
 })
@@ -124,6 +124,40 @@ test('LPT balancing distributes a known fixture optimally and covers it exactly 
   const manifest = fixture(), shards = balanceShards(manifest, 3)
   assert.deepEqual(shards.map(s => s.weightSeconds), [13, 13, 13])
   assert.deepEqual(checkCoverage(manifest, shards, files(manifest)), { specs: 6, shards: 3 })
+})
+
+test('one-worker tier weights convert measured parallel steps but retain serial and unmeasured estimates', async () => {
+  const { tierWeights } = await import('./ci-web-shard.mjs')
+  const manifest = fixture()
+  manifest.ciInventory = [{ id: 'measured', kind: 'browser-test', measuredSeconds: 42, flags: ['--workers=2'] }]
+  const specs = manifest.groups.flatMap(group => group.specs)
+  specs[0].weightSource = 'measured'
+  specs[1].weightSource = 'local-serial-runtime-estimate'
+  specs[2].weightSource = 'unmeasured-test-rate'
+  const before = structuredClone(manifest)
+  const weights = tierWeights(manifest)
+  assert.equal(weights[specs[0].file], specs[0].weightSeconds * 2)
+  for (const spec of specs.slice(1)) assert.equal(weights[spec.file], spec.weightSeconds)
+  assert.deepEqual(manifest, before, 'Historical weights and gate policy must stay unchanged')
+  for (const value of [0, 65]) {
+    manifest.ciInventory[0].flags = [`--workers=${value}`]
+    assert.throws(() => tierWeights(manifest), /Invalid measured worker count/)
+  }
+})
+
+test('hosted tier timings override historical worker conversion and scale only the selected slice', async () => {
+  const { tierWeights } = await import('./ci-web-shard.mjs')
+  const manifest = fixture(), spec = manifest.groups[0].specs[0]
+  spec.tierTiming = { seconds: 432, selectedTests: 39 }
+  const before = structuredClone(manifest)
+  assert.equal(tierWeights(manifest)[spec.file], 432)
+  assert.equal(tierWeights(manifest, [{ file: spec.file }])[spec.file], 432 / 39)
+  assert.equal(tierWeights(manifest, [])[spec.file], 0)
+  assert.deepEqual(manifest, before)
+  for (const timing of [{ seconds: -1, selectedTests: 39 }, { seconds: NaN, selectedTests: 39 }, { seconds: 432, selectedTests: 0 }]) {
+    spec.tierTiming = timing
+    assert.throws(() => tierWeights(manifest), /Invalid tier timing/)
+  }
 })
 
 test('assignment is deterministic despite manifest group/spec order and breaks ties by path', () => {

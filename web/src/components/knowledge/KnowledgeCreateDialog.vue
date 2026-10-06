@@ -142,7 +142,7 @@ defineExpose({ open })
 </template>
 
 <style scoped>
-.create { width: min(clamp(640px, 52vw, 1120px), calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.create { width: min(var(--dialog-l), calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .create::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .create-card { display: grid; gap: 18px; max-height: calc(100dvh - 24px); overflow: auto; padding: 20px 22px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 .create-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -188,5 +188,9 @@ h2 { font-size: 18px; }
   .create-foot { flex-wrap: wrap; }
   .create-foot .f-hint { display: none; }
   .create-foot .btn { flex: 1; height: 44px; }
+  /* A full-height sheet: the fields scroll, the actions stay pinned at the bottom (AEON-730). */
+  .create { inset: 0; width: 100%; max-width: none; height: 100dvh; max-height: none; margin: 0; }
+  .create-card { display: flex; flex-direction: column; height: 100%; max-height: none; border: 0; border-radius: 0; background: var(--surface-raised); }
+  .create-foot { position: sticky; bottom: -16px; flex: none; margin: auto -16px -16px; padding: 10px 16px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-raised); }
 }
 </style>

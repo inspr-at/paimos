@@ -4,6 +4,7 @@ package authz
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -33,6 +34,44 @@ func RequireQueueCoordinatorTx(ctx context.Context, tx pgx.Tx, p tenant.Principa
 		}
 	}
 	return nil
+}
+
+// RequireQueueDispatcherTx reports whether agentID could pass queue pickup in
+// projectID with keyID, the credential bound to its current lead generation
+// at claim or at its last proven dispatch. Scheduling advice about another
+// lead's agent cannot see which key that process holds now, so authority is
+// proven as production authentication would see it for exactly that key: a
+// key that is revoked, expired, cut off by a revoked pairing, held by an
+// inactive or system principal, below the coordinator ceiling, or bound to a
+// creator without run.create and nodes.read in the project cannot dispatch.
+// Another live key of the same principal is never a substitute; a lead
+// without a bound key gets ErrForbidden, never an assumed ceiling.
+func RequireQueueDispatcherTx(ctx context.Context, tx pgx.Tx, tenantID, agentID, keyID, projectID string) error {
+	if keyID == "" || !uuidPattern.MatchString(keyID) {
+		return ErrForbidden
+	}
+	var scopes []string
+	var creator string
+	err := tx.QueryRow(ctx, `SELECT k.scopes,coalesce(k.created_by_principal_id::text,'')
+	 FROM agent_keys k
+	 WHERE k.tenant_id=$1::uuid AND k.id=$2::uuid AND k.principal_id=$3::uuid AND k.revoked_at IS NULL
+	 AND (k.expires_at IS NULL OR k.expires_at>now())
+	 AND NOT EXISTS(SELECT 1 FROM agent_pairing_computers c JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id
+	  WHERE c.tenant_id=k.tenant_id AND c.principal_id=k.principal_id AND (c.state='revoked' OR q.state<>'redeemed'))
+	 AND EXISTS(SELECT 1 FROM principals p WHERE p.tenant_id=k.tenant_id AND p.id=k.principal_id AND p.kind='agent' AND p.status='active'
+	  AND NOT (p.roles && ARRAY['system','importer','operator','embedding','quote_public_service','quote_confirmation_service','portal_public_service']::text[]))`,
+		tenantID, keyID, agentID).Scan(&scopes, &creator)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrForbidden
+	}
+	if err != nil {
+		return err
+	}
+	if !IsCoordinatorKey(scopes) {
+		return ErrForbidden
+	}
+	p := tenant.Principal{ID: agentID, TenantID: tenantID, Kind: tenant.Agent, Scopes: scopes, KeyCreatorID: creator, KeyID: keyID, AuthKeyID: keyID}
+	return RequireQueueCoordinatorTx(ctx, tx, p, projectID)
 }
 
 // RequireQueueCoordinatorEntryTx checks the live role at the queue's entry

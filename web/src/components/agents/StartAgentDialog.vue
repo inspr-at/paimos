@@ -378,7 +378,7 @@ defineExpose({ open })
 </template>
 
 <style scoped>
-.launch-dialog { width: min(clamp(600px, 52vw, 1040px), calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: auto; scrollbar-gutter: stable; }
+.launch-dialog { width: min(var(--dialog-l), calc(100vw - 24px)); max-height: calc(100dvh - 32px); padding: 0; border: 1px solid var(--line-2); border-radius: 22px; background: var(--surface-raised); color: var(--ink); box-shadow: 0 24px 80px var(--scrim); overflow: auto; scrollbar-gutter: stable; }
 .launch-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(5px); }
 .launch-card { padding: 22px 24px 20px; }
 .launch-head { display: flex; gap: 12px; align-items: center; margin-bottom: 18px; }
@@ -417,7 +417,7 @@ label { display: block; margin-bottom: 7px; font-size: 12px; font-weight: 650; c
 .bad { color: var(--danger); }
 footer { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
 footer > p { flex: 1; font-size: 12px; color: var(--ink-2); line-height: 1.5; }
-footer .btn { min-height: 44px; }
+@media (pointer: coarse), (max-width: 600px) { footer .btn { min-height: 44px; } }
 .run-result { display: grid; justify-items: center; text-align: center; padding: 14px 0; gap: 12px; outline: none; }
 .run-result h3 { font-size: 25px; letter-spacing: -.5px; }
 .run-result > p:not(.eyebrow) { color: var(--ink-2); font-size: 14px; line-height: 1.6; max-width: 410px; }

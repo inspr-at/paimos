@@ -1,8 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, reactive, useId, watch } from 'vue'
-import { limitMode, liveCopy, modeLimit, nextLimitMode, noOwnTip, nowCopy, setLimit, statusCopy, stepLimit, stepTotal, waitingCopy, workingRows, type HarnessLimit, type LimitMode } from '../../lib/agentsWorking'
-import { buildPools, POOL_ORDER } from '../../lib/capacity'
+import { accountRoomCopy, accountRoomDetail, limitMode, liveCopy, modeLimit, nextLimitMode, noOwnTip, nowCopy, setLimit, statusCopy, stepLimit, stepTotal, waitingCopy, workingAccountRoom, workingRows, type HarnessLimit, type LimitMode } from '../../lib/agentsWorking'
 import { useAgentPlan } from '../../lib/useAgentPlan'
 import { useAgents } from '../../stores/agents'
 import { useCapacity } from '../../stores/capacity'
@@ -22,33 +21,23 @@ watch(viewer, () => { for (const key of Object.keys(memo)) delete memo[key] })
 const ownAccounts = computed(() => new Set(agents.accounts.filter(a => a.owner_person_id
   ? a.owner_person_id === snapshot.value?.principal_id || a.owner_person_id === session.identity?.principal.id
   : a.registered_by_principal_id === snapshot.value?.principal_id || a.registered_by_principal_id === session.identity?.principal.id).map(a => a.id)))
-const room = computed<Record<string, number | null>>(() => {
+const accountRoom = computed(() => {
   const own = capacity.rows.filter(r => ownAccounts.value.has(r.id))
-  const out: Record<string, number | null> = {}
   const known = capacity.loaded && !capacity.stale && agents.accountsState === 'ready'
-  // buildPools owns quota deduplication; two aliases never invent extra room.
-  const pools = buildPools(own, agents.now)
-  for (const harness of POOL_ORDER) {
-    const matching = pools.filter(p => p.mark === harness)
-    if (!matching.length && !['codex', 'claude', 'cursor'].includes(harness) && !(harness in (plan.value?.limits ?? {})) && !(harness in (snapshot.value?.running ?? {}))) continue
-    out[harness] = known && matching.every(p => p.rows.every(r => !!r.routing)) ? matching.reduce((n, p) => n + p.parallelRuns, 0) : null
-  }
-  return out
+  return workingAccountRoom(own, agents.now, known, [...Object.keys(plan.value?.limits ?? {}), ...Object.keys(snapshot.value?.running ?? {})])
 })
-const roomNow = computed(() => {
-  const values = Object.values(room.value)
-  return capacity.loaded && !capacity.stale && agents.accountsState === 'ready' && values.every(n => n !== null) ? values.reduce<number>((sum, n) => sum + (n ?? 0), 0) : null
-})
+const room = computed(() => accountRoom.value.room)
+const roomNow = computed(() => accountRoom.value.total)
 const rows = computed(() => plan.value && snapshot.value ? workingRows(plan.value, snapshot.value, room.value, waiting.value) : [])
 const modes = [['none', 'No limit'], ['max', 'At most'], ['off', 'Off']] as const
 const total = computed(() => plan.value?.total ?? 0)
 const run = computed(() => snapshot.value?.running_total ?? 0)
-const live = computed(() => liveCopy(total.value, run.value, roomNow.value))
-const status = computed(() => statusCopy(total.value, run.value, roomNow.value))
+const live = computed(() => liveCopy(total.value, run.value, roomNow.value, accountRoom.value.full))
+const status = computed(() => statusCopy(total.value, run.value, roomNow.value, accountRoom.value.full))
 const now = computed(() => nowCopy(total.value, run.value, roomNow.value))
-const waits = computed(() => plan.value && snapshot.value ? waitingCopy(plan.value, snapshot.value, room.value, waiting.value) : '')
-const accounts = computed(() => roomNow.value === null ? 'Account room is not available yet.' : roomNow.value > 0 ? `Room for ${roomNow.value} more right now, ${run.value + roomNow.value} at once in all.` : 'Full right now.')
-const accountDetail = computed(() => rows.value.map(row => `${row.label} ${room.value[row.key] === null || room.value[row.key] === undefined ? 'not measured' : row.running + room.value[row.key]!}`).join(' · '))
+const waits = computed(() => plan.value && snapshot.value ? waitingCopy(plan.value, snapshot.value, room.value, waiting.value, accountRoom.value.reasons) : '')
+const accounts = computed(() => accountRoomCopy(accountRoom.value))
+const accountDetail = computed(() => rows.value.map(row => accountRoomDetail(accountRoom.value, row.key)).join(' · '))
 function changeTotal(delta: number) {
   if (plan.value) save(stepTotal(plan.value, delta))
 }

@@ -216,7 +216,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 </template>
 
 <style scoped>
-.picker { width: min(clamp(640px, 52vw, 1120px), calc(100vw - 24px)); max-height: min(760px, calc(100dvh - 24px)); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.picker { width: min(var(--dialog-l), calc(100vw - 24px)); max-height: min(760px, calc(100dvh - 24px)); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .picker::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .card { display: flex; flex-direction: column; gap: 10px; max-height: min(760px, calc(100dvh - 24px)); padding: 18px 18px 14px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

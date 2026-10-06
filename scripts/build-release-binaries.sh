@@ -23,6 +23,44 @@ fi
 team_ldflag="-X github.com/inspr-at/paimos/internal/agentd.expectedTeamID=${team}"
 mkdir -p dist
 
+# Shipped binaries compile cold from verified modules (AEON-422). The go
+# command never re-verifies a build-cache entry, and the caches actions/setup-go
+# restores are also written by CI jobs on the self-hosted pool. In GitHub
+# Actions the caller therefore passes GOCACHE and GOMODCACHE inside RUNNER_TEMP
+# (empty at job start, never a cache-restore target), one empty GOCACHE per
+# invocation. Downloads are checked against go.sum; verify re-hashes every
+# module zip and extracted tree, which an empty module cache would not exercise.
+prepare_go() {
+  export GOFLAGS=-mod=readonly
+  if [ "${GITHUB_ACTIONS:-}" = true ]; then
+    local name value
+    : "${RUNNER_TEMP:?RUNNER_TEMP is not set}"
+    for name in GOCACHE GOMODCACHE; do
+      value="${!name:-}"
+      case "$value" in
+        */../*|*/..|*/./*|*/.) value="" ;;
+      esac
+      case "$value" in
+        "${RUNNER_TEMP%/}"/?*) ;;
+        *)
+          echo "$name must be a directory inside RUNNER_TEMP for a shipped build" >&2
+          exit 1
+          ;;
+      esac
+    done
+    if [ "$GOCACHE" = "$GOMODCACHE" ]; then
+      echo "GOCACHE and GOMODCACHE must differ" >&2
+      exit 1
+    fi
+    if [ -e "$GOCACHE" ] && { [ ! -d "$GOCACHE" ] || [ -n "$(ls -A "$GOCACHE")" ]; }; then
+      echo "GOCACHE is not empty; a shipped binary needs a cold build cache" >&2
+      exit 1
+    fi
+  fi
+  go mod download
+  go mod verify
+}
+
 require_buildinfo() {
   local bin="$1" os="$2" arch="$3" cgo="$4" info
   info="$(go version -m "$bin")"
@@ -115,11 +153,12 @@ verify_darwin() {
 }
 
 case "$mode" in
-  darwin-agentd) darwin_agentd ;;
-  linux-agentd) linux_agentd ;;
-  cli) cli_bins ;;
+  darwin-agentd) prepare_go; darwin_agentd ;;
+  linux-agentd) prepare_go; linux_agentd ;;
+  cli) prepare_go; cli_bins ;;
   verify-darwin) verify_darwin ;;
   host)
+    prepare_go
     if [ "$(uname -s)" = "Darwin" ]; then
       AEON_DARWIN_ARCH="$(go env GOARCH)"
       darwin_agentd

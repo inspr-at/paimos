@@ -19,6 +19,102 @@ info:
 servers:
   - url: /api
 paths:
+  /projects/{projectId}/lead:
+    get:
+      summary: Read the project's explicitly owned lead
+      description: Requires harness.read. Returns none until a person explicitly requests a lead; existing coordinator registrations are never automatically adopted. Project members see only generation, state and redacted reason codes.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      responses:
+        '200':
+          description: Lead lifecycle snapshot
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ProjectLead'}
+    post:
+      summary: Request a project lead without launching a process
+      description: Person-only harness.control and run.create. Requires expected_revision (zero for none). Creates an explicit owned intent; queue presence grants no authority. Automatic production launch stays disabled pending AEON-603. Idle or stopped leads restart through admission.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision]
+              additionalProperties: false
+              properties:
+                expected_revision: {type: integer, minimum: 0}
+      responses:
+        '200': {description: 'Explicit lead intent, with unavailable gates shown as waiting_for_room'}
+        '403': {description: Person or live owner permission required}
+        '409': {description: Revision conflict or predecessor exit is unconfirmed}
+  /projects/{projectId}/lead/claim:
+    post:
+      summary: Bind a proven coordinator generation to the project lead intent
+      description: Agent-only harness.worker. X-Aeon-Worker-Lease proves the named session; its canonical person owner must match the explicit intent. The session heartbeat (or creation before its first heartbeat) must be no more than two minutes old and not future-dated, allowing the default 50-second CLI reporting cadence plus a missed beat. Every claim rechecks server-side dial, harness, account room and host-load evidence, each at most 30 seconds old. Missing, stale or unreadable evidence waits. Competing claims serialize. Existing coordinator registrations migrate only through this explicit ID and proof, without adopting or reparenting workers. Succession requires confirmed predecessor stop, fresh session reference and lease, and the same owner. The authenticating agent key becomes the generation's dispatch credential, so fair-turn scheduling qualifies exactly that key and never another key of the same principal; a proven pickup through a different live key rebinds it. No process is launched.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - {in: header, name: X-Aeon-Worker-Lease, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expected_revision, session_id]
+              additionalProperties: false
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                session_id: {type: string, format: uuid}
+      responses:
+        '200': {description: Bound generation or truthful admission wait}
+        '403': {description: 'Lease, live authority or owned intent rejected'}
+        '409': {description: 'Concurrent claim, unconfirmed stop or revision conflict'}
+  /projects/{projectId}/lead/pause:
+    post:
+      summary: Checkpoint and cooperatively pause the current lead
+      description: Person owner with harness.control, or the current lead with harness.worker and X-Aeon-Worker-Lease. Requires expected_revision and generation. Stops new dispatch immediately and reuses the harness wrap-up/handover controls. A live process keeps its slot until confirmed stopped. A worker may request idle pause only for its own generation; no workers are reassigned.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, generation]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                generation: {type: integer, minimum: 0}
+      responses:
+        '200': {description: Dispatch fenced; existing graceful handover pending confirmed exit}
+        '403': {description: Owner or generation proof required}
+        '409': {description: Stale revision or generation}
+  /projects/{projectId}/lead/yield:
+    post:
+      summary: Yield an idle lead's slot through checkpoint and confirmed exit
+      description: Agent-only harness.worker and the current generation lease. Requires expected_revision and generation. The server checks the existing Queue under the tree fence. An idle lead, a lead with a routed worker waiting, or one whose bounded project turn has ended requests the existing cooperative checkpoint/pause. No slot is freed until confirmed exit. Routed assignments retain this generation and can start after worker-priority yield and confirmed exit through all four live gates. Other pauses remain fenced. Restart is explicit and uses ordinary admission; eligible workers precede restart. Automatic production launch remains disabled pending AEON-603.
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - {in: header, name: X-Aeon-Worker-Lease, required: true, schema: {type: string, minLength: 32, maxLength: 256}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, generation]
+              properties:
+                expected_revision: {type: integer, minimum: 1}
+                generation: {type: integer, minimum: 1}
+      responses:
+        '200': {description: 'Cooperative checkpoint requested; process remains counted until exit'}
+        '403': {description: 'Current worker lease, live harness.worker permission, or live owner authority rejected'}
+        '409': {description: 'Stale identity, useful current turn, unavailable scheduling evidence or unavailable handover delivery'}
   /settings/work-vocabulary:
     get:
       summary: Read workspace work names and icons
@@ -1090,6 +1186,57 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '409': {description: Active run or changed target conflicts}
         '422': {description: 'Not ready; code queue_not_ready, error text and structured readiness with missing field names and suggested_estimate_hours'}
+  /queue/{nodeId}/snapshots:
+    post:
+      operationId: captureParentQueueSnapshot
+      summary: Capture visible open executable leaves without starting work
+      description: Captures at most 100 leaves, traversing at most 256 visible work nodes and 32 levels within 5 seconds. Hidden branches are omitted without counts. The server retains leaf identities, revisions and ancestry; later descendants are never added. When continuation_available is true, capture a fresh snapshot with continuation_of set to this snapshot id to advance beyond visited nodes. Continuations retain bounded traversal and explicit page membership; they are owned by the caller and must use the same parent. A fresh capture without continuation_of starts at the beginning. The depth limit remains 32 levels. Queue presence grants no launch authority.
+      parameters:
+        - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision]
+              properties:
+                expected_revision: {type: string, format: date-time}
+                continuation_of: {type: string, format: uuid, description: Prior owned snapshot whose server-held traversal cursor advances this capture}
+      responses:
+        '200': {description: Owner-bound snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/ParentQueueSnapshot'}}}}
+        '400': {description: Invalid revision or id}
+        '403': {description: Queue permission denied}
+        '404': {description: Parent unavailable}
+        '409': {description: 'Parent changed, is not a work parent, or continuation is cancelled, exhausted or its ancestry changed'}
+  /queue-snapshots/{snapshotId}:
+    get:
+      operationId: getParentQueueSnapshot
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Current visible results only, content: {application/json: {schema: {$ref: '#/components/schemas/ParentQueueSnapshot'}}}}
+        '404': {description: Snapshot unavailable or owned by another principal}
+    delete:
+      operationId: cancelParentQueueSnapshot
+      description: Cancels only a pending snapshot. Applied queue entries remain; remove those with the existing per-leaf queue removal API. Cancellation and application serialize; repeated cancellation is idempotent.
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Cancelled snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/ParentQueueSnapshot'}}}}
+        '404': {description: Snapshot unavailable}
+        '409': {description: Snapshot already applied}
+  /queue-snapshots/{snapshotId}/apply:
+    post:
+      operationId: applyParentQueueSnapshot
+      description: Rechecks each current leaf and ancestry under the tenant access and tree fences. Changed, closed, ineligible, active or unavailable leaves are skipped. Existing shared queue membership is idempotent. All new entries and audit events commit atomically; retries replay results without re-adding removed work. No routing, capacity reservation or automatic start is performed. Mandatory launch gates remain on the existing launch path.
+      parameters:
+        - {name: snapshotId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Honest per-leaf outcomes, content: {application/json: {schema: {$ref: '#/components/schemas/ParentQueueSnapshot'}}}}
+        '404': {description: Snapshot or parent unavailable}
+        '409': {description: Snapshot cancelled}
   /queue/{nodeId}/undo:
     post:
       operationId: undoStaleWorkQueue
@@ -1171,16 +1318,22 @@ paths:
   /queue/next:
     post:
       operationId: nextWorkQueue
-      description: Coordinator or permitted person routes the first ready run to an eligible agent using existing allowance admission. Targeted work precedes shared work for its agent. Blocked work keeps its place and is skipped. No capacity returns entry null. This selects a run; pickup and In progress occur atomically on the daemon's fenced claim. Repeated selection returns the same assigned run until claim.
+      description: >-
+        Coordinator or permitted person routes the first ready run to an eligible agent using existing allowance admission. Targeted work precedes shared work for its agent. Blocked work keeps its place and is skipped. No capacity returns entry null. This selects a run; pickup and In progress occur atomically on the daemon's fenced claim. Repeated selection returns the same assigned run until claim. Explicit leads share one owner dial: oldest eligible project demand gets one new route per turn, then goes behind waiting projects. Within each project targeted and manual order are preserved. Missing or stale mandatory gates and unusable worker model/account routes never qualify a contender. Fairness waits return entry null and a redacted wait_reason; no project/account identities escape. Lead pickup queries return at most 201 rows to detect a 200-entry overflow, cap each ticket fields payload at 64 KiB before decoding, and enforce a five-second deadline. Scheduling overflow returns 409 explicitly.
       security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {in: header, name: X-Aeon-Lead-Session, required: false, schema: {type: string, format: uuid}, description: Required for projects with an explicit lead intent; the current lead must prove its session lease. Legacy manual routing in unconfigured projects remains compatible.}
+        - {in: header, name: X-Aeon-Lead-Generation, required: false, schema: {type: integer, minimum: 1}, description: Exact current project lead generation. All mandatory start checks are repeated; unavailable checks return an admission wait.}
+        - {in: header, name: X-Aeon-Worker-Lease, required: false, schema: {type: string, minLength: 32, maxLength: 256}}
       requestBody:
         required: true
         content:
           application/json:
             schema: {$ref: '#/components/schemas/QueueTarget'}
       responses:
-        '200': {description: Selection, content: {application/json: {schema: {type: object, required: [entry], properties: {entry: {oneOf: [{$ref: '#/components/schemas/WorkQueueEntry'}, {type: 'null'}]}}}}}}
+        '200': {description: Selection, content: {application/json: {schema: {type: object, required: [entry], properties: {wait_reason: {type: string}, entry: {oneOf: [{$ref: '#/components/schemas/WorkQueueEntry'}, {type: 'null'}]}}}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '409': {description: 'Lead proof missing, stale assignment, paused/revoked/archived lead, mandatory admission unavailable, or bounded scheduling snapshot overflow'}
   /settings/status-autopilot:
     get:
       operationId: getStatusAutopilot
@@ -5050,7 +5203,7 @@ paths:
     get:
       operationId: getStatusHelp
       summary: The same status definitions and live workspace limits for people and agents
-      description: Defaults are used while Status autopilot settings are absent. Optional project_id resolves its Inherit/On/Off override through the caller's project visibility. Queued describes Open in the work queue; it is not a stored status. No status values are changed.
+      description: Read-only tenant metadata for authenticated agents and people with nodes.read permission. Agent keys need no scopes or role bindings; customer sessions without nodes.read are denied, and pairing lifecycle checks remain in place. Defaults are used while Status autopilot settings are absent. Optional project_id resolves its Inherit/On/Off override through the caller's project visibility; inaccessible projects return 404. Queued describes Open or Blocked in the work queue; it is not a stored status. Work merged into another ticket is cancelled with a reason naming the destination ticket; done describes completed work merged as code or a reviewed non-code result. No status values or write permissions are changed.
       security: *auth
       parameters:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
@@ -5058,6 +5211,7 @@ paths:
         '200': {description: 'Definitions, rules and effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/StatusHelp'}}}}
         '400': {description: Invalid project id}
         '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
         '404': {description: Project is not visible}
   /nodes:
     get:
@@ -5776,15 +5930,13 @@ paths:
     get:
       operationId: listEvents
       description: >-
-        Tenant-wide history excludes quote events, whose document metadata is available only through quote-scoped authorized routes. Optional from/to filters select event timestamps in [from, to), spanning at most 366 days; they must be supplied together. Legacy event ID pagination remains unchanged. With order=time (or briefing=true), pages use ascending (at,id) keysets on the existing time index. briefing=true establishes a statement_timestamp() window in the same statement snapshot as the first page (commits after the snapshot are not consumed by its cutoff): since is the previous server cutoff, absent means 24 hours; an older cutoff is capped to 366 days, and a future cutoff is preserved as an empty window. Subsequent time pages must reuse the returned window.
+        Tenant-wide history excludes quote events, whose document metadata is available only through quote-scoped authorized routes. Optional from/to filters select event timestamps in [from, to), spanning at most 366 days; they must be supplied together. Legacy event ID pagination remains unchanged. With order=time, pages use ascending (at,id) keysets on the existing time index and require from/to. Subsequent time pages must reuse those bounds.
       security: *auth
       parameters:
         - {name: node_id, in: query, schema: {type: string, format: uuid}}
         - {name: after, in: query, description: Exclusive event ID, schema: {type: integer, format: int64, minimum: 0}}
         - {name: order, in: query, schema: {type: string, enum: [id, time]}}
         - {name: cursor, in: query, description: 'Opaque exclusive (at,id) cursor; requires from/to and enables order=time', schema: {type: string, maxLength: 256}}
-        - {name: briefing, in: query, schema: {type: boolean}, description: 'Establish the first briefing window; excludes from/to, after and cursor.'}
-        - {name: since, in: query, schema: {type: string, format: date-time}, description: Previous server cutoff; only with briefing=true.}
         - {name: project_id, in: query, schema: {type: string, format: uuid}, description: Restrict to events attached to nodes in this visible project.}
         - {name: from, in: query, schema: {type: string, format: date-time}}
         - {name: to, in: query, schema: {type: string, format: date-time}}
@@ -7744,6 +7896,53 @@ paths:
         '403': {description: Worker proof or context binding rejected}
         '409': {description: Expected receipt revision conflict or divergent request reuse}
         '410': {description: Authenticated archived generation; receipt history remains readable}
+  /projects/{projectId}/lead-decisions:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: listLeadDecisions
+      description: Project-visible, prompt-free reports from coordinator generations, oldest first. Replays immutable evidence rather than reevaluating current policy or gates. No account identities, quota values, prompts or execution authority. Uses the existing append-only event log; history survives generation stop/archive. Reports do not prove a launch or a review verdict.
+      parameters:
+        - {name: after, in: query, schema: {type: integer, minimum: 0}, description: Exclusive tenant-local event ID cursor.}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+        - {name: session_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Bounded decision history, content: {application/json: {schema: {$ref: '#/components/schemas/LeadDecisionPage'}}}}
+        '400': {description: Invalid query}
+        '403': {description: Missing project read permission}
+        '404': {description: Project is not visible}
+  /projects/{projectId}/harness-sessions/{sessionId}/lead-decisions:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: recordLeadDecision
+      description: >-
+        Requires harness.worker, the owning active coordinator generation and its exact lease.
+        Authority is rechecked under the existing tenant/pairing/tree fence before append or replay.
+        Fixed enums, bounded numeric revisions/attempts, gate timestamps and same-project result IDs only;
+        unknown fields, prompts, account details and arbitrary URLs are rejected. Reports grant no authority
+        and do not launch, merge, deploy, change policy or open review gates. Admission reports must include
+        all four gates; unreadable, missing timestamps, future timestamps or readings older than 120 seconds
+        turn a reported success into wait. Gate freshness is frozen at server recording time.
+        request_id is idempotent within the project: exact metadata replays the original evidence, divergent
+        reuse returns 409. A different, stopped, archived or revoked generation cannot replay the request.
+        Tenant/project/request identity remains unique even when a referenced node moves out of visibility;
+        conflicts never return hidden evidence or bypass event visibility.
+        Review links are checked against the existing exact-commit binding and freeze its base/head hashes.
+      parameters:
+        - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/LeadDecisionWrite'}
+      responses:
+        '200': {description: Appended or replayed evidence, content: {application/json: {schema: {$ref: '#/components/schemas/LeadDecisionRecorded'}}}}
+        '400': {description: Invalid or unbounded evidence}
+        '403': {description: Worker ownership or authorization rejected}
+        '409': {description: Request identity or result binding conflict}
+        '410': {description: Authenticated archived generation}
   /projects/{projectId}/instruction-provenance:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -7901,6 +8100,38 @@ paths:
         '401': {description: Unauthorized}
         '403': {description: Permission denied}
         '404': {description: Model profile not found}
+  /projects/{projectId}/lead/usage:
+    get:
+      operationId: getProjectLeadUsage
+      summary: Redacted measured lead, worker, review and fix totals (AEON-738)
+      description: >-
+        Forward-only usage lineage identifies the original lead harness generation, independently of
+        subsequent reparenting or succession. The range selects sessions started in [from,to) and
+        contribution segments first worked in [from,to); their cumulative measurements are not interval
+        spend. Current session/model counters supply lead tokens; AEON-689 contribution segments supply
+        worker/review/fix measurements, never overlapping run telemetry or episode totals.
+        Null measurements are unknown. Missing source permissions, legacy lineage and missing episode
+        evidence make the result partial. At most 1000 sessions, 5000 contributions, 200 model rows per lead session
+        and 1000 reservations are read. Missing lead-generation storage returns 503.
+        Holds remain separate from measured usage and retain their native window unit. Only the account
+        owner, subject to pooled-account privacy, sees hold details. Holds are attributed reservations,
+        never an exclusive lead quota. No agent-hour-to-quota conversion or finish prediction is made.
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: generation, in: query, schema: {type: integer, minimum: 1}, description: 'Original lead generation; omitted selects all generations in the project.'}
+        - {name: from, in: query, schema: {type: string}, description: 'RFC3339 or YYYY-MM-DD; both bounds or neither (last 30 UTC days).'}
+        - {name: to, in: query, schema: {type: string}, description: 'Exclusive end, at most 366 days after from.'}
+      responses:
+        '200':
+          description: Bounded aggregate with explicit coverage and private holds
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/LeadUsage'}
+        '400': {description: Invalid or oversized query}
+        '401': {description: Unauthorized}
+        '403': {description: Source-project access denied}
+        '404': {description: Project or generation not found}
+        '503': {description: Lead-generation contract unavailable}
   /usage/dashboard:
     get:
       operationId: getUsageDashboard
@@ -11213,6 +11444,17 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    ProjectLead:
+      type: object
+      required: [project_id, revision, generation, state, reason, process_active]
+      properties:
+        project_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 0}
+        generation: {type: integer, minimum: 0}
+        session_id: {type: [string, 'null'], format: uuid}
+        state: {type: string, enum: [none, starting, working, waiting_for_room, paused, cannot_start]}
+        reason: {type: string, description: Redacted machine-readable reason; contains no account or credential details}
+        process_active: {type: boolean, description: True until the bound harness generation has confirmed stopped; heartbeat loss and archive do not prove exit}
     WorkLifecyclePreview:
       type: object
       required: [is_leaf, busy, open_leaves, updated_at, scope_revision, pending]
@@ -13483,6 +13725,57 @@ components:
           additionalProperties: true
           properties:
             next_action: {type: string, enum: [operator_external_stage_cli]}
+    LeadUsageMeasure:
+      type: object
+      required: [measured, known, unknown]
+      properties:
+        measured: {type: [string, 'null'], pattern: '^[0-9]+$'}
+        known: {type: integer, minimum: 0}
+        unknown: {type: integer, minimum: 0}
+    LeadUsageTotals:
+      type: object
+      required: [contributions, attempts, tokens, active_ms, waiting_ms]
+      properties:
+        contributions: {type: integer, minimum: 0}
+        attempts: {type: integer, minimum: 0}
+        tokens: {$ref: '#/components/schemas/LeadUsageMeasure'}
+        active_ms: {$ref: '#/components/schemas/LeadUsageMeasure'}
+        waiting_ms: {$ref: '#/components/schemas/LeadUsageMeasure'}
+    LeadUsage:
+      type: object
+      required: [project_id, generation, from, to, basis, partial, truncated, gaps, total, lead, worker, review, fix, held, finish_forecast]
+      properties:
+        project_id: {type: string, format: uuid}
+        generation: {type: [integer, 'null'], minimum: 1}
+        from: {type: string, format: date-time}
+        to: {type: string, format: date-time}
+        basis: {type: string, enum: [cumulative_for_sessions_and_segments_started_in_range]}
+        partial: {type: boolean}
+        truncated: {type: boolean}
+        gaps: {type: array, items: {type: string}}
+        total: {$ref: '#/components/schemas/LeadUsageTotals'}
+        lead: {$ref: '#/components/schemas/LeadUsageTotals'}
+        worker: {$ref: '#/components/schemas/LeadUsageTotals'}
+        review: {$ref: '#/components/schemas/LeadUsageTotals'}
+        fix: {$ref: '#/components/schemas/LeadUsageTotals'}
+        finish_forecast: {type: string, enum: [estimate_unavailable]}
+        held:
+          type: object
+          required: [state, scope, windows]
+          properties:
+            state: {type: string, enum: [available, withheld, partial]}
+            scope: {type: string, enum: [attributed_run_reservations_not_exclusive_quota]}
+            windows:
+              type: array
+              items:
+                type: object
+                required: [window_id, unit, reserved_units, settled_units, unknown_settlements]
+                properties:
+                  window_id: {type: string, format: uuid}
+                  unit: {type: string}
+                  reserved_units: {type: string, pattern: '^[0-9]+$'}
+                  settled_units: {type: [string, 'null'], pattern: '^[0-9]+$'}
+                  unknown_settlements: {type: integer, minimum: 0}
     UsageGroup:
       type: object
       description: Distinct sessions, with token and list-estimate sums across current model rows. A null total is unknown, not zero. A known zero is the decimal zero string.
@@ -17118,6 +17411,92 @@ components:
           required: [replayed]
           properties:
             replayed: {type: boolean, description: True when the latest revision already had this set digest.}
+    LeadDecisionGate:
+      type: object
+      additionalProperties: false
+      required: [kind, state]
+      properties:
+        kind: {type: string, enum: [dial, harness, account_room, host_load]}
+        state: {type: string, enum: [ready, full, unreadable]}
+        observed_at: {type: [string, 'null'], format: date-time}
+    LeadDecisionLink:
+      type: object
+      additionalProperties: false
+      required: [kind, id]
+      properties:
+        kind: {type: string, enum: [run, review, release]}
+        id: {type: string, format: uuid}
+        head_sha: {type: string, pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$', description: Required for review; must match the existing pinned review binding.}
+    LeadDecisionWrite:
+      type: object
+      additionalProperties: false
+      required: [request_id, stage, outcome, reason_codes, policy_source, policy_revision, attempt]
+      properties:
+        request_id: {type: string, format: uuid}
+        ticket_node_id: {type: string, format: uuid}
+        stage: {type: string, enum: [queue, admission, review, release_handoff]}
+        outcome: {type: string, enum: [selected, wait, requested, passed, failed, handoff, partial]}
+        reason_codes:
+          type: array
+          minItems: 1
+          maxItems: 8
+          uniqueItems: true
+          items: {type: string, enum: [oldest_eligible, manual_order, dependency_wait, criteria_wait, no_work, policy_wait, gates_ready, review_requested, review_passed, review_failed, attempt_limit, release_handoff, person_gate_required, forecast_unavailable, model_escalated, login_selected, connection_broken, process_broken, capacity_unavailable, capacity_full, partial_result, dial_full, dial_unreadable, dial_stale, harness_full, harness_unreadable, harness_stale, account_room_full, account_room_unreadable, account_room_stale, host_load_full, host_load_unreadable, host_load_stale]}
+        policy_source: {type: string, enum: [workspace, project], description: Reported effective policy scope; no new permission source.}
+        policy_revision: {type: integer, minimum: 1, maximum: 2147483647, description: Reported revision frozen as evidence; never authorizes execution.}
+        attempt: {type: integer, minimum: 1, maximum: 32}
+        previous_event_id: {type: integer, minimum: 1, description: Optional prior decision in the same visible project and ticket. Attempt may stay the same or advance by one. Allows succession without inventing an assignment store; run result links identify existing assignments.}
+        gates: {type: array, maxItems: 4, items: {$ref: '#/components/schemas/LeadDecisionGate'}}
+        results: {type: array, maxItems: 8, items: {$ref: '#/components/schemas/LeadDecisionLink'}}
+    LeadDecision:
+      type: object
+      required: [event_id, project_id, session_id, recorded_at, evidence, authority_granted, request, outcome, reason_codes, gate_freshness, results]
+      properties:
+        event_id: {type: integer, minimum: 1}
+        project_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        recorded_at: {type: string, format: date-time}
+        evidence: {type: string, const: coordinator_reported}
+        authority_granted: {type: boolean, const: false}
+        request: {$ref: '#/components/schemas/LeadDecisionWrite'}
+        outcome: {type: string, enum: [selected, wait, requested, passed, failed, handoff, partial]}
+        reason_codes: {type: array, maxItems: 13, items: {type: string}}
+        gate_freshness:
+          type: array
+          maxItems: 4
+          items:
+            type: object
+            required: [kind, freshness]
+            properties:
+              kind: {type: string, enum: [dial, harness, account_room, host_load]}
+              freshness: {type: string, enum: [fresh, stale, unreadable]}
+        results:
+          type: array
+          maxItems: 8
+          items:
+            type: object
+            required: [kind, id]
+            properties:
+              kind: {type: string, enum: [run, review, release]}
+              id: {type: string, format: uuid}
+              head_sha: {type: string, pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$'}
+              base_sha: {type: string, pattern: '^([0-9a-f]{40}|[0-9a-f]{64})$'}
+              author_run_id: {type: string, format: uuid}
+              review_run_id: {type: string, format: uuid}
+              author_family: {type: string, enum: [openai, anthropic, xai, cursor]}
+              reviewer_family: {type: string, enum: [openai, anthropic, xai, cursor]}
+    LeadDecisionRecorded:
+      type: object
+      required: [decision, replayed]
+      properties:
+        decision: {$ref: '#/components/schemas/LeadDecision'}
+        replayed: {type: boolean}
+    LeadDecisionPage:
+      type: object
+      required: [items, next_after]
+      properties:
+        items: {type: array, maxItems: 200, items: {$ref: '#/components/schemas/LeadDecision'}}
+        next_after: {type: [integer, 'null'], minimum: 1}
     HarnessProvenancePage:
       type: object
       required: [session_id, revisions, truncated]
@@ -17249,6 +17628,30 @@ components:
         message_id: {type: string, format: uuid}
         decision: {type: string, enum: [resolved, dismissed]}
         created_at: {type: string, format: date-time}
+    ParentQueueSnapshot:
+      type: object
+      required: [id, parent_id, parent_revision, tree_revision, state, truncated, partial, tree_changed, items]
+      properties:
+        id: {type: string, format: uuid}
+        parent_id: {type: string, format: uuid}
+        parent_revision: {type: string, format: date-time}
+        tree_revision: {type: string, description: SHA-256 of the bounded visible topology and revisions at capture}
+        state: {type: string, enum: [pending, applied, cancelled]}
+        truncated: {type: boolean}
+        continuation_available: {type: boolean, description: More visible traversal remains; use this snapshot id as continuation_of for a fresh capture. Remaining nodes may all be ineligible. False when only the depth limit truncated traversal.}
+        partial: {type: boolean, description: True when truncated or any captured leaf was skipped or is no longer readable}
+        tree_changed: {type: boolean, description: Visible topology or revision changed before application}
+        items:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [node_id, revision, outcome]
+            properties:
+              node_id: {type: string, format: uuid}
+              revision: {type: string, format: date-time}
+              outcome: {type: string, enum: [pending, queued, already_queued, changed, not_ready, active, unavailable]}
+              run_id: {type: string, format: uuid}
     QueueReadiness:
       type: object
       required: [queueable, ready, missing, suggested_estimate_hours, security_review_required]
@@ -19774,15 +20177,7 @@ components:
       properties:
         next_cursor:
           type: [string, 'null']
-          description: Exclusive time cursor for order=time or briefing=true pages.
-        window:
-          type: object
-          required: [from, to, first, capped]
-          properties:
-            from: {type: string, format: date-time}
-            to: {type: string, format: date-time}
-            first: {type: boolean}
-            capped: {type: boolean}
+          description: Exclusive time cursor for order=time pages.
         items:
           type: array
           items:
