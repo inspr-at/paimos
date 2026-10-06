@@ -578,7 +578,13 @@
     ,
     "internal/workorders:TestEndpointPositionedBodyNetworkDeadline"
     ,
+    "scripts/releaseworkflow:TestBuilderChecksumAndPluginPathFailClosed"
+    ,
+    "scripts/releaseworkflow:TestBuilderVersionAssertionFailsClosed"
+    ,
     "scripts/releaseworkflow:TestParallelWebUnitsShareRuntimeAndRunOnce"
+    ,
+    "scripts/releaseworkflow:TestRehearsedBuilderPins"
   ]
   ,
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)"
@@ -2076,6 +2082,26 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestWireWriteLockWaitIsCancellable","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentChangedBriefCannotClaim","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentCheckoutFenceSurvivesDaemonLoss","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentCheckoutReleasesAfterConfirmedExit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentClaimResponseLossUsesJournalProof","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentCompetingDaemonCannotClaimCheckout","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentRejectsOverlappingCheckoutDirectories","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentRemoteClaimCarriesExactPickup","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentRestartClearsOwnConfirmedCheckoutFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentUnknownForkNeverRetries","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestWorkerAssignmentWorktreeIdentityIgnoresDaemon","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentdwire","name":"TestAttachConflictDiagnosticIsSurfacedAndBounded","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentdwire","name":"TestAttachedHookInboxResponseBoundsAndStrictJSON","tier":"ESSENTIAL"}
@@ -2573,6 +2599,18 @@
     {"kind":"go","package":"internal/agentruns","name":"TestWorkOrderLifecycleAndIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestWorkParentQueueRefusedWithLiveWorkChild","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffConcurrentPickupOneWriter","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffObsoleteClaimDoesNotAcceptWriter","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffReceiptsReplayAndSuccession","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffRejectsChangedBriefAndMissingPickup","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffUnknownExitBlocksRetryAndReconciles","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestWorkerHandoffWorktreeIsHeldUntilExit","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentsecurity","name":"TestCancelledEnclaveOperationStopsBeforeNativeAccess","tier":"ESSENTIAL"}
     ,
@@ -4268,6 +4306,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIRejectsUnboundedAndPrivateEvidence","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestLeadHandoffCLIAndQueueDispatchPrivacy","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestLeadSettingsCLIContractAndValidation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestLeadSettingsCLIUsesExplicitPersonSession","tier":"GATED-FULL"}
@@ -4439,6 +4479,8 @@
     {"kind":"go","package":"internal/cli","name":"TestRulesRendererPreservesExactBytes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestRulesTLDRDryRunApplyAndTemplate","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestRunAgentClaimsAssignedRunThroughProjectAPI","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestRunAgentReadsSharedAccountRegistry","tier":"GATED-FULL"}
     ,
@@ -8504,6 +8546,10 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestAnnotatedTagGuardFailsClosed","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestBuilderChecksumAndPluginPathFailClosed","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestBuilderVersionAssertionFailsClosed","tier":"NIGHTLY"}
+    ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestComposeAppProbesReadiness","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestComposeDocumentsParse","tier":"GATED-FULL"}
@@ -8561,6 +8607,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestRehearsalPlatformDigestHandoff","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestRehearsalReleaseTagValidation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestRehearsedBuilderPins","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReleaseBinariesRefuseWarmOrUnverifiedGo","tier":"ESSENTIAL"}
     ,
