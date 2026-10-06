@@ -124,17 +124,16 @@ test('native Node and Vitest selectors execute the requested registrations, rath
 test('native browser selectors cover reconciled essentials and every collected full-suite registration',()=>{
   mkdirSync(evidence,{recursive:true})
   const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))
-  const all=[]
-  for(const config of ['playwright.ui.config.ts','playwright.perf.config.ts']) {
-    const rows=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','-c',config,'--list','--reporter=json'],{cwd:web})),config)
-    all.push(...rows.filter(row=>config!=='playwright.ui.config.ts'||row.file!=='tests/performance.spec.ts'))
-  }
+  // The shared snapshot already lists both browser configs natively. Keep the
+  // same complete registration identities without listing the catalogue twice.
+  const all=inventory().tests.filter(row=>row.kind==='browser')
   const reconciled=validate({version:1,tests:manifest.tests.filter(row=>row.kind==='browser')},all)
   assert.deepEqual(reconciled.map(key).sort(),all.map(key).sort())
   const tiers=new Map(reconciled.map(row=>[key(row),row.tier]))
   const declared=new Map(manifest.tests.filter(row=>row.kind==='browser').map(row=>[key(row),row]))
   for(const row of reconciled) assert.equal(row.tier,declared.get(key(row))?.tier??'NIGHTLY',key(row))
   const groups=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8')).groups
+  const listings=new Map()
   for(const mode of ['essential','full','all']) {
     let total=0
     for(const group of groups) {
@@ -142,15 +141,16 @@ test('native browser selectors cover reconciled essentials and every collected f
       const rows=all.filter(row=>group.specs.some(spec=>spec.file===row.file)&&included(row))
       if(!rows.length) continue
       const list=resolve(evidence,`regression-${mode}-${group.id}.txt`)
-      writeFileSync(list,browserList(rows,all).join('\n')+'\n')
+      const selection=browserList(rows,all).join('\n')+'\n'
+      writeFileSync(list,selection)
       const env={...process.env,...Object.fromEntries(Object.entries(group.env).map(([k,v])=>[k,v.replaceAll('${RUNNER_TEMP}',evidence)]))}
-      // --test-list filters registrations after loading spec modules. Restrict
-      // discovery too, as the actual shard runner does, so every group/mode
-      // does not import the entire catalogue again. Identity assertions below
-      // still compare every selected registration with the full native list.
-      const files=[...new Set(rows.map(row=>row.file))].map(file=>`^${resolve(web,file).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}$`)
-      const listed=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','--config',group.config,...group.flags,
-        ...(group.project?['--project',group.project]:[]),'--workers=1','--retries=0','--test-list',list,'--list','--reporter=json',...files],{cwd:web,env})),group.config)
+      // Several groups select exactly the same cases in full and all modes.
+      // Reuse only identical native requests within this unchanged snapshot;
+      // each mode still asserts every identity and its independent total.
+      const request=JSON.stringify([group.config,group.flags,group.project,group.env,selection])
+      if(!listings.has(request)) listings.set(request,flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','--config',group.config,...group.flags,
+        ...(group.project?['--project',group.project]:[]),'--workers=1','--retries=0','--test-list',list,'--list','--reporter=json'],{cwd:web,env})),group.config))
+      const listed=listings.get(request)
       assert.deepEqual(listed.map(row=>`${row.id}:${row.project}`).sort(),rows.map(row=>`${row.id}:${row.project}`).sort(),group.id)
       total+=listed.length
     }
