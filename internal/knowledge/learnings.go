@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/markdownsource"
@@ -54,14 +55,20 @@ type Learning struct {
 	At        time.Time `json:"at"`
 	Author    *Person   `json:"author"`
 	Href      string    `json:"href"`
-	projectID string
-	verdict   bool
+	// Recommendation is an agent's (or a person's) prepared decision
+	// (AEON-788). It never decides anything by itself.
+	Recommendation *Recommendation `json:"recommendation,omitempty"`
+	projectID      string
+	verdict        bool
 }
 
 // LearningPage is GET /api/knowledge/learnings.
+// Truncated means more open learnings follow; NextCursor then continues the
+// list after the last item (AEON-788).
 type LearningPage struct {
-	Items     []Learning `json:"items"`
-	Truncated bool       `json:"truncated"`
+	Items      []Learning `json:"items"`
+	Truncated  bool       `json:"truncated"`
+	NextCursor string     `json:"next_cursor,omitempty"`
 }
 
 // learningAudit is the dismiss event. node_id and project_id are real nodes.
@@ -72,6 +79,7 @@ type learningAudit struct {
 	CommentID string `json:"comment_id,omitempty"`
 	ProjectID string `json:"project_id"`
 	Text      string `json:"text"`
+	Reason    string `json:"reason,omitempty"`
 }
 
 // LearningDecision is the result of accept or dismiss.
@@ -124,6 +132,49 @@ type acceptedSnap struct {
 
 func alreadyDecided() error {
 	return fail(http.StatusConflict, "already_decided", "This learning was already accepted or dismissed.")
+}
+
+// changedLearning refuses a decision on text the person did not review: the
+// learning reads differently now than when they sent it (AEON-788).
+func changedLearning() error {
+	return fail(http.StatusConflict, "learning_changed", "This learning changed since you reviewed it. Review it again.")
+}
+
+// reviewedMatches is whether the text the person reviewed is the learning's
+// text now. Older clients send none and are not checked.
+func reviewedMatches(reviewed *string, current string) bool {
+	return reviewed == nil || *reviewed == current
+}
+
+// fenceLearningWrite holds project placement and access steady through
+// commit (tenant, then tree, before any learning or node lock), then
+// authorizes against the source's current project. The route's scope was
+// resolved before this transaction; the item may have moved, or the grant
+// been revoked, since then (AEON-788).
+func fenceLearningWrite(ctx context.Context, tx pgx.Tx, p tenant.Principal, nodeID string) error {
+	if err := authz.LockProjectWrite(ctx, tx, p.TenantID); err != nil {
+		return err
+	}
+	forbidden := fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
+	if !canWrite(ctx, tx, p, "knowledge.write") {
+		return forbidden
+	}
+	var project *string
+	err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE tenant_id=$1 AND id=$2::uuid AND deleted_at IS NULL`, p.TenantID, nodeID).Scan(&project)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return closedLearning()
+	}
+	if err != nil {
+		return err
+	}
+	scope := authz.Scope{}
+	if project != nil {
+		scope.ProjectID = *project
+	}
+	if authz.RequireTx(ctx, tx, p, "knowledge.write", scope) != nil {
+		return forbidden
+	}
+	return nil
 }
 
 func requirePerson(p tenant.Principal) error {
@@ -348,11 +399,19 @@ func (m *module) handleListLearnings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fail(http.StatusBadRequest, "invalid_request", "project_id is required"))
 		return
 	}
+	cursor, err := parseLearningCursor(r.URL.Query().Get("cursor"))
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
 	var page LearningPage
-	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		var err error
-		page, err = listLearnings(r.Context(), tx, p.TenantID, project)
-		return err
+		page, err = listLearningPage(r.Context(), tx, p.TenantID, project, cursor)
+		if err != nil {
+			return err
+		}
+		return attachRecommendations(r.Context(), tx, p.TenantID, project, page.Items)
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -380,7 +439,7 @@ func (m *module) handleAcceptLearning(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	knowledgeID, confirm, err := parseAccept(raw)
+	in, err := parseAccept(raw)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -390,9 +449,9 @@ func (m *module) handleAcceptLearning(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	decision, err := m.acceptLearning(r.Context(), p, r.PathValue("learningId"), nodeID, commentID, comment, knowledgeID, confirm, expected)
+	decision, err := m.acceptLearning(r.Context(), p, r.PathValue("learningId"), nodeID, commentID, comment, in, expected)
 	if errors.Is(err, errStale) {
-		writeErr(w, m.stale(r.Context(), p, knowledgeID))
+		writeErr(w, m.stale(r.Context(), p, in.KnowledgeID))
 		return
 	}
 	if err != nil {
@@ -416,7 +475,12 @@ func (m *module) handleDismissLearning(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	decision, err := m.dismissLearning(r.Context(), p, r.PathValue("learningId"), nodeID, commentID, comment)
+	reason, reviewed, err := readDismiss(w, r)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	decision, err := m.dismissLearning(r.Context(), p, r.PathValue("learningId"), nodeID, commentID, comment, reason, reviewed)
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -424,27 +488,46 @@ func (m *module) handleDismissLearning(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, decision)
 }
 
-func parseAccept(raw map[string]json.RawMessage) (string, bool, error) {
+type acceptInput struct {
+	KnowledgeID string
+	Lesson      string
+	Reviewed    *string
+	Confirm     bool
+}
+
+// parseAccept reads knowledge_id, an optional lesson that replaces the
+// learning's own text in the changelog line and the learning_text the person
+// reviewed (AEON-788), and confirm_not_sensitive.
+func parseAccept(raw map[string]json.RawMessage) (acceptInput, error) {
+	var in acceptInput
 	if len(raw) == 0 {
-		return "", false, fail(http.StatusBadRequest, "invalid_request", "knowledge_id is required")
+		return in, fail(http.StatusBadRequest, "invalid_request", "knowledge_id is required")
 	}
 	for key := range raw {
-		if key != "knowledge_id" && key != "confirm_not_sensitive" {
-			return "", false, fail(http.StatusBadRequest, "invalid_request", "unknown field "+key)
+		switch key {
+		case "knowledge_id", "confirm_not_sensitive", "lesson", "learning_text":
+		default:
+			return in, fail(http.StatusBadRequest, "invalid_request", "unknown field "+key)
 		}
 	}
 	id, ok, err := stringField(raw, "knowledge_id")
 	if err != nil {
-		return "", false, err
+		return in, err
 	}
 	if !ok || !validUUID(strings.TrimSpace(id)) {
-		return "", false, fail(http.StatusBadRequest, "invalid_request", "knowledge_id is required")
+		return in, fail(http.StatusBadRequest, "invalid_request", "knowledge_id is required")
 	}
-	confirm, err := confirmField(raw)
-	if err != nil {
-		return "", false, err
+	in.KnowledgeID = strings.TrimSpace(id)
+	if in.Lesson, err = lessonField(raw); err != nil {
+		return in, err
 	}
-	return strings.TrimSpace(id), confirm, nil
+	if in.Reviewed, err = reviewedField(raw); err != nil {
+		return in, err
+	}
+	if in.Confirm, err = confirmField(raw); err != nil {
+		return in, err
+	}
+	return in, nil
 }
 
 // ---------- List ----------
@@ -475,6 +558,17 @@ WITH RECURSIVE tree AS (
 )`
 
 func listLearnings(ctx context.Context, tx pgx.Tx, tenantID, projectID string) (LearningPage, error) {
+	return listLearningPage(ctx, tx, tenantID, projectID, nil)
+}
+
+// listLearningPage is one page of 50, newest first, continuing after cursor
+// when one is given. Tickets, comments and nominations each scan in the
+// list's own order, (at, id) newest first, from the full cursor key, so ties
+// and older learnings stay reachable beyond each scan's limit. A scan that
+// fills its limit has unseen rows after its last one; the page ends there
+// (its horizon), so no learning from another source beyond it is listed
+// ahead of them.
+func listLearningPage(ctx context.Context, tx pgx.Tx, tenantID, projectID string, cursor *learningCursor) (LearningPage, error) {
 	page := LearningPage{Items: []Learning{}}
 	var projectKey string
 	err := tx.QueryRow(ctx, `SELECT n.key FROM nodes n
@@ -490,23 +584,44 @@ func listLearnings(ctx context.Context, tx pgx.Tx, tenantID, projectID string) (
 	if err != nil {
 		return page, err
 	}
-	tickets, err := listTaggedIssues(ctx, tx, tenantID, projectID, projectKey, decided)
+	tickets, ticketsEnd, err := listTaggedIssues(ctx, tx, tenantID, projectID, projectKey, decided, cursor)
 	if err != nil {
 		return page, err
 	}
-	comments, err := listTaggedComments(ctx, tx, tenantID, projectID, projectKey, decided)
+	comments, commentsEnd, err := listTaggedComments(ctx, tx, tenantID, projectID, projectKey, decided, cursor)
 	if err != nil {
 		return page, err
 	}
-	nominated, err := listNominated(ctx, tx, tenantID, projectID, projectKey)
+	nominated, nominatedEnd, err := listNominated(ctx, tx, tenantID, projectID, projectKey, cursor)
 	if err != nil {
 		return page, err
 	}
 	items := mergeNominations(append(tickets, comments...), nominated)
 	sortLearnings(items)
+	if cursor != nil {
+		items = afterCursor(items, *cursor)
+	}
+	var horizon *learningCursor
+	for _, end := range []*learningCursor{ticketsEnd, commentsEnd, nominatedEnd} {
+		if end != nil && (horizon == nil || end.sortsBefore(*horizon)) {
+			horizon = end
+		}
+	}
+	if horizon != nil {
+		kept := items[:0]
+		for _, item := range items {
+			if !horizon.sortsBefore(learningCursor{At: item.At, ID: item.ID}) {
+				kept = append(kept, item)
+			}
+		}
+		items = kept
+		page.Truncated = true
+		page.NextCursor = horizon.encode()
+	}
 	if len(items) > learningListLimit {
 		items = items[:learningListLimit]
 		page.Truncated = true
+		page.NextCursor = encodeLearningCursor(items[len(items)-1])
 	}
 	if items == nil {
 		items = []Learning{}
@@ -544,7 +659,25 @@ func decidedKeys(ctx context.Context, tx pgx.Tx, tenantID string) (map[string]bo
 	return out, rows.Err()
 }
 
-func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, decided map[string]bool) ([]Learning, error) {
+// scanEnd is the key of a scan's last row when the scan filled its limit:
+// rows after it were not read. nil when the scan reached its end.
+func scanEnd(rows int, last learningCursor) *learningCursor {
+	if rows < learningScanLimit {
+		return nil
+	}
+	return &last
+}
+
+// cursorArgs are the $3 timestamp and $4 id of an optional cursor.
+func cursorArgs(c *learningCursor) (*time.Time, string) {
+	if c == nil {
+		return nil, ""
+	}
+	return &c.At, c.ID
+}
+
+func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, decided map[string]bool, cursor *learningCursor) ([]Learning, *learningCursor, error) {
+	before, beforeID := cursorArgs(cursor)
 	rows, err := tx.Query(ctx, projectTree+`
 	  SELECT n.id::text, n.key, n.title, n.updated_at, n.fields, k.slug, coalesce(n.fields->>'slug','')
 	  FROM nodes n
@@ -556,21 +689,26 @@ func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, proje
 	    AND proj.id=$2::uuid
 	    AND n.fields::text ILIKE '%process-learning%'
 	    AND `+undecidedNode+`
-	  ORDER BY n.updated_at DESC
-	  LIMIT `+strconv.Itoa(learningScanLimit), tenantID, projectID)
+	    AND ($3::timestamptz IS NULL OR n.updated_at < $3
+	         OR (n.updated_at = $3 AND ('n-'||n.id::text) COLLATE "C" < $4::text COLLATE "C"))
+	  ORDER BY n.updated_at DESC, ('n-'||n.id::text) COLLATE "C" DESC
+	  LIMIT `+strconv.Itoa(learningScanLimit), tenantID, projectID, before, beforeID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	var out []Learning
+	var scanned int
+	var last learningCursor
 	for rows.Next() {
 		var item Learning
 		var fields json.RawMessage
 		var kind, slug string
 		if err := rows.Scan(&item.NodeID, &item.Key, &item.Title, &item.At, &fields, &kind, &slug); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		item.ID = nodeLearningID(item.NodeID)
+		scanned, last = scanned+1, learningCursor{At: item.At, ID: item.ID}
 		if decided[item.ID] || !issueKinds[kind] || !hasLearningTag(fields) {
 			continue
 		}
@@ -583,10 +721,11 @@ func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, proje
 		item.projectID = projectID
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	return out, scanEnd(scanned, last), rows.Err()
 }
 
-func listTaggedComments(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, decided map[string]bool) ([]Learning, error) {
+func listTaggedComments(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, decided map[string]bool, cursor *learningCursor) ([]Learning, *learningCursor, error) {
+	before, beforeID := cursorArgs(cursor)
 	rows, err := tx.Query(ctx, projectTree+`
 	  SELECT c.id::text, c.at, n.id::text, n.key, n.title, k.slug, coalesce(n.fields->>'slug',''),
 	         coalesce(latest.after->>'body_markdown', c.after->>'body_markdown', ''),
@@ -610,21 +749,26 @@ func listTaggedComments(ctx context.Context, tx pgx.Tx, tenantID, projectID, pro
 	    AND coalesce(latest.after->>'deleted','false')<>'true'
 	    AND coalesce(latest.after->>'body_markdown', c.after->>'body_markdown','') ILIKE '%process-learning%'
 	    AND `+undecidedComment+`
-	  ORDER BY c.at DESC
-	  LIMIT `+strconv.Itoa(learningScanLimit), tenantID, projectID)
+	    AND ($3::timestamptz IS NULL OR c.at < $3
+	         OR (c.at = $3 AND ('c-'||n.id::text||'-'||c.id::text) COLLATE "C" < $4::text COLLATE "C"))
+	  ORDER BY c.at DESC, ('c-'||n.id::text||'-'||c.id::text) COLLATE "C" DESC
+	  LIMIT `+strconv.Itoa(learningScanLimit), tenantID, projectID, before, beforeID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer rows.Close()
 	var out []Learning
+	var scanned int
+	var last learningCursor
 	for rows.Next() {
 		var item Learning
 		var kind, slug, body, authorID, authorName string
 		if err := rows.Scan(&item.CommentID, &item.At, &item.NodeID, &item.Key, &item.Title, &kind, &slug, &body, &authorID, &authorName); err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		text, ok := commentLearningText(body)
 		item.ID = commentLearningID(item.NodeID, item.CommentID)
+		scanned, last = scanned+1, learningCursor{At: item.At, ID: item.ID}
 		if !ok || decided[item.ID] {
 			continue
 		}
@@ -637,7 +781,7 @@ func listTaggedComments(ctx context.Context, tx pgx.Tx, tenantID, projectID, pro
 		}
 		out = append(out, item)
 	}
-	return out, rows.Err()
+	return out, scanEnd(scanned, last), rows.Err()
 }
 
 func sortLearnings(items []Learning) {
@@ -651,11 +795,11 @@ func sortLearnings(items []Learning) {
 
 // ---------- Accept and dismiss ----------
 
-func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, knowledgeID string, confirm bool, expected *time.Time) (LearningDecision, error) {
+func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, in acceptInput, expected *time.Time) (LearningDecision, error) {
 	var out LearningDecision
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if !canWrite(ctx, tx, p, "knowledge.write") {
-			return fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
+		if err := fenceLearningWrite(ctx, tx, p, nodeID); err != nil {
+			return err
 		}
 		if err := lockLearning(ctx, tx, p.TenantID, publicID); err != nil {
 			return err
@@ -667,11 +811,17 @@ func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicI
 		if err != nil {
 			return err
 		}
-		confirmed, err := sensitiveCheck(sensitiveRanges("text", item.Text), confirm)
+		if !reviewedMatches(in.Reviewed, item.Text) {
+			return changedLearning()
+		}
+		if in.Lesson != "" {
+			item.Text = in.Lesson
+		}
+		confirmed, err := sensitiveCheck(sensitiveRanges("text", item.Text), in.Confirm)
 		if err != nil {
 			return err
 		}
-		current, _, err := lockNode(ctx, tx, p.TenantID, knowledgeID, false)
+		current, _, err := lockNode(ctx, tx, p.TenantID, in.KnowledgeID, false)
 		if err != nil {
 			return err
 		}
@@ -714,11 +864,11 @@ func (m *module) acceptLearning(ctx context.Context, p tenant.Principal, publicI
 	return out, err
 }
 
-func (m *module) dismissLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool) (LearningDecision, error) {
+func (m *module) dismissLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, reason string, reviewed *string) (LearningDecision, error) {
 	var out LearningDecision
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if !canWrite(ctx, tx, p, "knowledge.write") {
-			return fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
+		if err := fenceLearningWrite(ctx, tx, p, nodeID); err != nil {
+			return err
 		}
 		if err := lockLearning(ctx, tx, p.TenantID, publicID); err != nil {
 			return err
@@ -730,8 +880,14 @@ func (m *module) dismissLearning(ctx context.Context, p tenant.Principal, public
 		if err != nil {
 			return err
 		}
+		if !reviewedMatches(reviewed, item.Text) {
+			return changedLearning()
+		}
+		if looksSensitive(reason) {
+			return sensitiveLearning(sensitiveRanges("reason", reason))
+		}
 		ev, err := events.Append(ctx, tx, p, events.Change{NodeID: &item.NodeID, Type: evLearningDismissed, After: learningAudit{
-			SourceKey: publicID, Source: item.Source, NodeID: item.NodeID, CommentID: item.CommentID, ProjectID: item.projectID, Text: item.Text,
+			SourceKey: publicID, Source: item.Source, NodeID: item.NodeID, CommentID: item.CommentID, ProjectID: item.projectID, Text: item.Text, Reason: reason,
 		}})
 		if err != nil {
 			return err
@@ -966,18 +1122,29 @@ func outcomePayload(ctx context.Context, tx pgx.Tx, tenantID, outcomeID string) 
 }
 
 // listNominated drops decided nominations in SQL, before the limit, so a
-// window of newer decided ones cannot hide an older open candidate.
-func listNominated(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string) ([]Learning, error) {
-	rows, err := tx.Query(ctx, `SELECT `+nominationColumns+`, m.source_key
+// window of newer decided ones cannot hide an older open candidate. It scans
+// in the list's order: a nomination's time is its comment's, or its node's
+// updated_at, as learningFromNomination lists it; the id is the source key.
+func listNominated(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, cursor *learningCursor) ([]Learning, *learningCursor, error) {
+	before, beforeID := cursorArgs(cursor)
+	// nominationColumns, qualified: nodes and events share their names.
+	rows, err := tx.Query(ctx, `SELECT m.origin, m.excerpt, m.source_hash, coalesce(m.comment_id::text, ''), m.node_id::text,
+		  m.project_id::text, m.outcome_id, m.nominated_at, m.source_key, x.at
 		FROM method_learning_nominations m
+		JOIN nodes n ON n.tenant_id=m.tenant_id AND n.id=m.node_id AND n.deleted_at IS NULL
+		LEFT JOIN events c ON c.tenant_id=m.tenant_id AND c.id=m.comment_id AND c.node_id=m.node_id AND c.type='comment.created'
+		CROSS JOIN LATERAL (SELECT CASE WHEN m.comment_id IS NULL THEN n.updated_at ELSE c.at END AS at) x
 		WHERE m.tenant_id=$1 AND m.project_id=$2::uuid
+		  AND x.at IS NOT NULL
 		  AND NOT EXISTS (
 		    SELECT 1 FROM method_learning_decisions d
 		    WHERE d.tenant_id=m.tenant_id AND d.source_key=m.source_key)
-		ORDER BY m.nominated_at DESC, m.source_key
-		LIMIT `+strconv.Itoa(learningScanLimit), tenantID, projectID)
+		  AND ($3::timestamptz IS NULL OR x.at < $3
+		       OR (x.at = $3 AND m.source_key COLLATE "C" < $4::text COLLATE "C"))
+		ORDER BY x.at DESC, m.source_key COLLATE "C" DESC
+		LIMIT `+strconv.Itoa(learningScanLimit), tenantID, projectID, before, beforeID)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Resolve each nomination after the scan. A query on this transaction
 	// while rows are open is "conn busy".
@@ -987,31 +1154,34 @@ func listNominated(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectK
 		nom       nomination
 	}
 	var hits []nominatedHit
+	var last learningCursor
 	for rows.Next() {
 		var hit nominatedHit
 		var sourceKey string
-		nom, err := scanNomination(rows, &sourceKey)
+		var at time.Time
+		nom, err := scanNomination(rows, &sourceKey, &at)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		hit.sourceKey, hit.nom = sourceKey, nom
 		hits = append(hits, hit)
+		last = learningCursor{At: at, ID: sourceKey}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	rows.Close()
 	var out []Learning
 	for _, hit := range hits {
 		item, ok, err := learningFromNomination(ctx, tx, tenantID, projectID, projectKey, hit.sourceKey, hit.nom)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if ok {
 			out = append(out, item)
 		}
 	}
-	return out, nil
+	return out, scanEnd(len(hits), last), nil
 }
 
 func learningFromNomination(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey, sourceKey string, nom nomination) (Learning, bool, error) {

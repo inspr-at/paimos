@@ -302,6 +302,14 @@
     ,
     "browser:tests/features.spec.ts:project OFF overrides workspace ON and inherit restores it"
     ,
+    "browser:tests/knowledge-learnings.spec.ts:a learning that changed after review is refused and shown again"
+    ,
+    "browser:tests/knowledge-learnings.spec.ts:leaving the knowledge view during a run sends no further step"
+    ,
+    "browser:tests/knowledge-learnings.spec.ts:on a phone the review sheet keeps its actions pinned through apply"
+    ,
+    "browser:tests/knowledge-learnings.spec.ts:pages that scanned no open learning still lead to older ones"
+    ,
     "browser:tests/knowledge.spec.ts:Decision entries expose active and superseded history without generic mutation controls"
     ,
     "browser:tests/no-shift.spec.ts:Agents header keeps pause actions and Decision Desk navigation at 1024"
@@ -621,6 +629,24 @@
     "browser:tests/service-tier.spec.ts:320: phone Change tier menu opens and restores its actual trigger"
     ,
     "browser:tests/service-tier.spec.ts:390: phone Change tier menu opens and restores its actual trigger"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:Capacity and load: work days, nights and the editors, with controls that stay put"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:a failed Sprint is said as a failure, not as saved"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:a menu opened before the pool changed acts on nothing and says so"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:people without account management get no account menu and read-only pacing"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:phone: the editor is a full-height sheet and nothing scrolls sideways"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:the plan card for an existing schedule: Turn off keeps nothing for you"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:the plan card shows until it is answered: Looks right saves Auto, then it is gone"
+    ,
+    "browser:tests/settings-account-pacing.spec.ts:the plan card: Change leads to Capacity and load without saving"
     ,
     "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
     ,
@@ -8482,13 +8508,25 @@
     ,
     {"kind":"browser","file":"tests/knowledge-graph.spec.ts","name":"the pane closes back to the graph, which keeps the display and filters","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a learning that changed after review is refused and shown again","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a person accepts a learning into the changelog and can dismiss another","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a person applies agent recommendations in one confirm, with one row left out","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a person can save a learning as a rule draft","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a suspected credential needs a person to confirm it is not one","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"an empty inbox leaves the knowledge tab in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"leaving the knowledge view during a run sends no further step","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"older learnings load after the newest 50","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"on a phone the review sheet keeps its actions pinned through apply","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"pages that scanned no open learning still lead to older ones","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"removing the last learning keeps focus on the search","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11054,6 +11092,30 @@
     ,
     {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows light 390 detail open pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Capacity and load: work days, nights and the editors, with controls that stay put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Remove account… confirmed after the account was regrouped removes nothing and says so","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Remove account… says what stays untouched, and only Remove account removes it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"a failed Sprint is said as a failure, not as saved","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"a menu opened before the pool changed acts on nothing and says so","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"people without account management get no account menu and read-only pacing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"phone: the editor is a full-height sheet and nothing scrolls sideways","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the account menu sprints, holds until the time it showed, and goes back to the plan","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the plan card for an existing schedule: Turn off keeps nothing for you","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the plan card shows until it is answered: Looks right saves Auto, then it is gone","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"the plan card: Change leads to Capacity and load without saving","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"a reader cannot confirm matching login hints","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"a row opens its detail: windows with source and freshness, and the last three readings","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13105,6 +13167,12 @@
     {"kind":"node","file":"tests/knowledge.test.ts","name":"Decisions have a distinct icon from Guidelines in lists and graph legends","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"a body heading that repeats the title, or starts it, is not shown twice","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/knowledge.test.ts","name":"a stopped run sends nothing after the stop","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/knowledge.test.ts","name":"applying recommendations sends only the chosen rows, and a failed row does not stop the rest","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/knowledge.test.ts","name":"each step sends the lesson and the learning text that were on screen, and a changed learning asks for a new review","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"method-learning errors stay specific when the status is also 403 or 404","tier":"GATED-FULL"}
     ,
