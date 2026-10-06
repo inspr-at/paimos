@@ -4926,6 +4926,10 @@
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: tablet verification control is independent of the status label width","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-716: stalled verification reports the ownership fence and remains retryable after settlement","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-716: verification warnings preserve offline and account recovery controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Agents at once saves one ceiling and independent harness limits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Check now says what came back: a failure as a failure, still nothing, then the reading","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -5505,6 +5509,40 @@
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"typed totals clamp, invalid drafts do not write, and field shortcuts remain native","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"zero and thirty are real ceilings; idle glyph rests and disabled boundaries keep focus","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 dark: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 light: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 light: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 dark: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 light: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 light: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 dark: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 light: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 light: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"a stopped failed session still counts as needing attention","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"another person’s visible account never becomes your full account or your capacity","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"attention counts relevant descendants through family folds and stopped history","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"ended workers remain recoverable through an opt-in fold without cleanup writes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"live families count all external workers, hide hundreds of ended siblings and retain counts when folded","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-handover.spec.ts","name":"drag and drop moves only onto an authorized live lead","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12388,6 +12426,8 @@
     ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"six blocked accounts of seven keep the full count and are not labeled ready","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/agent-pairing.test.ts","name":"stalled verification preserves offline, login and setup recovery progress","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"the Nix guide is additive, parsed as published, and never guesses a paired service option","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"the guide uses the server origin and stays available when the session is frozen","tier":"GATED-FULL"}
@@ -14036,6 +14076,8 @@
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > carries real API room through accounts, pools and the dial when nothing runs","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > claims readiness only from confirmed room when unknown and zero room mix","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > explains routing blockers without calling scheduled, held or unapproved accounts full","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > keeps known room when another harness has no current advice","tier":"NIGHTLY"}
@@ -14047,6 +14089,8 @@
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > rejects stale projections and never doubles shared quota aliases across groups","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > reserves full for explicitly occupied slots and keeps absent accounts distinct","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > resolves a shared-quota alias measurement from the canonical gauge","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > retains server start advice while explaining unmeasured usage","tier":"NIGHTLY"}
     ,
@@ -14061,6 +14105,8 @@
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > includes all configured harnesses and counts beyond a lowered ceiling","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > keeps no own limit, numeric zero and off distinct","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > never calls missing account ownership or routing a full account","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > reports actual waiting work without simulating starts or inventing an empty queue","tier":"GATED-FULL"}
     ,
@@ -14179,6 +14225,14 @@
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"online, no readings yet > each account is ready, and capacity says honestly that nothing was read","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"online, no readings yet > is online, seen just now, with the full identities","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification reporting failures > explains a rejected report without blaming the vendor protocol or exposing raw errors","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification reporting failures > shows a stalled check as a problem without changing its active ownership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification warnings preserve recovery precedence > keeps failed and stalled checks behind sign-in and harness repair commands","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification warnings preserve recovery precedence > keeps failed verification behind offline, disconnecting and setup states","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"waits from the server routing > a ranked account with a free slot stays ready","tier":"GATED-FULL"}
     ,

@@ -173,6 +173,9 @@ func TestGatePreviewDoesNotReportRequiredStatusOnPushOrDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if problems, err := checkWorkflow("cross-family-preview.yml", body); err != nil || len(problems) != 0 {
+		t.Fatalf("diagnostic preview with bootstrap skip must be accepted: %v %v", problems, err)
+	}
 	for _, changed := range []string{
 		strings.Replace(string(body), "  pull_request:", "  push:\n  pull_request:", 1),
 		strings.Replace(string(body), "  pull_request:", "  workflow_dispatch:\n  pull_request:", 1),

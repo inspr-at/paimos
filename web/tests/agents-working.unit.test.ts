@@ -99,6 +99,24 @@ describe('the one dial', () => {
     expect(waitingCopy(snapshot, under, room, [{}])).toBe('1 waiting: ready for a start')
     expect(waitingCopy(snapshot, under, { codex: 0, claude: 0, cursor: 0 }, [{}])).toBe('1 waiting for room on an account')
   })
+  it('never calls missing account ownership or routing a full account', () => {
+    const now = Date.parse('2026-10-05T12:00:00Z')
+    const account = (slots: number, measured = true) => buildRows(
+      [{ id: 'owned', label: 'Owned', harness: 'codex', host: 'workstation', state: 'available', last_probe_ok: true }],
+      [{ account_id: 'owned', windows: [], schedule: defaultSchedule('UTC'), routing: measured ? { rank: 1, available_slots: slots } : undefined }],
+    )
+    expect(workingAccountRoom([], now, true, ['codex', 'claude']).total).toBeNull()
+    expect(workingAccountRoom(account(17), now, false, ['codex']).total).toBeNull()
+    expect(workingAccountRoom(account(0, false), now, true, ['codex']).total).toBeNull()
+    const known = workingAccountRoom(account(17), now, true, ['codex', 'claude', 'cursor'])
+    expect(known.room).toEqual({ codex: 17, claude: 0, cursor: 0 })
+    expect(known.total).toBe(17)
+    expect(known.full).toBe(false)
+    expect(workingAccountRoom(account(0), now, true, ['codex']).total).toBe(0)
+    expect(liveCopy(20, 3, known.total)).toBe('3 running · room for 17 more')
+    expect(liveCopy(20, 3, 2)).toBe('3 running · room for 2 more')
+    expect(liveCopy(20, 0, null)).toBe('0 running · account room not measured yet')
+  })
   it('includes all configured harnesses and counts beyond a lowered ceiling', () => {
     const rows = workingRows({ total: 1, limits: { grok: 30, pi: 'off', gemini: 'no_limit', opencode: 0 } }, snapshot, {}, null)
     expect(rows.map(r => r.key)).toEqual(['codex', 'claude', 'grok', 'cursor', 'pi', 'gemini', 'opencode'])

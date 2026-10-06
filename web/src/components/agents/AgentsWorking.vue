@@ -101,7 +101,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
             <WorkingStepper :value="row.limit" :effective="row.effective" :label="row.label" :viewer="viewer()" :revision="snapshot.updated_at" @step="changeLimit(row.key, $event)" @edit="editLimit(row.key, $event)" @boundary="changeMode(row.key, $event)" />
           </div>
         </div>
-        <p class="f-live" :data-tip="error || status" :class="{ failed: error }" role="status"><span class="live-mark" aria-hidden="true" /><span>{{ error || live }}</span><span v-if="saving" class="sr-only">Saving</span></p>
+        <p class="f-live" :data-tip="error || `Your sessions across projects, including sessions started outside PAIMOS. Other people's sessions appear in the live count above. ${status}`" :class="{ failed: error }" role="status"><span class="live-mark" aria-hidden="true" /><span>{{ error || `${live} · your agents` }}</span><span v-if="saving" class="sr-only">Saving</span></p>
         <button type="button" class="f-fold step ghost" :aria-expanded="!folded" :aria-controls="`${id}-body`" :aria-label="folded ? 'Show details' : 'Hide details'" :data-tip="folded ? 'Show details: each harness, accounts, waiting work' : 'Hide details: keep the one-line bar'" @click="toggleFold"><AppIcon name="chevron" :size="16" /></button>
       </div>
       <div :id="`${id}-body`" class="f-body" :hidden="folded">

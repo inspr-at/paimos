@@ -62,7 +62,18 @@ function toggleFold() {
 
 // ---------- Cards ----------
 const rows = computed(() => (props.showAccounts ? capacity.rows : []))
-const cards = computed(() => buildComputerCards({ computers: props.permissions.canListComputers ? capacity.computers : [], rows: rows.value, now: now.value }))
+// Start with attention first, then keep controls where the person saw them.
+// A successful retry changes readiness; it must not reorder the clicked card.
+const cardSnapshot = computed<{ identity: string; cards: ComputerCard[] }>((previous) => {
+  const identity = `${session.identity?.tenant.id ?? ''}/${session.identity?.principal.id ?? ''}`
+  const next = buildComputerCards({ computers: props.permissions.canListComputers ? capacity.computers : [], rows: rows.value, now: now.value })
+  if (previous?.identity === identity) {
+    const rank = new Map(previous.cards.map((card, index) => [card.key, index]))
+    next.sort((a, b) => (rank.get(a.key) ?? rank.size) - (rank.get(b.key) ?? rank.size))
+  }
+  return { identity, cards: next }
+})
+const cards = computed(() => cardSnapshot.value.cards)
 const summary = computed(() => readySummary(cards.value))
 const pacingLine = computed(() => pacingSummary(schedule.value))
 const empty = computed(() => capacity.loaded && !cards.value.length)
@@ -79,7 +90,8 @@ function canVerify(line: AccountLine, card: ComputerCard) {
     && card.computer.verification_capabilities?.[line.harness]?.supported === true
 }
 function verifyBusy(line: AccountLine, card: ComputerCard) {
-  return !!verifying.value || ['starting', 'running', 'waiting', 'ownership_lost'].includes(enrollmentOf(line, card)?.verification_state ?? '')
+  const e = enrollmentOf(line, card)
+  return !!verifying.value || !e?.verification_stalled && ['starting', 'running', 'waiting', 'ownership_lost'].includes(e?.verification_state ?? '')
 }
 async function verifyAgain(line: AccountLine, card: ComputerCard) {
   if (!canVerify(line, card) || verifyBusy(line, card)) return
@@ -89,7 +101,10 @@ async function verifyAgain(line: AccountLine, card: ComputerCard) {
   verifying.value = account
   try {
     const response = await api(`/agent-pairing/computers/${computer}/enrollments/${account}/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: revision, expected_verification_run_id: priorRun }) })
-    if (!response.ok) throw new Error(response.status === 403 ? 'Only the account owner may verify it again.' : response.status === 409 ? 'The account or verification changed. Refresh before verifying again.' : 'Verification could not be requested. Please try again.')
+    if (!response.ok) {
+      const problem = await response.json().catch(() => ({})) as { code?: string }
+      throw new Error(response.status === 403 ? 'Only the account owner may verify it again.' : response.status === 409 && problem.code === 'verification_active' ? 'The helper must confirm that the previous check stopped and settle its reports before another can start.' : response.status === 409 ? 'The account or verification changed. Refresh before verifying again.' : 'Verification could not be requested. Please try again.')
+    }
     const created = await response.json() as { account_id?: string; run_id?: string }
     if (created.account_id !== account || typeof created.run_id !== 'string') throw new Error('Verification response could not be confirmed. Refresh the account list.')
     const current = cards.value.find(card => card.computer?.computer_id === computer)?.computer
