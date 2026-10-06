@@ -718,7 +718,7 @@
     ,
     "browser:tests/webcore-recovery.spec.ts:start-time typing keeps the cost unit and controls stable (390, light)"
     ,
-    "browser:tests/webcore-recovery.spec.ts:timing failures restore confirmed values, keep both controls anchored and retry the requested value"
+    "browser:tests/webcore-recovery.spec.ts:timing failures keep typed values and controls anchored, and save again on blur"
     ,
     "node:tests/agent-pause.test.ts:effective agent lists override all hosts, including an explicit empty list"
     ,
@@ -5083,6 +5083,12 @@
     {"kind":"browser","file":"tests/agent-indicator.spec.ts","name":"migrated legacy playful retains Hover and preserves rollback preferences","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-indicator.spec.ts","name":"nine real avatars keep their order and family layout","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-names.spec.ts","name":"agent names save beside the work levels without wiping or conflicting at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-names.spec.ts","name":"agent names save beside the work levels without wiping or conflicting at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-names.spec.ts","name":"the saved word names the lead on the project band","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"Agents links to Connect your machine","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10784,6 +10790,34 @@
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"without account.manage the list is read-only","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"a numeric conflict suppresses shared saved feedback from another field","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"agent card fits 1024px dark, with stable controls and long German copy","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"agent card fits 1024px light, with stable controls and long German copy","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"agent card fits 1440px dark, with stable controls and long German copy","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"agent card fits 1440px light, with stable controls and long German copy","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"agent card fits 390px dark, with stable controls and long German copy","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"agent card fits 390px light, with stable controls and long German copy","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"members do not see or fetch workspace agent settings","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"numeric Undo conflict for Estimates persists until an authoritative reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"numeric Undo conflict for Silent sessions persists until an authoritative reload","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"stale Agent activity saves require a reload before saving and Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"stale Estimates saves require a reload before saving and Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"stale Silent sessions saves require a reload before saving and Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-agents.spec.ts","name":"stored agent settings stay together; bounds, failures, Undo and Models link stay honest","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"Needs you verifies the expired sign-in once and reports a failed request honestly","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"a matching login joins the shared quota from the account panel and Sign out everywhere covers it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -11614,7 +11648,7 @@
     ,
     {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"start-time typing keeps the cost unit and controls stable (390, light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"timing failures restore confirmed values, keep both controls anchored and retry the requested value","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/webcore-recovery.spec.ts","name":"timing failures keep typed values and controls anchored, and save again on blur","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/wide.spec.ts","name":"back trail › following links inside the panel builds a trail with Back and Alt+Left; list moves clear it","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
@@ -12760,6 +12794,8 @@
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"the docking width leaves the list 560px beside a 560px pane","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"AEON-791: the saved agent names reach every screen that reads LEAD_WORDS, and clearing restores Lead","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/lead.test.ts","name":"Resume is only a restart after a confirmed stop; Pause needs an existing intent","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"a parent queue reports queued, existing and skipped leaves and what remains","tier":"ESSENTIAL"}
@@ -13655,6 +13691,12 @@
     {"kind":"vitest","file":"tests/agent-indicator.unit.test.ts","name":"normalizes saved sprite to sprite without changing hovering","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agent-indicator.unit.test.ts","name":"reads legacy account data without a write, then persists the migrated style on hovering change","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-names-card.unit.test.ts","name":"a Work vocabulary read overtaken by an Agent names save never brings the old word back","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-names-card.unit.test.ts","name":"an edited draft conflicts with names another admin saved instead of overwriting them","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-names-card.unit.test.ts","name":"an edited draft follows a work-level save that left the names alone","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/agent-pause-store.unit.test.ts","name":"Resume all sends only the selected paused generations","tier":"NIGHTLY"}
     ,
@@ -15433,6 +15475,12 @@
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"access retains the same child, draft and one-time link on expiry, with writes inert","tags":[],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"an incoming owner clears frozen Access before fresh permissions arrive","tags":[],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"legacy #agent-activity highlights its consolidated field until the arrival expires","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"legacy #estimates highlights its consolidated field until the arrival expires","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"legacy #silent-sessions highlights its consolidated field until the arrival expires","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"personal retains the same child, draft and one-time link on expiry, with writes inert","tags":[],"tier":"GATED-FULL"}
     ,

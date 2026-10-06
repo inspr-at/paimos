@@ -312,7 +312,7 @@ test('fixed check environment removes caller flags and identity but supplies CI 
     NIX_CC_WRAPPER_TARGET_HOST_x86_64_apple_darwin: '1', NIX_BINTOOLS_WRAPPER_TARGET_HOST_x86_64_apple_darwin: '1',
     NIX_CC_WRAPPER_TARGET_BUILD_aarch64_apple_darwin: '1', NIX_CC_WRAPPER_FLAGS_SET_aarch64_apple_darwin: '1',
     NIX_CC_WRAPPER_TARGET_BUILD_arm64_apple_darwin: '1', NIX_BINTOOLS_WRAPPER_TARGET_TARGET_arm64_apple_darwin: '1',
-    NIX_CC_WRAPPER_FLAGS_SET_arm64_apple_darwin: '1', NIX_DEBUG: '7' }
+    NIX_CC_WRAPPER_FLAGS_SET_arm64_apple_darwin: '1', NIX_DEBUG: '7', NIX_CC: 'fixture-cc' }
   await runChecks([{ id: 'env', command: 'true', cwd: '.', needs: [], timeout_seconds: 5 }], cwd, { env: source, run: async (_command, { env }) => {
     assert.equal(env.GOFLAGS, undefined); assert.equal(env.AEON_TEST_DATABASE_URL, undefined)
     assert.equal(env.RANDOM_EXTRA, undefined); assert.equal(env.AEON_TEST_TIER_MODE, 'full')
@@ -337,6 +337,7 @@ test('fixed check environment removes caller flags and identity but supplies CI 
     assert.equal(env.NIX_BINTOOLS_WRAPPER_TARGET_TARGET_arm64_apple_darwin, '1')
     assert.equal(env.NIX_CC_WRAPPER_FLAGS_SET_arm64_apple_darwin, undefined)
     assert.equal(env.NIX_DEBUG, undefined)
+    assert.equal(env.NIX_CC, undefined)
     assert.ok(env.npm_config_cache.startsWith(tmpdir()))
     return { status: 'passed', seconds: 0 }
   } })

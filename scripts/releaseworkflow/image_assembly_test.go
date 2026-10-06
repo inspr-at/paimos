@@ -304,7 +304,7 @@ func goIsolationProblems(release, dry workflow) []string {
 		job, name, dryJob, dryName, cache string
 		commands                          []string
 	}{
-		{"agentd-darwin", "Build darwin paimos-agentd with LocalAuthentication", "agentd-rehearsal", "Build darwin paimos-agentd with LocalAuthentication", "go-build-agentd", []string{"bash scripts/build-release-binaries.sh darwin-agentd"}},
+		{"agentd-darwin", "Build darwin paimos-agentd with LocalAuthentication", "agentd-rehearsal", "Build darwin paimos-agentd with LocalAuthentication", "go-build-agentd", []string{"bash scripts/build-release-binaries.sh darwin-agentd", `GOCACHE="$RUNNER_TEMP/go-build-cli-darwin" bash scripts/build-release-binaries.sh cli-darwin` + "\n"}},
 		{"image-platform", "Release history", "image-dry-run", "Release history fixture", "go-build-history", []string{"go mod download\n", "go mod verify\n", "go run ./internal/releasehistory/generate"}},
 		{"image-platform", "Compile web and Go outside Docker", "image-dry-run", "Compile web and Go outside Docker", "go-build-image", []string{"node scripts/build-image-inputs.mjs build"}},
 		// Each proof run creates its own build cache; none may be passed in.
@@ -349,7 +349,7 @@ func goIsolationProblems(release, dry workflow) []string {
 	if assets, ok := find(release, "assets", "Build linux paimos-agentd and aeon-cli"); ok {
 		for _, line := range []string{
 			`GOCACHE="$RUNNER_TEMP/go-build-linux-agentd" bash scripts/build-release-binaries.sh linux-agentd` + "\n",
-			`GOCACHE="$RUNNER_TEMP/go-build-cli" bash scripts/build-release-binaries.sh cli` + "\n",
+			`GOCACHE="$RUNNER_TEMP/go-build-cli" bash scripts/build-release-binaries.sh cli-linux` + "\n",
 		} {
 			if strings.Count(assets.Run, line) != 1 {
 				problems = append(problems, "assets: every compilation needs its own empty build cache")
@@ -405,7 +405,7 @@ func TestShippedGoBuildsCompileColdFromVerifiedModules(t *testing.T) {
 		{"history verified late", "release", "          go mod download\n          go mod verify\n          go run ./internal/releasehistory/generate -repo . -repository \"${GITHUB_REPOSITORY}\"\n", "          go mod download\n          go run ./internal/releasehistory/generate -repo . -repository \"${GITHUB_REPOSITORY}\"\n          go mod verify\n", "modules are not verified before go run"},
 		{"proof given a build cache", "release", "          # Each proof run creates its own empty GOCACHE; none is passed here.\n", "          GOCACHE: ${{ runner.temp }}/go-build-proof\n", "image-platform/Prove two clean image rebuilds: not compiled cold"},
 		{"assets share one cache", "release", `GOCACHE="$RUNNER_TEMP/go-build-cli" bash`, `GOCACHE="$RUNNER_TEMP/go-build-linux-agentd" bash`, "every compilation needs its own empty build cache"},
-		{"assets unnamed cache", "release", `GOCACHE="$RUNNER_TEMP/go-build-cli" bash scripts/build-release-binaries.sh cli`, "bash scripts/build-release-binaries.sh cli", "every compilation needs its own empty build cache"},
+		{"assets unnamed cache", "release", `GOCACHE="$RUNNER_TEMP/go-build-cli" bash scripts/build-release-binaries.sh cli-linux`, "bash scripts/build-release-binaries.sh cli-linux", "every compilation needs its own empty build cache"},
 		{"rehearsal drifts", "dry", "GOCACHE: ${{ runner.temp }}/go-build-image", "GOCACHE: ${{ runner.temp }}/go-build-other", "rehearsal differs in GOCACHE"},
 		{"rehearsal assets without modules", "dry", "      - name: Exact production assets assembly\n        env:\n          GOMODCACHE: ${{ runner.temp }}/go-mod\n          GOFLAGS: -mod=readonly\n", "      - name: Exact production assets assembly\n", "rehearsal differs in GOMODCACHE"},
 	} {
