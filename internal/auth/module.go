@@ -408,6 +408,9 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		}
 		switch parts[2] {
 		case "lead":
+			if len(parts) == 4 && parts[3] == "usage" && read {
+				return "harness.read", true
+			}
 			// Starting a lead remains person-only, regardless of key scopes.
 			if len(parts) == 3 && read {
 				return "harness.read", true

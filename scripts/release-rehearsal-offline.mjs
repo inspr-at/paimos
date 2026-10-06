@@ -41,7 +41,8 @@ if (process.argv[2] === 'docker') {
   const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, AEON_REHEARSAL_REAL_GH: realGH,
     RUNNER_TEMP: directory, GITHUB_OUTPUT: join(directory, 'output'), GITHUB_STEP_SUMMARY: join(directory, 'summary'),
     GITHUB_REF: `refs/tags/v${version}`, GITHUB_REPOSITORY: 'inspr-at/paimos', VERSION: version, DIGEST: digest('5'),
-    PIN_EVIDENCE: 'Offline rehearsal: no pin proposal was published.' };
+    PIN_EVIDENCE: 'Offline rehearsal: no pin proposal was published.',
+    RUNTIME_AMD64: digest('6'), RUNTIME_ARM64: digest('7') };
   for (const [job, name] of [
     ['image', 'Publish multi-arch index'], ['image', 'Verify pushed image attestation'],
     ['assets', 'Create draft GitHub release with signed assets'],
