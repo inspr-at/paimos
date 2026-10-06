@@ -27,7 +27,7 @@ import (
 // normal estimate write would fill them with classifier suggestions instead.
 func placementNode(t *testing.T, w planningWorld, key string, fields map[string]any) nodeJSON {
 	t.Helper()
-	n := w.node(t, key, "ticket", w.root.ID, "open", nil)
+	n := w.node(t, key, "work", w.root.ID, "open", nil)
 	raw, err := json.Marshal(fields)
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
 		tickets = append(tickets, placementNode(t, w, fmt.Sprintf("LINK-%d", i+1), fields))
 	}
 	for i := range 5 {
-		n := w.node(t, fmt.Sprintf("GROKHIST-%d", i+1), "ticket", w.root.ID, "done", nil)
+		n := w.node(t, fmt.Sprintf("GROKHIST-%d", i+1), "work", w.root.ID, "done", nil)
 		w.session(t, n.ID, "grok", "grok-4.7", "high", "grok-4.7", 60, 1_000_000, 0, 0, "api", "")
 	}
 	if _, err := testDB.Admin.Exec(t.Context(), `UPDATE harness_sessions SET created_at='2026-09-30T12:00:00Z',stopped_at='2026-09-30T13:00:00Z' WHERE tenant_id=$1`, w.admin.TenantID); err != nil {
@@ -117,7 +117,7 @@ func TestPlanningLinkedViewerAndCanonicalAssignee(t *testing.T) {
 		t.Helper()
 		mux := http.NewServeMux()
 		New(appPool, nil).Mount(mux)
-		r := httptest.NewRequest("GET", "/api/nodes?within="+w.root.ID+"&kind=ticket&state=open&limit=100&sort="+order, nil)
+		r := httptest.NewRequest("GET", "/api/nodes?within="+w.root.ID+"&kind=work&state=open&limit=100&sort="+order, nil)
 		r = r.WithContext(agentaccounts.WithResidencyClassifier(tenant.WithPrincipal(r.Context(), p), evidence))
 		rec := httptest.NewRecorder()
 		mux.ServeHTTP(rec, r)
@@ -196,7 +196,7 @@ func placementCalibration(t *testing.T, w planningWorld) {
 		if i >= 5 {
 			harness, model, effort, tokens = "claude", "opus", "high", 8_000_000
 		}
-		n := w.node(t, fmt.Sprintf("HISTORY-%d", i+1), "ticket", w.root.ID, "done", nil)
+		n := w.node(t, fmt.Sprintf("HISTORY-%d", i+1), "work", w.root.ID, "done", nil)
 		w.session(t, n.ID, harness, model, effort, model, 60, tokens, 0, 0, "api", "")
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
@@ -307,6 +307,7 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 	// An independent pre-502c snapshot envelope, with known fixture rates and
 	// exact price-row fields, must equal the stored JSON for every legacy row.
 	// AEON-502e adds history evidence; its seeded tests verify those new fields.
+	// AEON-503 also freezes the fixture's classification without changing rates.
 	for _, e := range want {
 		err := db.InTenant(dbtest.Seed(t.Context()), appPool, w.admin.TenantID, func(tx pgx.Tx) error {
 			if err := CapturePlanningStart(t.Context(), tx, e.node.ID, "session"); err != nil {
@@ -317,7 +318,11 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 				return err
 			}
 			hours, tokens, cost, rate := 2.0, 2*e.rate, fmt.Sprintf("%d.000000", e.cost), fmt.Sprint(e.cost/2)
-			legacy := planningSnapshot{Source: "session", Hours: &hours, Tokens: &tokens, Cost: &cost, Route: views[e.node.Key].Route,
+			classification, err := json.Marshal(map[string]string{"area": e.area, "route_role": e.role, "complexity": "M"})
+			if err != nil {
+				return err
+			}
+			legacy := planningSnapshot{WorkClassification: classification, Source: "session", Hours: &hours, Tokens: &tokens, Cost: &cost, Route: views[e.node.Key].Route,
 				RateBasis: estimateRateBasis{planningCalibration: planningCalibration{Basis: "median", Tickets: 5, TokensPerHour: e.rate, AnyRoute: e.profile == ""}, TokensPerHourExact: fmt.Sprint(e.rate), ListPerHour: &rate, CachedMix: mixCached, InputMix: mixInput, OutputMix: mixOutput}}
 			if e.profile == "" {
 				legacy.RateBasis.Tickets = 10
@@ -380,7 +385,14 @@ func TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange(t *testing.T) {
 			}
 		}
 		var same bool
-		if err := tx.QueryRow(t.Context(), `SELECT (SELECT snapshot-'model_estimate' FROM ticket_estimate_snapshots WHERE ticket_node_id=$1)=(SELECT snapshot-'model_estimate' FROM ticket_estimate_snapshots WHERE ticket_node_id=$2)`, security.ID, twin.ID).Scan(&same); err != nil {
+		// Rates and the legacy envelope stay equal; the immutable classifications
+		// must retain each ticket's actual area. Check both exact classifications.
+		if err := tx.QueryRow(t.Context(), `SELECT
+            s.snapshot-'model_estimate'=jsonb_set(b.snapshot-'model_estimate','{work_classification}',
+                '{"area":"security","route_role":"build-hard","complexity":"M"}'::jsonb)
+            AND b.snapshot->'work_classification'='{"area":"backend","route_role":"build-hard","complexity":"M"}'::jsonb
+            FROM ticket_estimate_snapshots s CROSS JOIN ticket_estimate_snapshots b
+            WHERE s.ticket_node_id=$1 AND b.ticket_node_id=$2`, security.ID, twin.ID).Scan(&same); err != nil {
 			return err
 		}
 		if !same {
@@ -414,7 +426,7 @@ func TestTicketAreasAreProjectScopedAndSystemRowsStaySeparate(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		body := fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Area","fields":{"area":%q}}`, kindBySlug(t, w.admin, "ticket").ID, tc.project, tc.area)
+		body := fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Area","fields":{"area":%q}}`, kindBySlug(t, w.admin, "work").ID, tc.project, tc.area)
 		code, raw := call(t, &w.admin, "POST", "/api/nodes", body)
 		if tc.ok && code != 201 || !tc.ok && code != 400 {
 			t.Fatalf("area %+v: %d %s", tc, code, raw)
@@ -426,7 +438,7 @@ func TestTicketAreasAreProjectScopedAndSystemRowsStaySeparate(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	code, _ := call(t, &w.admin, "POST", "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Archived","fields":{"area":"firmware"}}`, kindBySlug(t, w.admin, "ticket").ID, w.root.ID))
+	code, _ := call(t, &w.admin, "POST", "/api/nodes", fmt.Sprintf(`{"kind_id":%q,"parent_id":%q,"title":"Archived","fields":{"area":"firmware"}}`, kindBySlug(t, w.admin, "work").ID, w.root.ID))
 	if code != 400 {
 		t.Fatalf("archived area accepted: %d", code)
 	}

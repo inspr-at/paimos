@@ -17,6 +17,51 @@ async function open(page: Page, path: string, options: KnowledgeMockOptions & { 
 }
 const rows = (page: Page) => page.locator('.k-row')
 const groupTitles = (page: Page) => page.locator('.k-group h2')
+
+test('Decision entries expose active and superseded history without generic mutation controls', async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 })
+  const errors = watchErrors(page)
+  await mockWork(page, fixtures())
+  const world = knowledgeWorld()
+  const base = world.entries[0]
+  world.entries.push(
+    { ...base, id: 'decision-new', key: 'DCS-2', type: 'decision', slug: 'decision-new', title: 'Use remote tests', body: 'Run the tests on the approved offload machine.', metadata: { decision_state: 'active', supersedes: 'decision-old' }, links: [] },
+    { ...base, id: 'decision-old', key: 'DCS-1', type: 'decision', slug: 'decision-old', title: 'Earlier testing answer', body: 'The earlier approved answer.', status: 'archived', metadata: { decision_state: 'superseded', superseded_by: 'decision-new' }, links: [] },
+  )
+  const calls = await mockKnowledge(page, world)
+  await page.goto('/p/PHAROS/knowledge?type=decision&view=entries')
+  await expect(groupTitles(page)).toHaveText(['Decisions'])
+  const rail = page.getByRole('navigation', { name: 'Kinds of knowledge' })
+  const decisionIcon = rail.getByRole('button', { name: /Decisions/ }).locator('.k-kind-icon')
+  const guidelineIcon = rail.getByRole('button', { name: /Guidelines/ }).locator('.k-kind-icon')
+  expect(await decisionIcon.locator('svg').innerHTML()).not.toBe(await guidelineIcon.locator('svg').innerHTML())
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    expect(await decisionIcon.evaluate(el => getComputedStyle(el).color)).not.toBe(await guidelineIcon.evaluate(el => getComputedStyle(el).color))
+    const colors = await page.evaluate(() => {
+      const css = getComputedStyle(document.documentElement)
+      return { decision: css.getPropertyValue('--kind-decision').trim(), guideline: css.getPropertyValue('--kind-guideline').trim() }
+    })
+    expect(colors.decision).not.toBe(colors.guideline)
+  }
+  await expect(rows(page)).toHaveCount(1)
+  await expect(page.getByRole('button', { name: 'New decision', exact: true })).toHaveCount(0)
+  await rows(page).first().click()
+  await expect(page.locator('.e-note').filter({ hasText: 'Always answer' })).toContainText('Active; approved for reuse.')
+  await expect(page.getByRole('button', { name: 'Edit', exact: true })).toHaveCount(0)
+  await page.keyboard.press('e')
+  await expect(page.getByRole('form', { name: /Edit decision/ })).toHaveCount(0)
+  await page.getByRole('button', { name: 'More actions' }).click()
+  await expect(page.getByRole('menuitem', { name: /Delete|Archive/ })).toHaveCount(0)
+  await page.keyboard.press('Escape')
+  await page.goto('/p/PHAROS/knowledge/decision/decision-old')
+  await expect(page.locator('.e-body')).toContainText('The earlier approved answer.')
+  await expect(page.locator('.e-note').filter({ hasText: 'Always answer' })).toContainText('Superseded; kept for its history.')
+  await expect(page.locator('.e-note').filter({ hasText: 'Always answer' })).toContainText('decision-new')
+  expect(calls.filter(call => ['POST', 'PATCH', 'DELETE'].includes(call.method))).toEqual([])
+  expect(errors).toEqual([])
+})
+
 async function axe(page: Page) {
   const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
   expect(result.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([])

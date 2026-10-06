@@ -6,6 +6,7 @@ You are one of several agents building PAIMOS AEON in parallel. A coordinator pl
 
 The next generation of Paimos: agents first, voice first, multi-tenant, hybrid human work first-class. Decisions are fixed in two accepted ADRs (PPM project AEON, knowledge `adr-001-foundation` and `adr-002-stack`):
 
+- Work creation: **create a work item; nesting decides its name**. Agents work on leaves only; parent statuses follow their children and are never set by lead status scripts.
 - Core model: **nodes** (one type in a fully dynamic tree, kinds and labels are tenant configuration), **relations** (typed links), **events** (one append-only log per tenant for audit, history, undo, live updates), plus **principals** (people and agents) and **files**.
 - Every row carries `tenant_id`; Postgres row-level security enforces isolation.
 - Stack: Go (standard library HTTP, `pgx`, `sqlc`-style typed SQL), Postgres 18 + pgvector, Vue 3 + TypeScript + Vite, one OpenAPI 3.1 contract (`api/openapi.yaml`), server-sent events for live updates, OIDC through Zitadel for people, scoped API keys for agents.

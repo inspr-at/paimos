@@ -370,7 +370,7 @@ const touch = window.matchMedia('(hover: none)').matches
 .jump-row:focus-visible { box-shadow: var(--focus-ring); }
 .jump-none { padding: 10px 8px; font-size: 12.5px; color: var(--ink-3); }
 .sheet-scrim { position: absolute; inset: 0; z-index: 10; display: grid; place-items: center; background: color-mix(in oklab, var(--canvas) 70%, transparent); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
-.sheet { width: min(520px, calc(100vw - 32px)); padding: 22px 24px; border-radius: 18px; background: var(--surface-raised); box-shadow: var(--shadow-pop); }
+.sheet { width: min(var(--dialog-m), calc(100vw - 32px)); padding: 22px 24px; border-radius: 18px; background: var(--surface-raised); box-shadow: var(--shadow-pop); }
 .sheet header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
 .sheet h2 { font-size: 18px; font-weight: 500; }
 .sheet dl { display: grid; margin: 0; }

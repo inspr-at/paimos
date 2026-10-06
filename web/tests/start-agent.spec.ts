@@ -4,13 +4,17 @@ import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 import { sessionListReads } from './agents-fixtures'
 import { mockStartAgent } from './start-agent-fixtures'
+import { expectStableControls } from './helpers/stable'
+import { me } from './work-fixtures'
 
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Start agent', exact: true })
+const newAgent = (page: Page) => page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })
 async function open(page: Page, ticket = false) {
   // Ticket dispatch now uses the Queue/assignee menu (work-queue.spec.ts).
-  // Keep the explicit account cascade covered through its retained /agents entry.
+  // Keep the explicit account cascade covered through the /agents New menu.
   await page.goto('/agents')
-  await page.locator('button.start-agent').click()
+  await newAgent(page).click()
+  await page.getByRole('menuitem', { name: /^Start agent…/ }).click()
   await expect(dialog(page)).toBeVisible()
   if (ticket) {
     await dialog(page).getByRole('searchbox').fill('PHAROS-11')
@@ -71,6 +75,42 @@ test('advanced launch retains its selected ticket and retry reuses the created w
   await dialog(page).getByRole('button', { name: 'Queue run', exact: true }).click()
   await expect(dialog(page).getByRole('heading', { name: 'Queued', exact: true })).toBeVisible()
   expect(mock.calls.filter(c => c.method === 'POST' && c.path === '/api/work-orders')).toHaveLength(1)
+})
+
+test('canonical leaf search excludes mixed parent results and queues only the selected leaf', async ({ page }) => {
+  const mock = await mockStartAgent(page)
+  const reads: URLSearchParams[] = []
+  const leaf = { id: 'n-1', key: 'PHAROS-11', title: 'Connect Hetzner Cloud for managed provisioning', is_leaf: true, fields: {}, kind_slug: 'work' }
+  await page.route('**/api/nodes?**', route => {
+    const query = new URL(route.request().url()).searchParams
+    if (query.get('limit') !== '30' || query.get('sort') !== '-updated_at') return route.fallback()
+    reads.push(query)
+    // Deliberately include an ineligible row even when shape was requested.
+    return route.fulfill({ json: { items: [{ ...leaf, id: 'parent', key: 'PHAROS-10', title: 'Work parent', is_leaf: false }, leaf], next_cursor: null } })
+  })
+  await open(page)
+  const search = dialog(page).getByRole('searchbox')
+  await expect(dialog(page).getByRole('button', { name: /PHAROS-11 Connect Hetzner/ })).toBeVisible()
+  await expectStableControls({
+    controls: { search },
+    interactions: [{ name: 'filter leaf results', run: async () => {
+      await search.fill('PHAROS')
+      await expect.poll(() => reads.at(-1)?.get('q')).toBe('PHAROS')
+    } }],
+    scrollAreas: { results: dialog(page).locator('.ticket-results') },
+  })
+  expect(reads.length).toBeGreaterThan(0)
+  for (const query of reads) {
+    expect(query.get('kind')).toBe('work')
+    expect(query.get('shape')).toBe('leaf')
+  }
+  await expect(dialog(page).getByRole('button', { name: /PHAROS-10 Work parent/ })).toHaveCount(0)
+  await expect(dialog(page).getByRole('button', { name: 'Queue run', exact: true })).toBeDisabled()
+  await dialog(page).getByRole('button', { name: /PHAROS-11 Connect Hetzner/ }).click()
+  await ready(page, true)
+  await dialog(page).getByRole('button', { name: 'Queue run', exact: true }).click()
+  await expect(dialog(page).getByRole('heading', { name: 'Queued', exact: true })).toBeVisible()
+  expect(mock.calls.filter(c => c.method === 'POST' && c.path === '/api/work-orders').map(c => c.body?.parent_id)).toEqual(['n-1'])
 })
 
 test('a queue that fails after the work order was written still reads the lists again', async ({ page }) => {
@@ -227,6 +267,8 @@ test('failed prerequisites keep launch disabled and read-only people have no act
   await page.goto('/agents')
   await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Start agent', exact: true })).toHaveCount(0)
+  await newAgent(page).click()
+  await expect(page.getByRole('menuitem', { name: /^Start agent…/ })).toHaveCount(0)
 })
 
 for (const theme of ['light', 'dark']) {
@@ -245,7 +287,7 @@ for (const theme of ['light', 'dark']) {
     expect(await dialog(page).evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
     await page.keyboard.press('Escape')
     await expect(dialog(page)).not.toBeVisible()
-    await expect(page.locator('button.start-agent')).toBeFocused()
+    await expect(newAgent(page)).toBeFocused()
   })
 }
 
@@ -261,11 +303,45 @@ for (const theme of ['light', 'dark'] as const) {
       const accounts = page.locator('#agent-accounts')
       await expect(accounts.locator('.account').first()).toBeVisible()
       await accounts.screenshot({ path: `../.agent-shots/acu1-accounts-${width}-${theme}.png` })
-      await page.goto('/agents')
-      await page.locator('button.start-agent').click()
+      await open(page)
       await ready(page)
       await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
       await dialog(page).screenshot({ path: `../.agent-shots/acu1-start-${width}-${theme}.png` })
     })
   }
+}
+
+for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+  test(`New menu restores its trigger without moving header controls at ${width} ${theme}`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    await mockStartAgent(page)
+    await page.route('**/api/me', route => route.fulfill({ json: {
+      principal: { id: me.id, name: me.name, kind: 'person', roles: ['admin'] },
+      tenant: { id: 't1', name: 'Agentensteuerung für gemeinsame Entwicklungsprojekte und zuverlässige Übergaben' },
+    } }))
+    await page.goto('/agents')
+    await page.evaluate(theme => document.documentElement.dataset.theme = theme, theme)
+    const header = page.locator('.agents-page .page-head')
+    await expectStableControls({
+      controls: { new: newAgent(page), more: header.getByRole('button', { name: 'More agent actions', exact: true }) },
+      scrollAreas: { header },
+      interactions: [
+        { name: 'open New menu', run: async () => {
+          await newAgent(page).click()
+          await expect(page.getByRole('menuitem', { name: /^Start agent…/ })).toBeVisible()
+          await page.screenshot({ path: info.outputPath(`agents-header-${width}-${theme}.png`), fullPage: true })
+        } },
+        { name: 'open start dialog', run: async () => {
+          await page.getByRole('menuitem', { name: /^Start agent…/ }).click()
+          await expect(dialog(page)).toBeVisible()
+        } },
+        { name: 'close start dialog', run: async () => {
+          await dialog(page).getByRole('button', { name: 'Close start agent', exact: true }).click()
+          await expect(dialog(page)).not.toBeVisible()
+          await expect(newAgent(page)).toBeFocused()
+        } },
+      ],
+    })
+  })
 }

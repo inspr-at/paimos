@@ -21,6 +21,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/markdownsource"
 	"github.com/inspr-at/paimos/internal/rules/doctrine"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -38,7 +39,7 @@ var (
 	incidentWord         = regexp.MustCompile(`(?i)(^|[^A-Za-z0-9_-])incident([^A-Za-z0-9_-]|$)`)
 	atxHeading           = regexp.MustCompile(`^(#{1,6})[ \t]+(.+?)\s*$`)
 	changelogWord        = regexp.MustCompile(`(?i)changelog`)
-	issueKinds           = map[string]bool{"ticket": true, "task": true, "epic": true}
+	issueKinds           = map[string]bool{"work": true, "ticket": true, "task": true, "epic": true}
 )
 
 // Learning is one open method learning on the Knowledge tab.
@@ -199,17 +200,7 @@ func appendChangelog(body, line string) (string, string) {
 }
 
 func fencedLines(lines []string) []bool {
-	out := make([]bool, len(lines))
-	in := false
-	for i, line := range lines {
-		if strings.HasPrefix(strings.TrimSpace(line), "```") {
-			out[i] = true
-			in = !in
-			continue
-		}
-		out[i] = in
-	}
-	return out
+	return markdownsource.CodeLines(strings.Join(lines, "\n"))
 }
 
 func learningLine(date, text, key, href string) string {
@@ -561,7 +552,7 @@ func listTaggedIssues(ctx context.Context, tx pgx.Tx, tenantID, projectID, proje
 	  JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
 	  `+nearestProject+`
 	  WHERE n.tenant_id=$1 AND n.deleted_at IS NULL
-	    AND k.slug IN ('ticket','task','epic')
+	    AND k.slug IN ('work','ticket','task','epic')
 	    AND proj.id=$2::uuid
 	    AND n.fields::text ILIKE '%process-learning%'
 	    AND `+undecidedNode+`

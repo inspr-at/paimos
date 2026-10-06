@@ -1,0 +1,173 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix1",
+  "reviewed_commit": "98702972d9901de82f7a19077e808f4af4491d83",
+  "tested_production_commit": "076bfb54c5fc9b2ebe47e87abee41081eca0d3ad",
+  "branch": "work/aeon-648-int",
+  "scope": [
+    "residency admission and live routing recheck for canonical work",
+    "retained account/group pins, canonical pin editing and forward trigger guard",
+    "Repeat menu, Shift+R, leaf/parent target and canonical recurrence template",
+    "classic imported issue resolution after real kind upgrade, retaining ambiguity and visibility checks",
+    "restore existing queued-run/order deletion rollback proof alongside parent queue refusal"
+  ],
+  "baseline": {
+    "production_bytes": "98702972; tests-only checkpoint commits retain the reviewed production sources",
+    "backend_failures": [
+      {
+        "test": "TestCanonicalWorkResidencyAdmissionAndLiveRecheck",
+        "observed": "HTTP 201 instead of residency_unmet HTTP 409",
+        "checkpoint": "95964db1"
+      },
+      {
+        "test": "TestCanonicalWorkLiveResidencyRecheck",
+        "observed": "any instead of local",
+        "checkpoint": "e119caae"
+      },
+      {
+        "test": "TestMigratedWorkRetainsAndEditsAccountPins",
+        "observed": "unpinned account accepted (HTTP 200 instead of 409), for both account and group pins",
+        "checkpoint": "95964db1"
+      },
+      {
+        "test": "TestWorkRoutingUpgradePreservesResidencyAndPins",
+        "observed": "upgraded admission requirement any instead of eu",
+        "checkpoint": "e119caae"
+      },
+      {
+        "test": "TestResolveImportedLinksWithProjectVisibility",
+        "observed": "upgraded visible imported issue incorrectly resolved to Home",
+        "checkpoint": "95964db1"
+      }
+    ],
+    "web_failures": [
+      "canonical template was ticket instead of work",
+      "Repeat availability was false for work",
+      "canonical parent targeted its own parent instead of its own id"
+    ],
+    "deletion_rollback": "Restored assertion coverage passed on the reviewed production code; this finding repairs the test claim, not deletion behavior."
+  },
+  "validation": {
+    "remote_transport": "coordinator remote-test.sh; approved non-production temporary test ref; no origin push",
+    "go_packages": {
+      "result": "pass",
+      "packages": [
+        "internal/modelprefs",
+        "internal/agentaccounts",
+        "internal/agentruns",
+        "internal/fromclassic",
+        "internal/db",
+        "internal/recurrences"
+      ],
+      "command": "go test -count=1 [affected packages] (runner-owned parallelism)"
+    },
+    "web_remote": {
+      "build": "pass",
+      "lint": "pass",
+      "npm_run_test_unit": "pass",
+      "vitest_files": 98,
+      "vitest_tests": 2767
+    },
+    "browser_local": {
+      "spec": "web/tests/recurrences.spec.ts",
+      "workers": 1,
+      "result": "14 passed",
+      "screenshot_followup": "2 migrated cases passed",
+      "control_stability": "named Create, Cancel, Parent and clicked Event radio measured; existing full spec stability guards pass"
+    },
+    "migration_guard": {
+      "result": "pass",
+      "base_ref": "v261003095616.0.0",
+      "unique_numbers": 258,
+      "historical_sql_unchanged": true,
+      "forward_migration": "1240_work_account_pins.sql",
+      "sha256": "009afe1caec0684ca46ceeba5aca4a4c38021fc7ea248f388b826098e417c38d",
+      "contract_tests": 32
+    },
+    "tier_metadata": {
+      "existing_registrations_retained": true,
+      "new_go_cases": 5,
+      "new_web_unit_cases": 3,
+      "new_browser_cases": 2,
+      "browser_tier": "NIGHTLY, retaining the existing recurrence spec policy",
+      "tier_contract_tests": 33
+    }
+  },
+  "screenshots": [
+    {
+      "path": "web/test-results/aeon-648-int-fix1/repeat-leaf-1024-dark.png",
+      "sha256": "222a24019d044e5071cfd7dcfe4c2d95c478da8801c24784eb2d4559cd05dc87"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix1/repeat-leaf-1024-light.png",
+      "sha256": "20863dc3e1c5381676379928b98e3f292ba33a23bfb6faf9ee10dfefde6a953f"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix1/repeat-leaf-1440-dark.png",
+      "sha256": "3f14ed12819b4320d22860716aecd53bb7e146440df960c9893023d38ed88df0"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix1/repeat-leaf-1440-light.png",
+      "sha256": "541d011d9a0d2acd2d90c51622f42542c438c24414409c5893dbfddf6450a7f8"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix1/repeat-leaf-390-dark.png",
+      "sha256": "635c52fd060c21f1eb7da63904194af64fdec8372e3b1e48957778913e5a2731"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix1/repeat-leaf-390-light.png",
+      "sha256": "f7e05cc914b82641413c2941c5455ffd8ddcd57c91c7c1190434606003133381"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix1/repeat-parent-1024-dark.png",
+      "sha256": "e5a46b270b6c465971041d14f514d86df131640158535b0dedaa630183d6b0c8"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix1/repeat-parent-1024-light.png",
+      "sha256": "678ded4fe5d696479c13fd8b614ba090a19e65f0f7da84eb5e50bf034c816dfc"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix1/repeat-parent-1440-dark.png",
+      "sha256": "f295987a8e349298c40339d89c09efdf6ddded2d23878e8a23372095f4e17d76"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix1/repeat-parent-1440-light.png",
+      "sha256": "bf1bf636a1dfb4940a29b3c3ff92f2e491f91e54f4eefc5ab71cc8df6eca4d00"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix1/repeat-parent-390-dark.png",
+      "sha256": "ea909cd05c92a2bf24d2bbeb3ffa656ab88a3d923e34eb6d9c6395653bdf6ac6"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix1/repeat-parent-390-light.png",
+      "sha256": "68d747c2192c8776d0e69c9b046ec7a01b9546b06fc12b0cb4ddc2c6d1de4eb1"
+    }
+  ],
+  "open": [
+    {
+      "finding": "P3: migration 1238 ledger reservation",
+      "owner": "coordinator / AEON-655",
+      "status": "pending coordinator retrospective ownership record; worker did not claim or alter another package ownership"
+    },
+    {
+      "check": "CI-equivalent Linux Chromium",
+      "status": "not run; remote browser entry refused with exit 3 because OPS-247 bootstrap and approved launcher are pending; no push means no new hosted CI"
+    },
+    {
+      "gate": "consolidated review and release approval",
+      "status": "remains with coordinator; forward migration exception is exact-byte documentation, not acceptance"
+    },
+    {
+      "design": "needs Opus design",
+      "status": "no design artifact named in this fix brief; existing recurrence component/layout reused, no new layout invented"
+    }
+  ],
+  "safety": {
+    "origin_push": false,
+    "deploy": false,
+    "ticket_status_changed": false,
+    "historical_migrations_modified": false,
+    "new_secrets_requested": false,
+    "other_worktrees_modified": false
+  }
+}

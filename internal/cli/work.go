@@ -18,6 +18,10 @@ import (
 // issueView is the classic issue text/JSON shape. Aeon stores the issue as a
 // node: type is the kind slug, status is state, and priority lives in fields.
 type issueView struct {
+	IsLeaf              *bool             `json:"is_leaf,omitempty"`
+	Depth               int               `json:"depth,omitempty"`
+	LevelName           string            `json:"level_name,omitempty"`
+	LevelIcon           string            `json:"level_icon,omitempty"`
 	Queued              *workqueue.Queued `json:"queued,omitempty"`
 	EstimateHours       *float64          `json:"estimate_hours,omitempty"`
 	EstimateSource      string            `json:"estimate_source,omitempty"`
@@ -72,7 +76,7 @@ type issueInput struct {
 	Tags        []string
 }
 
-var issueKinds = map[string]bool{"epic": true, "ticket": true, "task": true}
+var issueKinds = map[string]bool{"work": true, "epic": true, "ticket": true, "task": true}
 
 func (rt *runtime) viewIssue(n apiNode, kinds kindTable) issueView {
 	fields := fieldMap(n.Fields)
@@ -91,6 +95,7 @@ func (rt *runtime) viewIssue(n apiNode, kinds kindTable) issueView {
 		estimate = &h
 	}
 	return issueView{
+		IsLeaf: n.IsLeaf, Depth: n.Depth, LevelName: n.LevelName, LevelIcon: n.LevelIcon,
 		Queued:        n.Queued,
 		EstimateHours: estimate, EstimateSource: fieldString(fields, "estimate_source"), EstimateBy: fieldString(fields, "estimate_by"), EstimateAt: fieldString(fields, "estimate_at"),
 		PillEN: fieldString(fields, "pill_en"), PillDE: fieldString(fields, "pill_de"), BenefitEN: fieldString(fields, "benefit_en"), BenefitDE: fieldString(fields, "benefit_de"), Hide: hidden, Warnings: n.Warnings,
@@ -173,7 +178,7 @@ type issueListResult struct {
 }
 
 func (rt *runtime) listIssuesResult(project, status, typ, priority, assignee string, limit, offset int) (issueListResult, error) {
-	if offset < 0 || limit > 10000 {
+	if offset < 0 || offset > 10000 || limit < 0 || limit > 10000 {
 		return issueListResult{}, usagef("offset must be nonnegative and limit at most 10000")
 	}
 	if typ != "" && !issueKinds[typ] {
@@ -192,7 +197,7 @@ func (rt *runtime) listIssuesResult(project, status, typ, priority, assignee str
 		q.Set("state", status)
 	}
 	if typ != "" {
-		k, ok := kinds.bySlug[typ]
+		k, ok := kinds.issueKind(typ)
 		if !ok {
 			return issueListResult{}, rt.fail(fmt.Errorf("node kind %q is not configured", typ), "")
 		}
@@ -452,7 +457,7 @@ func (rt *runtime) checkIssueKind(ref, requested string) error {
 		return err
 	}
 	current := kinds.slug(n.KindID)
-	if current == requested {
+	if k, ok := kinds.issueKind(requested); ok && k.ID == n.KindID {
 		return nil
 	}
 	return rt.fail(fmt.Errorf("kind_change_not_allowed: %s → %s; use \"aeon issue convert %s --to %s\"", current, requested, n.Key, requested), "")
@@ -492,7 +497,7 @@ func (rt *runtime) updateIssueResult(in issuePatch) (issueUpdateResult, error) {
 		return issueUpdateResult{}, rt.fail(fmt.Errorf("issue %q not found", in.Ref), "")
 	}
 	if in.RouteRole != "" || in.Area != "" || in.Complexity != "" {
-		if slug := kinds.slug(n.KindID); slug != "ticket" && slug != "task" {
+		if slug := kinds.slug(n.KindID); slug != "work" && slug != "ticket" && slug != "task" {
 			return issueUpdateResult{}, usagef("--role, --area and --complexity apply to tickets and tasks")
 		}
 	}
@@ -822,7 +827,7 @@ func (rt *runtime) knowledgeNodes(project, typ string) (kindTable, []apiNode, er
 	var kept []apiNode
 	for _, n := range nodes {
 		slug := kinds.slug(n.KindID)
-		if !knowledgeSupported(slug) {
+		if !knowledgeSupported(slug) || slug == "decision" && fieldString(fieldMap(n.Fields), "slug") == "" {
 			continue
 		}
 		if want != "" && slug != want {

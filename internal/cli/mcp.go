@@ -58,7 +58,7 @@ type noArgs struct{}
 type issueListArgs struct {
 	Project  string `json:"project,omitempty" jsonschema:"project key"`
 	Status   string `json:"status,omitempty" jsonschema:"status filter"`
-	Type     string `json:"type,omitempty" jsonschema:"issue type"`
+	Type     string `json:"type,omitempty" jsonschema:"work; epic ticket and task are compatibility aliases after migration"`
 	Limit    int    `json:"limit,omitempty" jsonschema:"page size"`
 	Offset   int    `json:"offset,omitempty" jsonschema:"pagination offset"`
 	Priority string `json:"priority,omitempty" jsonschema:"priority filter"`
@@ -71,7 +71,8 @@ type issueRefArgs struct {
 type issueCreateArgs struct {
 	Project     string   `json:"project" jsonschema:"project key"`
 	Title       string   `json:"title" jsonschema:"issue title"`
-	Type        string   `json:"type,omitempty" jsonschema:"issue type"`
+	Parent      string   `json:"parent,omitempty" jsonschema:"parent work item key; depth decides the name"`
+	Type        string   `json:"type,omitempty" jsonschema:"work; epic ticket and task are compatibility aliases after migration"`
 	Status      string   `json:"status,omitempty" jsonschema:"initial status"`
 	Description string   `json:"description,omitempty" jsonschema:"description markdown"`
 	Tags        []string `json:"tags,omitempty" jsonschema:"tag names preserved when filing the issue"`
@@ -147,7 +148,7 @@ type knowledgeUpdateArgs struct {
 type searchArgs struct {
 	Query   string `json:"query" jsonschema:"free-text query"`
 	Project string `json:"project,omitempty" jsonschema:"project key"`
-	Type    string `json:"type,omitempty" jsonschema:"issue type"`
+	Type    string `json:"type,omitempty" jsonschema:"work; epic ticket and task are compatibility aliases after migration"`
 	Limit   int    `json:"limit,omitempty" jsonschema:"page size"`
 }
 
@@ -186,7 +187,7 @@ func addWorkTool[In any](s *mcp.Server, rt *runtime, name, description string, _
 			if args.Bug && !slices.Contains(tags, "bug") {
 				tags = append(tags, "bug")
 			}
-			result, err = work.createIssueResult(issueInput{Project: args.Project, Title: args.Title, Type: args.Type, Status: args.Status, Description: args.Description, Tags: tags})
+			result, err = work.createIssueResult(issueInput{Project: args.Project, Title: args.Title, Type: args.Type, Status: args.Status, Parent: args.Parent, Description: args.Description, Tags: tags})
 		case issueCommentArgs:
 			var comment issueCommentResult
 			comment, err = work.commentIssueResult(args.Ref, args.Body)

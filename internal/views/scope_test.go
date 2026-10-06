@@ -43,7 +43,7 @@ func TestProjectViewsRoundTripSoftDeleteAndUndo(t *testing.T) {
 		}
 		projectA = insert("project", "PRJ-1", nil)
 		projectB = insert("project", "PRJ-2", nil)
-		ticket = insert("ticket", "TKT-1", &projectA)
+		ticket = insert("work", "TKT-1", &projectA)
 		return nil
 	}))
 
@@ -53,7 +53,7 @@ func TestProjectViewsRoundTripSoftDeleteAndUndo(t *testing.T) {
 	request := func(principalID, method, path, body string) *httptest.ResponseRecorder {
 		t.Helper()
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{ID: principalID, TenantID: tenantID, Roles: []string{"member"}}))
+		req = req.WithContext(tenant.WithPrincipal(req.Context(), tenant.Principal{ID: principalID, TenantID: tenantID, Kind: tenant.Person, Roles: []string{"member"}}))
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, req)
 		return w

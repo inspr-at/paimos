@@ -6,6 +6,8 @@
 // themes, phone.
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
+import { mkdirSync } from 'node:fs'
+import { expectStableControls } from './helpers/stable'
 import { fixtures, mockWork, watchErrors, type Call } from './work-fixtures'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
@@ -171,10 +173,11 @@ test('on the full page r anchors the picker to the visible Link', async ({ page 
 for (const colorScheme of ['light', 'dark'] as const) {
   test(`the picker and the list pass axe in ${colorScheme}, and fit a phone`, async ({ page }) => {
     const data = fixtures()
+    data.nodes.find(node => node.id === 'n-4')!.title = 'Verlässliche Zusammenarbeit für österreichische Entwicklungsprojekte mit vollständiger Dokumentation und Freigaben'
     data.relations.push({ id: 'r-3', source_node_id: 'n-1', target_node_id: 'n-a1', type: 'implements', created_at: '2026-09-20T10:00:00Z' })
     await mockWork(page, data)
     await page.emulateMedia({ colorScheme, reducedMotion: 'reduce' })
-    for (const width of [1280, 390]) {
+    for (const width of [1440, 1024, 390]) {
       await page.setViewportSize({ width, height: 844 })
       await page.goto('/p/PHAROS/PHAROS-11')
       const list = relations(page)
@@ -190,6 +193,20 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await dialog.getByRole('radio', { name: 'Blocks' }).click()
       await dialog.getByRole('combobox').fill('PHAROS-14')
       await expect(dialog.getByRole('option')).toHaveCount(1)
+      const read = dialog.getByRole('button', { name: /^Read full name: PHAROS-14/ })
+      await expectStableControls({
+        controls: { search: dialog.getByRole('combobox'), choice: dialog.getByRole('radio', { name: 'Blocks', exact: true }), option: dialog.getByRole('option'), read },
+        scrollAreas: { options: dialog.locator('#relation-options') },
+        interactions: [
+          { name: 'read complete ticket name', run: async () => { await read.click(); await expect(dialog.getByRole('region', { name: 'Full name' })).toBeVisible() } },
+          { name: 'close complete ticket name', run: async () => { await page.keyboard.press('Escape'); await expect(dialog.getByRole('region', { name: 'Full name' })).toHaveCount(0) } },
+        ],
+      })
+      if (process.env.RELATION_SHOTS) {
+        mkdirSync(process.env.RELATION_SHOTS, { recursive: true })
+        await dialog.screenshot({ path: `${process.env.RELATION_SHOTS}/${width}-${colorScheme}.png` })
+      }
+      await dialog.getByRole('combobox').focus()
       await page.keyboard.press('Enter')
       await expect(dialog.getByRole('alert')).toContainText('would make a loop')
       await axe(page)

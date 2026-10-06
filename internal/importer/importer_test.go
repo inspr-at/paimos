@@ -245,7 +245,7 @@ func TestAllClassicIssueKindsUseR1Nodes(t *testing.T) {
 	}
 	for _, kind := range kinds {
 		var count int
-		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM nodes n JOIN node_kinds k ON n.kind_id=k.id WHERE k.slug=$1`, kind).Scan(&count); err != nil {
+		if err := d.Admin.QueryRow(ctx, `SELECT count(*) FROM nodes n JOIN node_kinds k ON n.kind_id=k.id WHERE k.slug=$1`, canonicalType(kind)).Scan(&count); err != nil {
 			t.Fatal(err)
 		}
 		if count != 1 {
@@ -254,13 +254,16 @@ func TestAllClassicIssueKindsUseR1Nodes(t *testing.T) {
 	}
 }
 
-// Quiescence proves every competing goroutine reached its request or the cap.
-// Held transports make saturation deterministic, independent of network timing.
+// Quiescence and held transports prove saturation. synctest's injected clock
+// records the full configured delay across concurrent starts and cap refills.
 func TestSourceRequestCapAndDelay(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
+		const requests = 8
+		const delay = 15 * time.Millisecond
+		origin := time.Now()
 		var active, peak atomic.Int32
-		entered := make(chan struct{}, 8)
-		failures := make(chan error, 8)
+		entered := make(chan time.Time, requests)
+		failures := make(chan error, requests)
 		var wg sync.WaitGroup
 		release := make(chan struct{})
 		defer func() {
@@ -281,15 +284,15 @@ func TestSourceRequestCapAndDelay(t *testing.T) {
 					break
 				}
 			}
-			entered <- struct{}{}
+			entered <- time.Now()
 			<-release
 			return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(strings.NewReader(`[]`)), Header: make(http.Header)}, nil
 		})}}
-		if err := source.Configure(2, 0); err != nil {
+		if err := source.Configure(2, delay); err != nil {
 			t.Fatal(err)
 		}
 		ctx := t.Context()
-		for n := 0; n < 8; n++ {
+		request := func() {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -297,25 +300,58 @@ func TestSourceRequestCapAndDelay(t *testing.T) {
 				failures <- source.get(ctx, "/probe", &rows)
 			}()
 		}
-		synctest.Wait()
-		if got := len(entered); got != 2 {
-			t.Fatalf("admitted held requests = %d, want 2", got)
+		assertStart := func(n int) {
+			t.Helper()
+			select {
+			case at := <-entered:
+				if got, want := at.Sub(origin), time.Duration(n)*delay; got != want {
+					t.Fatalf("request %d start = %s, want %s", n, got, want)
+				}
+			default:
+				t.Fatalf("request %d did not start", n)
+			}
+			if len(entered) != 0 {
+				t.Fatalf("unexpected extra request starts: %d", len(entered))
+			}
 		}
-		if active.Load() != 2 {
-			t.Fatalf("held active requests = %d, want 2", active.Load())
+		// Establish the first dispatch before queueing competitors. With a cap
+		// of two, only one caller waits on the timer; the rest block on the cap.
+		request()
+		synctest.Wait()
+		assertStart(0)
+		for range requests - 1 {
+			request()
+		}
+		synctest.Wait()
+		for n := 1; n < requests; n++ {
+			if n > 1 {
+				// Free one slot while another transport remains held.
+				release <- struct{}{}
+				synctest.Wait()
+			}
+			if active.Load() != 1 || len(entered) != 0 {
+				t.Fatalf("before delay %d: active=%d, extra starts=%d, want 1 and 0", n, active.Load(), len(entered))
+			}
+			// Sleep advances virtual time only; there is no wall-clock tolerance.
+			time.Sleep(delay)
+			synctest.Wait()
+			assertStart(n)
+			if active.Load() != 2 {
+				t.Fatalf("held active requests = %d, want 2", active.Load())
+			}
 		}
 		close(release)
 		wg.Wait()
-		for n := 0; n < 8; n++ {
+		for range requests {
 			if err := <-failures; err != nil {
 				t.Fatal(err)
 			}
 		}
-		if got := peak.Load(); got > 2 {
-			t.Fatalf("request cap exceeded: %d", got)
+		if got := peak.Load(); got != 2 {
+			t.Fatalf("peak requests = %d, want 2", got)
 		}
-		if len(entered) != 8 {
-			t.Fatalf("completed request count = %d, want 8", len(entered))
+		if active.Load() != 0 || len(entered) != 0 {
+			t.Fatalf("after completion: active=%d, extra starts=%d, want 0 and 0", active.Load(), len(entered))
 		}
 	})
 }

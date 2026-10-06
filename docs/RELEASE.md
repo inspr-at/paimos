@@ -16,9 +16,27 @@ Development builds leave the linker version at `dev`. A release build sets:
 -X github.com/inspr-at/paimos/internal/version.Version=<version>
 ```
 
-with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `CGO_ENABLED=0` (`Dockerfile` for the image). Darwin `paimos-agentd` is built on macOS with `CGO_ENABLED=1` and links LocalAuthentication. `scripts/build-release-binaries.sh` is the build used by `.github/workflows/release.yml`.
+with `-trimpath`. The server image, `aeon-cli`, and Linux `paimos-agentd` use `CGO_ENABLED=0` (`scripts/build-image-inputs.mjs` for the image). Darwin `paimos-agentd` is built on macOS with `CGO_ENABLED=1` and links LocalAuthentication. `scripts/build-release-binaries.sh` builds the distributed client binaries in `.github/workflows/release.yml`.
 
 ## Workflow
+
+### Nix Go dependency hash (AEON-703)
+
+The Linux `release-check-run` job builds `aeon.goModules` to verify the shared
+`vendorHash` used by both flake packages. `ci-plan` selects it for PR changes to
+`go.mod`, `go.sum`, `flake.nix`, `flake.lock` or the guard's wiring. Main, merge
+queue and manual runs select it too; missing classification selects it safely.
+The required `release-check` aggregate includes failures from this step.
+Nix inputs are cached by OS, architecture and those four files, with cache
+writes confined to main pushes. The dependency output is always rebuilt, so
+an existing fixed-output store path cannot hide a stale hash; no application
+compilation or Postgres is needed for this check.
+
+Run `bash scripts/check-nix-vendor-hash.sh` from the repository root. After a
+dependency update, obtain the new hash from a real `nix build .#aeon -L` hash
+mismatch, update `flake.nix`, then rerun the check and package build. Do not
+guess a hash or add a downstream override. These are package builds, never
+NixOS configuration builds on macOS.
 
 ### Mandatory pre-tag rehearsal (AEON-531)
 
@@ -79,9 +97,11 @@ disabled privileged operation. The workflow tests reject new jobs, new steps,
 changed step bodies/flags and missing counterparts. When a release step changes,
 implement its counterpart first, then review the updated fingerprint and run the
 negative drift fixtures. Do not regenerate fingerprints as a substitute for a
-counterpart. `docker-web-check.yml` separately builds the real Dockerfile `web`
-stage on PR changes to `web/**`, `internal/**/*.json` and its build inputs, so
-shared JSON imports are checked inside the production context before release.
+counterpart. `docker-web-check.yml` retains its established check identity and
+runs `scripts/build-image-inputs.mjs web`, the production host web build, on PR
+changes to `web/**`, `internal/**/*.json` and its build inputs. Shared JSON
+imports keep their full checkout paths; the obsolete Docker `web` stage no
+longer compiles anything. Both image rehearsals also check these imports.
 
 ### Cross-family verdict and merge queue (AEON-411)
 
@@ -237,20 +257,227 @@ router and small Go/Node checks. Go tests use four pool shards when routing
 admits the batch, otherwise the existing seven hosted shards. Timing budgets,
 static checks and the required `go` aggregate always run hosted.
 
-**Web CI (OPS-257):** hosted `web-setup` runs typecheck, lint, unit tests and
-browser-runner safety once, builds the current web, and shares its dependencies
-and build through the run's `web-runtime` artifact. Dependency and Chromium
+**Web CI (OPS-257):** hosted `web-setup` runs typecheck and lint, builds the
+current web, and shares its dependencies and build through the run's
+`web-runtime` artifact. Four file-preserving `web-unit` shards start beside
+the browser shards from that runtime; shell preparation and unit checks no longer
+delay browser fan-out. Unit shard 1 also runs shard-policy regressions and
+browser-runner safety once. Spec-only PRs retain one unit job with the existing
+unit command; docs-only PRs skip all three web job families. Dependency and Chromium
 caches are keyed by the lockfile hash and resolved Playwright version; each of
 12 hosted `web-shard` jobs restores that runtime and installs only Chromium's
 system libraries. The shard command is `npm --prefix web run ci:web:shard --
-i/12`, wrapped by `scripts/ci-flake-guard.mjs --kind playwright`; traces and
+i/12` for exact-spec inspection; full-lane execution uses
+`scripts/test-tiers/cli.mjs run web --shard i/12` with zero retries. Traces and
 screenshots are retained in `web-shard-i-evidence` for seven days. The required
 check remains exactly `web`: its unconditional aggregate rejects failed,
-cancelled or skipped setup/shards. The shards select 53 gated specs: the original
+cancelled or skipped setup, unit shards or browser shards in the full lane.
+All four unit measurements and twelve browser measurements feed the tier report;
+nightly retains its existing once-only `web-unit` evidence. Skipped Actions jobs
+with zero timestamps report absent duration; executed jobs with invalid timestamps
+still fail accounting. Spec-only reports explicitly use `untiered` coverage and
+claim no tier case passes; its native checks still block `web`.
+
+**Affected PR planning (OPS-257 / AEON-743):** `CI_AFFECTED_LANE` is a repository
+variable, default off. Only its exact value `on` enables new rules; unset, `off`
+and every other value preserve old PR selection byte for byte (the selector test
+replays all 80 recorded merged-PR file lists plus one list per rule against the
+frozen phase-1 selector). The workflow environment passes it to the planners and
+tier runners. Merge groups always use the full gated catalogue and the full
+layout regardless of the switch. Main push, manual and nightly selection keep
+their established behavior. Required check names, skipped-job accounting, tier
+evidence, tree reuse and unconditional `migration-compat` stay unchanged.
+
+**The bar (OPS decision, phase 2):** the PR lane is feedback only. The merge
+queue is the authoritative full gate, main push stays full or exact-tree reuse,
+nightly stays full, and any change to CI machinery stays full in the PR lane
+too (`.github/**`, `scripts/ci-*`, `scripts/ci/static-checks.json`,
+`scripts/test-tiers/**`, `scripts/test-tier-go/**`, `scripts/releaseworkflow/**`,
+`go.mod`/`go.sum`/`go.work`, `web/package*.json`, Playwright, Vite and
+TypeScript configuration, `web/scripts/` except the three manifest regression
+tests). A PR can already edit its own `ci.yml`, so narrowing the PR lane creates
+no new bypass while the merge group is full; the phase-1 "trusted bootstrap"
+concern is therefore not a blocker for narrowing. The tier planner still runs
+the base-SHA snapshot of its classifier, graph and manifests, which keeps lane
+decisions reproducible, not as a security boundary. A narrowing miss costs one
+merge-group ejection (about 12 to 25 minutes), so rules narrow wherever a
+plausible, cheap-to-compute mapping exists and stay full where a miss is likely
+or the mapping is unknowable.
+
+**Modes and layouts.** The planner publishes `mode` (`full` or `essential`) and
+`layout` (`full` or `static`). `essential`/`full` is the phase-1 shape: two Go
+shards, two browser shards, four unit shards, timing, static, release, smoke and
+migration jobs (22 hosted jobs). `essential`/`static` keeps only `ci-plan`,
+`tier-plan`, `runner-route`, `go-static`, `go`, `web-setup`, four `web-unit`
+shards, `web`, `release-check-run`, `release-check`, `e2e`, `migration-compat`
+and `tier-measurements` (16 jobs): no Go shards, no timing, no browsers, no
+server smoke. The `go`, `web` and `e2e` aggregates accept exactly those skips,
+only for `pull_request` events with lane `full`, and reject any other layout
+value. The static layout applies only when every changed path is docs-like,
+a manifest (R1), audit tooling (R5) or an always-on regression test (R9), and
+no promoted case needs a Go or browser shard. `tier-measurements` treats the
+skipped shard jobs as expected and still requires unit evidence.
+
+Rules, each with how a regression could slip through the PR lane and what
+catches it:
+
+- **R1 manifests** (`scripts/ci/*.json` tier, flaky and baseline registries,
+  `scripts/ci/go-shards*.txt` weights, `web/ci-web-shards.json`,
+  `scripts/migration-policy*.json`, `scripts/audit/*.json`, and the manifest
+  regression tests `web/scripts/{ci-web-shard,aeon-676-ci,aeon-681-ci}.test.mjs`):
+  static layout. `go-static` re-validates the Go manifest against native
+  collection (`check go` now also rejects malformed timing weights), `web-unit`
+  shard 1 runs the shard manifest tests and `ci:web:shard:check`, the tier
+  runner validates the web manifest, `migration-compat` applies the policy
+  JSON and `release-check-run` runs the audit suite. Tier manifests are diffed
+  against the event base: a row promoted to GATED-FULL or ESSENTIAL (absent or
+  lower tier at base) executes; unit promotions stay static, Go or browser
+  promotions switch to the full layout; new NIGHTLY rows need only the checks.
+  A missing base manifest fails closed to full. Slip: a shard regrouping that
+  starves a browser group only shows when browsers run; caught by the merge
+  group's 12-shard full run.
+- **R2 API contracts** (`api/**`): essential/full layout with the Go packages
+  whose sources name the changed file (grep over `internal/`, `cmd/` and
+  `scripts/` Go sources), their bounded reverse dependants, web typecheck and
+  lint in `web-setup`, the smoke in `e2e-run`, and ESSENTIAL web. This tree has
+  handwritten web wire types and no generated API code, so there are no
+  generated-type importers to select. A diff that also touches the OpenAPI lint
+  package `internal/reportercontract/`, codegen configuration or generated
+  sources stays full; a contract nobody reads stays full. Slip: a response
+  shape change that only a NIGHTLY browser spec notices; caught by nightly,
+  while the Go contract tests and the smoke run in the lane.
+- **R3 web helpers and fixtures:** unchanged from phase 1: ESSENTIAL plus every
+  transitive importing spec and unit; unknown, deleted or unimported helpers
+  and helpers imported by more than 15 specs stay full; the 300-browser-case
+  layout bound applies. Harness pages loaded by URL are not import edges (an
+  experiment with page edges cost more PRs to the 300-case bound than it won).
+- **R4 migrations** (`internal/db/migrations/*.sql`): essential/full layout.
+  A SQL-aware tokenizer handles strings, quoted identifiers, dollar quotes,
+  and nested block/line comments together. Only completely parsed statements
+  may narrow: simple CREATE TABLE, ALTER TABLE ADD COLUMN, CREATE INDEX, and
+  INSERT/UPDATE/DELETE on a plain named table with constant values and simple
+  predicates. Quoted names and the `public` schema are supported. Every token
+  must belong to the whitelist. Any unsupported statement or tail, DO/function
+  body, CTE, TRUNCATE, complex expression/constraint/policy, ambiguous escape,
+  malformed quote/comment or empty intermediate statement makes the **whole
+  migration full**, even if preceding statements have known objects.
+  Every Go package whose sources mention one of those identifiers runs, plus
+  `internal/db` itself (the owning package: migration runner, RLS bootstrap and
+  split-parity tests), bounded reverse dependants, `migration-compat` as always
+  and the real-server smoke. Browser specs are API-mocked and never reach the
+  database, so the web side stays at ESSENTIAL. Unreadable migrations, no
+  recognised object, no referencing package, or more than the consumer bound
+  stay full. Other `internal/db/` sources and `internal/dbtest/` stay full. The
+  migrations README belongs to `internal/db`. Slip: a package that reads a
+  changed table only through a view or function defined elsewhere, or through
+  dynamically assembled SQL; caught by the merge group's full Go run and by
+  `migration-compat` for the previous release.
+- **R5 audit tooling** (`scripts/audit/**`): static layout; `release-check-run`
+  runs the audit unit tests and coverage check in every lane. Slip: none in
+  the product; a broken audit script fails its own job.
+- **R6 release data** (`version.json`, with `internal/releasehistory/data/`
+  through the ordinary package mapping): packages and web tests that name
+  `version.json` (`internal/releasehistory`, `internal/releases`,
+  `tests/calver3.test.ts`) plus the release checks in `release-check-run`.
+  Slip: a build-time consumer that reads the file under another name; caught
+  by the merge group and the release rehearsal.
+- **R7 Go test data** (`internal/**/testdata/`, `cmd/**/testdata/`): the owning
+  package through the ordinary mapping plus every Go package and web test that
+  names the file. Slip: a sibling package reading the directory with a
+  computed path; caught by the merge group.
+- **R8 harness pages** (`web/tests/*.html`): the specs that navigate to the
+  page by name. Slip: a page reached through a variable URL; caught by the
+  merge group.
+- **R9 always-on regression tests** (`scripts/check-migrations.test.mjs`,
+  `scripts/migration_compat_probe_test.py`): static layout; `migration-compat`
+  executes them in every lane. Their executables (`check-migrations.mjs`,
+  `migration-compat.sh`, `migration-compat-probe.py`) stay full.
+- **Docs-like files** (`docs/`, root notices, any Markdown outside `testdata`,
+  `internal/` and `cmd/`): no tier impact; Markdown inside Go packages maps to
+  the package. Every other path keeps its phase-1 handling: ordinary Go and
+  web sources select the changed area, everything unmapped stays full.
+
+Bounds: R3 keeps 15 specs; mapped browser fan-outs above 300 cases keep the
+full layout; optional Go reverse dependants above 300 extra cases are dropped;
+consumer rules (R2, R4, R6, R7) stay full above 1000 extra gated Go cases,
+because the two essential Go shards carry about one full hosted shard each and a
+wider set is cheaper on the seven-shard layout. `consumerCaseBound` in
+`scripts/test-tiers/core.mjs` is the knob; hosted timings calibrate it.
+
+With `CI_AFFECTED_LANE=on`, `tier-plan.outputs.lane` is the single effective
+workflow lane. Wider trusted coverage wins: `full`, `essential` and `static`
+planner modes force the `full` aggregate lane, with the trusted layout deciding
+which jobs execute. `spec-only` is retained only when both classifiers say
+`spec-only`; `docs-only` only when the trusted planner says `docs`. A raw `full`
+lane never narrows. Missing or invalid planner data fails closed to full; merge
+queue, main and manual events stay full. With the flag off (including unset or
+any value other than exact `on`), the raw `ci-plan` lane is preserved unchanged.
+Every execution condition, shard matrix, runner tier selection, full-execution
+check, required aggregate and tier measurement uses this effective output.
+Only `tier-plan` reads the raw classifier lane. All consumers depend on successful
+tier planning; a new spec missing from the trusted graph therefore runs full
+validation and inventory checks, even if the raw classifier called it spec-only.
+
+The runner honours `AEON_TEST_TIER_MODE` from the trusted planner (full,
+essential, static or spec-only); a candidate graph cannot narrow a supplied
+full decision. Candidate uncertainty or an explicit planner/candidate layout
+disagreement widens to full. `AEON_TEST_TIER_LAYOUT`, when supplied, preserves
+the planner's layout. Explicit `--full`/`--all` retain their existing meanings.
+
+Consumer scans preflight the complete file set before reading: reaching 20,000
+files, 100,000 walked entries, 64 MiB total or 2 MiB per file invalidates the
+whole scan. Source and migration reads are bounded, reject binary/invalid UTF-8
+and non-regular files, check file identity/size around reads, and reject symlink
+escapes. Scan errors and symlinks discard partial results and force full for
+the whole affected selection. These checks do not alter the flag-off selector.
+
+Replay the 80 recorded merged PR file lists without browsers using
+`node scripts/test-tiers/replay.mjs` (`--json` adds a summary and exact per-PR
+counts and reasons). The fixture pins the old selector and Go graph to
+`b6f74faa11d506efd3d21387ca4e2f5a9c687dcf`; replay uses the current manifest
+catalogue, web graph, Go sources and migrations rather than each historical PR
+tree, and cannot reconstruct historical manifest promotions (R1 edits replay as
+registration-only). Result after OPS-257 L4 fix round 2: old lane 16 of 80
+essential (20%); new lane 36 of 80 narrowed (45%: 20 newly essential,
+16 unchanged, 0 static
+because every sampled manifest or audit PR also changed sources). Projected
+hosted jobs for the sample fall from 2710 to 2420 (full 37, essential 22,
+static 16, spec-only 12, docs-only 9). The pre-fix lane narrowed 38; two of
+those PRs now correctly stay full on unsupported SQL. PR 235 retains its
+essential tier selection but widens its raw spec-only workflow lane to full
+(22 jobs rather than 12), following trusted planner precedence. The 44 PRs that stay
+full: CI machinery
+18 (mostly `ci.yml`), R3 helpers above 15 specs 9 (`work-fixtures.ts`,
+`agents-fixtures.ts`, `capacity-fixtures.ts`), unnarrowed `internal/db/`
+sources or ad-hoc scripts 8, unsupported SQL migrations 6, one browser fan-out above
+300, one deleted-file replay artifact (PR 224 narrows on its live tree) and one
+`.dockerignore`. The 50% target is missed by four PRs on this sample; SQL
+uncertainty is a safety fallback, not a reason to loosen the whitelist.
+
+Rollout stays coordinator-owned: keep the variable unset while this change is
+reviewed and merged, measure the next full runs (rule reasons, selected cases,
+promotion counts, jobs, PR wall time, merge-group and nightly failures), then
+set `CI_AFFECTED_LANE=on`. Acceptance for keeping it on: at least 50% of PR runs
+essential or static with p50 wall time at or below 5 minutes, merge-group red
+rate at or below 10%, and nightly finding nothing the lane missed. Roll back by
+unsetting the variable or setting `off`; the merge-group full fix remains.
+Reverting planner code requires a reviewed revert that retains that fix. The
+workflow shape change (static-layout gates on `go-test`, `go-timing`,
+`web-shard`, `e2e-run`; the `layout` output; layout-aware aggregates) is inert
+while the variable is off because the planner then never emits `static`.
+
+The historical shard inventory selected 53 gated specs: the original
 49 measured specs plus `clip-tip`, `aeon-632b-clip`, `key-trim` and `model-prefs`, whose
 weights are scheduling estimates. `clip-tip` uses its complete local serial
 runtime plus a 20 percent margin; the other three use listed test counts.
-These are not hosted runtime measurements. The 164 specs of the
+These are not hosted runtime measurements. The one-worker tier runner now uses
+serial estimates for historical N-worker steps (`N * weightSeconds`); it retains
+local serial and unmeasured estimates. The committed full-gate ledger estimates
+368–372 seconds per browser shard (max/median 1.01), versus 266–497 seconds with
+the old allocation evaluated under the same serial model. Original exact-spec
+weights, launch policies, tier classifications and optional catalogue membership
+stay unchanged. These estimates exclude collection, launch and runner overhead;
+the 12–13 minute PR target still requires hosted measurement. The 164 specs of the
 `remaining-ui` group are declared in
 `web/ci-web-shards.json` with `gate: false` and run only with `--all`, until a
 follow-up ticket measures them. Unit CI checks the source manifest before
@@ -282,7 +509,7 @@ and 164 ungated specs across 12 shards. No behavior or assertion was changed.
 The worker is forbidden to push; local checks do not close this gate. The
 coordinator must complete `CI` on the integrated branch (PR or branch dispatch,
 keeping mbp2606 off limits). Retain the run URL, checked-out SHA, logs/reports
-showing `clip-tip`, `aeon-632b-clip`, `key-trim` and `model-prefs` actually
+showing `clip-tip`, `aeon-632b-clip`, `aeon-632b-clip-settings`, `key-trim` and `model-prefs` actually
 executed without skips, and successful `web-setup`, all 12 `web-shard` jobs
 and the required `web` aggregate. A later revision must retain these fixes
 and identify its exact SHA; selection-only output or a run on an unrelated
@@ -620,15 +847,15 @@ A push of an annotated `v*` tag runs `.github/workflows/release.yml`. The coordi
 The server image pipeline starts independently of the macOS jobs (AEON-407, AEON-504). **Every release requires linux/amd64 and linux/arm64**, built and smoked natively in parallel; either platform failing prevents release-index publication. GitHub's hosted `ubuntu-24.04` runner builds amd64 and `ubuntu-24.04-arm` builds arm64 ([runner labels](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)). No QEMU is installed, and each job checks `uname -m` before building.
 
 1. Each `image-platform` matrix job checks out all tags, validates the calendar coordinate and presentation bundle, and requires an annotated tag matching `version.json`. It refuses an existing GitHub release (including drafts) or GHCR release tag; lookup errors fail closed.
-2. Generate the release-history manifest embedded in the image. Both the loaded smoke build and the provenance export use the same working-directory context and build arguments.
-3. Import the architecture's registry cache, `ghcr.io/inspr-at/aeon:buildcache` or `:buildcache-arm64`, and load its native image into Docker. Resolve the loaded tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable ID. Independent cache refs prevent the two exporters overwriting each other; the existing amd64 cache is retained and the first arm64 import may miss while its cache warms.
-4. After smoke passes, export the same inputs with BuildKit `provenance: mode=max`, push **by digest only**, and update that architecture's separate cache in `mode=max`. Platform jobs never assign the release tag. Each creates and verifies a GitHub build-provenance attestation bound to its digest, repository, workflow, source tag and commit, then uploads its digest artifact.
+2. Generate the release-history manifest once. Freeze the source commit timestamp as `SOURCE_DATE_EPOCH`; compile web and Go on the native host. The npm cache is restored (every tarball is checked against the lockfile); **no Go cache is restored**, and Go compiles cold from modules verified against `go.sum` (see [Cold Go compilation](#cold-go-compilation-for-shipped-binaries)). `scripts/build-image-inputs.mjs` runs the production prebuild checks, uses `-trimpath -buildvcs=false -tags webembed`, disables CGO, and injects the exact reserved version. The input manifest records the tree, toolchain versions, generated-history hash, web hashes and binary hash; the final executable has mode 755 and a fixed mtime.
+3. Prepare the runtime closure cold: build `scripts/Dockerfile.runtime` (the digest-pinned Alpine base plus the pinned `chromium` and `tini`) with `no-cache` and without any registry cache, in every tag build and every rehearsal (see [Runtime closure](#runtime-closure-prepared-cold-on-every-build)). Bind the exported OCI runtime manifest digest as the `aeon-runtime` named context and print it per architecture. The main Dockerfile only copies `dist/image-input/paimos` and `NOTICE`, retaining UID/GID 65532 and the tini entrypoint. Import the existing `:buildcache` or `:buildcache-arm64` assembly cache and load the native image. Resolve its tag with `docker image ls --quiet --no-trunc`, require exactly one full ID, then run the full smoke gate on that immutable ID. Both assembly and export use the same working-directory context, base digest and single-platform arguments, with `rewrite-timestamp=true` and OCI media types.
+4. Record assembly plus smoke timing and require two clean same-input rebuilds (below). After these gates pass, export the same image inputs with BuildKit `provenance: mode=max` and push **by digest only**. Update that architecture's assembly cache in `mode=max`. Platform jobs never assign the release tag. Before anything is attested, `scripts/verify-pushed-image.mjs` reads the pushed digest back, walks to its `linux/<arch>` manifest and requires the image config digest of the smoked build; a mismatch fails the job and prints both digests. Each job then creates and verifies a GitHub build-provenance attestation bound to its digest, repository, workflow, source tag and commit, and uploads its digest artifact. That handoff is the job's last step.
 5. The `image` job waits for both platform jobs to succeed, rechecks release/tag immutability, and combines their immutable references using `docker buildx imagetools create`. Before publishing and after reading back, require exactly linux/amd64 and linux/arm64 runtime manifests with separate bound BuildKit provenance descriptors. Publish one multi-arch OCI index at `ghcr.io/inspr-at/aeon:<version>`, without a `latest` alias.
-6. Attest and verify the index digest too. Preserve `needs.image.outputs.version` and `needs.image.outputs.digest`; **digest is the index digest**, also recorded in the summary and draft release notes. Production **csb1 is x86_64 and automatically pulls linux/amd64 from this index**. ARM servers and Apple-silicon Linux VMs pull linux/arm64 from the same tag or digest, without emulation.
+6. Attest and verify the index digest too. Preserve `needs.image.outputs.version` and `needs.image.outputs.digest`; **digest is the index digest**, also recorded in the summary and draft release notes. The notes keep exactly one `Digest:` line (the index, which `scripts/verify-live.mjs` requires) and add one `Runtime closure linux/<arch>:` line per architecture. Production **csb1 is x86_64 and automatically pulls linux/amd64 from this index**. ARM servers and Apple-silicon Linux VMs pull linux/arm64 from the same tag or digest, without emulation.
 
 The index is the deployment and rollback pin. Partial by-digest platform exports are untagged and cannot be deployed through the release coordinate. Once an index tag has been published, a later failure still requires a new coordinate; reruns cannot replace it. Real registry push/attestation and deployment verification remain coordinator release gates.
 
-In parallel, macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The `assets` job waits for both signed darwin targets and the verified image job, builds Linux `paimos-agentd` and all `aeon-cli` targets statically, verifies the darwin binaries and computes `SHA256SUMS` over all eight binaries. It rechecks release immutability, then creates one **draft** GitHub release with all nine assets and the image digest (AEON-356). Existing drafts and published releases are never uploaded to or overwritten. A partial image publication requires a new coordinate rather than a rerun that replaces it.
+In parallel, macOS runners build darwin `paimos-agentd` with CGO enabled, then sign it with Developer ID (team P66J39QV6V, hardened runtime) and notarize it in the `release-signing` environment before upload (docs/AGENT_INTEGRATION.md, Signed release daemon). The `assets` job waits for both signed darwin targets and the verified image job, builds Linux `paimos-agentd` and all `aeon-cli` targets statically (cold, like every shipped Go binary), verifies the darwin binaries and computes `SHA256SUMS` over all eight binaries. It rechecks release immutability, then creates one **draft** GitHub release with all nine assets and the image digest (AEON-356). Existing drafts and published releases are never uploaded to or overwritten. A partial image publication requires a new coordinate rather than a rerun that replaces it.
 
 Publication remains the coordinator's explicit step after successful native agent qualification (AEON-487), before the server switch (AEON-493). Failed or incomplete artifact checks or native qualification leave the release a draft. The tap must be merged and its exact public assets checked before switching the server. Server deployment still requires its separate approval and live verification of the exact image digest, version and health. After publication, the coordinator dispatches `.github/workflows/homebrew-tap.yml` on **main**, passing only the version as data. Release events cannot receive tap secrets: their workflow definition can come from an untrusted tag. The trusted main job requires the exact published immutable release, annotated tag on main, complete digest-pinned assets and `SHA256SUMS` bytes matching the API asset digest before minting a tap token. It renders `Formula/aeon-agentd.rb` from those verified bytes and opens a pull request on `inspr-at/homebrew-tap` using the protected environment's App identity. The formula installs the signed, notarized darwin bytes with `bin.install` and does not rebuild or re-sign them. If either App secret is absent the bump logs `homebrew tap bump skipped: app secrets absent` and succeeds; environment preflight still requires installed protection. The stable 105 sample is [docs/homebrew/aeon-agentd.rb](homebrew/aeon-agentd.rb).
 
@@ -720,9 +947,208 @@ the evidence. Fixture timings are not live acceptance evidence.
 
 ### Image dry runs and timing evidence
 
-`.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. Its two native hosted matrix jobs run the workflow/index regression tests, generate offline release history, import the matching architecture cache, load that platform's production build and run the same full smoke gate. Both are required to pass. The Actions job timings and build logs record per-platform timing and cache hits; cold-cache and warm-cache times must be distinguished. Its token has only `contents: read`; it has no signing environment, registry login, cache export, image push, attestation or release creation. Before tagging, require the successful exact-SHA `main` receipt described in [Mandatory pre-tag rehearsal (AEON-531)](#mandatory-pre-tag-rehearsal-aeon-531); a work-branch or PR run is diagnostic only and cannot authorize a release tag. Hosted timing and real attestation verification still require a coordinator-authorized publishing run; a local fixture test does not establish either acceptance criterion.
+`.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. Its two native hosted matrix jobs run the workflow/index and assembly-script regression tests, generate offline release history once, compile externally with the tag build's exact Go and npm cache settings, read the matching architecture's assembly cache, prepare the runtime closure cold and freeze it by digest, load that platform's production assembly and run the same full smoke gate. Both must also produce complete assembly/smoke timing evidence and pass the two-clean-rebuild digest proof. The 90-second target is an AEON-422 acceptance measurement; slower successful samples warn without blocking releases. The rehearsal exports production BuildKit provenance locally with the identical digest-bound base and inputs, then requires that export to carry the smoked image config, using the code that checks the pushed digest in a tag build. Its token has only `contents: read`; it has no signing environment, registry login, registry cache export, image push, attestation or release creation. Before tagging, require the successful exact-SHA `main` receipt described in [Mandatory pre-tag rehearsal (AEON-531)](#mandatory-pre-tag-rehearsal-aeon-531); a work-branch or PR run is diagnostic only and cannot authorize a release tag. Hosted timing can be measured in rehearsal; real attestation verification still requires a coordinator-authorized publishing run. A local fixture test establishes neither.
+
+### Host compilation, runtime pin and digest proof (AEON-422)
+
+`scripts/Dockerfile.runtime` pins the official Alpine 3.24 multi-platform index
+by digest (3.24.2 when observed on 2026-10-05), while preserving Chromium
+152.0.7977.82-r0 and tini 0.19.0-r3. The index keeps both native architectures;
+the smoke gate still checks their installed pins, licenses, NOTICE, UID/GID,
+mounted files, embedded web, authenticated APIs and Chromium PDF rendering.
+The runtime closure uses epoch 0, so neither the source commit's timestamp nor
+the build time enters it. Every tag build and every rehearsal prepares it cold;
+it is never restored from or saved to a cache
+([Runtime closure](#runtime-closure-prepared-cold-on-every-build)).
+
+Every assembly targets exactly one native platform and omits
+`BUILDKIT_MULTI_PLATFORM=1`. Hosted rehearsal run
+[37340960096](https://github.com/inspr-at/paimos/actions/runs/37340960096)
+failed on both architectures after the COPY steps with
+`docker exporter does not currently support exporting manifest lists`.
+That flag forces a multi-platform result even for one target; the
+[BuildKit 0.33.1 Docker exporter](https://github.com/moby/buildkit/blob/v0.33.1/exporter/oci/export.go)
+rejects it. Smoke uses `load: true`, `type=docker`, and `provenance: false`;
+standalone assembly explicitly passes `--load`. Clean proofs export
+single-platform OCI directories with provenance disabled. Rehearsal's
+`mode=max` provenance export writes an explicit `tar=true` OCI archive;
+production uses the index-capable image exporter to push by digest.
+Version, epoch, platform and digest-bound runtime inputs stay identical across
+these exports. Provenance envelopes may create an index, so evidence walks
+the layout and binds the actual platform manifest/config rather than its root
+index. BuildKit's smoke `imageid` supplies the config digest for the proof;
+the daemon-resolved image ID supplies the runnable smoke identity.
+
+Alpine's APK repository and unpinned transitive dependencies still resolve
+during a **cold runtime preparation**. A pinned Alpine index alone does not
+freeze them. The exported OCI closure digest freezes all their bytes before
+assembly, smoke, both proof runs and provenance export. Changing that digest
+changes the input: equality across independently regenerated cold closures is
+not claimed. Retain the complete runtime OCI layout when replaying old
+evidence; the input/base hashes in JSON identify it but cannot recover its
+bytes. Pin/package changes require the existing render-parity and NOTICE
+review; unavailable pinned APKs fail preparation rather than being upgraded.
+
+`scripts/reproduce-image.mjs RUNTIME_LAYOUT EVIDENCE.json` requires a clean
+tracked checkout. It archives the exact commit into two distinct fresh source
+directories, copies the exact already-generated history fixture, and builds
+web and Go independently. Each run compiles Go in its own empty build cache,
+so run 2 is a second compilation, not a replay of run 1 or of the smoked build.
+The proof's exact scope: **same runner, same frozen runtime closure, same
+history fixture**; the runs also share the `go.sum`-verified module downloads
+and the lockfile-verified npm cache. It does not claim equality across
+runners, toolchain installations or independently prepared runtime closures.
+Neither compiled
+outputs nor incremental web state are carried between runs. Each assembly
+uses `--no-cache --network=none`, the same runtime digest, reserved version,
+source epoch and normalization flags. It compares **platform runtime manifest
+digests**, excluding provenance envelopes, and requires each rebuilt input
+manifest to equal the original smoked build's inputs. It separately compares
+the rebuilt config to BuildKit's smoked config digest; the daemon's runnable
+ID is recorded independently because it need not equal that config digest.
+Temporary fixtures remain under ignored `tmp/image-repro-*` for diagnosis.
+
+Both workflows upload `image-assembly-<arch>-<run_id>-<attempt>` for 14 days:
+
+- `inputs.json` (`aeon.image-inputs.v1`): tree, reserved version, platform,
+  source epoch, generated-history/NOTICE/recipe/web/binary hashes and exact
+  Go/Node/npm versions.
+- `image-reproducibility.json` (`aeon.image-reproducibility.v1`): source SHA,
+  those inputs, both runs' runtime manifest/config digests and build-cache
+  paths, smoke IDs, `proof_scope`, `reproducible`, and failure/completeness
+  fields. `runtime_base` identifies the runtime closure this build prepared:
+  platform, manifest and config digests, layer diff IDs and the recipe hash.
+- `image-timing.json` (`aeon.image-timing.v1`): timezone-bearing start/end,
+  run/attempt/SHA/platform, assembly/smoke outcomes, `assembly_smoke_s`,
+  `within_target`, and `completeness: {state, reasons}`. Missing/failed/skipped
+  evidence is **unknown**, never zero or success, following
+  `scripts/release-timing.mjs`'s validated interval conventions. After saving
+  the JSON and step summary, missing, malformed, reversed or incomplete
+  evidence makes the timing command exit non-zero. Start files are bounded
+  to 128 bytes; oversized or non-regular files are treated as missing evidence.
+  Both workflows run this command with `if: always()` and pass the assembly
+  and smoke outcomes; failed or skipped work stays partial and fails the step.
+- Runtime `index.json`: the frozen local OCI root descriptor. Archive the
+  full runtime layout separately if a durable replay fixture is required.
+
+The timing interval starts immediately before COPY assembly and stops after
+the complete immutable-ID smoke, including image load, ID resolution, fixture
+setup and cleanup. Complete successful samples over 90 seconds record
+`within_target: false`, emit a GitHub `::warning::` annotation and a step-summary
+line, retain their artifact and exit zero. The 90-second target measures
+AEON-422 acceptance; it is not a release safety gate. Host
+compilation, runtime preparation, setup, clean rebuild proofs and provenance
+export are outside that named acceptance metric; their separate named Actions
+step durations must still be reported when assessing total release latency.
+Record native runner, cold/warm cache state and run attempt with every sample.
+
+Hosted evidence remains pending until the coordinator integrates this change
+and dispatches `release-image-check.yml` on the exact `main` SHA using the
+existing pre-tag procedure. Download both architecture artifacts, require
+`reproducible: true`, equal `runs[0].image.digest` and `runs[1].image.digest`,
+matching inputs/base, complete timing, and full smoke/job success. Assess
+`assembly_smoke_s <= 90` separately for AEON-422 acceptance; a slower measured
+sample warns without blocking the release. Use `gh run view RUN_ID --json jobs,createdAt,updatedAt`
+to retain per-step durations and cold/warm logs; compare like-for-like samples
+to release 123's 142 s amd64 and 129 s arm64 build-plus-smoke baseline. Those
+baseline numbers are OPS-provided, not measured by this worker. No local or
+hosted runtime result is claimed by the fixture tests. The final tag build
+must repeat these gates and retain its existing signer workflow and exact-SHA
+receipt checks; rehearsing never grants publication or deployment permission.
 
 Baseline evidence: [release run 36647379702](https://github.com/inspr-at/paimos/actions/runs/36647379702), obtained with `gh run view --json jobs,createdAt,updatedAt`, took **641 s (10:41)** from run creation to pushed digest. The release job began after **237 s**; Linux/CLI builds took **99 s**, artifact download **1 s**, history **32 s**, image smoke (including its original build) **119 s**, and build/push **122 s**. Removing the signing dependency and client build/download time gives a conservative structural estimate of **304 s (5:04)** before the new attestation/verification overhead, with cache gains unmeasured. The ≤6 min target and successful test-image verification remain pending a hosted run; do not report this estimate as measured acceptance.
+
+#### Cold Go compilation for shipped binaries
+
+No job that produces a shipped binary restores a Go cache. `actions/setup-go`
+runs with `cache: false` in every job of `release.yml` and
+`release-image-check.yml`. The reason: the go command never re-verifies a
+build-cache entry, and the caches `setup-go` restores are also written by CI
+jobs, including main-push shards on the self-hosted mbp2606 pool. A poisoned
+entry would be compiled into a release, outside what
+`--deny-self-hosted-runners` on the attestation covers.
+
+Each compilation gets its own **empty `GOCACHE` under `RUNNER_TEMP`**: the image
+binary, the release-history generator (its output is linked into the binary),
+each of the two proof runs, darwin `paimos-agentd`, Linux `paimos-agentd` and
+`aeon-cli`. `GOMODCACHE` is a new directory under `RUNNER_TEMP` per job;
+`go mod download` fills it (every module is checked against `go.sum`),
+`go mod verify` re-hashes every module zip and extracted tree, and builds run
+with `GOFLAGS=-mod=readonly`. `scripts/build-image-inputs.mjs` and
+`scripts/build-release-binaries.sh` enforce this themselves in GitHub Actions:
+a missing cache variable, a path outside `RUNNER_TEMP` or a non-empty build
+cache stops the build before any Go command runs. Local builds keep their
+caches. The rehearsal uses the same settings step for step, and workflow tests
+reject any drift.
+
+The npm cache is still restored. It holds downloaded tarballs only,
+`web/package-lock.json` pins a sha512 for every one of them (a prebuild test
+requires that) and `npm ci` checks the hash of cached and downloaded bytes
+alike, so altered cache content fails the install.
+
+The cold compilations, like the cold runtime preparation, lie outside the
+90-second assembly and smoke metric, whose boundary is unchanged. They do
+lengthen the image jobs: each runs three cold Go compilations (the smoked build
+and both proof runs) and one cold runtime preparation, which is why their
+timeout is 30 instead of 20 minutes. Report their step durations when assessing
+release latency.
+
+#### Runtime closure: prepared cold on every build
+
+There is no runtime closure cache. Every tag build, and every rehearsal,
+prepares the closure cold: `scripts/Dockerfile.runtime` is built with
+`no-cache: true` and without a registry cache, from the digest-pinned Alpine
+3.24 index and the pinned `chromium` and `tini` packages. Nothing is restored
+from an earlier build and nothing is saved for a later one. Workflow tests
+reject a cache for it, a second source, a second preparation, and any step
+after the platform job's digest handoff.
+
+The APK repositories are resolved **once per build**, in that preparation
+step. Its result is bound by digest at once: assembly, smoke, both proof runs,
+the provenance export and the push use that one closure, and none of them
+fetches runtime bytes again. The unpinned transitive packages are therefore
+whatever Alpine 3.24 published when the build ran. Two releases can ship
+different runtime closures without any change in this repository, and a
+rehearsal's closure is not the release's closure: the tag build prepares its
+own, then smokes and proves that one.
+
+The runtime digests recorded per release are the traceability record. They
+describe the closure that this build prepared and shipped, never a shared or
+reused one:
+
+- each platform job's summary: runtime manifest digest, config digest, layer
+  diff IDs and the recipe hash;
+- `runtime_base` in `image-reproducibility.json`: the same values;
+- the draft release notes: one `Runtime closure linux/<arch>:` line per
+  architecture with the runtime manifest digest.
+
+Equal digests prove equal runtime bytes. Unequal digests are expected whenever
+Alpine's repositories moved between two builds; equality across independently
+prepared closures is not claimed. The digests identify the bytes but cannot
+recover them.
+
+#### Pushed image equals smoked image
+
+Smoke and proof examine local builds; the push is a further export of the same
+inputs. `scripts/verify-pushed-image.mjs registry` closes that gap in the tag
+build: it reads the pushed digest with `docker buildx imagetools inspect --raw`,
+requires the bytes to hash to the digest they were requested by, requires an
+index holding exactly one `linux/<arch>` manifest besides attestations, and
+compares that manifest's config digest with `steps.build.outputs.imageid`, the
+config digest of the smoked build. The rehearsal runs the same walk over its
+local provenance export (`layout`) and, read-only, over the digest-pinned
+Alpine index named in the runtime recipe (`probe`), which exercises the real
+registry reads without a push.
+
+#### What only a tag build can prove
+
+The rehearsal has no registry write, so these run for the first time in the
+first tag build after this change (release 124):
+
+- `Require pushed image to equal the smoked build` against a digest pushed to
+  GHCR. Its logic and its registry reads are rehearsed; the pushed object is not.
+- The runtime digests in the draft release notes, which travel through job
+  outputs of the matrix job.
 
 ### Release timing (AEON-416)
 
@@ -956,7 +1382,7 @@ production acceptance or native hardware qualification.
 
 ## Image smoke gate
 
-`scripts/smoke-image.sh` builds the release image and exercises it before anything is published. CI sets `AEON_SMOKE_IMAGE` to the cached build's immutable image ID, which skips rebuilding and preserves the caller-owned image during cleanup; standalone runs still build and clean up their own disposable image. It checks the pinned Chromium and tini packages, their licenses, and `NOTICE`. It then starts a disposable Postgres and the server with mounted secret files, and checks startup, the database role, UID 65532, health, and headers. The script's dev mode is only for authenticated upload and quote calls. Live OIDC is not part of the gate, because the database is disposable and has no identity provider.
+`scripts/smoke-image.sh` exercises the release image before anything is published. CI sets `AEON_SMOKE_IMAGE` to the cached assembly's immutable image ID, which skips rebuilding and preserves the caller-owned image during cleanup; standalone runs use `scripts/assemble-image.mjs` to compile externally, prepare the runtime and load one disposable image, then clean up that image. Standalone assembly needs Go, Node/npm and a Buildx `docker-container` builder (OCI export and named contexts); it generates offline history only when no generated fixture exists. It checks the pinned Chromium and tini packages, their licenses, and `NOTICE`. It then starts a disposable Postgres and the server with mounted secret files, and checks startup, the database role, UID/GID 65532, health, and headers. The script's dev mode is only for authenticated upload and quote calls. Live OIDC is not part of the gate, because the database is disposable and has no identity provider.
 
 The gate needs Docker. It is a release check, not the day-to-day `just test` run.
 
@@ -1411,3 +1837,117 @@ keeps New/Backlog suggestions. Human checks pause only delivery and acceptance.
 Progress inactivity uses actual harness/session-branch and review-PR timestamps,
 so a title edit or comment does not keep stalled work in progress. Triage
 autopilot's judgement modes are a separate phase.
+
+
+### Work-node maintenance switch (AEON-648 / AEON-684)
+
+Before stopping the release-122 container, run the candidate binary's
+`paimos migrate --check` (or `aeon-server migrate --check`) with the existing
+server database configuration. This command opens a read-only repeatable
+snapshot, pages every tenant under FORCE RLS, prints each busy parent key and
+reason using the same predicate as migration 1215, and applies no migrations.
+Exit 78 means a live legacy work parent has a live direct work child and a
+bound unstopped session, queued/starting/running/waiting claim, or running child
+work order. Keep the old container running while claims drain and cooperative
+handovers complete. Rerun the check before the switch; a clean snapshot is not
+an execution permit and 1215 still rechecks under its maintenance locks.
+Preflight errors or timeouts are failures, never clean results. Large reports
+stream in bounded pages; the stderr summary explicitly truncates after 100.
+
+Boot refuses the same blockers with one diagnostic naming their keys and the
+remedy, exits 78, and performs no internal retry. OPS must not stop the old
+container while this check fails. Existing schema-conflict, backup, human
+approval, paused-writer and release gates remain authoritative; the worker's
+preflight does not grant deployment approval.
+
+OPS's 2026-10-04 csb1 real-data rehearsal (AEON-684) migrated 241 files from
+schema 1148 through 1230 in 8 seconds. Epic 317 + task 811 + ticket 5239 became
+6367 work nodes; keys, parents, titles, counters and relations were
+byte-identical. These are OPS-provided facts, not a rehearsal performed by this
+integration worker, and do not claim later migrations were rehearsed.
+Release 122's server boots on that migrated database despite not knowing the
+`work` kind. Boot success therefore does not prove rollback correctness.
+**Rollback requires restoring the matching verified pre-switch database and
+file/blob dump plus the exact old artifact; merely repinning release 122 is
+unsupported.** A partial later migration failure can leave 1215 committed;
+never delete ledger rows or modify published migration bytes to retry.
+
+Integration retains ledger-owned 1237 for release-leaf lifecycle and renumbers
+only the unpublished colliding parent-benefit generation file to reserved
+1239. No published migration or release coordinate changes.
+
+AEON-648 integration fix round 1 retains per-work residency floors in admission
+and live routing, saved account/group pins, canonical Repeat actions/templates,
+and upgraded imported issue links. Reserved forward migration
+`1240_work_account_pins.sql` widens only the pin guard's target kinds and retains
+its tenant, live-target and harness checks. It has a pinned policy exception
+requiring consolidated coordinator review; historical SQL stays unchanged.
+Regression and validation evidence is in
+[aeon-648-int-fix1-evidence.json](qa/aeon-648-int-fix1-evidence.json).
+The deletion regression again retains a real queued run, generated order and
+capacity hold through a failed deletion. Migration 1238's retrospective
+AEON-655 ledger entry remains a coordinator action. Linux browser CI and
+OPS-247 remain unverified; local single-file Chromium evidence is not a
+replacement release gate. This fix round neither pushes to origin nor deploys.
+
+## Local static CI pre-filter (OPS-257)
+
+Before pushing, run `node scripts/ci-static.mjs --here` from any directory
+(the script resolves its own worktree). Before enqueueing a committed branch,
+refresh `origin/main` normally, then run `node scripts/ci-static.mjs --merge-main`
+(the default). It merges committed HEAD with the locally cached `origin/main`
+in a detached OS-temporary worktree, reports conflicts, and removes that
+worktree afterwards. It never fetches, changes the caller's branch/files,
+installs dependencies, or pushes. Uncommitted edits are included only by `--here`.
+
+`--list` shows the registry and workflow origins, `--only id,...` selects checks,
+`--json` emits one report with statuses, commands and seconds, and `--jobs N`
+sets the bounded pool (default 4). Each check has a timeout. Failures include
+the last 40 output lines and the exact command to reproduce. Exit codes are
+0 for a complete pass, 1 for check/merge failure, 2 for usage/setup errors,
+and 3 for an incomplete run with optional skips. `--allow-skips` explicitly
+permits exit 0 with skips; the summary still says **INCOMPLETE**, names every
+skipped check, and JSON carries `incomplete: true`. Failures take precedence.
+
+Coverage mirrors the static Go, release, audit/slice ownership, runner guard,
+migration policy/numbering, shard inventory/spec drift, planner and tier tests,
+and OpenAPI property lint checks in `.github/workflows/ci.yml`. Web typecheck,
+lint, native shard tests, browser safety tests and native tier collection are
+optional when installed `web/node_modules` is absent; no browsers are launched.
+When caller and merged `web/package-lock.json` bytes match, merge mode symlinks
+the caller's installed dependencies into the disposable tree and treats them
+as read-only. npm/tool caches and TypeScript build info go to temporary paths;
+typecheck extends the original projects through temporary configs under `web`
+to preserve module resolution. It never installs or shares mismatched locks.
+Checks receive a small fixed environment: caller GOFLAGS and AEON_* settings
+are stripped, CI/full-lane/full-tier values are set, and differing Node major
+or Go major/minor versions from `ci.yml` generate warnings.
+A dependency-free strict shard inventory still catches unregistered specs.
+The migration baseline uses GitHub's **latest published stable release**, exactly
+as CI does, and requires its local tag. Offline operators may explicitly pass
+`--base-ref vYYMMDDhhmmss.0.0` after verifying that published release; there is
+no fallback to the newest tag, which may be unpublished.
+
+This is a pre-filter, never a gate. Hosted CI remains the proof, including DB
+compatibility, full Go/browser suites, builds, Nix vendor hash and release checks.
+The command registry is `scripts/ci/static-checks.json`. It explicitly classifies
+every CI job as static or not-static (with a reason and pinned run-inventory digest).
+Static jobs require a primary mirror or a reasoned exact exclusion for every
+run line/block; supplements cannot satisfy coverage. Unknown jobs, new run
+steps, changed excluded runs, unclassified lines and stale origins fail drift
+validation and require an explicit classification decision. Not-static digests
+are SHA-256 of JSON arrays of `{step, cwd, command}` for every nonempty run in
+workflow order, with commands normalized by the workflow reader; review the
+changed runs before updating a pin.
+`release-check-run` already includes `scripts/ci-static.test.mjs` in its
+**PR classification and exact-SHA reuse regressions** command; the registry
+mirrors it and the historical Go workflow assertion pins that accepted command.
+That workflow is owned by the coordinator. Root `scripts/*.test.mjs` files use these explicit CI commands,
+not the Go or web tier manifests (web collection covers `web/tests/`).
+
+Disposable worktree creation and merging override caller hooks, signing and
+fast-forward settings. Interrupts cancel process groups and clean this run's
+worktree. Cleanup failures are reported without replacing the original result;
+pruning is attempted afterwards. A reported residue path is this run's detached
+worktree: inspect it, then use `git worktree remove --force <reported-path>` and
+`git worktree prune`. Do not remove other workers' worktrees.

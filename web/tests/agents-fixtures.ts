@@ -133,9 +133,10 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     const provenancePath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/provenance$/.exec(path)
     const readMarkerPath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/read-marker$/.exec(path)
     const sessionsPath = /^\/api\/projects\/([^/]+)\/harness-sessions(?:\/([^/]+)(?:\/controls\/([^/]+))?)?$/.exec(path)
+    const pausePath = /^\/api\/projects\/([^/]+)\/harness-sessions\/([^/]+)\/pause$/.exec(path)
     const messagesPath = /^\/api\/projects\/([^/]+)\/(messages|message-targets)$/.exec(path)
     const resolutionPath = /^\/api\/projects\/([^/]+)\/messages\/([^/]+)\/resolution$/.exec(path)
-    const known = provenancePath || readMarkerPath || sessionsPath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/decision-desk/projection' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
+    const known = provenancePath || readMarkerPath || sessionsPath || pausePath || messagesPath || resolutionPath || path === '/api/harness-sessions' || path === '/api/runs' || path === '/api/decision-desk/projection' || path === '/api/approvals' || path.startsWith('/api/approvals/') || path.startsWith('/api/agent-accounts') || path.startsWith('/api/runs/')
     const pairing = !!options.capacity && path === '/api/agent-pairing/computers'
     if (!known && !pairing) return route.fallback()
     calls.push({ path, method, body, query: url.searchParams })
@@ -182,6 +183,15 @@ export async function mockAgents(page: Page, data: AgentData, options: AgentMock
     }
     if (provenancePath) {
       return route.fulfill({ json: { session_id: provenancePath[2], revisions: [], truncated: false } })
+    }
+    if (pausePath) {
+      if (method !== 'POST') return route.fulfill({ status: 405, json: { error: 'method not allowed' } })
+      const target = data.sessions.find(s => s.id === pausePath[2] && s.project_id === pausePath[1])
+      if (!target) return route.fulfill({ status: 404, json: { error: 'session not found' } })
+      const input = body as { level: string; note: string }
+      // Acceptance leaves the process live until a later reported exit.
+      Object.assign(target, { revision: Number(target.revision) + 1, pause: { control_id: `pause-${target.id}`, state: 'requested', level: input.level, note: input.note, stop_requested: input.level === 'stop_now', deliver: true } })
+      return route.fulfill({ json: target })
     }
     if (sessionsPath) {
       if (options.sessionsMissing) return route.fulfill({ status: 404, json: { error: 'not found' } })

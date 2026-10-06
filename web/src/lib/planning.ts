@@ -214,7 +214,7 @@ function modelDurationLine(row: PlanningRow): string {
 function basisLine(tokens: PlanningTokens, row: PlanningRow): string {
   const snap = row.planning?.estimate_snapshot
   const cal = snap?.rate_basis ?? tokens.calibration
-  if (row.kind_slug === 'epic' && row.planning?.children) {
+  if (row.planning?.children) {
     const c = row.planning.children
     return `Sum of ${c.estimated} of ${c.total} open and done children with an estimate${c.uncalibrated ? ` · partial: ${c.uncalibrated} uncalibrated ${c.uncalibrated === 1 ? 'child excluded' : 'children excluded'}` : ''}`
   }
@@ -252,8 +252,8 @@ export function tokensCell(row: PlanningRow): FigureCell {
     lines.push(`${count} session${count === 1 ? '' : 's'} running${models.length === 1 ? ` on ${models[0]!.label}` : ''}`)
   }
   if (spent !== null && tokens?.unreported) lines.push(`${tokens.unreported} ${tokens.unreported === 1 ? 'session has' : 'sessions have'} no usage report yet`)
-  if (row.planning?.children?.uncalibrated) lines.push(basisLine(tokens!, row))
-  if (tokens && est !== null && snap?.rate_basis.basis !== 'default' && !row.planning?.children?.uncalibrated && ((!tokens.sessions && !live && spent === null) || (snap?.rate_basis ?? tokens.calibration)?.basis_text)) {
+  if (row.planning?.children) lines.push(basisLine(tokens!, row))
+  if (tokens && est !== null && snap?.rate_basis.basis !== 'default' && !row.planning?.children && ((!tokens.sessions && !live && spent === null) || (snap?.rate_basis ?? tokens.calibration)?.basis_text)) {
     const basis = basisLine(tokens, row); if (basis) lines.push(basis)
   }
   if (spent === null && est !== null && snap?.rate_basis.basis === 'default') lines.push(uncalibratedLine(row), snapshotLine(row))
@@ -286,8 +286,8 @@ export function listCostCell(row: PlanningRow): FigureCell {
     const hours = snap ? snap.estimate_hours : row.planning?.tokens.calibration && row.planning.tokens.estimated !== null ? row.planning.tokens.estimated / row.planning.tokens.calibration.tokens_per_hour : null
     lines.push(`Estimated ~${formatDollars(est)} at API list prices${hours && hours > 0 ? ` (${exactDollars(String(est / hours))}/h)` : ''}`, 'Billing shows once a session reports')
   } else lines.push(uncalibrated(row) ? uncalibratedLine(row) : row.planning?.tokens.sessions ? 'Billing not reported yet' : 'No agent session yet')
-  if (row.planning?.children?.uncalibrated) lines.push(basisLine(row.planning.tokens, row))
-  if (est !== null && snap?.rate_basis.basis !== 'default' && !row.planning?.children?.uncalibrated && row.planning?.tokens && (snap?.rate_basis ?? row.planning.tokens.calibration)?.basis_text) {
+  if (row.planning?.children) lines.push(basisLine(row.planning.tokens, row))
+  if (est !== null && snap?.rate_basis.basis !== 'default' && !row.planning?.children && row.planning?.tokens && (snap?.rate_basis ?? row.planning.tokens.calibration)?.basis_text) {
     const basis = basisLine(row.planning.tokens, row); if (basis) lines.push(basis)
   }
   if (spent !== null && cost?.list_unpriced) lines.push('Part of this has no list price, so it is a lower bound')

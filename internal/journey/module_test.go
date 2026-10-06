@@ -1010,7 +1010,7 @@ func (f *fixture) release(t *testing.T, project, key string, number int) string 
 
 func (f *fixture) ticket(t *testing.T, project, release, key, hours string, scope, access bool) {
 	t.Helper()
-	id := f.node(t, "ticket", key, key)
+	id := f.node(t, "work", key, key)
 	if _, err := f.db.Admin.Exec(t.Context(), `
 		INSERT INTO journey_tickets (
 			tenant_id, ticket_node_id, project_node_id, release_node_id, walker_position,

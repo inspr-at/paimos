@@ -132,8 +132,9 @@ type heartbeatOptions struct {
 }
 
 type heartbeatCommit struct {
-	SHA     string
-	Subject string
+	SHA                                    string
+	Subject                                string
+	LinesAdded, LinesDeleted, FilesChanged *int64
 }
 
 func (rt *runtime) harnessRunHeartbeat() *Command {
@@ -1238,9 +1239,13 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	}
 	commits := heartbeatCommits(ctx, o, dep, &session.disk)
 	if len(commits) > 0 {
-		items := make([]map[string]string, 0, len(commits))
+		items := make([]map[string]any, 0, len(commits))
 		for _, c := range commits {
-			items = append(items, map[string]string{"sha": c.SHA, "subject": c.Subject})
+			item := map[string]any{"sha": c.SHA, "subject": c.Subject}
+			if c.LinesAdded != nil && c.LinesDeleted != nil && c.FilesChanged != nil {
+				item["lines_added"], item["lines_deleted"], item["files_changed"] = *c.LinesAdded, *c.LinesDeleted, *c.FilesChanged
+			}
+			items = append(items, item)
 		}
 		body["commits"] = items
 	}

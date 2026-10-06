@@ -20,13 +20,26 @@ import (
 // project row-level security or handler-level authorization confines to the
 // caller's visible projects (nodes, relations, events, knowledge, search,
 // views and approvals pinned to a project, live agent sessions),
-// workspace configuration every reader needs (kinds, the workspace logo that
-// /api/me links, read under tenant row-level security), or the caller's own
-// profile and preferences. Every other route without a project in its path is
-// authorized by the workspace binding alone, so a project-only principal never
-// reaches workspace-wide data such as members, quotes, CRM or hours.
+// workspace configuration every reader needs (kinds, work names and icons,
+// the workspace logo linked by /api/me, read under tenant row-level security),
+// or the caller's own profile and preferences. Every other route without a
+// project in its path is authorized by the workspace binding alone, so a
+// project-only principal never reaches workspace-wide data such as members,
+// quotes, CRM or hours.
 var ProjectFilteredRoutes = map[string]bool{
-	"GET /api/chat-threads/{id}":           true,
+	"GET /api/chat-threads/{id}":                                    true,
+	"GET /api/me/phone-approvals":                                   true,
+	"PUT /api/me/phone-approvals/settings":                          true,
+	"POST /api/me/phone-approvals/passkeys/options":                 true,
+	"POST /api/me/phone-approvals/passkeys":                         true,
+	"DELETE /api/me/phone-approvals/passkeys/{credentialId}":        true,
+	"POST /api/me/phone-approvals/subscriptions":                    true,
+	"DELETE /api/me/phone-approvals/subscriptions/{subscriptionId}": true,
+	"GET /api/phone-approvals/{kind}/{requestId}":                   true,
+	"POST /api/phone-approvals/{kind}/{requestId}/options":          true,
+	"POST /api/phone-approvals/{kind}/{requestId}/decision":         true,
+
+	"GET /api/features":                    true,
 	"GET /api/themes":                      true,
 	"GET /api/themes/{themeId}":            true,
 	"GET /api/me/theme":                    true,
@@ -56,11 +69,13 @@ var ProjectFilteredRoutes = map[string]bool{
 	"GET /api/usage/dashboard":                    true,
 	"GET /api/usage/model-estimates":              true,
 	"GET /api/settings/status-autopilot":          true,
+	"GET /api/settings/work-vocabulary":           true,
 	"GET /api/status-autopilot/changes":           true,
 	"GET /api/status-autopilot/proposals":         true,
 	"GET /api/projects":                           true,
 	"GET /api/nodes":                              true,
 	"GET /api/outcomes":                           true,
+	"GET /api/outcomes/measurement":               true,
 	"GET /api/nodes/lookup":                       true,
 	"GET /api/nodes/tree":                         true,
 	"GET /api/search":                             true,
@@ -106,7 +121,13 @@ var ProjectDecidedRoutes = map[string]bool{
 	"PATCH /api/work-kinds/{kindId}":                             true,
 	"DELETE /api/work-kinds/{kindId}":                            true,
 	"POST /api/work-kinds/{kindId}/restore":                      true,
+	"POST /api/recurrences":                                      true,
+	"POST /api/recurrences/preview":                              true,
 	"POST /api/queue":                                            true,
+	"POST /api/queue/{nodeId}/snapshots":                         true,
+	"GET /api/queue-snapshots/{snapshotId}":                      true,
+	"POST /api/queue-snapshots/{snapshotId}/apply":               true,
+	"DELETE /api/queue-snapshots/{snapshotId}":                   true,
 	"POST /api/queue/reset":                                      true,
 	"POST /api/queue/next":                                       true,
 	"GET /api/rules/layers":                                      true,
@@ -131,7 +152,6 @@ var ProjectDecidedRoutes = map[string]bool{
 	"POST /api/outcomes":                                         true,
 	"POST /api/relations":                                        true,
 	"POST /api/knowledge":                                        true,
-	"POST /api/recurrences":                                      true,
 }
 
 // Product release notes are the same for everyone; they are not tenant data.
@@ -314,11 +334,14 @@ func targetProject(ctx context.Context, pool *pgxpool.Pool, kind, id string) (st
 	err := db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx, query, args...).Scan(&project)
 	})
-	if errors.Is(err, pgx.ErrNoRows) || project == nil {
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", nil
 	}
 	if err != nil {
 		return "", err
+	}
+	if project == nil {
+		return "", nil
 	}
 	return *project, nil
 }

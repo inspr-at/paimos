@@ -37,7 +37,7 @@ const dirty = computed(() => !!title.value.trim())
 
 async function open(initial?: KnowledgeType) {
   opener = document.activeElement as HTMLElement
-  type.value = initial ?? 'runbook'
+  type.value = initial && initial !== 'decision' ? initial : 'runbook'
   title.value = ''; slug.value = ''; slugEdited.value = false; touched.value = false; error.value = ''; conflict.value = null; busy.value = false
   dialog.value?.showModal()
   await nextTick(); titleInput.value?.focus()
@@ -92,7 +92,7 @@ defineExpose({ open })
       <fieldset class="kinds-set">
         <legend class="f-label">Kind</legend>
         <div class="kinds">
-          <label v-for="meta in TYPES" :key="meta.type" class="kind" :class="{ on: type === meta.type }">
+          <label v-for="meta in TYPES.filter(meta => meta.type !== 'decision')" :key="meta.type" class="kind" :class="{ on: type === meta.type }">
             <input v-model="type" class="sr-only" type="radio" name="k-new-kind" :value="meta.type" />
             <span class="kind-icon"><AppIcon :name="meta.icon" :size="15" /></span>
             <strong class="kind-label">{{ meta.label }}</strong>
@@ -142,7 +142,7 @@ defineExpose({ open })
 </template>
 
 <style scoped>
-.create { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.create { width: min(var(--dialog-l), calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .create::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .create-card { display: grid; gap: 18px; max-height: calc(100dvh - 24px); overflow: auto; padding: 20px 22px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 .create-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -188,5 +188,9 @@ h2 { font-size: 18px; }
   .create-foot { flex-wrap: wrap; }
   .create-foot .f-hint { display: none; }
   .create-foot .btn { flex: 1; height: 44px; }
+  /* A full-height sheet: the fields scroll, the actions stay pinned at the bottom (AEON-730). */
+  .create { inset: 0; width: 100%; max-width: none; height: 100dvh; max-height: none; margin: 0; }
+  .create-card { display: flex; flex-direction: column; height: 100%; max-height: none; border: 0; border-radius: 0; background: var(--surface-raised); }
+  .create-foot { position: sticky; bottom: -16px; flex: none; margin: auto -16px -16px; padding: 10px 16px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface-raised); }
 }
 </style>

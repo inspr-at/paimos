@@ -60,6 +60,38 @@ func (f *fixture) count() int {
 	})
 	return n
 }
+
+func TestPrincipalLinkTenantBeforeAdvisory(t *testing.T) {
+	for _, cli := range []bool{false, true} {
+		t.Run(fmt.Sprintf("operator=%t", cli), func(t *testing.T) {
+			f := setup(t)
+			from := f.person("Alias", "", "")
+			to := f.person("Canonical", "", "")
+			dbtest.BindRole(t, f.d, f.tid, from, "member")
+			dbtest.TenantBeforeAdvisory(t, f.d, f.tid, f.tid, 532, func(ctx context.Context) error {
+				if cli {
+					_, err := f.s.Link(ctx, "links", from, to)
+					return err
+				}
+				return db.InTenant(dbtest.Seed(ctx), f.d.App, f.tid, func(tx pgx.Tx) error {
+					_, err := LinkTx(ctx, tx, f.tid, from, to, to, "principal.linked", "principal.unlinked")
+					return err
+				})
+			})
+			var linked string
+			var bindings int
+			if err := f.d.Admin.QueryRow(t.Context(), `SELECT linked_to::text,
+				(SELECT count(*) FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2)
+				FROM principals WHERE tenant_id=$1 AND id=$2`, f.tid, from).Scan(&linked, &bindings); err != nil {
+				t.Fatal(err)
+			}
+			if linked != to || bindings != 0 {
+				t.Fatalf("linked=%s want %s; alias bindings=%d", linked, to, bindings)
+			}
+		})
+	}
+}
+
 func TestLinkUnlinkReplayAndSuggestions(t *testing.T) {
 	f := setup(t)
 	a := f.person("mba", "paimos-classic", "same@example.test")

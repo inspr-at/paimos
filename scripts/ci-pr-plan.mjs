@@ -4,7 +4,10 @@ import { appendFileSync, readFileSync, statSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 
 const limit = 2 * 1024 * 1024;
-const full = reason => ({ lane: 'full', specs: [], reason });
+const full = reason => ({ lane: 'full', specs: [], nixVendor: true, reason });
+// Include the guard's wiring so changes to the check also exercise Nix.
+const nixVendorPaths = new Set(['go.mod', 'go.sum', 'flake.nix', 'flake.lock',
+  '.github/workflows/ci.yml', 'scripts/ci-pr-plan.mjs', 'scripts/check-nix-vendor-hash.sh']);
 // The documentation allowlist lives here, including root licence notices.
 export const docsPaths = [/^[^/]+\.md$/i, /^docs\//, /^(?:LICENSE|LICENCE|COPYING|NOTICE)(?:\.(?:txt|md|rst))?$/i];
 
@@ -19,14 +22,15 @@ export function classifyPaths(files, deleted = []) {
   if (!files.length || files.length > 10000) return full('empty or oversized diff');
   files.forEach(validatePath);
   deleted.forEach(validatePath);
+  const nixVendor = [...files, ...deleted].some(file => nixVendorPaths.has(file));
   if (files.every(file => !file.split('/').includes('testdata') && docsPaths.some(pattern => pattern.test(file)))) {
-    return { lane: 'docs-only', specs: [], reason: 'documentation allowlist' };
+    return { lane: 'docs-only', specs: [], nixVendor, reason: 'documentation allowlist' };
   }
   // A rename includes its removed source with --no-renames. Removals require full validation.
   if (!deleted.length && files.every(file => /^web\/tests\/[^/]+\.spec\.ts$/.test(file))) {
-    return { lane: 'spec-only', specs: [...new Set(files)].sort(), reason: 'changed Playwright specs' };
+    return { lane: 'spec-only', specs: [...new Set(files)].sort(), nixVendor, reason: 'changed Playwright specs' };
   }
-  return full('shared inputs, rename or deletion');
+  return { ...full('shared inputs, rename or deletion'), nixVendor };
 }
 
 export function classifyPR(eventName, event, { git = args => execFileSync('git', args,
@@ -76,7 +80,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
         plan = classifyPR(name, event, { checkout: process.env.GITHUB_SHA });
       } catch { plan = full('classification unavailable; full validation required'); }
       console.log(JSON.stringify(plan));
-      if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `lane=${plan.lane}\nspecs=${JSON.stringify(plan.specs)}\n`);
+      if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `lane=${plan.lane}\nspecs=${JSON.stringify(plan.specs)}\nnix_vendor=${plan.nixVendor}\n`);
       if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `CI: ${plan.lane}; ${plan.reason}\n`);
     } else throw new Error('Usage: ci-pr-plan.mjs [gate LANE CLASSIFIER RESULT...]');
   } catch (error) { console.error(error.message); process.exitCode = 1; }

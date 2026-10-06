@@ -4,6 +4,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { setPageTitle } from './lib/brand'
 import { useProjects } from './stores/projects'
 import { useSession } from './stores/session'
+import { useWorkVocabulary } from './stores/workVocabulary'
 import { sessionEnded } from './lib/api'
 import { can, ensurePermissions, permissionsRevoked } from './lib/authz'
 import { toast } from './lib/toast'
@@ -25,7 +26,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: ProjectsView, meta: { title: 'Projects' } },
-    { path: '/briefing', component: () => import('./views/MorningBriefingView.vue'), meta: { title: 'Morning briefing' } },
+    { path: '/briefing', redirect: '/agents' },
     // One record for the project page: its list, the open ticket and its Knowledge
     // tab and entries are children, so moving between them never remounts the page
     // (and its guards stay on the record that is matched throughout).
@@ -34,6 +35,7 @@ export const router = createRouter({
       children: [
         { path: 'tickets', component: RouteMarker, meta: { projectSection: 'tickets' } },
         { path: 'journey', component: RouteMarker, meta: { title: 'Journey', projectSection: 'journey' } },
+        { path: 'settings', component: RouteMarker, meta: { title: 'Project settings', projectSection: 'settings' } },
         // A docked entry (?entry=<type>/<slug>) on a screen too narrow to dock it opens the entry's own page.
         { path: 'knowledge', component: RouteMarker, meta: { title: 'Knowledge', projectSection: 'knowledge' }, beforeEnter: to => {
           const entry = parseEntryParam(to.query.entry)
@@ -90,13 +92,15 @@ export const router = createRouter({
     // eslint-disable-next-line no-restricted-syntax -- a route of the page, not a request
     { path: '/runs/:runId?', redirect: '/agents' },
     { path: '/approvals', redirect: '/agents' },
+    { path: '/phone-approvals/:kind(approval|attach)/:requestId', component: () => import('./views/PhoneApprovalView.vue'), meta: { title: 'Review approval' } },
     { path: '/pacing', redirect: '/agents' },
     // The release history is a sheet over the page (App.vue); its own links open it over Projects.
     { path: '/releases/:version?', component: ProjectsView, meta: { title: 'Releases' } },
-    // Settings: Personal for everyone; Workspace, Business and Projects for admins.
+    // Settings: grouped sections; preserve old card bookmarks after the moves.
     { path: '/settings', redirect: '/settings/personal' },
+    { path: '/settings/projects', redirect: to => ({ path: '/settings/vocabulary', query: to.query, hash: to.hash }) },
     { path: '/settings/business/profiles/:profileId?', component: () => import('./views/settings/DocumentProfilesView.vue'), props: true, meta: { title: 'Document profiles', fill: true } },
-    { path: '/settings/:section(personal|developer|agent-rules|accounts|workspace|business|projects|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
+    { path: '/settings/:section(personal|theme|developer|agent-rules|accounts|workspace|vocabulary|agents|autopilot|business|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     // Access: /settings/access/<tab>/<id> (a person, a role, a project).
     { path: '/settings/:section(access)/:tab(people|invites|roles|projects|agents|audit)?/:id?', component: () => import('./views/SettingsView.vue'), meta: { title: 'Access', keepsFocus: true } },
     { path: '/link', component: () => import('./views/LinkAccountView.vue'), meta: { title: 'Link an account' } },
@@ -141,6 +145,13 @@ router.beforeEach(async (to, from) => {
     if (code && to.path === '/agents') holdAttachCode(code, scopeOwner(useSession().identity))
     return { path: to.path, query: to.query, hash: '', replace: true }
   }
+  // Section and hash changes reuse Settings' route record, so beforeEnter
+  // cannot normalize old card bookmarks during in-app navigation.
+  if (to.params.section === 'workspace') {
+    const moved: Record<string, string> = { '#work-vocabulary': 'vocabulary', '#ticket-types': 'vocabulary', '#models': 'agents', '#model-refresh': 'agents', '#estimates': 'agents', '#silent-sessions': 'agents', '#agent-activity': 'agents', '#quota-warnings': 'accounts', '#status-autopilot': 'autopilot', '#autopilot-projects': 'autopilot', '#autopilot-suggestions': 'autopilot', '#autopilot-recent': 'autopilot', '#autopilot-proposals': 'autopilot', '#autopilot-changes': 'autopilot', '#members': 'access' }
+    const section = moved[to.hash]
+    if (section) return { path: `/settings/${section}`, query: to.query, hash: to.hash === '#members' ? '' : to.hash }
+  }
   // Canonical section URLs replace bookmarks without adding a history step.
   // Ticket addresses stay /p/KEY/TICKET; ?section= preserves a non-default background,
   // including across reload, expand/collapse and links inside the side panel.
@@ -178,6 +189,7 @@ router.beforeEach(async (to, from) => {
   if (!session.identity && to.path !== '/signin') {
     // A classic link arrives before sign-in (AEON-175): keep it for after OIDC.
     if (to.path.startsWith('/from-classic/')) sessionStorage.setItem('aeon.fromClassicReturn', to.fullPath)
+    if (to.path.startsWith('/phone-approvals/')) return { path: '/signin', query: { return: to.fullPath } }
     if (wasSignedIn) return signInAgain(to.fullPath)
     dropAttachCode()
     return '/signin'
@@ -208,6 +220,14 @@ router.beforeEach(async (to, from) => {
       delete query.new
       return { path: to.path, query, hash: to.hash, replace: true }
     }
+  }
+  // Resolve workspace names before project controls appear, so a late read
+  // cannot change a type chip's width under the pointer.
+  if (session.identity && to.params.projectKey) {
+    const vocabulary = useWorkVocabulary()
+    await vocabulary.load()
+    if (!session.identity || session.requiresSignIn) return signInAgain(to.fullPath)
+    if (vocabulary.error) toast(vocabulary.error, { tone: 'error' })
   }
 })
 // A held attach code is offered once the navigation that cleaned the address bar has settled.

@@ -1,0 +1,165 @@
+{
+  "ticket": "AEON-648",
+  "round": "int-fix3",
+  "recorded_at": "2026-10-04T20:45:13.135185+00:00",
+  "branch": "work/aeon-648-int",
+  "reviewed_commit": "d5af6a9aaf1e6f28f5c3113f80c731300481b84b",
+  "completion": "Release membership lock inversion fixed and tested; coordinator-owned migration1238 reservation remains open.",
+  "findings": [
+    {
+      "finding": 1,
+      "severity": "P1",
+      "status": "fixed",
+      "source": "internal/releases/work_parents.go: lockMembership",
+      "behavior": "Acquire tenant FOR NO KEY UPDATE, then pairing, then tree before resource rows and event counter; RequireTx still rechecks current project releases.write under the final write fence.",
+      "regression": "internal/releases/work_membership_lock_test.go: TestReleaseMembershipTenantBeforePairingWithDerivationDisabled",
+      "proof": "Actual membership HTTP write overlaps a tenant-first project writer with parent derivation verified disabled. Traced backend plus pg_blocking_pids establishes the exact tenant-row wait. Zero granted advisory locks and successful pairing/tree probes rule out the inversion. Both competing edit and membership persist after commit. No sleeps or elapsed-time assertions.",
+      "baseline_commit": "ac57267da6808056953f1c4b5a85b15221f8477a",
+      "baseline_production_identical_to": "d5af6a9aaf1e6f28f5c3113f80c731300481b84b",
+      "baseline_failure": "Membership holds two advisory locks while waiting for tenant; tenant-first writer cannot acquire pairing.",
+      "final_pass_commit": "c751b19340aa639993371f90488602bc6c997cd4",
+      "retained_revocation_test": "TestWorkParentPlacementRechecksRevokedGrantUnderFence now uses the production tenant-first LockProjectMutation fence and the exact backend/query wait barrier. Original HTTP403, project access required text and zero-membership/parent-placement assertions are unchanged."
+    },
+    {
+      "finding": 2,
+      "severity": "P3",
+      "status": "open: coordinator action required",
+      "owner": "coordinator / AEON-655",
+      "evidence": "docs/qa/aeon-648-int-fix3-reservation.json",
+      "expected_line": "1238 AEON-655 (work vocabulary)",
+      "worker_action": "Attached original AEON-655 commit, unchanged migration hash, exact missing reservation and shared-ledger hash. Preserved ownership; shared ledger not edited.",
+      "coordinator_action": "Append the reservation under AEON-655 ownership and attach the resulting ledger line/hash; no SQL rewrite or renumbering."
+    }
+  ],
+  "validation": {
+    "remote_transport": "Coordinator-approved remote-test.sh, committed HEAD, runner-owned limits, temporary non-production test refs only. No origin push.",
+    "baseline": {
+      "commit": "ac57267da6808056953f1c4b5a85b15221f8477a",
+      "runner_exit_code": 1,
+      "expected_regression_failure": true,
+      "log": "web/test-results/aeon-648-int-fix3/logs/baseline-remote.log"
+    },
+    "initial_remote": {
+      "commit": "9426f9f6ec22613ca94ab4c79b7314dd5d8eda93",
+      "runner_exit_code": 1,
+      "passes": {
+        "internal/db_seconds": 96.699,
+        "internal/authz_seconds": 20.043,
+        "web_adapter_seconds": 162.537
+      },
+      "release_failure": "Old revocation test acquired pairing before tenant; its fixture deadlocked against the repaired tenant-first request. Test barrier fixed in c751b193, assertions retained, entire release suite rerun.",
+      "log": "web/test-results/aeon-648-int-fix3/logs/final-remote.log"
+    },
+    "final_releases": {
+      "commit": "c751b19340aa639993371f90488602bc6c997cd4",
+      "runner_exit_code": 0,
+      "result": "pass",
+      "seconds": 25.648,
+      "new_concurrency_regression": "pass",
+      "retained_revocation_regression": "pass",
+      "log": "web/test-results/aeon-648-int-fix3/logs/final-releases-remote.log"
+    },
+    "web": {
+      "commit": "9426f9f6ec22613ca94ab4c79b7314dd5d8eda93",
+      "build": "pass",
+      "lint": "pass",
+      "npm_run_test_unit": "pass",
+      "shard_node_cases": 26,
+      "node_unit_cases": 764,
+      "vitest_cases": 2772,
+      "vitest_files": 99,
+      "transport": "Temporary .qa648fix3 Go adapter through remote-test.sh; removed from final tree. No browser runs through the adapter.",
+      "log": "web/test-results/aeon-648-int-fix3/logs/final-remote.log"
+    },
+    "browser": {
+      "result": "not run: approved remote launcher refused",
+      "exit_code": 3,
+      "owner": "coordinator / OPS-247",
+      "requested_specs": [
+        "work-integration.spec.ts",
+        "morning-briefing.spec.ts",
+        "journey-imported.spec.ts",
+        "ticket-placement.spec.ts"
+      ],
+      "reason": "Remote browser lane unavailable: OPS-247 bootstrap and approved launcher are pending. Use draft PR hosted CI; no SSH, dependency or browser installation, or local fallback.",
+      "log": "web/test-results/aeon-648-int-fix3/logs/browser-remote.log",
+      "previous_evidence": "Round2 browser coverage remains in docs/qa/aeon-648-int-fix2-evidence.json; no UI changes in round3. No new browser or hosted-CI pass claimed."
+    },
+    "tier_guards": {
+      "result": "33 passed, zero failures/skips",
+      "log": "web/test-results/aeon-648-int-fix3/logs/tier-guards.log"
+    },
+    "migration_guard": {
+      "result": "pass",
+      "base_ref": "v261003095616.0.0",
+      "unique_numbers": 258,
+      "historical_and_exception_sql_unchanged": true,
+      "new_migrations": 0,
+      "log": "web/test-results/aeon-648-int-fix3/logs/migration-guard.log"
+    },
+    "ci_registration": {
+      "existing_go_ci_rows_retained": 3711,
+      "new_go_ci_rows": 1,
+      "new_case": {
+        "kind": "go",
+        "package": "internal/releases",
+        "name": "TestReleaseMembershipTenantBeforePairingWithDerivationDisabled",
+        "tier": "GATED-FULL"
+      },
+      "existing_ci_policy_unchanged": true,
+      "migrations_changed_this_round": 0,
+      "origin_main_is_ancestor": true,
+      "origin_main": "a3ca8c475a94ce1de6da1398182abe3dfe98eb9f"
+    },
+    "final_source_equivalence": "After tested c751b193 only evidence files and removal of the temporary test transport change. Production source is identical to tested 9426f9f6; corrected release fixture and new regression are identical to tested c751b193. No assertions loosened or skipped."
+  },
+  "artifacts": [
+    {
+      "path": "web/test-results/aeon-648-int-fix3/logs/baseline-remote.log",
+      "sha256": "bf323c9e2c513c0064f6f0161cae816fb11004dacad466a1f1deebe4c86a1a3c"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix3/logs/browser-remote.log",
+      "sha256": "773e28199e77ad2bac9a833bff42ef9ee0e895acc3fd79d293ced00421a420e2"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix3/logs/final-releases-remote.log",
+      "sha256": "ce991c9c04d9c9a217e50d78a29ca73ab54a398410e87f5709605d8592f301aa"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix3/logs/final-remote.log",
+      "sha256": "93173aac0fb800ac99551b5c0afa0270dfd853baf2980ef64dc6c099839c4e0f"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix3/logs/migration-guard.log",
+      "sha256": "bc1d2249cb2c0bb89af89c17f06096c7c8a5cb6da82683a83bc6d79fd267d82c"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix3/logs/static-proof.json",
+      "sha256": "f3b8409b4a80c72a3b2aafd6927b24afb180aa382a7d0b74b91939e095b41f53"
+    },
+    {
+      "path": "web/test-results/aeon-648-int-fix3/logs/tier-guards.log",
+      "sha256": "4592481414b876522ab0af7c8910307800ea6a6dc58f93330e77a731596a81df"
+    }
+  ],
+  "safety": {
+    "origin_push": false,
+    "deploy": false,
+    "production_access": false,
+    "ticket_status_changed": false,
+    "migration_ledger_modified": false,
+    "historical_migrations_modified": false,
+    "new_secrets_requested": false,
+    "credentials_read_or_displayed": false,
+    "other_worktrees_modified": false,
+    "subagents_or_model_reviews": false,
+    "generated_build_output_committed": false,
+    "temporary_test_adapter_removed": true
+  },
+  "remaining": [
+    "Coordinator must record AEON-655 migration1238 reservation and attach evidence.",
+    "CI-equivalent Linux Chromium and hosted CI remain coordinator/OPS-247; worker did not bypass approved launcher.",
+    "Consolidated release gate remains coordinator-owned."
+  ]
+}

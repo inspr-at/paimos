@@ -88,7 +88,15 @@ func completeValues(raw json.RawMessage) bool {
 		return false
 	}
 	a, ok := object(v["agents"], "avatar", "ring", "hover", "size", "palette")
-	return ok && string(a["hover"]) != "null"
+	if !ok || string(a["hover"]) == "null" {
+		return false
+	}
+	for _, key := range []string{"dim_inactive", "inactive_opacity"} {
+		if raw, present := a[key]; present && string(raw) == "null" {
+			return false
+		}
+	}
+	return true
 }
 func input(w http.ResponseWriter, r *http.Request, out any, required ...string) bool {
 	controller := http.NewResponseController(w)

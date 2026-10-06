@@ -244,7 +244,7 @@ func (m *Module) tx(ctx context.Context, p tenant.Principal, permission string, 
 	if m.analysisAuthorized(ctx, p) && (permission == "rules.read" || permission == "rules.write") {
 		return db.InTenant(db.AllProjects(ctx, "doctrine outcome analysis"), m.pool, p.TenantID, fn)
 	}
-	if permission == "settings.manage" && p.Kind != tenant.Person {
+	if permission == "settings.manage" && p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 		return authz.ErrForbidden
 	}
 	return db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {

@@ -30,7 +30,7 @@ func ownsMove(ctx context.Context, tx pgx.Tx, p tenant.Principal, s Session) (bo
 	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals p WHERE p.id=$1 AND
   (coalesce(p.linked_to,p.id)=$2::uuid OR EXISTS(SELECT 1 FROM role_bindings b JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
    WHERE b.principal_id=coalesce(p.linked_to,p.id) AND r.builtin AND r.key IN ('owner','admin') AND
-   (b.scope_type='workspace' OR b.scope_type='project' AND b.scope_id=$3::uuid))))`, p.ID, s.ownerID, s.ProjectID).Scan(&allowed)
+   (b.scope_type='workspace' OR b.scope_type='project' AND b.scope_id=$3::uuid))))`, p.ID, s.OwnerPrincipalID, s.ProjectID).Scan(&allowed)
 	return allowed, err
 }
 
@@ -45,8 +45,8 @@ func stampMoveRights(ctx context.Context, tx pgx.Tx, sessions []*Session) error 
 		allowed := false
 		if s.StoppedAt == nil && s.ArchivedAt == nil {
 			owner := ""
-			if s.ownerID != nil {
-				owner = *s.ownerID
+			if s.OwnerPrincipalID != nil {
+				owner = *s.OwnerPrincipalID
 			}
 			key := s.ProjectID + ":" + owner
 			var seen bool

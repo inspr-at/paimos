@@ -531,7 +531,12 @@ type workFixture struct {
 
 func newWorkFixture(t *testing.T) *workFixture {
 	t.Helper()
-	f := &workFixture{db: dbtest.Open(t), mux: http.NewServeMux(), project: uid()}
+	return newWorkFixtureWithDB(t, oldWorkDatabase(t))
+}
+
+func newWorkFixtureWithDB(t *testing.T, d *dbtest.DB) *workFixture {
+	t.Helper()
+	f := &workFixture{db: d, mux: http.NewServeMux(), project: uid()}
 	f.person = tenant.Principal{ID: uid(), TenantID: uid(), Kind: tenant.Person}
 	f.guest = tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Person}
 	f.agent = tenant.Principal{ID: uid(), TenantID: f.person.TenantID, Kind: tenant.Agent}

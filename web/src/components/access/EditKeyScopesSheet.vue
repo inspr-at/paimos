@@ -106,7 +106,7 @@ onMounted(load)
 </script>
 
 <template>
-  <AccessSheet :title="`Edit scopes for ${agent.name}`" size="center" actions-first submit-shortcut @submit="save" @close="busy || emit('close')">
+  <AccessSheet :title="`Edit scopes for ${agent.name}`" size="center" scale="l" actions-first submit-shortcut @submit="save" @close="busy || emit('close')">
     <div class="body" :aria-busy="busy">
       <p class="note">Changes to <span class="mono">{{ keyHint(agentKey.prefix) }}</span> apply immediately with the same key.</p>
       <template v-if="loaded">
@@ -150,8 +150,8 @@ onMounted(load)
     <template #foot>
       <div class="foot">
         <div class="actions">
+          <button type="button" class="btn primary" :disabled="busy || !loaded || !allowed || !changed || invalid || selected.size > MAX_KEY_SCOPES" @click="save"><span class="action-label btn-label"><span>{{ busy && loaded ? 'Saving…' : roleAdded.length ? 'Add to role and save scopes' : 'Save scopes' }}</span><span aria-hidden="true">Add to role and save scopes</span></span><kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
           <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-          <button type="button" class="btn primary" :disabled="busy || !loaded || !allowed || !changed || invalid || selected.size > MAX_KEY_SCOPES" @click="save"><span class="action-label">{{ busy && loaded ? 'Saving…' : roleAdded.length ? 'Add to role and save scopes' : 'Save scopes' }}</span><kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
         </div>
       </div>
     </template>
@@ -164,7 +164,7 @@ onMounted(load)
 .scopes { margin: 0; padding: 0; border: 0; min-width: 0; }
 .scopes legend, .group-h { font: 500 10.5px/1.5 var(--mono); color: var(--ink-3); }
 .scopes legend { margin-bottom: 8px; }
-.scope-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.scope-group { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 20px; row-gap: 4px; }
 .group-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; grid-column: 1 / -1; margin: 10px 0 4px; text-transform: uppercase; letter-spacing: .1em; }
 .group-actions { display: flex; gap: 4px; }
 .group-actions .btn { min-width: 44px; }
@@ -172,12 +172,15 @@ onMounted(load)
 .scope-row input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--teal); }
 .detail { font-size: 11px; color: var(--ink-3); }
 .foot { display: grid; gap: 12px; width: 100%; min-width: 0; }
-.actions { display: flex; justify-content: end; gap: 8px; }
+.actions { display: flex; flex-wrap: wrap; justify-content: start; gap: 8px; }
+@media (max-width: 600px) { .actions { flex-direction: row-reverse; } .actions .btn { flex: 1 1 auto; min-height: 44px; } .actions .keycap { display: none; } }
 .actions .primary { min-width: 0; }
 .action-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
 .actions .keycap { flex-shrink: 0; }
 .role-confirm { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-raised); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .role-confirm h3 { font-size: 13px; font-weight: 600; }
 .failure .btn, .scope-toggle { justify-self: start; }
+@container access-body (min-width: 600px) { .scope-group { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container access-body (min-width: 900px) { .scope-group { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 600px) { .scope-group { grid-template-columns: minmax(0, 1fr); } .scope-row { min-height: 44px; align-items: center; } }
 </style>

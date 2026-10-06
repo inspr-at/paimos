@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
+import { readFileSync, writeFileSync, mkdirSync, mkdtempSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { run, browserList, plan, main } from '../../scripts/test-tiers/cli.mjs'
 import { command, root, web, evidence, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
 import { resolve } from 'node:path'
-import { validate, key } from '../../scripts/test-tiers/core.mjs'
+import { pathToFileURL } from 'node:url'
+import { validate, key, select } from '../../scripts/test-tiers/core.mjs'
 
 test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async()=>{
   const policy=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8'))
@@ -14,7 +17,7 @@ test('native full CI planning retains the OPS-257 gate and essential promotions 
   const selection=plan('web',options)
   const browser=selection.all.filter(row=>row.kind==='browser')
   const declared=new Map(JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8')).tests.map(row=>[key(row),row]))
-  const expected=browser.filter(row=>row.tier==='ESSENTIAL'||(gated.has(row.file)&&declared.has(key(row))))
+  const expected=browser.filter(row=>row.tier==='ESSENTIAL'||(gated.has(row.file)&&declared.get(key(row))?.tier==='GATED-FULL'))
   assert.ok(browser.length>expected.length,'Fixture must include optional nonessential registrations')
   assert.deepEqual(selection.tests.map(key).sort(),expected.map(key).sort())
   assert.equal(selection.full,true)
@@ -105,4 +108,82 @@ test('native browser selectors cover reconciled essentials and every collected f
     }
     assert.equal(total,mode==='all'?all.length:reconciled.filter(row=>row.tier==='ESSENTIAL'||(mode==='full'&&row.tier==='GATED-FULL')).length)
   }
+})
+
+test('AEON-648 work Node registrations have explicit tiers and remain in changed-area and nightly runs',()=>{
+  const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json')))
+  for(const file of ['tests/done-gate.test.ts','tests/release-membership.test.ts','tests/work-aggregates.test.ts',
+    'tests/work-surfaces-fix4.test.ts','tests/work-vocabulary.test.ts']) {
+    const collected=JSON.parse(command(process.execPath,['--import',resolve(root,'scripts/test-tiers/node-collect-hook.mjs'),
+      resolve(root,'scripts/test-tiers/node-collect.mjs'),resolve(web,file)],{cwd:web}))
+      .map(row=>({...row,kind:'node',file}))
+    assert.ok(collected.length>0,file)
+    const declared={version:1,tests:manifest.tests.filter(row=>row.file===file)}
+    const rows=validate(declared,collected,undefined,{strict:true})
+    for(const event of ['pull_request','merge_group']) {
+      const changed=select(rows,{event,paths:[`web/${file}`],webImports:{[file]:[]}})
+      const expected=event==='merge_group'?rows.filter(row=>row.tier==='ESSENTIAL'||row.tier==='GATED-FULL'):collected
+      assert.equal(changed.full,event==='merge_group')
+      assert.deepEqual(changed.tests.map(key).sort(),expected.map(key).sort(),`${event}: ${file}`)
+    }
+    assert.deepEqual(select(rows,{event:'schedule',paths:[]}).tests.map(key).sort(),collected.map(key).sort(),file)
+  }
+  for(const [file,name] of [
+    ['tests/release-membership.test.ts','ambiguous parent create replay never confirms a backlog leaf as added'],
+    ['tests/work-vocabulary.test.ts','workspace names depend on leaf shape first, then project-relative depth'],
+  ]) {
+    const row=manifest.tests.find(row=>row.file===file&&row.name===name)
+    assert.equal(row?.tier,'NIGHTLY',`${file}: ${name}`)
+    assert.equal(select([row],{event:'pull_request',paths:['README.md']}).tests.length,0)
+  }
+})
+
+test('default check command warns once per unclassified native work-node case and exits zero', () => {
+  const manifest = JSON.parse(readFileSync(resolve(root, 'scripts/ci/web-test-tiers.json'), 'utf8'))
+  const cases = []
+  for (const file of ['tests/done-gate.test.ts', 'tests/release-membership.test.ts', 'tests/work-aggregates.test.ts',
+    'tests/work-surfaces-fix4.test.ts', 'tests/work-vocabulary.test.ts']) {
+    const native = JSON.parse(command(process.execPath, ['--import', resolve(root, 'scripts/test-tiers/node-collect-hook.mjs'),
+      resolve(root, 'scripts/test-tiers/node-collect.mjs'), resolve(web, file)], { cwd: web }))
+    assert.ok(native.length > 0, file)
+    cases.push(...native.map(row => ({ ...row, kind: 'node', file })))
+  }
+  const known = manifest.tests.find(row => row.file === 'tests/planning.test.ts')
+  assert.ok(known)
+  assert.equal(new Set(cases.map(key)).size, cases.length)
+  const directory = mkdtempSync(resolve(tmpdir(), 'aeon-648-default-tier-'))
+  const hook = resolve(directory, 'fixture.mjs')
+  const collector = pathToFileURL(resolve(root, 'scripts/test-tiers/collect.mjs')).href
+  // Native registration identities stay real; only collection breadth and the
+  // manifest read are isolated. Execute the unchanged command/main/validator.
+  const wrapper = `export * from ${JSON.stringify(`${collector}?aeon648-fixture`)};
+export const collectWeb = () => (${JSON.stringify({ tests: [known, ...cases] })});`
+  writeFileSync(hook, `import fs from 'node:fs';
+import { registerHooks, syncBuiltinESMExports } from 'node:module';
+const read = fs.readFileSync;
+fs.readFileSync = function(path, ...args) {
+  if (String(path) === ${JSON.stringify(resolve(root, 'scripts/ci/web-test-tiers.json'))}) return ${JSON.stringify(JSON.stringify({ version: 1, tests: [known] }))};
+  return read.call(this, path, ...args);
+};
+syncBuiltinESMExports();
+registerHooks({ resolve(specifier, context, next) {
+  const result = next(specifier, context);
+  if (result.url === ${JSON.stringify(collector)}) return { url: ${JSON.stringify(`data:text/javascript,${encodeURIComponent(wrapper)}`)}, shortCircuit: true };
+  return result;
+}});
+`)
+  const env = { ...process.env }
+  delete env.NODE_TEST_CONTEXT
+  const result = spawnSync(process.execPath, ['--import', hook, resolve(root, 'scripts/test-tiers/cli.mjs'), 'check', 'web'],
+    { cwd: web, env, encoding: 'utf8', timeout: 30_000, maxBuffer: 4 * 1024 * 1024 })
+  assert.ifError(result.error)
+  assert.equal(result.status, 0, result.stderr)
+  const warnings = result.stderr.trim().split('\n').filter(Boolean)
+  assert.equal(warnings.length, cases.length, result.stderr)
+  const expected = cases.map(row => `::warning::Unclassified test (defaults to NIGHTLY; classify these): ${key(row)}`
+    .replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A'))
+  assert.deepEqual(warnings.sort(), expected.sort())
+  const summary = JSON.parse(result.stdout)
+  assert.equal(summary.inventory.NIGHTLY, cases.length + (known.tier === 'NIGHTLY' ? 1 : 0))
+  assert.equal(Object.values(summary.inventory).reduce((sum, n) => sum + n, 0), cases.length + 1)
 })

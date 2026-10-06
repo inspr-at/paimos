@@ -310,7 +310,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
         <div class="state-actions">
           <button v-if="filters.status !== 'all'" type="button" class="btn" @click="showAll">Include archived</button>
           <button type="button" class="btn" @click="resetFilters">Clear the filters</button>
-          <button v-if="canWrite && filters.type" type="button" class="btn primary" @click="openCreate(filters.type)"><AppIcon name="plus" :size="14" />New {{ TYPES.find(t => t.type === filters.type)?.label.toLowerCase() }}</button>
+          <button v-if="canWrite && filters.type && filters.type !== 'decision'" type="button" class="btn primary" @click="openCreate(filters.type)"><AppIcon name="plus" :size="14" />New {{ TYPES.find(t => t.type === filters.type)?.label.toLowerCase() }}</button>
         </div>
       </div>
 
@@ -321,7 +321,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
             <h2 :id="`k-group-${group.type}`">{{ group.meta.plural }}</h2>
             <span class="k-group-count mono">{{ group.items.length }}</span>
             <p class="k-group-hint">{{ group.meta.hint }}</p>
-            <button v-if="canWrite" type="button" class="btn sm ghost k-add" :aria-label="`New ${group.meta.label.toLowerCase()}`" @click="openCreate(group.type)"><AppIcon name="plus" :size="13" /><span>{{ group.meta.label }}</span></button>
+            <button v-if="canWrite && group.type !== 'decision'" type="button" class="btn sm ghost k-add" :aria-label="`New ${group.meta.label.toLowerCase()}`" @click="openCreate(group.type)"><AppIcon name="plus" :size="13" /><span>{{ group.meta.label }}</span></button>
           </header>
           <ul class="k-rows">
             <li v-for="item in group.items" :key="item.id">

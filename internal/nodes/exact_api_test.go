@@ -14,11 +14,11 @@ import (
 
 func TestExactAPISameKindHumanCheck(t *testing.T) {
 	p := newPrincipal(t, "same-kind-human-check")
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	for _, alias := range []string{"kind_id", "type", "kind"} {
 		t.Run(alias, func(t *testing.T) {
 			n := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Check"}`, kind.ID))
-			value := "ticket"
+			value := kind.Slug
 			if alias == "kind_id" {
 				value = kind.ID
 			}
@@ -40,7 +40,7 @@ func TestExactAPIExpiredListCursor(t *testing.T) {
 	for _, mutation := range []string{"delete", "filter"} {
 		t.Run(mutation, func(t *testing.T) {
 			p := newPrincipal(t, "expired-list-"+mutation)
-			kind := kindBySlug(t, p, "ticket")
+			kind := kindBySlug(t, p, "work")
 			for _, title := range []string{"A", "B", "C"} {
 				mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":%q,"state":"new"}`, kind.ID, title))
 			}
@@ -68,7 +68,7 @@ func TestExactAPIExpiredListCursor(t *testing.T) {
 
 func TestExactAPIGraphUsesConfiguredBuckets(t *testing.T) {
 	p := newPrincipal(t, "graph-configured")
-	kind := kindBySlug(t, p, "ticket")
+	kind := kindBySlug(t, p, "work")
 	projectKind := kindBySlug(t, p, "project")
 	project := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Project"}`, projectKind.ID))
 	closed := mustNode(t, p, fmt.Sprintf(`{"kind_id":%q,"title":"Shipped","parent_id":%q}`, kind.ID, project.ID))

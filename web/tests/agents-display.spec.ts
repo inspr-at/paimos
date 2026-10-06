@@ -97,7 +97,7 @@ test('another person’s visible account never becomes your full account or your
   await page.route('**/api/agents/plan', route => route.fulfill({ json: { total: 20, limits: {}, principal_id: me.id, running: {}, running_total: 0, source: 'plan', updated_at: null } }))
   await page.goto('/agents')
   await expect(page.locator('.live-total')).toHaveText('4 live')
-  await expect(dial(page).locator('.f-live')).toContainText('0 running · account room unknown · your agents')
+  await expect(dial(page).locator('.f-live')).toContainText('0 running · account room not measured yet · your agents')
   await expect(dial(page).locator('.f-live')).not.toContainText('accounts full')
 })
 

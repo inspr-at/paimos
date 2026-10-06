@@ -7,6 +7,7 @@ import { useModelDisplay } from '../../lib/prefs'
 import AppIcon from '../AppIcon.vue'
 import ColumnPicker from './ColumnPicker.vue'
 import SortEditor from './SortEditor.vue'
+import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
 
 // The Display menu: grouping, sort, row height and columns of this list. In a
 // saved view these are part of the view; otherwise columns are the person's own.
@@ -18,6 +19,7 @@ defineProps<{
   grouped?: boolean
   headerGraph?: boolean
   sheet?: boolean
+  projectHeader?: boolean
 }>()
 // The header graph is on until a person turns it off. Callers that omit the
 // prop keep that default so the switch does not flash off.
@@ -60,6 +62,7 @@ const emit = defineEmits<{
         <button type="button" role="radio" :aria-checked="density === 'compact'" @click="emit('density', 'compact')"><AppIcon name="rows-compact" :size="14" />Compact</button>
       </div>
     </div>
+    <HeaderRoomyChoice v-if="projectHeader" class="section" />
     <ColumnPicker v-if="columns" class="section" :order="columns.order" :visible="columns.visible" :customised="columns.customised" :notes="columns.notes" :reserve-notes="sheet" @change="(order, visible) => emit('columns', order, visible)" @reset="emit('columnsReset')" />
     <div class="section model-display">
       <div class="model-choice"><span>Effort meter</span><div class="seg" role="radiogroup" aria-label="Effort meter">

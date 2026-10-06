@@ -33,7 +33,7 @@ func TestDisposableOperatorSeedUsesJourneyActions(t *testing.T) {
 		t.Fatalf("mark replay: %+v %v", again, err)
 	}
 	release := f.node(t, "release", "REL-361", "Release")
-	ticket := f.node(t, "ticket", "TKT-361", "Completed ticket")
+	ticket := f.node(t, "work", "TKT-361", "Completed ticket")
 	ctx := t.Context()
 	if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, `INSERT INTO journey_projects(tenant_id,project_node_id,brief_confirmed_at,requirements_revision,agreed_requirements_revision,agreed_requirements_digest_sha256,current_release_node_id)
@@ -331,7 +331,7 @@ func TestDisposableBriefsUseExistingBuildingRelease(t *testing.T) {
 				t.Fatal(err)
 			}
 			release := f.node(t, "release", "REL-1", "Existing release")
-			ticket := f.node(t, "ticket", "TKT-1", "Earlier completed ticket")
+			ticket := f.node(t, "work", "TKT-1", "Earlier completed ticket")
 			ctx := t.Context()
 			if err := db.InTenant(dbtest.Seed(ctx), f.db.App, f.tenant, func(tx pgx.Tx) error {
 				if _, err := tx.Exec(ctx, `SELECT aeon_seed_requirement_kind($1::uuid)`, f.tenant); err != nil {

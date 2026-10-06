@@ -171,7 +171,7 @@ func newNode(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind, parent, t
 	err = tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,parent_id,title,body,fields,position)
  SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),$3,$4,$5,$6::jsonb,
  coalesce((SELECT max(position)+1024 FROM nodes WHERE parent_id=$3 AND deleted_at IS NULL),1024)
- FROM node_kinds k WHERE k.slug=$2 RETURNING id::text`, p.TenantID, kind, parent, title, body, raw).Scan(&id)
+ FROM node_kinds k WHERE k.slug=CASE WHEN $2 IN ('epic','ticket','task') AND EXISTS(SELECT 1 FROM node_kinds WHERE slug='work') THEN 'work' ELSE $2 END RETURNING id::text`, p.TenantID, kind, parent, title, body, raw).Scan(&id)
 	if err != nil {
 		return "", err
 	}
