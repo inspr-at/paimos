@@ -14,6 +14,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/escalation"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
@@ -339,14 +340,47 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			return nil, workorders.Fail(400, "retry_of_run_id must be an earlier run of this work order and agent")
 		}
 	}
-	placement, err := modelregistry.DispatchPlacement(ctx, tx, p, o.NodeID, time.Now().UTC())
-	if err != nil {
+	var escalationTrace map[string]any
+	var placement *modelregistry.WorkPlacement
+	var ticket, project *string
+	if err := tx.QueryRow(ctx, `SELECT parent_id::text,project_id::text FROM nodes WHERE id=$1`, o.NodeID).Scan(&ticket, &project); err != nil {
 		return nil, err
+	}
+	if ticket != nil && project != nil {
+		state, err := escalation.LoadTx(ctx, tx, *ticket)
+		if err != nil {
+			return nil, err
+		}
+		if state != nil && (state.Status == "stuck" || state.Status == "awaiting_decision") {
+			if in.Retry == nil {
+				return nil, workorders.Fail(409, "stuck work requires a bounded retry lineage")
+			}
+			reserved, rejection, err := escalation.ReservePlacementTx(ctx, tx, p, *ticket, *project, *in.Retry, in.Profile, o.MaxCost)
+			if err != nil {
+				return nil, err
+			}
+			if rejection != nil {
+				return rejection, nil
+			}
+			state, err = escalation.LoadTx(ctx, tx, *ticket)
+			if err != nil {
+				return nil, err
+			}
+			escalationTrace = state.Public()
+			placement = reserved
+		}
+	}
+	if placement == nil {
+		placement, err = modelregistry.DispatchPlacement(ctx, tx, p, o.NodeID, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
 	}
 	dispatchTrace := struct {
 		modelprefs.RequirementTrace
-		Placement *modelregistry.WorkPlacement `json:"work_placement,omitempty"`
-	}{trace, placement}
+		Placement  *modelregistry.WorkPlacement `json:"work_placement,omitempty"`
+		Escalation map[string]any               `json:"escalation,omitempty"`
+	}{trace, placement, escalationTrace}
 	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override,residency,prefs_person_id,trace) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride, modelprefs.Stamp(requirement), person, dispatchTrace))
 	if err != nil {
 		return nil, err
@@ -542,6 +576,41 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	if !active || !fresh || state != "available" || !compatible {
 		return nil, workorders.Fail(409, "reservation or daemon probe is not eligible")
+	}
+	var trace struct {
+		Escalation json.RawMessage `json:"escalation"`
+	}
+	if len(v.Trace) > 0 {
+		if err := json.Unmarshal(v.Trace, &trace); err != nil {
+			return nil, workorders.Fail(409, "invalid run trace")
+		}
+	}
+	if v.Purpose == "managed" && !v.ReadOnlyReview {
+		var ticket *string
+		if err := tx.QueryRow(ctx, `SELECT coalesce($2::uuid,parent_id)::text FROM nodes WHERE id=$1`, v.OrderID, v.QueueNodeID).Scan(&ticket); err != nil {
+			return nil, err
+		}
+		if ticket != nil {
+			profile, previous := "", ""
+			if v.ProfileID != nil {
+				profile = *v.ProfileID
+			}
+			if v.RetryOfRunID != nil {
+				previous = *v.RetryOfRunID
+			}
+			if err := escalation.CheckLaunchTx(ctx, tx, *ticket, profile, previous, trace.Escalation); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if len(trace.Escalation) > 0 && string(trace.Escalation) != "null" {
+		ids, err := agentaccounts.EscalationRoomIDs(ctx, tx, []string{*v.AccountID}, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			return nil, workorders.Fail(409, "escalation waits for fresh measured account room")
+		}
 	}
 	if err := agentaccounts.ValidateReservedCapacity(ctx, tx, v.ID, *v.AccountID); err != nil {
 		if v.Purpose == "managed" && agentaccounts.ReservedRouteChanged(err) {
