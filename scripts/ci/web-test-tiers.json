@@ -5232,13 +5232,25 @@
     ,
     {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"the public guide is readable without sign-in and keeps only the human code","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1024 dark: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1024 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 dark: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 dark: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 light: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"State groups running agents, idle hosts and offline hosts in that order","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12509,6 +12521,8 @@
     {"kind":"node","file":"tests/agent-pause.test.ts","name":"planning counts down from its report and stale or cleared snapshots never revive legacy ETA","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/agent-pause.test.ts","name":"selection separates host admission intent from individual agents and normalizes tri-state","tier":"NIGHTLY"}
+    ,
+    {"kind":"node","file":"tests/agent-pause.test.ts","name":"stop requests remain visible through stale heartbeats until a worker stop report","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/agent-pause.test.ts","name":"wind-down chooses fitting wrap-up before quick pause and respects margins and uninterruptible commands","tier":"NIGHTLY"}
     ,
