@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
+// This existing hosted CI entry also runs the OpenAPI lint and its regressions.
+import './openapi-sort.test.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, realpathSync, rmSync, chmodSync, watchFile, unwatchFile } from 'node:fs'
 import { join, resolve } from 'node:path'

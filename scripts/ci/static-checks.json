@@ -757,6 +757,22 @@
       ],
       "optional": true,
       "timeout_seconds": 120
+    },
+    {
+      "id": "openapi-sort",
+      "command": "node scripts/openapi-sort.mjs --check",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "PR classification and exact-SHA reuse regressions",
+        "command": "node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30,
+      "supplement": "AEON-747: the existing ci-static.test.mjs hosted entry imports openapi-sort.test.mjs, which executes this lint and its regression cases."
     }
   ]
 }
