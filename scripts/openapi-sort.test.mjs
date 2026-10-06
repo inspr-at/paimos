@@ -96,6 +96,10 @@ test('fails closed on duplicate keys, missing sections and unsafe anchor forms o
   assert.throws(() => sortOpenAPI(fixture.replace('    Alpha: {type: string}', '    &key Alpha: {type: string}')), /Unsupported anchor form/)
   assert.throws(() => sortOpenAPI(fixture.replace('*auth # alias', '&auth [{other: []}]')), /different definitions/)
   assert.throws(() => sortOpenAPI(fixture.replace('&auth [{session: []}, {agentKey: []}]', '*missing')), /precedes its definition/)
+  // A ? glued to text or inside a plain scalar is content, never an explicit key: no definition is recorded.
+  for (const scalar of ['{?&auth session : []}', '{a: what ? &auth}', '[?&auth]']) {
+    assert.throws(() => sortOpenAPI(fixture.replace('&auth [{session: []}, {agentKey: []}]', scalar)), /Alias \*auth precedes its definition$/, scalar)
+  }
 })
 
 test('check fails on unsorted additions without writing; write fixes it and is idempotent', t => {
@@ -333,6 +337,12 @@ const anchorForms = [
   ['x-shared: &shared\n        type: string', 'x-shared: *shared'],
   ['x-shared: &shared text', 'x-shared: *shared'],
   ['x-shared:\n        - &shared |\n          text\n          security: *other', 'x-shared:\n        - *shared'],
+  // Explicit flow keys: the ? indicator keeps the node start open for properties.
+  ['security: {? &shared session : []}', 'security: {? *shared : []}'],
+  ['security: [? &shared session : []]', 'security: [? *shared : []]'],
+  ['security: {? !!str &shared session : []}', 'security: {? *shared : []}'],
+  ['security: {\n        ? &shared session : []}', 'security: {\n        ? *shared : []}'],
+  ['security: {? session : &shared []}', 'security: {? session : *shared}'],
 ]
 
 test('fails closed when sorting would move a tracked alias before its sequence, flow or block anchor', () => {

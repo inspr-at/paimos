@@ -74,6 +74,10 @@ function scalarLines(lines, blockContent = new Set(), tokens = []) {
       }
       if (closed) throw new Error(`Unsupported content after a flow or quoted node: ${line.trim()}`)
       const start = prev === undefined || /[[{,:]/.test(prev)
+      // An explicit-key indicator (? followed by space) keeps the node start
+      // open, so the key's properties are seen: {? &key name : value}. A ?
+      // glued to other text is plain scalar content.
+      if (start && char === '?' && (j + 1 === text.length || /\s/.test(text[j + 1]))) continue
       if (char === '[' || char === '{') flowDepth++
       else if ((char === '"' || char === "'") && (j === 0 || /[\s[{,:?]/.test(text[j - 1]))) quote = char
       else if (start && /[&*!]/.test(char)) {
