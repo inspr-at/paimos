@@ -29,6 +29,10 @@ async function waitFor(check) {
     await sleep(25)
   }
 }
+// A root slower than the supervisor's whole attempt budget. The budget is
+// counted in attempts, so a load-dependent start must never decide these tests.
+const SLOW_ROOT_MS = 1000
+const slowRoot = `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${SLOW_ROOT_MS})`
 function fixture(mode, directory, env = process.env) {
   const lock = join(directory, 'suite.lock'), ready = join(directory, `${mode}.ready`)
   const pid = join(directory, `${mode}.pid`), output = join(directory, `${mode}.json`)
@@ -354,7 +358,7 @@ test('supervisor leaves an already-exited root exit code alone after repeated ps
   })
   syncBuiltinESMExports()
   try {
-    const result = await runOwnedCommand(process.execPath, ['-e', afterRelease(release, 'process.exit(7)')], {
+    const result = await runOwnedCommand(process.execPath, ['-e', `${slowRoot}; ${afterRelease(release, 'process.exit(7)')}`], {
       lockPath: path, graceMs: 50, rootIdentityWait: barrier.wait,
     })
     assert.equal(result.code, 7)
@@ -396,6 +400,7 @@ for (const mode of ['transient', 'persistent', 'owner-change']) {
     const barrier = mode === 'transient' ? rootExitBarrier(t, release) : undefined
     // Isolate preload publication: for the transient case the supervisor
     // cannot verify the root, so only the preload can record it before work.
+    // That root also starts slowly, which the blind supervisor must outwait.
     const original = childProcess.spawnSync
     const injected = mode === 'transient' ? t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
       if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) return { status: 1, stdout: '' }
@@ -406,7 +411,8 @@ for (const mode of ['transient', 'persistent', 'owner-change']) {
     try {
       result = await runOwnedCommand(process.execPath, ['-e', script], {
         lockPath, graceMs: 50, rootIdentityWait: barrier?.wait,
-        env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}` },
+        env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}`,
+          ...(mode === 'transient' ? { AEON_PW_TEST_START_DELAY_MS: String(SLOW_ROOT_MS) } : {}) },
       })
     } finally { barrier?.restore(); injected?.mock.restore(); syncBuiltinESMExports() }
     const calls = readFileSync(attempts, 'utf8').trim().split('\n').length
