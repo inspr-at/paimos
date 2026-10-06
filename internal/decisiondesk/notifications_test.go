@@ -156,7 +156,7 @@ func TestHeldRequestCanonicalizationDoesNotRepeatNotice(t *testing.T) {
 	secret := rand.Text()
 	sum := sha256.Sum256([]byte(secret))
 	prefix := strings.ReplaceAll(f.agent.TenantID, "-", "") + strings.Repeat("ab", 8)
-	f.exec(t, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'held-fixture',$3,$4,$5)`, f.agent.TenantID, f.agent.ID, prefix, hex.EncodeToString(sum[:]), []string{"inbox.send"})
+	f.exec(t, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'held-fixture',$3,$4,$5,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, f.agent.TenantID, f.agent.ID, prefix, hex.EncodeToString(sum[:]), []string{"inbox.send"})
 	body, _ := json.Marshal(map[string]any{"to": f.person.ID, "body": "Private held request", "idempotency_key": "held-source", "is_action_request": true, "delivery_level": "simple"})
 	r := httptest.NewRequest("POST", "/api/projects/"+f.project+"/messages", bytes.NewReader(body)).WithContext(tenant.WithPrincipal(t.Context(), f.agent))
 	r.Header.Set("Authorization", "Bearer aeon_"+prefix+"_"+secret)

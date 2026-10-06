@@ -9,8 +9,8 @@ import AppIcon from '../AppIcon.vue'
 // Agent keys as the workspace settings showed them: name, prefix, scopes, last use
 // and state. With `revocable`, an active key has a Revoke action (the caller
 // confirms). Only a key's prefix is ever shown again.
-defineProps<{ keys: AgentKey[]; revocable?: boolean; rotatable?: boolean; editable?: boolean; showName?: boolean }>()
-const emit = defineEmits<{ revoke: [key: AgentKey]; rotate: [key: AgentKey]; edit: [key: AgentKey] }>()
+defineProps<{ keys: AgentKey[]; revocable?: boolean; rotatable?: boolean; editable?: boolean; adoptable?: boolean; showName?: boolean }>()
+const emit = defineEmits<{ revoke: [key: AgentKey]; rotate: [key: AgentKey]; edit: [key: AgentKey]; adopt: [key: AgentKey] }>()
 const STATE: Record<string, string> = { active: 'Active', expired: 'Expired', revoked: 'Revoked' }
 const now = ref(Date.now())
 let timer: ReturnType<typeof setInterval> | undefined
@@ -21,7 +21,7 @@ onUnmounted(() => { clearInterval(timer) })
 <template>
   <div class="table-wrap">
     <table class="keys-table">
-      <thead><tr><th v-if="showName" scope="col">Name</th><th scope="col">Key</th><th scope="col">Scopes</th><th scope="col">Last used</th><th scope="col">Expires</th><th scope="col">Status</th><th v-if="revocable || rotatable || editable" scope="col"><span class="sr-only">Actions</span></th></tr></thead>
+      <thead><tr><th v-if="showName" scope="col">Name</th><th scope="col">Key</th><th scope="col">Scopes</th><th scope="col">Last used</th><th scope="col">Expires</th><th scope="col">Status</th><th v-if="revocable || rotatable || editable || adoptable" scope="col"><span class="sr-only">Actions</span></th></tr></thead>
       <tbody>
         <tr v-for="key in keys" :key="key.id" :class="keyState(key, now)">
           <th v-if="showName" scope="row">{{ key.name }}<span class="sub">Created {{ relativeTime(key.created_at, { long: true }) }}</span></th>
@@ -33,9 +33,10 @@ onUnmounted(() => { clearInterval(timer) })
             <span v-else class="muted">Never</span>
             <span v-if="keyExpiry(key, now).soon" class="sub">Rotate before expiry</span>
           </td>
-          <td data-label="Status"><span class="state" :class="keyState(key, now)">{{ STATE[keyState(key, now)] }}</span></td>
-          <td v-if="revocable || rotatable || editable" class="act">
+          <td data-label="Status"><span class="state" :class="keyState(key, now)">{{ STATE[keyState(key, now)] }}</span><span class="sub" :class="{ 'owner-known': key.created_by_principal_id !== null }" :aria-hidden="key.created_by_principal_id !== null">{{ key.created_by_principal_id === null ? 'No owner' : '\u00a0' }}</span></td>
+          <td v-if="revocable || rotatable || editable || adoptable" class="act">
             <div v-if="!key.revoked_at" class="actions">
+              <button v-if="adoptable && keyState(key, now) === 'active'" type="button" class="btn sm ghost" :class="{ 'owner-known': key.created_by_principal_id !== null }" :disabled="key.created_by_principal_id !== null" :aria-hidden="key.created_by_principal_id !== null" @click="emit('adopt', key)">Make me the owner</button>
               <button v-if="editable && keyState(key, now) === 'active'" type="button" class="btn sm ghost" :aria-label="`Edit scopes for key ${keyHint(key.prefix)}`" @click="emit('edit', key)"><AppIcon name="edit" :size="12" />Edit scopes</button>
               <button v-if="rotatable" type="button" class="btn sm ghost" :aria-label="`Rotate key ${keyHint(key.prefix)}`" @click="emit('rotate', key)"><AppIcon name="refresh" :size="12" />Rotate</button>
               <button v-if="revocable" type="button" class="btn sm ghost danger-text" :aria-label="`Revoke key ${keyHint(key.prefix)}`" @click="emit('revoke', key)"><AppIcon name="close" :size="12" />Revoke</button>
@@ -55,6 +56,7 @@ onUnmounted(() => { clearInterval(timer) })
 .keys-table tbody th { font-weight: 600; color: var(--ink); }
 .sub { display: block; margin-top: 2px; font: 400 11.5px/1.4 var(--font); color: var(--ink-3); }
 .scope { display: inline-flex; align-items: center; height: 20px; margin: 0 4px 4px 0; padding: 0 7px; border-radius: 6px; background: var(--surface-2); color: var(--ink-2); font-size: 11px; }
+.owner-known { visibility: hidden; }
 .muted { color: var(--ink-3); }
 .more { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
 .state { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 11.5px; font-weight: 600; }

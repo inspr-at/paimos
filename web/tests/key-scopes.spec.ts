@@ -200,3 +200,57 @@ for (const theme of ['light', 'dark'] as const) for (const { width, wideFont } o
     expect(errors).toEqual([])
   })
 }
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`adoption preserves the key and controls at ${width}px in ${theme}`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.emulateMedia({ colorScheme: theme })
+    const world = await open(page, 'owner', world => {
+      world.keys.find(k => k.id === 'k2')!.created_by_principal_id = null
+      world.keys.find(k => k.id === 'k2')!.name = 'Arbeitsplatz-Agentenschlüssel für die gemeinsame langfristige Projektkoordination'
+    })
+    const row = agent(page)
+    const adopt = row.getByRole('button', { name: 'Make me the owner' })
+    await expect(row.getByText('No owner', { exact: true })).toBeVisible()
+    const before = structuredClone(world.keys.find(k => k.id === 'k2')!)
+    const count = world.keys.length
+    const dir = process.env.KEY_SCOPES_SHOTS ?? testInfo.outputDir
+    mkdirSync(dir, { recursive: true })
+    await adopt.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: join(dir, `adoption-list-${width}-${theme}.png`), fullPage: true })
+    await expectStableControls({ controls: { edit: row.getByRole('button', { name: /^Edit scopes/ }), rotate: row.getByRole('button', { name: /^Rotate key/ }), revoke: row.getByRole('button', { name: /^Revoke key/ }) }, interactions: [{ name: 'cancel adoption', run: async () => {
+      await adopt.click()
+      const dialog = page.getByRole('dialog', { name: /^Make me the owner\?/ })
+      await expect(dialog).toBeVisible()
+      await expectStableControls({ controls: { confirm: dialog.getByRole('button', { name: 'Make me the owner' }), cancel: dialog.getByRole('button', { name: 'Cancel', exact: true }) }, scrollAreas: { body: dialog.locator('#confirm-body') }, interactions: [{ name: 'read ownership effect', run: async () => { await dialog.locator('#confirm-body').evaluate(el => { el.scrollTop = el.scrollHeight }) } }] })
+      await page.screenshot({ path: join(dir, `adoption-confirm-${width}-${theme}.png`), fullPage: true })
+      await dialog.getByRole('button', { name: 'Cancel', exact: true }).click()
+      await expect(dialog).not.toBeVisible()
+    } }, { name: 'adopt same key', run: async () => {
+      await adopt.click()
+      await page.getByRole('dialog', { name: /^Make me the owner\?/ }).getByRole('button', { name: 'Make me the owner' }).click()
+      await expect(row.getByText('No owner', { exact: true })).not.toBeVisible()
+    } }] })
+    expect(world.keys).toHaveLength(count)
+    expect(world.keys.find(k => k.id === 'k2')).toEqual({ ...before, created_by_principal_id: world.me })
+    expect(world.calls.filter(c => c.path.endsWith('/adopt'))).toHaveLength(1)
+    expect(world.calls.filter(c => c.method === 'POST' && c.path === '/api/agent-keys')).toHaveLength(0)
+    expect(world.events.at(-1)?.type).toBe('agent_key.adopted')
+  })
+}
+
+test('adoption refusal reports failure and owned keys have no takeover action', async ({ page }) => {
+  const world = await open(page, 'owner', world => { world.keys.find(k => k.id === 'k2')!.created_by_principal_id = null })
+  await page.route('**/api/agent-keys/k2/adopt', route => route.fulfill({ status: 409, json: { error: 'key already has a person owner' } }))
+  await agent(page).getByRole('button', { name: 'Make me the owner' }).click()
+  await page.getByRole('dialog', { name: /^Make me the owner\?/ }).getByRole('button', { name: 'Make me the owner' }).click()
+  await expect(page.getByText('The key owner could not be changed')).toBeVisible()
+  await expect(agent(page).getByText('No owner', { exact: true })).toBeVisible()
+  await expect(page.getByText('You are now the key owner')).toHaveCount(0)
+  await page.unroute('**/api/agent-keys/k2/adopt')
+  world.keys.find(k => k.id === 'k2')!.created_by_principal_id = world.me
+  await page.reload()
+  await agent(page).getByRole('button', { name: /active key/ }).click()
+  // A normally owned key has no adoption control (undefined old fixtures also hide it).
+  await expect(page.getByRole('button', { name: 'Make me the owner' })).not.toBeVisible()
+})

@@ -157,7 +157,7 @@ onBeforeUnmount(release)
 .pm { display: grid; place-items: center; flex: none; width: var(--pm-size); height: var(--pm-size); padding: 0; border: 0; border-radius: 50%; background: var(--surface-raised); box-shadow: var(--shadow-btn); color: var(--teal-ink); cursor: pointer; transition: background .15s ease; }
 .pm:disabled { opacity: .3; cursor: default; }
 /* Holding is a gesture: no callout, no selection, no double-tap zoom. */
-.pm { touch-action: manipulation; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.pm { touch-action: manipulation; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .value-slot { display: block; flex: none; width: var(--value-width); height: var(--value-height); color: var(--ink); font: 650 var(--value-size)/1 var(--font); font-variant-numeric: tabular-nums; }
 .f-num { color: var(--teal-ink); font-weight: 700; }
 .is-none .value-slot, .is-off .value-slot { color: var(--ink-3); font-weight: 500; }
