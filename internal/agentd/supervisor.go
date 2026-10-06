@@ -62,10 +62,11 @@ type replay struct {
 // Record contains only local process provenance and bounded control digests.
 // The journal is AEON v2; classic journals are never opened implicitly.
 type Record struct {
-	AutomaticReview       bool   `json:"automatic_review,omitempty"`
-	VerificationReason    string `json:"verification_reason,omitempty"`
-	BudgetStopReason      string `json:"budget_stop_reason,omitempty"`
-	BudgetStopUnconfirmed bool   `json:"budget_stop_unconfirmed,omitempty"`
+	RecoveryReports       []RecoveryReport `json:"recovery_reports,omitempty"`
+	AutomaticReview       bool             `json:"automatic_review,omitempty"`
+	VerificationReason    string           `json:"verification_reason,omitempty"`
+	BudgetStopReason      string           `json:"budget_stop_reason,omitempty"`
+	BudgetStopUnconfirmed bool             `json:"budget_stop_unconfirmed,omitempty"`
 	// Only launchPrepared proves that adapter.Start has never been called.
 	// Empty is a legacy record, never evidence that no child was forked.
 	LaunchState   string `json:"launch_state,omitempty"`
@@ -137,6 +138,9 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	recoveryMu             sync.Mutex
+	attachedHooks          map[string]*attachedHookBinding
+	attachedHookVerifier   *AttachManager
 	stepUps                *StepUpManager
 	capacityNow            func() time.Time
 	capacityWake           chan struct{}
@@ -487,6 +491,7 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 		// Recover no-launch claims before a fresh probe changes generation.
 		recoveryErr = s.recoverUnlaunched(ctx)
 		s.settlePending(ctx)
+		recoveryErr = errors.Join(recoveryErr, s.recoverAgents(ctx))
 	}
 	if err := pollContextError(ctx, recoveryErr); err != nil {
 		return err
@@ -938,6 +943,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		if output, branchErr := exec.CommandContext(ctx, "git", "-C", s.workspace, "branch", "--show-current").Output(); branchErr == nil {
 			branch = strings.TrimSpace(string(output))
 		}
+		if run.RecoveryBrief != "" {
+			if len(run.RecoveryBrief) > 20000 {
+				return errors.New("recovery handover exceeds bound")
+			}
+			prompt += "\n\n" + run.RecoveryBrief
+		}
 		if run.CapacityHandoff {
 			if err := s.validateCapacityHandoff(run, branch); err != nil {
 				return err
@@ -1081,7 +1092,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	caps := []string{"status", "stop"}
 	if managedPolicy {
-		caps = append(caps, managedControlCapability, "steer", "rename", "model", "effort")
+		caps = append(caps, recoveryCapability, managedControlCapability, "steer", "rename", "model", "effort")
 	}
 	if profile.Harness != Grok && !review {
 		caps = append(caps, "interrupt")
@@ -1096,7 +1107,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if (profile.Harness == Claude || profile.Harness == Codex) && !verification && !review {
 		caps = append(caps, servicetier.Capability)
 	}
-	registration := HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB, AccountLabel: route.AccountLabel}
+	registration := HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB, AccountLabel: route.AccountLabel, DisplayLabel: run.RecoveryLabel}
 	if profile.Harness != Codex {
 		registration.Model, registration.ReasoningEffort = profile.Model, profile.Effort
 	}
@@ -1114,6 +1125,21 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			}
 		}
 		active := "default"
+		if run.RecoveryTier != "" {
+			if !servicetier.Valid(run.RecoveryTier) {
+				return errors.New("invalid recovery service tier")
+			}
+			offered := false
+			for _, tier := range report.Tiers {
+				if tier.Tier == run.RecoveryTier && tier.Offered {
+					offered = true
+				}
+			}
+			if !offered {
+				return errors.New("recovery service tier no longer offered")
+			}
+			active = run.RecoveryTier
+		}
 		if err = api.ReportServiceTiers(ctx, entry.harness, servicetier.Reports(report.Harness, report.Model, report.HarnessVersion), &active); err != nil {
 			return err
 		}
@@ -1231,7 +1257,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	runCtx, cancelRun := context.WithTimeout(s.lifetime, duration)
 	startCtx, cancelStart := context.WithDeadline(ctx, launchedAt.Add(duration))
 	proc, err := adapter.Start(startCtx, StartRequest{Lifetime: runCtx, TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
-		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
+		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, ServiceTier: entry.harness.ServiceTier, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
 	cancelStart()
 	if err != nil {
 		cancelRun()
@@ -2159,6 +2185,7 @@ func (s *Supervisor) heartbeatHarnessPhase(ctx context.Context, entry *owned, ph
 				if identity, err := recovery.Ownership(); err == nil {
 					identity.DaemonID, identity.Generation = s.daemonID, s.generation
 					session.Ownership = &identity
+					entry.harness.Ownership = &identity
 				}
 			}
 		}

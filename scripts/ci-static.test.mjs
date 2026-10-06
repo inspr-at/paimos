@@ -31,6 +31,13 @@ test('static CI commands are registered and every origin still exists', () => {
   assert.equal(validateRegistry(registry, parseWorkflow(workflow)), registry.checks)
   assert.ok(staticSteps(parseWorkflow(workflow), registry).length >= 30)
   assert.equal(registry.checks.filter(c => c.optional).length, 6)
+  for (const [id, limit] of [['web-shard-tests', 600], ['go-vet', 180]]) {
+    const bounded = structuredClone(registry)
+    bounded.checks.find(c => c.id === id).timeout_seconds = limit
+    assert.doesNotThrow(() => validateRegistry(bounded, parseWorkflow(workflow)))
+    bounded.checks.find(c => c.id === id).timeout_seconds++
+    assert.throws(() => validateRegistry(bounded, parseWorkflow(workflow)), /Invalid check/)
+  }
 })
 
 test('drift guard catches newly added commands in each full static job', () => {
