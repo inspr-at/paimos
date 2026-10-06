@@ -24,6 +24,8 @@ function entry(line, depth) {
 const anchorName = /^[^\s,\[\]{}]*/
 function properties(text, lines, i, column, tokens) {
   for (;;) {
+    // Verbatim tags (!<tag:yaml.org,2002:str>) may hold commas; not supported.
+    if (text.startsWith('!<')) throw new Error(`Unsupported verbatim tag: ${lines[i].trim()}`)
     const tag = /^![^\s,\[\]{}]*\s+/.exec(text)
     if (tag) { text = text.slice(tag[0].length); column += tag[0].length; continue }
     if (!/^[&*]/.test(text)) return { text, column }
@@ -81,6 +83,7 @@ function scalarLines(lines, blockContent = new Set(), tokens = []) {
       if (char === '[' || char === '{') flowDepth++
       else if ((char === '"' || char === "'") && (j === 0 || /[\s[{,:?]/.test(text[j - 1]))) quote = char
       else if (start && /[&*!]/.test(char)) {
+        if (char === '!' && text[j + 1] === '<') throw new Error(`Unsupported verbatim tag: ${line.trim()}`)
         const name = anchorName.exec(text.slice(j + 1))[0]
         if (char !== '!') {
           if (!name) throw new Error(`Unsupported anchor form: ${line.trim()}`)

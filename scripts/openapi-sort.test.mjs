@@ -96,6 +96,9 @@ test('fails closed on duplicate keys, missing sections and unsafe anchor forms o
   assert.throws(() => sortOpenAPI(fixture.replace('    Alpha: {type: string}', '    &key Alpha: {type: string}')), /Unsupported anchor form/)
   assert.throws(() => sortOpenAPI(fixture.replace('*auth # alias', '&auth [{other: []}]')), /different definitions/)
   assert.throws(() => sortOpenAPI(fixture.replace('&auth [{session: []}, {agentKey: []}]', '*missing')), /precedes its definition/)
+  assert.throws(() => sortOpenAPI(fixture.replace('&auth [{session: []}, {agentKey: []}]', '!<tag:yaml.org,2002:seq> &auth [{session: []}, {agentKey: []}]')), /Unsupported verbatim tag/)
+  assert.throws(() => sortOpenAPI(fixture.replace('    Alpha: {type: string}', '    Alpha:\n      - !<tag:yaml.org,2002:str> &key value')), /Unsupported verbatim tag/)
+  assert.throws(() => sortOpenAPI(fixture.replace('    Alpha: {type: string}', '    Alpha: {type: !<tag:yaml.org,2002:str> &key string}')), /Unsupported verbatim tag/)
   // A ? glued to text or inside a plain scalar is content, never an explicit key: no definition is recorded.
   for (const scalar of ['{?&auth session : []}', '{a: what ? &auth}', '[?&auth]']) {
     assert.throws(() => sortOpenAPI(fixture.replace('&auth [{session: []}, {agentKey: []}]', scalar)), /Alias \*auth precedes its definition$/, scalar)
