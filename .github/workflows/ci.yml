@@ -201,7 +201,9 @@ jobs:
           CI_PLAN_LANE: ${{ needs.ci-plan.outputs.lane }}
         run: |
           case "$GITHUB_EVENT_NAME" in
-            pull_request|merge_group) node scripts/test-tiers/diff.mjs ;;
+            pull_request) node scripts/test-tiers/diff.mjs ;;
+            # Enforce full merge-group coverage here: the candidate planner can be edited by a PR.
+            merge_group) printf 'mode=full\nlayout=full\nlane=full\n' >> "$GITHUB_OUTPUT" ;;
             *)
               lane=full
               if [ "$CI_AFFECTED_LANE" != on ]; then lane="$CI_PLAN_LANE"; fi
@@ -214,14 +216,14 @@ jobs:
       required-idle-runners: 4
 
   go-test:
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.layout != 'static') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.runner-route.result == 'success'
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full' && (github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.runner-route.result == 'success'
     needs: [runner-route, ci-plan, tree-reuse, tier-plan]
     strategy:
       fail-fast: false
       matrix:
         # Use the same event/ref/attempt guards as runs-on when evaluated.
         # Re-run all jobs: partial reruns may retain earlier matrix values.
-        shard: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}
+        shard: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}
     runs-on: ${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}
     services:
       postgres:
@@ -302,7 +304,7 @@ jobs:
           GOFLAGS: -count=1
         run: node scripts/test-tiers/cli.mjs run go --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job go-test-${{ matrix.shard }}
       - name: Confirm full tier execution
-        if: needs.tier-plan.outputs.mode != 'essential'
+        if: github.event_name != 'pull_request' || needs.tier-plan.outputs.mode != 'essential'
         env:
           TIER_REPORT: tmp/test-tiers/go-test-${{ matrix.shard }}-measurement.json
         run: node scripts/test-tiers/check-full.mjs
@@ -328,7 +330,7 @@ jobs:
   # runs this job, regardless of the selected Go shard layout.
   go-timing:
     needs: [ci-plan, tree-reuse, tier-plan]
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.layout != 'static') && needs.tree-reuse.outputs.reuse != 'merge_group'
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full' && (github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -562,7 +564,7 @@ jobs:
       fail-fast: false
       matrix:
         # Spec-only retains the existing exact-spec lane's once-only unit command.
-        shard: ${{ fromJSON(needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4]') }}
+        shard: ${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4]') }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -595,7 +597,7 @@ jobs:
             node ../scripts/test-tiers/cli.mjs run web --unit --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-unit-${{ matrix.shard }}
           fi
       - name: Confirm full tier execution
-        if: needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential'
+        if: github.event_name != 'pull_request' || (needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential')
         env:
           TIER_REPORT: tmp/test-tiers/web-unit-${{ matrix.shard }}-measurement.json
         run: node scripts/test-tiers/check-full.mjs
@@ -614,14 +616,14 @@ jobs:
         run: npm run test:browser-safety
 
   web-shard:
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane != 'docs-only' && needs.tier-plan.outputs.layout != 'static') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.web-setup.result == 'success'
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane != 'docs-only' && (github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.web-setup.result == 'success'
     needs: [ci-plan, web-setup, tree-reuse, tier-plan]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}
+        shard: ${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}
     env:
       PW_RETRIES: '0'
     steps:
@@ -665,7 +667,7 @@ jobs:
             node scripts/test-tiers/cli.mjs run web --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-shard-${{ matrix.shard }}
           fi
       - name: Confirm full tier execution
-        if: needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential'
+        if: github.event_name != 'pull_request' || (needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential')
         env:
           TIER_REPORT: tmp/test-tiers/web-shard-${{ matrix.shard }}-measurement.json
         run: node scripts/test-tiers/check-full.mjs
@@ -918,7 +920,7 @@ jobs:
 
   e2e-run:
     needs: [ci-plan, tree-reuse, tier-plan]
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.layout != 'static') && needs.tree-reuse.outputs.reuse != 'merge_group'
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full' && (github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')) && needs.tree-reuse.outputs.reuse != 'merge_group'
     runs-on: ubuntu-latest
     services:
       postgres:

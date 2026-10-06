@@ -11990,6 +11990,32 @@
     ,
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Show all opens the automatic view and a delayed Undo never marks a different view","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"delayed project-filter failure keeps retained rows and Undo still at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"delayed project-filter failure keeps retained rows and Undo still at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"delayed project-filter failure keeps retained rows and Undo still at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"older-page failure and retry keep retained rows and Undo still at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"older-page failure and retry keep retained rows and Undo still at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"older-page failure and retry keep retained rows and Undo still at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/access.test.ts","name":"Full access includes mixed workspace/project role scopes without promoting workspace-only project permissions","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"Ticket worker includes activity history only within creator, role and registry ceilings","tier":"GATED-FULL"}
@@ -19145,6 +19171,8 @@
     {"kind":"vitest","file":"tests/work-surfaces-fix2.unit.test.ts","name":"stops at the lazy item budget while retaining an honest incomplete result","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/work-vocabulary-card.unit.test.ts","name":"serializes a deferred Reload with Save and leaves the saved revision visible","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/workspace-activity.unit.test.ts","name":"drops another person’s history and binds every delayed Undo result to the exact displayed event, ticket and revision","tier":"GATED-FULL"}
   ]
   ,
   "ticket": "AEON-681"
