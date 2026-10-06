@@ -24,7 +24,7 @@ const switchCases = [
   ["PULL_REQUEST", []], [" ", []], [",", []], [null, []], [1, []],
 ];
 const available = {
-  schema: 1, repository, os: "linux", arch: "arm64", online: true, busy: false,
+  schema: 2, events: Object.keys(eventClasses), repository, os: "linux", arch: "arm64", online: true, busy: false,
   observed_at: new Date(now - 1000).toISOString(), idle_runners: 4,
 };
 function route(event = "push", changes = {}, options = {}) {
@@ -72,6 +72,50 @@ test("pushes and dispatches outside main stay hosted even with a fresh lease", (
   }
 });
 
+test("PR and merge-group routing requires schema 2 and the event in both switch and lease", () => {
+  for (const event of ["pull_request", "merge_group"])
+    for (const schema of [1, 2])
+      for (const events of [undefined, [], ["push", "workflow_dispatch"], ["pull_request"], ["merge_group"], Object.keys(eventClasses)])
+        for (const poolEvents of ["", "push,workflow_dispatch", "pull_request", "merge_group", enabledEvents]) {
+          const admitted = schema === 2 && events?.includes(event) && poolEvents.split(",").includes(event);
+          const selected = route(event, { schema, events }, { poolEvents, headRepository: repository, requiredIdle: 4 });
+          const label = JSON.stringify({ event, schema, events, poolEvents });
+          assert.deepEqual(selected.runs_on, admitted ? ["self-hosted", "Linux", "ARM64", "mbp2606", eventClasses[event]] : ["ubuntu-latest"], label);
+          assert.equal(selected.runner_class, admitted ? "mbp2606" : "hosted", label);
+          if (poolEvents.split(",").includes(event) && !admitted) assert.equal(selected.reason, "unsupported-pool-event", label);
+        }
+});
+
+test("lease events must be a bounded array of unique known names before PR or merge-group routing", () => {
+  for (const event of ["pull_request", "merge_group"]) {
+    for (const events of [undefined, null, true, 1, event, { [event]: true },
+      [event, null], [event, 1], [event, {}], [event, [event]], [event, ""],
+      [event, "pull_request_target"], [event, "future_event"], [event, "constructor"],
+      [event, "toString"], [event, "__proto__"], [event, "PULL_REQUEST"],
+      [event, " merge_group"], [event, event], [...Object.keys(eventClasses), event],
+      Array(1000).fill(event)]) {
+      const selected = route(event, { events }, { poolEvents: enabledEvents, headRepository: repository, requiredIdle: 4 });
+      assert.deepEqual(selected, { runs_on: ["ubuntu-latest"], runner_class: "hosted", reason: "unsupported-pool-event" }, `${event}: ${JSON.stringify(events)}`);
+    }
+  }
+});
+
+test("push and dispatch preserve routing and lease checks under schema 1 and 2 regardless of events", () => {
+  for (const event of ["push", "workflow_dispatch"])
+    for (const schema of [1, 2])
+      for (const events of [undefined, null, "invalid", [], ["pull_request"], ["unknown"], Object.keys(eventClasses)]) {
+        const lease = { schema, events };
+        assert.deepEqual(route(event, lease), route(event, { schema: 1, events: undefined }));
+        assert.equal(route(event, lease, { ref: "refs/heads/other" }).reason, "untrusted-ref");
+        assert.equal(route(event, lease, { poolEvents: "pull_request,merge_group" }).reason, "untrusted-event");
+        for (const [changes, reason] of [
+          [{ online: false }, "offline-or-busy"], [{ busy: true }, "offline-or-busy"],
+          [{ idle_runners: 3 }, "insufficient-idle-capacity"],
+          [{ observed_at: new Date(now - 30000).toISOString() }, "expired-availability"],
+        ]) assert.equal(route(event, { ...lease, ...changes }, { requiredIdle: 4 }).reason, reason);
+      }
+});
+
 test("event x switch x head repository x ref retains defaults and opts in only listed event classes", () => {
   for (const [poolEvents, allowed] of switchCases)
     for (const event of [...Object.keys(eventClasses), "pull_request_target", "schedule", "workflow_call", "workflow_run", "release", "future_event"])
@@ -112,7 +156,8 @@ test("absent, offline, busy and malformed records fall back without waiting", ()
   }
   for (const changes of [
     { online: false }, { online: "true" }, { busy: true }, { busy: undefined },
-    { schema: 2 }, { repository: "other/repo" }, { os: "macos" }, { arch: "amd64" },
+    { schema: 0 }, { schema: 3 }, { schema: "2" }, { schema: undefined },
+    { repository: "other/repo" }, { os: "macos" }, { arch: "amd64" },
     { idle_runners: 0 }, { idle_runners: "4" }, { idle_runners: 1.5 },
   ]) assert.equal(route("push", changes).runner_class, "hosted");
 });
@@ -153,18 +198,20 @@ test("CLI writes JSON runs-on, rerun attempt and value-free evidence", () => {
 
 test("CLI reads the pool event switch and PR head repository from workflow environment", () => {
   for (const [event, ref] of [["pull_request", "refs/pull/34/merge"], ["merge_group", "refs/heads/gh-readonly-queue/main/pr-34"]])
-    for (const poolEvents of ["", enabledEvents]) for (const headRepository of [repository, "fork/paimos", ""]) {
+    for (const poolEvents of ["", enabledEvents]) for (const headRepository of [repository, "fork/paimos", ""])
+      for (const lease of [{ schema: 1, events: undefined }, { schema: 2, events: ["push", "workflow_dispatch"] }, { schema: 2, events: Object.keys(eventClasses) }]) {
       const result = spawnSync(process.execPath, [new URL("./ci-runner-route.mjs", import.meta.url).pathname], {
         encoding: "utf8",
         env: {
           GITHUB_EVENT_NAME: event, GITHUB_REPOSITORY: repository, GITHUB_REF: ref, GITHUB_RUN_ATTEMPT: "1",
           AEON_POOL_EVENTS: poolEvents, AEON_PR_HEAD_REPOSITORY: headRepository,
-          AEON_MBP2606_AVAILABILITY: JSON.stringify({ ...available, observed_at: new Date().toISOString() }),
+          AEON_MBP2606_AVAILABILITY: JSON.stringify({ ...available, ...lease, observed_at: new Date().toISOString() }),
           AEON_REQUIRED_IDLE_RUNNERS: "4",
         },
       });
       assert.equal(result.status, 0, result.stderr);
-      const admitted = poolEvents !== "" && (event !== "pull_request" || headRepository === repository);
+      const admitted = poolEvents !== "" && (event !== "pull_request" || headRepository === repository) &&
+        lease.schema === 2 && lease.events.includes(event);
       assert.match(result.stdout, new RegExp(`runner_class=${admitted ? "mbp2606" : "hosted"}\\n`));
       if (admitted) assert.ok(result.stdout.includes(`"${eventClasses[event]}"`));
     }
@@ -218,6 +265,20 @@ test("CI expressions honor the router switch, fork boundary and attempt for runn
       const selected = route(event, changes, { requiredIdle: 4, poolEvents: enabledEvents, headRepository: repository, ref });
       const outputs = { ...selected, runs_on: JSON.stringify(selected.runs_on), run_attempt: "1" };
       assert.deepEqual(evaluate(runnerExpression, github, outputs), ["ubuntu-latest"]);
+      assert.deepEqual(evaluate(shardExpression, github, outputs, "full"), [1, 2, 3, 4, 5, 6, 7]);
+    }
+  }
+  for (const [event, ref] of cases.filter(([event]) => ["pull_request", "merge_group"].includes(event))) {
+    const github = { event_name: event, ref, run_attempt: 1, repository, event: { pull_request: { head: { repo: { full_name: repository } } } } };
+    for (const changes of [{ schema: 1, events: undefined }, { schema: 1 }, { events: undefined },
+      { events: null }, { events: ["push", "workflow_dispatch"] },
+      { events: [event === "pull_request" ? "merge_group" : "pull_request"] },
+      { events: [event, "future_event"] }, { events: [event, event] }]) {
+      const selected = route(event, changes, { requiredIdle: 4, poolEvents: enabledEvents, headRepository: repository, ref });
+      assert.equal(selected.reason, "unsupported-pool-event");
+      const outputs = { ...selected, runs_on: JSON.stringify(selected.runs_on), run_attempt: "1" };
+      assert.deepEqual(evaluate(runnerExpression, github, outputs), ["ubuntu-latest"]);
+      assert.deepEqual(evaluate(shardExpression, github, outputs), event === "pull_request" ? [1, 2] : [1, 2, 3, 4, 5, 6, 7]);
       assert.deepEqual(evaluate(shardExpression, github, outputs, "full"), [1, 2, 3, 4, 5, 6, 7]);
     }
   }

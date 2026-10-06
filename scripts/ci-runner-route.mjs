@@ -34,8 +34,18 @@ export function routeRunner({ event, repository, ref, headRepository, poolEvents
   } catch {
     return hosted("invalid-availability");
   }
-  if (!lease || lease.schema !== 1 || lease.repository !== repository ||
+  if (!lease || ![1, 2].includes(lease.schema) || lease.repository !== repository ||
       lease.os !== "linux" || lease.arch !== "arm64") return hosted("invalid-availability");
+  // PR/merge-group support must be advertised by the upgraded controller. An
+  // opt-in alone must never send those jobs to the legacy push/dispatch pool.
+  // Push/dispatch retain their schema-1 behavior, including with schema 2.
+  if (!defaultEvents.includes(event)) {
+    if (lease.schema !== 2 || !Array.isArray(lease.events) ||
+        lease.events.length > eventClasses.size ||
+        !lease.events.every((value) => eventClasses.has(value)) ||
+        new Set(lease.events).size !== lease.events.length ||
+        !lease.events.includes(event)) return hosted("unsupported-pool-event");
+  }
   if (lease.online !== true || lease.busy !== false) return hosted("offline-or-busy");
   const observed = typeof lease.observed_at === "string" ? Date.parse(lease.observed_at) : NaN;
   // Reject future dates too: a clock error must never keep an old lease alive.
