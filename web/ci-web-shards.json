@@ -1224,6 +1224,34 @@
         {"file":"tests/settings-shared.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":6.613,"median":0.701,"min":0.409},"seconds":38.002851,"selectedTests":23},"weightSeconds":20,"weightSource":"unmeasured-test-count-estimate"}
       ]
     }
+    ,
+    {
+      "config": "playwright.ui.config.ts"
+      ,
+      "env": {}
+      ,
+      "flags": [
+        "--workers=1"
+        ,
+        "--trace=retain-on-failure"
+      ]
+      ,
+      "gate": true
+      ,
+      "hostedOnly": true
+      ,
+      "id": "coarse-hit-area"
+      ,
+      "project": null
+      ,
+      "sourceSteps": [
+        "AEON-723 coarse hit-area selector regression"
+      ]
+      ,
+      "specs": [
+        {"file":"tests/coarse-hit-area.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
+      ]
+    }
   ]
   ,
   "integrationNotes": [

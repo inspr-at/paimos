@@ -6364,6 +6364,12 @@
     ,
     {"kind":"browser","file":"tests/clip-tip.spec.ts","name":"touch selection reveals the same full graph card after leaving ticket details","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/coarse-hit-area.spec.ts","name":"1024px coarse pointer › shared controls extend to a 44px hit area","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/coarse-hit-area.spec.ts","name":"1440px fine pointer › shared controls keep only their own box","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/coarse-hit-area.spec.ts","name":"390px fine pointer › shared controls extend to a 44px hit area","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/connect-verification.spec.ts","name":"a mismatched computer has a reason at Connect and a working recovery","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/connect-verification.spec.ts","name":"agent sees the permission reason at Connect","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

@@ -171,7 +171,7 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
   .ticket-chip::before, .more-link::before, .reach-link::before,
   .hours-chip::before,
   .prop-btn::before, .key-chip::before, .project-link::before,
-  .ekey::before::before, .row-main::before,
+  .ekey::before, .row-main::before,
   .twisty::before, .tier-mark::before {
     content: '';
     position: absolute;
