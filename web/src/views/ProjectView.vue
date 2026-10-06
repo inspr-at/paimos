@@ -163,7 +163,7 @@ watch(projectId, id => { queueAnchor.value = null; assigneeMenu.value = null; if
 onMounted(() => queuePoller.start())
 onBeforeUnmount(() => queuePoller.stop())
 function closeQueue(restore: boolean) { const anchor = queueAnchor.value; queueAnchor.value = null; if (restore) anchor?.focus() }
-function openAssignee(row: ListItem, anchor: HTMLElement) { assigneeMenu.value = { row, anchor } }
+function openAssignee(row: ListItem, anchor: HTMLElement) { void loadProjectPeople(); assigneeMenu.value = { row, anchor } }
 function closeAssignee(restore: boolean) { const anchor = assigneeMenu.value?.anchor; assigneeMenu.value = null; if (restore) anchor?.focus() }
 async function assignPerson(value: string) {
   const row = assigneeMenu.value?.row
@@ -793,19 +793,44 @@ function showUpdates() {
   if (!fullView.value && !panel.value?.el?.contains(document.activeElement)) table.value?.focusGrid()
 }
 
-// People who can be assigned: everyone assigned somewhere in this project, and you.
+// Discover everyone assigned in the project only when an assignment menu needs
+// them. Cold ticket navigation must not scan assignees and fetch each name.
 const projectPeople = ref<string[]>([])
-watch(projectId, async id => {
+let peopleGeneration = 0
+let projectPeopleLoad: Promise<void> | null = null
+watch([projectId, () => scopeOwner(session.identity)], () => {
+  peopleGeneration++
   projectPeople.value = []
-  if (!id) return
-  try {
-    const page = await listNodes({ within: id, kind: WORK_KINDS, facets: ['assignee'], limit: 1 })
-    const ids = Object.keys(page.facets?.assignee ?? {}).filter(value => value !== 'none')
-    await list.resolveNames(ids)
-    if (projectId.value === id) projectPeople.value = ids
-  } catch { /* the menu still offers you and Unassigned */ }
-}, { immediate: true })
-const people = computed(() => projectPeople.value.map(id => ({ id, name: list.names.get(id) ?? 'Someone' })))
+  projectPeopleLoad = null
+}, { flush: 'sync' })
+onBeforeUnmount(() => { peopleGeneration++ })
+function loadProjectPeople(): Promise<void> {
+  const id = projectId.value
+  if (!id) return Promise.resolve()
+  if (projectPeopleLoad) return projectPeopleLoad
+  const request = peopleGeneration
+  projectPeopleLoad = (async () => {
+    try {
+      const page = await listNodes({ within: id, kind: WORK_KINDS, facets: ['assignee'], limit: 1 })
+      if (request !== peopleGeneration) return
+      const ids = Object.keys(page.facets?.assignee ?? {}).filter(value => value !== 'none')
+      await list.resolveNames(ids)
+      if (request === peopleGeneration) projectPeople.value = ids
+    } catch {
+      // A later opening retries; already loaded people remain available.
+      if (request === peopleGeneration) projectPeopleLoad = null
+    }
+  })()
+  return projectPeopleLoad
+}
+const people = computed(() => {
+  const known = new Map<string, string>()
+  for (const row of [...list.rows.value, panelItem.value]) {
+    if (row?.project?.id === projectId.value && row.assignee) known.set(row.assignee.id, row.assignee.name)
+  }
+  for (const id of projectPeople.value) known.set(id, list.names.get(id) ?? 'Someone')
+  return [...known].map(([id, name]) => ({ id, name }))
+})
 
 let openedFromList = false
 let openedQuery = ''
@@ -1267,6 +1292,7 @@ function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTM
   if (!at) return
   if (kind === 'release') { openRelease(at, liveSelection()); return }
   if (kind === 'labels') void list.requestFacet('tag')
+  if (kind === 'assignee') void loadProjectPeople()
   if (kind === 'move') void list.loadEpics()
   bulkMenu.value = { kind, anchor: at }
 }
@@ -1842,7 +1868,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         v-if="ticketKey" :key="`${project.id}/${me?.id ?? ''}/${ticketKey.toUpperCase()}`" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
         :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
-        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :native-releases="nativeReleases"
+        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :native-releases="nativeReleases" @need-people="loadProjectPeople"
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />

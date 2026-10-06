@@ -81,7 +81,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   close: []; prev: []; next: []; expand: []; collapse: []; newTab: []; openKey: [key: string, newTab: boolean]; status: [anchor: HTMLElement]; trailBack: [steps: number]
-  removed: [item: ListItem]; created: [item: ListItem]; moved: [item: ListItem, fromParent: string | null]; assigned: []; retry: []; openInProject: []
+  removed: [item: ListItem]; created: [item: ListItem]; moved: [item: ListItem, fromParent: string | null]; assigned: []; retry: []; openInProject: []; needPeople: []
 }>()
 
 // The row store's display object for this ticket (the list's row when the
@@ -356,6 +356,7 @@ async function cancelEdit() {
 const uid = useId()
 const editMenu = ref<{ kind: 'status' | 'priority' | 'assignee'; anchor: HTMLElement } | null>(null)
 function openEditMenu(kind: 'status' | 'priority' | 'assignee', event: Event) {
+  if (kind === 'assignee') emit('needPeople')
   const anchor = event.currentTarget as HTMLElement
   editMenu.value = editMenu.value?.kind === kind ? null : { kind, anchor }
 }
@@ -464,7 +465,10 @@ function anchorFor(shortcut: string) {
 }
 function openMenu(kind: 'priority' | 'assignee' | 'epic' | 'release', anchor: HTMLElement | null) {
   if (!anchor) return
-  if (kind === 'release' ? canRelease.value : kind === 'epic' ? movable.value : kind === 'assignee' ? editable.value || canQueue.value : editable.value) menu.value = { kind, anchor }
+  if (kind === 'release' ? canRelease.value : kind === 'epic' ? movable.value : kind === 'assignee' ? editable.value || canQueue.value : editable.value) {
+    if (kind === 'assignee') emit('needPeople')
+    menu.value = { kind, anchor }
+  }
 }
 async function chooseRelease(target: ReleaseTarget) {
   const it = item.value
