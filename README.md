@@ -738,6 +738,35 @@ and prices remain unchanged; Security now uses the ticket's role route and rate.
 Work-kind lists use `limit`/`cursor` pagination; editor writes reject oversized
 matrices or atomic re-stamp scopes. See `api/openapi.yaml` for the contract.
 
+## Project lead scheduling (AEON-739 backend groundwork)
+
+Explicit project leads consume the existing person's agent dial, including
+idle leads and generations with unconfirmed exit. The server supplies no extra
+lead slots. Queue is the only scheduling input; it never grants execution rights.
+A successful new route records one project turn. The next turn orders qualified
+project demand by the later of its oldest eligible queue arrival and its last
+successful route. This gives waiting projects a turn while preserving targeted
+and manual ticket order inside each project. Idempotent routing does not advance
+turns. Revoked owners, archived projects, unresolved dependencies, stale reporting
+and unavailable live lead gates cannot win a competing turn. Competing demand
+also needs a usable worker model/account route, live claim permission and no
+pending worker assignment. Scheduling reads are owner-scoped, limited to 200
+entries with a three-second deadline and 64 KiB per ticket's fields; excess
+demand returns an explicit wait error. Lead pickup also caps its project queue
+before fields are decoded or entries projected.
+
+A worker uses `aeon lead yield --project KEY --expected-revision N --generation G
+--worker-lease-file PATH` (or `-` for stdin) when idle, waiting for an accepted
+worker, or yielding its project turn. The server validates that condition and
+reuses cooperative checkpoint/pause. The process keeps its slot until confirmed
+stopped. Only a worker-priority yield with a retained checkpoint allows previously
+routed assignments of the exact current generation to start afterwards. Person
+pauses and replacement generations fence them. Every final worker start still
+checks dial, harness, account room and host load. Ready routed workers have
+priority over lead restart; restart remains an explicit intent through ordinary
+admission. No workers are adopted or reassigned. The production admission adapter
+and automatic launch remain disabled until AEON-603 end-to-end qualification.
+
 ## Agent start plan
 
 `aeon agents plan` shows the person's planned total, per-harness limits and
@@ -1048,16 +1077,26 @@ gates setup and both matrices; spec-only retains one unit job and one exact-spec
 job, while docs-only skips them. Skipped Actions jobs contribute no runner duration;
 executed jobs still reject invalid timestamps. Spec-only measurements explicitly
 report `untiered` scope rather than claim tier case passes.
-OPS-257 schedules tiers using hosted run 37341114152: browser `tierTiming` in
+OPS-257 schedules tiers using hosted run 37377299349: browser `tierTiming` in
 `web/ci-web-shards.json` and unit/Go `timingWeights` in their tier ledgers.
 Browser costs include per-case durations and apportioned group overhead; unit
 costs include Vitest elapsed time, Node test time and shared residual launch
-overhead; Go costs use terminal package elapsed time. Other selections scale
+overhead; Go costs include terminal package elapsed time plus shared residual
+native enumeration and launch time. Other selections scale
 these measured slices by case count. Missing browser/Go artifacts retain
 historical estimates; exact-spec weights and all gated membership stay intact.
-The 39-case `aeon-632b-clip` file stays serial on its own shard. Local balance
-estimates exclude runner setup, native collection and shard 1's extra unit
-checks; the next hosted run must validate total job costs.
+The 39 `aeon-632b-clip` cases keep their original bodies and titles in two
+serial files: planning/touch (27 cases) and settings/rules (12), importing
+shared fixtures. Each half conservatively retains the original launch overhead.
+Unit shard 1 loses equal-load ties to its peers because it also runs the shard
+and browser-supervisor regressions; the heaviest unit file starts on shard 2.
+Scheduling estimates after native inventory reconciliation are 6.28–6.39 browser
+minutes (max/median 1.012), 0.50–0.74 unit minutes and 4.85–6.12 Go minutes
+(max/median about 1.26).
+The indivisible `internal/nodes` package sets the Go floor, slightly above
+the 1.25 execution-only ratio target. Estimates exclude runner setup, initial
+selection and shard 1's extra unit checks; hosted runs must validate complete
+job costs and the intended eight-to-nine-minute critical path.
 The eight-minute target needs hosted measurement; [local selection counts](scripts/ci/test-tier-selection-baseline.json)
 establish coverage only.
 
