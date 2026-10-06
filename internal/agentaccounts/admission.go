@@ -286,6 +286,30 @@ func WaitForRun(ctx context.Context, tx pgx.Tx, id string) (*CapacityWait, error
 	if err != nil || run.Status != "queued" || run.Purpose != "managed" {
 		return nil, err
 	}
+	return waitForRun(ctx, tx, run)
+}
+
+// WaitForQueueRoute evaluates a prospective worker assignment without writing
+// it. Fair scheduling and actual queue routing use the same account gates.
+func WaitForQueueRoute(ctx context.Context, tx pgx.Tx, id, agent, profile string, account *string) (*CapacityWait, error) {
+	run, err := loadWaitRun(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+	// Match queue pickup's requested_account_id replacement and retry fallback.
+	if account == nil {
+		if err := tx.QueryRow(ctx, `SELECT retry_account_id::text FROM agent_runs WHERE id=$1`, id).Scan(&account); err != nil {
+			return nil, err
+		}
+	}
+	run.AgentID, run.ProfileID, run.RequestedAccountID = agent, &profile, account
+	if run.Status != "queued" || run.Purpose != "managed" {
+		return waitFor("state"), nil
+	}
+	return waitForRun(ctx, tx, run)
+}
+
+func waitForRun(ctx context.Context, tx pgx.Tx, run runRow) (*CapacityWait, error) {
 	host, err := agentpairing.HostCapacityForPrincipal(ctx, tx, run.AgentID)
 	if err != nil {
 		return nil, err

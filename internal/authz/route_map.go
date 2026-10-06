@@ -24,6 +24,12 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	// Lead handlers retain their actor/owner checks inside the final transaction.
+	"GET /api/projects/{projectId}/lead":                            "harness.read",
+	"POST /api/projects/{projectId}/lead":                           "harness.control",
+	"POST /api/projects/{projectId}/lead/yield":                     "harness.worker",
+	"POST /api/projects/{projectId}/lead/claim":                     "harness.worker",
+	"POST /api/projects/{projectId}/lead/pause":                     "harness.control|harness.worker",
 	"GET /api/projects/{projectId}/lead/usage":                      "harness.read",
 	"POST /api/projects/{projectId}/chat-roles":                     "chat.bind",
 	"POST /api/projects/{projectId}/chat-threads/resolve":           "chat.read",
