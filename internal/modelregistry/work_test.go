@@ -268,7 +268,7 @@ func TestPreferenceStoreCanonicalPeopleAndGuards(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'PREFS-1','Project' FROM node_kinds WHERE slug='project' RETURNING id::text`, p.TenantID).Scan(&project); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'PREFS-2','Ticket',$2 FROM node_kinds WHERE slug='ticket' RETURNING id::text`, p.TenantID, project).Scan(&ticket); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'PREFS-2','Ticket',$2 FROM node_kinds WHERE slug='work' RETURNING id::text`, p.TenantID, project).Scan(&ticket); err != nil {
 			return err
 		}
 		expectConstraint(t, tx, "23514", `INSERT INTO model_pref_scopes(tenant_id,level,person_id) VALUES($1,'person',$2)`, p.TenantID, alias)
@@ -306,10 +306,10 @@ func TestPreferenceStoreCanonicalPeopleAndGuards(t *testing.T) {
 			}
 		}
 		var schema []byte
-		if _, err := tx.Exec(t.Context(), `UPDATE node_kinds SET label=label WHERE slug='ticket'`); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE node_kinds SET label=label WHERE slug='work'`); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `SELECT field_schema->'properties'->'area' FROM node_kinds WHERE slug='ticket'`).Scan(&schema); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT field_schema->'properties'->'area' FROM node_kinds WHERE slug='work'`).Scan(&schema); err != nil {
 			return err
 		}
 		if strings.Contains(string(schema), "enum") || !strings.Contains(string(schema), "pattern") {

@@ -28,8 +28,9 @@ const presets = computed(() => KEY_SCOPE_PRESETS.map(preset => ({ ...preset, sco
 
 <style scoped>
 .presets { display: grid; gap: 8px; min-width: 0; }
-.preset-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-.preset-actions .btn { min-height: 36px; padding-inline: 6px; white-space: nowrap; }
+/* Presets keep their labels' width and wrap as a group (AEON-730). */
+.preset-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset-actions .btn { white-space: nowrap; }
 .person-only { font-size: 12px; line-height: 1.5; color: var(--ink-3); }
 .preset { min-width: 0; padding-block: 6px; border-bottom: 1px solid var(--line); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 summary { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; font-weight: 600; list-style: none; }

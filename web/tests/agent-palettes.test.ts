@@ -10,9 +10,14 @@ import { normalizeAgentState } from '../src/lib/agentSignals.ts'
 
 const css = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8')
 function block(source: string, selector: string) {
-  const start = source.indexOf(`${selector} {`)
-  assert.ok(start >= 0, `missing ${selector}`)
-  const body = source.slice(start + selector.length + 2, source.indexOf('}', start))
+  const wanted = selector.split(',').map(value => value.trim())
+  const rule = [...source.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+    .find(match => {
+      const selectors = match[1]!.split(',').map(value => value.trim())
+      return wanted.every(value => selectors.includes(value))
+    })
+  assert.ok(rule, `missing ${selector}`)
+  const body = rule[2]!
   return Object.fromEntries([...body.matchAll(/--([\w-]+):\s*([^;]+);/g)].map(match => [match[1]!, match[2]!.trim()]))
 }
 const states = css('../src/styles/agent-states.css'), tokens = css('../src/styles/tokens.css')

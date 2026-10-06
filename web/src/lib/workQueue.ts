@@ -2,7 +2,7 @@
 import { api, APIError, getNode, type ListItem } from './api.ts'
 import { listModels, type ModelProfile } from './agents.ts'
 import { accountName, authorFamilyFor, displayText, fetchAccountCatalog, publicModelId, workRoleFor } from './accountCascade.ts'
-import { normaliseState } from './work.ts'
+import { normaliseState, statusMeta } from './work.ts'
 import type { AgentRunRow } from './agentRows.ts'
 
 // A projection of the existing agent run queue. Part A owns its HTTP contract.
@@ -25,8 +25,25 @@ export interface QueueTarget {
 }
 export type ReadyGap = 'estimate' | 'criteria' | 'blocker'
 export const QUEUE_STATES = ['new', 'open', 'backlog', 'blocked']
-export function queueable(row: Pick<ListItem, 'kind_slug' | 'state'>): boolean {
-  return (row.kind_slug === 'ticket' || row.kind_slug === 'task') && QUEUE_STATES.includes(normaliseState(row.state))
+type QueueRow = Pick<ListItem, 'kind_slug' | 'state'> & Partial<Pick<ListItem, 'assignee' | 'lead_worker' | 'fields' | 'queue_stale' | 'estimate' | 'is_leaf'>>
+export function staleProgress(row: QueueRow): boolean {
+  return row.is_leaf !== false && (row.kind_slug === 'ticket' || row.kind_slug === 'task' || row.kind_slug === 'work' && (row.is_leaf ?? row.estimate?.is_parent === false)) && statusMeta(row.state).key === 'progress' && !row.assignee && !row.lead_worker
+}
+export function staleWork(row: QueueRow): boolean {
+  return staleProgress(row) && row.queue_stale === true
+}
+export function queueable(row: QueueRow): boolean {
+  return row.is_leaf !== false && (row.kind_slug === 'ticket' || row.kind_slug === 'task' || row.kind_slug === 'work' && (row.is_leaf ?? row.estimate?.is_parent === false)) && (QUEUE_STATES.includes(normaliseState(row.state)) || staleWork(row))
+}
+export function queueIneligibleReason(row: QueueRow): string {
+  const status = statusMeta(row.state)
+  if (status.key === 'progress') {
+    const worker = row.assignee?.name ?? row.lead_worker?.name
+    return worker || row.queue_stale === false
+      ? `Already ${status.label.toLowerCase()} (${worker ?? 'assigned or active work'}), can't be queued.`
+      : `${status.label}: queue eligibility has not been confirmed.`
+  }
+  return `${status.label}: this work can't be queued.`
 }
 export function readyGaps(row: Pick<ListItem, 'fields' | 'state'>): ReadyGap[] {
   const out: ReadyGap[] = []
@@ -57,7 +74,9 @@ export async function queueRequest<T>(path: string, method = 'GET', body?: unkno
 }
 // Part A's published contract. The run property is deliberately discarded: run
 // rows belong to agentRows and its ledger, never this ticket projection.
+export interface QueueUndoToken { run_id: string; revision: string }
 export interface QueueWireEntry {
+  undo?: QueueUndoToken
   node_id: string; key: string; title: string; state: string; priority: string; estimate_hours: number
   queued: { run_id: string; position: number; by: QueuedTicket['by']; at: string; target_agent_id: string | null; expected_agent_id: string | null; model_profile_id: string | null; expected_start_at: string | null; waiting: boolean; wait_reason: string }
 }
@@ -86,7 +105,7 @@ export const addToQueue = (ticket: string, target?: QueueTarget) => queueRequest
 export const removeFromQueue = (ticket: string) => queueRequest<void>(`/queue/${encodeURIComponent(ticket)}`, 'DELETE')
 export const moveQueue = (ticket: string, position: number) => queueRequest<QueueWireSnapshot>(`/queue/${encodeURIComponent(ticket)}/move`, 'POST', { position })
 export const resetQueue = () => queueRequest<QueueWireSnapshot>('/queue/reset', 'POST')
-export interface QueueReadiness { queueable: boolean; ready: boolean; missing: ('status' | ReadyGap)[]; suggested_estimate_hours: number; security_review_required: boolean }
+export interface QueueReadiness { stale?: boolean; queueable: boolean; ready: boolean; missing: ('status' | ReadyGap)[]; suggested_estimate_hours: number; security_review_required: boolean }
 export const queueReadiness = (ticket: string) => queueRequest<QueueReadiness>(`/queue/${encodeURIComponent(ticket)}/readiness`)
 export const applyQueueEstimate = (ticket: string, estimate_hours: number) => queueRequest<QueueReadiness>(`/queue/${encodeURIComponent(ticket)}/estimate`, 'POST', { estimate_hours })
 export async function queueTargets(ticket: string): Promise<{ items: QueueTarget[] }> {
@@ -101,3 +120,5 @@ export async function queueTargets(ticket: string): Promise<{ items: QueueTarget
       matches_preference: account.default_model_profile_id === effort.model_profile_id }] : []
   }))))) }
 }
+
+export const undoQueueAddition = (ticket: string, token: QueueUndoToken) => queueRequest<{ removed: boolean }>(`/queue/${encodeURIComponent(ticket)}/undo`, 'POST', token)

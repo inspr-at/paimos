@@ -3,6 +3,7 @@
 // the B1 query semantics (within, kind, state, priority, assignee, q, hide_closed,
 // sort, facets, cursor paging) so specs can assert on real behaviour.
 import type { Page, Route } from '@playwright/test'
+import { hideChoice, hiddenStates } from '../src/lib/hideStates'
 import { deriveAgentState, normalizeAgentState, STATE_PRIORITY } from '../src/lib/agentSignals.ts'
 import { benefitIssues, completedTicketState } from '../src/lib/ticketBenefits.ts'
 import { leadWorkerKey, who, type LiveAgent } from '../src/lib/liveAgents.ts'
@@ -18,8 +19,11 @@ const forward = (previous: string, at: number) => new Date(Math.max(at, Date.par
 const ago = (hours: number) => new Date(now - hours * 3_600_000).toISOString()
 
 export interface MockNode {
+  queue_stale?: boolean
+  is_leaf?: boolean; depth?: number; level_name?: string; level_icon?: string; work_children_count?: number; status_derived?: boolean
   id: string; key: string; kind_slug: string; title: string; body: string; state: string
   human_check?: string | null
+  recurrence?: import('../src/lib/api').NodeRecurrence
   fields: Record<string, unknown>; parent_id: string | null; project: string
   created_at: string; updated_at: string
   estimate?: import('../src/lib/estimates').TicketEstimate
@@ -39,6 +43,9 @@ export function mockView(partial: Partial<MockView> & Pick<MockView, 'id' | 'nam
   }
 }
 export interface MockOptions {
+  // Kind-specific status buckets, as configured on the server. Omitted
+  // entries retain the normal spelling-based fallback.
+  workBuckets?: Record<string, Record<string, ReturnType<typeof workBucket>>>
   conflictAlways?: string
   delayChildren?: number
   readOnly?: boolean
@@ -153,7 +160,7 @@ export interface Call { path: string; method: string; query: URLSearchParams; bo
 // hideLead: the caller cannot read harness sessions, so the server sends no
 // lead_worker (AEON-316 gates it on the same visibility as the live read).
 function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
-  const kindIds: Record<string, string> = { epic: 'k-epic', ticket: 'k-ticket', task: 'k-task', project: 'k-project' }
+  const kindIds: Record<string, string> = { work: 'k-work', epic: 'k-epic', ticket: 'k-ticket', task: 'k-task', project: 'k-project' }
   const parent = node.parent_id ? data.nodes.find(n => n.id === node.parent_id) : undefined
   const project = data.projects.find(p => p.id === node.project)!
   // has_avatar as the server sends it (U27), when the spec gives it; absent,
@@ -162,6 +169,8 @@ function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
   const assignee = person ? { id: person.id, name: person.name, ...(person.has_avatar === undefined ? {} : { has_avatar: person.has_avatar }) } : null
   const lead = hideLead ? undefined : leadOf(data, node)
   return {
+    queue_stale: node.queue_stale,
+    ...(node.is_leaf === undefined ? {} : { is_leaf: node.is_leaf, depth: node.depth, level_name: node.level_name, level_icon: node.level_icon, work_children_count: node.work_children_count, status_derived: node.status_derived }),
     id: node.id, key: node.key, kind_id: kindIds[node.kind_slug], title: node.title, body: node.body, fields: node.fields, state: node.state, human_check: node.human_check ?? null,
     parent_id: node.parent_id, position: '0', created_at: node.created_at, updated_at: node.updated_at, deleted_at: null,
     kind_slug: node.kind_slug, kind_label: node.kind_slug[0].toUpperCase() + node.kind_slug.slice(1),
@@ -173,6 +182,7 @@ function item(node: MockNode, data: Fixtures, hideLead = false, usage = true) {
     // The server always states finished on an estimate; false unless a spec sets it.
     ...(node.eta ? { eta: { finished: false, ...node.eta } } : {}),
     ...(node.estimate ? { estimate: node.estimate } : {}),
+    ...(node.recurrence ? { recurrence: node.recurrence } : {}),
     ...(node.planning ? { planning: usage ? node.planning : { ...node.planning, cost: undefined } } : {}),
     ...(lead ? { lead_worker: { name: who(lead), key: leadWorkerKey(lead) } } : {}),
   }
@@ -196,7 +206,11 @@ function projectItem(project: Fixtures['projects'][number]) {
 const listParam = (query: URLSearchParams, name: string) => (query.get(name) ?? '').split(',').map(v => v.trim()).filter(Boolean)
 const normal = (state: string) => state.replace(/-/g, '_')
 // Same buckets as the project summary: a category is not modelled here.
-// Archived stays in the total only; every other non-closed state is open.
+// Archived has a separate count; every other non-closed state is open.
+function canonicalWorkStatus(state: string) {
+  const norm = state.trim().toLowerCase().replace(/[\s-]+/g, '_')
+  return ['active', 'inprogress'].includes(norm) ? 'in_progress' : norm === 'canceled' ? 'cancelled' : norm
+}
 function workBucket(state: string): 'open' | 'in_progress' | 'done' | 'cancelled' | 'archived' {
   const norm = state.trim().toLowerCase().replace(/[\s-]+/g, '_')
   if (norm === 'cancelled' || norm === 'canceled') return 'cancelled'
@@ -269,7 +283,7 @@ function shownAssignee(data: Fixtures, node: MockNode): string {
 }
 
 function completionRefusal(node: MockNode, nextState: string, fields: Record<string, unknown>): { error: string; code: string } | null {
-  if (node.kind_slug !== 'ticket' || completedTicketState(node.state) || !completedTicketState(nextState)) return null
+  if (!['work', 'ticket'].includes(node.kind_slug) || completedTicketState(node.state) || !completedTicketState(nextState)) return null
   const issues = benefitIssues(fields)
   if (!issues.length) return null
   return { error: `before done: ${issues.join('; ')}`, code: 'benefit_required' }
@@ -278,8 +292,14 @@ function completionRefusal(node: MockNode, nextState: string, fields: Record<str
 export async function mockWork(page: Page, data: Fixtures, options: MockOptions = {}) {
   const calls: Call[] = []
   const started = Date.now()
+  const bucketOf = (node: MockNode) => options.workBuckets?.[node.kind_slug]?.[canonicalWorkStatus(node.state)] ?? workBucket(node.state)
   await page.route('**/api/**', async arrived => {
-    const request = arrived.request(), url = new URL(request.url()), path = url.pathname, method = request.method(), query = url.searchParams
+    const request = arrived.request(), url = new URL(request.url()), method = request.method(), query = url.searchParams
+    // Preferences use an encoded path segment; model the server's decoded key
+    // and keep Call.path consistent with the fixture's logical preference keys.
+    const path = url.pathname.startsWith('/api/preferences/')
+      ? `/api/preferences/${decodeURIComponent(url.pathname.slice('/api/preferences/'.length))}`
+      : url.pathname
     const held = options.hold?.({ path, method, query })
     const route = held ? heldRoute(arrived, held) : arrived
     let body: unknown = null
@@ -387,7 +407,6 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         // Per-node preconditions (AEON-326): changed since the list showed it.
         const seen = input.if_unmodified_since?.[id]
         if (seen && Date.parse(seen) !== Date.parse(node.updated_at)) { skipped.push({ id, key: node.key, reason: 'changed since you loaded it', code: 'conflict' }); continue }
-        if (input.parent_id && node.kind_slug === 'task' && data.nodes.find(n => n.id === input.parent_id)?.kind_slug === 'epic') { skipped.push({ id, key: node.key, reason: 'a task cannot sit under an epic' }); continue }
         const old = JSON.parse(JSON.stringify(node)) as MockNode
         const fields = { ...node.fields }
         if ('priority' in input) fields.priority = input.priority
@@ -425,7 +444,8 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
     }
     if (path === '/api/me/permissions') return route.fulfill({ json: mockEffectivePermissions(options.readOnly ? 'viewer' : options.admin ? 'admin' : 'member', query.get('project_id') ?? undefined) })
     if (path === '/api/me') return route.fulfill({ json: { principal: { id: me.id, name: me.name, kind: options.principalKind ?? 'person', roles: options.readOnly ? ['viewer'] : options.admin ? ['admin'] : ['member'] }, tenant: { id: 't1', name: 'INSPR Studio' } } })
-    if (path === '/api/kinds') return route.fulfill({ json: { items: ['epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
+    if (path === '/api/settings/work-vocabulary') return route.fulfill({ json: { revision: 0, leaf: { name: '', icon: '' }, levels: [] } })
+    if (path === '/api/kinds') return route.fulfill({ json: { items: ['work', 'epic', 'ticket', 'task', 'project'].map(slug => ({ id: `k-${slug}`, slug, label: slug[0].toUpperCase() + slug.slice(1), short_prefix: slug.slice(0, 3).toUpperCase(), icon: slug, allowed_child_kinds: null, field_schema: {} })) } })
     // Relations (U27): the server's refusals, in its words, for the picker to show.
     if (path === '/api/relations' && method === 'POST') {
       if (options.readOnly) return route.fulfill({ status: 403, json: { code: 'forbidden', message: 'forbidden' } })
@@ -532,13 +552,18 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       if (options.failProjects) return route.fulfill({ status: 503, json: { error: 'Projects are resting' } })
       const archived = query.get('include_archived') === 'true'
       return route.fulfill({ json: { items: data.projects.filter(p => archived || p.state !== 'archived').map(p => {
-        const work = data.nodes.filter(n => n.project === p.id && ['ticket', 'task', 'epic'].includes(n.kind_slug))
-        const tally = { open: 0, in_progress: 0, done: 0, cancelled: 0 }
+        const work = data.nodes.filter(n => n.project === p.id && ['work', 'ticket', 'task', 'epic'].includes(n.kind_slug))
+        const tally = { open: 0, in_progress: 0, done: 0, cancelled: 0, archived: 0 }
+        const statusCounts = new Map<string, { state: string; bucket: ReturnType<typeof workBucket>; count: number }>()
         for (const node of work) {
-          const bucket = workBucket(node.state)
-          if (bucket !== 'archived') tally[bucket]++
+          const bucket = bucketOf(node)
+          tally[bucket]++
+          const state = canonicalWorkStatus(node.state)
+          const key = `${state}:${bucket}`, previous = statusCounts.get(key)
+          statusCounts.set(key, { state, bucket, count: (previous?.count ?? 0) + 1 })
         }
-        return { id: p.id, key: p.key, title: p.title, state: p.state, ...tally, total: work.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
+        const { archived: archivedCount, ...counts } = tally
+        return { id: p.id, key: p.key, title: p.title, state: p.state, ...counts, archived_count: archivedCount, status_counts: [...statusCounts.values()], status_counts_truncated: false, total: work.length, last_activity: p.last, people: (p.id === 'p-pharos' ? [mira, me] : p.id === 'p-aeon' ? [me] : []).map(person => ({ ...data.people.find(x => x.id === person.id) ?? person, kind: 'person' })) }
       }) } })
     }
     if (path === '/api/nodes' && method === 'GET') {
@@ -564,9 +589,16 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
       }
       // ids (AEON-326): only those nodes, every other filter still applied.
       const onlyIds = listParam(query, 'ids')
+      // Shape is canonical even for old payloads that omit is_leaf. Count only
+      // work children, and retain explicit shape for fixtures with hidden work.
+      const workParents = new Set(data.nodes.filter(n => ['work', 'epic', 'ticket', 'task'].includes(n.kind_slug)).map(n => n.parent_id))
       let rows = data.nodes.filter(n => inside(n) && (!parentFilter || n.parent_id === parentFilter) && (!kinds.length || kinds.includes(n.kind_slug)))
+        .filter(n => passes(listParam(query, 'shape'), v => v === ((n.is_leaf ?? !workParents.has(n.id)) ? 'leaf' : 'parent')))
+        .filter(n => passes(listParam(query, 'depth'), v => v === String(n.depth ?? 1)))
         .filter(n => !onlyIds.length || onlyIds.includes(n.id))
         .filter(n => passes(states, v => v === n.state))
+        .filter(n => passes(listParam(query, 'work_state'), v => v === canonicalWorkStatus(n.state)))
+        .filter(n => !listParam(query, 'work_bucket').length || listParam(query, 'work_bucket').includes(bucketOf(n)))
         .filter(n => passes(listParam(query, 'human_check'), v => v === (n.human_check?.trim() ? 'pending' : 'none')))
         .filter(n => passes(priorities, v => v === (typeof n.fields.priority === 'string' ? n.fields.priority : 'none')))
         .filter(n => passes(assignees, v => v === (typeof n.fields.assignee === 'string' ? n.fields.assignee : 'none')))
@@ -576,7 +608,11 @@ export async function mockWork(page: Page, data: Fixtures, options: MockOptions 
         .filter(n => passes(releases, v => v === (release(n).toLowerCase() || 'none')))
         .filter(n => !dateField || (dateOf(n) !== null && (!dateFrom || dateOf(n)! >= Date.parse(dateFrom)) && (!dateTo || dateOf(n)! < Date.parse(dateTo))))
         .filter(n => !q || n.key.toLowerCase().includes(q) || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q))
-        .filter(n => query.get('hide_closed') !== 'true' || !['done', 'cancelled', 'archived'].includes(workBucket(n.state)))
+        .filter(n => {
+          if (query.get('hide_closed') !== 'true') return true
+          const choice = hideChoice(n.state, bucketOf(n))
+          return !choice || !hiddenStates(listParam(query, 'hide_states')).includes(choice)
+        })
       const sort = (query.get('sort') ?? 'position').split(',')
       rows = [...rows].sort((a, b) => {
         for (const raw of sort) {

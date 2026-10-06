@@ -19,7 +19,7 @@ const identity = useSession()
 const agents = useAgents()
 const copy = computed(() => attachCopy(brand.value.short_name))
 // A decision changes what /agents lists as waiting; the page refreshes it.
-const props = defineProps<{ now: number }>()
+const props = defineProps<{ now: number; hideTrigger?: boolean }>()
 const emit = defineEmits<{ changed: [result: AttachReview, declined: boolean] }>()
 const allowed = computed(() => identity.identity?.principal.kind === 'person' && can('account.manage'))
 // Nothing here awaits outside an identity scope (AEON-440). `link` belongs to the
@@ -160,7 +160,7 @@ function keys(event: KeyboardEvent) {
   else if (event.key === 'ArrowLeft') { event.preventDefault(); move(roundIndex.value - 1) }
   else if (event.key === 'ArrowRight') { event.preventDefault(); move(roundIndex.value + 1) }
 }
-defineExpose({ show, sync })
+defineExpose({ show, sync, open })
 function lookup() {
   const normalized = code.value.replace(/[\s-]/g, '')
   if (busy.value) return Promise.resolve()
@@ -205,7 +205,7 @@ onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
 
 <template>
   <template v-if="allowed">
-    <button class="btn attach-session" type="button" @click="open"><AppIcon name="eye" :size="15" />{{ copy.attachSession }}</button>
+    <button v-if="!hideTrigger" class="btn attach-session" type="button" @click="open"><AppIcon name="eye" :size="15" />{{ copy.attachSession }}</button>
     <dialog ref="dialog" class="desk-dlg" aria-labelledby="attach-title" @keydown="keys" @cancel.prevent="escape" @click="event => { if (event.target === dialog) close() }">
       <div class="desk">
         <header class="desk-top">

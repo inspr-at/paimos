@@ -292,7 +292,7 @@ func TestProjectAgentDenialsDoNotDiscloseNodeTargets(t *testing.T) {
 			return err
 		}
 		if err := tx.QueryRow(ctx, `INSERT INTO nodes(tenant_id,key,title,parent_id,kind_id)
-			SELECT $1::uuid,'PRJ-2','Ticket',$2::uuid,id FROM node_kinds WHERE slug='ticket'
+			SELECT $1::uuid,'PRJ-2','Ticket',$2::uuid,id FROM node_kinds WHERE slug='work'
 			RETURNING id::text`, owner.TenantID, projectID).Scan(&nodeID); err != nil {
 			return err
 		}

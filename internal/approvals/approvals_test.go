@@ -48,27 +48,28 @@ func TestScopeWithinKey(t *testing.T) {
 }
 
 type fixture struct {
-	db       *dbtest.DB
-	mux      *http.ServeMux
-	tenantA  string
-	tenantB  string
-	personA  tenant.Principal
-	personB  tenant.Principal
-	agentA   tenant.Principal
-	agentB   tenant.Principal
-	wide     string
-	exact    string
-	narrow   string
-	once     string
-	claimant string
-	empty    string
-	revoked  string
-	tokenB   string
-	nodeA    string
-	deleted  string
-	nodeB    string
-	runA     string
-	runB     string
+	db         *dbtest.DB
+	mux        *http.ServeMux
+	tenantA    string
+	tenantB    string
+	personA    tenant.Principal
+	personB    tenant.Principal
+	agentA     tenant.Principal
+	agentB     tenant.Principal
+	wide       string
+	exact      string
+	narrow     string
+	once       string
+	claimant   string
+	empty      string
+	revoked    string
+	tokenB     string
+	nodeA      string
+	deleted    string
+	nodeB      string
+	runA       string
+	runB       string
+	eventStart int64
 }
 
 func newFixture(t *testing.T) *fixture {
@@ -102,12 +103,12 @@ func newFixture(t *testing.T) *fixture {
 	f.empty = insertKey(t, f.db.Admin, f.agentA, []string{}, false)
 	f.revoked = insertKey(t, f.db.Admin, f.agentA, []string{"run.claim"}, true)
 	f.tokenB = insertKey(t, f.db.Admin, f.agentB, []string{"run", "nodes.read", "approvals.read", "harness.read"}, false)
-	f.nodeA = insertNode(t, f.db.Admin, f.tenantA, "ticket", "TKT-1", "Target")
-	f.deleted = insertNode(t, f.db.Admin, f.tenantA, "ticket", "TKT-2", "Gone")
+	f.nodeA = insertNode(t, f.db.Admin, f.tenantA, "work", "TKT-1", "Target")
+	f.deleted = insertNode(t, f.db.Admin, f.tenantA, "work", "TKT-2", "Gone")
 	if _, err := f.db.Admin.Exec(ctx, `UPDATE nodes SET deleted_at = now() WHERE id = $1::uuid`, f.deleted); err != nil {
 		t.Fatal(err)
 	}
-	f.nodeB = insertNode(t, f.db.Admin, f.tenantB, "ticket", "TKT-1", "Foreign")
+	f.nodeB = insertNode(t, f.db.Admin, f.tenantB, "work", "TKT-1", "Foreign")
 	order := insertNode(t, f.db.Admin, f.tenantA, "work_order", "WOR-1", "Order")
 	if _, err := f.db.Admin.Exec(ctx, `
 		INSERT INTO work_orders (tenant_id, node_id, requested_by_principal_id, assignee_principal_id, status)
@@ -117,6 +118,9 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.runA = insertRun(t, f.db.Admin, f.tenantA, order, f.agentA.ID)
 	f.runB = insertRun(t, f.db.Admin, f.tenantA, order, f.agentB.ID)
+	if err := f.db.Admin.QueryRow(ctx, `SELECT coalesce(max(id),0) FROM events WHERE tenant_id=$1`, f.tenantA).Scan(&f.eventStart); err != nil {
+		t.Fatal(err)
+	}
 	f.mux = http.NewServeMux()
 	New(f.db.App).Mount(f.mux)
 	return f
@@ -250,7 +254,7 @@ func decodeApproval(t *testing.T, w *httptest.ResponseRecorder) Approval {
 func (f *fixture) eventTypes(t *testing.T) []string {
 	t.Helper()
 	rows, err := f.db.Admin.Query(t.Context(), `
-		SELECT type FROM events WHERE tenant_id = $1::uuid ORDER BY id`, f.tenantA)
+		SELECT type FROM events WHERE tenant_id = $1::uuid AND id>$2 ORDER BY id`, f.tenantA, f.eventStart)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -778,7 +782,7 @@ func TestProjectScopedApprovalNames(t *testing.T) {
 	ticket := func(project, key string) string {
 		t.Helper()
 		var id string
-		if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,kind_id,key,title) SELECT $1::uuid,$2::uuid,id,$3,$3 FROM node_kinds WHERE tenant_id=$1::uuid AND slug='ticket' RETURNING id::text`, f.tenantA, project, key).Scan(&id); err != nil {
+		if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,kind_id,key,title) SELECT $1::uuid,$2::uuid,id,$3,$3 FROM node_kinds WHERE tenant_id=$1::uuid AND slug='work' RETURNING id::text`, f.tenantA, project, key).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
 		return id

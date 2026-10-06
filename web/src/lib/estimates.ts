@@ -3,6 +3,10 @@ import type { WorkNode } from './api.ts'
 
 export interface TicketEstimate {
   hours: number | null
+  planned_hours?: number | null
+  is_parent?: boolean
+  leaf_count?: number
+  estimated_leaves?: number
   estimated_children: number
   open_children: number
   by?: { id: string; name: string }
@@ -14,8 +18,9 @@ export function parseEstimate(raw: string): number | null {
   return Number.isFinite(hours) && hours > 0 && hours <= 200 ? hours : null
 }
 export function estimateHours(item: Pick<WorkNode, 'fields' | 'estimate'> & { kind_slug?: string }): number | null {
-  const hours = item.kind_slug === 'epic' ? item.estimate?.hours : item.fields.estimate_hours
-  return typeof hours === 'number' && Number.isFinite(hours) && hours > 0 && (item.kind_slug === 'epic' || hours <= 200) ? hours : null
+  const parent = item.estimate?.is_parent ?? item.kind_slug === 'epic'
+  const hours = parent ? item.estimate?.hours : item.fields.estimate_hours
+  return typeof hours === 'number' && Number.isFinite(hours) && hours > 0 && (parent || hours <= 200) ? hours : null
 }
 export function formatEstimate(hours: number): string {
   if (hours < 1 / 60) return '<1m'
@@ -23,21 +28,25 @@ export function formatEstimate(hours: number): string {
 }
 export function estimateDisplay(item: Pick<WorkNode, 'fields' | 'estimate'> & { kind_slug?: string }) {
   const hours = estimateHours(item)
-  const epic = item.kind_slug === 'epic'
+  const epic = item.estimate?.is_parent ?? item.kind_slug === 'epic'
   const agent = !epic && hours !== null && item.fields.estimate_source === 'agent'
   const draft = agent && item.fields.estimate_confirmed !== true
   const points = item.fields.estimate_lp
-  const text = hours !== null ? formatEstimate(hours) : !epic && typeof points === 'number' && points > 0 ? `${points} pt` : ''
+  const leafText = hours !== null ? formatEstimate(hours) : !epic && typeof points === 'number' && points > 0 ? `${points} pt` : ''
+  const planned = item.estimate?.planned_hours
+  const plannedText = typeof planned === 'number' ? `${formatEstimate(planned)} planned` : ''
+  const text = epic && item.estimate?.is_parent ? [leafText ? `${leafText} from leaves` : 'No leaf estimates', plannedText].filter(Boolean).join(' · ') : leafText
   const who = item.estimate?.by?.name
   const at = typeof item.fields.estimate_at === 'string' ? Date.parse(item.fields.estimate_at) : NaN
   const when = Number.isFinite(at) ? new Date(at).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
   const origin = agent ? 'Agent estimate' : 'Estimate'
-  const tip = epic && item.estimate ? `${item.estimate.estimated_children} of ${item.estimate.open_children} open children estimated · agent hours` :
+  const tip = epic && item.estimate ? `${item.estimate.estimated_leaves ?? item.estimate.estimated_children} of ${item.estimate.leaf_count ?? item.estimate.open_children} ${item.estimate.is_parent ? "leaves" : "open children"} estimated · agent hours${plannedText ? `\n${plannedText}; kept separately from the leaf sum` : ""}` :
     hours !== null ? `${origin}${who ? ` by ${who}` : ''}${when ? `, ${when}` : ''}${agent && !draft ? ' · confirmed by working agent' : ''}\nAgent work time until ready for review` : text ? 'Legacy points estimate' : 'Set agent work hours until ready for review'
   return { hours, text, draft, tip }
 }
 export function estimateControlLabel(item: Parameters<typeof estimateDisplay>[0]): string {
   const view = estimateDisplay(item)
+  if (item.estimate?.is_parent) return `Parent estimate: ${view.text}. Edit planned estimate`
   if (!view.text) return 'Add estimate'
   const author = item.estimate?.by?.name
   const origin = view.draft ? `, agent draft, not confirmed${author ? `, by ${author}` : ''}` : ''

@@ -84,7 +84,7 @@ function all(side: 'mine' | 'theirs') { choices.value = Object.fromEntries(confl
 </template>
 
 <style scoped>
-.review { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.review { width: min(var(--dialog-l), calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .review::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .card { display: grid; gap: 14px; max-height: calc(100dvh - 24px); overflow: auto; padding: 20px 22px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 .head { display: flex; align-items: flex-start; gap: 12px; }

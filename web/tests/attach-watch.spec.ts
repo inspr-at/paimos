@@ -2,6 +2,7 @@
 import { mkdirSync } from 'node:fs'
 import AxeBuilder from '@axe-core/playwright'
 import { expect, test, type Page, type Locator } from '@playwright/test'
+import { openAttachSession } from './agents-menu-fixtures'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents, sessionListReads } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
@@ -64,7 +65,7 @@ test('watch is default-off, including the approving owner', async ({ page }) => 
   await expect(page.getByRole('button', { name: 'Watch live', exact: true })).toHaveCount(0)
   const panel = page.getByRole('complementary', { name: 'Session details' })
   await expect(panel.getByRole('textbox')).toHaveCount(0)
-  await expect(panel.getByRole('button', { name: /^(Message|Interrupt|Stop|Recover)$/ })).toHaveCount(0)
+  await expect(panel.getByRole('button', { name: /^(Message|Interrupt.*|Pause…|Stop now…|Resume|Recover|More session (?:actions|controls))$/ })).toHaveCount(0)
 })
 test('live text is inert, bounded, cleared on end and never automatically rejoined', async ({ page }) => {
   const worker = await setup(page)
@@ -121,7 +122,7 @@ test('approving an attach request reads the lists again', async ({ page }) => {
   await page.route('**/api/nodes/n-2', route => route.fulfill({ json: { id: 'n-2', key: 'PHAROS-12', title: 'PDF worker image' } }))
   await page.route('**/api/agent-pairing/attach/**', route => route.fulfill({ json: route.request().url().endsWith('/lookup') ? review : { ...review, state: 'approved' } }))
   await page.goto('/agents')
-  await page.getByRole('button', { name: 'Attach session', exact: true }).click()
+  await openAttachSession(page)
   await page.getByLabel('Attach code', { exact: true }).fill('123456789')
   await page.getByRole('button', { name: /Find request/ }).click()
   const dialog = page.getByRole('dialog')
@@ -159,7 +160,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
       approved = true
       return route.fulfill({ json: { ...review, state: 'approved' } })
     })
-    await page.getByRole('button', { name: 'Attach session', exact: true }).click()
+    await openAttachSession(page)
     await page.getByLabel('Attach code', { exact: true }).fill('123 456 789')
     await page.getByRole('button', { name: /Find request/ }).click()
     const dialog = page.getByRole('dialog')
@@ -206,7 +207,7 @@ test('strict approval cannot proceed on a Linux daemon', async ({ page }) => {
     snapshot: { platform: 'linux', computer_id: 'computer-fixture', project_id: 'p-pharos', ticket_id: 'n-2', host: 'Linux workstation', harness: 'codex', transcript: '/home/owner/session.jsonl', file_id: '1:234', process: { pid: 4812, uid: 1000, started: 'fixture', executable: '/usr/bin/codex', cwd: '/home/owner/work' } },
   } }))
   await page.goto('/agents')
-  await page.getByRole('button', { name: 'Attach session', exact: true }).click()
+  await openAttachSession(page)
   await page.getByLabel('Attach code', { exact: true }).fill('123456789')
   await page.getByRole('button', { name: /Find request/ }).click()
   await expect(page.getByRole('dialog')).toContainText('Local confirmation is unavailable on this computer')
@@ -225,7 +226,7 @@ test('an Aeon approval on Linux says that computer keeps this approval', async (
   await page.route('**/api/nodes/p-pharos', route => route.fulfill({ json: { id: 'p-pharos', key: 'PHAROS', title: 'Pharos' } }))
   await page.route('**/api/nodes/n-2', route => route.fulfill({ json: { id: 'n-2', key: 'PHAROS-12', title: 'PDF worker image' } }))
   await page.goto('/agents')
-  await page.getByRole('button', { name: 'Attach session', exact: true }).click()
+  await openAttachSession(page)
   await page.getByLabel('Attach code', { exact: true }).fill('123456789')
   await page.getByRole('button', { name: /Find request/ }).click()
   await expect(page.getByRole('dialog')).toContainText('This computer keeps approval in AEON.')
@@ -259,7 +260,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
       approvals++
       return route.fulfill({ json: { ...review, state: 'approved' } })
     })
-    await page.getByRole('button', { name: 'Attach session', exact: true }).click()
+    await openAttachSession(page)
     await page.getByLabel('Attach code', { exact: true }).fill('123 456 789')
     await page.getByRole('button', { name: /Find request/ }).click()
     const dialog = page.getByRole('dialog')

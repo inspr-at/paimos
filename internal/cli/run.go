@@ -67,6 +67,7 @@ type runtime struct {
 	version            bool
 	kinds              *kindTable
 	messagingDeliverer localDeliverer
+	personClient       *client.Client
 }
 
 func (rt *runtime) execute(args []string) error {
@@ -121,8 +122,12 @@ func (rt *runtime) printJSON(v any) error {
 	return enc.Encode(v)
 }
 
-func (rt *runtime) fail(err error, secret string) error {
-	exit := &exitError{code: 1, msg: redact(err.Error(), secret)}
+func (rt *runtime) fail(err error, secrets ...string) error {
+	message := err.Error()
+	for _, secret := range secrets {
+		message = redact(message, secret)
+	}
+	exit := &exitError{code: 1, msg: message}
 	var status *client.StatusError
 	if errors.As(err, &status) {
 		exit.apiStatus = status.Status
@@ -145,8 +150,10 @@ func (rt *runtime) root() *Command {
 		rt.cmdKeys(),
 		rt.cmdScopes(),
 		rt.cmdWhoami(""),
+		rt.cmdMe(),
 		rt.cmdIssue(),
 		rt.cmdQueue(),
+		rt.cmdLead(),
 		rt.cmdRecur(),
 		rt.cmdOutcome(),
 		rt.cmdProject(),
@@ -355,6 +362,12 @@ func (rt *runtime) cmdWhoami(use string) *Command {
 	}
 }
 
+func (rt *runtime) cmdMe() *Command {
+	c := rt.cmdWhoami("me")
+	c.Name = "me"
+	return c
+}
+
 func (rt *runtime) whoami(ctx context.Context) error {
 	inst, err := rt.resolve()
 	if err != nil {
@@ -366,16 +379,21 @@ func (rt *runtime) whoami(ctx context.Context) error {
 	}
 	if rt.jsonOut {
 		return rt.printJSON(map[string]any{
-			"instance":  inst.Name,
-			"url":       inst.URL,
-			"principal": me.Principal,
-			"tenant":    me.Tenant,
-			"identity":  me.Identity,
+			"instance":                inst.Name,
+			"url":                     inst.URL,
+			"principal":               me.Principal,
+			"tenant":                  me.Tenant,
+			"identity":                me.Identity,
+			"owner_workstation":       me.OwnerWorkstation,
+			"workstation_computer_id": me.WorkstationComputerID,
 		})
 	}
 	fmt.Fprintf(rt.stdout, "instance: %s (%s)\n", inst.Name, inst.URL)
 	fmt.Fprintf(rt.stdout, "principal: %s (%s)\n", me.Principal.Name, me.Principal.Kind)
 	fmt.Fprintf(rt.stdout, "tenant: %s (%s)\n", me.Tenant.Name, me.Tenant.Slug)
+	if me.OwnerWorkstation {
+		fmt.Fprintf(rt.stdout, "owner workstation: %s\n", me.WorkstationComputerID)
+	}
 	return nil
 }
 

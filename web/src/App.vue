@@ -4,6 +4,7 @@ import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, r
 import { isNavigationFailure, useRoute, useRouter } from 'vue-router'
 import AppHeader from './components/AppHeader.vue'
 import ConfirmHost from './components/ConfirmHost.vue'
+import PauseDialog from './components/agents/PauseDialog.vue'
 import DoneGateHost from './components/DoneGateHost.vue'
 import ToastHost from './components/ToastHost.vue'
 import { modelPrefsContext, closeModelPrefs } from './lib/modelPrefsCommand'
@@ -245,6 +246,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
     <ModelPrefsDialog v-if="modelPrefsContext && session.identity && !session.requiresSignIn" :key="modelPrefsContext.requestId" :context="modelPrefsContext" @close="closeModelPrefs" />
     <ToastHost />
     <ConfirmHost />
+    <PauseDialog />
     <DoneGateHost />
     <ShortcutSheet ref="shortcuts" />
     <StatusHelpSheet />

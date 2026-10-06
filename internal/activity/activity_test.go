@@ -74,7 +74,7 @@ func (f *fixture) addNode(key string) string {
 	f.t.Helper()
 	var id string
 	f.tx(func(tx pgx.Tx) error {
-		return tx.QueryRow(f.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,$2,'Ticket','new' FROM node_kinds WHERE tenant_id=$1 AND slug='ticket' RETURNING id::text`, f.p.TenantID, key).Scan(&id)
+		return tx.QueryRow(f.t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,state) SELECT $1,id,$2,'Ticket','new' FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, f.p.TenantID, key).Scan(&id)
 	})
 	return id
 }

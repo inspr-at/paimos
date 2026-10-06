@@ -8,7 +8,7 @@ import {
   addReleaseMembership, availabilityMark, canSelectTicket, isMoveConflict, listReleaseTicketOptions,
   type MembershipResult, type MembershipTicket,
 } from '../../lib/releaseMembership'
-import { highlight, kindLabel, plural, statusMeta, statusOptions } from '../../lib/work'
+import { highlight, kindLabel, statusMeta, statusOptions } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import StatusIcon from '../work/StatusIcon.vue'
@@ -17,7 +17,7 @@ import StatusIcon from '../work/StatusIcon.vue'
 // title; status, epic and type narrow it. Closed and already released tickets
 // are shown and cannot be picked. A ticket in another open release asks first.
 const props = defineProps<{ projectId: string; releaseId: string; releaseTitle: string; epics: { id: string; key: string; title: string }[] }>()
-const emit = defineEmits<{ added: [payload: { count: number; result: MembershipResult }]; close: [] }>()
+const emit = defineEmits<{ added: [payload: { count: number | null; result: MembershipResult }]; close: [] }>()
 
 const dialog = ref<HTMLDialogElement>()
 const searchEl = ref<HTMLInputElement>()
@@ -123,7 +123,7 @@ async function add() {
       const result = await addReleaseMembership(props.projectId, props.releaseId, {
         expected_revision: revision.value, ticket_node_ids: chosen.map(ticket => ticket.ticket_node_id), confirm_move: confirmMove,
       })
-      emit('added', { count: chosen.length, result })
+      added(result)
     } catch (error) {
       if (!confirmMove && isMoveConflict(error)) {
         const ok = await confirmAction({
@@ -137,7 +137,7 @@ async function add() {
         const result = await addReleaseMembership(props.projectId, props.releaseId, {
           expected_revision: revision.value, ticket_node_ids: chosen.map(ticket => ticket.ticket_node_id), confirm_move: true,
         })
-        emit('added', { count: chosen.length, result })
+        added(result)
         return
       }
       throw error
@@ -146,6 +146,11 @@ async function add() {
     const missing = error instanceof APIError && (error.status === 404 || error.status === 405)
     note.value = missing ? 'This server cannot add tickets to a release yet.' : error instanceof Error ? error.message : 'The tickets were not added.'
   } finally { busy.value = false }
+}
+function added(result: MembershipResult) {
+  // Parents and overlapping selections expand on the server. Older servers may
+  // omit the leaf set; the selected root count cannot stand in for that result.
+  emit('added', { count: result.leaf_node_ids ? new Set(result.leaf_node_ids).size : null, result })
 }
 function close() { dialog.value?.close(); emit('close') }
 function backdrop(event: MouseEvent) { if (event.target === dialog.value) close() }
@@ -198,12 +203,12 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
       <footer>
         <p class="hint">
           <span class="count"><span class="mono">{{ picked.length }}</span> of {{ addableCount }} selected</span>
-          <button v-if="addableCount && picked.length < addableCount" type="button" class="linkish" @click="selectAddable">Select all {{ addableCount }}</button>
+          <button v-if="addableCount" type="button" class="linkish" :disabled="picked.length >= addableCount || busy" @click="selectAddable">Select all {{ addableCount }}</button>
           <span class="keys"><KeyCap k="up" /><KeyCap k="down" /> move · <KeyCap k="enter" /> select</span>
         </p>
         <div class="actions">
           <button type="button" class="btn" @click="close">Cancel</button>
-          <button type="button" class="btn primary" :disabled="!picked.length || busy" @click="add"><AppIcon name="plus" :size="14" />{{ busy ? 'Adding…' : picked.length ? `Add ${plural(picked.length, 'ticket')}` : 'Add' }}</button>
+          <button type="button" class="btn primary" :disabled="!picked.length || busy" :aria-busy="busy" @click="add"><AppIcon name="plus" :size="14" />Add selected</button>
         </div>
       </footer>
     </div>
@@ -211,7 +216,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 </template>
 
 <style scoped>
-.picker { width: min(640px, calc(100vw - 24px)); max-height: min(760px, calc(100dvh - 24px)); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.picker { width: min(var(--dialog-l), calc(100vw - 24px)); max-height: min(760px, calc(100dvh - 24px)); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .picker::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .card { display: flex; flex-direction: column; gap: 10px; max-height: min(760px, calc(100dvh - 24px)); padding: 18px 18px 14px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

@@ -17,11 +17,11 @@ func TestCanonicalRoadmapPublication(t *testing.T) {
 	agent := tenant.Principal{ID: "22222222-2222-2222-2222-222222222222", TenantID: person.TenantID, Kind: tenant.Agent}
 	stored := []byte(`{"priority":"low","roadmap_public":true,"roadmap_public_source":"person","roadmap_public_by":"11111111-1111-1111-1111-111111111111","roadmap_public_at":"2026-09-30T00:00:00Z"}`)
 
-	same, err := canonicalRoadmapPublication(agent, "ticket", []byte(`{"priority":"high","roadmap_public":true,"roadmap_public_source":"person","roadmap_public_by":"11111111-1111-1111-1111-111111111111","roadmap_public_at":"2026-09-30T00:00:00Z"}`), stored)
+	same, err := canonicalRoadmapPublication(agent, "work", []byte(`{"priority":"high","roadmap_public":true,"roadmap_public_source":"person","roadmap_public_by":"11111111-1111-1111-1111-111111111111","roadmap_public_at":"2026-09-30T00:00:00Z"}`), stored)
 	if err != nil || string(same) != `{"priority":"high","roadmap_public":true,"roadmap_public_source":"person","roadmap_public_by":"11111111-1111-1111-1111-111111111111","roadmap_public_at":"2026-09-30T00:00:00Z"}` {
 		t.Fatalf("unchanged true: %v %s", err, same)
 	}
-	kept, err := canonicalRoadmapPublication(agent, "ticket", []byte(`{"priority":"high","roadmap_public":true,"roadmap_public_source":"agent","roadmap_public_by":"spoof"}`), stored)
+	kept, err := canonicalRoadmapPublication(agent, "work", []byte(`{"priority":"high","roadmap_public":true,"roadmap_public_source":"agent","roadmap_public_by":"spoof"}`), stored)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,17 +29,17 @@ func TestCanonicalRoadmapPublication(t *testing.T) {
 	if keptFields["priority"] != "high" || keptFields["roadmap_public_source"] != "person" || keptFields["roadmap_public_by"] != person.ID || keptFields["roadmap_public_at"] != "2026-09-30T00:00:00Z" {
 		t.Fatalf("forged resend: %#v", keptFields)
 	}
-	if _, err := canonicalRoadmapPublication(agent, "ticket", []byte(`{"roadmap_public":true}`), nil); err == nil || !strings.Contains(err.Error(), "permission denied") {
+	if _, err := canonicalRoadmapPublication(agent, "work", []byte(`{"roadmap_public":true}`), nil); err == nil || !strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("agent publish: %v", err)
 	}
-	if _, err := canonicalRoadmapPublication(agent, "ticket", []byte(`{"priority":"low"}`), stored); err == nil || !strings.Contains(err.Error(), "permission denied") {
+	if _, err := canonicalRoadmapPublication(agent, "work", []byte(`{"priority":"low"}`), stored); err == nil || !strings.Contains(err.Error(), "permission denied") {
 		t.Fatalf("agent clear: %v", err)
 	}
-	absent, err := canonicalRoadmapPublication(agent, "ticket", []byte(`{"priority":"low","roadmap_public":false}`), nil)
+	absent, err := canonicalRoadmapPublication(agent, "work", []byte(`{"priority":"low","roadmap_public":false}`), nil)
 	if err != nil || string(absent) != `{"priority":"low","roadmap_public":false}` {
 		t.Fatalf("agent false: %v %s", err, absent)
 	}
-	stripped, err := canonicalRoadmapPublication(agent, "ticket", []byte(`{"roadmap_public":false,"roadmap_public_source":"person","roadmap_public_by":"spoof"}`), nil)
+	stripped, err := canonicalRoadmapPublication(agent, "work", []byte(`{"roadmap_public":false,"roadmap_public_source":"person","roadmap_public_by":"spoof"}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -47,16 +47,16 @@ func TestCanonicalRoadmapPublication(t *testing.T) {
 	if strippedFields["roadmap_public"] != false || strippedFields["roadmap_public_source"] != nil || strippedFields["roadmap_public_by"] != nil {
 		t.Fatalf("forged false: %#v", strippedFields)
 	}
-	if _, err := canonicalRoadmapPublication(person, "ticket", []byte(`{"roadmap_public":"yes"}`), nil); err == nil || !strings.Contains(err.Error(), "roadmap_public must be a boolean") {
+	if _, err := canonicalRoadmapPublication(person, "work", []byte(`{"roadmap_public":"yes"}`), nil); err == nil || !strings.Contains(err.Error(), "roadmap_public must be a boolean") {
 		t.Fatalf("string: %v", err)
 	}
-	if _, err := canonicalRoadmapPublication(person, "ticket", []byte(`{"roadmap_public":null}`), nil); err == nil || !strings.Contains(err.Error(), "roadmap_public must be a boolean") {
+	if _, err := canonicalRoadmapPublication(person, "work", []byte(`{"roadmap_public":null}`), nil); err == nil || !strings.Contains(err.Error(), "roadmap_public must be a boolean") {
 		t.Fatalf("null: %v", err)
 	}
-	if _, err := canonicalRoadmapPublication(person, "ticket", []byte(`{"roadmap_public":true,"roadmap_public_source":"agent"}`), nil); err == nil || !strings.Contains(err.Error(), "roadmap_public_source") {
+	if _, err := canonicalRoadmapPublication(person, "work", []byte(`{"roadmap_public":true,"roadmap_public_source":"agent"}`), nil); err == nil || !strings.Contains(err.Error(), "roadmap_public_source") {
 		t.Fatalf("forged source: %v", err)
 	}
-	stamped, err := canonicalRoadmapPublication(person, "ticket", []byte(`{"priority":"low","roadmap_public":true,"roadmap_public_by":"spoof"}`), nil)
+	stamped, err := canonicalRoadmapPublication(person, "work", []byte(`{"priority":"low","roadmap_public":true,"roadmap_public_by":"spoof"}`), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +69,7 @@ func TestCanonicalRoadmapPublication(t *testing.T) {
 		t.Fatalf("project: %v %s", err, project)
 	}
 	incomplete := []byte(`{"roadmap_public":true,"priority":"low"}`)
-	agentKept, err := canonicalRoadmapPublication(agent, "ticket", []byte(`{"roadmap_public":true,"roadmap_public_source":"person","roadmap_public_by":"spoof","priority":"high"}`), incomplete)
+	agentKept, err := canonicalRoadmapPublication(agent, "work", []byte(`{"roadmap_public":true,"roadmap_public_source":"person","roadmap_public_by":"spoof","priority":"high"}`), incomplete)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestCanonicalRoadmapPublication(t *testing.T) {
 	if agentFields["roadmap_public"] != true || agentFields["roadmap_public_source"] != nil || agentFields["priority"] != "high" {
 		t.Fatalf("incomplete agent: %#v", agentFields)
 	}
-	personKept, err := canonicalRoadmapPublication(person, "ticket", []byte(`{"roadmap_public":true,"priority":"high"}`), incomplete)
+	personKept, err := canonicalRoadmapPublication(person, "work", []byte(`{"roadmap_public":true,"priority":"high"}`), incomplete)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +89,8 @@ func TestCanonicalRoadmapPublication(t *testing.T) {
 
 func TestRoadmapPublicationIsPersonOnly(t *testing.T) {
 	p := newPrincipal(t, "roadmap-pub")
-	ticketKind := kindBySlug(t, p, "ticket")
+	customKind(t, p, "task", "task")
+	ticketKind := kindBySlug(t, p, "work")
 	taskKind := kindBySlug(t, p, "task")
 	projectKind := kindBySlug(t, p, "project")
 	agent := routeAgent(t, p.TenantID)
@@ -164,7 +165,7 @@ func TestRoadmapPublicationIsPersonOnly(t *testing.T) {
 
 func TestRoadmapPublicationKeepsNumbers(t *testing.T) {
 	raw := json.RawMessage(`{"estimate_hours":1.5,"roadmap_public":false}`)
-	out, err := canonicalRoadmapPublication(tenant.Principal{Kind: tenant.Agent}, "ticket", raw, nil)
+	out, err := canonicalRoadmapPublication(tenant.Principal{Kind: tenant.Agent}, "work", raw, nil)
 	if err != nil || string(out) != string(raw) {
 		t.Fatalf("number preserved: %v %s", err, out)
 	}

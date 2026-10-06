@@ -5,6 +5,7 @@ package portal
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"regexp"
 	"sort"
 	"strconv"
@@ -59,6 +60,13 @@ var (
 // public release history is omitted so it does not stay in both places.
 // A missing hide_from_release_notes is visible; only boolean true hides.
 func loadPublicRoadmap(ctx context.Context, tx pgx.Tx) ([]publicRoadmapItem, error) {
+	productID, err := portalProductID(ctx, tx)
+	if errors.Is(err, errNoProduct) {
+		return []publicRoadmapItem{}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
 	shipped, err := frozenPublicTicketIDs(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -90,9 +98,9 @@ func loadPublicRoadmap(ctx context.Context, tx pgx.Tx) ([]publicRoadmapItem, err
 		         WHEN 'string' THEN n.fields->>'release'
 		       END
 		FROM nodes n
-		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id AND k.slug = 'ticket'
-		JOIN portal_pace pace ON pace.tenant_id = n.tenant_id AND pace.project_node_id = n.project_id
-		WHERE n.deleted_at IS NULL
+		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id AND k.slug IN ('work','ticket')
+		JOIN portal_product_pace pace ON pace.tenant_id = n.tenant_id AND pace.project_node_id = n.project_id
+		WHERE pace.product_id=$1::uuid AND n.deleted_at IS NULL
 		  AND lower(n.state) NOT IN ('cancelled', 'canceled', 'archived', 'deleted')
 		  AND jsonb_typeof(n.fields->'roadmap_public') = 'boolean'
 		  AND n.fields->>'roadmap_public' = 'true'
@@ -120,7 +128,7 @@ func loadPublicRoadmap(ctx context.Context, tx pgx.Tx) ([]publicRoadmapItem, err
 		          ELSE '' END)) = 'roadmap'
 		  )
 		ORDER BY n.id
-		LIMIT 500`)
+		LIMIT 500`, productID)
 	if err != nil {
 		return nil, err
 	}

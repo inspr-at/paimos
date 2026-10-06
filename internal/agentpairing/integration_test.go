@@ -90,6 +90,7 @@ type fixture struct {
 	db         *dbtest.DB
 	h          http.Handler
 	tenantID   string
+	tenantSlug string
 	person     string
 	cookie     *http.Cookie
 	profiles   map[string]string
@@ -120,13 +121,17 @@ func uuid(t *testing.T, d *dbtest.DB) string {
 }
 func newFixture(t *testing.T) *fixture {
 	t.Helper()
-	d := dbtest.Open(t)
-	id, err := tenantbootstrap.Create(t.Context(), d.App, "pairtest", "Pairing test")
+	return newFixtureInTenant(t, dbtest.Open(t), "pairtest")
+}
+
+func newFixtureInTenant(t *testing.T, d *dbtest.DB, slug string) *fixture {
+	t.Helper()
+	id, err := tenantbootstrap.Create(t.Context(), d.App, slug, "Pairing test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	sessionKey := []byte(nonce())
-	f := &fixture{t: t, db: d, tenantID: id, profiles: map[string]string{}, sessionKey: sessionKey}
+	f := &fixture{t: t, db: d, tenantID: id, tenantSlug: slug, profiles: map[string]string{}, sessionKey: sessionKey}
 	f.rebuildHandler()
 	login := f.call("POST", "/api/auth/dev-login", map[string]string{"email": "pairing@example.test"}, false, "", 200)
 	cookies := login.Result().Cookies()
@@ -170,11 +175,11 @@ func newFixture(t *testing.T) *fixture {
 // changes. Database rows, signing configuration and modules remain identical.
 func (f *fixture) rebuildHandler() {
 	f.t.Helper()
-	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: f.sessionKey, BootstrapTenantSlug: "pairtest", BootstrapAdminEmail: "pairing@example.test"}, f.db.App)
+	am, err := auth.New(auth.Config{Env: "dev", PublicURL: origin, SessionKey: f.sessionKey, BootstrapTenantSlug: f.tenantSlug, BootstrapAdminEmail: "pairing@example.test"}, f.db.App)
 	if err != nil {
 		f.t.Fatal(err)
 	}
-	pairing := agentpairing.New(f.db.App, origin, "pairtest")
+	pairing := agentpairing.New(f.db.App, origin, f.tenantSlug)
 	if err := pairing.ConfigureAccountLink(f.sessionKey); err != nil {
 		f.t.Fatal(err)
 	}
@@ -1021,7 +1026,7 @@ func TestPairingExpiredReservationReleasesSlotAndAllowsOngoing(t *testing.T) {
 		t.Fatalf("expiry leaked reservation or invented process: %s %s held=%d started=%v claimed=%v expired=%v", state, holdState, held, started, claimed, expired)
 	}
 	retry := f.redeem(p)
-	if retry.Enrollments[0].VerificationState != "expired" || *retry.Enrollments[0].VerificationRunID != *e.VerificationRunID {
+	if retry.Enrollments[0].VerificationState != "expired" || !retry.Enrollments[0].VerificationExpiredReady || *retry.Enrollments[0].VerificationRunID != *e.VerificationRunID {
 		t.Fatal("expiry projection/retry binding wrong")
 	}
 	f.claim(v, e, key, ids, 409)
@@ -1676,4 +1681,28 @@ func (f *fixture) addClaude(p *proposal, computerID, key string) agentpairing.Vi
 	f.submit(q)
 	f.approve(q, "connect_only")
 	return f.redeem(q)
+}
+
+func TestPairingVerificationClaimsWithNullTrace(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.submit(p)
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	e := v.Enrollments[0]
+	var absent bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT trace IS NULL FROM agent_runs WHERE id=$1`, *e.VerificationRunID).Scan(&absent); err != nil {
+		t.Fatal(err)
+	}
+	if !absent {
+		t.Fatal("pairing fixture no longer covers NULL trace")
+	}
+	f.probe(v, e, key, 200)
+	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+	var run agentruns.Run
+	decodeResult(t, f.call("GET", "/api/runs/"+*e.VerificationRunID, nil, false, key, 200), &run)
+	if run.Status != "starting" || run.Purpose != "pairing_verification" || run.RepositoryMutationAllowed {
+		t.Fatal("verification claim lost its read-only contract", run)
+	}
 }

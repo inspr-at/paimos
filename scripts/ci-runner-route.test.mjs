@@ -111,17 +111,17 @@ test("router outputs bind each attempt and refuse a missing or invalid attempt",
   }
 });
 
-test("CI expressions keep PRs and stale attempts on seven hosted shards", () => {
+test("CI expressions keep PRs on two hosted tier shards and stale main attempts on seven", () => {
   const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const shardJob = workflow.split("  go-test:\n")[1].split("\n  go-timing:")[0];
   const runnerExpression = shardJob.match(/^    runs-on: (.+)$/m)[1];
   const shardExpression = shardJob.match(/^        shard: (.+)$/m)[1];
   // Evaluate the checked-in expressions, not a separate implementation of the
   // workflow decision. These expressions use the common JS/Actions operators.
-  function evaluate(expression, github, outputs) {
-    const source = expression.slice(3, -2).replaceAll("needs.runner-route.outputs.", "outputs.");
-    return Function("github", "outputs", "contains", "fromJSON", `return (${source});`)(
-      github, outputs, (values, value) => values.includes(value), JSON.parse,
+  function evaluate(expression, github, outputs, tierMode="essential") {
+    const source = expression.slice(3, -2).replaceAll("needs.runner-route.outputs.", "outputs.").replaceAll("needs.tier-plan.outputs.mode", "tierMode");
+    return Function("github", "outputs", "contains", "fromJSON", "tierMode", `return (${source});`)(
+      github, outputs, (values, value) => values.includes(value), JSON.parse, tierMode,
     );
   }
   for (const event of ["push", "workflow_dispatch", "pull_request", "pull_request_target", "merge_group", "schedule"]) {
@@ -133,7 +133,9 @@ test("CI expressions keep PRs and stale attempts on seven hosted shards", () => 
         const github = { event_name: event, ref, run_attempt };
         const admitted = trustedEvents.includes(event) && ref === "refs/heads/main" && run_attempt === 1;
         assert.deepEqual(evaluate(runnerExpression, github, outputs), admitted ? selected.runs_on : ["ubuntu-latest"]);
-        assert.deepEqual(evaluate(shardExpression, github, outputs), admitted ? [1, 2, 3, 4] : [1, 2, 3, 4, 5, 6, 7]);
+        assert.deepEqual(evaluate(shardExpression, github, outputs), admitted ? [1, 2, 3, 4] :
+          ["pull_request", "merge_group"].includes(event) ? [1, 2] : [1, 2, 3, 4, 5, 6, 7]);
+        assert.deepEqual(evaluate(shardExpression, github, outputs,"full"), admitted ? [1, 2, 3, 4] : [1, 2, 3, 4, 5, 6, 7]);
       }
     }
   }
@@ -143,5 +145,32 @@ test("CI expressions keep PRs and stale attempts on seven hosted shards", () => 
     const outputs = { ...selected, runs_on: JSON.stringify(selected.runs_on), run_attempt: "1" };
     assert.deepEqual(evaluate(runnerExpression, github, outputs), ["ubuntu-latest"]);
     assert.deepEqual(evaluate(shardExpression, github, outputs), [1, 2, 3, 4, 5, 6, 7]);
+  }
+});
+
+test("key dialog CI uses the hosted shards and covers the shared access markup", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  const units = workflow.split("  web-unit:\n")[1].split("\n  web-shard:")[0];
+  assert.match(units, /sudo apt-get install -y -qq fish zsh/);
+  const install = units.indexOf("Install shells used by command round-trip unit tests");
+  const execute = units.indexOf("Run selected web units without retries");
+  assert.ok(install >= 0 && execute > install, 'Unit runners must install shells before running tests');
+  assert.match(units, /cli\.mjs run web --unit/);
+  assert.doesNotMatch(workflow, /Key dialog layout regression|playwright .*tests\/key-layout\.spec\.ts/);
+  const shardJob = workflow.split("  web-shard:\n")[1].split("\n  web:")[0];
+  assert.match(shardJob, /runs-on: ubuntu-latest/);
+  assert.match(shardJob, /cli\.mjs run web --shard/);
+  const manifest = JSON.parse(readFileSync(new URL("../web/ci-web-shards.json", import.meta.url), "utf8"));
+  const layoutGroups = manifest.groups.filter(group => group.specs.some(spec => spec.file === "tests/key-layout.spec.ts"));
+  assert.equal(layoutGroups.length, 1);
+  const layout = layoutGroups[0];
+  assert.notEqual(layout.gate, false);
+  assert.equal(layout.hostedOnly, true);
+  assert.equal(layout.config, "playwright.ui.config.ts");
+  assert.deepEqual(layout.flags, ["--workers=1"]);
+  const access = manifest.groups.find(group => group.id === "access-dialogs");
+  assert.equal(access.hostedOnly, true);
+  for (const file of ["tests/access.spec.ts", "tests/key-dialog.spec.ts"]) {
+    assert.ok(access.specs.some(spec => spec.file === file));
   }
 });

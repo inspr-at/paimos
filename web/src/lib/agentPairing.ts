@@ -51,7 +51,7 @@ const SETUP_STATES: readonly SetupState[] = ['not_started', 'approved', 'provisi
 const VERIFICATION_STATES: readonly VerificationState[] = ['not_selected', 'queued', 'starting', 'running', 'waiting', 'completed', 'failed', 'cancelled', 'ownership_lost', 'expired', 'unavailable']
 const CONNECTIVITY: readonly Connectivity[] = ['online', 'offline', 'unknown']
 const VERIFICATION_ACTIVE: readonly VerificationState[] = ['queued', 'starting', 'running', 'waiting']
-const VERIFICATION_FAILED: readonly VerificationState[] = ['failed', 'cancelled', 'ownership_lost', 'expired']
+const VERIFICATION_FAILED: readonly VerificationState[] = ['failed', 'cancelled', 'ownership_lost']
 const PAIRING_CODE_KEY = 'aeon.pairingUserCode'
 
 export interface RequestedAccount {
@@ -95,6 +95,8 @@ export interface PairingEnrollment {
   active_run_ids: string[]
   /** Actual run result. A verification_run_id alone is not success. */
   verification_state?: VerificationState
+  verification_expired_ready?: boolean
+  can_verify?: boolean
   verification_reason?: string
   verification_error?: string | null
   /** Drained only after the computer acknowledges cleanup. Revoke does not infer it. */
@@ -917,9 +919,9 @@ function setupProgress(view: PairingView): PairingProgress {
       renewsAuthority: false,
     }
   }
-  if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED as readonly string[]).includes(item.verification_state))) {
+  if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED.includes(item.verification_state) || (item.verification_state === 'expired' && describeEnrollmentStatus(view, item) !== 'Ready')))) {
     const reason = view.enrollments.find(item => item.verification_error)?.verification_error
-    return { phase: 'verify', title: 'Verification did not succeed', detail: reason || 'The verification run did not succeed.', next: 'The one-time allowance was not refilled. A new verification needs a new pairing approval.', renewsAuthority: false }
+    return { phase: 'verify', title: 'Verification did not succeed', detail: reason || 'The verification run did not succeed.', next: 'The one-time allowance was not refilled. The account owner can use Verify again for a fresh read-only check.', renewsAuthority: false }
   }
   if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state))) {
     return { phase: 'verify', title: 'Verification is running', detail: 'One short read-only run was approved for each selected harness. A later run on the computer is not a verification.', next: 'Ongoing work follows your account approval. This page will not start another verification.', renewsAuthority: false }
@@ -938,9 +940,9 @@ function setupProgress(view: PairingView): PairingProgress {
   }
   const verificationAsked = view.verification?.mode === 'one_per_harness'
   const verificationRelevant = view.enrollments.filter(item => item.state !== 'revoked' && item.verification_state != null && item.verification_state !== 'not_selected')
-  const verificationDone = !verificationAsked || (verificationRelevant.length > 0 && verificationRelevant.every(item => item.verification_state === 'completed'))
+  const verificationDone = !verificationAsked || (verificationRelevant.length > 0 && verificationRelevant.every(item => item.verification_state === 'completed' || (item.verification_state === 'expired' && describeEnrollmentStatus(view, item) === 'Ready')))
   if (progress === 'connected' && verificationDone && view.connectivity === 'online') {
-    return { phase: 'connected', title: 'Connected', detail: 'The computer reported that setup finished, and a recent probe succeeded.', next: 'Add another harness from this computer, or set an ongoing allowance when you want more work.', renewsAuthority: false }
+    return { phase: 'connected', title: 'Connected', detail: verificationRelevant.some(item => item.verification_state === 'expired') ? 'Verification expired. A recent account probe is ready; the old check does not block ongoing work.' : 'The computer reported that setup finished, and a recent probe succeeded.', next: 'Add another harness from this computer, or set an ongoing allowance when you want more work.', renewsAuthority: false }
   }
   if (progress === 'connected' && verificationDone) {
     return { phase: 'setup', title: 'Setup finished', detail: 'The computer reported that setup finished. Current connectivity is unknown.', next: 'Wait for a probe before treating the daemon as online. This page will not start another verification.', renewsAuthority: false }
@@ -1039,7 +1041,16 @@ const PROBE_DETAILS = new Set([
   'the sign-in answer did not identify the account',
   'the sign-in command exited unsuccessfully',
 ])
+const PAIRING_DETAILS = new Set([
+  'the local pairing state could not be read or saved',
+  'the pairing server could not confirm the lifecycle',
+  'the pairing response did not match the approved computer',
+  'the pairing response contains an unapproved account',
+  'the local dispatch fence could not be confirmed',
+  'the approved runtime configuration could not be refreshed',
+])
 function probeDetail(reason: unknown, detail: unknown, harness: string): string | undefined {
+  if (reason === 'pairing_sync_failed') return typeof detail === 'string' && PAIRING_DETAILS.has(detail) ? detail : undefined
   if (reason === 'login_required' && detail === "the approved account is signed out in the daemon's view") return detail
   if (detail === 'the default Claude profile is not private (requires mode 0700)' && harness !== 'claude') return undefined
   return reason === 'probe_failed' && typeof detail === 'string' && PROBE_DETAILS.has(detail) ? detail : undefined
@@ -1108,7 +1119,7 @@ export function describeEnrollmentDiagnostic(view: HarnessView, enrollment: { ac
   if (!item) return null
   const cause = probeDetail(item.reason, item.reason_detail, enrollment.harness)
   return {
-    hint: cause ? `${harnessDisplayName(enrollment.harness)}: ${item.reason === 'login_required' ? '' : 'sign-in check failed: '}${cause}.` : '',
+    hint: cause ? `${harnessDisplayName(enrollment.harness)}: ${item.reason === 'login_required' ? '' : item.reason === 'pairing_sync_failed' ? 'pairing sync failed: ' : 'sign-in check failed: '}${cause}.` : '',
     command: harnessFix(enrollment.harness, item.reason, cause)?.command ?? '',
   }
 }
@@ -1134,6 +1145,10 @@ export function describeHarnessHint(view: HarnessView, harness: string): string 
   const accounts = view.enrollments?.filter(item => item.harness === harness && item.state === 'connected') ?? []
   const accountName = accounts.length === 1 && accounts[0]?.label ? accounts[0].label : harnessDisplayName(harness)
   if (detail.reason === 'binding_missing') return `${harnessDisplayName(harness)} was approved but isn't set up on this computer. Add it here or remove it from this computer in ${product()}.`
+  if (detail.reason === 'pairing_sync_failed') {
+    const cause = probeDetail(detail.reason, detail.reason_detail, harness)
+    return `${accountName}: pairing sync failed${cause ? `: ${cause}` : ''}.`
+  }
   if (detail.reason === 'probe_pending') return `${accountName}: waiting for the sign-in and availability check; blocked after 60 seconds.`
   if (detail.reason === 'capacity_capture') return `${accountName}: a short capacity check is in progress; expected within 10 seconds.`
   if (['probe_timeout', 'probe_failed', 'capacity_timeout'].includes(detail.reason ?? '')) return `${accountName}: ${reasonLabel(detail.state, detail.reason).toLowerCase()}.`
@@ -1150,7 +1165,7 @@ export function describeHarnessHint(view: HarnessView, harness: string): string 
 
 function reasonLabel(status: string, reason?: string): string {
   const labels: Record<string, string> = { ready: 'Ready', blocked: 'Needs attention', login_required: 'Sign in required', checking: 'Checking', draining: 'Draining' }
-  const reasons: Record<string, string> = { repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair', binding_missing: 'Approved, not set up here', probe_pending: 'Checking account (up to 60 seconds)', probe_timeout: 'Account check timed out after 60 seconds', probe_failed: 'Account availability check failed', capacity_capture: 'Capturing capacity (up to 10 seconds)', capacity_timeout: 'Capacity capture timed out after 10 seconds' }
+  const reasons: Record<string, string> = { pairing_sync_failed: 'Pairing sync failed', repin_pending: 'Waiting for repin', dependency_invalid: 'Dependency needs repair', pin_missing: 'Pin missing', login_required: 'Sign in required', starting: 'Starting', cli_unavailable: 'Executable unavailable', pin_partial: 'Pin incomplete', pin_drifted: 'Pin changed', pin_invalid: 'Pin invalid', pin_unsafe: 'Pin unsafe', harness_failed: 'Failed to start', profile_permissions: 'Profile permissions need repair', binding_missing: 'Approved, not set up here', probe_pending: 'Checking account (up to 60 seconds)', probe_timeout: 'Account check timed out after 60 seconds', probe_failed: 'Account availability check failed', capacity_capture: 'Capturing capacity (up to 10 seconds)', capacity_timeout: 'Capacity capture timed out after 10 seconds' }
   // A code from a newer daemon is shown raw rather than dropped or guessed.
   if (!HARNESS_STATES.includes(status as typeof HARNESS_STATES[number])) return `Needs attention · ${reason ?? status}`
   if (reason) return reasons[reason] ?? `Needs attention · ${reason}`
@@ -1179,7 +1194,7 @@ export function describeHarnessStatus(view: HarnessView, harness: string): strin
 }
 
 /** Per-enrollment label. A complete attention list names the blocked accounts and leaves the others Ready. An account missing from a truncated list is not Ready. */
-export function describeEnrollmentStatus(view: HarnessView, enrollment: { account_id: string; harness: string; verification_state?: VerificationState }): string {
+export function describeEnrollmentStatus(view: HarnessView, enrollment: { account_id: string; harness: string; verification_state?: VerificationState; verification_expired_ready?: boolean }): string {
   if (view.computer_state !== 'connected') return ''
   const detail = harnessDetail(view, enrollment.harness)
   const attention = attentionReport(detail)
@@ -1190,9 +1205,11 @@ export function describeEnrollmentStatus(view: HarnessView, enrollment: { accoun
     if (detail?.state !== 'ready' || attention.truncated || attention.count !== attention.accounts.length) return freshLabel(view, 'Needs attention')
     status = freshLabel(view, 'Ready')
   }
+  if (enrollment.verification_state === 'expired' && enrollment.verification_expired_ready === false) return freshLabel(view, 'Verification failed')
   if (status && status !== 'Ready') return status
   const verification = enrollment.verification_state
   if (verification && VERIFICATION_ACTIVE.includes(verification)) return freshLabel(view, verification === 'queued' ? 'Verification queued' : 'Verifying account')
+  if (verification === 'expired' && status !== 'Ready') return freshLabel(view, 'Verification failed')
   if (verification && VERIFICATION_FAILED.includes(verification)) return freshLabel(view, 'Verification failed')
   return status
 }
@@ -1253,7 +1270,7 @@ export function pairingStillLive(view: PairingView): boolean {
   const phase = describeProgress(view).phase
   if (phase === 'denied' || phase === 'expired' || phase === 'revoked') return false
   if (view.setup_state === 'setup_failed') return false
-  if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED as readonly string[]).includes(item.verification_state))) return false
+  if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED.includes(item.verification_state) || (item.verification_state === 'expired' && describeEnrollmentStatus(view, item) !== 'Ready')))) return false
   const connected = describeComputerStatus(view).stateLabel === 'Connected'
   const moving = view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state))
   return !(connected && !moving)
@@ -1816,6 +1833,8 @@ function enrollments(value: unknown): PairingEnrollment[] {
       state: oneOf(record.state, COMPUTER_STATES, 'enrollment.state'),
       local_cleanup: oneOf(record.local_cleanup, CLEANUP_STATES, 'enrollment.local_cleanup'),
       verification_run_id: optionalUuid(record.verification_run_id, 'verification_run_id'),
+      ...(typeof record.can_verify === 'boolean' ? { can_verify: record.can_verify } : {}),
+      ...(typeof record.verification_expired_ready === 'boolean' ? { verification_expired_ready: record.verification_expired_ready } : {}),
       active_run_ids: uuidList(record.active_run_ids, 'active_run_ids'),
       ...optionalVerification(record),
     }

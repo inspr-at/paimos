@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,9 +19,11 @@ import (
 
 // Me is the GET /api/me response.
 type Me struct {
-	Principal Principal `json:"principal"`
-	Tenant    Tenant    `json:"tenant"`
-	Identity  *Identity `json:"identity"`
+	OwnerWorkstation      bool      `json:"owner_workstation,omitempty"`
+	WorkstationComputerID string    `json:"workstation_computer_id,omitempty"`
+	Principal             Principal `json:"principal"`
+	Tenant                Tenant    `json:"tenant"`
+	Identity              *Identity `json:"identity"`
 }
 
 // Principal is the acting person or agent.
@@ -54,6 +57,7 @@ type StatusError struct {
 	Message       string
 	AttachRefusal string
 	ReasonCode    string
+	RetryAfter    time.Duration
 }
 
 func (e *StatusError) Error() string {
@@ -63,11 +67,12 @@ func (e *StatusError) Error() string {
 	return fmt.Sprintf("api %d", e.Status)
 }
 
-// Client calls one Aeon instance with an agent API key.
+// Client calls one Aeon instance with an agent key or an explicit person session.
 type Client struct {
-	BaseURL string
-	Token   string
-	HTTP    *http.Client
+	BaseURL      string
+	Token        string
+	SessionToken string
+	HTTP         *http.Client
 	// ConfirmStepUp receives only a challenge ID. Nil fails closed on 428.
 	ConfirmStepUp func(context.Context, string) (string, error)
 }
@@ -79,6 +84,15 @@ func New(baseURL, token string) *Client {
 		Token:   token,
 		HTTP:    &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// NewSession authenticates as a signed-in person, never as a bearer agent.
+func NewSession(baseURL, sessionToken string) *Client {
+	c := New(baseURL, "")
+	c.SessionToken = sessionToken
+	// A person cookie must never follow a redirect to another destination.
+	c.HTTP.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return c
 }
 
 // Me calls GET /api/me.
@@ -124,7 +138,9 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
-	if c.Token != "" {
+	if c.SessionToken != "" {
+		req.AddCookie(&http.Cookie{Name: "aeon_session", Value: c.SessionToken})
+	} else if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
 	for name, value := range headers {
@@ -216,7 +232,7 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 				ReasonCode    string `json:"reason_code"`
 			}
 			_ = json.Unmarshal(payload, &detail)
-			return &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal, ReasonCode: detail.ReasonCode}
+			return &StatusError{Status: res.StatusCode, Message: errorMessage(payload), AttachRefusal: detail.AttachRefusal, ReasonCode: detail.ReasonCode, RetryAfter: retryAfter(res.Header.Get("Retry-After"), time.Now())}
 		}
 		if dest == nil || len(bytes.TrimSpace(payload)) == 0 {
 			return nil
@@ -227,6 +243,28 @@ func (c *Client) DoWithHeaders(ctx context.Context, method, path string, body, d
 		return nil
 	}
 	return fmt.Errorf("Touch ID retry exhausted")
+}
+
+// Bound untrusted delay values to one day. Both HTTP forms are supported;
+// malformed, past or excessive values provide no retry instruction.
+func retryAfter(value string, now time.Time) time.Duration {
+	if len(value) > 128 {
+		return 0
+	}
+	value = strings.TrimSpace(value)
+	if seconds, err := strconv.ParseUint(value, 10, 32); err == nil {
+		if seconds <= 86400 {
+			return time.Duration(seconds) * time.Second
+		}
+		return 0
+	}
+	if until, err := http.ParseTime(value); err == nil {
+		delay := until.Sub(now)
+		if delay > 0 && delay <= 24*time.Hour {
+			return delay
+		}
+	}
+	return 0
 }
 
 func errorMessage(payload []byte) string {

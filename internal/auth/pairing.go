@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -17,6 +18,10 @@ import (
 // resources are reachable; pairing never grants tenant administration.
 func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 	return db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if authz.OwnerWorkstation(p) {
+			_, _, err := authz.WorkstationKeyTx(r.Context(), tx, p)
+			return err
+		}
 		paired, err := agentpairing.PairedPrincipal(r.Context(), tx, p.ID)
 		if err != nil || !paired {
 			return err
@@ -34,9 +39,19 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 			return deny
 		}
 		switch parts[1] {
+		case "status":
+			// A live paired computer may read the same tenant status metadata;
+			// this does not admit other paths or bypass pairing revocation.
+			if len(parts) == 3 && parts[2] == "help" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+				return nil
+			}
 		case "me":
 			if r.Method == "GET" && len(parts) == 2 {
 				return nil
+			}
+		case "agentd":
+			if r.Pattern == "GET /api/agentd/step-ups/{challenge_id}" {
+				return nil // Handler requires the runtime key plus the computer lifecycle proof.
 			}
 		case "agent-pairing":
 			if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/account-link" {

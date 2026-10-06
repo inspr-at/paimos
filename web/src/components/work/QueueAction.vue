@@ -1,11 +1,12 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { APIError, type ListItem } from '../../lib/api'
 import { can } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import { useWorkQueue } from '../../stores/workQueue'
-import { queueable, readyGaps } from '../../lib/workQueue'
+import { queueable, readyGaps, queueIneligibleReason, type QueueWireEntry } from '../../lib/workQueue'
+import { statusMeta } from '../../lib/work'
 import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
 import QueueReadyPanel from './QueueReadyPanel.vue'
@@ -15,35 +16,65 @@ const readyAnchor = ref<HTMLElement | null>(null)
 const button = ref<HTMLElement>()
 const entry = computed(() => queueable(props.row) ? queue.entry(props.projectId, props.row.id) : null)
 const allowed = computed(() => session.identity?.principal.kind === 'person' && can('run.create', props.projectId))
-const eligible = computed(() => queueable(props.row))
+const eligible = computed(() => queueable(props.row) || queue.stale(props.row))
 const gaps = computed(() => queue.gaps(props.row))
-const title = computed(() => !allowed.value ? 'Permission to queue work is required' : entry.value ? `Queued #${entry.value.position} · click to remove · q` : !eligible.value ? `${props.row.state}: the queue takes New, Open, Backlog or Blocked` : gaps.value.length ? 'Not ready to queue; click to fix' : 'Queue for the next free agent · q')
-watch(() => props.row.id, () => { readyAnchor.value = null })
+const title = computed(() => !allowed.value ? 'Permission to queue work is required' : entry.value ? `Queued #${entry.value.position} · click to remove · q` : !eligible.value ? queueIneligibleReason(props.row) : gaps.value.length ? 'Not ready to queue; click to fix' : queue.stale(props.row) ? 'In progress, but nobody is working on it. Queue it for the next free agent · q' : 'Queue for the next free agent · q')
+watch(() => [props.row.id, props.projectId, session.identity?.principal.id], () => { readyAnchor.value = null })
 // Only ambiguous blockers need an extra row read: a live blocks relation is
 // named on the server even when the list has no blocker field.
 watch(() => [props.row.id, props.row.updated_at, allowed.value], () => {
-  if (allowed.value && eligible.value && readyGaps(props.row).includes('blocker')) void queue.checkReadiness(props.row).catch(() => {})
+  if (session.identity && ((props.row.queue_stale === undefined && statusMeta(props.row.state).key === 'progress') || (allowed.value && eligible.value && readyGaps(props.row).includes('blocker')))) void queue.checkReadiness(props.row).catch(() => {})
 }, { immediate: true })
 async function toggle() {
   if (!allowed.value || queue.busy || (!entry.value && !eligible.value)) return
+  const row = props.row, id = row.id, revision = row.updated_at, project = props.projectId, actor = session.identity?.principal.id
+  const current = () => props.row.id === id && props.projectId === project && session.identity?.principal.id === actor && allowed.value
+  const queued = entry.value
   try {
-    if (!entry.value && gaps.value.length && !(await queue.checkReadiness(props.row)).ready) { readyAnchor.value = button.value ?? null; return }
-    if (entry.value) { await queue.remove(props.projectId, props.row.id); toast(`${props.row.key} left the queue`) }
-    else { await queue.add(props.projectId, props.row.id); toast(`${props.row.key} queued`) }
+    if (!queued && gaps.value.length) {
+      const ready = await queue.checkReadiness(row)
+      if (!current() || props.row.updated_at !== revision) return
+      if (!ready.ready) { readyAnchor.value = button.value ?? null; return }
+    }
+    if (queued) {
+      await queue.remove(project, id)
+      if (current()) toast(`${row.key} left the queue`)
+    } else {
+      const result = await queue.add(project, id)
+      await nextTick()
+      if (!result || !current()) return
+      await showAdded(row, project, actor, result)
+    }
   } catch (e) {
+    if (!current()) return
     if (e instanceof APIError && e.status === 422 && e.body.code === 'queue_not_ready') readyAnchor.value = button.value ?? null
     else toast(e instanceof Error ? e.message : 'The queue change was not saved.', { tone: 'error' })
   }
 }
+async function showAdded(row: ListItem, project: string, actor: string | undefined, result: QueueWireEntry) {
+  await nextTick()
+  const id = row.id
+  const current = () => props.row.id === id && props.projectId === project && session.identity?.principal.id === actor && allowed.value
+  if (result.node_id !== id || !current()) return
+  const queuedRevision = result.undo?.revision ?? props.row.updated_at, token = result.undo
+  toast(`${row.key} queued`, token ? { action: { label: 'Undo', run: () => {
+    if (!current() || props.row.updated_at !== queuedRevision || queue.entry(project, id)?.run_id !== token.run_id) {
+      toast('The ticket changed; this queue addition can no longer be undone.', { tone: 'error' }); return
+    }
+    void queue.undoAdd(project, id, token).then(result => {
+      if (result?.removed && current()) toast(`${row.key} returned to In progress`)
+    }).catch(e => { if (current()) toast(e instanceof Error ? e.message : 'The queue addition could not be undone.', { tone: 'error' }) })
+  } } } : {})
+}
 defineExpose({ toggle })
 </script>
 <template>
-  <button ref="button" type="button" class="q-btn" :class="[label ? 'btn sm q-action' : 'icon-btn sm flat', { unready: !entry && eligible && gaps.length }]" :aria-pressed="!!entry" :aria-disabled="!allowed || (!entry && !eligible)" :disabled="queue.busy" :aria-haspopup="!entry && gaps.length ? 'dialog' : undefined" :aria-label="`${entry ? `Remove ${row.key} from the queue` : `Queue ${row.key}`}${!allowed || (!entry && !eligible) || (!entry && gaps.length) ? `: ${title}` : ''}`" :data-tip="title" aria-keyshortcuts="q" @click.stop="toggle">
+  <button v-if="row.is_leaf !== false" ref="button" type="button" class="q-btn" :class="[label ? 'btn sm q-action' : 'icon-btn sm flat', { unready: !entry && eligible && gaps.length }]" :aria-pressed="!!entry" :aria-disabled="!allowed || (!entry && !eligible)" :disabled="queue.busy" :aria-haspopup="!entry && gaps.length ? 'dialog' : undefined" :aria-label="`${entry ? `Remove ${row.key} from the queue` : `Queue ${row.key}`}${!allowed || (!entry && !eligible) || (!entry && gaps.length) ? `: ${title}` : ''}`" :data-tip="title" aria-keyshortcuts="q" @click.stop="toggle">
     <AppIcon v-if="!entry" name="queue-add" :size="label ? 14 : 13" />
     <template v-else><AppIcon name="queue-on" class="g-on" :size="label ? 14 : 13" /><AppIcon name="queue-off" class="g-remove" :size="label ? 14 : 13" /></template>
-    <span v-if="label" class="q-label">{{ entry ? `Queued #${entry.position}` : 'Queue' }}</span>
+    <span v-if="label" class="q-label">Queue</span>
   </button>
-  <QueueReadyPanel v-if="readyAnchor" :row="row" :project-id="projectId" :anchor="readyAnchor" @close="restore => { readyAnchor = null; if (restore) button?.focus() }" />
+  <QueueReadyPanel v-if="readyAnchor" :row="row" :project-id="projectId" :anchor="readyAnchor" @queued="result => showAdded(row, projectId, session.identity?.principal.id, result)" @close="restore => { readyAnchor = null; if (restore) button?.focus() }" />
 </template>
 <style scoped>
 .q-btn { position: relative; }

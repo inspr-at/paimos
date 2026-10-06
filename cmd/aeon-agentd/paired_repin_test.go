@@ -31,6 +31,8 @@ type repinSupervisor struct {
 	refreshes       []recordedRefresh
 }
 
+func (*repinSupervisor) SetPairingFailure(string) {}
+
 func (s *repinSupervisor) SetHarnessHoldWithReason(harness, code, reason string) {
 	if s.holds == nil {
 		s.holds = map[string]string{}

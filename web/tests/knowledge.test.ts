@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DOCK_LIST_RESERVE, DOCK_MIN_WIDTH, dockPath, entryParam, parseEntryParam, plainError, slugProblem, slugify, suggestSlug, withoutTitle } from '../src/lib/knowledge.ts'
+import { DOCK_LIST_RESERVE, DOCK_MIN_WIDTH, dockPath, TYPES, isKnowledgeType, typeMeta, entryParam, parseEntryParam, plainError, slugProblem, slugify, suggestSlug, withoutTitle } from '../src/lib/knowledge.ts'
 
 test('the docked entry lives in ?entry=<type>/<slug>, and only real kinds and slugs count', () => {
   assert.equal(entryParam('guideline', 'adr-001-foundation'), 'guideline/adr-001-foundation')
@@ -43,4 +43,16 @@ test('slugs: suggestions from titles, unique, and the rules agents rely on', () 
   assert.equal(slugProblem('runbook', '9lives'), 'Start with a letter.')
   assert.match(slugProblem('memory', 'stale'), /reserved/)
   assert.equal(slugProblem('runbook', 'ok_slug-2'), '')
+})
+
+test('Decision entries use the same Knowledge taxonomy, routing and history status', () => {
+  assert.equal(isKnowledgeType('decision'), true)
+  assert.equal(typeMeta('decision').label, 'Decision')
+  assert.equal(TYPES[0].type, 'runbook')
+  assert.deepEqual(parseEntryParam('decision/decision-history'), {type:'decision',slug:'decision-history'})
+  assert.equal(dockPath('AEON','decision','decision-history'),'/p/AEON/knowledge?entry=decision/decision-history')
+})
+
+test('Decisions have a distinct icon from Guidelines in lists and graph legends', () => {
+  assert.notEqual(typeMeta('decision').icon, typeMeta('guideline').icon)
 })

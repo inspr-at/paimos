@@ -38,6 +38,10 @@ func (rt *runtime) cmdStatus() *Command {
 					Label   string `json:"label"`
 					Meaning string `json:"meaning"`
 				} `json:"queued"`
+				Recurring struct {
+					Label   string `json:"label"`
+					Meaning string `json:"meaning"`
+				} `json:"recurring"`
 				Autopilot struct {
 					EffectiveEnabled bool `json:"effective_enabled"`
 					Rules            map[string]struct {
@@ -53,6 +57,9 @@ func (rt *runtime) cmdStatus() *Command {
 				fmt.Fprintf(rt.stdout, "%s — %s (set by: %s)\n", def.Label, def.Meaning, def.SetBy)
 			}
 			fmt.Fprintf(rt.stdout, "%s — %s\n", view.Queued.Label, view.Queued.Meaning)
+			if view.Recurring.Label != "" {
+				fmt.Fprintf(rt.stdout, "%s — %s\n", view.Recurring.Label, view.Recurring.Meaning)
+			}
 			fmt.Fprintf(rt.stdout, "Status autopilot: %t\n", view.Autopilot.EffectiveEnabled)
 			for _, key := range []string{"new", "backlog", "blocked", "progress", "done", "publish", "accept"} {
 				rule := view.Autopilot.Rules[key]

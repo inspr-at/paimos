@@ -184,6 +184,58 @@ func TestTicketPinDoesNotCrossAFence(t *testing.T) {
 	}
 }
 
+func TestMigratedWorkRetainsAndEditsAccountPins(t *testing.T) {
+	for _, target := range []string{"account", "group"} {
+		t.Run(target, func(t *testing.T) {
+			reset(t)
+			admin, runner, profile, token, mod := groupFixture(t)
+			pinned := groupAccount(t, mod, admin, runner, token, "pinned", "daemon-a", "Pinned", "studio")
+			other := groupAccount(t, mod, admin, runner, token, "other", "daemon-a", "Other", "studio")
+			_, ticket, run := insertTicketRun(t, admin, runner, profile)
+			var group AccountGroup
+			callStatus(t, mod, &admin, "", "POST", "/api/agent-accounts/groups", encoded(t, map[string]any{"harness": "codex", "name": "Pinned group", "account_ids": []string{pinned.ID}}), 201, &group)
+			pin := map[string]any{"ticket_id": ticket, "harness": "codex"}
+			if target == "account" {
+				pin["account_id"] = pinned.ID
+			} else {
+				pin["group_id"] = group.ID
+			}
+			// Seed a legacy pin through the real guard, then restore canonical work.
+			// The full pre-1215 upgrade is covered by the database migration test.
+			seed(t, admin, func(tx pgx.Tx) error {
+				if _, err := tx.Exec(t.Context(), `UPDATE node_kinds SET slug='ticket' WHERE slug='work'`); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO account_ticket_pins(tenant_id,ticket_id,harness,account_id,group_id) VALUES($1,$2,'codex',$3,$4)`, admin.TenantID, ticket, pin["account_id"], pin["group_id"]); err != nil {
+					return err
+				}
+				_, err := tx.Exec(t.Context(), `UPDATE node_kinds SET slug='work' WHERE slug='ticket'`)
+				return err
+			})
+			seedUsed(t, admin, pinned.ID, 80)
+			callStatus(t, mod, &runner, token, "POST", "/api/agent-accounts/route", routeBody(t, run, "daemon-a", []Account{other}, map[string]int64{"requests": 1}), 409, nil)
+			if scalar(t, admin, `SELECT count(*) FROM agent_runs WHERE id=$1 AND account_id IS NOT NULL`, run) != 0 {
+				t.Fatal("retained pin allowed an unpinned account")
+			}
+			got := mustRoute(t, mod, runner, token, run, "daemon-a", []Account{other, pinned}, map[string]int64{"requests": 1})
+			if got.AccountID != pinned.ID {
+				t.Fatal("retained work pin ignored", got.AccountID)
+			}
+			callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/pins", encoded(t, map[string]any{"ticket_id": ticket, "harness": "codex", "group_id": group.ID}), 204, nil)
+			callStatus(t, mod, &admin, "", "PUT", "/api/agent-accounts/pins", encoded(t, map[string]any{"ticket_id": ticket, "harness": "codex", "account_id": other.ID}), 204, nil)
+			var pins []TicketPin
+			callStatus(t, mod, &admin, "", "GET", "/api/agent-accounts/pins?ticket_id="+ticket, "", 200, &pins)
+			if len(pins) != 1 || pins[0].AccountID != other.ID || pins[0].GroupID != "" {
+				t.Fatalf("edited work pin not saved: %+v", pins)
+			}
+			callStatus(t, mod, &admin, "", "DELETE", "/api/agent-accounts/pins?ticket_id="+ticket+"&harness=codex", "", 204, nil)
+			if scalar(t, admin, `SELECT count(*) FROM account_ticket_pins WHERE ticket_id=$1`, ticket) != 0 {
+				t.Fatal("work pin deletion failed")
+			}
+		})
+	}
+}
+
 func groupFixture(t *testing.T) (tenant.Principal, tenant.Principal, string, string, httpapi.Module) {
 	t.Helper()
 	admin := makePrincipal(t, "groups", "person", "Ada", []string{"admin"})
@@ -245,7 +297,7 @@ func insertTreeRun(t *testing.T, person, agent tenant.Principal, profileID, titl
 			if err := tx.QueryRow(t.Context(), `
 				INSERT INTO nodes (tenant_id, key, kind_id, title, parent_id)
 				SELECT $1::uuid, aeon_next_node_key($1::uuid, k.short_prefix), k.id, 'Ticket', $2::uuid
-				FROM node_kinds k WHERE k.slug = 'ticket'
+				FROM node_kinds k WHERE k.slug = 'work'
 				RETURNING id::text`, person.TenantID, project).Scan(&ticket); err != nil {
 				return err
 			}

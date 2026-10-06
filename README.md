@@ -4,11 +4,240 @@ PAIMOS AEON is an open-source, self-hosted work platform for people and AI agent
 
 Agents-first and voice-first, Aeon gives people a web workspace and agents a CLI and API, with tenant isolation and scoped permissions. The stack is Go, Postgres 18 + pgvector and Vue 3, built around nodes, relations and an append-only event log.
 
+Project descriptions reveal their full text only when clipped. Desktop descriptions that fit a tooltip use the shared clip-tip; phones, touch devices and descriptions taller than the available tooltip space use **More** / **Less** with a bounded scrolling panel. The panel accepts touch scrolling and keyboard arrows, Home and End; Escape closes it and returns focus to **More**. Project controls stay in place while it is open.
+
+Ticket URLs select the record shown in the detail panel. A stale `peek` query is removed from a routed ticket URL; links followed inside that ticket reuse its panel and browser history. Desktop ticket panels leave room for the list, including at 1024 px and with a saved wider panel preference. Narrow ticket headers collapse breadcrumb text while keeping Back available. Phones retain the full-screen ticket sheet.
+
+Capped Done gate, Rules Preview and document-profile headings reveal their complete text on hover, keyboard focus or tap. Their reader stays inside the viewport and scrolls for long identities. Press Arrow Down on a clipped heading to enter the reader; Escape closes it and returns focus to the heading. Heading and action positions stay in place. Rules Preview reserves the width of both **Change** and **Done** labels so toggling the selectors keeps the button still without a fixed pixel width.
+
 Find published builds in [GitHub Releases](https://github.com/inspr-at/paimos/releases). PAIMOS AEON is licensed under [AGPL-3.0-only](LICENSE); third-party notices are in [NOTICE](NOTICE). See [SECURITY.md](SECURITY.md) to report a vulnerability privately.
 
 Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
+
+## Agent conversation foundation
+
+AEON-618 R1 introduces a separate `chat-v1` identity contract in
+`api/openapi.yaml`. The server mounts it disabled by default; integration
+packages may opt in with `chat.New(pool, chat.Options{Enabled: true})`.
+This foundation does not enable chat delivery, wake, history migration or
+native process controls. Existing inbox, session and CLI contracts stay intact.
+History, read-marker, delivery, receipt, cancellation and stream definitions
+are reserved contracts marked `x-aeon-package` for R2/R3; R1 does not mount them.
+
+A person creates their own project role, resolves its lasting conversation,
+and selects an existing external inbox registration using the expected binding
+epoch. Lead identity is stored as `person_project`: one lead per person and
+project. Workers require distinct assignment slots. Handover preserves the
+conversation and prior binding records; a native session cannot be reused for
+another private role or person. Automation binding delegation is deferred.
+
+Workers use their scoped agent key and existing `X-Aeon-Worker-Lease` through
+`POST /api/chat-deliveries/binding/resolve`. The proof is checked against the
+exact live external registration (heartbeat or initial registration within two
+minutes), person, project, role and epoch. Public references and session IDs
+alone grant no access. Readiness omits account, quota, model, host and native
+reference metadata; no input/wake/receipt capability is advertised before
+receiver qualification. Registration and binding do not extend execution
+permissions or start an agent.
+
+New inbox rows have an internal `chat_thread_id` discriminator and restrictive
+participant RLS. Legacy reads, ACKs, replies, managed drains, streams, receipts,
+sweepers and notifications exclude that mode. The database rejects legacy
+transport projections of chat rows and cross-mode replies. Chat event hints
+are private, and nested legacy transactions clear verified chat context.
+Migration `1141_chat_identity.sql` preserves all existing rows without backfill.
+
+## Theme settings and agent appearance
+
+Settings › Theme has separate Colours and Agents cards sharing Save and Discard.
+The Agents card uses the nine shipped renderers, with native or chosen ring/size,
+hover, five state palettes and inactive dimming. Both light and dark previews
+show a live row and Working, Waiting, Throttled, Problem and Idle. Draft appearance
+stays in the previews until a successful save; reduced motion stills artwork.
+Personal › Agents retains heartbeat warnings and estimate display.
+
+Migration 1235 copies saved personal appearance into an owner-only theme based
+on the workspace default and selects it, unless the person already saved an
+explicit theme choice. Legacy avatar/palette names and drawn geometry retain
+existing appearance; linked aliases keep physical ownership for unlink. Original
+preference rows remain for rollback and previous binaries, and heartbeat settings
+are unchanged. Creation and selection are audited with a private audience.
+Optional `agents.dim_inactive` and `agents.inactive_opacity` preserve inactive
+appearance; omitted values mean true and 55 percent. Runtime reads the active
+theme and drops stale appearance responses after identity changes.
+
+## Pause and wind down agents
+
+The Agents header groups Start agent and Attach a running session under New.
+More agent actions includes Pause all, Resume all, Wind down and Agent keys.
+Closing a dialog opened from either menu returns focus to its header trigger.
+
+The Agents page offers Pause and Stop now per controllable session, plus quiet
+Pause all and Resume all actions. Pause asks for a level and an optional handover
+note; Pause all supports per-agent overrides and Keep running. A lead can include
+its workers. Personal settings choose the default pause level. Paused generations
+keep the saved handover, next steps, questions and WIP commit. Resume saves a
+continuation request; a launcher must start the successor, including after a reboot.
+
+Interrupt this step lives in the session menu. Stop now uses the shared pause
+dialog and confirms a saved request, rather than a process exit. Dialog headings
+keep one visible line for long session names; the full name remains available to
+screen readers and on hover, while Close and the action bar stay in place.
+
+Wind down starts only after its host-grouped preview is confirmed. The host picker
+uses personal computer names, tri-state host selection, individual agents and All /
+None quick picks; its State view groups running agents, idle hosts and offline
+hosts, omitting empty sections. Preview and selection count only the caller-owned
+sessions with control permission, matching the session's `owner_principal_id`
+against the canonical owner returned by the leaving report for linked identities.
+The request carries `deadline_at` plus
+`hosts: "all" | [...]` and optional explicit `agents`. Host scope is persisted, but
+new-start blocking remains launcher follow-up work: new agents can still start.
+Missing or stale planning reports never imply a finish estimate. The plan reads
+back durable backend outcomes; a deadline or queued stop alone cannot mark it done.
+Cancellation withdraws pending requests, keeps existing handovers and reports stops
+already in flight, with Undo while the cancelled deadline is still ahead.
+Dismissing a completed report clears its deadline quietly, without withdrawal
+feedback or Undo. Partial batch writes name accepted and failed requests.
+
+Dialogs anchor their controls above variable content on desktop and pin their
+footer on phone sheets. Submit uses Command+Enter on Apple platforms and Ctrl+Enter
+elsewhere; Escape first leaves a field, then closes. API rows pass through the
+canonical session ledger and controls stay bound to the captured generation/run.
+
+## Theme API
+
+Settings → Theme (AEON-642) lists the workspace default, shared workspace
+themes and personal themes. Choose, duplicate, rename in place or confirm a
+deletion on the page. New theme copies the current workspace default. Members
+duplicate workspace themes to edit their own; managers with `settings.manage`
+can edit shared themes, including the workspace default (`scope: default`).
+Fresh selection or reload resolves a prior conflict; a conflict on another
+theme does not disable the selected theme's editor. Loading more themes keeps
+unresolved conflict feedback and recovery available until fresh active state loads.
+Recovery belongs to each theme: another theme's conflict or successful deletion
+cannot unlock an unresolved selected theme, even after pagination or a failed reload.
+Pagination sits above the scrolling list and retains its space when the last
+page arrives, keeping New theme, recovery and Colours controls in place.
+Colours has separate light and dark accents, optional derived dark values,
+presets, a native picker and hex input, plus recurring marker choices. The light
+and dark previews update while editing; the rest of the page keeps its saved
+appearance. Contrast below 4.5:1 warns without blocking Save. Suggest adjusts
+only the failing mode to a readable shade of the same hue. Discard and Save
+appear in an overlay bar, preserving the page layout. Saves retain the Agents
+configuration and use the existing revision checks; conflicted drafts must be
+discarded and refreshed before saving again.
+The Agents link still opens Personal → Agents until the separate Agents card
+package lands. Applying saved theme values throughout the app is a later package.
+
+AEON-641 provides theme data for the appearance consumers. `GET /api/themes`
+returns visible workspace themes and the person's own themes with UUID keyset
+pagination (`after`, `limit`, maximum 100). `GET /api/me/theme` returns the active
+record, default ID, selection revision and any deletion notice. Agents may read
+the workspace default with `profile.read`; theme writes belong to people.
+
+Create with `POST /api/themes`, duplicate with `POST /api/themes/{id}/duplicate`,
+rename or replace values with `PATCH /api/themes/{id}`, and delete with
+`DELETE /api/themes/{id}?revision=N`. Updates, copies and deletes require the
+record's revision; `PUT /api/me/theme` requires the independent selection
+generation in `revision` (initially 0) and a `theme_id` or null to follow the
+default. Return the generation unchanged; it is an opaque CAS value, not a
+counter to increment. The first explicit default is saved and audited. Stale
+revisions return 409. Personal writes require the owner and `profile.write`
+(or the portal equivalent); workspace/default writes require `settings.manage`.
+Personal records and their events remain owner-only, including for managers.
+The full schemas are in [the API contract](api/openapi.yaml).
+
+Linking people preserves theme owners and choice rows. Linked identities can
+read, edit and undo their shared personal themes; unlink restores each original
+owner's privacy. The canonical person's saved choice wins (including an explicit
+default); otherwise the alias choice with the lowest principal UUID wins. Choice
+edits update that winning row and keep other rows for unlink. If unlink makes a
+chosen theme private, the API returns the default without that theme's ID/name,
+retaining the selection generation for the next choice. Changing the winning
+identity changes that generation, even when both physical row revisions match.
+Undo restores an unsaved preference separately from an explicit default, so
+alias inheritance resumes. Its retained row carries a fresh generation to
+reject stale writes, including revision 0; a subsequent explicit default is
+saved and audited again. The migration preserves physical row revisions
+and existing audit snapshots; audit remains append-only and its audience follows
+current links.
+
+Each tenant starts with Porcelain, using the shipped light/dark accents and
+native agent artwork settings. Null accent dark means derived by the consumer;
+null agent ring/size means the chosen style's drawn default. Deletion is
+reversible through the event undo API. A selected tombstone resolves to the
+workspace default and supplies `fallback_notice` until another choice is saved.
+Undo restores availability without replacing later choices. The default itself
+cannot be deleted. This package supplies the API; Settings and applying its
+values are delivered by AEON-642–644.
+
+## Work leaves and graceful lifecycle actions
+
+Agents bind to work leaves: only live work children make a parent. New dispatch,
+claims, session registration/binding and work-order placement share the tree
+fence with child creation. A busy leaf cannot gain work children; historical
+sessions keep their original IDs and bindings.
+
+Busy work does not prevent adding siblings to its project or existing work
+parent. Coordinator live ETA writes accept work leaves, reject work parents,
+and recheck current authority under the tree fence. Work leaves also retain
+missing-estimate guidance and their saved dispatch model placement.
+
+In a work item's **Work actions** sheet, **Split into children** saves up to
+20 child titles and requests an AEON-479 cooperative handover before creating
+them. **Cancel with its open children** previews up to 100 open leaves, cancels
+idle leaves, and waits for running leaves to report stopped. Finished leaves
+stay finished. These requests never send process signals or treat heartbeat loss
+as a confirmed stop. The saved action continues after closing the sheet or
+restarting the server, with the original person's current permissions checked
+inside every write. A changed split target requires abandoning the saved request
+and reviewing a fresh preview; abandoning keeps earlier completed writes and
+handover requests intact. Heartbeat loss, lost process ownership and administrative
+removal keep the stop fence; they require recovery or an explicit process-stop
+report. Bindings of an unconfirmed generation cannot detach or move away while
+its work action is pending. The same generation may revive and finish handover.
+Cooperative wrap-up delivery expires after ten minutes. **Check handover** and
+the background worker retry expired delivery under the original person's current
+authority, with an audit trail, while retaining the fence. Retries never escalate
+to force stop and reuse any still-active delivery.
+
+After an uncertain stop, the owned executor can report a later confirmed exit
+through `POST /api/projects/{projectId}/harness-sessions/{sessionId}/confirm-exit`
+with its exact worker lease and current `harness.worker` authority. Only
+`process_exited`, `process_failed` and `force_stopped` are accepted. Confirmation
+releases the work fence, records `harness.stop_confirmed` once and preserves
+closure timestamps, archive receipts and historical bindings. Archived servicing
+remains revoked; the administrative recovery observation stays unchanged.
+Work-order, harness and lifecycle action requests buffer bodies up to 1 MiB under a
+ten-second network read deadline before opening their tenant transaction.
+Failed reads retain the deadline so draining the body cannot stall indefinitely.
+Stalled uploads cannot hold the work-tree or tenant fences; key scopes and
+target permissions are still checked inside the final mutation transaction.
+Coordinator registration and resume adopt up to 1000 direct live/paused children
+atomically. Larger scopes return 409; buffered audit snapshots have a 32 MiB cap
+(429 on excess), and flush only after all generation and child mutations finish.
+
+The additive API is `GET/POST /api/nodes/{id}/work-lifecycle`,
+`POST /api/nodes/{id}/work-lifecycle/{action}/continue`, and
+`DELETE /api/nodes/{id}/work-lifecycle/{action}`. Requests bind a UUID, the node
+revision and the preview's scope digest. Waiting and completed responses are
+explicit; replaying a request creates no extra children or cancellation events.
+Builder completion with a review range still commits during pending handover:
+automatic review records `review.unavailable` and leaves the review gate closed,
+without starting new work or preventing the original generation from finishing.
+Work-order cancellation rechecks `work_orders.write` and queued reservation
+release rechecks `run.create`, alongside `nodes.write` and session control.
+
+Integration seams: AEON-655's work surfaces can supply `is_leaf` to the shared
+queue helper; this package also accepts the existing estimate's `is_parent`
+projection and otherwise fails closed. The AEON-429 `work-parent-status` rollout
+continues to govern derived parent states from AEON-650. No sibling package is
+required for the lifecycle API or sheet. When the DSAR inventory lands, classify
+`work_lifecycle_actions.children` as personal drafts and targets/results/requester
+as tenant identifiers; that inventory is absent from this stacked checkout.
 
 ## Code health audits
 
@@ -37,7 +266,9 @@ create tickets, run models, schedule work or publish pages.
 
 The tools in `scripts/audit/` use Python 3.10+ and the standard library, Git,
 and Node for the optional renderer smoke check. They run offline, without
-installing packages or invoking analysis tools. Supply locally collected,
+installing packages or invoking analysis tools. The renderer smoke check retains
+its content assertions and a ten-second VM hang guard; it does not assert rendering
+speed on shared runners. Supply locally collected,
 sanitized diagnostics in the shared `T` manifest; never include credentials
 or raw secret scanner output. Tool installation, advisory downloads and
 analysis run separately on the approved build/test runner.
@@ -127,7 +358,43 @@ and accepted baseline attachments stay under ignored `tmp/` or outside the
 checkout, and are attached to the run ticket. The stable living-page link,
 trends and slice-coverage age are coordinator publication concerns.
 
+## Ticket queue
+
+In progress tickets and tasks with no assignee, queued/live agent run, or live
+bound session show a small **stale** hint. Queue returns them to Open and adds
+work for the next free agent, after the usual estimate and acceptance checks.
+The confirmation offers Undo, including after readiness fixes. Undo restores
+that addition's prior state and fields only while its original run is queued
+and its audited ticket revision is unchanged; permissions are checked again.
+Assigned or active In progress work remains disabled, with a display-name reason.
+
 ## Recurring work
+
+In the web app, **Repeat…** in a ticket or epic's More menu (Shift+R while
+its panel is focused) opens the recurrence editor. Project **Settings →
+Recurring work** lists definitions with Pause/Resume, revision-checked Undo,
+Run now, Edit, History, Copy CLI command and Delete. Read-only people can inspect
+definitions and history; changing them needs `recurrences.manage`. The editor
+previews unsaved schedules through `POST /api/recurrences/preview`, using the
+server's calendar engine. Created tickets show the recurrence name and occurrence
+number, linking back to project Settings. Array-based template criteria are
+readable and editable in the ordinary ticket panel.
+
+The additive UI contract stores the optional recurrence `name` in `template`.
+`GET /api/recurrences/{id}/history` pages 50 events with a `before` cursor and
+`all|created|skipped|changes` filter. `GET /api/recurrences/{id}/releases` lists
+up to 100 published project releases, explicitly reports truncation, and includes
+existing receipts. Names use supplied marketing codenames, with the canonical
+version on hover. Manual release runs (`--release-key`) share their durable key
+with automatic runs. `--force-overlap` is an explicit manual confirmation and
+does not edit the overlap policy; `--revision` can bind Run now to a definition.
+Delete requires `expected_revision`; it pauses the definition and appends a
+retirement event. Receipts, the definition and created tickets are retained;
+retired definitions are omitted from reads and cannot be resumed or run.
+Project-only readers see recurrence history and retirement events for visible
+projects. The scheduler ignores retired definitions even if an older client
+resumed the row. Both overlap prevention and Run now's open-previous notice use
+the node list's closed-state rule, including each kind's configured categories.
 
 `aeon recur create|list|get|update|pause|resume|run-now|preview` manages
 server-owned schedules. Create reads a JSON definition from stdin or
@@ -160,7 +427,12 @@ month dates and spring gaps are skipped; a repeated fall time uses its first
 instant. Preview uses the same calendar and returns UTC timestamps without
 writing anything, including while paused. Event triggers use
 `{"kind":"event","event":"release.published"}`; future publication dates
-cannot be previewed.
+cannot be previewed. Event triggers may set `event_start` to `now` (default),
+`hour` or `morning`; morning means 06:00 on the next local calendar day in
+`event_timezone` (an IANA zone, default UTC). The scheduler checks the database
+clock inside each claim before running delayed publications, including across
+DST changes. Deferred rows yield to other ready definitions without advancing
+their event cursor.
 
 For example, a weekly tool sweep under the code-health epic can be created with
 this body (replace project/parent UUIDs with the intended existing nodes):
@@ -212,8 +484,24 @@ produce tenant/project-scoped `release.published` events; the same project and
 version are deduplicated across sources. Newly configured schedules ignore
 publications from before their creation. Occurrence tickets and their node,
 queue and recurrence audit events use the keyless system actor **Recurring
-work**. Occurrence receipts link each ticket back to its recurrence. Management
-requires `recurrences.manage`; agents need an explicit custom-role grant plus
+work**. Occurrence receipts link each ticket back to its recurrence. Lists show
+a gold loop badge on the type icon, in a fixed 22 px slot; its accessible tooltip
+describes the schedule and occurrence number in English or German. The ticket
+header shows a Recurring pill linking to the source recurrence only with
+management permission. Node GET and list responses carry read-only `recurrence`
+provenance from visible occurrence receipts, enriched once per bounded page;
+editable fields do not create a marker or provenance line. Authoritative GETs
+refresh source retirement and visibility even when the ticket revision is unchanged;
+partial save responses preserve the current provenance. Source links and editing use
+the receipt's project, including after a ticket moves. A linked recurrence is resolved
+directly rather than substituted with the first page's first schedule. Retired
+sources keep their markers; withheld provenance clears the marker and source editor.
+Source editing becomes available when delayed management permissions arrive, without
+reloading the recurrence details; revocation closes the editor and cancels pending edits.
+The header pill keeps the same size through permission loading, grant and revocation;
+on touch devices both the marker and link reserve a minimum 44 px height.
+Status help and `aeon status help --json` share the same marker definition.
+Management requires `recurrences.manage`; agents need an explicit custom-role grant plus
 a key scope, even when bound to Owner/Admin. Saving a definition also requires
 `nodes.write`; `queue_each` adds `run.create` and `work_orders.write`.
 
@@ -329,6 +617,41 @@ The hover labels this local estimate: other projects, current runs and blocker
 delays are not included. Unmeasured capacity or an unknown unblock time keeps
 the suggestion empty.
 
+On phones, the configurable project header keeps the queue action visible in
+Compact and Comfortable while folding the activity timestamp. Expanding a
+collapsed header restores the queue action.
+
+## Feature flags
+
+Shipped rollout flags start **OFF**. A person with `settings.manage` can open
+**Settings → Workspace → Feature flags** and choose On, Off or Inherit for the
+workspace or one project. A project override wins over the workspace override;
+without either, the feature stays off. Resetting an override retains its revision.
+The first flag, `workspace-summary`, shows project and work counts in Workspace
+settings. Enable or disable it on the same page without rebuilding, restarting
+or deploying. Selecting a project in Feature flags shows its work summary only
+when that project's effective flag is on, including an explicit project On
+while the workspace is Off. Other open pages re-evaluate on focus and navigation.
+Summaries render below the flag controls. Scope reloads keep the rows in place
+and disable them until the selected scope's settings arrive.
+
+`GET /api/features?project_id=<uuid>` reads committed flags for the caller's
+tenant and visible project; omit the query for the workspace baseline. It
+requires `nodes.read`. Admin reads use `GET /api/settings/features`; writes use
+`PUT /api/settings/features/{key}` with `enabled` (true, false or null) and
+`expected_revision` from the read (zero for a new scope). Optional `project_id`
+selects the override scope. Changed writes atomically append `feature.updated`
+events with actor and before/after state; identical writes are idempotent and
+stale writes return 409. Agent keys cannot change rollout choices.
+
+Web code uses the typed `canFeature(key, projectId?)` helper in
+`web/src/lib/features.ts` alongside its existing `can(permission, projectId?)`
+check. Unread scopes, failed, unshipped and revoked answers are off. Rechecks
+retain the last valid answer until its replacement arrives; failures and
+session resets discard it. Server code uses
+`features.Service.Enabled`, which reads the database each time and returns
+false on error. **Flags never grant permissions or bypass approval gates.**
+
 ## Model preferences
 
 `aeon model resolve --ticket AEON-123` resolves the ticket's work kind,
@@ -337,7 +660,7 @@ why line. `aeon model prefs [--project KEY]` reads the effective matrix. Both
 commands are read-only; role-only `model resolve build` retains its existing
 advisory response.
 
-In the web app, open **Model preferences** from the Agents gear or a project's
+In the web app, open **Model preferences** from **More agent actions** or a project's
 agents popover. The **Why this model?** planning cell opens its kind of work.
 Choose Automatic, follow new versions or pin a version at Default, You or
 Project. Kinds can be added or removed at Default and Project; system kinds stay.
@@ -374,6 +697,35 @@ Operator keys have no You setting. With an empty matrix, existing planning gaps
 and prices remain unchanged; Security now uses the ticket's role route and rate.
 Work-kind lists use `limit`/`cursor` pagination; editor writes reject oversized
 matrices or atomic re-stamp scopes. See `api/openapi.yaml` for the contract.
+
+## Project lead scheduling (AEON-739 backend groundwork)
+
+Explicit project leads consume the existing person's agent dial, including
+idle leads and generations with unconfirmed exit. The server supplies no extra
+lead slots. Queue is the only scheduling input; it never grants execution rights.
+A successful new route records one project turn. The next turn orders qualified
+project demand by the later of its oldest eligible queue arrival and its last
+successful route. This gives waiting projects a turn while preserving targeted
+and manual ticket order inside each project. Idempotent routing does not advance
+turns. Revoked owners, archived projects, unresolved dependencies, stale reporting
+and unavailable live lead gates cannot win a competing turn. Competing demand
+also needs a usable worker model/account route, live claim permission and no
+pending worker assignment. Scheduling reads are owner-scoped, limited to 200
+entries with a three-second deadline and 64 KiB per ticket's fields; excess
+demand returns an explicit wait error. Lead pickup also caps its project queue
+before fields are decoded or entries projected.
+
+A worker uses `aeon lead yield --project KEY --expected-revision N --generation G
+--worker-lease-file PATH` (or `-` for stdin) when idle, waiting for an accepted
+worker, or yielding its project turn. The server validates that condition and
+reuses cooperative checkpoint/pause. The process keeps its slot until confirmed
+stopped. Only a worker-priority yield with a retained checkpoint allows previously
+routed assignments of the exact current generation to start afterwards. Person
+pauses and replacement generations fence them. Every final worker start still
+checks dial, harness, account room and host load. Ready routed workers have
+priority over lead restart; restart remains an explicit intent through ordinary
+admission. No workers are adopted or reassigned. The production admission adapter
+and automatic launch remain disabled until AEON-603 end-to-end qualification.
 
 ## Agent start plan
 
@@ -413,15 +765,24 @@ closed. `agentplan.CanStart` checks total and harness limits without changing
 running work; launchers must serialize starts and check account room separately.
 On **Agents**, the control reads “Run up to … agents at once.” The total and
 harness limits save to the same canonical plan used by coordinators. The folded
-line keeps compact − / + controls and a harness mark that cycles No limit →
-At most → Off; a muted number means no own limit, capped by the total and measured
-account room. Expanded numeric controls stop at 1; folded − from 1 selects Off.
+line starts with the agent mark and keeps the same raised round − / + controls
+as the expanded rows. Harness values follow Off → 1…30 → ∞ (no own limit):
+− from 1 selects Off, + from 30 selects no own limit, and − from ∞ sets a ceiling
+one below the harness's effective total/account limit. Buttons stay visible and
+disabled at the ends. Clicking the harness mark cycles No limit → At most → Off;
+the tooltip names the next mode. The ∞ value's tooltip includes the effective limit.
 A stored API/CLI zero stays visible and only + is enabled. Details grow below the
 dial with each harness's controls and the
 read-only Now, Accounts, Waiting and Checks. Folding is remembered separately
 for the signed-in viewer in `agents.working.display`; it never changes the plan.
-Arrow keys step a focused − / + or move between harness modes, preserving
-browser and OS modifier shortcuts. Failed saves stay visible across successful
+Click any total or harness value to type; Enter or blur applies, and Esc cancels.
+An empty harness field selects no own limit, 0 selects Off, and positive whole
+numbers clamp to 30. The total accepts whole numbers from 0 to 30; invalid or
+empty total drafts leave it unchanged. Drafts are discarded if the viewer, target
+value or plan revision changes. Editing occupies the value's original slot.
+Arrow keys step a focused stepper or move between harness modes; Home selects
+Off and End selects no own limit on a harness stepper. Browser and OS modifier
+shortcuts stay native. Failed saves stay visible across successful
 polls until another deliberate change. Repeated selections and arrows at a
 boundary do not write. The live line announces total changes once.
 Unknown account or queue readings stay explicit. The visible queue's ready work
@@ -455,6 +816,29 @@ applies it separately. A changed customer or provider configuration refuses the
 stale generation. Delegated agent runs and Aithema intake retain their existing
 harness, plugin and approval controls; this setting does not select their models.
 
+**Generate parent benefits from leaves** is a separate opt-in (AEON-654), behind
+`work-parent-status` (AEON-429). Completing a parent queues an asynchronous English
+and German pill/benefit summary; its Done never waits for the model. The parent
+shows pending/running, generated provenance, or a safe failure with **Retry
+generation**. **Edit benefit** preserves human text and cancels stale attempts.
+The worker uses the saved chat model; it never launches a harness or falls back to
+a vendor. The person who saved the provider must still have `settings.manage`,
+`nodes.read` and `nodes.write` for the current parent when a result is applied.
+It summarises up to 200 leaves / 64 KB of benefit data, excludes cancelled/archived
+leaves, refuses incomplete or cross-project sources, and never silently truncates.
+Provider changes, moved/reopened parents, changed leaves and edited benefits fence
+in-flight results. Leases recover after restart. Leaves keep the bilingual Done
+gate; published snapshots remain immutable. Migration `1239` stores only job and
+provenance metadata on existing nodes. `GET /api/nodes/{id}/benefit-generation`
+reports status; the person-only retry POST requires the displayed generation and
+node revision. Retry bodies have a 4 KiB limit and a five-second HTTP read deadline
+before decoding and mutation locks. A generated write emits
+`node.benefits_generated` for live refresh; it has no generic node Undo, which
+could overwrite unrelated fields.
+Leaf completion checks use the same tenant state categories as parent derivation,
+including custom Done states. Cancellation and archival do not require benefits,
+and edits to already-completed historical records remain available.
+
 API keys are optional and encrypted through the existing tenant-bound AES-GCM
 vault, separate from JSON settings and event data. Reads reveal only whether a
 key is set. A blank replacement clears the key; omitting it preserves it.
@@ -471,52 +855,60 @@ makes no model request, indexing leaves its queue untouched, and search stays
 lexical. The server now uses these workspace settings for embeddings; migrate
 older `AEON_EMBEDDING_*` server configuration here.
 
-## Morning briefing
+## Phone approvals
 
-People can open **Morning briefing** on Projects or `/briefing`. The daily
-in-app reminder uses a chosen time in the device's local timezone (08:00 by
-default). It reads existing completion and release outcomes, delivered-state
-and recorded ticket merge evidence, Status autopilot deliveries and skipped
-human checks, failed reviews/CI, current approvals, held human
-requests and available journey decisions. Each fact links to its item and source.
-The suggested next step is one of those person actions or recorded findings.
+In **Settings → Personal → Phone approvals**, add a device passkey and explicitly
+enable notifications on that device. On iPhone and iPad, first add the site to
+the Home Screen and open it there ([WebKit's Web Push requirements](https://webkit.org/blog/13878/web-push-for-web-apps-on-ios-and-ipados/)).
+The notification contains only a review link. Open it, sign in, review the live
+request and approve or decline with fresh WebAuthn user verification. A device
+may use Face ID, Touch ID or its passkey verification method; the app does not
+choose a biometric or receive biometric data.
 
-The first visit covers 24 hours; later visits start at that person's saved
-briefing visit. The database statement start establishes the window alongside the first
-event page; only complete successful log reads advance the saved server cutoff.
-Denied logs, failed logs and log pagination limits retain the earlier cutoff.
-Pending approvals, held requests, journey actions and usage are separate current
-snapshots: their page limits or failures do not freeze completed log windows.
-Very old visits are bounded to 366 days. Preferences use the existing tenant/person-scoped store;
-there is no new activity tracking or generated narrative.
+The server requires `AEON_PUBLIC_URL` to be its stable HTTPS origin (localhost
+HTTP is supported for development). Push is disabled until an operator
+provisions `AEON_PHONE_PUSH_VAPID_FILE` in the existing host secret storage. That
+JSON file contains `public_key`, `private_key` (a matching base64url P-256 VAPID
+pair) and `subject` (a `mailto:` or HTTPS contact). Keep the existing
+`AEON_LINK_KEY_FILE` stable (or its existing `AEON_MESSAGING_KEY_FILE` fallback):
+its derived vault key encrypts stored push
+subscriptions. This feature never generates or publishes host VAPID secrets.
+Delivery supports Apple, Mozilla and Google push endpoints, refuses redirects
+and sends a generic notification without request details or approval proofs.
 
-Usage requires `harness.read`. Its API list value is approximate, includes
-lifetime usage of sessions **started** in the window, and is not interval spend
-or an invoice. Recorded ticket totals reuse the planning columns' measured and
-estimated figures and Paid semantics; account budget windows describe current
-reported usage. Permitted windows remain visible when account budget coverage is
-partial. The briefing explains privacy omissions and the independent window/account
-truncation limit; shared windows are counted once across project reads.
-Unknown usage stays unknown. Headline usage sums only projects with
-`harness.read`, using the workspace dashboard only for a workspace grant; source
-links appear only after successful reads. Merge facts use changes to a ticket’s
-recorded `fields.merge_commit`, available under project visibility; PR URLs alone
-do not count as merges. The visit-bounded autopilot log must also load completely
-before the cutoff advances. Journey next actions use one batch snapshot query.
-The additive `GET /api/decision-desk/projection` supplies the future Decision
-Desk's canonical order and exact counts. Held approvals sort by expiry, then
-other held work by age, then ordinary open items by age, with source ID ties.
-Questions with several askers count once; a question replaces its linked action
-request. Sign-ins remain separate chores. Counts cover currently readable sources
-independently of page size; coverage above 1000 projects returns an explicit 422.
-The current Agents badge continues to count the approvals and held requests its
-panel can display. Agents does not poll the unused desk projection before the
-P6/P8 cutover, so failures in that future source do not affect its refresh state.
-Morning briefing retains actionable approvals with their scope labels/rationale
-and held requests with their project/body and app Source links.
-P6/P8 must switch desk, badge and briefing together when the complete desk UI and
-question deep links are available; ordinary questions currently remain in the
-server projection, without generating pushes.
+Settings, passkeys and subscriptions belong to the signed-in person and tenant.
+Notifications start disabled; registration and browser subscription happen only
+after explicit actions. The service worker handles push and review navigation;
+it does not intercept requests or cache authenticated pages. Subscription
+endpoints and browser keys are encrypted at rest and omitted from reads and
+audit events. Settings expose only revocable device/passkey IDs. Pausing stops
+notifications; revoking the last passkey also pauses delivery and invalidates
+outstanding verification challenges. Browser notification permission can be
+withdrawn in device settings. HTTP 404/410 responses revoke dead subscriptions.
+The browser's push provider processes the subscription and encrypted delivery.
+
+Quiet hours use the configured time zone; equal start/end disables quiet hours.
+The first eligible person receives the request, and timed escalation adds the
+next authorized person in stable person-ID order, measured from request creation.
+It never expands approval authority; attach requests remain exclusive to their
+paired computer owner. Existing gate, risk, resource and permission checks run
+again when deciding. A watch requiring local Mac confirmation still needs it.
+The two-minute, one-use challenge binds the request ID and content hash, person,
+tenant, decision and reason. Verification, decision, permission grant and audit
+commit together; changed or ended requests, revoked credentials and replayed
+proofs are rejected. Writes are limited to 30 attempts per person per ten minutes,
+with bounded notification batches and delivery retries. Approval and credential
+events remain in the tenant event log under its existing retention policy.
+
+## Decision Desk projection
+
+`GET /api/decision-desk/projection` supplies the Decision Desk's canonical
+order and exact counts. Held approvals sort by expiry, then other held work by
+age, then ordinary open items by age, with source ID ties. Questions with several
+askers count once; a question replaces its linked action request. Sign-ins remain
+separate chores. Counts cover currently readable sources independently of page
+size; coverage above 1000 projects returns an explicit 422. The Agents badge
+counts the approvals and held requests its panel can display.
 
 AEON-568's notification adapter (`internal/decisiondesk`) exposes bounded
 `NoticesTx`, final `ClaimTx` admission and `CurrentTx` reauthorization for the
@@ -542,8 +934,6 @@ tests, agreement on the warning window and integrated doctrine toast suppression
 The current adapter treats approval requests against unfinished ticket/task work
 as held; the coordinator must confirm that policy before activation. Durable
 claims retain retry evidence rather than being pruned while a source can recur.
-
-The in-app briefing is available; push, e-mail and spoken delivery remain future work.
 
 ## Link a vendor account to yourself
 
@@ -580,6 +970,18 @@ just web-check    # web typecheck and build
 just dev          # run the server (API on :8080); `cd web && npm run dev` for the UI
 ```
 
+Event ordering and presentation race tests observe database lock waits. Importer
+request tests use held transports and `testing/synctest` virtual time;
+elapsed time is not evidence that an operation started. Doctrine quotation guards
+use synthetic public and private fixtures in ordinary runs. To survey current
+doctrine checkouts, opt in:
+
+```sh
+AEON_TEST_DOCTRINE_CHECKOUTS=1 go test -count=1 -run '^TestCheckedOutDoctrineGuardCounts$' -v ./internal/rules/doctrine
+```
+
+The survey reports observed counts without requiring historical corpus totals.
+
 CI runs on pushes to `main`, pull requests, merge-queue check requests and manual
 dispatches. A new push to `main` cancels superseded main CI runs to free runner
 capacity (AEON-585). Main's group is separate from PR and merge-queue groups:
@@ -587,11 +989,101 @@ PRs keep their existing per-PR cancellation, while each queue and manual run
 keeps a unique group. Required checks remain `go`, `web`, `release-check` and
 `e2e`; the external `gate/cross-family` status is unchanged.
 
+Test tiers (AEON-681): full-lane PRs and merge groups run ESSENTIAL plus changed-area
+cases; Go reverse dependencies add at most 300 extra cases. There are three tiers:
+ESSENTIAL is the approved core; GATED-FULL retains the other previously gated Go,
+unit and browser cases; NIGHTLY includes the never-gated browser catalogue.
+Shared inputs, uncertain impact, main/manual CI and explicit `--full` select
+exactly ESSENTIAL + GATED-FULL. Browser gate membership comes from OPS-257's
+`gate:true` groups in `web/ci-web-shards.json`, with approved ESSENTIAL promotions
+preserved. Mapped changed-area selection still includes optional cases in the
+affected area. Unknown impact widens to the established full gate.
+Reports name the selection `scope` (`gated-full`, `catalogue` or `changed-area`) and count
+`deferredBrowserCases`; deferred cases are not reported as passes or skips.
+Classifications live in the [Go manifest](scripts/ci/go-test-tiers.json)
+and [web manifest](scripts/ci/web-test-tiers.json). Use
+`node scripts/test-tiers/cli.mjs classify go` (or `web`) for new NIGHTLY cases,
+then `check`. CI reconciles manifests at runtime: unlisted cases default to
+NIGHTLY, stale entries are dropped, and named Actions warnings report the drift.
+New cases retain changed-area and nightly coverage without requiring
+manifest edits in each PR. A separate scheduled classification check runs
+`check go --strict` and `check web --strict` to report cases needing classification;
+it does not gate PRs or the nightly test jobs. Remove stale entries when updating
+the stored manifests. Malformed entries and known-flaky ESSENTIAL cases still
+fail validation. New browser specs also need a
+launch policy in `web/ci-web-shards.json`. No tests are removed: deletion tags
+remain on nonessential cases, including candidate groups whose exact members need review.
+The [known-flaky registry](scripts/ci/known-flaky.json) names exact case keys
+and owner tickets; its validator rejects any ESSENTIAL entry. The nine cases
+identified in AEON-675/676/683 stay outside ESSENTIAL and retain their prior
+full-gate membership as GATED-FULL, plus changed-area and nightly coverage.
+Scheduled/manual `nightly-full.yml` uses `--all` to execute every
+case, including the optional browser catalogue; main/manual CI runs the full gate
+unless exact-SHA full-suite reuse is verified below. The main-push run is the
+FULL gate after merge; a full premerge run is required only when impact is
+uncertain. Releases require a green full main-push gate (or full nightly run) on the
+exact freeze SHA, in addition to the release rehearsal. Nightly is separate from
+the required PR/main checks; its failures remain visible for classification.
+A red nightly needs a ticket naming its failing cases and tested SHA; OPS step 2 owns automated
+ticket creation, ownership and budget wiring. Migration compatibility
+always runs fresh; timing, static and smoke gates stay outside tier impact
+filtering within the full CI lane. Stability cases retain their manifest tiers
+and changed-area/full coverage. Selected cases never retry. `test-tier-run-measurement` reports cases
+per class and complete job costs against the 22.50 Go / 42.17 web runner-minute
+baselines; reused reports carry provenance without claiming fresh passes.
+Web setup shares the built runtime before four file-preserving unit shards and
+twelve full-gate browser shards run in parallel. The required `web` aggregate
+gates setup and both matrices; spec-only retains one unit job and one exact-spec
+job, while docs-only skips them. Skipped Actions jobs contribute no runner duration;
+executed jobs still reject invalid timestamps. Spec-only measurements explicitly
+report `untiered` scope rather than claim tier case passes.
+OPS-257 schedules tiers using hosted run 37377299349: browser `tierTiming` in
+`web/ci-web-shards.json` and unit/Go `timingWeights` in their tier ledgers.
+Browser costs include per-case durations and apportioned group overhead; unit
+costs include Vitest elapsed time, Node test time and shared residual launch
+overhead; Go costs include terminal package elapsed time plus shared residual
+native enumeration and launch time. Other selections scale
+these measured slices by case count. Missing browser/Go artifacts retain
+historical estimates; exact-spec weights and all gated membership stay intact.
+The 39 `aeon-632b-clip` cases keep their original bodies and titles in two
+serial files: planning/touch (27 cases) and settings/rules (12), importing
+shared fixtures. Each half conservatively retains the original launch overhead.
+Unit shard 1 loses equal-load ties to its peers because it also runs the shard
+and browser-supervisor regressions; the heaviest unit file starts on shard 2.
+Scheduling estimates after native inventory reconciliation are 6.28–6.39 browser
+minutes (max/median 1.012), 0.50–0.74 unit minutes and 4.85–6.12 Go minutes
+(max/median about 1.26).
+The indivisible `internal/nodes` package sets the Go floor, slightly above
+the 1.25 execution-only ratio target. Estimates exclude runner setup, initial
+selection and shard 1's extra unit checks; hosted runs must validate complete
+job costs and the intended eight-to-nine-minute critical path.
+The eight-minute target needs hosted measurement; [local selection counts](scripts/ci/test-tier-selection-baseline.json)
+establish coverage only.
+
+`scripts/ci-flake-guard.mjs`, `scripts/ci-quarantine.json` and
+`scripts/ci-flake-report.mjs` are retained for NIGHTLY flake diagnosis and
+OPS step 2. The current nightly tier runner executes all cases with zero
+retries and does not invoke the guard or suppress quarantined failures;
+these tools do not soften PR or merge-queue checks.
+
+PRs containing only root Markdown, `docs/**` (excluding `testdata/`), or root
+LICENSE/LICENCE/COPYING/NOTICE files skip classified heavy jobs; required checks
+report success with a `docs-only` note. Migration compatibility runs in every
+lane, independently of classification. The allowlist lives in
+`scripts/ci-pr-plan.mjs`; CI executes the PR base commit's copy, and an unavailable
+base classifier retains full validation. Markdown under implementation and
+test-fixture paths requires full coverage. PRs changing only top-level
+`web/tests/*.spec.ts` run exactly those specs in one hosted job, including specs
+outside the shard map, with their group's config and flags. Spec renames or
+deletions, mixed changes and unavailable classification retain full coverage.
+Main pushes and manual CI runs execute ESSENTIAL + GATED-FULL; merge groups use tier selection
+within the full CI lane. Docs-only and spec-only classification applies only to PRs.
+
 The separate release rehearsal already cancels superseded runs per ref. Release
 tag builds still require a successful `release-image-check.yml` rehearsal for
 the exact release SHA on `main` (push or manual dispatch); a cancelled rehearsal
-does not satisfy that gate. Main validation is retained, including when a merge
-group tested the same tree. Workflow policy tests live in
+does not satisfy that gate. Main validates the full suite unless the exact-SHA
+proof below establishes full merge-group execution. Workflow policy tests live in
 `scripts/ci-runner-guard` and `scripts/releaseworkflow`.
 
 The ordinary activity tests check exact pagination through 240 same-ticket
@@ -612,6 +1104,33 @@ It measures the handler and JSON decoding; the nearest-rank p95 must be below
 100 ms. Median and maximum are logged for diagnosis. It does not measure full
 history traversal or guarantee production latency. Shared or loaded runners
 are unsuitable for interpreting this budget.
+
+### CI push reuse (AEON-423)
+
+On a push to main, `scripts/ci-tree-reuse.mjs` searches for a successful `CI`
+merge-group run at that exact commit SHA and verifies its repository, workflow
+name/path/ID, latest run attempt, complete required jobs, all seven Go and twelve
+web shards, and successful execution steps. A verified match skips the heavy
+jobs before runner allocation and database startup; the existing required checks and aggregates
+report `reused merge_group run <id>`. One hosted `cache-prime` job still runs
+`npm ci`, installs Playwright Chromium and warms Go modules/builds, saving the
+same main-scoped dependency, browser and hosted Go shard cache keys restored
+by PR/queue jobs; its failure fails the required aggregates. `migration-compat` always
+runs against the latest release, including every step (AEON-415). Direct pushes
+without verified queue evidence, queue runs, manual runs, failed/cancelled
+or partial reruns, API errors and timeouts retain full validation. PRs keep
+the docs-only/spec-only classification above; the proof job itself runs only
+on main pushes. Lookup uses only
+read permissions, a ten-second network deadline, bounded responses and at most
+20 candidates; a failed proof job leaves outputs unset and runs full CI. Set
+`CI_TREE_REUSE=off` to disable lookup. PR-to-queue tree reuse and its registry
+publisher were removed to keep this path small; no tree comparisons or record
+writes remain. Offline fixtures run with `node --test scripts/ci-tree-reuse.test.mjs`
+and `go test ./scripts/releaseworkflow ./scripts/ci-runner-guard ./scripts/ci-go-shards`;
+hosted savings and the cache-priming duration require coordinator measurement
+once the change reaches main. The verifier job list and execution steps are
+checked against the actual workflow and its full merge-queue matrices, so
+adding or changing a job cannot silently leave the reuse proof behind.
 
 The offline CI proof foundation (AEON-417 A) is in `internal/ciproof`, with
 versioned obligation, plan and receipt contracts in `contracts/v1.schema.json`.
@@ -691,6 +1210,49 @@ Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
 `?section=knowledge` retains its background section. Tickets is the default,
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
+
+The Tickets project header defaults to Compact: project details, sections with
+saved views and Hide/Display, then the toolbar. Comfortable gives the title and
+description more reading room; Collapsed retains the toolbar. The centered
+app-bar switch selects all three on desktop. Phones fold with the project badge
+and chevron, and choose Comfortable/Compact in the Filters sheet's Display
+section. Command+Shift+Period on macOS or Ctrl+Shift+Period elsewhere toggles
+Collapsed and restores the last roomy choice, including while typing. It uses
+the physical Period key; Escape and scrolling do not unfold or fold the header.
+The choice stays on this device, separately for each person and workspace,
+across projects; row height and saved views remain independent. Active filter
+buttons show their values (counts on narrower desktops), with individual remove
+actions and Clear all; their labels, including names arriving asynchronously,
+update after the filter popover closes. The phone fold badge keeps its full
+44 px touch height and an unclipped keyboard focus ring. Open, doing and done
+counts filter by the server's work buckets; clicking again clears the choice.
+Comfortable adds the eleven status counts in four groups (Open, Doing, Done,
+Closed); phones retain the three group buttons. Status clicks include legacy
+spellings. Selecting a status hidden by Hide temporarily shows closed work and
+announces why; clearing it or choosing visible statuses restores Hide. A manual
+Hide toggle takes precedence. These selections and automatic Hide restoration
+survive URL links and saved views. The project summary carries bounded
+`status_counts` and their buckets;
+missing or truncated detail is labelled unavailable or partial, while group
+totals remain exact. With partial detail, a single-status selection temporarily
+turns Hide off because an omitted kind category may hide that status; clearing
+the selection restores Hide, and manual toggles still take precedence. Group
+selections retain their exact bucket policy. The additive `work_state` and
+`work_bucket` list parameters share the summary's canonical spellings and
+kind-aware buckets. Hide's ghost gear opens “What Hide hides”; phones offer the
+same five choices inside Filters. All five remain the default. The three
+finished choices read “Hide finished”; other subsets show Hide and their status
+icons, with names available on hover and to screen readers. At least one choice
+remains selected; Reset restores all five. Counts use the project summary and
+show unavailable when its detail is missing or partial. Choices travel with the
+URL and saved view even while Hide is off, and the gear and Display stay still.
+The additive `hide_states` list selector applies only with `hide_closed=true`.
+Each kind's bucket wins: Delivered/Accepted retain their names inside Done,
+other Done-bucket statuses use the Done choice, and exit buckets use Cancelled
+or Archived. List, Outline and Graph share this membership policy, including
+the default and Reset. Graph retains closed topology until the list query
+decides membership, so a kind's Open Accepted or Done QA follows its configured
+bucket rather than the graph's spelling-based category.
 
 Model estimates learn from completed-ticket outcomes, actual session profiles and
 frozen work placements. Fully reported worker runs with measured active time feed
@@ -1003,10 +1565,21 @@ paimos mcp
 `aeon status help --json` (also `paimos status help --json`) reads
 `GET /api/status/help`: the ordered status definitions, hints, Queued explanation
 and effective workspace rules. `--project KEY` resolves that project's
-Inherit/On/Off override. The help sheet and agents use the same definitions;
-the API reads live Status autopilot limits when its settings tables are present,
-otherwise it explicitly reports the defaults. Queued means Open in the work
-queue (AEON-522), rather than another stored status.
+Inherit/On/Off override. The help sheet and agents use the same definitions.
+The endpoint is read-only tenant metadata available to authenticated agents,
+including keys without scopes or role bindings. People retain the `nodes.read`
+permission check, which denies customer sessions without that permission.
+Project names and overrides still require project visibility; inaccessible projects return 404.
+Customer portal restrictions and pairing lifecycle checks remain in place.
+This read grants no ticket or settings write permission.
+The API reads live Status autopilot limits when its settings tables are present,
+otherwise it explicitly reports the defaults. Queued means Open or Blocked in
+the work queue (AEON-522), rather than another stored status.
+
+Work **merged into another ticket** gets `cancelled`: it will not be done
+separately. Record a reason naming the destination ticket. `done` means the
+completed code was merged, or a non-code result exists and passed review;
+`merged` and `superseded` are not separate status values.
 
 Tickets and tasks can carry `human_check`, nullable text describing what only a
 person can confirm. Create or patch it through the nodes API, and filter lists
@@ -1143,7 +1716,7 @@ Named instances and the default live in `~/.aeon/config.yaml`. The agent API key
 
 Classic colleagues without a sign-in identity can join through **Settings → Access → People → Imported from classic → Invite this person**. The invite starts with their email and imported access; the administrator confirms roles they may grant. On acceptance, one active, unlinked imported account with exactly the same verified email (case-insensitive) in this workspace becomes an alias of the new person, with an audited reason. Classic identities and history remain intact. Multiple unlinked matches require manual **Link to person**, including inactive records or records that already have aliases; already linked, deactivated or existing link-target accounts are never automatically linked. A token alone cannot link an account. Invited access stays authoritative even for project-only invites; sign-in and later imports never restore workspace access from the alias's classic roles.
 
-Create a CLI/script identity at **Settings → Access → Agents → New agent**: give it a name, a description, a role ceiling, and workspace or selected-project access. The **Ticket worker** purpose selects project-only access and suggests the smallest role you may grant that covers `nodes.read`, `nodes.write`, `comments.read`, `comments.write`, `events.read` (ticket activity and history), and `search.read`; Admin is never suggested automatically. Role options explain their effect for agent keys. The description is prefilled from the purpose and project keys, stays editable, and may be cleared after confirming **Create without a description**. A person with `keys.manage` can create it, within their own permissions; agent and role changes are audited together. The next sheet offers one-click **Full access**, **Ticket worker** and **Coordinator** presets and previews their scopes before applying only those permitted by the registry, creator and agent role. Scope rows show their label, id, registry explanation and risk; search matches names, ids, groups and descriptions. Built-in Owner, Admin and Member roles exclude `recurrences.manage` for agents; recurrence automation needs an explicit custom-role grant and a key scope. The same previews and search are available when editing scopes; rotation preserves original scopes only within the live ceiling. The first key is shown once, with a copy button (manual selection if clipboard access is blocked) and this instance's `paimos --instance <name> auth login --name <name> --url <origin>` command. Paste the key at the hidden terminal prompt. Computer pairing uses agentd and needs no API key; its page links directly to this alternative.
+Create a CLI/script identity at **Settings → Access → Agents → New agent**: give it a name, a description, a role ceiling, and workspace or selected-project access. The **Ticket worker** purpose selects project-only access and suggests the smallest role you may grant that covers `nodes.read`, `nodes.write`, `comments.read`, `comments.write`, `events.read` (ticket activity and history), and `search.read`; Admin is never suggested automatically. Role options explain their effect for agent keys. The description is prefilled from the purpose and project keys, stays editable, and may be cleared after confirming **Create without a description**. A person with `keys.manage` can create it, within their own permissions; agent and role changes are audited together. The next sheet offers one-click **Full access**, **Ticket worker** and **Coordinator** presets and previews their scopes before applying only those permitted by the registry, creator and agent role. Scope rows show their label, id, registry explanation and risk; search matches names, ids, groups and descriptions. Built-in Owner, Admin and Member roles exclude `recurrences.manage` for agents; recurrence automation needs an explicit custom-role grant and a key scope. The same previews and search are available when editing scopes; rotation preserves original scopes only within the live ceiling. The first key is shown once, with a copy button (manual selection if clipboard access is blocked) and the `paimos auth login --name <workspace> --url <origin>` command (named after the workspace's slug, else the host). Paste the key at the hidden terminal prompt. Computer pairing uses agentd and needs no API key; its page links directly to this alternative.
 
 Manual rotation rechecks live permissions inside the replacement transaction. Shared roles combine workspace and project grants; generated private roles also cap replacement scopes at their configured workspace permissions, even when preserving the old scopes. A project binding cannot restore a scope removed from that private role. The coordinator’s derived project-only `rules.read` remains available. A rejected rotation leaves the old key unchanged and creates no replacement or audit event.
 
@@ -1272,6 +1845,38 @@ heartbeats use the returned session id and lease with `--eta-ready +10m
 --progress 40`, or keep `pct`, `remaining_min` and `note` current in the reporter's
 status file. Each concurrent job needs its own private state directory.
 
+Lead decision evidence (AEON-737) uses the existing project event log. An active
+coordinator generation records bounded, typed metadata with
+`aeon harness decision --project AEON --session UUID --body-file decision.json
+--worker-lease-file PATH`. Only its owning agent and exact generation lease can
+write; current project permission is checked inside the fenced transaction,
+including on replay. Identical `request_id` metadata replays its original event;
+different metadata or a different generation returns a conflict.
+Migration `1263` enforces request uniqueness per tenant and project even when
+a referenced ticket moves out of the coordinator's visibility. Reusing that
+identity for otherwise valid evidence returns a redacted 409, retaining the
+hidden snapshot and rolling back the failed append's event-counter allocation.
+Replay and history still obey event visibility and current authorization.
+
+`aeon project decisions AEON --limit 50 [--after EVENT-ID] [--session UUID]`
+reads a page of redacted reports, with `--json` preserving all evidence and the
+next-page cursor. Project members can read policy scope/revision, attempts,
+reason codes, gate observation times and same-project result links. Review
+links freeze the existing exact base/head commit and provider-family binding.
+`previous_event_id` links a report to an earlier decision for the same ticket;
+attempts may stay the same or advance by one, capped at 32. Existing run IDs
+identify assignments. A `partial` outcome requires `partial_result`; unavailable
+forecasts, model escalation, login selection and connection/process failures
+retain separate reason codes. Prompts, arbitrary
+URLs, account identities and quota values are rejected. Admission reports
+require dial, harness, account-room and host-load readings; unreadable readings,
+missing timestamps and readings older than 120 seconds or in the future produce
+a visible wait. Freshness stays frozen when replayed. These are coordinator
+reports, not launch receipts, verified review verdicts or execution grants;
+recording never starts work, opens a review gate, merges or deploys. The future
+lead executor must supply this evidence alongside its existing admission path.
+Automatic production launch remains gated by AEON-603 and OPS qualification.
+
 The Sessions table retains its existing design, adds a separate **Host** column,
 and calls the intended result column **Name**. Host identity is the exact
 registered `--host`; `run-heartbeat` defaults to the short OS hostname (the part
@@ -1283,7 +1888,7 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.6`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.8`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. 2.8 adds optional commit diff counts. 2.7 adds optional response-only `owner_principal_id` for the reviewed pause and wind-down ownership projection and optional `desk_answers` references for durable Decision Desk handovers. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
 
 Pause levels (AEON-524 part A2) add `--level stop_now|pause_quickly|pause|wrap_up`
 and an optional `--note` to pause one or all sessions. Omitted levels use the
@@ -1344,7 +1949,9 @@ request is not a process exit receipt: offline or older launchers can leave an
 unconfirmed request, which remains visible in the deadline report. The server
 never claims such a process has stopped. Existing part-A records without a
 level retain their original cancel-on-expiry behavior. The response contract
-adds optional fields at `harness-session/2.4`; request headers stay unchanged.
+adds optional planning fields at `harness-session/2.4`; contract 2.5 adds the
+optional nullable `owner_principal_id` for ownership-aware previews. Request
+headers and requirements stay unchanged.
 
 Pause/resume (AEON-524 part A) adds optional `pause` and `continuation` fields
 in contract 2.2. `pause.state` distinguishes requested, planned, paused,
@@ -1430,7 +2037,9 @@ New required properties on these shared components still require a major bump.
 Changed existing properties, newly requiring an existing optional property, and adding a required
 property to a previously closed response schema also remain major changes.
 
-Agent drafts show `est.` until a person or a working agent bound to the ticket confirms or changes them. Resubmitting the hours through the estimate command confirms them; provenance is recorded again. The ticket's Estimate control also edits or clears the value. Epics show the sum of direct, visible, open ticket/task children, with estimated-child coverage in the tooltip; nested tasks are not counted twice. The Estimate sort keeps empty values last in either direction. Imported points remain visible as points, not converted to hours.
+Agent drafts show `est.` until a person or a working agent bound to the ticket confirms or changes them. Resubmitting the hours through the estimate command confirms them; provenance is recorded again. The ticket's Estimate control also edits or clears the value. Parents show the sum of their visible, non-archived, non-cancelled leaves at any depth, including done leaves. A typed parent estimate stays alongside as “planned” and never enters the leaf sum. Progress weights estimated leaves by hours and shows coverage; with no estimates it counts leaves. Regrouping the same leaves does not change project progress. Ready/live ETA is the latest report among open leaves, labelled partial when some have no report. Weighted or rounded 100% does not suppress that ETA or staleness while leaves remain open. Project-scoped readers receive authorized Autopilot Undo facts so these projections refresh even when parent status stays unchanged. Headline and state-facet counts (including Hide) count leaves only; parents group work. Historical spend stays on former leaves and each session counts once per scope, including cancelled/archived work; exact-money visibility still requires access to both the row and source projects. The invoker-rights `aeon_work_scope` traversal deduplicates requested roots and has no depth cutoff; `aeon_work_aggregates` shares leaf facts/session reads and returns explicit coverage. Migration 1230 preserves both old `aeon_node_eta` and `aeon_node_eta_progress` signatures for previous binaries. The Estimate sort keeps empty values last in either direction. Imported points remain visible as points, not converted to hours.
+
+Ticket details show the same progress, ETA and leaf coverage below the controls. A disconnected event feed labels the ETA as the last reported estimate. People with write access open **More actions → Work actions** to split or cancel work; closing the sheet returns keyboard focus to More actions.
 
 For a backfill, an agent drafts a JSON plan such as `[{"key":"AEON-317","hours":2},{"key":"AEON-318","hours":0.5}]`, then runs:
 
@@ -1444,6 +2053,8 @@ Both modes validate every plan entry and project membership before any write. Ap
 ## Independent commit reviews
 
 The ticket panel's **Cross-family review** section requests a review of a repository and two full commit hashes. A completed managed builder run also requests one automatically when its daemon reports a produced commit range and its key already permits `work_orders.write` and `run.create`. The reviewer receives the ticket snapshot, acceptance criteria and exact bounded diff through the existing managed-run queue. This slice never merges.
+
+Both request paths support migrated `work` leaves as well as legacy tickets and tasks. Work parents cannot receive new review work orders; replaying a request retains its original order and run.
 
 Review work orders have immutable author, reviewer, repository and range bindings. The registry's `review-gate` profiles provide model/version pins; eligible strong or frontier profiles require `xhigh`, exclude the author family, and follow Codex → Grok → Claude. Only qualified adapters with tools, hooks, plugins and inherited settings disabled can launch a review. Today that means the Claude bridge or a qualified native Grok enrollment on arm64 macOS; unsupported adapters, unavailable accounts, exhausted capacity and missing approvals remain visible fallback reasons. Profile families must match their fixed harness provider or a supported explicit provider/model binding. Unknown providers cannot establish review independence. Inconsistent legacy pins remain immutable history but are excluded from routing, evidence and approval; replace them with a correctly labelled profile. Legacy daemons cannot receive or claim review runs. The daemon uses scratch space outside the repository and supplies a bounded text diff without credential paths or known credential forms. Binary or oversized changes require another review path; they cannot pass this gate.
 
@@ -1472,6 +2083,17 @@ A coordinator registered with the same principal, harness and native session
 reference automatically takes over its stopped or heartbeat-lost predecessor's
 live children. The transaction records one `harness.adopted` event per child and
 `harness.handed_over` on the old lead; stopped children remain historical.
+
+For opt-in chat, a native reference and every linked alias retain one person,
+chat role and project across registrations. Relationships persist even before
+first binding, so binding one reference claims the connected aliases without
+replaying older generations. Registration, replay, renaming and binding share
+one database store and table guards. Conflicting ownership rolls back the whole
+write; components larger than 1024 references fail closed. Ownership is never
+implicitly released by stopping, archiving or handing over a generation.
+Replacement claims precede stop-trigger reply-obligation events as well as
+registration events. This identity groundwork remains disabled by default.
+
 A healthy lead is never replaced. `harness run-heartbeat --role coordinator
 --source-session NATIVE_UUID` uses that stable native reference; use a fresh
 private state directory for the new process generation. After an unclean
@@ -1598,6 +2220,10 @@ aeon-scopes:v1:comments.read+write,events.read,nodes.read+write,search.read:5a07
 ```
 
 Paste a code into **New key**, **Change scopes** (the Edit scopes dialog), or **Rotate**. It replaces the selection, leaves unknown or ungrantable scopes unticked, and explains each skipped scope. Review before confirming; a code is not a credential and grants nothing. Pasting never extends an agent's role. Rotation keeps the old scopes unless you explicitly select a different set, and saves the replacement and old-key revocation together. Every rotation rechecks the actor's permissions and the agent's existing role ceiling, even when preserving scopes. Creation, editing and rotation use the same role ceiling: workspace-role permissions plus project-grantable and self-service permissions (`kinds.read`, `profile.read`, `profile.write`, `authz.read`) held through project roles, intersected with the agent-grantable registry. A scope from a project role still requires that project's binding on each request; it grants no workspace access. Rotation never creates or extends a role, restores a removed workspace binding, or adds default permissions; project-only agents keep their existing project access.
+
+Dialogs, sheets and modals share one size scale (AEON-730): S (440px) for confirmations, M (560px) for forms and results, L (840px) for editors and multi-column pickers (`--dialog-s/m/l` in `tokens.css`). Each shrinks with the window and never stretches beyond its step on wide screens. Actions sit under the title on desktop, primary first and only as wide as their labels; a label that changes (Create → Creating…) reserves its widest form, so neighbouring buttons stay put. Phones get a full-height sheet with the action bar pinned to the bottom. New and edited key scopes use one column below 600px of available body width and two from 600px. The frame is decided when the dialog opens; filtering or expanding a preview cannot change it. `web/tests/dialog-scale.spec.ts` checks each dialog's width against its step and every action's width against its label at 2560px, and the phone sheets at 390px. Confirmation actions fit their labels, wrap long words, and stack when the row cannot hold both. `web/tests/dialog-widths.spec.ts` checks label fit, column counts and control stability at 390, 1024, 1440 and 1920px in both themes, and saves the dialog screenshots under `web/test-results/`.
+
+Role choices use a bounded, wider frame with one scrolling body and visible actions; phones use the full screen. Rows and the “What changes” area keep their size when a role is picked, and pointer selection does not scroll the clicked row. Paired runtime roles show computer identity names from their existing workspace bindings on the second line; other roles show their descriptions. A runtime role without a bound computer or description still needs a data follow-up, since the role payload has no host or creation date. Other floating choice lists scroll with their panel instead of a second small scroll box. Headings and role details use two lines; clipped names and details are readable on hover, keyboard focus or a touch hold through the shared clip-tip, and the selected role’s full decision context remains in the scrolling preview. Closing choice menus keep a separate **Read full name** action: tap, Enter or Space opens its full text; Escape dismisses that disclosure while leaving the choice menu open. Very long names use a bounded scrollable disclosure: Tab enters it, Shift+Tab returns to the read action, and forward Tab exits the menu. Short role actions retain the full person/project sentence as their accessible name. Enter on Cancel cancels without writing. The computer-name editor uses **Use registered name** rather than putting the hostname in its button. `web/tests/role-picker-layout.spec.ts` covers every role choice, both actions inside the panel, native keyboard cancellation, full-text access, constrained heights and stability in all eight floating list callers, with screenshots of all ten views at 1440, 1024 and 390px in both themes.
 
 For the exact calls a CLI command makes, run `aeon scopes needed issue get/create/update/comment` or `aeon scopes needed "issue get" "issue search"`; `--json` returns the code and group/label/id list. With no commands, it covers get/create/update/comment/search. This works offline, derives permission names from the authorization route map, and tests the command table against actual HTTP calls. `issue get` reads the activity feed, so it needs `events.read` (**See history**) as well as `nodes.read`. The broader ticket-worker set above also includes `comments.read`; the current CLI reads comments through activity rather than a separate comment-read call. Project moves need `nodes.move` in addition to ordinary update scopes. Unsupported command forms are refused rather than guessed.
 
@@ -2071,11 +2697,27 @@ may read, including the project permission and scoped ownership checks.
 
 ## Web workspace
 
+Quote presence coalesces selection changes made during an outstanding request and sends the latest state after completion, preserving throttling, rejoin backoff and disposal. In Hours, an incomplete start time keeps the selected cost unit and its options; completing the time rechecks rate eligibility against that start's UTC date. Incomplete times cannot be logged.
+
+**Settings → Access → Access log** reads the newest 2,000 access changes and says when older changes are omitted. The API keeps its existing ascending `after` pagination; `GET /api/audit?category=access&order=desc` returns newest first, with `next_before` for older pages through `before`. Each page is bounded to 50 events.
+
 The Vue shell includes an authenticated workspace, sign-in, a 404, an account
 menu, and light/dark themes. The theme follows the operating system until the
 user toggles it; that choice lasts for the current page session and writes no
 browser storage. Assets and fonts are served locally. The supplied mark is
 preserved at `web/src/assets/brand/aeon-mark.svg` for its later replacement.
+
+Ticket drafts belong to a record and are cleared when Discard is accepted;
+opening that same ticket as a full page keeps its comment draft. Knowledge,
+customer, quote-version and session-chat reads ignore results from a previous
+record. Hours approval displays entries and digest from one stable read, then
+uses that displayed revision and digest after confirmation. Account changes
+cancel pending preference reads, timers and writes and clear earlier toast
+actions. Changing person or workspace, or starting sign-out, cancels open
+confirmation dialogs so their captured actions cannot proceed in the new session.
+CRM and quote mutation responses carry `X-Aeon-Event-Ids`, listing the
+exact accepted events in undo order. Undo uses only this receipt; missing
+receipts and intervening changes refuse Undo without a latest-event lookup.
 
 Clipped names using the shared clip-tip reveal their full text on mouse hover
 or keyboard focus. On touch, tapping performs the row or link's action; holding
@@ -2320,6 +2962,26 @@ but unbound harnesses name the required `add-harness` command. Account checks
 report a 60-second bound from daemon start for each initial account, or from
 that account being added or unblocked by repin; refreshing unchanged accounts
 does not extend the wait. Capacity capture reports a 10-second bound.
+
+**Verify again (AEON-685).** An expired one-time verification is informational
+when that enrollment has a fresh successful probe; it does not revoke separately
+approved ongoing use. A sibling's readiness never qualifies it. The account row's
+**Verify again** button authorizes one fresh read-only check for the signed-in
+account owner with `account.manage` (the original approver owns an unlinked
+account). Visibility into the internal verification project is not required,
+and requesting a check grants no project access. The server checks the computer
+revision and prior run again under the mutation lock, cancels only that account's
+unclaimed queued check, releases its holds and creates one new run with a
+thirty-minute, one-request allowance.
+Claimed nonterminal checks must be reconciled first. Account identity, runtime
+key, daemon generation, pairing approval and cleanup remain intact.
+`aeon-agentd verify --account ID` opens the existing account's owner approval
+screen; `--no-browser` prints its link. It uses read-only pairing state and neither
+contacts nor restarts the daemon. The link grants no allowance: the signed-in
+owner must choose **Verify again**. Use `--state-root PATH` for a fixture or a
+non-default pairing root. The approval link initially expands Accounts and
+computers; its Fold control still honors the person's choice.
+
 Unsupported or incomplete verification fails with `verification_unavailable`
 and a bounded cause, independently of account probing. Connect-only approval
 creates no verification, and a later approval cancels older queued verification
@@ -2356,6 +3018,15 @@ daemon shutdown prevented polling or an account probe. Correlate these lines
 with read-only `aeon-agentd status --json` for the affected account. Queue errors
 can therefore explain a subsequent probe timeout; the timeout alone does not
 identify the underlying cause. Raw errors and private bindings are not logged.
+
+Pairing reconciliation and runtime refresh failures report `pairing_sync_failed`
+with a fixed short cause in local account/harness status and subsequent lifecycle
+reports. They log `agentd pairing diagnostic` once per distinct cause per daemon
+process, without raw errors, paths or credentials. Polling stays blocked until
+reconciliation and runtime validation succeed; recovery clears the diagnostic.
+Revoked enrollments retain their fences without requiring an old local candidate;
+live enrollments match the approved account key and harness, independently of a
+changed display label. Unapproved live accounts still block reconciliation.
 
 ### Paired daemon socket paths
 
@@ -2749,6 +3420,33 @@ accepts an optional `--target-file JSON`. Verify handoffs retain the preceding
 deploy handoff's recorded target internally when present; neither handoff body
 emits target fields.
 
+### Owner workstation confirmation (AEON-580)
+
+An Owner person can designate one agent key for a paired workstation. The mark
+does not grant roles or scopes. High-risk governance calls return HTTP 428 with
+only `code: step_up_required`, `challenge_id` and `expires_at`. The companion
+AEON-581 client forwards only the ID to agentd, which retrieves the server's
+summary, nonce and action digest through its authenticated pairing channel.
+The server checks the bound computer, exact paired runtime key and device proof;
+an agent key alone cannot retrieve the challenge. The confirmation is single use,
+expires after two minutes and binds the exact request and pinned signer.
+
+The prompt is `Allow the owner workstation agent to <action>? <METHOD> <escaped path>`.
+For routes identifying an existing member, key or role, it appends
+` Target: "<stored name>"`. Names come from stored records, never the submitted
+request body. Labels exclude control/format characters and long labels end in
+an ellipsis; the entire summary fits 256 UTF-8 bytes.
+
+`aeon-agentd status --state-root /absolute/pairing/root` reports
+`Touch ID confirmation: ready (pairing key pinned)` or `needs pairing upgrade`
+with the exact command using that pairing's saved values:
+`aeon-agentd pair --url '<saved origin>' --state-root '<current root>-touch-id' --workspace '<saved workspace>'`.
+Values are shell-quoted. Keep the old pairing until the new one is verified;
+the existing service owner controls changing its state root. The API's additive
+`local_auth_pinned` field reports the stored confirmation pin, separately from
+live Touch ID availability or connectivity. An older server that omits the field
+shows `unknown (server pin not reported)`.
+
 ### Attach a running session (AEON-352)
 
 Computer pairing connects agentd to Aeon once. Linking a running session to a
@@ -2786,11 +3484,15 @@ the uid of the `/proc/<pid>` directory. Root-owned `sshd`, `su` and `sudo`
 ancestors are acceptable. The selected target still requires its executable
 and working directory.
 Those checks are defence in depth. A program running as the same user can open
-another terminal and request the review. On a Mac that can use Touch ID, attach
-approval asks for it by default until the person saves a choice. People without
-Touch ID, Linux, and a Mac with no graphical login keep approval in Aeon.
-Saving Mac confirmation turns watches off where Touch ID cannot run. SSH to a
-Mac that can show Touch ID prompts on that Mac's screen.
+another terminal and request the review. On a Mac whose browser-approved pairing
+pinned a Secure Enclave public key, attach approval requires that key's Touch ID
+signature by default until the person saves a choice, even when the daemon
+reports that Touch ID cannot run. Linux and older pairings without a pinned key
+keep approval in Aeon. To allow an upgraded Mac without a graphical login or
+usable Touch ID, explicitly save **Approve in Aeon** in
+**Settings → Personal → Security → Session watching**. Saving Mac confirmation
+fails closed where Touch ID cannot run. SSH to a Mac that can show Touch ID
+prompts on that Mac's screen.
 Run `GOMAXPROCS=2 nix develop -c python3 scripts/check-attach-ancestry-mutations.py`
 on macOS to verify that the negative ancestry regressions catch removed guards.
 
@@ -2885,7 +3587,9 @@ The daemon logs the server's refusal, disables attach and keeps serving work
 and local control. The updated helper shows version-repair guidance on the
 existing authenticated, kernel-checked socket; unauthenticated callers only get
 the generic auth refusal. After updating the server, restart agentd
-to retry attach registration; there is no in-process registration retry.
+to retry failed startup registration. Startup refusals still require this explicit
+repair. Once registered, a running daemon can recover a registration lost during
+a server restart, as described below.
 
 Owner refusal guidance distinguishes incompatible attach versions, a pairing
 that no longer authenticates, unavailable project/ticket access, draining or
@@ -2900,15 +3604,49 @@ they are not reported as connection failures. Admission and limit hints share th
 same per-computer cap and attempt window.
 Server errors preserve `code` and `error`
 and add `attach_refusal` only after checking the computer proof and principal
-(or the signed-in person owner). Fixed English/German hints name the next action;
+(or the signed-in person owner), with the narrowly scoped `poll_key_unknown`
+exception described below. Fixed English/German hints name the next action;
 unknown causes direct the owner to daemon status and the administrator's server
 logs. Arbitrary server text never becomes terminal output. Revoked HTTP
 bearers stay unauthenticated; pairing repair is offered only by the locally
 authenticated interactive helper. Poll refusals still detach and clear local
 state, and no uncertain conversation submission is retried.
 
-If attach fails after a server restart, the daemon's memory-only poll registration
-was lost: restart agentd when owned work permits, then request fresh approval.
+Recovery reads the long-lived computer lifecycle proof from the approved setup
+store for each registration attempt; the transport retains the memory-only poll
+key and pinned origin, without retaining that proof for the daemon lifetime.
+Startup obtains the host and registration proof together in one read. Store or
+Keychain stalls can leave at most one authority reader in flight per daemon;
+cancellation or the total deadline releases the transport gate, and abandoned
+results are discarded rather than used by a later registration.
+Local cleanup, disconnect or configuration changes refuse recovery before a
+registration is sent. Unknown-key diagnostics use a separate server-local budget
+of 30 attempts per minute per authenticated computer principal before computer, scope or watch
+lookups; they never consume the tenant attach request budget. The server holds
+at most 4096 live budgets across tenants. As an accepted AEON-608 limitation,
+new principals (including those in another tenant) are refused until a slot
+expires when that shared cap is full; existing budgets retain their counters.
+A capped call returns `attach_recovery_limited` with
+`Retry-After` seconds, without authorizing registration. The daemon retains
+the server refusal and performs no exchange or registration until that delay
+expires (valid server delays are bounded to one day). If the explicit
+`poll_key_unknown` refusal reaches the helper during cooldown, run attach again
+in a few seconds and give fresh approval; a daemon restart is not required.
+
+After a server restart, agentd automatically re-registers its memory-only poll key
+only on the explicit `poll_key_unknown` refusal. The server issues that signal
+only for the authenticated principal of a connected computer with valid attach
+scope; incorrect keys, revoked pairing, draining/removed enrollments, ended watches
+and foreign tenants remain refusals. Older servers without this signal still
+require an agentd restart. This replaces the blanket no-in-process-retry policy:
+a confirmed rejection before mutation is safe to replay, while a failed or
+uncertain exchange is not. Each call attempts registration at most once and
+replays once, with one exchange/recovery in flight, a 20-second total deadline,
+and exponential jitter windows of 500 ms to 8 seconds (actual delay: half to the
+full window). The same delay is retained as a cooldown after completion or failure;
+calls during cooldown return the refusal and there is no background retry loop.
+Registration still ends earlier approvals and watches. Run attach again and give
+fresh approval for an ended watch; new requests work without restarting agentd.
 Re-pairing is not required for lost registration. A local `harness claude draining`
 report alone does not block attach: the attach manager does not use the supervisor's
 launch fence. A server-side draining or removed enrollment does block a fresh
@@ -2944,7 +3682,7 @@ Darwin tests require ESRCH before a missing or mismatched PID counts as exited.
 The status-only text regression backdates the poll clock and observes the relay directly, so rate
 limiting cannot hide a missing content guard. The approval browser spec covers
 both modes and consent policies at 1600/390 pixels in light and dark.
-The reporter contract is `harness-session/2.6`, declared by the response-only
+The reporter contract is `harness-session/2.7`, declared by the response-only
 `Aeon-Contract` header. Existing reporters keep working without a Pharos or
 Janus release; registration and heartbeat requests need no contract header:
 existing state values stay intact; optional `watch.process_state` carries a
@@ -3099,11 +3837,248 @@ Generic node/knowledge CRUD cannot modify question/decision authority.
 Questions and immutable answer revisions use protected nodes plus tenant/project
 projections. Each asker retains input, principal, exact original session, source
 request, reply-root UUID and comment destination (ticket, or question node).
-The reply root is a reserved correlation identity, not yet a public inbox message:
-P3 must bind the answering person and materialize the inbox counterpart before
-using `tell --reply-to`. No synthetic recipient or newer generation is guessed.
-P1 person answers support Once and record revision-bound pending inbox/comment/
-outcome effects with a database-clock ten-second deadline. They do not dispatch
-messages or claim successful delivery. Always/Requirement/Doctrine publication,
-verified handover sources and post-dispatch corrections require the later adapters;
-unsupported requests fail explicitly. Suggestions for all four outcomes are stored.
+The dispatcher materializes each reserved reply root as a held counterpart for
+its answering person. The original request is never released or executed.
+Person answers use a database-clock ten-second grace window; edits restart it.
+A bounded durable dispatcher serializes with edits and commits each asker's inbox
+and comment effects independently. Revisions dispatched before a change remain
+in the log; the new typed correction names its `replaces` answer ID. The inbox
+outbox state `delivered` means dispatched, while `receipt_state` reports `queued`,
+`handed_off`, or `failed`. CLI status distinguishes dispatch from receiver proof.
+
+A signed-in addressed person with inbox management and question permissions can
+use `tell --reply-to UUID --session-cookie-file PATH` on a held request. The
+file contains only the `aeon_session` cookie value; the command uses the selected
+instance URL (or `AEON_URL` / `PAIMOS_URL`), sends that cookie without an
+Authorization header, and ignores ambient agent keys and sender sessions.
+This records the answer/outbox and settles the request atomically, returning
+`status: pending`, a question ID, revision and deadline. Other callers retain the hidden-parent refusal. Resolve/dismiss and
+permission approvals keep their existing immediate semantics. Desk dispatch and
+ordinary replies reserve the obligation, message, delivery and receipt rows
+before appending events. Migration 1117 permits event references to be filled
+in within that transaction and rejects incomplete reservations at commit.
+
+The additive `harness-session/2.7` response contract includes optional `desk_answers`
+references; registration and heartbeat request requirements remain unchanged.
+Ended generations retain bounded durable answer references. Only a verified
+same-project/principal continuation receives the latest answer; an absent
+successor stays visibly `successor_pending`. Continuation briefs carry references
+whose private text is resolved through authorized `ask status`, preventing
+harness metadata readers from gaining question content. No old process is woken.
+Outcome effects (AEON-565) apply after the finalized grace revision. Once keeps
+an immutable Decided record. Always publishes a protected Knowledge entry of type
+`decision`, using the existing knowledge list/filter/resolve/graph surfaces and
+CLI taxonomy. A correction immediately withdraws and archives the earlier Always
+answer, independently of grace or failure of its replacement; lineage remains.
+Withdrawing an active Decision requires `knowledge.write` on its project,
+including when correcting to Once.
+Requirement appends one criterion with its exact answer marker, preserves the
+other ticket fields, and compares the captured ticket revision before writing.
+Concurrent edits leave a visible `ticket_revision_conflict`; decide again after
+reviewing the ticket. Requirement is unavailable for list or structured criteria.
+Corrections replace only the exact tracked criterion; edited or removed criteria
+remain untouched and appear in `effect_data.review_required` on the new effect.
+Missing, moved or otherwise non-editable prior tickets also require review;
+their criteria stay untouched while the rest of the correction applies.
+Carried reviews retain each distinct kind and reference. Refreshing a review's
+reason on a later correction preserves the reason on superseded effect revisions.
+Doctrine requires `doctrine: {source_id, path, rule_key, rule_sha256, tldr_en?,
+tldr_de?}` on the question or person decision. It creates only a pending AEON-444
+inbox draft; the existing person-only submit/dismiss and AEON-319 publication gates
+remain authoritative. Dismissed and expired drafts are already retired. Published
+or person-edited proposals remain untouched and appear in `review_required`; the
+rest of the answer can apply, and the existing Doctrine path governs any manual
+correction. This review provenance carries across later answers; a Doctrine
+correction requiring that review creates no new draft; a person must handle
+the correction through the existing Doctrine path.
+CLI status reads the current proposal lifecycle, including dismissal and promotion.
+No rule is described as changed merely by proposing.
+Status exposes `outcomes` with availability and a why for disabled stamps, plus
+per-revision `effect_data` and safe failure explanations. Availability reads load
+permissions once and report a cheap Doctrine `mapping_present` hint; exact mapping
+and quotation checks run when deciding and applying. Expensive inbox preparation
+runs before the tenant mutation fence, then rechecks authority and cache versions
+inside the write. Transient failures retry with current permissions, including
+`stale_source` preparation races and an expired `public_main_unavailable` cache.
+Each transient failure schedules its next attempt 30 seconds later. A stale
+public-main cache keeps retrying until it is refreshed or the answer is replaced.
+Permanent conflicts expose `retryable: false` and require a reviewed new decision; failed
+outcome writes never appear applied. Encoded Doctrine inputs exceeding the
+4096-byte persistence bound return 422 and are stored only for Doctrine.
+`source_handover_id` remains unavailable pending its verified ask-source adapter.
+
+## Derived work-parent status (AEON-650)
+
+Migration `1225_work_parent_status.sql` installs the shared transaction engine.
+`db.InTenant` enters pairing → tree → tenant → sorted work rows before a writer;
+`db.InTransaction` coalesces nested writes before the outer commit. Both old and
+new ancestor chains participate in moves. Canonical reads temporarily raise
+project visibility only inside the SQL functions, restoring it on every return;
+normal authorization remains in each writer's final transaction. Derived parent
+updates preserve `updated_at`, so they do not invalidate an unrelated title/body
+edit. Live views consume `status_autopilot.derived` at that unchanged revision.
+At that revision, the row store rejects node responses sent before a newer
+accepted read or derived hint. Late list responses preserve status from newer
+node reads while still supplying list-only projections. List snapshots retain
+their server-position ordering; cross-source status uses request order when
+positions cannot be compared. Status and its ordering fence form one snapshot:
+an accepted node payload applies before its fence advances, including when a
+full cache was already confirmed. A post-gap read applies the recovered status
+before confirming freshness. Named regressions and 300 reproducible seeded
+node/list/stream-gap interleavings check this against a small reference model.
+
+Rollout remains OFF until AEON-429's `features` table and service merge. Its
+catalog must register `work-parent-status` (label: “Parents follow their work”),
+using its existing tenant/project inheritance, explicit project OFF and default
+OFF behavior. Before enabling it, provision the existing System actor in a
+separate committed transaction while the flag is OFF (`systemactor.Ensure` /
+`aeon_authz_system_actor`); activation without that actor fails closed.
+Activation plumbing must validate the row/depth bounds before saving ON. A tenant
+already above the live-row limit can still read and disable the flag; flagged
+work mutations fail closed until recovery. This checkout does not substitute a
+second flag API. The coordinator owns catalog
+registration, activation plumbing and the AEON-429 integration check. Existing
+parents reconcile when their children or state-category configuration change;
+activation itself does not rewrite historical states. Package AEON-655 owns the
+parent status controls and preview-confirmation UI.
+
+Live work children make a parent; other kinds do not. Doing/QA wins, then
+Blocked, then Open. With only finished children, any Done gives Done; only
+Cancelled gives Cancelled; all Accepted gives Accepted; Delivered/Accepted gives
+Delivered; other finished mixtures give Done. Custom categories use these same
+buckets. Archived children are ignored. No remaining active work children keeps
+the last state and records a retention reason, including when the last work
+child converts to another kind. PATCH rejects an explicit parent
+status with `409 parent_status_derived`, including the current value; bulk reports
+such parents as skipped while applying authorized leaf changes. Imports retain
+canonical parent status and report `parent_status_derived` as a source conflict.
+Requirements generation and release quick-create emit work nodes.
+
+History and SSE expose safe `derivation` context: rule version, generic reason,
+affected parent ID, and cause event ID only when that event is visible. No hidden
+child identity or count is included. The private audit metadata retains
+selected cause IDs for grouped writes; ambiguous causes offer no causal Undo.
+Derived changes use Status autopilot's audit
+surface. The existing single-click Undo stays unavailable for them. Fetch
+`GET /api/events/{id}/undo-preview`; confirm its visible `change_type`, message
+and affected children, then POST `/api/events/{id}/undo` with
+`{"confirmed_cause_event_id":123}` using the returned cause ID. The write
+decodes its bounded confirmation before taking any transaction locks, then
+re-checks permissions and original child revisions under access-change fences
+even if the flag was disabled, and reverses the cause once. Parents are derived
+again while the feature is enabled. Ordinary Undo also takes pairing, tree and
+tenant access fences before its event fence in both flag states, including
+across activation and concurrent knowledge writes.
+Later child edits, hidden/ambiguous causes, active work and unsupported reverse
+operations refuse the action atomically.
+Causal preview and confirmed Undo enforce the leaf’s bilingual benefits when restoring
+completion, using current tenant state categories, including custom Done.
+
+The initial implementation deliberately serializes flagged tenant transactions
+and prelocks their work rows to avoid taking ancestor locks after the event
+counter. Reads also enter that protocol within capacity. Limits fail the entire
+work mutation transaction: 50,000 live work rows (tombstones are excluded, and
+restoration counts toward the limit), 1,000 changed nodes, depth 1,000, 10,000
+cause events, and 10-second entry/derivation deadlines. Causal previews accept
+at most 200 children and 4 MiB of combined cause snapshots, checked on their
+expanded JSON in Postgres before transfer to the application. Confirmation
+bodies are limited to 1 KiB with a 10-second HTTP read deadline. Shared work-order,
+harness, run, hours and review endpoints, queue writes and brand settings buffer
+their existing bounded request bodies before transaction admission, with the
+same 10-second HTTP read deadline. Event-position buffering preserves that
+connection deadline on harness and run GET routes without flushing responses
+before their position is known. The live-row limit is
+checked again against the final tree before commit, so crossing creates,
+restores and kind conversions roll back atomically. Direct work writes outside
+`db.InTenant` fail closed when the flag is enabled. These bounds and tenant-wide read serialization require
+load validation before enabling large tenants; the local deep/wide regression
+covers 64 ancestor levels and 300 leaves, not a production load claim.
+
+No version, release pin, session/Decision Desk identity or historical event is
+rewritten by this package. AEON-649's backup-only kind migration rollback still
+applies. No permanent tables or columns are added; only transaction-local queues,
+SQL functions/triggers, and existing append-only event metadata are used.
+
+## Work leaf aggregates (AEON-651)
+
+Default and live work lists include migrated `work` nodes. Parents show the sum
+of eligible leaf estimates separately from their editable planned estimate;
+cancelled and archived leaves retain their own displayed estimate and sort by it,
+but contribute nothing to ancestor totals. Descendant node and session events
+invalidate loaded parent projections in the affected project even when parent
+status and revision stay unchanged. Membership changes also refresh former leaves.
+When an uncached descendant moves, its source project is unknown; held work rows
+across projects are conservatively refreshed through authorized reads. Reads still
+respect pinned editors and reject responses overtaken by newer hints.
+Late usage reports also invalidate the session's currently bound readable work
+node and held parents, including after a session stops. Planning sorts resolve
+displayed work rows as well as eligible descendant leaves, preserving a closed
+leaf's route, token and cost projections across sort changes.
+Current `work` nodes keep route provenance, human checks, completion benefits,
+project moves, graph links and person-only roadmap publication. Future frozen
+release notes capture work members using the existing public-field whitelist.
+Tests use the current starter catalog; historic mixed-kind cases define their own
+tenant kinds.
+Lists without sized work skip calibration reads that cannot produce an estimate,
+while still resolving displayed routes and retaining historical usage.
+Progress tooltips and accessibility labels share ETA's completion rule: weighted
+or rounded 100% still says “work remains” while leaves are open or their completion
+is unknown. The displayed percentage and estimate coverage remain visible.
+
+The unreleased 1230 migration bounds every shared scope traversal to 4096 input
+roots and 50000 distinct root/node pairs, counting overlapping roots against the
+expansion budget before leaf facts or sessions are read. Cycles are deduplicated
+and depth is not silently truncated. Aggregate readers and node detail reads use
+five-second context deadlines, preserving shorter caller deadlines. Exceeding a
+budget or deadline returns an explicit failure (node APIs: 503), never a partial
+aggregate. Larger lists should narrow their scope. RLS, exact-money permissions,
+historical spend and session identities are unchanged.
+
+Work vocabulary (AEON-655) is managed in Workspace settings, independently of appearance. A leaf always uses the leaf name (default Ticket); parents use their project-relative level (Epic, Story, then Level N). Only live work children make a parent; a project resets depth. Naming and the parent status explanation use the existing `work-parent-status` flag, whose production activation remains owned by AEON-429. Create a work item; nesting decides its name. Lead status scripts must write leaves only.
+
+| Surface | Before migration | After work-kind migration |
+| --- | --- | --- |
+| REST `kind_id` | Configured Epic/Ticket/Task UUID | Canonical Work UUID; retired UUIDs are rejected, never guessed |
+| REST list `kind=epic,ticket,task` | Requested old kinds | Each old slug also matches Work (including exclusions); use `shape=parent` / `shape=leaf` and `depth=N` for structure |
+| REST `epic` projection/filter | Nearest Epic/subtree | Nearest Work ancestor/subtree; property name retained for compatibility |
+| Outcomes and cross-family reviews | Ticket outcomes; Ticket/Task reviews | Work retains existing history, outcome recording and review requests; routes and payload field names stay compatible |
+| REST node/list/tree/Graph | Existing fields retained | Additive `is_leaf`, `depth`, `level_name`, `level_icon`; non-work nodes omit shape fields |
+| CLI `issue --type work,epic,ticket,task` | Old types remain accepted | Old type names resolve to canonical Work for creation/listing; same-kind updates are no-ops |
+| CLI JSON | Original `type` | Canonical `type=work`, plus `is_leaf`, `depth`, `level_name`, `level_icon` |
+| MCP `issue_list`, `issue_get`, `issue_create` | Same configured-kind paths as CLI | Same aliases and JSON as CLI; `parent` on creation decides nesting |
+| Saved views | Existing kind filters retained | Old kind slugs match Work; Parents/Leaves and depth round-trip through URL and saved filters |
+
+Vocabulary writes require a person with `settings.manage`, check the current permission under the tenant fence, compare the supplied revision, and append an event. At most 32 parent levels and 60 characters per name are accepted. Empty values keep stable names and icons. Historical sessions, event snapshots and Decision Desk identities are unchanged. Integration seam: AEON-429 must provide its feature storage/service; AEON-652 owns server-side lifecycle enforcement. This package does not activate flags or change external lead scripts.
+
+AEON-655 Outline roots load incrementally with one unified cursor. Page sizes remain fixed even when inserted or expanded work consumes retention capacity. The browser retains at most 5000 lazy work items and reports an incomplete Outline at that limit; filtered paths resolve at most 2000 ancestor reads in batches of eight, with cycle detection and explicit incomplete-result messages for unreadable ancestors, resource limits or interrupted reads. Drag nested work onto the Project root destination above the rows to return it to the project level. Reload and Save vocabulary are serialized, and person/tenant changes discard old responses. Detail-panel completion uses canonical descendant-leaf state facets, excluding cancelled leaves; failed aggregate reads show unavailable progress instead of direct-child counts. CLI/MCP type aliases resolve kinds only and never inject provenance into strict user field schemas.
+
+AEON-655 completion validation covers migrated `work` and legacy `ticket` records. Creating or moving a work item into Done, Accepted or Delivered requires both pill and benefit texts in English and German, including when hidden from release notes. Already completed history remains editable; reopening restores the next-completion requirement. The workspace offers the same benefit reading section, editor and completion prompt for work items. Outline rendering traverses explicit frames rather than the JavaScript call stack; a 3600-row path (1800 ancestors plus 1800 matches) has regression coverage.
+
+### Ticket work measurement (AEON-503)
+
+Terminal managed runs expose `waiting_ms` alongside `active_ms`: waiting spans
+are clipped to the run lifetime and closed at the terminal timestamp, including
+finished reports without a status. More than 10,000 status readings leave both
+measurements unknown without rejecting completion or usage. Existing rows keep
+their recorded active time and have null waiting time; no history is rebuilt.
+New work-start estimate snapshots freeze area, role and complexity as well as
+size and rate. Later estimate edits cannot change that baseline.
+
+`GET /api/outcomes/measurement?ticket_node_id=AEON-503` requires `outcome.read`
+and `harness.read`. It returns lifetime recorded completion, review-verdict and
+fix-round counts, and distinct retained commit diff totals from current session
+bindings. It is a live evidence view, not an episode receipt or proof of complete
+contributor coverage. Project restrictions and bounded/truncated evidence are
+reported in `gaps`; missing diff totals are null, never zero. File changes sum
+per commit, not unique paths. Heartbeats collect content-free numstat counts
+with byte, file and time bounds; binary/failed reads remain unknown. Session
+responses add optional diff fields under `harness-session/2.8`.
+
+AEON-502e remains the only model/kind/complexity estimator. Its existing learning
+query now requires paired measured active/waiting time, final token evidence,
+a frozen source-project baseline and a single baseline per ticket. Legacy,
+missing timing, provisional tokens, moved sources and reopened/multiple-baseline
+work do not train this path. Restricted node visibility also excludes samples
+so an RLS subset cannot certify whole-ticket effort. Episode boundaries, retained
+contributor ownership, completion receipts and interval rebinding remain a
+separate concept decision.

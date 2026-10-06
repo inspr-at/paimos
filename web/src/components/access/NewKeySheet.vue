@@ -5,6 +5,7 @@ import { AccessError, type Agent, type AgentKeyCreated, agentScopeCeiling, creat
 import type { AgentKey } from '../../lib/settings'
 import { can, myPermissions } from '../../lib/authz'
 import { useAccess } from '../../stores/access'
+import { useSession } from '../../stores/session'
 import { agentLoginCommand } from '../../lib/agentLogin'
 import { absoluteTime } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
@@ -68,11 +69,13 @@ const scopeProblem = computed(() => !scopes.value.size ? 'Choose at least one th
 const copied = ref(false)
 const copyFallback = ref(false)
 const tokenInput = ref<HTMLInputElement>()
-const commandInput = ref<HTMLTextAreaElement>()
+const commandInput = ref<HTMLElement>()
 const commandCopied = ref(false)
 const commandFallback = ref(false)
-const loginCommand = agentLoginCommand(window.location.origin)
+const session = useSession()
+const loginCommand = computed(() => agentLoginCommand(window.location.origin, session.identity?.tenant.slug))
 const role = computed(() => currentAgent.value.workspace_role?.name)
+const submitLabel = computed(() => props.rotateKey ? 'Rotate key' : props.firstKey ? 'Create first key' : 'Create key')
 const rotationProblem = computed(() => props.rotateKey && !rotationScopesChanged.value && props.rotateKey.scopes.some(k => !held.value.has(k))
   ? 'The original scopes exceed what you or this agent’s role may grant. Rotation keeps those scopes, so it cannot continue.' : '')
 async function create() {
@@ -105,14 +108,22 @@ async function copy() {
   try { await navigator.clipboard.writeText(created.value.token); copied.value = true; copyFallback.value = false }
   catch { copied.value = false; copyFallback.value = true; selectKey(tokenInput.value) }
 }
+function selectCommand() {
+  const command = commandInput.value
+  if (!command) return
+  const range = document.createRange()
+  range.selectNodeContents(command)
+  getSelection()?.removeAllRanges()
+  getSelection()?.addRange(range)
+}
 async function copyCommand() {
-  try { await navigator.clipboard.writeText(loginCommand); commandCopied.value = true; commandFallback.value = false }
-  catch { commandCopied.value = false; commandFallback.value = true; commandInput.value?.focus(); commandInput.value?.select() }
+  try { await navigator.clipboard.writeText(loginCommand.value); commandCopied.value = true; commandFallback.value = false }
+  catch { commandCopied.value = false; commandFallback.value = true; commandInput.value?.focus() }
 }
 </script>
 
 <template>
-  <AccessSheet :title="created ? 'Key ready' : `${rotateKey ? 'Rotate key' : firstKey ? 'Create first key' : 'New key'} for ${agent.name}`" size="center" actions-first :submit-shortcut="!created" @submit="create" @close="busy || emit('close')">
+  <AccessSheet :title="created ? 'Key ready' : `${rotateKey ? 'Rotate key' : firstKey ? 'Create first key' : 'New key'} for ${agent.name}`" size="center" scale="l" actions-first :submit-shortcut="!created" @submit="create" @close="busy || emit('close')">
     <div v-if="!created" class="body">
       <p v-if="rotateKey" class="note"><AppIcon name="refresh" :size="14" /><span>Rotate {{ keyHint(rotateKey.prefix) }}: create a replacement and revoke the old key immediately when you confirm. The same scopes are kept unless you change the selection. Copy the new key into {{ agent.name }}’s configuration to reconnect it.</span></p>
       <p v-else class="note"><AppIcon name="shield" :size="14" /><span>The key does only what you tick below, and never more than {{ agent.name }}’s role{{ role ? ` (${role})` : '' }} allows. Revoking it stops it at once.</span></p>
@@ -141,7 +152,7 @@ async function copyCommand() {
           </span></div>
           <label v-for="scope in group.items" :key="scope.key" class="scope-row" :class="{ off: !held.has(scope.key) }">
             <input type="checkbox" :checked="scopes.has(scope.key)" :disabled="busy || !allowed || !held.has(scope.key)" @change="toggle(scope.key)" />
-            <ScopeDetails :scope="scope"><span v-if="!held.has(scope.key)" class="unavailable">{{ why(scope.key) }}</span></ScopeDetails>
+            <ScopeDetails :scope="scope"><span v-if="!held.has(scope.key)" class="unavailable" :title="why(scope.key)">{{ why(scope.key) }}</span></ScopeDetails>
           </label>
         </div>
         <p v-if="!groups.length" class="empty">No scope matches “{{ term }}”.</p>
@@ -153,23 +164,25 @@ async function copyCommand() {
     <div v-else class="body">
       <p class="once"><AppIcon name="info" :size="14" /><span>This key is shown only now; copy it before closing.</span></p>
       <div class="token">
-        <input ref="tokenInput" class="field mono" readonly :value="created.token" aria-label="New agent key" @focus="selectKey($event.target as HTMLInputElement)" />
-        <button type="button" class="btn token-copy" data-session-keep @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="14" />{{ copied ? 'Copied' : 'Copy key' }}</button>
+        <input ref="tokenInput" class="field mono" readonly :value="created.token" :style="{ '--chars': created.token.length }" aria-label="New agent key" @focus="selectKey($event.target as HTMLInputElement)" />
+        <button type="button" class="btn token-copy" data-session-keep @click="copy"><AppIcon :name="copied ? 'check' : 'copy'" :size="14" /><span class="btn-label"><span>{{ copied ? 'Copied' : 'Copy key' }}</span><span aria-hidden="true">Copy key</span></span></button>
       </div>
       <p class="expiry-note">{{ created.expires_at ? `Expires ${absoluteTime(created.expires_at)}.` : 'It never expires.' }}{{ rotateKey ? ' The old key is now revoked.' : '' }}</p>
       <p v-if="copied || copyFallback" class="copy-status" :class="{ 'sr-only': copied }" role="status">{{ copied ? 'Key copied.' : 'Clipboard unavailable. The key is selected; copy it with your keyboard or touch menu.' }}</p>
       <section class="cli-login" aria-labelledby="cli-login-title">
         <h3 id="cli-login-title">Use with the CLI</h3>
         <p class="expiry-note">Run this command, then paste the key at the hidden prompt.</p>
-        <textarea ref="commandInput" class="field mono login-command" readonly :value="loginCommand" aria-label="CLI login command" rows="3" @focus="($event.target as HTMLTextAreaElement).select()" />
-        <button type="button" class="btn sm" data-session-keep @click="copyCommand"><AppIcon :name="commandCopied ? 'check' : 'copy'" :size="14" />{{ commandCopied ? 'Command copied' : 'Copy command' }}</button>
+        <div class="command">
+          <code ref="commandInput" class="login-command" tabindex="0" role="textbox" aria-readonly="true" aria-label="CLI login command" @focus="selectCommand">{{ loginCommand }}</code>
+          <button type="button" class="btn sm" data-session-keep @click="copyCommand"><AppIcon :name="commandCopied ? 'check' : 'copy'" :size="14" /><span class="btn-label"><span>{{ commandCopied ? 'Command copied' : 'Copy command' }}</span><span aria-hidden="true">Command copied</span></span></button>
+        </div>
         <p v-if="commandCopied || commandFallback" class="copy-status" :class="{ 'sr-only': commandCopied }" role="status">{{ commandCopied ? 'Command copied; paste the key only when prompted.' : 'Command selected; copy it with your keyboard or touch menu.' }}</p>
       </section>
     </div>
     <template #foot>
       <template v-if="!created">
+        <button type="button" class="btn primary" :disabled="busy || !allowed || !!rotationProblem" :data-tip="allowed ? undefined : lostPermission('keys.manage')" @click="create"><AppIcon name="key" :size="13" /><span class="btn-label"><span>{{ busy ? (rotateKey ? 'Rotating…' : 'Creating…') : submitLabel }}</span><span aria-hidden="true">{{ submitLabel }}</span></span><kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
         <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-        <button type="button" class="btn primary" :disabled="busy || !allowed || !!rotationProblem" :data-tip="allowed ? undefined : lostPermission('keys.manage')" @click="create"><AppIcon name="key" :size="13" />{{ busy ? (rotateKey ? 'Rotating…' : 'Creating…') : (rotateKey ? 'Rotate key' : firstKey ? 'Create first key' : 'Create key') }}<kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
       </template>
       <button v-else type="button" class="btn primary" data-session-keep @click="emit('close')">Done</button>
     </template>
@@ -179,30 +192,37 @@ async function copyCommand() {
 <style scoped>
 .cli-login { display: grid; gap: 8px; padding-top: 4px; min-width: 0; }
 .cli-login h3 { font-size: 14px; font-weight: 600; }
-.cli-login .btn { justify-self: start; }
-.login-command { height: auto; min-height: 88px; resize: none; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
+.command { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; min-width: 0; }
+/* The command takes the height of its text: one line on wide screens, wrapped on narrow ones. */
+.login-command { display: block; flex: 0 1 auto; min-width: 0; max-width: 100%; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius-s); background: var(--field-bg); box-shadow: var(--field-inset); font-size: 12px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; cursor: text; }
+.login-command:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .copy-status { font-size: 12.5px; color: var(--ink-2); line-height: 1.5; }
 .expiry-note { font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
-.rotation-scopes { display: grid; gap: 8px; }
-.body { display: grid; gap: 14px; }
+.rotation-scopes { display: grid; gap: 8px; min-width: 0; }
+.body { display: grid; gap: 14px; min-width: 0; }
+.body > *, .note > span, .once > span { min-width: 0; overflow-wrap: anywhere; }
 .note, .once { display: grid; grid-template-columns: 14px 1fr; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); font-size: 13px; line-height: 1.5; color: var(--ink-2); }
 .note svg, .once svg { margin-top: 3px; color: var(--teal-ink); }
 .label { padding: 0; font: 500 10.5px/1.4 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
-.token { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.scopes { display: grid; gap: 10px; margin: 0; padding: 0; border: 0; border-radius: 10px; }
+/* The one-time key field is as wide as the key, not the dialog. */
+.token { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.token .field { flex: 0 1 auto; width: calc(var(--chars, 48) * 1ch + 28px); max-width: 100%; }
+.scopes { display: grid; gap: 10px; margin: 0; padding: 0; border: 0; border-radius: 10px; min-width: 0; }
 .scopes:focus-visible { box-shadow: var(--focus-ring); }
 .count { margin-left: 6px; letter-spacing: .04em; color: var(--ink-3); }
 .clear { justify-self: start; }
-.scope-group { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.scope-group { display: grid; grid-template-columns: minmax(0, 1fr); column-gap: 20px; row-gap: 4px; }
 .group-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; grid-column: 1 / -1; margin: 4px 0 2px; font: 600 10.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .group-actions { display: flex; gap: 4px; }
 .group-actions .btn { min-width: 44px; }
-.scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: start; gap: 8px; padding: 5px 0; cursor: pointer; }
+.scope-row { display: grid; grid-template-columns: 16px minmax(0, 1fr); min-width: 0; align-items: start; gap: 8px; padding: 5px 0; cursor: pointer; }
 .scope-row input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--teal); }
 .unavailable { font-size: 11px; color: var(--ink-3); }
 .scope-row.off { cursor: default; }
 .empty { font-size: 13px; color: var(--ink-3); }
 .field-error { display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--danger); }
 .token .field { font-size: 12.5px; }
-@media (max-width: 600px) { .cli-login .btn { min-height: 44px; } .token { grid-template-columns: 1fr; } .token .btn { height: 44px; } .scope-row { min-height: 44px; align-items: center; } .scope-row input { margin: 0; } }
+@container access-body (min-width: 600px) { .scope-group { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container access-body (min-width: 900px) { .scope-group { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 600px) { .cli-login .btn { min-height: 44px; } .token .field { width: 100%; } .token .btn { height: 44px; } .scope-row { min-height: 44px; align-items: center; } .scope-row input { margin: 0; } }
 </style>

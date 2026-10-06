@@ -20,7 +20,7 @@ import (
 
 func TestPatchPreconditionAtomic(t *testing.T) {
 	p := newPrincipal(t, "preconditions")
-	k := kindBySlug(t, p, "ticket")
+	k := kindBySlug(t, p, "work")
 	n := mustNode(t, p, `{"kind_id":"`+k.ID+`","title":"Before"}`)
 	mux := http.NewServeMux()
 	New(appPool, nil).Mount(mux)
@@ -82,7 +82,7 @@ func TestPatchPreconditionAtomic(t *testing.T) {
 
 func TestClassicAssigneeProjectionAndFacets(t *testing.T) {
 	p := newPrincipal(t, "assignee-fallback")
-	k := kindBySlug(t, p, "ticket")
+	k := kindBySlug(t, p, "work")
 	var mapped string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 		var identity string
@@ -118,7 +118,7 @@ func TestClassicAssigneeProjectionAndFacets(t *testing.T) {
 		t.Fatalf("unassigned = %s", body)
 	}
 	other := addPrincipal(t, "assignee-other")
-	otherKind := kindBySlug(t, other, "ticket")
+	otherKind := kindBySlug(t, other, "work")
 	status, body = call(t, &other, "POST", "/api/nodes", `{"kind_id":"`+otherKind.ID+`","title":"Other","fields":{"assignee":"`+mapped+`"}}`)
 	if status != 400 {
 		t.Fatalf("accepted foreign assignment: %d %s", status, body)
@@ -133,6 +133,8 @@ func TestClassicAssigneeProjectionAndFacets(t *testing.T) {
 
 func TestProjectCountsWorkKindsAndStateGroups(t *testing.T) {
 	p := newPrincipal(t, "work-counts")
+	customKind(t, p, "epic", "epic")
+	customKind(t, p, "task", "task")
 	create := func(kind, state, parent string) nodeJSON {
 		t.Helper()
 		k := kindBySlug(t, p, kind)
@@ -140,7 +142,7 @@ func TestProjectCountsWorkKindsAndStateGroups(t *testing.T) {
 		if parent != "" {
 			body["parent_id"] = parent
 		}
-		if kind == "ticket" {
+		if kind == "work" {
 			body["fields"] = json.RawMessage(benefitFields)
 		}
 		raw, _ := json.Marshal(body)
@@ -150,7 +152,7 @@ func TestProjectCountsWorkKindsAndStateGroups(t *testing.T) {
 	folder := create("release", "done", root.ID)
 	create("memory", "done", root.ID)
 	for i, state := range []string{"new", "backlog", "in_progress", "qa", "done", "delivered", "accepted", "cancelled"} {
-		create([]string{"ticket", "task", "epic"}[i%3], state, folder.ID)
+		create([]string{"work", "task", "epic"}[i%3], state, folder.ID)
 	}
 	status, body := call(t, &p, "GET", "/api/projects", "")
 	projects := decode[projectPage](t, status, body, 200)
@@ -161,7 +163,7 @@ func TestProjectCountsWorkKindsAndStateGroups(t *testing.T) {
 	if got.Total != 8 || got.Open != 2 || got.InProgress != 2 || got.Done != 3 || got.Cancelled != 1 {
 		t.Fatalf("groups: %+v", got)
 	}
-	status, body = call(t, &p, "GET", "/api/nodes?within="+root.ID+"&kind=ticket,task,epic&sort=state", "")
+	status, body = call(t, &p, "GET", "/api/nodes?within="+root.ID+"&kind=work,task,epic&sort=state", "")
 	page := decode[nodePage](t, status, body, 200)
 	if len(page.Items) != got.Total {
 		t.Fatalf("list/count mismatch %d / %d", len(page.Items), got.Total)
@@ -178,11 +180,13 @@ func TestProjectStatusBuckets(t *testing.T) {
 		t.Fatalf("state spelling: %q %q %q", normaliseWorkState(" QA "), normaliseWorkState("in-progress"), normaliseWorkState("in progress"))
 	}
 	p := newPrincipal(t, "status-buckets")
+	customKind(t, p, "epic", "epic")
+	customKind(t, p, "task", "task")
 	create := func(kind, state, parent string) {
 		t.Helper()
 		k := kindBySlug(t, p, kind)
 		body := map[string]any{"kind_id": k.ID, "title": kind + " " + state, "state": state, "parent_id": parent}
-		if kind == "ticket" {
+		if kind == "work" {
 			body["fields"] = json.RawMessage(benefitFields)
 		}
 		raw, err := json.Marshal(body)
@@ -199,7 +203,7 @@ func TestProjectStatusBuckets(t *testing.T) {
 		"in_progress", "in-progress", "in progress", "inprogress", "active", "qa", " QA ",
 		"accepted", "delivered", "done", "cancelled", "canceled", "archived",
 	} {
-		create("ticket", state, folder.ID)
+		create("work", state, folder.ID)
 	}
 	create("task", "open", folder.ID)
 	create("epic", "blocked", folder.ID)
@@ -223,7 +227,7 @@ func TestProjectStatusBuckets(t *testing.T) {
 	// done: accepted, delivered, done. cancelled: cancelled, canceled. archived is total only.
 	assertBuckets(7, 7, 3, 2, 20)
 
-	ticketKind := kindBySlug(t, p, "ticket")
+	ticketKind := kindBySlug(t, p, "work")
 	var schema map[string]any
 	if err := json.Unmarshal(ticketKind.FieldSchema, &schema); err != nil {
 		t.Fatal(err)
@@ -265,7 +269,7 @@ func TestProjectStatusBuckets(t *testing.T) {
 	// Ticket catalog only: mystery is done, blocked is in progress, both qa spellings are open.
 	// The epic's blocked state keeps the fixed mapping.
 	got := assertBuckets(7, 6, 4, 2, 20)
-	status, body = call(t, &p, "GET", "/api/nodes?within="+root.ID+"&kind=ticket,task,epic&hide_closed=true&limit=100", "")
+	status, body = call(t, &p, "GET", "/api/nodes?within="+root.ID+"&kind=work,task,epic&hide_closed=true&limit=100", "")
 	hidden := decode[nodePage](t, status, body, 200)
 	if len(hidden.Items) != got.Open+got.InProgress {
 		t.Fatalf("hide closed %d, open+doing %d", len(hidden.Items), got.Open+got.InProgress)
@@ -274,12 +278,12 @@ func TestProjectStatusBuckets(t *testing.T) {
 	for _, n := range hidden.Items {
 		seen[n.Title] = true
 	}
-	for _, title := range []string{"ticket mystery", "ticket canceled", "ticket done", "ticket archived", "ticket accepted", "ticket delivered"} {
+	for _, title := range []string{"work mystery", "work canceled", "work done", "work archived", "work accepted", "work delivered"} {
 		if seen[title] {
 			t.Fatalf("closed work stayed visible: %s", title)
 		}
 	}
-	for _, title := range []string{"ticket open", "ticket blocked", "task open", "epic blocked"} {
+	for _, title := range []string{"work open", "work blocked", "task open", "epic blocked"} {
 		if !seen[title] {
 			t.Fatalf("open work hidden: %s", title)
 		}
@@ -289,7 +293,9 @@ func TestProjectStatusBuckets(t *testing.T) {
 // Hide closed and the project counts share one bucket, per work kind.
 func TestHideClosedAgreesWithBuckets(t *testing.T) {
 	p := newPrincipal(t, "hide-closed-buckets")
-	for _, kind := range []string{"ticket", "task", "epic"} {
+	customKind(t, p, "epic", "epic")
+	customKind(t, p, "task", "task")
+	for _, kind := range []string{"work", "task", "epic"} {
 		t.Run(kind, func(t *testing.T) {
 			k := kindBySlug(t, p, kind)
 			var schema map[string]any
@@ -307,7 +313,7 @@ func TestHideClosedAgreesWithBuckets(t *testing.T) {
 			root := mustNode(t, p, `{"kind_id":"`+kindBySlug(t, p, "project").ID+`","title":"`+kind+` project","state":"active"}`)
 			for _, state := range []string{"open", "blocked", "mystery", "canceled", "done", "accepted", "delivered", "in-progress", "qa", "archived"} {
 				body := map[string]any{"kind_id": k.ID, "title": kind + " " + state, "state": state, "parent_id": root.ID}
-				if kind == "ticket" {
+				if kind == "work" {
 					body["fields"] = json.RawMessage(benefitFields)
 				}
 				raw, err := json.Marshal(body)
@@ -363,7 +369,7 @@ func TestHideClosedAgreesWithBuckets(t *testing.T) {
 func TestStateSortFollowsWorkflow(t *testing.T) {
 	p := newPrincipal(t, "state-sort")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Sort","state":"active"}`)
 	for _, state := range []string{"archived", "mystery", "done", "qa", "active", "in-progress", "blocked", "open", "new", "cancelled", "canceled", "accepted", "delivered"} {
 		body := map[string]any{"kind_id": ticket.ID, "title": state, "state": state, "parent_id": root.ID}
@@ -420,7 +426,7 @@ func TestStateSortFollowsWorkflow(t *testing.T) {
 func TestStateSortNormalisesSpellings(t *testing.T) {
 	p := newPrincipal(t, "state-sort-norm")
 	project := kindBySlug(t, p, "project")
-	ticket := kindBySlug(t, p, "ticket")
+	ticket := kindBySlug(t, p, "work")
 	root := mustNode(t, p, `{"kind_id":"`+project.ID+`","title":"Norm sort","state":"active"}`)
 	for _, state := range []string{"mystery", " OPEN ", "done", "in--progress", " QA ", "archived", "open", "qa"} {
 		body := map[string]any{"kind_id": ticket.ID, "title": state, "state": state, "parent_id": root.ID}

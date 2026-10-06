@@ -24,7 +24,12 @@ const waiting = computed(() => !!tiers.busy[context.session.id])
 const valid = computed(() => !loading.value && offeredTier(selected.value) && choice.value !== snapshot.value?.active_tier && !waiting.value &&
   (context.ask ? tiers.canAsk(session.value) && !!why.value.trim() && [...why.value.trim()].length <= 500 : !tiers.unavailable(session.value)))
 const label = computed(() => !choice.value || choice.value === snapshot.value?.active_tier ? 'Pick another tier' : `${context.ask ? 'Ask for' : 'Switch to'} ${TIER_NAME[choice.value]} · ${tierPrice(selected.value)}`)
-function close(restore = true) { tiers.close(restore) }
+function close(restore = true) {
+  // Leave the modal top layer before restoring focus to the overflow trigger.
+  // Otherwise it is still inert, and removing the sheet loses that focus.
+  frame.value?.close()
+  tiers.close(restore)
+}
 async function confirm() {
   if (!valid.value || !choice.value || !snapshot.value) return
   const id = context.session.id

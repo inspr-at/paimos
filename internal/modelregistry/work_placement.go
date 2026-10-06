@@ -41,8 +41,7 @@ func PlacementFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuer
 		q.PersonID = modelprefs.PrefsPerson(ctx, tx, p)
 	}
 	if KnownRouteRole(q.Role) && !(strings.HasPrefix(q.Role, "review-gate") && q.AuthorFamily == "") {
-		// Fields are already read in this transaction; avoid a second lookup.
-		q.TicketID = ""
+		// Retain identity so ticket-aware routing consumes its escalation episode.
 		resolved, err := ResolveWork(ctx, tx, tenant.Principal{}, q, now)
 		if err != nil {
 			return out, err
@@ -73,15 +72,15 @@ func PlacementFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuer
 	return out, nil
 }
 
-// DispatchPlacement finds the nearest ticket/task of a work order. A person
+// DispatchPlacement finds the nearest work item of a work order. A person
 // preview never enters this path: q is keyed by the run's starter.
 func DispatchPlacement(ctx context.Context, tx pgx.Tx, p tenant.Principal, order string, now time.Time) (*WorkPlacement, error) {
 	var ticket *string
 	err := tx.QueryRow(ctx, `WITH RECURSIVE up AS (
  SELECT n.id,n.parent_id,k.slug,0 AS depth FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND n.deleted_at IS NULL
  UNION ALL SELECT n.id,n.parent_id,k.slug,up.depth+1 FROM up JOIN nodes n ON n.tenant_id=current_setting('aeon.tenant_id')::uuid AND n.id=up.parent_id
- JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE up.slug NOT IN ('ticket','task') AND up.depth<32 AND n.deleted_at IS NULL)
- SELECT (SELECT id::text FROM up WHERE slug IN ('ticket','task') ORDER BY depth LIMIT 1)`, order).Scan(&ticket)
+ JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE up.slug NOT IN ('work','ticket','task') AND up.depth<32 AND n.deleted_at IS NULL)
+ SELECT (SELECT id::text FROM up WHERE slug IN ('work','ticket','task') ORDER BY depth LIMIT 1)`, order).Scan(&ticket)
 	if err != nil || ticket == nil {
 		return nil, err
 	}

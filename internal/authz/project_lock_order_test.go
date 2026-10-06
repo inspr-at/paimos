@@ -23,7 +23,7 @@ func TestProjectFencesPreserveTenantModes(t *testing.T) {
 				if err := lock(ctx, tx, f.actor.TenantID); err != nil {
 					return err
 				}
-				// Preserve the shipped modes: membership mutations use UPDATE;
+				// Preserve the shipped modes: membership mutations use NO KEY UPDATE;
 				// resource writes use SHARE, compatible with FK checks and other
 				// readers but excluding every authority writer.
 				for _, mode := range []string{"KEY SHARE", "NO KEY UPDATE", "SHARE", "UPDATE"} {
@@ -33,7 +33,7 @@ func TestProjectFencesPreserveTenantModes(t *testing.T) {
 					}
 					_, err = probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR `+mode+` NOWAIT`, f.actor.TenantID)
 					_ = probe.Rollback(ctx)
-					if name == "write" && (mode == "KEY SHARE" || mode == "SHARE") {
+					if mode == "KEY SHARE" || (name == "write" && mode == "SHARE") {
 						if err != nil {
 							t.Errorf("compatible tenant %s check blocked by project fence: %v", mode, err)
 						}

@@ -1,6 +1,8 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { isWorkItem, isWorkParent } from '../../lib/workVocabulary'
+import { isJourneyLeaf } from '../../lib/journeyWork'
 import { useJourneyContext } from '../../lib/journeyContext'
 import { isDropped, isFinished } from '../../lib/journey'
 import { entryPath, typeMeta } from '../../lib/knowledge'
@@ -28,8 +30,8 @@ const open = ref(false)
 const knowledge = computed(() => origin.value.knowledge.filter(k => k.status !== 'archived'))
 const shownKnowledge = computed(() => knowledge.value.slice(0, 6))
 const work = computed(() => ctx.data.work.value.value)
-const epics = computed(() => work.value.filter(item => item.kind_slug === 'epic').length)
-const tickets = computed(() => work.value.filter(item => item.kind_slug === 'ticket' && !isDropped(item.state)))
+const epics = computed(() => work.value.filter(item => isWorkItem(item) && isWorkParent(item)).length)
+const tickets = computed(() => work.value.filter(item => isJourneyLeaf(item) && !isDropped(item.state)))
 const done = computed(() => tickets.value.filter(item => isFinished(item.state)).length)
 const routeKey = computed(() => ctx.project.value.routeKey)
 </script>

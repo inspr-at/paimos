@@ -57,7 +57,7 @@ func setup(t *testing.T) *fixture {
 		return id
 	}
 	f.project, f.otherProject = node("project", ""), node("project", "")
-	f.ticket = node("ticket", f.project)
+	f.ticket = node("work", f.project)
 	if _, err := f.d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, tid, f.reader.ID, f.project); err != nil {
 		t.Fatal(err)
 	}

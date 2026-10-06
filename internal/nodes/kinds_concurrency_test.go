@@ -13,7 +13,7 @@ import (
 func TestKindConcurrentDisjointPatches(t *testing.T) {
 	p := newPrincipal(t, "kind-concurrency")
 	var id string
-	if err := adminPool.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='task'`, p.TenantID).Scan(&id); err != nil {
+	if err := adminPool.QueryRow(t.Context(), `SELECT id::text FROM node_kinds WHERE tenant_id=$1 AND slug='work'`, p.TenantID).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
 	pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool { return strings.Contains(sql, "UPDATE node_kinds") })

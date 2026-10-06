@@ -22,6 +22,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	webpush "github.com/SherClockHolmes/webpush-go"
 	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
@@ -42,6 +43,7 @@ import (
 	"github.com/inspr-at/paimos/internal/business/quotes/collaboration"
 	"github.com/inspr-at/paimos/internal/business/quotes/confirmation"
 	publicquotes "github.com/inspr-at/paimos/internal/business/quotes/public"
+	"github.com/inspr-at/paimos/internal/chat"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
@@ -49,6 +51,7 @@ import (
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/embedding"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/features"
 	"github.com/inspr-at/paimos/internal/fromclassic"
 	"github.com/inspr-at/paimos/internal/greetings"
 	"github.com/inspr-at/paimos/internal/harness"
@@ -63,6 +66,8 @@ import (
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/outcomes"
+	"github.com/inspr-at/paimos/internal/parentbenefits"
+	"github.com/inspr-at/paimos/internal/phoneapprovals"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/portal"
 	"github.com/inspr-at/paimos/internal/profile"
@@ -80,6 +85,7 @@ import (
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/tenantbrand"
+	"github.com/inspr-at/paimos/internal/themes"
 	"github.com/inspr-at/paimos/internal/ticketwork"
 	"github.com/inspr-at/paimos/internal/usagedashboard"
 	"github.com/inspr-at/paimos/internal/views"
@@ -168,6 +174,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	}
 	// In-app models are workspace opt-ins. There is no global vendor fallback.
 	workspaceModels := modelprovider.New(pool, authCfg.SessionKey)
+	parentBenefits := parentbenefits.New(pool, workspaceModels.ParentBenefits)
 	workspaceNotes := crm.WorkspaceNotes{Provider: workspaceModels}
 	extraPlugins := []func() (plugins.Plugin, error){costunits.Plugin, func() (plugins.Plugin, error) { return crm.PluginWithNoteGenerator(workspaceNotes) }, quotes.ManifestPlugin, hours.Plugin, greetings.ManifestPlugin, profile.Plugin, host.Plugin}
 	journalStore, err := journal.NewStore(pool)
@@ -188,9 +195,10 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		go aithemaHost.Run(ctx)
 	}
 
+	questionsMod := questions.New(pool)
 	var messagingMod httpapi.Module
 	if cfg.MessagingKey != nil {
-		m, err := inbox.NewMessaging(pool, cfg.MessagingKey)
+		m, err := inbox.NewMessaging(pool, cfg.MessagingKey, inbox.WithHeldReplyBridge(questionsMod.ReplyHeld))
 		if err != nil {
 			closeListener()
 			return fmt.Errorf("messaging: %w", err)
@@ -250,6 +258,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		return fmt.Errorf("public quotes: %w", err)
 	}
 	go embedding.NewWorker(pool, nil, embedding.Options{Resolve: workspaceModels.Embeddings}).Run(ctx)
+	go parentBenefits.Run(ctx)
 	go runConfirmationJobs(ctx, pool, confirmationMod, pdfConcurrency)
 	// A bad AEON_BRAND_FILE must stop startup, never fall back silently.
 	productBrand, err := brand.Load()
@@ -274,6 +283,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	go inbox.NewWorker(pool, inbox.WorkerOptions{}).Run(ctx)
 	// AEON-291: silent unmanaged sessions become "Lost contact" (one runner per tenant).
 	go harness.RunLostContactSweeper(ctx, pool)
+	go nodes.RunWorkLifecycle(ctx, pool)
 	modelMod := modelregistry.NewWithVault(pool, authCfg.SessionKey)
 	go modelMod.Run(ctx)
 	// AEON-280: delivery deadlines and the attempt cap; one runner across
@@ -312,6 +322,12 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	if err := pairingMod.ConfigureAccountLink(authCfg.SessionKey); err != nil {
 		return fmt.Errorf("account linking: %w", err)
 	}
+	var vapid *webpush.Options
+	if cfg.PhonePush != nil {
+		vapid = &webpush.Options{VAPIDPublicKey: cfg.PhonePush.PublicKey, VAPIDPrivateKey: cfg.PhonePush.PrivateKey, Subscriber: cfg.PhonePush.Subject}
+	}
+	phoneMod := phoneapprovals.New(pool, pairingMod, cfg.PublicURL, cfg.LinkKey, vapid)
+	go phoneMod.Run(ctx)
 	doctrineMod := doctrine.New(pool, doctrine.Options{
 		CredentialsDir:    cfg.DoctrineCredentialsDir,
 		GuardKey:          cfg.DoctrineGuardKey,
@@ -322,6 +338,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			TenantID: cfg.DoctrineAppTenantID, GateLogin: cfg.DoctrineGateLogin, DCOAcknowledged: cfg.DoctrineDCOAcknowledged,
 		},
 	})
+	questionsMod.WithDoctrine(doctrineMod)
+	go questionsMod.Run(ctx)
 	go doctrineMod.EnsurePrivateGuards(ctx)
 	go doctrineMod.RunOutcomeAnalysis(ctx)
 	reviewApp := &crossreview.GitHubApp{Config: crossreview.AppConfig{
@@ -354,9 +372,11 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			nodes.New(pool, nodes.SQLWriter{}),
 			fromclassic.New(pool),
 			tenantbrand.New(pool),
+			features.New(pool),
 			workspaceModels,
+			parentBenefits,
 			relations.New(pool),
-			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(statusautopilot.UndoHandlers()), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
+			events.New(pool, events.WithUndoHandlers(nodes.UndoHandlers()), events.WithCausalUndoHandlers(nodes.CausalUndoHandlers()), relations.UndoOption(), events.WithUndoHandlers(views.UndoHandlers()), events.WithUndoHandlers(knowledge.UndoHandlers()), events.WithUndoHandlers(projectgroups.UndoHandlers()), events.WithUndoHandlers(attachments.UndoHandlers()), events.WithUndoHandlers(hours.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(profile.UndoHandlers()), events.WithUndoHandlers(themes.UndoHandlers()), events.WithUndoHandlers(crm.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(publicquotes.UndoHandlers()), events.WithUndoHandlers(quotes.UndoHandlers(pluginRegistry)), events.WithUndoHandlers(statusautopilot.UndoHandlers()), events.WithUndoHandlers(releases.UndoHandlers()), events.WithUndoHandlers(harness.UndoHandlers())),
 			search.NewWithResolver(pool, workspaceModels.Embeddings),
 			views.New(pool),
 			activity.New(pool),
@@ -366,9 +386,11 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			projectgroups.New(pool),
 			historyMod,
 			profile.New(pool, attachments.Store{FilesDir: cfg.FilesDir}),
+			themes.New(pool),
 			imports.New(pool),
 			// R2: agents
 			inbox.New(pool),
+			chat.New(pool),
 			harness.New(pool, nodes.CapturePlanningStart),
 			rules.New(pool),
 			doctrineMod,
@@ -380,7 +402,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			reviewMod,
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
 			approvals.New(pool),
-			questions.New(pool),
+			phoneMod,
+			questionsMod,
 			decisiondesk.New(pool),
 			modelMod,
 			agentaccounts.New(pool),

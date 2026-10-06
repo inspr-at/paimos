@@ -4,17 +4,18 @@ package agentaccounts
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func bResource(t *testing.T, f limitFixture) string {
@@ -141,43 +142,34 @@ func TestBEarlyAndExpiryRecoveryRaceConsumesOneWait(t *testing.T) {
 		t.Fatal("owner check did not capture its wait")
 	}
 	runs := []string{insertRun(t, f.admin, f.runner, f.profile), insertRun(t, f.admin, f.runner, f.profile)}
-	// Pause the first transaction after it owns the pairing fence. The second
-	// must already be inside its transaction attempting that same fence before
-	// the first can continue; channels prove overlap without elapsed time.
-	tracer := &bRaceTracer{held: make(chan struct{}), competing: make(chan struct{}), release: make(chan struct{})}
-	config := appPool.Config()
-	config.ConnConfig.Tracer = tracer
-	pool, err := pgxpool.NewWithConfig(t.Context(), config)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-	defer func() {
-		select {
-		case <-tracer.release:
-		default:
-			close(tracer.release)
-		}
-	}()
+	// Pause after tenant acquisition; PostgreSQL proves the second claim is
+	// blocked on that fence before the first can continue.
+	pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool {
+		return sql == `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`
+	})
 	racing := fixedClockModule{Module: New(pool), at: now}
 	statuses := make(chan int, 2)
 	go func() {
-		code, _ := call(t, racing, &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, runs[0], "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
+		code, _ := bRaceRoute(ctx, racing, f.runner, f.token, routeBody(t, runs[0], "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
 		statuses <- code
 	}()
-	bBarrier(t, tracer.held)
+	pid := barrier.Wait(t, ctx)
+	secondDone := make(chan struct{})
 	go func() {
-		code, _ := call(t, racing, &f.runner, f.token, "POST", "/api/agent-accounts/route", routeBody(t, runs[1], "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
+		code, _ := bRaceRoute(ctx, racing, f.runner, f.token, routeBody(t, runs[1], "daemon-a", []Account{f.account}, map[string]int64{"requests": 1}))
 		statuses <- code
+		close(secondDone)
 	}()
-	bBarrier(t, tracer.competing)
-	close(tracer.release)
+	if lock := dbtest.BlockedOrDone(t, ctx, adminPool, pid, secondDone); lock != "transactionid" {
+		t.Fatalf("second recovery claim did not wait on tenant: %q", lock)
+	}
+	barrier.Release()
 	counts := map[int]int{}
 	for i := 0; i < 2; i++ {
 		select {
 		case code := <-statuses:
 			counts[code]++
-		case <-time.After(20 * time.Second):
+		case <-ctx.Done():
 			t.Fatal("recovery transactions hung")
 		}
 	}
@@ -212,38 +204,14 @@ func TestBHardStopsAndStaleRoomRemainResourceSpecific(t *testing.T) {
 	f.route(t, 200)
 }
 
-// bRaceTracer establishes a competing transaction at the real serialization
-// fence. The timeout is only a hang guard; no correctness claim uses duration.
-type bRaceTracer struct {
-	count                    atomic.Int32
-	held, competing, release chan struct{}
-}
-type bRaceKey struct{}
-
-func (b *bRaceTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
-	if strings.HasPrefix(data.SQL, "SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'") {
-		n := b.count.Add(1)
-		if n == 2 {
-			<-b.held
-			close(b.competing)
-		}
-		return context.WithValue(ctx, bRaceKey{}, n)
-	}
-	return ctx
-}
-func (b *bRaceTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
-	if n, ok := ctx.Value(bRaceKey{}).(int32); ok && n == 1 && data.Err == nil {
-		close(b.held)
-		<-b.release
-	}
-}
-func bBarrier(t *testing.T, ch <-chan struct{}) {
-	t.Helper()
-	select {
-	case <-ch:
-	case <-time.After(20 * time.Second):
-		t.Fatal("transaction barrier hung")
-	}
+func bRaceRoute(ctx context.Context, mod httpapi.Module, actor tenant.Principal, token, body string) (int, []byte) {
+	mux := http.NewServeMux()
+	mod.Mount(mux)
+	r := httptest.NewRequest("POST", "/api/agent-accounts/route", strings.NewReader(body)).WithContext(tenant.WithPrincipal(ctx, actor))
+	r.Header.Set("Authorization", "Bearer "+token)
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	return w.Code, w.Body.Bytes()
 }
 
 func TestBUnstartedRecoveryRestoresEarlyIntent(t *testing.T) {

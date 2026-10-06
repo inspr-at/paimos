@@ -4,11 +4,11 @@ import AxeBuilder from '@axe-core/playwright'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
-import { capacityWorld, NOW } from './capacity-fixtures'
+import { capacityWorld, defaultSchedule, NOW } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { PlanSnapshot } from '../src/lib/agentsWorking'
-const shots = process.env.AEON_540_SHOTS
+const shots = process.env.AEON_647_SHOTS ?? 'test-results/aeon-647'
 const states = {
   wind: { total: 5, running: { codex: 12, claude: 1, cursor: 3 }, limits: { codex: 4, claude: 2, cursor: 'off' } },
   room: { total: 8, running: { codex: 2, claude: 1, cursor: 0 }, limits: { codex: 4, claude: 'no_limit', cursor: 'no_limit' } },
@@ -40,7 +40,7 @@ async function setup(page: Page, state: keyof typeof states = 'wind', folded = f
       const harness = data.accounts.find(account => account.id === a.account_id)?.harness
       const slots = harness && !seen.has(harness) ? available[harness as keyof typeof available] ?? 0 : 0
       if (harness) seen.add(harness)
-      return { ...a, routing: { rank: 1, available_slots: slots } }
+      return { ...a, routing: state === 'full' ? { rank: 0, available_slots: 0, wait: { code: 'capacity', run_now_allowed: false } } : { rank: 1, available_slots: slots } }
     }) })
   })
   const queue = state === 'room' ? [] : Array.from({ length: state === 'off' ? 2 : 3 }, (_, i) => ({ node_id: `waiting-${i}`, key: `AEON-${i}`, title: 'Waiting work', state: 'open', priority: 'normal', estimate_hours: 1, queued: { model_profile_id: null, waiting: false, wait_reason: '' } }))
@@ -50,10 +50,85 @@ async function setup(page: Page, state: keyof typeof states = 'wind', folded = f
 const dial = (page: Page) => page.getByRole('region', { name: 'Agents at once' })
 const totalMore = (page: Page) => dial(page).getByRole('button', { name: 'One agent more at once' })
 const totalFewer = (page: Page) => dial(page).getByRole('button', { name: 'One agent fewer at once' })
-for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const) for (const state of Object.keys(states) as (keyof typeof states)[]) {
+
+test('AEON-720: idle dial reports real account room and explains unknown readings without inventing waiting agents', async ({ page }) => {
+  const { data, calls } = await setup(page, 'room')
+  let reading: 'ready' | 'missing' | 'blocked' = 'ready'
+  let capacityReads = 0
+  await page.route('**/api/agents/plan', route => route.fulfill({ json: { total: 5, limits: {}, principal_id: me.id, running: {}, running_total: 0, source: 'plan', updated_at: null } }))
+  await page.route('**/api/agent-accounts/capacity', route => {
+    capacityReads++
+    return route.fulfill({ json: data.accounts.map(a => ({
+      account_id: a.id, schedule: defaultSchedule(),
+      windows: [], routing: reading === 'ready' ? { rank: 1, available_slots: 2 }
+        : { rank: 0, available_slots: 0, wait: { code: reading === 'missing' ? 'reading' : 'schedule', run_now_allowed: false } },
+    })) })
+  })
+  await page.clock.install({ time: NOW })
+  await page.goto('/agents')
+  const card = dial(page), detail = card.locator('.f-info')
+  const capture = async () => {
+    mkdirSync(shots, { recursive: true })
+    for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: 1800 })
+      await page.emulateMedia({ colorScheme: theme })
+      expect(await card.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+      await card.screenshot({ path: `${shots}/${width}-${theme}-idle-${reading}.png`, animations: 'disabled' })
+    }
+    await page.setViewportSize({ width: 1440, height: 1800 })
+  }
+  await expect(card.locator('.f-now')).toContainText('0 are running; 5 more can start as work comes in.')
+  await expect(detail).toContainText(`Room for ${data.accounts.length * 2} more right now.`)
+  await expect(detail).toContainText('quota not measured yet')
+  await expect(card.locator('.f-wait')).toHaveText('No work queued.')
+  await expect(card.locator('.f-now')).not.toContainText('wait')
+  await expect(detail).not.toContainText('Full right now')
+  await capture()
+  await expectStableControls({
+    controls: { more: totalMore(page), fewer: totalFewer(page), fold: card.locator('.f-fold'), choices: card.locator('[data-key="codex"] .seg'), row: card.locator('[data-key="codex"]') },
+    scrollAreas: { card },
+    interactions: [
+      { name: 'reading disappears during a poll', run: async () => {
+        const before = capacityReads
+        reading = 'missing'
+        await page.clock.fastForward(30_000)
+        await expect.poll(() => capacityReads).toBeGreaterThan(before)
+        await expect(detail).toContainText('Account room is not measured yet; see the reasons below.')
+        await expect(detail).toContainText('a current reading is missing')
+        await expect(card.locator('.f-live')).toHaveText('0 running · account room not measured yet')
+        await capture()
+      } },
+      { name: 'scheduled hours block new starts', run: async () => {
+        reading = 'blocked'
+        await page.clock.fastForward(30_000)
+        await expect(detail).toContainText('outside scheduled hours')
+        await expect(detail).toContainText('No account starts are available right now.')
+        await expect(detail).not.toContainText('Full right now')
+        await expect(card.locator('.f-now')).not.toContainText('wait')
+      } },
+    ],
+  })
+  await capture()
+  expect(calls.filter(c => c.method !== 'GET' && /harness-sessions|\/controls|\/stop|\/interrupt/.test(c.path))).toEqual([])
+})
+
+test('AEON-720: accounts owned by another person never become dial room or a false full', async ({ page }) => {
+  const { data } = await setup(page, 'room')
+  for (const a of data.accounts) Object.assign(a, { owner_person_id: 'other-person', registered_by_principal_id: 'other-agent' })
+  await page.route('**/api/agents/plan', route => route.fulfill({ json: { total: 5, limits: {}, principal_id: me.id, running: {}, running_total: 0, source: 'plan', updated_at: null } }))
+  await page.goto('/agents')
+  const card = dial(page)
+  await expect(card.locator('.f-info')).toContainText('No linked accounts.')
+  await expect(card.locator('.f-info')).toContainText('Codex no linked accounts')
+  await expect(card.locator('.f-live')).toHaveText('0 running · no account starts available')
+  await expect(card.locator('.f-now')).not.toContainText('wait')
+  await expect(card.locator('.f-info')).not.toContainText('Full right now')
+})
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  const state = 'wind' as const
   test(`${width} ${theme} ${state}: stepping, modes and folding keep every control put`, async ({ page }) => {
-    // Three stability guards plus optional captures: allow hosted workers=2
-    // load without weakening any geometry, interaction or overflow assertion.
+    // Measure each changed control through steps, drafts, modes and folding.
     test.setTimeout(90_000)
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
@@ -64,6 +139,7 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await expect(codex).toBeVisible()
     await expect(card.locator('.f-num')).toHaveText(String(states[state].total))
     await expect(card.locator('.f-bot')).toHaveClass(/busy/)
+    expect(await card.locator('.f-dial').evaluate(el => el.firstElementChild?.classList.contains('f-bot'))).toBe(true)
     expect(await card.locator('.f-bot').evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0)
     const expected = { wind: '16 running · winding down to 5', room: '3 running · room for 5 more', zero: '2 running · nothing new starts', off: '4 running · room for 4 more', full: '3 running · accounts full' }
     await expect(card.locator('.f-live')).toContainText(expected[state])
@@ -80,12 +156,22 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
       await fold.click()
     }
     await expectStableControls({
-      controls: { more, fewer, fold, dial: card.locator('.f-dial'), total: card.locator('.f-num'), row: codex, selectors: codex.getByRole('radiogroup'), none: codex.getByRole('radio', { name: 'No limit', exact: true }), max: codex.getByRole('radio', { name: 'At most', exact: true }), off: codex.getByRole('radio', { name: 'Off', exact: true }) },
+      controls: { more, fewer, fold, dial: card.locator('.f-dial'), total: card.locator('.f-num'), row: codex, selectors: codex.getByRole('radiogroup'), none: codex.getByRole('radio', { name: 'No limit', exact: true }), max: codex.getByRole('radio', { name: 'At most', exact: true }), off: codex.getByRole('radio', { name: 'Off', exact: true }), stepper: codex.locator('.f-pm'), minus: codex.locator('.pm').first(), plus: codex.locator('.pm').last(), value: codex.locator('.f-n'), mark: codex.locator('.f-mode') },
       scrollAreas: { card, rows: card.locator('.rows') },
       interactions: [
         { name: 'cross total digit boundary', run: async () => { for (let n = states[state].total; n < 10; n++) await more.click(); await expect(card.locator('.f-num')).toHaveText('10') } },
         { name: 'lower ceiling', run: async () => { await fewer.click(); await expect(card.locator('.f-num')).toHaveText('9') } },
         ...['Off', 'No limit', 'At most'].map(name => ({ name: `mode ${name}`, run: async () => { await codex.getByRole('radio', { name, exact: true }).click(); await expect(codex.getByRole('radio', { name, exact: true })).toHaveAttribute('aria-checked', 'true') } })),
+        { name: 'type total without moving its slot', run: async () => { await card.locator('.f-num .value').click(); await expect(card.locator('.f-num input')).toBeFocused() } },
+        { name: 'apply total on Enter', run: async () => { await card.locator('.f-num input').fill('10'); await card.locator('.f-num input').press('Enter'); await expect(card.locator('.f-num')).toHaveText('10') } },
+        { name: 'type a harness limit', run: async () => { await codex.locator('.value').click(); await expect(codex.locator('input')).toBeFocused() } },
+        { name: 'apply clamped ceiling', run: async () => { await codex.locator('input').fill('99'); await codex.locator('input').press('Enter'); await expect(codex.locator('.f-n')).toHaveText('30') } },
+        { name: '30 plus gives no own limit', run: async () => { await codex.locator('.pm').last().click(); await expect(codex.locator('.value svg')).toBeVisible(); await expect(codex.locator('.pm').last()).toBeDisabled(); await expect(codex.locator('.value')).toHaveAttribute('data-tip', /up to 10 now/) } },
+        { name: 'no own limit minus uses effective ceiling', run: async () => { await codex.locator('.pm').first().click(); await expect(codex.locator('.f-n')).toHaveText('9') } },
+        { name: 'Home sets off', run: async () => { await codex.locator('.pm').last().focus(); await codex.locator('.pm').last().press('Home'); await expect(codex.locator('.f-n')).toHaveText('off') } },
+        { name: 'End sets no own limit', run: async () => { await codex.locator('.pm').last().press('End'); await expect(codex.locator('.value svg')).toBeVisible() } },
+        ...[1, 2, 3].map(n => ({ name: `expanded mark cycle ${n}`, run: () => codex.locator('.f-mode').click() })),
+        { name: 'return to at most', run: () => codex.getByRole('radio', { name: 'At most', exact: true }).click() },
       ],
     })
     await expectStableControls({
@@ -98,13 +184,20 @@ for (const width of [1440, 390]) for (const theme of ['light', 'dark'] as const)
     await fold.click()
     const chip = card.locator('[data-harness="codex"]'), cycle = chip.locator('.f-mode'), dec = chip.locator('.pm').first(), inc = chip.locator('.pm').last()
     await expectStableControls({
-      controls: { more, fewer, fold, chips: card.locator('.f-chips'), chip, cycle, dec, inc, claude: card.locator('[data-harness="claude"]'), cursor: card.locator('[data-harness="cursor"]') }, scrollAreas: { card, chips: card.locator('.f-chips') },
+      controls: { more, fewer, fold, chips: card.locator('.f-chips'), chip, cycle, dec, inc, claude: card.locator('[data-harness="claude"]'), cursor: card.locator('[data-harness="cursor"]'), value: chip.locator('.f-n') }, scrollAreas: { card, chips: card.locator('.f-chips') },
       interactions: [
         { name: 'compact plus', run: () => inc.click() }, { name: 'compact minus', run: () => dec.click() },
         ...[1, 2, 3].map(n => ({ name: `cycle harness ${n}`, run: () => cycle.click() })),
+        { name: 'folded draft starts in its value slot', run: () => chip.locator('.value').click() },
+        { name: 'typed zero gives off on blur', run: async () => { await chip.locator('input').fill('0'); await more.focus(); await expect(chip.locator('.f-n')).toHaveText('off') } },
+        { name: 'off plus gives one', run: async () => { await inc.click(); await expect(chip.locator('.f-n')).toHaveText('1') } },
+        { name: 'one minus gives off', run: async () => { await dec.click(); await expect(chip.locator('.f-n')).toHaveText('off') } },
+        { name: 'empty value starts in its slot', run: () => chip.locator('.value').click() },
+        { name: 'empty value gives no own limit', run: async () => { await chip.locator('input').fill(''); await chip.locator('input').press('Enter'); await expect(chip.locator('.value svg')).toBeVisible() } },
+        { name: 'cancel a draft', run: async () => { await chip.locator('.value').click(); await chip.locator('input').fill('6'); await chip.locator('input').press('Escape'); await expect(chip.locator('.value svg')).toBeVisible(); await expect(chip.locator('.value')).toBeFocused() } },
       ],
     })
-    if (width === 390) expect((await inc.boundingBox())!.width).toBe(24)
+    expect((await inc.boundingBox())!.width).toBe(22)
     await expect.poll(() => work.preferences['agents.working.display']).toEqual({ folded: true })
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
     expect(calls.filter(c => c.method !== 'GET' && /harness-sessions|\/controls|\/stop|\/interrupt/.test(c.path))).toEqual([])
@@ -163,52 +256,37 @@ test('zero and thirty are real ceilings; idle glyph rests and disabled boundarie
   await expect(card.locator('.f-num')).toHaveText('30')
   await expect(more).toBeDisabled()
   await expect(fewer).toBeFocused()
-  await expect(card.locator('[data-key="codex"] button').last()).toBeDisabled()
+  await expect(card.locator('[data-key="codex"] .pm').last()).toBeEnabled()
+  await card.locator('[data-key="codex"] .pm').last().click()
+  await expect(card.locator('[data-key="codex"] .value svg')).toBeVisible()
+  await expect(card.locator('[data-key="codex"] .pm').last()).toBeDisabled()
 })
 
-test('expanded limits cannot create bare zero; API zero and total boundaries do not save unchanged values', async ({ page }) => {
+test('stored numeric zero stays visible and boundaries do not save unchanged values', async ({ page }) => {
   const { work } = await setup(page, 'zero')
-  work.preferences['agents.working'] = { total: 0, limits: { codex: 1 } }
+  work.preferences['agents.working'] = { total: 30, limits: { codex: 0 } }
   let writes = 0
   await page.route('**/api/preferences/agents.working', async route => {
     if (route.request().method() === 'PUT') writes++
     await route.fallback()
   })
   await page.goto('/agents')
-  const card = dial(page), row = card.locator('[data-key="codex"]'), plus = row.getByRole('button', { name: 'Codex: at most one more' }), minus = row.getByRole('button', { name: 'Codex: at most one fewer' })
+  const card = dial(page), row = card.locator('[data-key="codex"]'), plus = row.locator('.pm').last(), minus = row.locator('.pm').first()
+  await expect(row.locator('.f-n')).toHaveText('0')
   await expect(minus).toBeDisabled()
   await plus.focus(); await plus.press('ArrowDown')
-  await expect(row.locator('.lim-num')).toHaveText('1')
-  await row.getByRole('radio', { name: 'At most', exact: true }).click()
-  await totalMore(page).focus(); await totalMore(page).press('ArrowDown')
-  await expect(card.locator('.f-num')).toHaveText('0')
-  expect(writes).toBe(0)
-  await expect(card.locator('.f-num')).not.toHaveAttribute('aria-live')
-  await expect(card.locator('.f-live')).toHaveAttribute('role', 'status')
-  work.preferences['agents.working'] = { total: 30, limits: { codex: 0 } }
-  await page.reload()
-  await expect(row.locator('.lim-num')).toHaveText('0')
-  await expect(minus).toBeDisabled()
-  await card.locator('.f-fold').click()
-  const storedZero = card.locator('[data-harness="codex"]')
-  await expect(storedZero.locator('.pm').first()).toBeDisabled()
-  await expect(storedZero.locator('.pm').last()).toBeEnabled()
-  await storedZero.locator('.pm').last().focus()
-  await storedZero.locator('.pm').last().press('ArrowLeft')
-  await expect(storedZero.locator('.f-n')).toHaveText('0')
-  await card.locator('.f-fold').click()
+  await expect(row.locator('.f-n')).toHaveText('0')
   await totalFewer(page).focus(); await totalFewer(page).press('ArrowUp')
-  await plus.focus(); await plus.press('ArrowDown')
   expect(writes).toBe(0)
   await plus.click()
-  await expect(row.locator('.lim-num')).toHaveText('1')
-  await expect(minus).toBeDisabled()
+  await expect(row.locator('.f-n')).toHaveText('1')
+  await expect(minus).toBeEnabled()
   await expect.poll(() => writes).toBe(1)
   await expect.poll(() => work.preferences['agents.working']).toMatchObject({ total: 30, limits: { codex: 1 } })
-  await card.locator('.f-fold').click()
-  const chip = card.locator('[data-harness="codex"]')
-  await chip.locator('.pm').first().click()
-  await expect(chip.locator('.f-n')).toHaveText('off')
+  await minus.click()
+  await expect(row.locator('.f-n')).toHaveText('off')
+  await expect(minus).toBeDisabled()
+  await expect(card.locator('.f-live')).toHaveAttribute('role', 'status')
 })
 
 test('save failure remains visible after a successful scheduled poll', async ({ page }) => {
@@ -293,6 +371,126 @@ test('linked viewer keeps room on alias-owned accounts while counts use the cano
   data.accounts = data.accounts.map(a => ({ ...a, owner_person_id: me.id }))
   await page.route('**/api/agents/plan', route => route.fulfill({ json: { ...work.preferences['agents.working'], principal_id: 'canonical-person', running: { codex: 2, claude: 1 }, running_total: 3, source: 'plan', updated_at: null } }))
   await page.goto('/agents')
-  await expect(dial(page).locator('.f-right')).toContainText('Room for 9 more right now, 12 at once in all.')
+  await expect(dial(page).locator('.f-right')).toContainText('Room for 9 more right now.')
+  await expect(dial(page).locator('.f-right')).toContainText('Codex room for 4 more')
   await expect(dial(page).locator('.f-live')).toContainText('3 running · room for 5 more')
+})
+
+test('typed totals clamp, invalid drafts do not write, and field shortcuts remain native', async ({ page }) => {
+  const { work } = await setup(page, 'room', true)
+  let writes = 0
+  await page.route('**/api/preferences/agents.working', async route => {
+    if (route.request().method() === 'PUT') writes++
+    await route.fallback()
+  })
+  await page.goto('/agents')
+  const card = dial(page), total = card.locator('.f-num'), chip = card.locator('[data-harness="codex"]')
+  await expect(total).toHaveText('8')
+  for (const draft of ['', '-1', '1.5', 'bad']) {
+    await total.locator('.value').click(); await total.locator('input').fill(draft); await total.locator('input').press('Enter')
+    await expect(total).toHaveText('8')
+  }
+  await chip.locator('.value').click(); await chip.locator('input').fill('6')
+  await chip.locator('input').press('Control+Enter'); await expect(chip.locator('input')).toBeFocused()
+  await chip.locator('input').press('Meta+Enter'); await expect(chip.locator('input')).toBeFocused()
+  await chip.locator('input').press('ArrowUp'); await expect(chip.locator('input')).toHaveValue('6')
+  await chip.locator('input').press('Escape'); await expect(chip.locator('.f-n')).toHaveText('4')
+  await chip.locator('.pm').first().focus(); await chip.locator('.pm').first().press('Control+Home')
+  await chip.locator('.pm').first().press('Meta+End'); await expect(chip.locator('.f-n')).toHaveText('4')
+  expect(writes).toBe(0)
+  await total.locator('.value').click(); await total.locator('input').fill('300'); await total.locator('input').press('Enter')
+  await expect(total).toHaveText('30')
+  await expect.poll(() => work.preferences['agents.working']).toMatchObject({ total: 30 })
+  await total.locator('.value').click(); await total.locator('input').fill('0'); await chip.locator('.value').focus()
+  await expect(total).toHaveText('0')
+  await expect.poll(() => work.preferences['agents.working']).toMatchObject({ total: 0 })
+})
+
+test('a typed write failure restores the confirmed harness value', async ({ page }) => {
+  await setup(page, 'room', true)
+  await page.route('**/api/preferences/agents.working', route => route.request().method() === 'PUT' ? route.fulfill({ status: 403, json: { error: 'forbidden' } }) : route.fallback())
+  await page.goto('/agents')
+  const card = dial(page), chip = card.locator('[data-harness="codex"]')
+  await expect(chip.locator('.f-n')).toHaveText('4')
+  await expectStableControls({
+    controls: { value: chip.locator('.f-n'), minus: chip.locator('.pm').first(), plus: chip.locator('.pm').last(), fold: card.locator('.f-fold'), live: card.locator('.f-live') },
+    interactions: [{ name: 'failed typed limit', run: async () => {
+      await chip.locator('.value').click(); await chip.locator('input').fill('30'); await chip.locator('input').press('Enter')
+      await expect(card.locator('.f-live')).toContainText('Couldn’t save')
+      await expect(chip.locator('.f-n')).toHaveText('4')
+    } }],
+  })
+})
+
+test('a changed plan revision discards a typed draft even when its value is unchanged', async ({ page }) => {
+  await page.clock.install({ time: NOW })
+  const { work } = await setup(page, 'room', true)
+  let revision: string | null = null, reads = 0, writes = 0
+  await page.route('**/api/agents/plan', route => {
+    reads++
+    return route.fulfill({ json: { ...work.preferences['agents.working'], principal_id: me.id, running: {}, running_total: 0, source: 'plan', updated_at: revision } })
+  })
+  await page.route('**/api/preferences/agents.working', async route => {
+    if (route.request().method() === 'PUT') writes++
+    await route.fallback()
+  })
+  await page.goto('/agents')
+  const total = dial(page).locator('.f-num')
+  await expect(total).toHaveText('8')
+  await total.locator('.value').click(); await total.locator('input').fill('25')
+  const initialReads = reads
+  revision = '2026-10-03T13:00:00.000001Z'
+  await page.clock.fastForward(15_000)
+  await expect.poll(() => reads).toBeGreaterThan(initialReads)
+  await expect(total.locator('input')).toHaveCount(0)
+  await expect(total).toHaveText('8')
+  await totalMore(page).focus()
+  expect(writes).toBe(0)
+})
+
+test.describe('phone touch targets', () => {
+  test.use({ viewport: { width: 390, height: 1000 }, hasTouch: true, isMobile: true })
+  test('every dial target is at least 44 px and all seven harnesses stay stable', async ({ page }) => {
+    const { work } = await setup(page, 'room', true)
+    work.preferences['agents.working'] = { total: 8, limits: { codex: 4, claude: 'no_limit', cursor: 'off', grok: 2, pi: 'off', gemini: 'no_limit', opencode: 3 } }
+    await page.goto('/agents')
+    const card = dial(page), chip = card.locator('[data-harness="codex"]'), fold = card.locator('.f-fold')
+    await expect(chip).toBeVisible()
+    const targets = async () => {
+      const sizes = await card.locator('button:visible').evaluateAll(elements => elements.map(el => { const box = el.getBoundingClientRect(); return { width: box.width, height: box.height } }))
+      expect(sizes.length).toBeGreaterThan(0)
+      for (const size of sizes) { expect(size.width).toBeGreaterThanOrEqual(44); expect(size.height).toBeGreaterThanOrEqual(44) }
+    }
+    await targets()
+    await expectStableControls({
+      controls: { fold, more: totalMore(page), fewer: totalFewer(page), chip, cycle: chip.locator('.f-mode'), minus: chip.locator('.pm').first(), plus: chip.locator('.pm').last(), value: chip.locator('.f-n') },
+      scrollAreas: { card, chips: card.locator('.f-chips') },
+      interactions: [
+        { name: 'touch step', run: () => chip.locator('.pm').last().tap() },
+        ...[1, 2, 3].map(n => ({ name: `touch cycle ${n}`, run: () => chip.locator('.f-mode').tap() })),
+      ],
+    })
+    await fold.tap(); await expect(card.locator('.rows > li')).toHaveCount(7)
+    await targets()
+    await expectStableControls({
+      controls: { fold, more: totalMore(page), selectors: card.locator('[data-key="codex"] .seg'), plus: card.locator('[data-key="codex"] .pm').last(), row: card.locator('[data-key="codex"]') },
+      scrollAreas: { card },
+      interactions: ['No limit', 'Off', 'At most'].map(name => ({ name: `touch mode ${name}`, run: () => card.locator('[data-key="codex"]').getByRole('radio', { name, exact: true }).tap() })),
+    })
+  })
+})
+
+test('long German waiting details wrap at every evidence width and theme', async ({ page }) => {
+  await setup(page, 'room')
+  const reason = 'Die automatische Bearbeitung wartet auf die Freigabe der zuständigen Projektverantwortlichen und die Synchronisierung der verfügbaren Agentenkonten.'
+  await page.route('**/api/queue', route => route.fulfill({ json: { items: [{ node_id: 'waiting-de', key: 'AEON-647', title: 'Freigabe der automatischen Bearbeitung', state: 'open', priority: 'normal', estimate_hours: 1, queued: { model_profile_id: null, waiting: true, wait_reason: reason } }], manual_order: false, capacity: {} } }))
+  await page.goto('/agents')
+  const card = dial(page)
+  await expect(card.locator('.f-wait')).toContainText(reason)
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1600 })
+    await page.emulateMedia({ colorScheme: theme })
+    expect(await card.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+    await card.screenshot({ path: `${shots}/${width}-${theme}-long-german-unfolded.png`, animations: 'disabled' })
+  }
 })

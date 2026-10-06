@@ -83,8 +83,8 @@ func newFixture(t *testing.T) *fixture {
 	}
 	f.project = node(ta, "project", "")
 	f.hidden = node(ta, "project", "")
-	f.ticket = node(ta, "ticket", f.project)
-	f.hiddenTicket = node(ta, "ticket", f.hidden)
+	f.ticket = node(ta, "work", f.project)
+	f.hiddenTicket = node(ta, "work", f.hidden)
 	f.foreignProject = node(tb, "project", "")
 	for _, p := range []tenant.Principal{f.agent, f.otherAgent} {
 		if _, err := f.d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, ta, p.ID, f.project); err != nil {
@@ -410,7 +410,7 @@ func TestQuestionHumanDecisionAndGenericForgery(t *testing.T) {
 			t.Fatal("agent decided")
 		}
 	}
-	for _, stamp := range []string{"always", "requirement", "doctrine"} {
+	for _, stamp := range []string{"requirement", "doctrine"} {
 		x := d
 		x.Outcome = stamp
 		if w := request(t.Context(), f.mux, f.person, "POST", "/api/questions/"+q.ID+"/decision", x); w.Code != 422 {
@@ -711,7 +711,9 @@ func TestQuestionPermissionFilteredPageAndRollback(t *testing.T) {
 	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM nodes`).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	if w := request(t.Context(), f.mux, f.agent, "POST", "/api/projects/"+f.project+"/questions", input()); w.Code != 500 {
+	fresh := input()
+	fresh.AnywayReason = "Exercise fresh question creation rollback"
+	if w := request(t.Context(), f.mux, f.agent, "POST", "/api/projects/"+f.project+"/questions", fresh); w.Code != 500 {
 		t.Fatal("event failure not propagated")
 	}
 	if err := f.d.Admin.QueryRow(t.Context(), `SELECT count(*) FROM nodes`).Scan(&after); err != nil {
@@ -742,6 +744,11 @@ func TestQuestionSourceCorrelation(t *testing.T) {
 	q := f.ask(t, in)
 	if q.Askers[0].Input.SourceRequestID != source || q.Askers[0].SessionID != f.session {
 		t.Fatal("lost original source route")
+	}
+	duplicate := in
+	duplicate.RequestID = uid()
+	if separate := f.ask(t, duplicate); separate.ID == q.ID {
+		t.Fatal("source-linked protected request participated in automatic merging")
 	}
 	in.RequestID = uid()
 	in.SessionID = ""

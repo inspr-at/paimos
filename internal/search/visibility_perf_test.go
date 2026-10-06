@@ -35,14 +35,21 @@ func TestSearch6000WithProjectVisibility(t *testing.T) {
 				return err
 			}
 		}
-		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,body,parent_id,position)
+		largeRows, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,body,parent_id,position)
 		    SELECT $1,'LRG-'||(g+1),k.id,'Signal item '||g,'Searchable body text '||g,$2,g
-		    FROM node_kinds k, generate_series(1,6000) g WHERE k.slug='ticket'`, tenantID, large); err != nil {
+		    FROM node_kinds k, generate_series(1,6000) g WHERE k.tenant_id=$1 AND k.slug='work'`, tenantID, large)
+		if err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,body,parent_id,position)
+		if largeRows.RowsAffected() != 6000 {
+			t.Fatalf("large search fixture has %d nodes, want 6000", largeRows.RowsAffected())
+		}
+		otherRows, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title,body,parent_id,position)
 		    SELECT $1,'OTH-'||(g+1),k.id,'Signal hidden '||g,'Searchable secret '||g,$2,g
-		    FROM node_kinds k, generate_series(1,300) g WHERE k.slug='ticket'`, tenantID, other)
+		    FROM node_kinds k, generate_series(1,300) g WHERE k.tenant_id=$1 AND k.slug='work'`, tenantID, other)
+		if err == nil && otherRows.RowsAffected() != 300 {
+			t.Fatalf("hidden search fixture has %d nodes, want 300", otherRows.RowsAffected())
+		}
 		return err
 	})
 	if err != nil {

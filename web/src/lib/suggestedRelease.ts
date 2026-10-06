@@ -6,6 +6,7 @@ import type { QueueSnapshot } from './workQueue.ts'
 export interface ReleaseSuggestion { text: string; kind: 'shipped' | 'planned' | 'empty'; tip: string; version?: string }
 export interface SuggestionInput {
   key: string; state: string; kind_slug?: string
+  is_leaf?: boolean; estimate?: { is_parent?: boolean }
   eta?: { eta_ready_at?: string | null; ready_stale?: boolean; eta_stale?: boolean }
   fields: Record<string, unknown>
 }
@@ -41,7 +42,9 @@ export function releaseCadence(releases: Release[]): { hours: number; latest: nu
 export function suggestedRelease(row: SuggestionInput, releases: Release[], now: number, queue?: QueueTiming | null): ReleaseSuggestion {
   row = { ...row, state: normaliseState(row.state) }
   const empty = (tip: string): ReleaseSuggestion => ({ text: '—', kind: 'empty', tip })
-  if (row.kind_slug === 'epic') return empty('Releases are suggested for tickets, not epics')
+  if (row.is_leaf === false || (row.is_leaf === undefined && row.estimate?.is_parent === true) || row.kind_slug === 'epic') {
+    return empty('Releases are suggested for leaf work; a parent’s leaves can span releases')
+  }
   if (row.state === 'delivered' || row.state === 'accepted') {
     const shipped = releases.filter(r => r.state === 'published' && (r.tickets.includes(row.key) || r.notes?.items?.some(t => t.key === row.key)))
       .sort((a, b) => (instant(a.published_at ?? a.tagged_at) ?? 0) - (instant(b.published_at ?? b.tagged_at) ?? 0))[0]

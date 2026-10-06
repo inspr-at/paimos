@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // SC1: one presentation contract for sessions, project indicators and previews.
 // Evidence stays separate from presentation; viewer thresholds never mutate it.
-export type AgentState = 'working' | 'awaiting' | 'waiting' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stale' | 'done' | 'stopped'
+export type AgentState = 'working' | 'awaiting' | 'waiting' | 'throttled' | 'problem' | 'unresponsive' | 'idle' | 'stale' | 'done' | 'stopped' | 'pausing' | 'paused'
 import { normalizeAgentPalette, type AgentPalette } from './agentPalettes.ts'
 export type { AgentPalette }
 export interface AgentStatePreference {
@@ -12,12 +12,12 @@ export const DEFAULT_AGENT_STATE: Readonly<AgentStatePreference> = {
   palette: 'standard', dimInactive: true, inactiveOpacity: 55, yellowMinutes: 3, redMinutes: 10,
 }
 export const STATE_LABEL: Record<AgentState, string> = {
-  working: 'Working', awaiting: 'Awaiting heartbeat', waiting: 'Needs something', throttled: 'Throttled', problem: 'Problem',
+  pausing: 'Pausing', paused: 'Paused', working: 'Working', awaiting: 'Awaiting heartbeat', waiting: 'Needs something', throttled: 'Throttled', problem: 'Problem',
   unresponsive: 'No heartbeat', idle: 'Idle', stale: 'Idle · no heartbeat', done: 'Done', stopped: 'Ended',
 }
 export const inactiveState = (state: AgentState) => state === 'idle' || state === 'stale' || state === 'stopped'
 export const movingState = (state: AgentState) => state === 'working'
-export const STATE_PRIORITY: Record<AgentState, number> = { problem: 0, unresponsive: 1, waiting: 2, awaiting: 3, throttled: 4, working: 5, idle: 6, stale: 7, done: 8, stopped: 9 }
+export const STATE_PRIORITY: Record<AgentState, number> = { pausing: 5, paused: 8, problem: 0, unresponsive: 1, waiting: 2, awaiting: 3, throttled: 4, working: 5, idle: 6, stale: 7, done: 8, stopped: 9 }
 export function leadingState(states: (AgentState | undefined)[]): AgentState {
   return states.reduce<AgentState>((lead, state) => STATE_PRIORITY[state ?? 'working'] < STATE_PRIORITY[lead] ? state ?? 'working' : lead, 'stopped')
 }
@@ -59,6 +59,7 @@ export function waitingLabel(evidence: Pick<StateEvidence, 'attention_reasons' |
   return reasons?.length ? 'Waiting' : STATE_LABEL.waiting
 }
 export interface StateEvidence {
+  pause?: { state: string; deliver?: boolean; stop_requested?: boolean };
   phase: string; activity: string; heartbeat_at?: string | null; created_at?: string; since?: string
   stopped_at?: string | null; stop_reason?: string | null; run_status?: string | null; progress_pct?: number | null
   // The server's answer to "did it complete its job": always sent, false included, also
@@ -119,6 +120,7 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
     return result('throttled', [{ code: 'vendor-limit', detail: `${window}${until}.`, next: 'Check account capacity before starting another run.' }], `Throttled · ${window.toLowerCase()}${until}`)
   }
   if (evidence.phase === 'stopped' || evidence.stopped_at) {
+    if (evidence.pause?.state === 'paused' || evidence.pause?.state === 'resume_requested') return result('paused', [], evidence.pause.state === 'resume_requested' ? 'Resume requested' : 'Paused')
     if (evidence.finished) return result('done')
     return result('stopped', [], evidence.stop_reason === LOST_CONTACT ? 'Lost contact' : STATE_LABEL.stopped)
   }
@@ -130,6 +132,7 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
     next: 'Check the worker and its heartbeat reporter on the recorded host. A missing heartbeat does not establish that the worker failed.',
   }
   if (working && heartbeat.age >= preferences.redMinutes * 60_000) return result('unresponsive', [heartbeatReason])
+  if (evidence.pause && ['requested', 'planned'].includes(evidence.pause.state) && evidence.pause.deliver !== false && !evidence.pause.stop_requested) return result('pausing')
   if ((evidence.needs_attention ?? (needs || evidence.run_status === 'waiting')) || evidence.phase === 'yielded' || evidence.eta_stale) {
     const detail = evidence.phase === 'yielded' ? 'The session yielded and is waiting to continue.' : evidence.run_status === 'waiting' ? 'The bound run is waiting.' : evidence.eta_stale ? 'The estimate was not refreshed within two reporting intervals.' : 'An approval, held action or requested reply is outstanding.'
     const reasons = evidence.attention_reasons?.filter(r => r.scope !== 'shared' && r.blocking).sort((a, b) => Number(b.kind === 'approval') - Number(a.kind === 'approval')).map(attentionReasonText) ?? []
