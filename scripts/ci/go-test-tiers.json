@@ -5702,6 +5702,8 @@
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestAppendChangelog","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/knowledge","name":"TestApplyRecommendationIsPersonOnly","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/knowledge","name":"TestChangelogNeverAppendsInsideCodeExamples","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestCreateReadListAndIsolation","tier":"ESSENTIAL"}
@@ -5734,6 +5736,8 @@
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningRuleDraft","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLearningsContinuePastFifty","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningsProjectGrant","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningsProjectSessionThroughAuth","tier":"GATED-FULL"}
@@ -5747,6 +5751,8 @@
     {"kind":"go","package":"internal/knowledge","name":"TestOpenLearningsSurviveDecidedWindow","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestOpenNominationSurvivesDecidedWindow","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestRecommendationAgentsCannotApply","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestRetryTagTenantConflictsAndCancellation","tier":"GATED-FULL"}
     ,

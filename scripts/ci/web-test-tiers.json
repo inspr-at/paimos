@@ -8386,11 +8386,15 @@
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a person accepts a learning into the changelog and can dismiss another","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a person applies agent recommendations in one confirm, with one row left out","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a person can save a learning as a rule draft","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"a suspected credential needs a person to confirm it is not one","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"an empty inbox leaves the knowledge tab in place","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"older learnings load after the newest 50","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/knowledge-learnings.spec.ts","name":"removing the last learning keeps focus on the search","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12969,6 +12973,10 @@
     {"kind":"node","file":"tests/knowledge.test.ts","name":"Decisions have a distinct icon from Guidelines in lists and graph legends","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"a body heading that repeats the title, or starts it, is not shown twice","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/knowledge.test.ts","name":"a stopped run sends nothing after the stop","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/knowledge.test.ts","name":"applying recommendations sends only the chosen rows, and a failed row does not stop the rest","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"method-learning errors stay specific when the status is also 403 or 404","tier":"GATED-FULL"}
     ,

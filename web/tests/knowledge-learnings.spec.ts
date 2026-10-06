@@ -9,6 +9,7 @@ import { test, expect, type Browser, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors, me } from './work-fixtures'
 import { knowledgeWorld, mockKnowledge, type MockLearning } from './knowledge-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { controlStability } from './control-stability'
 
 function learnings(now = Date.now()): MockLearning[] {
   return [
@@ -66,6 +67,24 @@ function four(now = Date.now()): MockLearning[] {
       key: 'PHAROS-14', title: 'Long', text: long,
       at: new Date(now - 9_000_000).toISOString(), author: null, href: '/p/PHAROS/PHAROS-14',
     },
+  ]
+}
+
+// AEON-788: an agent's prepared decisions on five learnings.
+function recommended(now = Date.now()): MockLearning[] {
+  const scout = { id: '33333333-3333-4333-8333-333333333333', name: 'Scout' }
+  const at = new Date(now - 600_000).toISOString()
+  const rec = (extra: Partial<NonNullable<MockLearning['recommendation']>> & { decision: 'accept' | 'dismiss' }) => ({ by: scout, at, event_id: 700, stale: false, target_missing: false, ...extra })
+  const row = (n: number, text: string, recommendation: MockLearning['recommendation']): MockLearning => ({
+    id: `n-${String(n).repeat(8)}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`, source: 'ticket', node_id: `${String(n).repeat(8)}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+    key: `PHAROS-${20 + n}`, title: text, text, at: new Date(now - n * 3_600_000).toISOString(), author: null, href: `/p/PHAROS/PHAROS-${20 + n}`, recommendation,
+  })
+  return [
+    row(1, 'Release notes were late again', rec({ decision: 'accept', knowledge_id: 'k-deploy', knowledge_title: 'Deploy a release to production', lesson: 'Write the release note in the same turn as the change' })),
+    row(2, 'Renumbered stages twice', rec({ decision: 'dismiss', reason: 'Already covered by the stage runbook' })),
+    row(3, 'Host keys expired during a deploy', rec({ decision: 'accept', knowledge_id: 'k-rotate', knowledge_title: 'Rotate the fleet host keys', lesson: 'Rotate keys before the window closes', stale: true })),
+    row(4, 'A one-off typo in a heading', rec({ decision: 'dismiss', reason: 'Not a method learning' })),
+    row(5, 'Retries hid a refused login', rec({ decision: 'accept', knowledge_id: 'k-vanished', knowledge_title: 'Retired runbook', lesson: 'Never retry a refusal' })),
   ]
 }
 
@@ -343,15 +362,86 @@ test('the inbox has no axe violations', async ({ page }) => {
   expect(result.violations.map(v => `${v.id}: ${v.nodes.map(n => n.target.join(' ')).join(', ')}`)).toEqual([])
 })
 
+test('a person applies agent recommendations in one confirm, with one row left out', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const errors = watchErrors(page)
+  const { calls, world } = await open(page, { learnings: recommended() })
+  await expect(card(page, 'Release notes were late again')).toContainText('Scout recommends adding to Deploy a release to production: “Write the release note in the same turn as the change”')
+  await expect(card(page, 'Renumbered stages twice')).toContainText('Scout recommends dismissing: Already covered by the stage runbook')
+  await page.getByRole('button', { name: 'Apply recommendations' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Apply recommendations' })
+  await expect(dialog).toBeVisible()
+  // Stale rows start left out; the rest are chosen.
+  await expect(dialog.getByText('2 to accept · 2 to dismiss · 1 left out')).toBeVisible()
+  const tick = (text: string) => dialog.getByRole('checkbox', { name: new RegExp(text) })
+  await expect(tick('Rotate keys before the window closes')).not.toBeChecked()
+  await expect(dialog.getByText('The learning changed after this was recommended.')).toBeVisible()
+
+  const guard = await controlStability(page, {
+    close: dialog.getByRole('button', { name: 'Close' }),
+    apply: dialog.getByRole('button', { name: 'Apply chosen' }),
+    firstRow: tick('Write the release note in the same turn'),
+    optOut: tick('A one-off typo in a heading'),
+  })
+  await guard.check(() => tick('A one-off typo in a heading').uncheck())
+  await expect(dialog.getByText('2 to accept · 1 to dismiss · 2 left out')).toBeVisible()
+  await guard.check(() => tick('A one-off typo in a heading').check())
+  await guard.check(() => tick('A one-off typo in a heading').uncheck())
+  guard.done()
+
+  await dialog.getByRole('button', { name: 'Apply chosen' }).click()
+  await expect(dialog.getByRole('status')).toHaveText('2 applied, 1 failed. The failed learnings stay open.')
+  await expect(dialog.locator('[data-step-id]').filter({ hasText: 'Never retry a refusal' })).toContainText('This entry no longer exists.')
+  const posts = calls.filter(call => call.method === 'POST' && call.path.includes('/learnings/'))
+  expect(posts.map(call => call.path.split('/').at(-1))).toEqual(['accept', 'accept', 'dismiss'])
+  expect(posts[0].body).toEqual({ knowledge_id: 'k-deploy', lesson: 'Write the release note in the same turn as the change' })
+  expect(posts[2].body).toEqual({ reason: 'Already covered by the stage runbook' })
+  expect(world.decisions.map(decision => decision.item.text).sort()).toEqual(['Release notes were late again', 'Renumbered stages twice'])
+  expect(world.entries.find(entry => entry.id === 'k-deploy')?.body).toContain('Write the release note in the same turn as the change. Source: [PHAROS-21]')
+
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(card(page, 'Release notes were late again')).toHaveCount(0)
+  await expect(card(page, 'Renumbered stages twice')).toHaveCount(0)
+  await expect(card(page, 'A one-off typo in a heading')).toBeVisible()
+  await expect(card(page, 'Retries hid a refused login')).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('older learnings load after the newest 50', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const now = Date.now()
+  const many: MockLearning[] = Array.from({ length: 55 }, (_, i) => ({
+    id: `n-${String(i).padStart(8, '0')}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`, source: 'ticket', node_id: `${String(i).padStart(8, '0')}-aaaa-4aaa-8aaa-aaaaaaaaaaaa`,
+    key: `PHAROS-${100 + i}`, title: `Learning ${i}`, text: `Learning number ${i}`, at: new Date(now - i * 60_000).toISOString(), author: null, href: `/p/PHAROS/PHAROS-${100 + i}`,
+  }))
+  const { calls } = await open(page, { learnings: many })
+  await expect(page.getByText('Showing the 50 newest. Load older from the top.')).toBeVisible()
+  const older = page.getByRole('button', { name: 'Load older' })
+  await older.click()
+  await expect(older).toHaveCount(0)
+  await expect(rows(page)).toHaveCount(55)
+  await expect(card(page, 'Learning number 54')).toBeVisible()
+  expect(calls.some(call => call.method === 'GET' && call.query.get('cursor') === '50')).toBe(true)
+})
+
 test('screenshots at 1600 and 390, light and dark', async ({ browser }) => {
   test.skip(process.env.VISUAL_AUDIT !== '1', 'Screenshots run only with VISUAL_AUDIT=1.')
   test.setTimeout(240_000)
   const shots = resolve(process.env.VISUAL_AUDIT_DIR ?? 'test-results/knowledge-learnings')
   mkdirSync(shots, { recursive: true })
-  const shot = async (browser: Browser, width: number, theme: 'light' | 'dark', mode: 'inbox' | 'dialog' | 'empty' | 'long' | 'suspect') => {
+  const shot = async (browser: Browser, width: number, theme: 'light' | 'dark', mode: 'inbox' | 'dialog' | 'empty' | 'long' | 'suspect' | 'recommended' | 'review') => {
     const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 1000 }, colorScheme: theme, reducedMotion: 'reduce', deviceScaleFactor: 1 })
     const page = await context.newPage()
     if (mode === 'empty') await open(page, { learnings: [], inbox: false })
+    else if (mode === 'recommended' || mode === 'review') {
+      await open(page, { learnings: recommended() })
+      await page.getByRole('button', { name: /^Show all/ }).click()
+      if (mode === 'review') {
+        await page.getByRole('button', { name: 'Apply recommendations' }).click()
+        await expect(page.getByRole('dialog', { name: 'Apply recommendations' })).toBeVisible()
+      }
+    }
     else if (mode === 'long') {
       await open(page, { learnings: four() })
       await page.getByRole('button', { name: 'Show all 4' }).click()
@@ -380,5 +470,9 @@ test('screenshots at 1600 and 390, light and dark', async ({ browser }) => {
   await shot(browser, 390, 'dark', 'dialog')
   for (const theme of ['light', 'dark'] as const) {
     for (const width of [1600, 390]) await shot(browser, width, theme, 'suspect')
+    for (const width of [1440, 1024, 390]) {
+      await shot(browser, width, theme, 'recommended')
+      await shot(browser, width, theme, 'review')
+    }
   }
 })

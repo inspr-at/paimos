@@ -116,7 +116,7 @@ export function knowledgeWorld(options: { empty?: boolean } = {}) {
     renames: { 'deploy-flow': 'k-deploy' } as Record<string, string>,
     counter: { next: 90, event: 500, clock: 0 },
     learnings: [] as MockLearning[],
-    decisions: [] as { event_id: number; item: MockLearning }[],
+    decisions: [] as { event_id: number; item: MockLearning; reason?: string; lesson?: string }[],
   }
 }
 export interface MockLearning {
@@ -125,6 +125,10 @@ export interface MockLearning {
   // Mock only: the server answers 409 learning_sensitive with these ranges
   // until a person confirms.
   sensitive?: { field: 'text' | 'title'; start: number; end: number }[]
+  recommendation?: {
+    decision: 'accept' | 'dismiss'; knowledge_id?: string; knowledge_title?: string; lesson?: string; reason?: string
+    by: { id: string; name: string } | null; at: string; event_id: number; stale: boolean; target_missing: boolean
+  }
 }
 export type KnowledgeWorld = ReturnType<typeof knowledgeWorld>
 export interface KnowledgeMockOptions {
@@ -193,14 +197,20 @@ export async function mockKnowledge(page: Page, world: KnowledgeWorld, options: 
     calls.push({ path: url.pathname, method, query, body, headers: request.headers() })
     const parts = url.pathname.replace(/^\/api\/knowledge\/?/, '').split('/').filter(Boolean)
     if (parts[0] === 'learnings') {
-      if (method === 'GET') return json(route, 200, { items: world.learnings.map(({ sensitive: _sensitive, ...item }) => item), truncated: false })
+      if (method === 'GET') {
+        // 50 per page like the server; the mock cursor is the next offset.
+        const offset = Number(query.get('cursor') ?? '0') || 0
+        const page = world.learnings.slice(offset, offset + 50).map(({ sensitive: _sensitive, ...item }) => item)
+        const more = offset + 50 < world.learnings.length
+        return json(route, 200, { items: page, truncated: more, ...(more ? { next_cursor: String(offset + 50) } : {}) })
+      }
       const id = decodeURIComponent(parts[1] ?? '')
       const found = world.learnings.find(item => item.id === id)
       if (!found) return json(route, 404, { error: 'This learning is no longer open.', code: 'learning_closed' })
       if (options.readOnly) return json(route, 403, { error: 'you can read knowledge but not change it', code: 'forbidden' })
       if (parts[2] === 'dismiss' && method === 'POST') {
         const eventId = ++world.counter.event
-        world.decisions.push({ event_id: eventId, item: found })
+        world.decisions.push({ event_id: eventId, item: found, reason: (body as { reason?: string } | null)?.reason })
         world.learnings = world.learnings.filter(item => item.id !== id)
         return json(route, 200, { id, decision: 'dismissed', event_id: eventId })
       }
@@ -208,20 +218,20 @@ export async function mockKnowledge(page: Page, world: KnowledgeWorld, options: 
         return json(route, 409, { error: 'This looks like a credential — remove it, or confirm it is not one.', code: 'learning_sensitive', ranges: found.sensitive })
       }
       if (parts[2] === 'accept' && method === 'POST') {
-        const input = body as { knowledge_id?: string }
+        const input = body as { knowledge_id?: string; lesson?: string }
         const entry = world.entries.find(candidate => candidate.id === input.knowledge_id && !candidate.deleted)
         if (!entry) return json(route, 404, { error: 'knowledge entry not found', code: 'not_found' })
         const expected = request.headers()['if-unmodified-since']
         if (expected && expected !== entry.updated_at) return json(route, 412, { error: 'the entry changed since you opened it', code: 'stale', entry: full(entry) })
         const before = structuredClone(entry)
         const date = new Date().toISOString().slice(0, 10)
-        const line = `- ${date}: ${found.text}. Source: [${found.key}](${found.href}).`
+        const line = `- ${date}: ${input.lesson ?? found.text}. Source: [${found.key}](${found.href}).`
         entry.body = `${entry.body.replace(/\s*$/, '')}\n\n${line}\n`
         entry.updated_at = tick()
         entry.updated_by = me
         entry.imported = false
         const eventId = record('knowledge.learning_accepted', before, entry)
-        world.decisions.push({ event_id: eventId, item: found })
+        world.decisions.push({ event_id: eventId, item: found, lesson: input.lesson })
         world.learnings = world.learnings.filter(item => item.id !== id)
         return json(route, 200, { id, decision: 'accepted', event_id: eventId, knowledge_id: entry.id, heading: 'Changelog', line, entry: full(entry, { event_id: eventId }) })
       }
