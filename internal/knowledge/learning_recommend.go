@@ -32,6 +32,7 @@ const (
 	maxReasonRunes        = 500
 	maxCursorBytes        = 160
 	maxDismissBody        = 8 << 10
+	maxReviewedRunes      = 2000
 )
 
 // Recommendation is the current prepared decision for one open learning.
@@ -111,25 +112,44 @@ func plainReason(text string) (string, error) {
 	return text, nil
 }
 
-// readDismissReason reads the optional {"reason": "…"} of a dismiss. Older
-// clients send no body or {}; both still dismiss without a reason.
-func readDismissReason(w http.ResponseWriter, r *http.Request) (string, error) {
+// reviewedField reads the optional learning_text: the learning's text as the
+// person reviewed it. nil when absent.
+func reviewedField(raw map[string]json.RawMessage) (*string, error) {
+	text, ok, err := stringField(raw, "learning_text")
+	if err != nil || !ok {
+		return nil, err
+	}
+	if utf8.RuneCountInString(text) > maxReviewedRunes {
+		return nil, fail(http.StatusBadRequest, "invalid_request", "learning_text is longer than 2000 characters")
+	}
+	return &text, nil
+}
+
+// readDismiss reads the optional {"reason": "…", "learning_text": "…"} of a
+// dismiss. Older clients send no body or {}; both still dismiss without a
+// reason and without a review check.
+func readDismiss(w http.ResponseWriter, r *http.Request) (string, *string, error) {
 	b, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDismissBody))
 	if err != nil {
-		return "", fail(http.StatusRequestEntityTooLarge, "invalid_request", "request body is too large")
+		return "", nil, fail(http.StatusRequestEntityTooLarge, "invalid_request", "request body is too large")
 	}
 	if len(strings.TrimSpace(string(b))) == 0 {
-		return "", nil
+		return "", nil, nil
 	}
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(b, &raw) != nil || raw == nil {
-		return "", nil
+		return "", nil, nil
+	}
+	reviewed, err := reviewedField(raw)
+	if err != nil {
+		return "", nil, err
 	}
 	reason, ok, err := stringField(raw, "reason")
 	if err != nil || !ok {
-		return "", err
+		return "", reviewed, err
 	}
-	return plainReason(reason)
+	reason, err = plainReason(reason)
+	return reason, reviewed, err
 }
 
 func parseRecommendation(raw map[string]json.RawMessage) (recommendationInput, error) {
@@ -184,15 +204,28 @@ func parseRecommendation(raw map[string]json.RawMessage) (recommendationInput, e
 
 // ---------- Continuation ----------
 
-// learningCursor is the last item of the previous page: the next page holds
-// the items after it in newest-first order (older, or as old with a smaller id).
+// learningCursor is the key the previous page ended at: the next page holds
+// the items after it in newest-first order (older, or as old with a smaller
+// id, by byte order as SQL's COLLATE "C").
 type learningCursor struct {
 	At time.Time
 	ID string
 }
 
+// sortsBefore is whether c comes before o in the list's newest-first order.
+func (c learningCursor) sortsBefore(o learningCursor) bool {
+	if c.At.Equal(o.At) {
+		return c.ID > o.ID
+	}
+	return c.At.After(o.At)
+}
+
+func (c learningCursor) encode() string {
+	return base64.RawURLEncoding.EncodeToString([]byte(c.At.UTC().Format(time.RFC3339Nano) + "|" + c.ID))
+}
+
 func encodeLearningCursor(item Learning) string {
-	return base64.RawURLEncoding.EncodeToString([]byte(item.At.UTC().Format(time.RFC3339Nano) + "|" + item.ID))
+	return learningCursor{At: item.At, ID: item.ID}.encode()
 }
 
 func parseLearningCursor(raw string) (*learningCursor, error) {
@@ -270,8 +303,8 @@ func (m *module) handleRecommendLearning(w http.ResponseWriter, r *http.Request)
 func (m *module) recommendLearning(ctx context.Context, p tenant.Principal, publicID, nodeID, commentID string, comment bool, in recommendationInput) (Recommendation, error) {
 	var out Recommendation
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if !canWrite(ctx, tx, p, "knowledge.write") {
-			return fail(http.StatusForbidden, "forbidden", "you can read knowledge but not change it")
+		if err := fenceLearningWrite(ctx, tx, p, nodeID); err != nil {
+			return err
 		}
 		if err := lockLearning(ctx, tx, p.TenantID, publicID); err != nil {
 			return err
@@ -295,7 +328,8 @@ func (m *module) recommendLearning(ctx context.Context, p tenant.Principal, publ
 				return err
 			}
 		}
-		// Lock order: the learning's advisory lock above, then the rows the
+		// Lock order: tenant and tree (the fence), the learning's advisory
+		// lock above, then the rows the
 		// recommendation references (key-share, so foreign keys find them
 		// held), then the recommendation row, and the event counter last.
 		if _, err := tx.Exec(ctx, `SELECT 1 FROM nodes WHERE tenant_id=$1 AND id = ANY($2::uuid[]) ORDER BY id FOR KEY SHARE`,

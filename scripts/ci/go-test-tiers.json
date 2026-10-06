@@ -5708,6 +5708,8 @@
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestCreateReadListAndIsolation","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/knowledge","name":"TestDecisionRejectsUnreviewedText","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/knowledge","name":"TestDeleteUndoAndCreateUndo","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestExcerpt","tier":"GATED-FULL"}
@@ -5736,7 +5738,13 @@
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningRuleDraft","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLearningWritesAuthorizeCurrentProject","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningsContinuePastFifty","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLearningsContinueThroughTiedScan","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLearningsPageEndsAtAFullScan","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningsProjectGrant","tier":"GATED-FULL"}
     ,
@@ -5747,6 +5755,8 @@
     {"kind":"go","package":"internal/knowledge","name":"TestLooksSensitive","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestMethodLearnings","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestNominationsContinuePastScan","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestOpenLearningsSurviveDecidedWindow","tier":"GATED-FULL"}
     ,
@@ -5771,6 +5781,8 @@
     {"kind":"go","package":"internal/knowledge","name":"TestSensitiveProviderFormsNotStored","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestSensitiveRandomKeys","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestSensitiveRangeFieldsMatchContract","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestSensitiveRanges","tier":"GATED-FULL"}
     ,
