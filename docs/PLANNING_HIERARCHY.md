@@ -8,7 +8,12 @@ A node has a tenant, an immutable key, a kind, a title, a body, a JSON fields ob
 
 Kinds belong to the tenant. The slug is immutable because parent rules name it. The label, short prefix, icon, allowed child slugs, and JSON Schema for `fields` are configuration. A null child list permits any child. An empty list permits none. Narrowing the list affects new children only. Existing children stay movable and deletable.
 
-New tenants start with project, epic, ticket, task, release, memory, runbook, and guideline. Later modules add kinds such as work_order, requirement, and the business kinds (cost_unit, organisation, contact, quote) when those features are configured. `external_system` and `related_project` are created on first use.
+New tenants start with project, work, release, memory, runbook, and guideline.
+Nesting and leaf shape decide whether work is presented as an epic, ticket or
+task; those names no longer require separate kinds. Later modules add kinds such
+as work_order, requirement, and the business kinds (cost_unit, organisation,
+contact, quote) when those features are configured. `external_system` and
+`related_project` are created on first use.
 
 State is a non-empty string chosen by the tenant. The product screens treat `new` and `backlog` as open, `in_progress` as doing, `done` as finished, and `cancelled` as dropped. Knowledge uses its own trio: active is stored as `backlog`, proposed as `proposed`, and archived as `cancelled`.
 
@@ -28,6 +33,9 @@ retain sequence, state, membership and published history during retirement.
 existing work, with a bounded ticket set and an idempotency key. It requires a
 person with release and node write permissions. No stage, gate or handoff runs.
 The release walker and membership APIs continue to read and edit planning work.
+`GET /api/projects/{id}/releases` returns at most 100 records, newest first;
+`truncated` signals another page, fetched with the last record's number as
+`before_number`. The picker refuses to infer availability from a partial list.
 
 ## Retired Flow
 

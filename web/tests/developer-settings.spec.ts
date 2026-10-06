@@ -19,7 +19,11 @@ for(const width of [390,1024,1440]) for(const theme of ['light','dark'] as const
  test(`retirement keeps project and settings controls stable ${width} ${theme}`,async({page},info)=>{
   await page.setViewportSize({width,height:900});await page.emulateMedia({colorScheme:theme})
   const data=fixtures();data.preferences.theme={choice:theme};data.preferences['developer-ui']={show_flow_controls:true};data.preferences['list:display']={headerGraph:false}
-  await mockWork(page,data);await page.goto('/p/PHAROS/tickets')
+  data.projects[0]!.title='Pharos · Betriebsübersicht'
+  data.projects[0]!.description='Überprüfung der mandantenübergreifenden Berechtigungsverwaltung und außergewöhnlich langer Projektbeschreibungen mit nachvollziehbaren Änderungen für sämtliche verantwortlichen Personen und Agenten.'
+  await mockWork(page,data)
+  await page.route('**/api/queue?*',route=>route.fulfill({json:{items:[],manual_order:false,capacity:{queued_hours:0,parallel_runs:0,work_hours:0,warning:false}}}))
+  await page.goto('/p/PHAROS/tickets')
   await expect(page.getByRole('tab',{name:'Tickets',exact:true})).toBeVisible()
   await expect(page.locator('#row-n-1')).toBeVisible()
   await page.evaluate(()=>document.fonts.ready)
@@ -32,7 +36,9 @@ for(const width of [390,1024,1440]) for(const theme of ['light','dark'] as const
   const control=page.getByRole('switch',{name:'Show reserved versions',exact:true})
   await expect(control).toBeVisible();await expect(page.getByRole('switch')).toHaveCount(1)
   const settings=await controlStability(page,{reserved:control})
-  await settings.check(()=>control.check());await settings.check(()=>control.uncheck());settings.done()
+  await settings.check(async()=>{await control.check();await expect.poll(()=>data.preferences['developer-ui']?.show_reserved_versions).toBe(true);await expect(control).toBeEnabled()})
+  await settings.check(async()=>{await control.uncheck();await expect.poll(()=>data.preferences['developer-ui']?.show_reserved_versions).toBe(false);await expect(control).toBeEnabled()});settings.done()
+  await expect(page.getByRole('status').filter({hasText:'Saving your preference'})).toHaveCount(0)
   await page.screenshot({path:info.outputPath(`developer-${width}-${theme}.png`)})
  })
 }
