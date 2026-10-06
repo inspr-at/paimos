@@ -68,7 +68,8 @@
         "cmd/**",
         "embed.go",
         "internal/phoneapprovals/**",
-        "internal/features/**"
+        "internal/features/**",
+        "internal/hostcapacity/**"
       ]
     },
     {
