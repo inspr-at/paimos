@@ -7612,6 +7612,8 @@
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestOpenAPIPropertyNamesHaveNoSpace","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestOpenAPISortPreservesScalarValues","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/reportercontract","name":"TestPausePlanningHeartbeatFieldsStayOptional","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestPinnedShapeKeys","tier":"ESSENTIAL"}
