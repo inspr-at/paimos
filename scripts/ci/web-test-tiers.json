@@ -596,6 +596,8 @@
     ,
     "browser:tests/service-tier.spec.ts:390: phone Change tier menu opens and restores its actual trigger"
     ,
+    "browser:tests/settings-account-pacing.spec.ts:Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them"
+    ,
     "browser:tests/settings-account-pacing.spec.ts:Capacity and load: work days, nights and the editors, with controls that stay put"
     ,
     "browser:tests/settings-account-pacing.spec.ts:a failed Sprint is said as a failure, not as saved"
@@ -10934,7 +10936,11 @@
     ,
     {"kind":"browser","file":"tests/session-rows.spec.ts","name":"session rows light 390 detail open pass 2","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Capacity and load: work days, nights and the editors, with controls that stay put","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Remove account… confirmed after the account was regrouped removes nothing and says so","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-account-pacing.spec.ts","name":"Remove account… says what stays untouched, and only Remove account removes it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
