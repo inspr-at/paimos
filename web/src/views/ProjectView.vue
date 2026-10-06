@@ -69,6 +69,8 @@ import ReleasePicker from '../components/work/ReleasePicker.vue'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../lib/releaseAssign'
 import { listNativeMemberships, openedMembershipMessage, releaseViewIsParent, type NativeReleaseView } from '../lib/releaseMembership'
 import HeaderGlimpse from '../components/work/HeaderGlimpse.vue'
+import LeadBand from '../components/lead/LeadBand.vue'
+import LeadOverlays from '../components/lead/LeadOverlays.vue'
 import type KnowledgeEntryPageType from '../components/knowledge/KnowledgeEntryPage.vue'
 import type KnowledgeTabType from '../components/knowledge/KnowledgeTab.vue'
 import { DOCK_LIST_RESERVE, DOCK_MEDIA, entryPath, isKnowledgeType, parseEntryParam, type KnowledgeEntry, type KnowledgeType } from '../lib/knowledge'
@@ -1748,6 +1750,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         </div>
         </div>
       </header>
+      <LeadBand :project-id="project.id" :project-key="project.routeKey" :route-key="project.routeKey" />
       <div class="project-navigation" :class="{ 'legacy-navigation': !ticketsHeader }">
         <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections tips @select="setSection" />
         <span v-if="ticketsHeader" class="nav-divider" aria-hidden="true" />
@@ -1868,6 +1871,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
       <LabelMenu v-else-if="bulkMenu?.kind === 'labels'" :anchor="bulkMenu.anchor" :labels="bulkLabels" :count="selectedRows.length" :busy="bulkBusy" @apply="bulkLabelsApply" @close="closeBulk" />
       <EpicPicker v-else-if="bulkMenu?.kind === 'move'" :anchor="bulkMenu.anchor" :project-id="project.id" current="-" :subject="plural(selected.size, 'ticket')" allow-none @choose="bulkMove" @close="closeBulk" />
       <ReleasePicker v-else-if="bulkMenu?.kind === 'release'" :anchor="bulkMenu.anchor" :project-id="project.id" :subject="plural(releaseIds.length, 'ticket')" @choose="chooseRelease" @close="closeBulk" />
+      <LeadOverlays />
     </template>
 
     <div v-else-if="projects.error && !projects.loaded" class="page-state" role="alert">

@@ -45,6 +45,7 @@ function deletingTicket() {
     '../../lib/work': { kindLabel: () => 'Ticket' }, '../../lib/useAttachments': { useAttachments: () => ({}) }, '../../lib/doneGate': {},
     '../../lib/workVocabulary': WorkVocabulary,
     '../../stores/workVocabulary': { useWorkVocabulary: () => ({ value: { revision: 0, leaf: { name: '', icon: '' }, levels: [] } }) },
+    '../../lib/developerSettings': { useDeveloperSettings: () => ({ showExpertStart: ref(false) }) },
     '../../lib/recurrences': {}, '../../lib/useIdentityScope': { useIdentityScope: () => ({ owner: ref(''), reset() {} }) },
     '../../lib/ticketBenefits': { benefitDraft: () => ({}) }, '../../lib/authz': { can: () => false }, '../../lib/releaseAssign': {}, '../../lib/releaseMembership': {},
     '../../stores/workQueue': { useWorkQueue: () => ({ load: async () => {} }) },

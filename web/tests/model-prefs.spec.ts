@@ -60,7 +60,7 @@ const row = (page: Page, kind: string) => dialog(page).locator(`[data-kind="${ki
 async function open(page: Page) {
   await page.goto('/agents')
   const trigger = page.getByRole('button', { name: 'More agent actions', exact: true })
-  await expectStableControls({ controls: { actions: trigger, add: page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true }) }, interactions: [
+  await expectStableControls({ controls: { actions: trigger, add: page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }) }, interactions: [
     { name: 'open model preferences from agent actions', run: async () => { await trigger.click(); await page.getByRole('menuitem', { name: 'Model preferences', exact: true }).click(); await expect(row(page, 'backend')).toBeVisible() } },
   ] })
 }
