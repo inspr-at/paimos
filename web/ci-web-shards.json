@@ -362,7 +362,7 @@
         ,
         {"file":"tests/ticket-outcomes.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":3.098,"median":2.322,"min":1.546},"seconds":4.832397,"selectedTests":2},"weightSeconds":4.959064,"weightSource":"web-13"}
         ,
-        {"file":"tests/views-filters.spec.ts","listedTests":17,"tierTiming":{"caseSeconds":{"max":12.895,"median":2.377,"min":1.202},"seconds":61.40423,"selectedTests":17},"weightSeconds":42.152047,"weightSource":"web-13"}
+        {"file":"tests/views-filters.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":12.895,"median":2.377,"min":1.202},"seconds":61.40423,"selectedTests":17},"weightSeconds":42.152047,"weightSource":"web-13"}
       ]
     }
     ,

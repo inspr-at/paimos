@@ -8440,9 +8440,13 @@
     ,
     {"kind":"go","package":"internal/views","name":"TestAgentsPlanRevisionCheckedSaves","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/views","name":"TestLegacyViewsMigrationScopeEventsAndRestore","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/views","name":"TestPreferencesArePrivateSmallObjectsPerPerson","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/views","name":"TestProjectViewsRoundTripSoftDeleteAndUndo","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/views","name":"TestViewModeRoundTripAndValidation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/views","name":"TestViewsShareReadOwnerWriteAndAppendEvents","tier":"ESSENTIAL"}
     ,

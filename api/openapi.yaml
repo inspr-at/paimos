@@ -20666,10 +20666,15 @@ components:
               type: string
               enum: [asc, desc]
           description: The earlier single-key sort; defaults to position asc
+        mode:
+          type: string
+          enum: [list, outline, graph]
+          default: list
+          description: "Ticket presentation mode; saved views always store it."
         columns:
           type: array
           maxItems: 32
-          description: Column ids in order; empty means the columns follow the table width
+          description: "Visible column ids in order; empty is retained for legacy clients."
           items:
             type: string
             pattern: '^[a-z][a-z_]{0,23}$'
@@ -20694,6 +20699,11 @@ components:
           items: {type: string}
         group_by:
           type: string
+        mode:
+          type: string
+          enum: [list, outline, graph]
+          default: list
+          description: "Ticket presentation mode; saved views always store it."
         columns:
           type: array
           items:
@@ -20704,7 +20714,7 @@ components:
       allOf:
         - {$ref: '#/components/schemas/ViewWrite'}
         - type: object
-          required: [id, owner_principal_id, project_id, sort, sort_keys, group_by, shared, created_at, updated_at, deleted_at]
+          required: [id, owner_principal_id, project_id, sort, sort_keys, group_by, mode, shared, created_at, updated_at, deleted_at]
           properties:
             id: {type: string, format: uuid}
             owner_principal_id: {type: string, format: uuid}

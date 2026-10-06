@@ -11700,6 +11700,12 @@
     ,
     {"kind":"browser","file":"tests/version-reveal.spec.ts","name":"unnamed release rows: only the version copy control reveals; the row still selects","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 Graph offers saved views, persists mode and applies their filters","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 plain columns save and reopen in list despite personal changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 plain columns save and reopen in outline despite personal changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"Shift F opens every filter: labels, parent, cost unit and release by name, and a relative date","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"a custom date range filters imported start dates by day","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -12945,6 +12951,8 @@
     {"kind":"node","file":"tests/list-views.test.ts","name":"groups by assignee (you first), priority, type and label, with totals from the counts","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/list-views.test.ts","name":"options and chip words for labels, epics and people","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/list-views.test.ts","name":"saved views retain each mode and an explicit pinned-only column choice","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/list-views.test.ts","name":"the list API gets exclusions with their spellings, kinds without the excluded ones, and day bounds","tier":"GATED-FULL"}
     ,
