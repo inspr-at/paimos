@@ -28,6 +28,7 @@ const GenerationHeader = "X-Aeon-Daemon-Generation"
 
 // Telemetry contains only bounded identifiers and counters, never vendor text.
 type Telemetry struct {
+	ProcessState  string                  `json:"process_state,omitempty"`
 	ServiceTier   string                  `json:"service_tier,omitempty"`
 	ReviewRange   *reviewgate.CommitRange `json:"review_range,omitempty"`
 	LimitWindow   string                  `json:"limit_window,omitempty"`
@@ -75,6 +76,10 @@ func terminal(s string) bool {
 	return false
 }
 func (t Telemetry) validate() error {
+	if t.ProcessState != "" && (t.Kind != "finished" || t.ProcessState != "not_attempted" && t.ProcessState != "exited" && t.ProcessState != "unconfirmed") {
+		return workorders.Fail(400, "invalid process evidence")
+	}
+
 	if t.Sequence < 1 || t.Input < 0 || t.Output < 0 || t.Cached < 0 || t.Reasoning < 0 || t.Cost < 0 || t.Tools < 0 || t.Turns < 0 ||
 		t.Cached > 1_000_000_000_000 || t.Reasoning > 1_000_000_000_000 {
 		return workorders.Fail(400, "positive sequence and nonnegative counters required")
@@ -145,7 +150,7 @@ func sameTelemetry(a, b Telemetry) bool {
 	if a.LimitWindow != b.LimitWindow || (a.LimitResetsAt == nil) != (b.LimitResetsAt == nil) || a.LimitResetsAt != nil && !a.LimitResetsAt.Equal(*b.LimitResetsAt) {
 		return false
 	}
-	if a.ServiceTier != b.ServiceTier || a.Sequence != b.Sequence || a.Kind != b.Kind || a.Status != b.Status || a.Input != b.Input || a.Output != b.Output || a.Cached != b.Cached || a.Reasoning != b.Reasoning || a.Cost != b.Cost || a.Tools != b.Tools || a.Turns != b.Turns || a.Model != b.Model || a.Evidence != b.Evidence || a.ErrorCode != b.ErrorCode || len(a.GitCommits) != len(b.GitCommits) {
+	if a.ProcessState != b.ProcessState || a.ServiceTier != b.ServiceTier || a.Sequence != b.Sequence || a.Kind != b.Kind || a.Status != b.Status || a.Input != b.Input || a.Output != b.Output || a.Cached != b.Cached || a.Reasoning != b.Reasoning || a.Cost != b.Cost || a.Tools != b.Tools || a.Turns != b.Turns || a.Model != b.Model || a.Evidence != b.Evidence || a.ErrorCode != b.ErrorCode || len(a.GitCommits) != len(b.GitCommits) {
 		return false
 	}
 	for i := range a.GitCommits {
@@ -249,7 +254,14 @@ func telemetryAuthority(ctx context.Context, tx pgx.Tx, r *http.Request, p tenan
 	if t.Sequence <= last {
 		return v, o, false, workorders.Fail(409, "telemetry sequence is not monotonic")
 	}
-	if v.Status == "queued" || terminal(v.Status) {
+	handoff, err := runHandoff(v)
+	if err != nil {
+		return v, o, false, err
+	}
+	// Queued runs stay refused. A terminal run is refused unless this same
+	// daemon is reconciling an unconfirmed ownership_lost assignment.
+	reconciling := v.Status == "ownership_lost" && handoff != nil && handoff.State != "completed" && t.Kind == "finished" && t.ProcessState == "exited"
+	if v.Status == "queued" || (terminal(v.Status) && !reconciling) {
 		return v, o, false, workorders.Fail(409, "run is not live")
 	}
 	if t.Input > math.MaxInt64-v.InputTokens || t.Output > math.MaxInt64-v.OutputTokens || t.Cached > math.MaxInt64-v.CachedInputTokens || t.Reasoning > math.MaxInt64-v.ReasoningTokens || t.Cost > math.MaxInt64-v.Cost ||
@@ -320,6 +332,9 @@ func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	}
 	if status == "starting" && v.Status != "starting" {
 		return nil, workorders.Fail(409, "run cannot return to starting")
+	}
+	if err = reportHandoff(ctx, tx, p, v, t, status); err != nil {
+		return nil, err
 	}
 	var pending []events.Change
 	before := v
