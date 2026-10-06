@@ -36,11 +36,11 @@ func TestNativeReleaseCreationAtomicReplayAndIsolation(t *testing.T) {
 		return err
 	})
 	denied := f.request(f.other, http.MethodPost, path, body("other", ticket))
-	if denied.Code != 403 {
+	if denied.Code != 404 || !strings.Contains(denied.Body.String(), "project or release not found") {
 		t.Fatalf("tenant fence: %d %s", denied.Code, denied.Body.String())
 	}
 	agent := f.request(f.agent, http.MethodPost, path, body("agent", ticket))
-	if agent.Code != 403 {
+	if agent.Code != 403 || !strings.Contains(agent.Body.String(), "person required") {
 		t.Fatalf("person fence: %d %s", agent.Code, agent.Body.String())
 	}
 	request := body("native", ticket)
