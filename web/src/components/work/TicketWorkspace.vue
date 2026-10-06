@@ -73,6 +73,7 @@ const props = defineProps<{
   project: { id: string; routeKey: string }; names: Map<string, string>
   me: { id: string; name: string } | null; canWrite: boolean; canDelete: boolean; canMove: boolean; canLink: boolean; canUnlink: boolean
   canComment: boolean; canDeleteComment: boolean; canAttach: boolean; people: { id: string; name: string }[]
+  ensurePeople?: () => Promise<void>
   nativeReleases?: Map<string, NativeReleaseView>
   // Tickets followed to get here, oldest first (the panel's back trail).
   trail?: string[]
@@ -81,7 +82,7 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   close: []; prev: []; next: []; expand: []; collapse: []; newTab: []; openKey: [key: string, newTab: boolean]; status: [anchor: HTMLElement]; trailBack: [steps: number]
-  removed: [item: ListItem]; created: [item: ListItem]; moved: [item: ListItem, fromParent: string | null]; assigned: []; retry: []; openInProject: []; needPeople: []
+  removed: [item: ListItem]; created: [item: ListItem]; moved: [item: ListItem, fromParent: string | null]; assigned: []; retry: []; openInProject: []
 }>()
 
 // The row store's display object for this ticket (the list's row when the
@@ -355,15 +356,24 @@ async function cancelEdit() {
 // digits, a filter for people), styled as form fields; a choice only edits the draft.
 const uid = useId()
 const editMenu = ref<{ kind: 'status' | 'priority' | 'assignee'; anchor: HTMLElement } | null>(null)
-function openEditMenu(kind: 'status' | 'priority' | 'assignee', event: Event) {
-  if (kind === 'assignee') emit('needPeople')
+let menuGeneration = 0
+onBeforeUnmount(() => { menuGeneration++ })
+async function preparePeople(anchor: HTMLElement, request: number) {
+  const id = item.value?.id, revision = item.value?.updated_at, project = props.project.id
+  await props.ensurePeople?.()
+  return request === menuGeneration && anchor.isConnected && item.value?.id === id && item.value?.updated_at === revision && props.project.id === project
+}
+async function openEditMenu(kind: 'status' | 'priority' | 'assignee', event: Event) {
+  const request = ++menuGeneration
   const anchor = event.currentTarget as HTMLElement
-  editMenu.value = editMenu.value?.kind === kind ? null : { kind, anchor }
+  if (editMenu.value?.kind === kind) { closeEditMenu(false); return }
+  if (kind === 'assignee' && (!(await preparePeople(anchor, request)) || !editing.value || !editable.value)) return
+  editMenu.value = { kind, anchor }
 }
 function editMenuKeys(kind: 'status' | 'priority' | 'assignee', event: KeyboardEvent) {
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); if (editMenu.value?.kind !== kind) openEditMenu(kind, event) }
 }
-function closeEditMenu(restore: boolean) { const anchor = editMenu.value?.anchor; editMenu.value = null; if (restore) anchor?.focus() }
+function closeEditMenu(restore: boolean) { menuGeneration++; const anchor = editMenu.value?.anchor; editMenu.value = null; if (restore) anchor?.focus() }
 function chooseEdit(kind: 'status' | 'priority' | 'assignee', value: string) {
   if (kind === 'status') draft.state = value
   else if (kind === 'priority') draft.priority = value
@@ -463,10 +473,11 @@ function copy(text: string, label: string) {
 function anchorFor(shortcut: string) {
   return [...(root.value?.querySelectorAll<HTMLElement>(`[aria-keyshortcuts="${shortcut}"]`) ?? [])].find(el => el.getClientRects().length) ?? null
 }
-function openMenu(kind: 'priority' | 'assignee' | 'epic' | 'release', anchor: HTMLElement | null) {
+async function openMenu(kind: 'priority' | 'assignee' | 'epic' | 'release', anchor: HTMLElement | null) {
+  const request = ++menuGeneration
   if (!anchor) return
   if (kind === 'release' ? canRelease.value : kind === 'epic' ? movable.value : kind === 'assignee' ? editable.value || canQueue.value : editable.value) {
-    if (kind === 'assignee') emit('needPeople')
+    if (kind === 'assignee' && (!(await preparePeople(anchor, request)) || (!editable.value && !canQueue.value))) return
     menu.value = { kind, anchor }
   }
 }
@@ -513,7 +524,7 @@ async function undoRelease(eventId: number, key: string) {
     toast(error instanceof APIError && error.status === 409 ? 'The release changed since, so nothing was undone.' : `Undo did not work: ${error instanceof Error ? error.message : 'unknown error'}`, { tone: 'error' })
   }
 }
-function closeMenu(restore: boolean) { const anchor = menu.value?.anchor; menu.value = null; if (restore) anchor?.focus() }
+function closeMenu(restore: boolean) { menuGeneration++; const anchor = menu.value?.anchor; menu.value = null; if (restore) anchor?.focus() }
 async function choosePriority(value: string) { const anchor = menu.value?.anchor; menu.value = null; anchor?.focus(); await ticket.setPriority(value || null) }
 async function chooseAssignee(value: string) {
   const anchor = menu.value?.anchor; menu.value = null; anchor?.focus()

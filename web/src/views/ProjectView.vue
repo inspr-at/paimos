@@ -163,7 +163,12 @@ watch(projectId, id => { queueAnchor.value = null; assigneeMenu.value = null; if
 onMounted(() => queuePoller.start())
 onBeforeUnmount(() => queuePoller.stop())
 function closeQueue(restore: boolean) { const anchor = queueAnchor.value; queueAnchor.value = null; if (restore) anchor?.focus() }
-function openAssignee(row: ListItem, anchor: HTMLElement) { void loadProjectPeople(); assigneeMenu.value = { row, anchor } }
+async function openAssignee(row: ListItem, anchor: HTMLElement) {
+  const request = peopleGeneration, revision = row.updated_at
+  await loadProjectPeople()
+  if (request !== peopleGeneration || !anchor.isConnected || row.updated_at !== revision) return
+  assigneeMenu.value = { row, anchor }
+}
 function closeAssignee(restore: boolean) { const anchor = assigneeMenu.value?.anchor; assigneeMenu.value = null; if (restore) anchor?.focus() }
 async function assignPerson(value: string) {
   const row = assigneeMenu.value?.row
@@ -1287,12 +1292,18 @@ onBeforeUnmount(() => { frameObserver?.disconnect(); window.removeEventListener(
 const bulkBusy = ref(false)
 const bulkMenu = ref<{ kind: 'status' | 'assignee' | 'priority' | 'labels' | 'move' | 'release'; anchor: HTMLElement } | null>(null)
 const releaseIds = ref<string[]>([])
-function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
+async function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
   const at = anchor ?? document.querySelector<HTMLElement>(`.bulk-bar [aria-keyshortcuts="${{ status: 's', assignee: 'a', priority: 'p', labels: 'l', move: 'm', release: 'g' }[kind]}"]`)
   if (!at) return
   if (kind === 'release') { openRelease(at, liveSelection()); return }
   if (kind === 'labels') void list.requestFacet('tag')
-  if (kind === 'assignee') void loadProjectPeople()
+  if (kind === 'assignee') {
+    const request = peopleGeneration
+    const selection = () => JSON.stringify(selectedRows.value.map(row => [row.id, row.updated_at]))
+    const shown = selection()
+    await loadProjectPeople()
+    if (request !== peopleGeneration || !at.isConnected || selection() !== shown) return
+  }
   if (kind === 'move') void list.loadEpics()
   bulkMenu.value = { kind, anchor: at }
 }
@@ -1868,7 +1879,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         v-if="ticketKey" :key="`${project.id}/${me?.id ?? ''}/${ticketKey.toUpperCase()}`" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
         :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
-        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :native-releases="nativeReleases" @need-people="loadProjectPeople"
+        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :ensure-people="loadProjectPeople" :native-releases="nativeReleases"
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />
