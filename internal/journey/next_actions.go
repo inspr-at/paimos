@@ -192,7 +192,7 @@ func loadActionSnapshots(ctx context.Context, tx pgx.Tx, ids []string) ([]action
 		ORDER BY a.proposed_at DESC, a.id DESC
  ) o),'[]'::jsonb),
  'DeployWindow',windows.deploy,'AccessWindow',windows.access,
- 'Handoffs',coalesce((SELECT jsonb_agg(jsonb_build_object('ID',h.id,'Stage',h.stage,'Operation',h.operation,'State',h.state,'Result',coalesce(result.outcome,''),'Attempt',h.attempt,'Epoch',h.authority_epoch,'At',h.created_at,'Historical',h.journey_revision<windows.renewal)) FROM stage_handoffs h LEFT JOIN stage_handoff_results result ON result.tenant_id=h.tenant_id AND result.handoff_id=h.id WHERE h.release_node_id=r.release_node_id AND h.stage IN ('deploy','access')),'[]'::jsonb))
+ 'Handoffs',coalesce((SELECT jsonb_agg(jsonb_build_object('ID',h.id,'Stage',h.stage,'Operation',h.operation,'State',h.state,'Result',coalesce(result.outcome,''),'Attempt',h.attempt,'Epoch',h.authority_epoch,'At',h.created_at,'Historical',h.journey_revision<windows.renewal OR (h.stage='access' AND h.journey_revision<windows.permit_renewal))) FROM stage_handoffs h LEFT JOIN stage_handoff_results result ON result.tenant_id=h.tenant_id AND result.handoff_id=h.id WHERE h.release_node_id=r.release_node_id AND h.stage IN ('deploy','access')),'[]'::jsonb))
  FROM projects p
  LEFT JOIN journey_releases r ON r.tenant_id=p.tenant_id AND r.release_node_id=p.release_id
  CROSS JOIN LATERAL (DIGEST_QUERY) content
@@ -204,10 +204,11 @@ func loadActionSnapshots(ctx context.Context, tx pgx.Tx, ids []string) ([]action
  count(*) FILTER(WHERE jt.release_node_id=r.release_node_id AND jt.access_change) AS access,
  coalesce(bool_or(jt.release_node_id=r.release_node_id AND jt.estimated_hours IS NULL),false) AS missing,
  coalesce(sum(jt.estimated_hours) FILTER(WHERE jt.release_node_id=r.release_node_id AND jt.estimated_hours IS NOT NULL),0)*100 AS plan
- FROM journey_tickets jt JOIN nodes n ON n.tenant_id=jt.tenant_id AND n.id=jt.ticket_node_id WHERE jt.project_node_id=p.id AND aeon_work_is_release_leaf(n.tenant_id,n.id)) stats
+ FROM journey_tickets jt JOIN nodes n ON n.tenant_id=jt.tenant_id AND n.id=jt.ticket_node_id WHERE jt.project_node_id=p.id AND jt.release_node_id=r.release_node_id AND n.deleted_at IS NULL AND aeon_work_is_release_leaf(n.tenant_id,n.id)) stats
  CROSS JOIN LATERAL (SELECT max(at) FILTER(WHERE type IN ('journey.candidate_approved','journey.deploy_retried')) AS deploy,
- max(at) FILTER(WHERE type='journey.permit_approved') AS access,
- coalesce(max((after->>'revision')::bigint) FILTER(WHERE type IN ('journey.candidate_renewed','journey.deploy_renewed')),0) AS renewal
+ max(at) FILTER(WHERE type IN ('journey.permit_approved','journey.permit_renewed')) AS access,
+ coalesce(max((after->>'revision')::bigint) FILTER(WHERE type IN ('journey.candidate_renewed','journey.deploy_renewed')),0) AS renewal,
+ coalesce(max((after->>'revision')::bigint) FILTER(WHERE type='journey.permit_renewed'),0) AS permit_renewal
  FROM events WHERE node_id=p.id AND after->>'current_release_id'=r.release_node_id::text) windows
  ORDER BY array_position($1::uuid[],p.id)`
 	query = strings.Replace(query, "DIGEST_QUERY", strings.ReplaceAll(requirements.DigestContentSQL, "$1", "p.id")+" AS content", 1)
