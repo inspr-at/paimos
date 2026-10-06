@@ -282,11 +282,13 @@ test('old workspace bookmarks redirect during section and hash changes inside Se
     await resetScroll()
   }
   const guard = await controlStability(page, { navigation: sections(page), personal: sections(page).getByRole('link', { name: /^Personal/ }) })
-  await guard.check(async () => {
-    await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/settings/workspace?source=bookmark#estimates')))
-    await expect(page).toHaveURL('/settings/agents?source=bookmark#estimates')
-    await arrivedAt('estimates')
-  })
+  for (const anchor of ['estimates', 'agent-activity', 'silent-sessions']) {
+    await guard.check(async () => {
+      await page.evaluate(id => import('/src/router.ts').then(({ router }) => router.push(`/settings/workspace?source=bookmark#${id}`)), anchor)
+      await expect(page).toHaveURL(`/settings/agents?source=bookmark#${anchor}`)
+      await arrivedAt(anchor)
+    })
+  }
   await guard.check(async () => {
     await sections(page).getByRole('link', { name: /^Workspace/ }).click()
     await expect(page).toHaveURL('/settings/workspace')

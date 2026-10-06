@@ -24,7 +24,7 @@ import { doctrineInbox } from '../lib/doctrineInbox'
 import { scopeOwner } from '../lib/identityScope'
 
 // Settings groups share one frame; explicit grants gate Access, rules and accounts.
-// /settings/<section>#<card> deep-links to one card, which is ringed on arrival.
+// /settings/<section>#<target> deep-links to a card or field, ringed on arrival.
 const route = useRoute()
 const session = useSession()
 const admin = computed(() => can('settings.manage'))
@@ -89,7 +89,7 @@ onMounted(() => { document.addEventListener('pointerdown', outside); window.addE
 onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', resize); clearTimeout(arrival); disposed = true })
 let disposed = false
 
-// A deep link scrolls to its card once the section has rendered it.
+// A deep link scrolls to its target once the section has rendered it.
 let arrival: ReturnType<typeof setTimeout> | undefined
 watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
   if (!hash) return
@@ -99,10 +99,12 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
     const target = document.getElementById(decodeURIComponent(hash.slice(1)))
     if (target) {
       target.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
-      const card = target.classList.contains('settings-card') ? target : target.querySelector<HTMLElement>('.settings-card, .setup')
-      card?.classList.add('arrived')
+      // Legacy bookmarks can now point to a field inside a consolidated card.
+      // Keep wrapper links ringing their card, and ring field links themselves.
+      const highlight = target.classList.contains('settings-card') ? target : target.querySelector<HTMLElement>('.settings-card, .setup') ?? target
+      highlight.classList.add('arrived')
       clearTimeout(arrival)
-      arrival = setTimeout(() => card?.classList.remove('arrived'), 1800)
+      arrival = setTimeout(() => highlight.classList.remove('arrived'), 1800)
       return
     }
     await new Promise(resolve => setTimeout(resolve, 50))
