@@ -276,11 +276,11 @@ test('unverifiable live roots terminate their group without an invalid journal e
   } finally { probe.child.kill('SIGKILL'); await probe.completion }
 })
 
-test('root retries allow a fast child to exit normally instead of failing verification', async () => {
+test('root retries allow a fast child to exit normally instead of failing verification', { timeout: 15000 }, async () => {
   const child = spawn(process.execPath, ['-e', 'process.exit(7)'], { detached: true, stdio: 'ignore' })
   const exited = new Promise(resolve => child.once('exit', resolve)), entries = []
   try {
-    assert.equal(await recordRootGroup(child, entry => entries.push(entry), { start: () => '', attempts: 200 }), child)
+    assert.equal(await recordRootGroup(child, entry => entries.push(entry), { start: () => '', wait: () => exited }), child)
     assert.equal(await exited, 7)
     assert.deepEqual(entries, [])
     assert.throws(() => process.kill(-child.pid, 0), { code: 'ESRCH' })
@@ -305,7 +305,40 @@ test('supervisor retries a root ps miss without overriding a successful suite ex
   } finally { injected.mock.restore(); syncBuiltinESMExports() }
 })
 
-test('supervisor leaves an already-exited root exit code alone after repeated ps misses', async t => {
+// The root stays alive until the supervisor has observed a ps miss. Its retry
+// waits for readiness, releases the child, then observes the actual exit.
+// No amount of startup load can consume the identity retry budget in between.
+function rootExitBarrier(t) {
+  const original = childProcess.spawn
+  let child, ready, exited, waits = 0
+  const stop = () => child?.kill('SIGKILL')
+  t.signal.addEventListener('abort', stop, { once: true })
+  const injected = t.mock.method(childProcess, 'spawn', (command, args, options) => {
+    assert.equal(child, undefined, 'one supervised root per barrier')
+    child = original(command, args, { ...options, stdio: ['ignore', 'inherit', 'inherit', 'ipc'] })
+    ready = new Promise(resolve => child.once('message', resolve))
+    exited = new Promise(resolve => child.once('exit', (code, signal) => resolve({ code, signal })))
+    return child
+  })
+  syncBuiltinESMExports()
+  return {
+    async wait() {
+      if (++waits === 1) return
+      assert.equal(waits, 2, 'root exit must settle the next retry')
+      const message = await Promise.race([ready, exited])
+      assert.equal(message, 'ready', 'root must reach the barrier before exiting')
+      child.send('exit')
+      await exited
+    },
+    async close() {
+      injected.mock.restore(); syncBuiltinESMExports()
+      t.signal.removeEventListener('abort', stop)
+      if (child) { child.kill('SIGKILL'); await exited }
+    },
+  }
+}
+
+test('supervisor leaves an already-exited root exit code alone after repeated ps misses', { timeout: 15000 }, async t => {
   const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-root-exited-')), 'suite.lock')
   const original = childProcess.spawnSync
   let calls = 0
@@ -313,14 +346,15 @@ test('supervisor leaves an already-exited root exit code alone after repeated ps
     if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) { calls++; return { status: 1, stdout: '' } }
     return original(command, args, options)
   })
-  syncBuiltinESMExports()
+  const barrier = rootExitBarrier(t)
   try {
-    const result = await runOwnedCommand(process.execPath, ['-e', 'process.exit(7)'], { lockPath: path, graceMs: 50 })
+    const result = await runOwnedCommand(process.execPath, ['-e', 'process.once("message", () => process.exit(7)); process.send("ready")'], { lockPath: path, graceMs: 50, rootIdentityWait: barrier.wait })
     assert.equal(result.code, 7)
     assert.ok(calls > 0)
+    assert.equal(calls, 2, 'both misses precede the observed root exit')
     assert.equal(result.metrics.remaining_processes, 0)
     assert.equal(existsSync(path), false)
-  } finally { injected.mock.restore(); syncBuiltinESMExports() }
+  } finally { injected.mock.restore(); await barrier.close(); syncBuiltinESMExports() }
 })
 
 test('persistent supervisor root verification failure kills the group before releasing its lock', async t => {
@@ -344,11 +378,12 @@ test('persistent supervisor root verification failure kills the group before rel
 })
 
 for (const mode of ['transient', 'persistent', 'owner-change']) {
-  test(`root preload handles ${mode} ps misses before suite code executes`, async t => {
+  test(`root preload handles ${mode} ps misses before suite code executes`, { timeout: 15000 }, async t => {
     const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-root-preload-')), lockPath = join(directory, 'suite.lock')
     const attempts = join(directory, 'attempts'), ready = join(directory, 'ready')
     const preload = new URL('./testdata/playwright/root-start-miss.mjs', import.meta.url).href
-    const script = `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(ready)}, fs.readFileSync(process.env.AEON_PW_GROUP_LOG));`
+    const script = `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(ready)}, fs.readFileSync(process.env.AEON_PW_GROUP_LOG));` +
+      (mode === 'transient' ? 'process.once("message", () => process.exit(0)); process.send("ready");' : '')
     // Isolate preload publication: for the transient case the supervisor
     // cannot verify the root, so only the preload can record it before work.
     const original = childProcess.spawnSync
@@ -356,14 +391,15 @@ for (const mode of ['transient', 'persistent', 'owner-change']) {
       if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) return { status: 1, stdout: '' }
       return original(command, args, options)
     }) : undefined
+    const barrier = mode === 'transient' ? rootExitBarrier(t) : undefined
     syncBuiltinESMExports()
     let result
     try {
       result = await runOwnedCommand(process.execPath, ['-e', script], {
-        lockPath, graceMs: 50,
+        lockPath, graceMs: 50, rootIdentityWait: barrier?.wait,
         env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}` },
       })
-    } finally { injected?.mock.restore(); syncBuiltinESMExports() }
+    } finally { injected?.mock.restore(); await barrier?.close(); syncBuiltinESMExports() }
     const calls = readFileSync(attempts, 'utf8').trim().split('\n').length
     assert.ok(calls >= 2)
     assert.equal(result.metrics.remaining_processes, 0)
