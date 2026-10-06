@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-402, on the computer-first panel of AEON-499: /agents cleanup. Revoked
-// computers fold into "Revoked computers · N" and a person removes them; every
-// account row menu has Remove; a queued run has Cancel; accounts and computers
-// fold into one remembered line. AEON402_SHOTS=<dir> writes screenshots at 1600
-// and 390 in light and dark.
+// AEON-402: /agents cleanup. A queued run has Cancel and Queued folds per
+// person; Accounts and computers folds into one remembered line (AEON-782).
+// Removing computers and accounts moved to Settings with AEON-686 and AEON-786
+// (settings-account-pacing.spec.ts, settings-host-capacity.spec.ts).
+// AEON402_SHOTS=<dir> writes screenshots at 1600 and 390 in light and dark.
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
@@ -42,10 +42,10 @@ function computers() {
   return [live, ...revoked]
 }
 
-async function setup(page: Page, options: { folded?: boolean; manage?: boolean } = {}) {
+async function setup(page: Page, options: { unfolded?: boolean; manage?: boolean } = {}) {
   await page.clock.setSystemTime(NOW)
   const work = fixtures()
-  if (options.folded) work.preferences['agents-page'] = { setupFolded: true }
+  if (options.unfolded) work.preferences['ui.agents.sections'] = { dial: true, accounts: true, sessions: true, queued: true }
   await mockWork(page, work, { admin: true })
   const data = agentData(world)
   const capacity = capacityWorld()
@@ -124,12 +124,6 @@ async function open(page: Page) {
 }
 const panel = (page: Page) => page.getByRole('region', { name: 'Accounts and computers' })
 const setupToggle = (page: Page) => page.getByRole('button', { name: 'Accounts and computers', exact: true })
-const computersRegion = (page: Page) => page.getByRole('region', { name: 'Revoked computers' })
-const cards = (page: Page) => panel(page).getByRole('region', { name: /^Computer / })
-async function removeAccount(page: Page, account: string) {
-  await page.locator(`[data-account="${account}"]`).getByRole('button', { name: /^More for / }).click()
-  await page.getByRole('menu').getByRole('menuitem', { name: /Remove account/ }).click()
-}
 const noScroll = (page: Page) => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)
 async function shots(page: Page, state: string) {
   const dir = process.env.AEON402_SHOTS
@@ -143,130 +137,6 @@ async function shots(page: Page, state: string) {
   }
   await page.setViewportSize({ width: 1600, height: 1000 })
 }
-
-test('revoked computers fold into one disclosure and a person removes them', async ({ page }) => {
-  const errors = watchErrors(page)
-  const { posts } = await setup(page)
-  await open(page)
-  const region = computersRegion(page)
-  await expect(cards(page).filter({ has: page.getByRole('button', { name: 'More for studio' }) })).toHaveCount(1)
-  const toggle = region.getByRole('button', { name: 'Revoked computers · 3' })
-  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
-  await expect(panel(page)).not.toContainText('0 harnesses')
-  await toggle.click()
-  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
-  await expect(region.locator('.revoked-list li')).toHaveCount(3)
-  await shots(page, 'revoked-open')
-  await region.getByRole('button', { name: 'Remove mbp2607' }).first().click()
-  const dialog = page.getByRole('dialog')
-  await expect(dialog).toContainText('Remove mbp2607?')
-  await expect(dialog).toContainText('Its history stays in the audit log.')
-  await expect(dialog).toContainText('Its account binding leaves Accounts too.')
-  await shots(page, 'computer-remove-confirm')
-  await dialog.getByRole('button', { name: 'Remove', exact: true }).click()
-  await expect(region.locator('.revoked-list li')).toHaveCount(2)
-  await expect(region.getByRole('button', { name: 'Revoked computers · 2' })).toBeVisible()
-  await expect(region.getByRole('button', { name: 'Remove mbp2607' }).first()).toBeFocused()
-  await shots(page, 'computer-removed')
-  expect(posts.map(p => p.path)).toEqual([`/api/agent-pairing/computers/${id(11)}/remove`])
-  // A connected computer that reported is disconnected, never removed: its menu says so.
-  await panel(page).getByRole('button', { name: 'More for studio' }).click()
-  const menu = page.getByRole('menu')
-  await expect(menu.getByRole('menuitem', { name: /Disconnect/ })).toBeVisible()
-  await expect(menu.getByRole('menuitem', { name: /^Remove/ })).toHaveCount(0)
-  expect(errors).toEqual([])
-})
-
-test('a list read that started before Remove does not bring the computer back', async ({ page }) => {
-  const { hold } = await setup(page)
-  await open(page)
-  const region = computersRegion(page)
-  await region.getByRole('button', { name: 'Revoked computers · 3' }).click()
-  let answer: (() => void) | undefined
-  hold.next = release => { answer = release }
-  // The page's poll reads the list again; that read is held.
-  await page.evaluate(() => window.dispatchEvent(new Event('online')))
-  await expect.poll(() => answer !== undefined).toBe(true)
-  await region.getByRole('button', { name: 'Remove mbp2607' }).first().click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Remove', exact: true }).click()
-  await expect(region.locator('.revoked-list li')).toHaveCount(2)
-  answer!()
-  await page.waitForTimeout(300)
-  await expect(region.locator('.revoked-list li')).toHaveCount(2)
-})
-
-// The page's poll holds the shared list reads across a write; the fresh read after
-// the write must win and the old answers, released late, must change nothing.
-async function pollHeldAcross(page: Page, holdGets: Set<string>, heldGets: (() => void)[], paths: string[]) {
-  for (const path of paths) holdGets.add(path)
-  await page.evaluate(() => window.dispatchEvent(new Event('online')))
-  await expect.poll(() => heldGets.length).toBe(paths.length)
-}
-
-test('a runs read that started before account Remove does not bring its cancelled run back', async ({ page }) => {
-  const { holdGets, heldGets } = await setup(page)
-  await open(page)
-  const item = page.getByRole('region', { name: 'Runs awaiting a session' }).locator('li').filter({ hasText: 'Add an Oracle Cloud connector' })
-  await expect(item).toHaveCount(1)
-  await pollHeldAcross(page, holdGets, heldGets, ['/api/runs', '/api/agent-accounts', '/api/agent-accounts/capacity'])
-  const row = page.locator(`.acct[data-account="${ACCOUNTS.claude}"]`)
-  await removeAccount(page, ACCOUNTS.claude)
-  await page.getByRole('dialog').getByRole('button', { name: 'Remove account' }).click()
-  await expect(row).toHaveCount(0)
-  // The fresh read after Remove shows the queued run cancelled.
-  await expect(item).toHaveCount(0)
-  for (const release of heldGets.splice(0)) release()
-  await page.waitForTimeout(300)
-  await expect(item).toHaveCount(0)
-  await expect(row).toHaveCount(0)
-})
-
-test('account and capacity reads that started before computer Remove do not bring its account back', async ({ page }) => {
-  const { list, holdGets, heldGets } = await setup(page)
-  // The first revoked mbp2607 still carries the Spare binding in this case.
-  list[1]!.enrollments[0]!.account_id = ACCOUNTS.spare
-  await open(page)
-  const row = page.locator(`.acct[data-account="${ACCOUNTS.spare}"]`)
-  await expect(row).toHaveCount(1)
-  const region = computersRegion(page)
-  await region.getByRole('button', { name: 'Revoked computers · 3' }).click()
-  await pollHeldAcross(page, holdGets, heldGets, ['/api/agent-accounts', '/api/agent-accounts/capacity'])
-  await region.getByRole('button', { name: 'Remove mbp2607' }).first().click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Remove', exact: true }).click()
-  await expect(region.locator('.revoked-list li')).toHaveCount(2)
-  await expect(row).toHaveCount(0)
-  for (const release of heldGets.splice(0)) release()
-  await page.waitForTimeout(300)
-  await expect(row).toHaveCount(0)
-  await expect(region.locator('.revoked-list li')).toHaveCount(2)
-})
-
-test('every account row menu has a person-only Remove that names what goes away', async ({ page }) => {
-  const { posts } = await setup(page)
-  await open(page)
-  const row = page.locator(`[data-account="${ACCOUNTS.claude}"]`)
-  await removeAccount(page, ACCOUNTS.claude)
-  const dialog = page.getByRole('dialog')
-  await expect(dialog).toContainText('Its runs and history stay.')
-  await expect(dialog).toContainText('One queued run for it is cancelled.')
-  await shots(page, 'account-remove-confirm')
-  await dialog.getByRole('button', { name: 'Remove account' }).click()
-  await expect(row).toHaveCount(0)
-  // Focus moves to the next row's menu, which is enabled again.
-  await expect(page.locator('.acct .row-more button:focus')).toHaveCount(1)
-  await expect(page.locator('.acct .row-more button:focus')).toBeEnabled()
-  await shots(page, 'account-removed')
-  expect(posts.map(p => p.path)).toEqual([`/api/agent-accounts/${ACCOUNTS.claude}/archive`])
-  // No trash icon on a row: removal lives in the row menu.
-  await expect(panel(page).getByRole('button', { name: /^Remove/ })).toHaveCount(0)
-})
-
-test('without account management, account rows have no menu', async ({ page }) => {
-  await setup(page, { manage: false })
-  await open(page)
-  await expect(page.locator('.acct').first()).toBeVisible()
-  await expect(page.locator('.acct').getByRole('button', { name: /^More for / })).toHaveCount(0)
-})
 
 test('a queued run can be cancelled from /agents', async ({ page }) => {
   const { posts } = await setup(page)
@@ -346,25 +216,26 @@ test('a section preference that lands after a run link keeps Queued open until t
 test('accounts and computers fold into one calm line, remembered per person', async ({ page }) => {
   const { work } = await setup(page)
   await open(page)
-  await expect(cards(page).first()).toBeVisible()
-  await shots(page, 'expanded')
-  await setupToggle(page).click()
+  // Folded on the first visit: the line states the state, the body is not there to tab into.
   await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'false')
   await expect(panel(page)).toContainText(/\d+ of \d+ ready/)
-  await expect(cards(page)).toHaveCount(0)
-  await expect(computersRegion(page)).toHaveCount(0)
-  await expect.poll(() => work.preferences['agents-page']).toEqual({ setupFolded: true })
+  await expect(panel(page).getByRole('table')).toBeHidden()
   await shots(page, 'folded')
-  await page.reload()
-  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'false')
   await setupToggle(page).click()
-  await expect(cards(page).first()).toBeVisible()
-  await expect.poll(() => work.preferences['agents-page']).toEqual({ setupFolded: false })
+  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'true')
+  await expect(panel(page).getByRole('table')).toBeVisible()
+  await expect.poll(() => work.preferences['ui.agents.sections']).toMatchObject({ accounts: true })
+  await shots(page, 'expanded')
+  await page.reload()
+  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'true')
+  await setupToggle(page).click()
+  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'false')
+  await expect.poll(() => work.preferences['ui.agents.sections']).toMatchObject({ accounts: false })
 })
 
-test('a stored folded choice opens folded, without a flash of the cards', async ({ page }) => {
-  await setup(page, { folded: true })
+test('a stored open choice opens open, without a flash of the folded line', async ({ page }) => {
+  await setup(page, { unfolded: true })
   await open(page)
-  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'false')
-  await expect(page.locator('.ac .computer')).toHaveCount(0)
+  await expect(setupToggle(page)).toHaveAttribute('aria-expanded', 'true')
+  await expect(panel(page).getByRole('table')).toBeVisible()
 })

@@ -6,7 +6,8 @@ import { accountName, accountPlan } from '../../lib/accountCascade'
 import { limitSummary, nameClashes, readingSupport, setByYou } from '../../lib/accountLimits'
 import { createGroup, deleteGroup, type AgentAccount } from '../../lib/agents'
 import { can } from '../../lib/authz'
-import { HARNESS_NAME, POOL_ORDER, accountUseCommand, type AccountState } from '../../lib/capacity'
+import { HARNESS_NAME, POOL_ORDER, accountUseCommand, clone, putSchedule, type AccountState } from '../../lib/capacity'
+import { toast } from '../../lib/toast'
 import { useAgents, type Availability } from '../../stores/agents'
 import { useCapacity } from '../../stores/capacity'
 import { getProjects } from '../../lib/api'
@@ -26,6 +27,8 @@ import HarnessMark from './HarnessMark.vue'
 // shared-quota account in Settings → Accounts and computers): name clashes and
 // pool candidates are found across all of them.
 const props = defineProps<{ accounts: AgentAccount[]; all?: AgentAccount[]; state: Availability; now: number; admin: boolean; set: (account: AgentAccount, state: AgentAccount['state']) => Promise<void> }>()
+// "I'm away…" leads to the pacing editors, which the page owns (AEON-782).
+const emit = defineEmits<{ away: [] }>()
 const session = useSession()
 const agents = useAgents()
 const capacity = useCapacity()
@@ -79,6 +82,17 @@ function onHead(event: MouseEvent, id: string) {
 }
 // A busy switch stays focusable (aria-disabled), so focus can return to it
 // when its confirmation closes.
+// What an account learned can be taken as its work hours (moved here from the Agents page with AEON-782).
+async function useHours(account: AgentAccount) {
+  const row = rowOf.value.get(account.id), hours = row?.learning?.suggested_hours
+  if (!mayManage.value || !hours || !row?.schedule || busy.value === account.id) return
+  const next = clone(row.schedule)
+  next.week = next.week.map(d => d.on ? { ...d, start: hours.start, end: hours.end } : d)
+  busy.value = account.id; error.value = ''
+  try { await putSchedule({ scope: 'account', account_id: account.id, schedule: next }); await agents.afterWrite(); toast(`Saved ${row.name}'s work hours.`) }
+  catch (e) { error.value = e instanceof Error ? e.message : 'The work hours were not saved. Please try again.' }
+  finally { busy.value = '' }
+}
 async function toggleUse(account: AgentAccount) {
   if (busy.value === account.id) return
   busy.value = account.id; error.value = ''
@@ -202,7 +216,7 @@ async function backInPool(account: AgentAccount) {
               <p>{{ capacity.accountLines.get(a.id)?.readiness.hint || capacity.accountLines.get(a.id)?.readiness.text }}</p>
               <p v-if="capacity.accountLines.get(a.id)?.readiness.command">On {{ host(a) || 'its computer' }}, run <code>{{ capacity.accountLines.get(a.id)?.readiness.command }}</code></p>
             </div>
-            <CapacityLearning :learning="rowOf.get(a.id)?.learning" :host="a.host_label" :now="now" />
+            <CapacityLearning :learning="rowOf.get(a.id)?.learning" :host="a.host_label" :now="now" :may-manage="mayManage" :saving="busy === a.id" @hours="useHours(a)" @away="emit('away')" />
             <AccountDetail
               v-if="open === a.id" :id="`account-detail-${a.id}`" :account="a" :accounts="all ?? accounts" :row="rowOf.get(a.id)" :cap="capacity.byAccount.get(a.id)" :now="now"
               :timezone="capacity.timezone" :may-manage="mayManage" :rename="renameAt === a.id ? renameActivation : 0" :rename-trigger="renameTrigger" @changed="changed"

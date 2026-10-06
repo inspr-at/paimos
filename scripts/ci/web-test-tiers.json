@@ -96,6 +96,8 @@
     ,
     "browser:tests/accounts-computers.spec.ts:AEON-685: tablet verification control is independent of the status label width"
     ,
+    "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
+    ,
     "browser:tests/agent-pause.spec.ts:1440 dark: scope, preview, levels and report controls stay under the pointer"
     ,
     "browser:tests/agent-pause.spec.ts:1440 light: scope, preview, levels and report controls stay under the pointer"
@@ -118,6 +120,8 @@
     ,
     "browser:tests/agents-cleanup.spec.ts:a section preference that lands after a run link keeps Queued open until the person folds it"
     ,
+    "browser:tests/agents-cleanup.spec.ts:a stored open choice opens open, without a flash of the folded line"
+    ,
     "browser:tests/agents-dial.spec.ts:AEON-781: a dial folded before the fold sections stays folded"
     ,
     "browser:tests/agents-dial.spec.ts:AEON-781: a held + speeds up, pauses before a mode boundary and saves only the final value once"
@@ -127,6 +131,48 @@
     "browser:tests/agents-dial.spec.ts:AEON-781: an arrow key keeps its own pace; leaving, blur and a disabled end stop a hold"
     ,
     "browser:tests/agents-dial.spec.ts:AEON-781: the chevron comes first, folding moves nothing above the body, and the fold follows the person"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:a blocked harness is a Needs you row with its one fix, beside a ready one at 1600 dark"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:a blocked harness is a Needs you row with its one fix, beside a ready one at 1600 light"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:a blocked harness is a Needs you row with its one fix, beside a ready one at 390 dark"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:a blocked harness is a Needs you row with its one fix, beside a ready one at 390 light"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:a computer that needs an update says so at 1600"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:a computer that needs an update says so at 390"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:a partial block names the account that needs attention at 1600 light"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:a partial block names the account that needs attention at 390 dark"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:every shared reason shows its fix beside a ready harness"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:the specific cli_unavailable command is the row's fix at 1600 dark"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:the specific cli_unavailable command is the row's fix at 1600 light"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:the specific cli_unavailable command is the row's fix at 390 dark"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:the specific cli_unavailable command is the row's fix at 390 light"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:the specific login_required command is the row's fix at 1600 dark"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:the specific login_required command is the row's fix at 1600 light"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:the specific login_required command is the row's fix at 390 dark"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:the specific login_required command is the row's fix at 390 light"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:the specific pin_missing command is the row's fix at 1600 dark"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:the specific pin_missing command is the row's fix at 1600 light"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:the specific pin_missing command is the row's fix at 390 dark"
+    ,
+    "browser:tests/agents-harness-status.spec.ts:the specific pin_missing command is the row's fix at 390 light"
     ,
     "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 1600px"
     ,
@@ -4892,9 +4938,27 @@
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Agents at once saves one ceiling and independent harness limits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away stays in the head with Back now, and one click ends it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away stays put when unfolding removes Verify again beside it, even with a wide status","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Away with an expired verification keeps the head inside the card and its controls put at 640, 720 and 800","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Check now says what came back: a failure as a failure, still nothing, then the reading","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Needs you lists what blocks agents with the fix or its details; a low-quota notice moves here with its urgency","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Touch ID pairing readiness and upgrade guidance keep the computer control in place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"a name, a cell and Details open the right panel in Settings","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"a problem: the line names the first thing and counts the rest, and Verify again fixes it from the folded head","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"an approval link shows the folded section once and offers that account's check; the fold preference stays","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"calm: one status line folded; unfolded, nothing needs you and the grid names every sign-in","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"loading, a failed read with Try again, and an empty workspace each say so in the status place","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"no reading yet is said once, with Check now; unsupported limits and offline computers stay honest","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -4902,9 +4966,25 @@
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"pacing is one summary button; the existing settings and editors open from it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"people without account management see Details, not Verify again","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"phone: stacked rows, no sideways scroll","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"stored ceiling arrives without a made-up total while the snapshot loads","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head keeps its height, and the toggle stays put, whether or not Verify again is shown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the row menu carries Sprint, Hold and Remove; the computer menu its own actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -4929,6 +5009,8 @@
     {"kind":"browser","file":"tests/add-account.spec.ts","name":"closing the hash-opened panel stays closed through a refresh and a focus","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/add-account.spec.ts","name":"no paired machine links to Connect your machine, including from the hash","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/add-account.spec.ts","name":"the Agents page links to Settings; Add an account lives there and opens the steps","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/add-account.spec.ts","name":"the accounts hash opens the steps once a machine is paired","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5406,6 +5488,8 @@
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a stored folded choice opens folded, without a flash of the cards","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a stored open choice opens open, without a flash of the folded line","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"account and capacity reads that started before computer Remove do not bring its account back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"accounts and computers fold into one calm line, remembered per person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -5520,9 +5604,27 @@
     ,
     {"kind":"browser","file":"tests/agents-handover.spec.ts","name":"move menu supports arrow keys and restores focus on Escape","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"a blocked harness is a Needs you row with its one fix, beside a ready one at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"a blocked harness is a Needs you row with its one fix, beside a ready one at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"a blocked harness is a Needs you row with its one fix, beside a ready one at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"a blocked harness is a Needs you row with its one fix, beside a ready one at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"a computer that needs an update says so at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"a computer that needs an update says so at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"a partial block names the account that needs attention at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"a partial block names the account that needs attention at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"computer compatibility advice at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"computer compatibility advice at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"every shared reason shows its fix beside a ready harness","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"every shared reason shows its fix beside a ready harness at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5571,6 +5673,30 @@
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"per-harness readiness and recovery at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"six blocked accounts of seven stay blocked when the list is truncated","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific cli_unavailable command is the row's fix at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific cli_unavailable command is the row's fix at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific cli_unavailable command is the row's fix at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific cli_unavailable command is the row's fix at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific login_required command is the row's fix at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific login_required command is the row's fix at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific login_required command is the row's fix at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific login_required command is the row's fix at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific pin_missing command is the row's fix at 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific pin_missing command is the row's fix at 1600 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific pin_missing command is the row's fix at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"the specific pin_missing command is the row's fix at 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-head.spec.ts","name":"\"…\" keeps five items; moved actions have their home on the page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5666,6 +5792,8 @@
     ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Keep for you: the popover is keyboard-complete, previews live and saves one choice","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Manage opens Settings / Accounts","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Needs you appears only when something waits, with the sign-in and its command","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"Sprint and Hold from the row menu, and back to the plan","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -5683,6 +5811,8 @@
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"a server routing wait is the row’s one state","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"night editor: day and night, three shifts with adjustable pace, custom blocks","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/agents-top.spec.ts","name":"nothing waits: no Needs you, a compact live line, and Accounts and computers as one status line","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"nothing waits: no Needs you, a compact live line, and one card per computer","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -8671,6 +8801,8 @@
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"rules short task grows below desktop actions and pins phone actions at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"saving a pacing option keeps keyboard focus for Escape","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"saving a pacing option keeps keyboard focus on it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"schedule model changes grow downward with actions in place at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -13751,6 +13883,26 @@
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > states unavailable reasons and hides secret-shaped labels","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > treats provisional windows as unknown and does not rank unmeasured zero as the greatest allowance","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > does not call a computer that stopped reporting broken, and does not ask for action while a repin settles","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > does not count a draining account or an account on Hold as ready","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > does not treat a missing sign-in report as ready","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > does not treat a revoked computer snapshot as ready","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > does not treat a revoked enrollment snapshot as ready","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > keeps a shared login as one account, ready when one door still is","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > lists a profile-permissions block in Needs you","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > names the first thing that blocks agents and counts the rest, so the line is the whole answer","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > rejects an estimated quota, a reading older than ten minutes, and a window that already reset","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > says all ready with the computers online when nothing blocks agents","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agent-appearance.unit.test.ts","name":"reports a failed state save and lets the same choice be retried","tier":"GATED-FULL"}
     ,
