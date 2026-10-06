@@ -398,7 +398,7 @@ func TestDecisionRejectsUnreviewedText(t *testing.T) {
 	if decisionOf(t, f, ticketID) != "" || decisionOf(t, f, noteID) != "" || entryBody(t, f, book.ID) != "Notes\n" {
 		t.Fatal("a decision on text the person did not review was written")
 	}
-	expect(t, call(t, f, f.a, "POST", "/api/knowledge/learnings/"+ticketID+"/accept", map[string]any{"knowledge_id": book.ID, "learning_text": strings.Repeat("x", maxReviewedRunes+1)}), 400)
+	expect(t, call(t, f, f.a, "POST", "/api/knowledge/learnings/"+ticketID+"/accept", map[string]any{"knowledge_id": book.ID, "learning_text": strings.Repeat("x", 2001)}), 400)
 
 	w := call(t, f, f.a, "POST", "/api/knowledge/learnings/"+ticketID+"/accept", map[string]any{"knowledge_id": book.ID, "lesson": "Rotate keys early", "learning_text": "Rotate the fleet keys"})
 	expect(t, w, 200)
