@@ -83,7 +83,7 @@ export interface AccessWorld {
   imported: { principal_id: string; name: string; classic_role: string | null; email?: string }[]
   bindings: { principal_id: string; project_id: string; role_id: string }[]
   invites: { id: string; email: string; workspace_role: string | null; project_roles: { project_id: string; role_id: string }[]; status: 'pending' | 'expired' | 'revoked' | 'accepted'; created_by: string; created_at: string; expires_at: string }[]
-  keys: { id: string; principal_id: string; name: string; prefix: string; scopes: string[]; created_at: string; expires_at: string | null; last_used_at: string | null; revoked_at: string | null }[]
+  keys: { created_by_principal_id?: string | null; id: string; principal_id: string; name: string; prefix: string; scopes: string[]; created_at: string; expires_at: string | null; last_used_at: string | null; revoked_at: string | null }[]
   events: { id: number; actor_principal_id: string; type: string; before: unknown; after: unknown; at: string }[]
   projects: Record<string, { key: string; title: string }>
   calls: { method: string; path: string; body: unknown }[]
@@ -482,6 +482,17 @@ export async function mockAccess(page: Page, world: AccessWorld, options: { also
       world.keys.unshift(key)
       event('agent_key.created', null, { id: key.id, principal_id: key.principal_id, name: key.name, prefix })
       return route.fulfill({ status: 201, json: { id: key.id, token: `aeon_${prefix}_T0k3nS3cr3tValue`, prefix, name: key.name, expires_at: key.expires_at } })
+    }
+    const adoptMatch = /^\/api\/agent-keys\/([^/]+)\/adopt$/.exec(path)
+    if (adoptMatch && method === 'POST') {
+      if (!need('keys.manage')) return fail(route, 403, 'forbidden', 'You need Manage agent keys.')
+      const key = world.keys.find(k => k.id === adoptMatch[1])
+      if (!key) return route.fulfill({ status: 404, json: { error: 'key not found' } })
+      if (key.created_by_principal_id !== null) return route.fulfill({ status: 409, json: { error: 'key already has a person owner' } })
+      const before = { ...key }
+      key.created_by_principal_id = world.me
+      event('agent_key.adopted', before, { ...key })
+      return route.fulfill({ json: key })
     }
     const scopeMatch = /^\/api\/agent-keys\/([^/]+)\/scopes$/.exec(path)
     if (scopeMatch) {
