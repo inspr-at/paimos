@@ -79,8 +79,9 @@ export function loadManifest(path = manifestPath) {
   return manifest
 }
 
-// Longest-processing-time scheduling. File names break weight ties, and the
-// lowest shard index breaks load ties; manifest order cannot change assignment.
+// Longest-processing-time scheduling, then bounded moves/swaps to reduce its
+// longest shard. File names break weight ties, and the lowest shard index
+// breaks load ties; manifest order cannot change assignment.
 // Groups with gate:false are declared (so drift is still caught) but only run with all:true.
 export const gatedGroups = (manifest, all = false) => manifest.groups.filter(group => all || group.gate !== false)
 
@@ -118,7 +119,44 @@ export function balanceShards(manifest, count, { all = false } = {}) {
     shard.specs.push(spec)
     shard.weightSeconds += spec.weightSeconds
   }
-  for (const shard of shards) shard.specs.sort((a, b) => compare(a.file, b.file))
+  // Indivisible files can leave LPT just over the gate budget even when there
+  // is room. Each move/swap lowers the affected pair's maximum; no other shard
+  // grows. Bound refinement independently of convergence and keep all weights,
+  // owning groups and launch policies intact.
+  for (let pass = 0; pass < Math.min(specs.length, 256); pass++) {
+    const high = shards.reduce((best, candidate) => candidate.weightSeconds > best.weightSeconds ? candidate : best)
+    let best, bestMaximum = high.weightSeconds
+    for (const low of shards) {
+      if (low === high) continue
+      for (let a = 0; a < high.specs.length; a++) {
+        // b=-1 moves a file; otherwise exchange it with a lighter file.
+        for (let b = -1; b < low.specs.length; b++) {
+          const delta = high.specs[a].weightSeconds - (b < 0 ? 0 : low.specs[b].weightSeconds)
+          if (delta <= 0) continue
+          const maximum = Math.max(high.weightSeconds - delta, low.weightSeconds + delta)
+          if (maximum < bestMaximum - 1e-9) {
+            bestMaximum = maximum
+            best = { low, a, b, delta }
+          }
+        }
+      }
+    }
+    if (!best) break
+    const { low, a, b, delta } = best, spec = high.specs[a]
+    if (b < 0) {
+      high.specs.splice(a, 1)
+      low.specs.push(spec)
+    } else {
+      high.specs[a] = low.specs[b]
+      low.specs[b] = spec
+    }
+    high.weightSeconds -= delta
+    low.weightSeconds += delta
+  }
+  for (const shard of shards) {
+    shard.specs.sort((a, b) => compare(a.file, b.file))
+    shard.weightSeconds = shard.specs.reduce((total, spec) => total + spec.weightSeconds, 0)
+  }
   return shards
 }
 

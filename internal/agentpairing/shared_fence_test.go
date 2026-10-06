@@ -23,7 +23,7 @@ func TestSharedFenceCallerInventory(t *testing.T) {
 		"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
 		"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
 		"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go"},
-		"agentpairing.LockMutation": {"agentaccounts/module.go", "agentpairing/module.go", "agentruns/queue.go", "auth/owner_workstation.go", "modelprovider/settings.go", "parentbenefits/module.go", "portal/market.go", "portal/moderate.go", "portal/module.go", "portal/products.go"},
+		"agentpairing.LockMutation": {"agentaccounts/module.go", "agentpairing/module.go", "agentruns/queue.go", "auth/owner_workstation.go", "harness/agent_recovery.go", "harness/module.go", "modelprovider/settings.go", "parentbenefits/module.go", "portal/market.go", "portal/moderate.go", "portal/module.go", "portal/products.go"},
 		"authz.LockProjectMutation": {"authz/agent_creation.go", "authz/members.go", "authz/project_members.go", "importer/users_backfill.go", "importer/writer.go"},
 		"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "events/causal_undo.go", "events/module.go", "harness/lead_decisions.go", "nodes/causal_undo.go", "nodes/portal_publish.go", "themes/store.go", "themes/undo.go"},
 		"operatoractor.Ensure":      {"auth/store.go", "authz/operator.go", "journey/operator.go", "operatoractor/actor.go"},
@@ -97,6 +97,13 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"../rules/module.go", "endpoint", "lockAccess(", "pg_advisory_xact_lock"},
 		{"../rules/learning_draft.go", "PrepareWrite", "lockAccess(", "pg_advisory_xact_lock"},
 		{"../recurrences/module.go", "lock", "FOR NO KEY UPDATE", "pg_try_advisory_xact_lock"},
+		// Attached heartbeats and recovery enter tenant/tree/pairing before
+		// policy/session/recovery rows; control events are flushed afterward.
+		{"../harness/module.go", "heartbeat", "agentpairing.LockMutation(", "lockActivityPolicy("},
+		{"../harness/agent_recovery.go", "requestAgentRecovery", "agentpairing.LockMutation(", "recoveryPerson("},
+		{"../harness/agent_recovery.go", "readAgentRecovery", "agentpairing.LockMutation(", "authz.RequireTx("},
+		{"../harness/agent_recovery.go", "claimAgentRecoveries", "agentpairing.LockMutation(", "recoveryDaemon("},
+		{"../harness/agent_recovery.go", "completeAgentRecovery", "agentpairing.LockMutation(", "recoveryDaemon("},
 	}
 	for _, c := range checks {
 		raw, err := os.ReadFile(c.path)
