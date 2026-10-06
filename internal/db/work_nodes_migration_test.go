@@ -2,6 +2,7 @@
 package db_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	_ "embed"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -155,8 +157,8 @@ func TestWorkNodesMigrationPreservesRowsHistoryAndIdentities(t *testing.T) {
 	if !reflect.DeepEqual(history, workSnapshot(t, d, tid, historySQL)) {
 		t.Fatal("historical event payloads changed")
 	}
-	if !reflect.DeepEqual(sessions, workSnapshot(t, d, tid, fmt.Sprintf(sessionSQL, `to_jsonb(s)`))) {
-		t.Fatal("historical session changed")
+	if got := workSnapshot(t, d, tid, fmt.Sprintf(sessionSQL, `to_jsonb(s)`)); !reflect.DeepEqual(sessions, got) {
+		t.Fatalf("historical session changed: %s", boundedJSONDiff(sessions, got))
 	}
 	if !reflect.DeepEqual(deskProjections, workSnapshot(t, d, tid, deskProjectionSQL)) {
 		t.Fatal("Decision Desk question/asker identity or work/session reference changed")
@@ -500,18 +502,71 @@ func TestWorkNodesMigrationExactNumbers(t *testing.T) {
 // CI supplies its service container explicitly. Other runners use native
 // PostgreSQL clients against the fixture's actual connection, without putting
 // connection credentials in process arguments or test output.
+// libpq getenv keeps the first value, so inherited PG* entries are removed
+// before the fixture binding is added.
 func workBackupCommand(ctx context.Context, d *dbtest.DB, tool string, args ...string) *exec.Cmd {
 	conn := d.Admin.Config().ConnConfig
+	env := commandEnvReplacing(os.Environ(), map[string]string{
+		"PGHOST": conn.Host, "PGPORT": strconv.Itoa(int(conn.Port)),
+		"PGUSER": conn.User, "PGPASSWORD": conn.Password, "PGDATABASE": d.Name,
+		"PGCONNECT_TIMEOUT": "10", "PGSSLMODE": "disable",
+	})
 	if container := os.Getenv("AEON_TEST_POSTGRES_CONTAINER"); container != "" {
-		return exec.CommandContext(ctx, "docker", append([]string{"exec", "-i", container, tool, "-U", conn.User, "-d", d.Name}, args...)...)
+		// -e NAME (no value) copies the client environment. The password stays
+		// out of argv; local socket trust ignores it, password auth can use it.
+		cmd := exec.CommandContext(ctx, "docker", append([]string{"exec", "-i", "-e", "PGPASSWORD", container, tool, "-U", conn.User, "-d", d.Name}, args...)...)
+		cmd.Env = env
+		return cmd
 	}
 	// pg_restore needs an explicit database option to restore rather than emit SQL.
 	cmd := exec.CommandContext(ctx, tool, append([]string{"-d", d.Name}, args...)...)
-	cmd.Env = append(os.Environ(),
-		"PGHOST="+conn.Host, "PGPORT="+strconv.Itoa(int(conn.Port)),
-		"PGUSER="+conn.User, "PGPASSWORD="+conn.Password, "PGDATABASE="+d.Name,
-		"PGCONNECT_TIMEOUT=10", "PGSSLMODE=disable")
+	cmd.Env = env
 	return cmd
+}
+
+func commandEnvReplacing(base []string, overrides map[string]string) []string {
+	filtered := make([]string, 0, len(base)+len(overrides))
+	for _, entry := range base {
+		name, _, _ := strings.Cut(entry, "=")
+		if _, replace := overrides[name]; replace {
+			continue
+		}
+		filtered = append(filtered, entry)
+	}
+	keys := make([]string, 0, len(overrides))
+	for key := range overrides {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		filtered = append(filtered, key+"="+overrides[key])
+	}
+	return filtered
+}
+
+func firstEnv(env []string) map[string]string {
+	out := map[string]string{}
+	for _, entry := range env {
+		name, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		if _, exists := out[name]; !exists {
+			out[name] = value
+		}
+	}
+	return out
+}
+
+func commandFailure(err error, stderr *bytes.Buffer) string {
+	msg := strings.TrimSpace(stderr.String())
+	if len(msg) > 400 {
+		msg = msg[:400]
+	}
+	if msg == "" {
+		return err.Error()
+	}
+	return err.Error() + ": " + msg
 }
 
 func TestWorkNodesBackupUsesFixtureConnection(t *testing.T) {
@@ -528,26 +583,32 @@ func TestWorkNodesBackupUsesFixtureConnection(t *testing.T) {
 			t.Setenv("PGPORT", "1")
 			t.Setenv("PGDATABASE", "unrelated-database")
 			t.Setenv("PGUSER", "unrelated-user")
+			t.Setenv("PGPASSWORD", "inherited")
 			for _, tool := range []string{"pg_dump", "pg_restore"} {
 				cmd := workBackupCommand(t.Context(), d, tool, "--no-owner")
+				joined := strings.Join(cmd.Args, "\x00")
+				if strings.Contains(joined, "unrelated-host") || strings.Contains(joined, "inherited") || strings.Contains(joined, "unrelated-database") {
+					t.Fatalf("%s put an inherited connection value in its arguments", tool)
+				}
 				if container != "" {
-					want := []string{"docker", "exec", "-i", container, tool, "-U", "fixture_user", "-d", "fixture", "--no-owner"}
+					want := []string{"docker", "exec", "-i", "-e", "PGPASSWORD", container, tool, "-U", "fixture_user", "-d", "fixture", "--no-owner"}
 					if !reflect.DeepEqual(cmd.Args, want) {
 						t.Fatalf("%s did not target the configured CI service and fixture", tool)
 					}
-					continue
-				}
-				if !reflect.DeepEqual(cmd.Args, []string{tool, "-d", "fixture", "--no-owner"}) {
+				} else if !reflect.DeepEqual(cmd.Args, []string{tool, "-d", "fixture", "--no-owner"}) {
 					t.Fatalf("%s must use native clients with an explicit database and no credential arguments", tool)
 				}
-				vars := map[string]string{}
+				// First value wins for libpq. A later correct entry must not hide an inherited one.
+				vars := firstEnv(cmd.Env)
+				for name, want := range map[string]string{"PGHOST": "127.0.0.2", "PGPORT": "55433", "PGDATABASE": "fixture", "PGUSER": "fixture_user", "PGPASSWORD": "", "PGCONNECT_TIMEOUT": "10", "PGSSLMODE": "disable"} {
+					if vars[name] != want {
+						t.Fatalf("%s did not bind %s to the fixture ahead of inherited values", tool, name)
+					}
+				}
 				for _, entry := range cmd.Env {
 					name, value, _ := strings.Cut(entry, "=")
-					vars[name] = value
-				}
-				for name, want := range map[string]string{"PGHOST": "127.0.0.2", "PGPORT": "55433", "PGDATABASE": "fixture", "PGUSER": "fixture_user", "PGCONNECT_TIMEOUT": "10", "PGSSLMODE": "disable"} {
-					if vars[name] != want {
-						t.Fatalf("%s did not bind %s to the fixture", tool, name)
+					if (name == "PGHOST" && value == "unrelated-host") || (name == "PGPASSWORD" && value == "inherited") || (name == "PGDATABASE" && value == "unrelated-database") || (name == "PGUSER" && value == "unrelated-user") || (name == "PGPORT" && value == "1") {
+						t.Fatalf("%s kept an inherited %s entry", tool, name)
 					}
 				}
 			}
@@ -612,9 +673,11 @@ func TestWorkNodesVerifiedBackupRestoreDrill(t *testing.T) {
 	defer cancel()
 	dump := workBackupCommand(ctx, d, "pg_dump", "--format=custom", "--no-owner", "--no-acl", "--exclude-extension=vector")
 	dump.Stdout = archive
+	var dumpErr bytes.Buffer
+	dump.Stderr = &dumpErr
 	if err := dump.Run(); err != nil {
 		_ = archive.Close()
-		t.Fatalf("local pg_dump: %v", err)
+		t.Fatalf("local pg_dump: %s", commandFailure(err, &dumpErr))
 	}
 	if err := archive.Close(); err != nil {
 		t.Fatal(err)
@@ -649,8 +712,10 @@ func TestWorkNodesVerifiedBackupRestoreDrill(t *testing.T) {
 	defer input.Close()
 	restore := workBackupCommand(ctx, restored, "pg_restore", "--no-owner", "--no-acl", "--exit-on-error", "--role="+restored.Role)
 	restore.Stdin = input
+	var restoreErr bytes.Buffer
+	restore.Stderr = &restoreErr
 	if err := restore.Run(); err != nil {
-		t.Fatalf("local pg_restore: %v", err)
+		t.Fatalf("local pg_restore: %s", commandFailure(err, &restoreErr))
 	}
 	after := digest(restored)
 	for table, expected := range before {
@@ -767,7 +832,7 @@ func TestWorkNodesUpgradeFromRelease122(t *testing.T) {
 		t.Fatal(err)
 	}
 	if after := workSnapshot(t, d, tid, fmt.Sprintf(preserved, `to_jsonb(s)`)); !reflect.DeepEqual(before, after) {
-		t.Fatalf("release 122 upgrade changed nodes, sessions or Decision Desk identities: %s", snapshotDifferences(before, after))
+		t.Fatalf("release 122 upgrade changed nodes, sessions or Decision Desk identities: %s", boundedJSONDiff(before, after))
 	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), d.App, tid, func(tx pgx.Tx) error {
 		var legacy, work, migrated int
@@ -787,30 +852,63 @@ func TestWorkNodesUpgradeFromRelease122(t *testing.T) {
 	t.Logf("release 122 (%s): %d exact SQL files, upgrade and reapply under FORCE RLS", release.Commit, len(applied))
 }
 
-// Keep upgrade failures readable without dumping entire row snapshots.
-func snapshotDifferences(before, after []byte) []string {
-	var a, b map[string][]map[string]any
+// boundedJSONDiff names changed fields without dumping whole snapshots.
+// Equal decoded values with different encoding are reported as such, and
+// still fail the caller's byte comparison.
+func boundedJSONDiff(before, after []byte) string {
+	var a, b any
 	if json.Unmarshal(before, &a) != nil || json.Unmarshal(after, &b) != nil {
-		return []string{"invalid snapshot"}
+		return "invalid snapshot"
 	}
-	var changed []string
-	for table, rows := range a {
-		if len(rows) != len(b[table]) {
-			changed = append(changed, table+": row count")
-			continue
-		}
-		for i, row := range rows {
-			for field, value := range row {
-				if !reflect.DeepEqual(value, b[table][i][field]) {
-					changed = append(changed, fmt.Sprintf("%s[%v].%s: %v -> %v", table, row["key"], field, value, b[table][i][field]))
-				}
-			}
-			for field := range b[table][i] {
-				if _, ok := row[field]; !ok {
-					changed = append(changed, table+": added column "+field)
-				}
-			}
-		}
+	diffs := jsonValueDiff("$", a, b)
+	if len(diffs) == 0 {
+		return "encoding differed without a value change"
 	}
-	return changed
+	if len(diffs) > 8 {
+		diffs = append(diffs[:8], fmt.Sprintf("and %d more", len(diffs)-8))
+	}
+	return strings.Join(diffs, "; ")
+}
+
+func jsonValueDiff(path string, before, after any) []string {
+	switch left := before.(type) {
+	case map[string]any:
+		right, ok := after.(map[string]any)
+		if !ok {
+			return []string{path + ": type"}
+		}
+		var diffs []string
+		for key, value := range left {
+			if _, exists := right[key]; !exists {
+				diffs = append(diffs, path+"."+key+": removed")
+				continue
+			}
+			diffs = append(diffs, jsonValueDiff(path+"."+key, value, right[key])...)
+		}
+		for key := range right {
+			if _, exists := left[key]; !exists {
+				diffs = append(diffs, path+"."+key+": added")
+			}
+		}
+		sort.Strings(diffs)
+		return diffs
+	case []any:
+		right, ok := after.([]any)
+		if !ok {
+			return []string{path + ": type"}
+		}
+		if len(left) != len(right) {
+			return []string{fmt.Sprintf("%s: row count %d -> %d", path, len(left), len(right))}
+		}
+		var diffs []string
+		for i := range left {
+			diffs = append(diffs, jsonValueDiff(fmt.Sprintf("%s[%d]", path, i), left[i], right[i])...)
+		}
+		return diffs
+	default:
+		if !reflect.DeepEqual(before, after) {
+			return []string{path + ": value"}
+		}
+		return nil
+	}
 }
