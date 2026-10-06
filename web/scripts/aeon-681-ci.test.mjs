@@ -4,13 +4,31 @@ import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { run, browserList, plan, main } from '../../scripts/test-tiers/cli.mjs'
+import { registerHooks } from 'node:module'
+import { run, browserList } from '../../scripts/test-tiers/cli.mjs'
 import { command, root, web, evidence, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { validate, key, select } from '../../scripts/test-tiers/core.mjs'
 
-test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async()=>{
+test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async t=>{
+  // Exercise every unchanged planner/CLI path against the same native snapshot.
+  // Recollecting the entire catalogue for each mode made this one regression
+  // exceed the static gate's guard before it could finish its assertions.
+  const collector=pathToFileURL(resolve(root,'scripts/test-tiers/collect.mjs')).href
+  const entry=pathToFileURL(resolve(root,'scripts/test-tiers/cli.mjs')).href+'?aeon691-native-planning'
+  const wrapper=`export * from ${JSON.stringify(collector)};
+import { collectWeb as nativeCollectWeb } from ${JSON.stringify(collector)};
+let inventory;
+export let collections = 0;
+export const collectWeb = () => { if (!inventory) { collections++; inventory = nativeCollectWeb(); } return inventory; };`
+  const snapshot='data:text/javascript,'+encodeURIComponent(wrapper)
+  const hook=registerHooks({resolve(specifier,context,next){
+    if(context.parentURL===entry&&specifier==='./collect.mjs') return {url:snapshot,shortCircuit:true}
+    return next(specifier,context)
+  }})
+  t.after(()=>hook.deregister())
+  const {plan,main}=await import(entry)
   const policy=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8'))
   const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
   const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
@@ -46,6 +64,7 @@ test('native full CI planning retains the OPS-257 gate and essential promotions 
   assert.deepEqual(nightly.tests.map(key).sort(),browser.map(key).sort())
   assert.equal(nightly.scope,'catalogue')
   assert.equal(nightly.deferredBrowserCases,0)
+  assert.equal((await import(snapshot)).collections,1,'all planner modes must use one real native inventory')
 })
 
 test('native Node and Vitest selectors execute the requested registrations, rather than skip them', async () => {
@@ -92,6 +111,9 @@ test('native browser selectors cover reconciled essentials and every collected f
   const declared=new Map(manifest.tests.filter(row=>row.kind==='browser').map(row=>[key(row),row]))
   for(const row of reconciled) assert.equal(row.tier,declared.get(key(row))?.tier??'NIGHTLY',key(row))
   const groups=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8')).groups
+  // Full and catalogue modes often produce identical inputs. Collect each
+  // distinct native selector once, while retaining every per-mode assertion.
+  const nativeSelections=new Map()
   for(const mode of ['essential','full','all']) {
     let total=0
     for(const group of groups) {
@@ -99,10 +121,16 @@ test('native browser selectors cover reconciled essentials and every collected f
       const rows=all.filter(row=>group.specs.some(spec=>spec.file===row.file)&&included(row))
       if(!rows.length) continue
       const list=resolve(evidence,`regression-${mode}-${group.id}.txt`)
-      writeFileSync(list,browserList(rows,all).join('\n')+'\n')
+      const selectors=browserList(rows,all).join('\n')+'\n'
+      writeFileSync(list,selectors)
       const env={...process.env,...Object.fromEntries(Object.entries(group.env).map(([k,v])=>[k,v.replaceAll('${RUNNER_TEMP}',evidence)]))}
-      const listed=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','--config',group.config,...group.flags,
-        ...(group.project?['--project',group.project]:[]),'--workers=1','--retries=0','--test-list',list,'--list','--reporter=json'],{cwd:web,env})),group.config)
+      const identity=JSON.stringify([group.config,group.flags,group.project,group.env,selectors])
+      let listed=nativeSelections.get(identity)
+      if(!listed) {
+        listed=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','--config',group.config,...group.flags,
+          ...(group.project?['--project',group.project]:[]),'--workers=1','--retries=0','--test-list',list,'--list','--reporter=json'],{cwd:web,env})),group.config)
+        nativeSelections.set(identity,listed)
+      }
       assert.deepEqual(listed.map(row=>`${row.id}:${row.project}`).sort(),rows.map(row=>`${row.id}:${row.project}`).sort(),group.id)
       total+=listed.length
     }
