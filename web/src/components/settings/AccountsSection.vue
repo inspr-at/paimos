@@ -103,8 +103,11 @@ async function actAttention(id: string) {
 }
 async function refresh() { await agents.refreshAccounts(); await capacity.load(); const result = await capacity.refreshComputers(); if (!result.ok && capacity.computersLoaded) toast('Computer status could not refresh. The previous report stays visible.', { tone: 'error' }) }
 const poller = usePoller(refresh, 20_000)
-onMounted(() => { poller.start(true) })
-onBeforeUnmount(() => { generation++; poller.stop() })
+// Returning to the window reads again at once (an account added in a terminal
+// shows up); the poller coalesces it with a read already in flight.
+function onFocus() { poller.tick(true) }
+onMounted(() => { poller.start(true); window.addEventListener('focus', onFocus) })
+onBeforeUnmount(() => { generation++; poller.stop(); window.removeEventListener('focus', onFocus) })
 watch(() => route.hash, hash => { if (hash === '#add-account' && manage.value) { add.value = true; void router.replace({ path: route.path, query: route.query, hash: '' }) } }, { immediate: true })
 watch(() => route.query.verify_account, id => {
   if (typeof id !== 'string') return
