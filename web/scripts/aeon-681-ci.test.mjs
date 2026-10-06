@@ -16,6 +16,22 @@ import { validate, key, select } from '../../scripts/test-tiers/core.mjs'
 let collected
 const inventory=()=>collected??=collectWeb()
 
+test('settings routing and agent login registrations remain in the full merge gate (AEON-660)',()=>{
+  const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))
+  for(const [file,tier] of [
+    ['tests/settings-routing.unit.test.ts','GATED-FULL'],
+    ['tests/agent-login.test.ts','ESSENTIAL'],
+  ]) {
+    const native=inventory().tests.filter(row=>row.file===file)
+    assert.ok(native.length>0,file)
+    const rows=validate({version:1,tests:manifest.tests.filter(row=>row.file===file)},native,undefined,{strict:true})
+    for(const row of rows) assert.equal(row.tier,tier,key(row))
+    const selected=select(rows,{event:'merge_group',paths:[]})
+    assert.equal(selected.full,true)
+    assert.deepEqual(selected.tests.map(key).sort(),native.map(key).sort(),file)
+  }
+})
+
 test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async()=>{
   // Every planner call sees the same unchanged tree. Collect it natively once,
   // then reuse that snapshot while exercising the unchanged planner and CLI.

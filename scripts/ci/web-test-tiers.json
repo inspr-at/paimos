@@ -12120,6 +12120,8 @@
     ,
     {"kind":"node","file":"tests/agent-activity.test.ts","name":"summary policy preserves the existing heartbeat note for older reporters","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/agent-login.test.ts","name":"CLI login names the instance after the workspace and never passes --instance (AEON-730)","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/agent-login.test.ts","name":"CLI login uses the current origin, excluding credentials, paths and query strings","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/agent-login.test.ts","name":"project-only agent ceiling excludes workspace-only permissions and fails closed for missing roles","tier":"ESSENTIAL"}
@@ -15472,7 +15474,75 @@
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"filters before limiting and keeps two sessions of one principal separate","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"Back returns to the previous section after following a legacy bookmark","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"a hash-only change on Workspace redirects and keeps its query","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"a trailing slash on a legacy Workspace bookmark still redirects","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"current cards and unknown bookmarks keep their section","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #agent-activity entry keeps the query and opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #autopilot-changes entry keeps the query and opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #autopilot-projects entry keeps the query and opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #autopilot-proposals entry keeps the query and opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #autopilot-recent entry keeps the query and opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #autopilot-suggestions entry keeps the query and opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #estimates entry keeps the query and opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #members entry keeps the query and opens access","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #model-refresh entry keeps the query and opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #models entry keeps the query and opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #quota-warnings entry keeps the query and opens accounts","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #silent-sessions entry keeps the query and opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #status-autopilot entry keeps the query and opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #ticket-types entry keeps the query and opens vocabulary","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #work-vocabulary entry keeps the query and opens vocabulary","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired briefing bookmarks open Agents and keep request links","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #agent-activity opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #autopilot-changes opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #autopilot-projects opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #autopilot-proposals opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #autopilot-recent opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #autopilot-suggestions opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #estimates opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #members opens access","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #model-refresh opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #models opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #quota-warnings opens accounts","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #silent-sessions opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #status-autopilot opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #ticket-types opens vocabulary","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #work-vocabulary opens vocabulary","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > queries canonical leaves on every page and excludes parents and unknown shapes from mixed results","tier":"ESSENTIAL"}
     ,
