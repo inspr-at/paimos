@@ -149,14 +149,17 @@ export async function listReleases(project: string): Promise<WorkNode[]> {
 // walker's feature line, the build's progress and ticket details).
 export async function listWork(project: string): Promise<ListItem[]> {
   const items: ListItem[] = []
+  const seen = new Set<string>()
   let cursor: string | undefined
   for (let page = 0; page < 12; page++) {
     const result = await listNodes({ within: project, kind: ['work', 'epic', 'ticket', 'task'], limit: 500, sort: 'key', cursor })
     items.push(...result.items)
     cursor = result.next_cursor ?? undefined
-    if (!cursor) break
+    if (!cursor) return items
+    if (seen.has(cursor)) throw new Error('The work list did not advance. Counts and progress are unavailable. Try again.')
+    seen.add(cursor)
   }
-  return items
+  throw new Error('The project has more work than Journey can load (6,000 rows). Counts and progress are unavailable.')
 }
 
 // Stage plugins (Pharos deploys, Janus grants access) and the gates of their steps.

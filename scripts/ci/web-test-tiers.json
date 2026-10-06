@@ -8088,6 +8088,8 @@
     ,
     {"kind":"browser","file":"tests/journey.spec.ts","name":"Inspire shows the sources, the transcript and cited drafts; accepting the brief moves the next action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"Journey hides partial work totals on pagination failure and retries the complete list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/journey.spec.ts","name":"Journey is a third view of the project, with the stage and next action in the footer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/journey.spec.ts","name":"Plan adds a ticket to the release, under a feature","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -8271,6 +8273,20 @@
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption refusal reports failure and owned keys have no takeover action","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"cancel or untick a role extension writes nothing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -12916,11 +12932,21 @@
     ,
     {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey grouping bounds cycles and retains legacy epic projection","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey groups retain leaves through all 1000 supported ancestors","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey parent groups count nested leaves once and exclude non-work children","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey parent totals include every leaf beyond 64 ancestors","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/journey-work.test.ts","name":"journey legacy ticket counts retain subdivisions until the canonical migration","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work accepts a complete twelfth page and retains every row in order","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work finishes empty lists and propagates later page failures","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work rejects a continuing twelfth page instead of returning partial totals","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work rejects repeated and cycling continuation cursors before another request","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/journey.test.ts","name":"confirmation binds journey, requirements, release, action and request identities by value","tier":"GATED-FULL"}
     ,
@@ -14254,7 +14280,11 @@
     ,
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > retains membership and screen shortcuts outside the description and Escape inside it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"adoption confirmation is bound to the acting person and key","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"keeps an explicit custom-role recurrence grant and names the creator ceiling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"late adoption results cannot restore another person or a departed key","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"names the built-in Admin agent role as the recurrence ceiling","tier":"ESSENTIAL"}
     ,

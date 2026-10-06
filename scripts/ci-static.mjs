@@ -147,15 +147,25 @@ const isolatedGit = ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=fal
 // Darwin config arm64-apple-darwin, x86_64_apple_darwin on Intel Macs).
 export const nixHostRoleMarker = /^NIX_(?:CC|BINTOOLS)_WRAPPER_TARGET_HOST_[A-Za-z0-9_]+$/
 
+// Build and target role flags are the literal "1". Host markers keep their
+// source value: the salt is targetPlatform.config, not only a lowercase flag.
+const nixBuildTargetRoleMarker = /^NIX_(?:CC|BINTOOLS)_WRAPPER_TARGET_(?:BUILD|TARGET)_[A-Za-z0-9_]+$/
+
 export function fixedEnvironment(source = process.env, scratch) {
   const env = {}
-  // Nix's Darwin wrappers use host-role markers to apply SDK search paths.
-  // Keep those markers and the selected SDK when Go links cgo tests.
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN',
-    'NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'DEVELOPER_DIR']) {
+  // Nix's wrappers consume the SDK and search paths only for their declared
+  // roles. Keep host-role markers, build/target role flags, and the selected
+  // SDK (including cross-build variants) when Go links cgo tests. Do not carry
+  // wrapper state, debug flags, or the caller's test options.
+  const toolchain = ['NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'DEVELOPER_DIR', 'SDKROOT']
+    .flatMap(key => ['', '_FOR_BUILD', '_FOR_TARGET'].map(suffix => key + suffix))
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN', ...toolchain]) {
     if (source[key] !== undefined) env[key] = source[key]
   }
-  for (const key of Object.keys(source)) if (nixHostRoleMarker.test(key)) env[key] = source[key]
+  for (const key of Object.keys(source)) {
+    if (nixHostRoleMarker.test(key)) env[key] = source[key]
+    else if (nixBuildTargetRoleMarker.test(key) && source[key] === '1') env[key] = '1'
+  }
   Object.assign(env, { CI: 'true', CI_LANE: 'full', AEON_TEST_TIER_MODE: 'full', GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', npm_config_audit: 'false', npm_config_fund: 'false' })
   if (scratch) Object.assign(env, { npm_config_cache: join(scratch, 'npm'), XDG_CACHE_HOME: scratch,
