@@ -15,6 +15,18 @@ import requireSupervisor from './playwright-global-setup.mjs'
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 const block = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+// A persistent root probe miss that lands only once the root has exited (gone
+// or a zombie awaiting reap). The supervisor's next attempt then observes the
+// exit regardless of how long node startup took; the bound is a hang guard.
+function missAfterRootExit(spawn, pid) {
+  const until = Date.now() + 15000
+  while (Date.now() < until) {
+    const probe = spawn('ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
+    if (probe.status !== 0 || probe.stdout.trim().startsWith('Z')) break
+    block(5)
+  }
+  return { status: 1, stdout: '' }
+}
 async function waitReady(path, exited) {
   const deadline = Date.now() + 15000
   while (!existsSync(path)) {
@@ -311,7 +323,7 @@ test('supervisor leaves an already-exited root exit code alone after repeated ps
   const original = childProcess.spawnSync
   let calls = 0
   const injected = t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
-    if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) { calls++; return { status: 1, stdout: '' } }
+    if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) { calls++; return missAfterRootExit(original, Number(args[1])) }
     return original(command, args, options)
   })
   syncBuiltinESMExports()
