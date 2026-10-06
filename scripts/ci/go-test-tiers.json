@@ -4664,6 +4664,8 @@
     ,
     {"kind":"go","package":"internal/events","name":"TestAccountEventHistoryAndSSEUseCurrentOwnerSharing","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/events","name":"TestActivityCursorBindsFiltersAndBoundsInput","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/events","name":"TestCounterWaitsForCommitAndNotificationContainsOnlyHint","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestEventListRejectsRetiredWindowParameters","tier":"GATED-FULL"}
@@ -7561,6 +7563,8 @@
     {"kind":"go","package":"internal/statusautopilot","name":"TestUpgradePublicationWaitsAndResumesAfterConfirmation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestUpgradeSuggestsWithoutTicketMutationsUntilOwnerConfirms","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestWorkspaceActivityPagingAndCurrentUndoAuthority","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/tenant","name":"TestPrincipalContextPreservesLegacyLabels","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
