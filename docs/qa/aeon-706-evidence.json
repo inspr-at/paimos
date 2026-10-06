@@ -335,5 +335,70 @@
       "Focused local checks only. Browser execution/full suites remain coordinator gates; no layout or browser geometry claims.",
       "No pushes, deployments, production access, model reviews, ticket-status changes, hook bypasses or amendments."
     ]
+  },
+  "fix_round_7": {
+    "baseline": "44a681f435a5ffedcbae0b7874f82615a7ef8a4e",
+    "review": "brief typo review-review-static292.out.out resolved to qa/review-static292.out",
+    "main": "def5b385e",
+    "merge": "eb3cc7c4d: merged newest fetched origin/main cleanly on assigned branch; main already includes PR #292. No release merge, push or deployment.",
+    "findings_fixed": [
+      "The supplied static report ends with eight missing-classification warnings; native collection found 34 missing Settings routing cases plus one missing workspace-named login case in those same files.",
+      "Added 34 GATED-FULL routing entries, matching the existing routing tier, and one ESSENTIAL login entry, matching the existing login tier. All existing manifest rows and classifications are preserved.",
+      "Added two strict native-registration regressions to the existing shard-test file. They expand parameterized routing registrations and reject missing/stale manifest rows or omission from full PR/merge-group selection."
+    ],
+    "regression_evidence": {
+      "before": "Both new tests fail with Tier manifest drift against the exact 44a681f4 web-test-tiers.json, identifying 34 routing cases and one login case. The native collectors, validator and collected test source files are unchanged from 44a681f4. The manifest was restored in finally; no assertions were weakened.",
+      "after": "27 shard tests pass, including both regressions; all 35 routing and three login registrations are classified and selected by full PR and merge-group gates."
+    },
+    "interruption_investigation": {
+      "reported": "The static report cancels aeon-681-ci.test.mjs and ci-web-shard.test.mjs near 120 seconds with kill EPERM; it reports 31 static checks passed, not a complete green gate.",
+      "observed": "Unmodified shard file: 25 passed in 0.84 seconds. Native planner file: seven passed in 62.98 seconds with zero cancellation or failure. The reported interruption did not reproduce in standalone focused runs. No timeout, assertion or failure-handling policy was loosened.",
+      "remaining": "The full locked remote static gate is unverified; standalone passes are not evidence that the combined static run is green."
+    },
+    "validation": [
+      {
+        "command": "node --test web/scripts/ci-web-shard.test.mjs",
+        "result": "27 passed."
+      },
+      {
+        "command": "node --test web/scripts/aeon-681-ci.test.mjs",
+        "result": "7 passed; run before adding the classifications."
+      },
+      {
+        "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+        "result": "170 passed."
+      },
+      {
+        "command": "Targeted Vitest runs, one file and one worker at a time, retry=0",
+        "result": "settings-routing: 35 passed; plan-owner: 28 passed; existing-ticket-picker: 19 passed."
+      },
+      {
+        "command": "node --test web/tests/agent-login.test.ts",
+        "result": "3 passed."
+      },
+      {
+        "command": "python3 -B -m unittest discover -s scripts/audit",
+        "result": "33 passed; no new source files or source-ownership changes."
+      },
+      {
+        "command": "GOTOOLCHAIN=local GOMAXPROCS=2 go test -p 2 ./internal/reportercontract/ -count=1",
+        "result": "Passed; single small local package checks the OpenAPI changes imported from main."
+      },
+      {
+        "command": "node scripts/test-tiers/cli.mjs manifests --check; node web/scripts/ci-web-shard.mjs --check --strict",
+        "result": "Passed: canonical manifests and 81 gated/166 ungated browser specs accounted for."
+      },
+      {
+        "command": "git diff --check; compare plan sources, unit tests and browser specs with 44a681f4",
+        "result": "Passed; plan product behavior and all existing plan regression assertions are unchanged."
+      }
+    ],
+    "ownership": "Verified ppm tenant INSPR, workstation-agents principal, gh markus-barta and the coordinator builder marker on AEON-706 before edits. Ticket status and release approval remain coordinator-owned.",
+    "limits": [
+      "Direct user instruction forbids pushes and deployments. remote-test.sh and the locked static helper push temporary remote refs, so neither was invoked. Full local static/Go fallback is also forbidden by worker-common. No full ci-static --merge-main, remote Go, full web suite or Linux Chromium result is claimed.",
+      "No new product, UI, layout, API, migration or version change beyond the authorized upstream main merge. No conflict with approved design decisions. Browser execution was not repeated for this classification-only fix.",
+      "Native planning still reports unrelated pre-existing unclassified registrations in agents-working.unit.test.ts and settings-owner.unit.test.ts. They are outside the supplied report findings and remain unchanged.",
+      "No pushes, deploys, production writes, model review gates, ticket-status changes, secret reads, hook bypasses or amendments."
+    ]
   }
 }
