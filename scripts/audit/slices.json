@@ -69,7 +69,8 @@
         "embed.go",
         "internal/phoneapprovals/**",
         "internal/features/**",
-        "internal/hookcap/**"
+        "internal/hookcap/**",
+        "internal/hostcapacity/**"
       ]
     },
     {

@@ -436,9 +436,16 @@ func (m *Module) completeAgentRecovery(r *http.Request, tx pgx.Tx, p tenant.Prin
 	if s.ArchivedAt != nil || s.HandedOverToID != nil || s.ProcessOwnership == nil || *s.ProcessOwnership != q.Ownership || subtle.ConstantTimeCompare(q.contextDigest, recoveryContextDigest(s)) != 1 {
 		return nil, workorders.Fail(409, "session process binding changed")
 	}
+	// Bound the recorded handover before admission. A later failure would roll
+	// back a Decision Desk transition that recovery must commit.
+	handover, _ := json.Marshal(recoveryHandover(s))
+	if len(handover) > 16000 {
+		return nil, workorders.Fail(409, "recorded handover exceeds recovery bound")
+	}
 	outcome := "rejected"
 	var next *string
 	var event func() error
+	var rejection *workorders.Error
 	if in.Outcome == "reconnected" {
 		if q.Action != "reconnect" || q.revision != recoveryRevision(s) || s.HeartbeatAt == nil || now.Sub(*s.HeartbeatAt) > ownershipWindow || s.InboxSeenAt == nil || now.Sub(*s.InboxSeenAt) > ownershipWindow {
 			return nil, workorders.Fail(409, "fresh heartbeat and inbox evidence required")
@@ -458,17 +465,17 @@ func (m *Module) completeAgentRecovery(r *http.Request, tx pgx.Tx, p tenant.Prin
 		if m.sessionRecovery == nil {
 			return nil, workorders.Fail(409, "run recovery admission unavailable")
 		}
-		runID, flushRun, e := m.sessionRecovery(r.Context(), tx, actor, s.ProjectID, *s.RunID, model, effort)
+		runID, flushRun, refused, e := m.sessionRecovery(r.Context(), tx, actor, s.ProjectID, *s.RunID, model, effort)
 		if e != nil {
 			return nil, e
 		}
-		next = &runID
-		event = flushRun
-		outcome = "continuation_queued"
-	}
-	handover, _ := json.Marshal(recoveryHandover(s))
-	if len(handover) > 16000 {
-		return nil, workorders.Fail(409, "recorded handover exceeds recovery bound")
+		if refused != nil {
+			rejection = refused
+		} else {
+			next = &runID
+			event = flushRun
+			outcome = "continuation_queued"
+		}
 	}
 	if _, err = tx.Exec(r.Context(), `UPDATE harness_recoveries SET state='completed',completion=$2,outcome=$3,next_run_id=$4,completed_at=clock_timestamp(),handover=$5::jsonb,service_tier=$6,display_label=$7 WHERE id=$1`, q.ID, in.Outcome, outcome, next, string(handover), s.ServiceTier, s.DisplayLabel); err != nil {
 		return nil, err
@@ -482,7 +489,15 @@ func (m *Module) completeAgentRecovery(r *http.Request, tx pgx.Tx, p tenant.Prin
 			return nil, err
 		}
 	}
-	return q, record(r.Context(), tx, p, s, "agent_recovery_completed", nil, q)
+	if err = record(r.Context(), tx, p, s, "agent_recovery_completed", nil, q); err != nil {
+		return nil, err
+	}
+	// The endpoint commits a *workorders.Error result, then writes it. Returning
+	// the refusal as an error would undo the decision and leave recovery claimed.
+	if rejection != nil {
+		return rejection, nil
+	}
+	return q, nil
 }
 
 func recoveryHandover(s Session) *Handover {

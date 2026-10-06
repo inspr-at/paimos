@@ -25,6 +25,10 @@ const homebrew = (harness: string) => `env "$(brew --prefix)/bin/aeon-agentd" ad
 const nix = (harness: string) => `env "$HOME/.nix-profile/bin/aeon-agentd" add-harness --harness ${harness}`
 const direct = (harness: string) => `env "$HOME/.local/bin/aeon-agentd" add-harness --harness ${harness}`
 const CALM = 'Sign-in happens on the machine; the password never reaches AEON.'
+const MEMBER = 'Only account owners with management permission can act. This view shows the status available to you.'
+const CREDENTIAL = 'Every sign-in stays on its computer. PAIMOS stores status and timestamps, never the vendor credential.'
+const CONNECT = 'Connect a computer'
+const accountsList = (page: Page) => page.getByRole('region', { name: /^Accounts \d+$/ })
 
 async function setup(page: Page, options: { manage?: boolean; desk?: boolean; computers?: Computers } = {}) {
   if (options.desk) await page.clock.setSystemTime(NOW)
@@ -79,7 +83,7 @@ async function shoot(page: Page, name: string, locator: Locator) {
   await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
 }
 
-const noBar = (page: Page) => page.locator('#add-account, #add-account *').evaluateAll(els => els.filter(el => {
+const noBar = (page: Page) => page.locator('#add-account-panel, #add-account-panel *').evaluateAll(els => els.filter(el => {
   const style = getComputedStyle(el)
   return ['Left', 'Top'].some(side => parseFloat(style[`border${side}Width` as 'borderLeftWidth']) >= 3 && style[`border${side}Style` as 'borderLeftStyle'] !== 'none')
 }).length)
@@ -89,7 +93,7 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write'])
   await setup(page)
   await page.goto('/settings/accounts')
-  const accounts = page.getByRole('region', { name: 'Accounts', exact: true })
+  const accounts = accountsList(page)
   await expect(accounts).toContainText('Claude Max')
   await expect(page.getByText(CALM)).toHaveCount(0)
   const open = page.getByRole('button', { name: 'Add an account' })
@@ -127,7 +131,7 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   await expect(page.getByLabel('Enroll command')).toHaveValue(direct('claude'))
   await page.getByRole('combobox', { name: 'Installed with' }).selectOption('homebrew')
   expect(await noBar(page)).toBe(0)
-  await shoot(page, 'panel', page.locator('#add-account'))
+  await shoot(page, 'panel', page.locator('#add-account-panel'))
 
   const steps = panel.getByRole('listitem')
   await steps.nth(0).getByRole('button', { name: 'Copy' }).click()
@@ -164,12 +168,13 @@ test('Add an account on the agents card opens the steps; Manage accounts does no
 test('without account.manage the action is gone and the hint stays', async ({ page }) => {
   await setup(page, { manage: false })
   await page.goto('/settings/accounts')
-  await expect(page.getByRole('region', { name: 'Accounts', exact: true })).toContainText('Claude Max')
-  await expect(page.getByText(CALM)).toBeVisible()
+  await expect(accountsList(page)).toContainText('Claude Max')
+  await expect(page.getByText(MEMBER)).toBeVisible()
+  await expect(page.getByText(CREDENTIAL)).toBeVisible()
   await expect(page.getByRole('button', { name: 'Add an account' })).toHaveCount(0)
-  await expect(page.getByRole('link', { name: 'Connect your machine' })).toHaveCount(0)
+  await expect(page.getByRole('link', { name: CONNECT })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Add an account' })).toHaveCount(0)
-  await shoot(page, 'hint', page.locator('#add-account'))
+  await shoot(page, 'hint', page.locator('#agent-accounts'))
   await page.goto('/agents')
   await expect(page.getByRole('region', { name: 'Accounts' }).getByRole('link', { name: 'Add an account' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: /Manage/ })).toBeVisible()
@@ -179,16 +184,17 @@ test('no paired machine links to Connect your machine, including from the hash',
   const { release } = await setup(page, { computers: 'hold' })
   try {
     await page.goto('/settings/accounts')
-    await expect(page.getByRole('region', { name: 'Accounts', exact: true })).toContainText('Claude Max')
-    await expect(page.getByRole('link', { name: 'Connect your machine' })).toHaveCount(0)
+    await expect(accountsList(page)).toContainText('Claude Max')
     await expect(page.getByRole('button', { name: 'Add an account' })).toHaveCount(0)
   } finally { release() }
-  const connect = page.getByRole('link', { name: 'Connect your machine' })
+  const connect = page.getByRole('link', { name: CONNECT })
   await expect(connect).toBeVisible()
   await expect(connect).toHaveAttribute('href', '/agents/register-agent')
-  await shoot(page, 'connect', page.locator('#add-account'))
+  await expect(page.getByText('No paired computers yet.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Add an account' })).toHaveCount(0)
+  await shoot(page, 'connect', page.locator('#agent-accounts'))
   await page.goto('/settings/accounts#add-account')
-  await expect(page.getByRole('link', { name: 'Connect your machine' })).toBeVisible()
+  await expect(page.getByRole('link', { name: CONNECT })).toBeVisible()
   await expect(page.getByRole('region', { name: 'Add an account' })).toHaveCount(0)
   await connect.click()
   await expect(page).toHaveURL('/agents/register-agent')
@@ -198,15 +204,16 @@ test('a failed computer list offers Try again and then the steps', async ({ page
   const errors = watchErrors(page)
   const { setComputers } = await setup(page, { computers: 'error' })
   await page.goto('/settings/accounts')
-  const alert = page.getByRole('alert')
-  await expect(alert).toContainText('Paired machines could not be loaded.')
-  await expect(page.getByRole('link', { name: 'Connect your machine' })).toHaveCount(0)
+  // AEON-686: load failures are reported in the page's one status line.
+  const alert = page.locator('#agent-accounts .loading-state[role="status"]')
+  await expect(alert).toHaveText('Accounts or computers could not be loaded. Try again')
+  await expect(page.getByText('No paired computers yet.')).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Add an account' })).toHaveCount(0)
   setComputers('ready')
   await alert.getByRole('button', { name: 'Try again' }).click()
   await page.getByRole('button', { name: 'Add an account' }).click()
   await expect(page.getByRole('region', { name: 'Add an account' })).toBeVisible()
-  await expect(alert).toHaveCount(0)
+  await expect(alert).toHaveText('')
   expect(errors).toEqual([])
 })
 
