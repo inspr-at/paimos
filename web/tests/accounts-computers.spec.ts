@@ -298,6 +298,14 @@ test('Away with an expired verification keeps the head inside the card and its c
       ],
     })
   }
+  // Fractional container widths between the two ranges (640 < w < 641) must still get the two-row head.
+  await page.setViewportSize({ width: 800, height: 3000 })
+  for (const width of [640.25, 640.5, 640.75]) {
+    await card.evaluate((el, w) => { (el as HTMLElement).style.width = `${w}px` }, width)
+    await expect(verify).toBeVisible()
+    expect((await spill()).out, `${width}px container spills`).toEqual([])
+  }
+  await card.evaluate(el => { (el as HTMLElement).style.width = '' })
 })
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {

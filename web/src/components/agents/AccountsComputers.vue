@@ -288,7 +288,7 @@ const grid = computed(() => accounts.value.map(a => ({
 @media (pointer: coarse) { .mx-head, .mx-cell { min-height: 44px; } }
 
 /* Medium: Away and Verify again beside the status no longer fit one row with the title and Manage (about 780 px of controls in the widest case, Away plus Verify again, before the status gets any room). The head then always has two rows, chosen by the container's width alone and never by what is shown: row 1 chevron, title, Manage at the line end; row 2 the status with Away after it, and Verify again at the line end, as in the wide head, so neither moves the other. The state still shortens with an ellipsis, so no part ever leaves the card. */
-@container acc (min-width: 641px) and (max-width: 63.75rem) {
+@container acc (640px < width <= 63.75rem) {
   .acc-section :deep(.fs-head) { flex-wrap: wrap; row-gap: 0; }
   .acc-section :deep(.fs-head)::after { content: ''; order: 2; flex: 0 0 100%; height: 0; }
   .fs-tools, .fs-act + .fs-tools { order: 1; margin-left: auto; }
@@ -298,7 +298,7 @@ const grid = computed(() => accounts.value.map(a => ({
 }
 
 /* Phone: line 1 chevron, title, Manage (44 px); line 2 the status, wrapping; line 3 Verify again. */
-@container acc (max-width: 640px) {
+@container acc (width <= 640px) {
   .acc-section :deep(.fs-head) { flex-wrap: wrap; gap: 6px 8px; padding: 6px 10px 6px 4px; }
   .fs-sum { order: 3; flex: 1 1 100%; padding-left: 40px; }
   .fs-sum .t { white-space: normal; overflow: visible; }
