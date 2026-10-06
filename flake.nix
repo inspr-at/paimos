@@ -97,7 +97,7 @@
       devShells = each (
         _system: pkgs: {
           default = pkgs.mkShell {
-            packages = [ pkgs.go ];
+            packages = [ pkgs.git pkgs.go pkgs.postgresql_18 ];
           };
         }
       );

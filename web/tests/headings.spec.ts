@@ -390,7 +390,9 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     await screenshot(page, 'session', width, theme)
     await noOverflow(page)
     await page.goto('/settings/accounts')
-    await page.getByRole('button', { name: `Details for ${longName}`, exact: true }).click()
+    // AEON-686: an account's logins open in its docked panel.
+    await page.locator(`.list-row[data-accounts~="${data.accounts[0]!.id}"]`).click()
+    await page.locator('section.pane').getByRole('button', { name: `Details for ${longName}`, exact: true }).click()
     const name = page.locator('.detail .nm')
     await fullText(name, longName)
     const rename = page.getByRole('button', { name: `Rename ${longName}`, exact: true })

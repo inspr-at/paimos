@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
@@ -532,6 +533,13 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 		diagnostic = "dispatch_not_allowed"
 		return nil
 	}
+	if reporter, ok := s.api.(interface {
+		HostCapacity(context.Context) (hostcapacity.View, error)
+	}); ok {
+		if _, err := reporter.HostCapacity(ctx); err != nil && !errors.Is(err, ErrHostCapacityUnsupported) {
+			return err
+		}
+	}
 	if dispatch {
 		var err error
 		runs, err = s.api.Queued(ctx)
@@ -753,7 +761,7 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			failures = append(failures, ErrScope)
 			continue
 		}
-		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) {
+		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) && !errors.Is(err, ErrHostCapacity) {
 			failures = append(failures, err)
 		}
 	}
@@ -855,6 +863,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		if routeReleased {
 			run.AccountID = ""
 		}
+	}
+	if err := s.checkHostCapacity(ctx); err != nil {
+		return err
 	}
 	profiles, err := s.api.Profiles(ctx)
 	if err != nil {

@@ -4,6 +4,7 @@
 // one enrollment. Device, runtime and lifecycle secrets never enter this module.
 // Setup, redemption and tombstone reconciliation stay on the computer.
 
+import { parseHostCapacity, type HostCapacityView } from './hostCapacity.ts'
 import { parseJson } from './json.ts'
 import { api, resilientFetch } from './api.ts'
 import { onAccessChange } from './authz.ts'
@@ -84,6 +85,9 @@ export interface VerificationTerms {
 }
 
 export interface PairingEnrollment {
+  verified_at?: string
+  verification_expires_at?: string
+  last_used_at?: string
   account_id: string
   account_key: string
   harness: string
@@ -123,6 +127,7 @@ export interface HarnessDetail {
 
 /** Public pairing projection. Secret-bearing keys are not part of this type. */
 export interface PairingView {
+  host_capacity?: HostCapacityView
   local_auth_pinned?: boolean
   request_id: string
   tenant_id: string
@@ -1752,6 +1757,7 @@ function parseView(data: unknown): PairingView {
     local_processes: oneOf(record.local_processes, PROCESS_STATES, 'local_processes'),
     enrollments: enrollments(record.enrollments),
   }
+  if (record.host_capacity != null) view.host_capacity = parseHostCapacity(record.host_capacity)
   if (typeof record.local_auth_pinned === 'boolean') view.local_auth_pinned = record.local_auth_pinned
   if (typeof record.revision === 'number' && Number.isSafeInteger(record.revision) && record.revision >= 0) view.revision = record.revision
   if (typeof record.interval_seconds === 'number' && record.interval_seconds > 0) view.interval_seconds = record.interval_seconds
@@ -1856,6 +1862,7 @@ function enrollments(value: unknown): PairingEnrollment[] {
       active_run_ids: uuidList(record.active_run_ids, 'active_run_ids'),
       ...optionalVerification(record),
     }
+    for (const name of ['verified_at', 'verification_expires_at', 'last_used_at'] as const) if (typeof record[name] === 'string' && Number.isFinite(Date.parse(record[name]))) enrollment[name] = record[name]
     const processes = readProcess(record.local_processes, 'enrollment.local_processes')
     if (processes) enrollment.local_processes = processes
     const accounting = readAccounting(record.accounting_state, 'enrollment.accounting_state')
