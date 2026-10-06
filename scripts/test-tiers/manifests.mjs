@@ -92,7 +92,7 @@ function manifestType(path) {
   return path === manifestPaths[2]
 }
 
-export function normalizeManifest(data, file, { rejectDuplicates = false } = {}) {
+function canonicalize(data, file, { rejectDuplicates = false } = {}, allowDuplicateSpecs = false) {
   const shards = manifestType(file)
   if (!object(data) || data.version !== 1 || !Array.isArray(data[shards ? 'groups' : 'tests'])) throw new ManifestInputError(`Expected version 1 manifest: ${file}`)
   function visit(value, path = []) {
@@ -108,7 +108,7 @@ export function normalizeManifest(data, file, { rejectDuplicates = false } = {})
     return value
   }
   const result = visit(data)
-  if (shards) {
+  if (shards && !allowDuplicateSpecs) {
     const seen = new Set()
     for (const group of result.groups) for (const spec of group.specs) {
       if (seen.has(spec.file)) throw new ManifestInputError(`Duplicate spec across groups: ${spec.file}`)
@@ -118,23 +118,50 @@ export function normalizeManifest(data, file, { rejectDuplicates = false } = {})
   return result
 }
 
+export function normalizeManifest(data, file, options) {
+  return canonicalize(data, file, options)
+}
+
 // Separators have their own lines, including at the first/last row. JSON has
 // no trailing commas: an insertion needs a row and a separator, but never a
 // changed neighbouring row or a policy-changing sentinel. Empty lists retain
 // the same opening/closing lines. All fields within a row have stable order.
 export function formatManifest(data, file, options) {
-  const normalized = normalizeManifest(data, file, options), shards = manifestType(file)
-  function render(value, path = [], depth = 0) {
+  return renderManifest(normalizeManifest(data, file, options), file)
+}
+
+function renderManifest(normalized, file, markers = new Map()) {
+  const shards = manifestType(file)
+  const pathKey = path => JSON.stringify(path)
+  function marker(path, depth, compact = false) {
+    const sides = markers.get(pathKey(path))
+    if (!sides) return undefined
+    const row = value => value === absent ? '' : '  '.repeat(depth) + (compact ? JSON.stringify(stable(value)) : render(value, path, depth, false)) + '\n'
+    const [b, o, t] = sides
+    return `<<<<<<< ours\n${row(o)}||||||| base\n${row(b)}=======\n${row(t)}>>>>>>> theirs`
+  }
+  function render(value, path = [], depth = 0, conflicts = true) {
+    const marked = conflicts ? marker(path, depth) : undefined
+    if (marked !== undefined) return marked
     const indent = '  '.repeat(depth), child = `${indent}  `
     if (Array.isArray(value)) {
       const policy = listPolicy(path, shards)
-      const rows = value.map((row, i) => child + (policy && !policy.recursive
-        ? JSON.stringify(row) : render(row, [...path, policy ? policy.identity(row) : String(i)], depth + 1)))
+      const rows = value.map((row, i) => {
+        const rowPath = [...path, policy ? policy.identity(row) : String(i)]
+        const marked = conflicts ? marker(rowPath, depth + 1, policy && !policy.recursive) : undefined
+        return marked ?? child + (policy && !policy.recursive
+          ? JSON.stringify(row) : render(row, rowPath, depth + 1, conflicts))
+      })
       return `[\n${rows.length ? rows.join(`\n${child},\n`) + '\n' : ''}${indent}]`
     }
     if (object(value)) {
       const compact = path.join('.') === 'timingWeights.owners'
-      const rows = Object.entries(value).map(([k, v]) => `${child}${JSON.stringify(k)}: ${compact ? JSON.stringify(v) : render(v, [...path, k], depth + 1)}`)
+      const rows = Object.entries(value).map(([k, v]) => {
+        const valuePath = [...path, k]
+        const marked = conflicts ? marker(valuePath, depth + 1, compact) : undefined
+        const text = marked === undefined ? (compact ? JSON.stringify(v) : render(v, valuePath, depth + 1, conflicts)) : `\n${marked}`
+        return `${child}${JSON.stringify(k)}: ${text}`
+      })
       return rows.length ? `{\n${rows.join(`\n${child},\n`)}\n${indent}}` : '{}'
     }
     return JSON.stringify(value)
@@ -183,33 +210,49 @@ export function mergeManifests(base, ours, theirs, file) {
   // Old layouts are welcome; duplicate identities (even identical rows) are
   // ambiguous merge input and must be repaired explicitly before retrying.
   const inputs = [base, ours, theirs].map(data => normalizeManifest(data, file, { rejectDuplicates: true }))
-  function conflict(path) { throw new MergeConflictError(`Manifest merge conflict: ${file}: ${path.join('.') || '<root>'}`) }
-  function merge(b, o, t, path = [], atomic = false) {
+  const conflicts = [], markers = new Map()
+  const describe = value => value === absent ? '<absent>' : JSON.stringify(stable(value))
+  function conflict(path, sides, record) {
+    conflicts.push(`${path.join('.') || '<root>'}: base=${describe(sides[0])}; ours=${describe(sides[1])}; theirs=${describe(sides[2])}`)
+    const target = record ?? { path, sides }
+    markers.set(JSON.stringify(target.path), target.sides)
+    // This provisional value is only used to position markers. It is never
+    // written as a clean result when any conflict has been recorded.
+    return sides[1] !== absent ? sides[1] : sides[2]
+  }
+  function merge(b, o, t, path = [], record) {
     if (equal(o, t)) return o
     if (equal(b, o)) return t
     if (equal(b, t)) return o
-    if (o === absent || t === absent || atomic) return conflict(path)
+    if (o === absent || t === absent) return conflict(path, [b, o, t], record)
     const policy = listPolicy(path, shards)
     if (policy) {
       const maps = [b === absent ? [] : b, o, t].map(rows => rowMap(rows, policy, path.join('.'), true))
       const ids = new Set(maps.flatMap(map => [...map.keys()]))
       const merged = new Map()
       for (const id of [...ids].sort(compare)) {
-        const row = merge(...maps.map(map => map.has(id) ? map.get(id) : absent), [...path, id], !policy.recursive)
+        const rowPath = [...path, id]
+        const sides = maps.map(map => map.has(id) ? map.get(id) : absent)
+        const row = merge(...sides, rowPath, { path: rowPath, sides })
         if (row !== absent) merged.set(id, row)
       }
       let order = [...merged.keys()]
       if (policy.ordered) {
         // Compare surviving BASE identities only: additions still append in
         // identity order, and deletions are handled by the keyed row merge.
-        const sequences = maps.map(map => [...map.keys()].filter(id => maps[0].has(id) && merged.has(id)))
+        const survivors = new Set([...maps[0].keys()].filter(id => maps[1].has(id) && maps[2].has(id) && merged.has(id)))
+        const sequences = maps.map(map => [...map.keys()].filter(id => survivors.has(id)))
         const [baseOrder, oursOrder, theirsOrder] = sequences
         const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
         let retained = baseOrder
         if (same(oursOrder, theirsOrder) || same(baseOrder, theirsOrder)) retained = oursOrder
         else if (same(baseOrder, oursOrder)) retained = theirsOrder
-        else return conflict([...path, '<order>'])
-        order = [...retained, ...[...merged.keys()].filter(id => !maps[0].has(id)).sort(compare)]
+        else {
+          conflict([...path, '<order>'], sequences, { path, sides: [b, o, t] })
+          retained = oursOrder
+        }
+        const retainedIds = new Set(retained)
+        order = [...retained, ...[...merged.keys()].filter(id => maps[0].has(id) && !retainedIds.has(id)), ...[...merged.keys()].filter(id => !maps[0].has(id)).sort(compare)]
       }
       return order.map(id => merged.get(id))
     }
@@ -217,21 +260,37 @@ export function mergeManifests(base, ours, theirs, file) {
       const names = new Set([b === absent ? [] : Object.keys(b), Object.keys(o), Object.keys(t)].flat())
       const values = []
       for (const name of [...names].sort(compare)) {
-        const v = merge(...[b, o, t].map(value => value !== absent && Object.hasOwn(value, name) ? value[name] : absent), [...path, name], path.join('.') === 'timingWeights.owners')
+        const childPath = [...path, name]
+        const sides = [b, o, t].map(value => value !== absent && Object.hasOwn(value, name) ? value[name] : absent)
+        const boundary = path.join('.') === 'timingWeights.owners' ? { path: childPath, sides } : record
+        const v = merge(...sides, childPath, boundary)
         if (v !== absent) values.push([name, v])
       }
       return Object.fromEntries(values)
     }
-    return conflict(path)
+    return conflict(path, [b, o, t], record)
   }
   const merged = merge(...inputs)
-  try { return normalizeManifest(merged, file, { rejectDuplicates: true }) }
-  catch (error) {
-    if (!(error instanceof ManifestInputError)) throw error
-    // Individually valid sides can introduce the same spec in two groups.
-    // That disagreement is a merge conflict, rather than an input parse error.
-    throw new MergeConflictError(`Manifest merge conflict: ${file}: ${error.message}`)
+  if (shards) {
+    const seen = new Map()
+    for (const group of merged.groups) for (const spec of group.specs) {
+      const path = ['groups', group.id, 'specs', spec.file]
+      if (seen.has(spec.file)) {
+        for (const target of [seen.get(spec.file), path]) {
+          const sides = inputs.map(input => input.groups.find(g => g.id === target[1])?.specs.find(s => s.file === spec.file) ?? absent)
+          conflict([...target, '<duplicate>'], sides, { path: target, sides })
+        }
+        conflicts.push(`Duplicate spec across groups: ${spec.file}`)
+      } else seen.set(spec.file, path)
+    }
   }
+  const normalized = canonicalize(merged, file, { rejectDuplicates: true }, conflicts.length > 0)
+  if (conflicts.length) {
+    const error = new MergeConflictError(`Manifest merge conflict: ${file}: ${conflicts.join('\n')}`)
+    error.output = renderManifest(normalized, file, markers)
+    throw error
+  }
+  return normalized
 }
 
 // All fallible writes target a unique sibling. Rename is the commit point;
@@ -262,14 +321,7 @@ export function mergeDriver(basePath, oursPath, theirsPath, file) {
   } catch (error) {
     if (!(error instanceof MergeConflictError)) throw error
     disagreement = error
-    // Preserve all three complete versions, even when the semantic conflict
-    // (e.g. duplicate specs across groups) would merge cleanly as plain text.
-    const [base, ours, theirs] = inputs.map(data => formatManifest(data, file, { rejectDuplicates: true }))
-    output = `<<<<<<< ours
-${ours}||||||| base
-${base}=======
-${theirs}>>>>>>> theirs
-`
+    output = error.output
   }
   atomicWrite(oursPath, output)
   // Exit 1 only after conflict markers are safely written. Any write failure
