@@ -232,6 +232,12 @@ router.beforeEach(async (to, from) => {
     if (!session.identity || session.requiresSignIn) return signInAgain(to.fullPath)
     if (vocabulary.error) toast(vocabulary.error, { tone: 'error' })
   }
+  // The Agents page names every project's lead in the workspace word (AEON-791);
+  // an unreadable vocabulary keeps the default word, so nothing to report here.
+  if (session.identity && !to.params.projectKey && (to.path === '/agents' || to.path.startsWith('/agents/'))) {
+    await useWorkVocabulary().load()
+    if (!session.identity || session.requiresSignIn) return signInAgain(to.fullPath)
+  }
 })
 // A held attach code is offered once the navigation that cleaned the address bar has settled.
 router.afterEach((to, _from, failure) => { if (!failure && to.path === '/agents') announceAttachCode() })

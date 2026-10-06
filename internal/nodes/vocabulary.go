@@ -19,27 +19,44 @@ type workLevel struct {
 	Name string `json:"name"`
 	Icon string `json:"icon"`
 }
+
+// leadNames is the word people read for a project's lead (AEON-791). Inside
+// PAIMOS it is always the lead; blank names use Lead and Leads.
+type leadNames struct {
+	Singular string `json:"singular"`
+	Plural   string `json:"plural"`
+}
 type workVocabulary struct {
 	Revision int64       `json:"revision"`
 	Leaf     workLevel   `json:"leaf"`
 	Levels   []workLevel `json:"levels"`
+	Lead     *leadNames  `json:"lead,omitempty"`
 }
 
 var workIcons = map[string]bool{"": true, "ticket": true, "epic": true, "task": true, "layers": true, "tree": true, "folder": true, "check": true, "box": true}
 
+func validName(name string, max int) bool {
+	if !utf8.ValidString(name) || utf8.RuneCountInString(name) > max || strings.TrimSpace(name) != name {
+		return false
+	}
+	for _, r := range name {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
 func (v workVocabulary) validate() error {
 	if v.Revision < 0 || len(v.Levels) > 32 {
 		return badRequest("invalid vocabulary")
 	}
 	for _, level := range append([]workLevel{v.Leaf}, v.Levels...) {
-		if !utf8.ValidString(level.Name) || utf8.RuneCountInString(level.Name) > 60 || strings.TrimSpace(level.Name) != level.Name || !workIcons[level.Icon] {
+		if !validName(level.Name, 60) || !workIcons[level.Icon] {
 			return badRequest("invalid work name or icon")
 		}
-		for _, r := range level.Name {
-			if unicode.IsControl(r) {
-				return badRequest("invalid work name")
-			}
-		}
+	}
+	if v.Lead != nil && (!validName(v.Lead.Singular, 40) || !validName(v.Lead.Plural, 40)) {
+		return badRequest("invalid agent name")
 	}
 	return nil
 }
@@ -98,6 +115,10 @@ func (m *Module) handlePutVocabulary(w http.ResponseWriter, r *http.Request) {
 			Name *string `json:"name"`
 			Icon *string `json:"icon"`
 		} `json:"levels"`
+		Lead *struct {
+			Singular *string `json:"singular"`
+			Plural   *string `json:"plural"`
+		} `json:"lead"`
 	}
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
@@ -122,6 +143,16 @@ func (m *Module) handlePutVocabulary(w http.ResponseWriter, r *http.Request) {
 		}
 		in.Levels = append(in.Levels, workLevel{Name: *level.Name, Icon: *level.Icon})
 	}
+	keepLead := input.Lead == nil
+	if !keepLead {
+		if input.Lead.Singular == nil || input.Lead.Plural == nil {
+			writeError(w, 400, "lead singular and plural are required")
+			return
+		}
+		if *input.Lead.Singular != "" || *input.Lead.Plural != "" {
+			in.Lead = &leadNames{Singular: *input.Lead.Singular, Plural: *input.Lead.Plural}
+		}
+	}
 	if err := in.validate(); err != nil {
 		writeErr(w, err)
 		return
@@ -141,6 +172,11 @@ func (m *Module) handlePutVocabulary(w http.ResponseWriter, r *http.Request) {
 		}
 		if prior.Revision != in.Revision {
 			return conflict("work vocabulary changed; reload before saving")
+		}
+		// A writer that omits lead (older clients, the Work vocabulary card)
+		// keeps the workspace's agent names.
+		if keepLead {
+			in.Lead = prior.Lead
 		}
 		in.Revision++
 		raw, err := json.Marshal(in)
