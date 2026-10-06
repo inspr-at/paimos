@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { pairingView } from './agent-pairing-fixtures'
+import { controlStability } from './control-stability'
 const NOW = Date.parse('2026-10-02T09:30:00Z')
 const world: AgentWorld = { me: me.id, now: NOW, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: { 'p-pharos': { key: 'PRJ-17', title: 'Pharos' }, 'p-aeon': { key: 'PRJ-35', title: 'Aeon' }, 'p-frozen': { key: 'PRJ-26', title: 'Studio infrastructure' }, 'n-1': { key: 'PHAROS-11', title: 'Provisioning' }, 'n-2': { key: 'PHAROS-12', title: 'Restore' }, 'n-a1': { key: 'AEON-1', title: 'Foundation' } } }
 async function setup(page: Page, readonly = false, configure?: (data: ReturnType<typeof agentData>) => void) {
@@ -191,3 +192,38 @@ test('dismissing a completed report before its deadline has no withdrawal toast 
   expect(mock.calls).toHaveLength(1)
 })
 test('without control permission pause actions and wind-down are hidden', async ({ page }) => { await setup(page, true); await page.goto('/agents'); await expect(page.locator('.agents-page .row').first()).toBeVisible(); await expect(page.getByRole('switch', { name: 'Wind down', exact: true })).toHaveCount(0); await expect(page.getByRole('button', { name: /^Pause worker/ })).toHaveCount(0) })
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`${width} ${theme}: stop request stays visible until the worker confirms stopped`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    const errors = watchErrors(page)
+    const mock = await setup(page, false, data => {
+      data.sessions = [data.sessions[0]!]
+      Object.assign(data.sessions[0]!, { management_mode: 'unmanaged', activity: 'busy', heartbeat_at: new Date(NOW).toISOString(), display_label: 'Datenbankänderungen und Wiederherstellungsprüfung abschließen' })
+    })
+    const session = mock.data.sessions[0]!
+    await page.goto(`/agents/${session.id}`)
+    const row = page.locator(`[data-row="s:${session.id}"]`)
+    await expect(row.locator('.c-state .state-word')).toHaveText('Working')
+    const guard = await controlStability(page, { row, menu: row.locator('.more') })
+    // The same durable snapshot returned by the pause route, while the heartbeat
+    // still says working. No worker stop report has arrived yet.
+    await guard.check(async () => {
+      Object.assign(session, { row_version: Number(session.row_version) + 1, pause: { control_id: 'pause-stop', state: 'cancelled', level: 'stop_now', stop_requested: true, deliver: true } })
+      await page.evaluate(() => window.dispatchEvent(new Event('online')))
+      await expect(row.locator('.c-state .state-word')).toHaveText('Stop requested')
+    })
+    await page.screenshot({ path: testInfo.outputPath(`stop-requested-${width}-${theme}.png`), fullPage: true })
+    await guard.check(async () => {
+      Object.assign(session, { row_version: Number(session.row_version) + 1, phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'stopped' })
+      await page.evaluate(() => window.dispatchEvent(new Event('online')))
+      await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
+    })
+    guard.done()
+    await page.screenshot({ path: testInfo.outputPath(`stopped-${width}-${theme}.png`), fullPage: true })
+    await page.reload()
+    await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
+    expect(errors).toEqual([])
+  })
+}

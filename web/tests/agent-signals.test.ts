@@ -183,7 +183,7 @@ test('Done is the server finished flag and nothing else; every other stop is End
     { stop_reason: 'archived', progress_pct: 100 },
   ]) {
     const ended = assessAgentState(stopped({ ...fields, finished: false }), now)
-    assert.deepEqual([fields, ended.state, ended.label], [fields, 'stopped', 'Ended'])
+    assert.deepEqual([fields, ended.state, ended.label], [fields, 'stopped', fields.stop_reason === 'stopped' ? 'Stopped' : 'Ended'])
     // An evidence object that somehow lacks the flag is not done either: there is no fallback.
     const { finished: _omitted, ...without } = stopped(fields)
     assert.equal(deriveAgentState(without as StateEvidence, now), 'stopped')

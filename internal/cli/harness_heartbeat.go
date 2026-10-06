@@ -66,6 +66,7 @@ var (
 	errOwnerGone               = errors.New("owner process is not alive")
 	errHeartbeatTerminal       = errors.New("heartbeat generation is closed")
 	errHeartbeatAlreadyStopped = errors.New("heartbeat generation is already stopped")
+	errHeartbeatStopRequested  = errors.New("heartbeat stop requested by server")
 	errHeartbeatStopBound      = errors.New("heartbeat stop retry bound reached")
 	errHeartbeatStopRejected   = errors.New("heartbeat stop was rejected")
 	errHeartbeatBusy           = errors.New("heartbeat state is already in use")
@@ -454,6 +455,15 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 		}
 		err := rt.heartbeatBeat(ctx, o, dep, session)
 		switch {
+		case errors.Is(err, errHeartbeatStopRequested):
+			// A PID observer owns only its reporting lifetime. Signalling is
+			// reserved for the launcher that owns and fences its exact child.
+			session.stopReason = "stopped"
+			if err := finish(); err != nil {
+				return err
+			}
+			fmt.Fprintf(rt.stderr, "heartbeat: session %s is stopped; observed owner process exit is unconfirmed\n", session.id)
+			return nil
 		case errors.Is(err, errHeartbeatTerminal):
 			rememberSettlement(session)
 			if serr := saveHeartbeatSession(session); serr != nil {
@@ -461,6 +471,7 @@ func (rt *runtime) heartbeatLoop(ctx context.Context, o heartbeatOptions, dep he
 				return serr
 			}
 			releaseSessionIndex(session)
+			explainClosedHeartbeat(rt, session)
 			return nil
 		case err != nil && ctx.Err() != nil:
 			return finish()
@@ -1264,9 +1275,12 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	}
 	path := harnessPath(projectID, session.id) + "/heartbeat"
 	var response struct {
-		Mode     string                    `json:"agent_activity_mode"`
-		Warnings []harness.EstimateWarning `json:"warnings"`
-		Pause    *harness.Pause            `json:"pause"`
+		ID        string                    `json:"id"`
+		Phase     string                    `json:"phase"`
+		StoppedAt *time.Time                `json:"stopped_at"`
+		Mode      string                    `json:"agent_activity_mode"`
+		Warnings  []harness.EstimateWarning `json:"warnings"`
+		Pause     *harness.Pause            `json:"pause"`
 	}
 	postBeat := func() error {
 		err := rt.harnessDoCtx(ctx, http.MethodPost, path, session.lease, body, &response)
@@ -1291,12 +1305,22 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	}
 	if err != nil && heartbeatStatus(err) == http.StatusConflict {
 		var status struct {
-			ActivitySequence int64 `json:"activity_sequence"`
+			ActivitySequence int64      `json:"activity_sequence"`
+			ID               string     `json:"id"`
+			Phase            string     `json:"phase"`
+			StoppedAt        *time.Time `json:"stopped_at"`
 		}
-		if readErr := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id), "", nil, &status); readErr == nil && status.ActivitySequence >= session.disk.Sequence {
-			session.disk.Sequence = status.ActivitySequence + 1
-			body["activity_sequence"] = session.disk.Sequence
-			err = postBeat()
+		if readErr := rt.harnessDoCtx(ctx, http.MethodGet, harnessPath(projectID, session.id), "", nil, &status); readErr == nil {
+			if strings.EqualFold(status.ID, session.id) && (status.StoppedAt != nil || status.Phase == "stopped") {
+				session.disk.Sequence--
+				markHeartbeatTerminal(session, "stopped")
+				return errHeartbeatTerminal
+			}
+			if status.ActivitySequence >= session.disk.Sequence {
+				session.disk.Sequence = status.ActivitySequence + 1
+				body["activity_sequence"] = session.disk.Sequence
+				err = postBeat()
+			}
 		}
 	}
 	if heartbeatTerminalStatus(err) {
@@ -1308,6 +1332,16 @@ func (rt *runtime) heartbeatBeat(ctx context.Context, o heartbeatOptions, dep he
 	if err != nil {
 		session.disk.Sequence--
 		return err
+	}
+	if response.ID != "" && !strings.EqualFold(response.ID, session.id) {
+		return errors.New("heartbeat response belongs to another generation")
+	}
+	if strings.EqualFold(response.ID, session.id) && (response.StoppedAt != nil || response.Phase == "stopped") {
+		markHeartbeatTerminal(session, "stopped")
+		return errHeartbeatTerminal
+	}
+	if dep.stopOwned == nil && response.Pause != nil && response.Pause.StopRequested && response.Pause.Deliver {
+		return errHeartbeatStopRequested
 	}
 
 	if o.ReconnectSocket != "" {

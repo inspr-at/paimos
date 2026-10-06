@@ -966,8 +966,8 @@ func TestRunHeartbeatTerminalStatusExits(t *testing.T) {
 			if len(hbWhere(calls, http.MethodPost, "/stop")) != 0 {
 				t.Fatal("terminal generation was stopped again")
 			}
-			if strings.Contains(stderr.String(), "will not resume") {
-				t.Fatalf("first run explained a closed generation: %s", stderr.String())
+			if !strings.Contains(stderr.String(), "will not resume") {
+				t.Fatalf("first run did not report the closed generation: %s", stderr.String())
 			}
 			before := len(calls)
 			err = rt.runHeartbeat(context.Background(), heartbeatTestOptions(dir), heartbeatDeps{alive: func(int) bool { return true }})

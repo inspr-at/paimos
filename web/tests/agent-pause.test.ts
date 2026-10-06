@@ -56,6 +56,20 @@ test('paused is resumable evidence, scheduled pauses stay working and stop reque
   assert.equal(assessAgentState({ ...row(), pause: { state: 'requested', deliver: false } }, now).state, 'working')
   assert.equal(assessAgentState({ ...row(), pause: { state: 'planned', deliver: true } }, now).state, 'pausing')
   assert.equal(assessAgentState({ ...row({ heartbeat_at: new Date(now - 21 * minute).toISOString() }), pause: { state: 'requested', deliver: true } }, now).state, 'unresponsive')
-  assert.equal(assessAgentState({ ...row(), pause: { state: 'cancelled', stop_requested: true } }, now).state, 'working')
+  assert.equal(assessAgentState({ ...row(), pause: { state: 'cancelled', stop_requested: true } }, now).state, 'pausing')
   assert.equal(assessAgentState({ ...row({ phase: 'stopped' }), pause: { state: 'paused' } }, now).state, 'paused')
+})
+
+test('stop requests remain visible through stale heartbeats until a worker stop report', () => {
+  for (const activity of ['busy', 'idle', 'throttled']) for (const heartbeat_at of [new Date(now).toISOString(), new Date(now - 21 * minute).toISOString()]) {
+    const requested = { ...row({ activity, heartbeat_at }), pause: { state: 'cancelled', stop_requested: true } }
+    const pending = assessAgentState(requested, now)
+    assert.equal(pending.state, 'pausing')
+    assert.equal(pending.label, 'Stop requested')
+    assert.match(pending.reasons[0]!.detail, /not confirmed/)
+    const confirmed = assessAgentState({ ...requested, phase: 'stopped', stopped_at: new Date(now).toISOString(), stop_reason: 'stopped' }, now)
+    assert.equal(confirmed.state, 'stopped')
+    assert.equal(confirmed.label, 'Stopped')
+  }
+  assert.equal(assessAgentState({ ...row(), pause: { state: 'cancelled', stop_requested: false } }, now).label, 'Working')
 })

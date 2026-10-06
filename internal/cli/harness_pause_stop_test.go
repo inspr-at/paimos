@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -89,5 +91,112 @@ func TestHeartbeatWaitUsesScheduledPauseHint(t *testing.T) {
 	}
 	if delay < time.Millisecond || delay > 250*time.Millisecond {
 		t.Fatalf("deadline delayed by ordinary heartbeat: %s", delay)
+	}
+}
+
+func TestRunHeartbeatHonoursServerStop(t *testing.T) {
+	for _, kind := range []string{"requested", "stopped_phase", "stopped_at", "conflict", "forbidden"} {
+		t.Run(kind, func(t *testing.T) {
+			var calls []hbCall
+			status := `{"id":"` + transcriptSessionID + `","phase":"stopped","activity_sequence":99}`
+			srv := heartbeatFixture(t, &calls, status, "")
+			defer srv.Close()
+			original := srv.Config.Handler
+			beats := 0
+			srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodPost && r.URL.Path == harnessPath(transcriptProjectID, transcriptSessionID)+"/heartbeat" {
+					beats++
+					switch kind {
+					case "conflict":
+						w.WriteHeader(http.StatusConflict)
+					case "forbidden":
+						w.WriteHeader(http.StatusForbidden)
+					default:
+						response := map[string]any{"id": transcriptSessionID}
+						switch kind {
+						case "requested":
+							response["pause"] = harness.Pause{State: "cancelled", Level: "stop_now", StopRequested: true, Deliver: true}
+						case "stopped_phase":
+							response["phase"] = "stopped"
+						case "stopped_at":
+							response["stopped_at"] = time.Now().UTC()
+						}
+						_ = json.NewEncoder(w).Encode(response)
+					}
+					return
+				}
+				original.ServeHTTP(w, r)
+			})
+			rt, _, stderr := heartbeatRuntime(t, srv)
+			o := heartbeatTestOptions(t.TempDir())
+			// Watch this test process: the observer must never signal it.
+			o.OwnerPID = os.Getpid()
+			waits := 0
+			dep := heartbeatDeps{alive: func(int) bool { return true }, wait: func(context.Context, int, time.Duration) error { waits++; return context.Canceled }}
+			if err := rt.runHeartbeat(t.Context(), o, dep); err != nil {
+				t.Fatal(err)
+			}
+			if beats != 1 || waits != 0 {
+				t.Fatalf("beats=%d waits=%d; stop must exit before another wait", beats, waits)
+			}
+			disk := loadHeartbeatDisk(t, o.StateDir)
+			if !disk.Closed && (!disk.Terminal || disk.TerminalReason != "stopped") {
+				t.Fatalf("stop was not persisted: closed=%v terminal=%v reason=%q", disk.Closed, disk.Terminal, disk.TerminalReason)
+			}
+			if !strings.Contains(stderr.String(), "is stopped") {
+				t.Fatalf("missing stopped result: %s", stderr)
+			}
+			stops := hbWhere(calls, http.MethodPost, "/stop")
+			if kind == "requested" {
+				if len(stops) != 1 || stops[0].body["reason"] != "stopped" {
+					t.Fatal("request did not report stopped")
+				}
+				if len(hbWhere(calls, http.MethodPost, "/complete")) != 0 {
+					t.Fatal("observer claimed verified process exit")
+				}
+			} else if len(stops) != 0 {
+				t.Fatal("already stopped generation was stopped again")
+			}
+			if err := rt.runHeartbeat(t.Context(), o, dep); err != nil {
+				t.Fatal(err)
+			}
+			if beats != 1 {
+				t.Fatal("closed generation resumed heartbeating")
+			}
+		})
+	}
+}
+
+func TestRunHeartbeatDoesNotStopForScheduledOrForeignResponse(t *testing.T) {
+	for _, foreign := range []bool{false, true} {
+		t.Run(fmt.Sprintf("foreign=%t", foreign), func(t *testing.T) {
+			var calls []hbCall
+			srv := heartbeatFixture(t, &calls, "", "")
+			defer srv.Close()
+			original := srv.Config.Handler
+			srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/heartbeat") {
+					id := transcriptSessionID
+					if foreign {
+						id = transcriptEntryID
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"id": id, "pause": harness.Pause{StopRequested: true, Deliver: foreign}})
+					return
+				}
+				original.ServeHTTP(w, r)
+			})
+			rt, _, stderr := heartbeatRuntime(t, srv)
+			o := heartbeatTestOptions(t.TempDir())
+			waits := 0
+			if err := rt.runHeartbeat(t.Context(), o, heartbeatDeps{alive: func(int) bool { return true }, wait: func(context.Context, int, time.Duration) error { waits++; return context.Canceled }}); err != nil {
+				t.Fatal(err)
+			}
+			if waits != 1 {
+				t.Fatal("undelivered or foreign request stopped observer")
+			}
+			if foreign && !strings.Contains(stderr.String(), "another generation") {
+				t.Fatal("foreign response was not rejected")
+			}
+		})
 	}
 }
