@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
-import { dirname, extname, resolve, relative } from 'node:path'
+import { dirname, resolve, relative } from 'node:path'
 import { migrationObjects } from './migration.mjs'
 
 export const key = row => row.kind === 'go' ? `${row.package}:${row.name}` : `${row.kind}:${row.file}:${row.name}${row.occurrence===undefined?'':`#${row.occurrence}`}`
@@ -332,27 +332,47 @@ export function shard(rows, index, count, weights = {}, { firstShardLast = false
   return bins[index-1].rows
 }
 
+// An impossible file name keeps uncertainty serializable alongside graph edges.
+export const unknownWebImport = '\0unknown-web-import'
+
 export function webGraph(root) {
   const graph = {}
   const visit = directory => {
     for (const entry of readdirSync(resolve(root, directory), { withFileTypes: true })) {
       const file = `${directory}/${entry.name}`
       if (entry.isDirectory()) visit(file)
-      else if (/\.(?:ts|js|mjs|vue|json|css)$/.test(file)) graph[file] = []
+      else if (/\.(?:ts|tsx|mts|js|mjs|vue|json|css)$/.test(file)) graph[file] = []
     }
   }
   for (const dir of ['src', 'tests', 'e2e']) visit(dir)
   for (const file of Object.keys(graph)) {
     const source = readFileSync(resolve(root, file), 'utf8')
-    for (const match of source.matchAll(/(?:\b(?:import|export)\s+(?:[\s\S]*?\s+from\s*)?|\bimport\s*\()\s*['"]([^'"]+)['"]/g)) {
-      const imported = match[1]
-      if (!imported.startsWith('.')) continue
+    const unknown = () => { if (file.startsWith('tests/')) graph[file].push(unknownWebImport) }
+    const add = imported => {
+      if (!imported.startsWith('.')) return
       const base = resolve(root, dirname(file), imported)
-      const candidates = [base, ...['.ts','.js','.mjs','.vue','.json','.css','/index.ts','/index.js'].map(s => base+s)]
-      const target = candidates.find(path => existsSync(path) && Object.hasOwn(graph, relative(root,path)))
+      const candidates = [base]
+      // Playwright accepts JS module specifiers for TypeScript sources.
+      if (base.endsWith('.js') && !existsSync(base)) candidates.push(...['.ts','.tsx','.mts'].map(s => base.slice(0,-3)+s))
+      candidates.push(...['.ts','.tsx','.mts','.js','.mjs','.vue','.json','.css','/index.ts','/index.tsx','/index.mts','/index.js'].map(s => base+s))
+      // Existing JSON imports outside web are terminal data, with no hidden
+      // registrations; executable imports outside the graph remain unknown.
+      const target = candidates.find(path => existsSync(path) && (Object.hasOwn(graph, relative(root,path)) || path.endsWith('.json')))
       if (target) graph[file].push(relative(root,target))
-      else if (extname(imported) === '') graph[file].push(relative(root,base)) // changed/deleted import remains a conservative edge
+      else {
+        graph[file].push(relative(root,base)) // changed/deleted import remains a conservative edge
+        unknown()
+      }
     }
+    for (const match of source.matchAll(/\b(?:import|export)(?:\s|\/\*(?:[^*]|\*(?!\/))*\*\/|\/\/[^\n]*\n)+(?:[^;()]*?\s+from\s*)?['"]([^'"]+)['"]/g)) add(match[1])
+    // Scan calls separately: a static-import match must never swallow a
+    // template/computed import, require, or a literal followed by an expression.
+    for (const match of source.matchAll(/\b(import|require)(?:\s|\/\*(?:[^*]|\*(?!\/))*\*\/|\/\/[^\n]*\n)*\(/g)) {
+      const literal = /^(?:\s|\/\*(?:[^*]|\*(?!\/))*\*\/|\/\/[^\n]*\n)*(['"])([^'"\\\r\n]+)\1(?:\s|\/\*(?:[^*]|\*(?!\/))*\*\/|\/\/[^\n]*\n)*\)/.exec(source.slice(match.index+match[0].length))
+      if (match[1] === 'import' && literal) add(literal[2])
+      else unknown()
+    }
+    graph[file] = [...new Set(graph[file])]
   }
   return graph
 }

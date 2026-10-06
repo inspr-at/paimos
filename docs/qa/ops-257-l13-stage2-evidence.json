@@ -359,35 +359,37 @@
   "checks": [
     {
       "name": "requested-node-suite",
-      "command": "node --test --test-concurrency=1 scripts/test-tiers/*.test.mjs scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs web/scripts/ci-web-shard.test.mjs web/scripts/aeon-676-ci.test.mjs web/scripts/aeon-681-ci.test.mjs",
-      "passed": 470,
+      "command": "node --test --test-concurrency=1 scripts/test-tiers/*.test.mjs scripts/check-migrations.test.mjs scripts/ci-pr-plan.test.mjs scripts/ci-runner-route.test.mjs scripts/ci-static.test.mjs scripts/ci-tree-reuse.test.mjs scripts/cross-family-gate.test.mjs scripts/full-ui-qa.test.mjs scripts/release-timing.test.mjs web/scripts/ci-web-shard.test.mjs web/scripts/aeon-676-ci.test.mjs web/scripts/aeon-681-ci.test.mjs",
+      "passed": 613,
       "failed": 0,
-      "logSha256": "4538facd4d156338f3d1140df126e63a5ab4d094cff981762fd68830540b9c5c"
+      "skipped": 0,
+      "logSha256": "c45c7579ef8f2ca4c04e8d48928425be3281d56b7c37ef32046c41bff5bfeb81"
     },
     {
-      "name": "go-static-with-no-web-dependencies",
-      "command": "NODE_OPTIONS=--import=/private/tmp/ops257-fix1-no-web-deps.mjs node --test scripts/test-tiers/test-tiers.test.mjs",
-      "passed": 222,
+      "name": "final-import-focused-regressions",
+      "command": "node --test --test-name-pattern='offline replay CLI policy fixture|browser graph|browser import uncertainty|browser registrar|standalone Node' scripts/test-tiers/test-tiers.test.mjs",
+      "passed": 22,
       "failed": 0,
-      "logSha256": "6872a21ec200a7577f86506b316187e9b2f28fcdd7097a9d3911d49759b6b9c8"
+      "logSha256": "689b516670f6b31337408c376dd882017c213532a2ee2b3bc81ec45f18f318ad"
     },
     {
       "name": "web-failure-reporting-native-node-runner",
       "command": "node --experimental-strip-types --test web/tests/test-tier-failures.test.ts",
       "passed": 8,
       "failed": 0,
-      "logSha256": "b8c89ddca0dc901608bb54690cf54932e733bad5eac4b4356f1d5a44f11ef1a6"
+      "logSha256": "edb56a0151b83100ada49b9f4717fab30a41e736a5462f76cfebdc29af372dc2"
     },
     {
       "name": "go-packages-installed-nix-store-toolchain",
-      "command": "PATH=/nix/store/5k3v90pgx77ibb4xzabk5hghnaqklmy1-go-1.26.7/bin:$PATH GOCACHE=/private/tmp/ops257-fix2-gocache GOPROXY=off GOTOOLCHAIN=local go test ./scripts/ci-runner-guard ./scripts/releaseworkflow ./scripts/ci-go-shards -count=1",
-      "passedPackages": 3,
+      "command": "PATH=/nix/store/ynhaddwnkhvlr6qn7scbrj1515k52gnw-go-1.26.7/bin:$PATH GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local GOCACHE=/private/tmp/ops257-fix2-gocache /nix/store/ynhaddwnkhvlr6qn7scbrj1515k52gnw-go-1.26.7/bin/go test ./internal/ciproof ./scripts/ci-go-shards ./scripts/ci-runner-guard ./scripts/releaseworkflow -count=1",
+      "passedPackages": 4,
       "output": [
-        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-runner-guard\t4.442s",
-        "ok  \tgithub.com/inspr-at/paimos/scripts/releaseworkflow\t4.417s",
-        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-go-shards\t6.291s"
+        "ok  \tgithub.com/inspr-at/paimos/internal/ciproof\t39.913s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-go-shards\t5.607s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-runner-guard\t3.808s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/releaseworkflow\t4.158s"
       ],
-      "logSha256": "0eae92c902c8e521e18eb31f41eb9a7eae7d673adc8a812da7745f827742e479"
+      "logSha256": "182f57258d6f426f230b957e78223e72470f905f787ae03e3a74c4cc88d548d6"
     },
     {
       "command": "node scripts/test-tiers/cli.mjs manifests --check",
@@ -395,49 +397,44 @@
       "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
     },
     {
-      "command": "node scripts/ci-static.mjs --list --json",
-      "passed": true,
-      "outputSha256": "37da9b98be9927473a2efaaf7779be13e18b6b4742c133a14b1cd7219a5f05fe"
-    },
-    {
       "command": "git diff --check",
       "passed": true
-    },
-    {
-      "command": "node scripts/test-tiers/prove-manifests.mjs 601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
-      "passed": true,
-      "outputSha256": "efb8b88d7fc2ff4e192d3eca00a45151cd57796c1e711546ed7ab1ea3856fa27"
     },
     {
       "name": "planner-base-replay-and-native-undercount-sweep",
       "command": "node scripts/test-tiers/replay.mjs --json --compare-base 601dbaa4f",
       "passed": true,
       "prs": 80,
-      "matchingModes": 76,
-      "modeChanges": 4,
+      "matchingModes": 75,
+      "modeChanges": 5,
       "undercounts": 0,
       "unsupported": 85,
-      "outputSha256": "36f46beb5233340821f7cf168ba78093ac61a6b5cfa35e666f7d2ca70b971f64"
+      "outputSha256": "c2bab761f196e9de9f9f023daaa89d55e48970e8d2d6882ec2a13807f00c2218"
     }
   ],
   "nodeSuiteFiles": [
     "scripts/test-tiers/manifests.test.mjs",
     "scripts/test-tiers/test-tiers.test.mjs",
     "scripts/test-tiers/tiers-merge-driver.test.mjs",
+    "scripts/check-migrations.test.mjs",
     "scripts/ci-pr-plan.test.mjs",
-    "scripts/ci-tree-reuse.test.mjs",
+    "scripts/ci-runner-route.test.mjs",
     "scripts/ci-static.test.mjs",
+    "scripts/ci-tree-reuse.test.mjs",
+    "scripts/cross-family-gate.test.mjs",
+    "scripts/full-ui-qa.test.mjs",
+    "scripts/release-timing.test.mjs",
     "web/scripts/ci-web-shard.test.mjs",
     "web/scripts/aeon-676-ci.test.mjs",
     "web/scripts/aeon-681-ci.test.mjs"
   ],
   "environment": {
     "network": "No network; existing dependencies reused; no browser launch, Docker, secrets, push or deployment.",
-    "go": "Installed Nix-store Go 1.26.7 darwin/arm64; GOCACHE=/private/tmp/ops257-fix2-gocache reused, GOPROXY=off, GOTOOLCHAIN=local",
-    "nixDevelopOffline": "Attempted with cache in writable /private/tmp; sandbox denies Nix daemon socket. Used installed store Go directly with downloads disabled.",
-    "web": "Native Node/Vitest/Playwright collection only; no browser launch; VITE_CACHE_DIR=/private/tmp/ops257-fix3-vite",
+    "go": "Installed /nix/store/ynhaddwnkhvlr6qn7scbrj1515k52gnw-go-1.26.7/bin/go (darwin/arm64); GOCACHE=/private/tmp/ops257-fix2-gocache reused; GOPROXY=off, GOSUMDB=off, GOTOOLCHAIN=local.",
+    "nixDevelopOffline": "Not invoked in round 4; used the brief-specified installed store Go directly with downloads disabled.",
+    "web": "Native Node/Vitest/Playwright registration collection only; no browser launch; VITE_CACHE_DIR=/private/tmp/ops257-fix4-vite.",
     "noWebDependencyGuard": "import {registerHooks} from 'node:module'\nregisterHooks({resolve(specifier,context,next){const result=next(specifier,context);if(result.url.includes('/node_modules/'))throw new Error('go-static must not import web dependencies');return result}})\n",
-    "postSuiteEdits": "Only evidence and git-ignored progress metadata will be written after final passing suites."
+    "postSuiteEdits": "Evidence and git-ignored progress metadata only after final validation; source hashes below bind the delivered bytes."
   },
   "consumerAudit": {
     "searchRoots": [
@@ -503,7 +500,7 @@
   },
   "risks": [
     "Hosted merge-group execution/time remains unmeasured; runtime estimates use historical owner/file timings and one second per unmeasured Go/unit case.",
-    "Conservative Go source counting and unsupported browser registration syntax can widen fan-out. On all 80 recorded PR file lists the affected-switch-unset lane and mode match the base; all 246 current native browser specs have no undercounts (202 bounded, 44 over-limit or unsupported).",
+    "Conservative source bounds and unknown imports can widen fan-out. The unset source planner matches base mode on 75/80 recorded PR lists; all five differences widen essential to full. Native sweep: 246 files, 161 bounded, 85 unsupported/over-limit, zero undercounts. Computed imports inside test callbacks also fail the dependency proof; no collection-time execution analysis is claimed.",
     "Installed external merge-driver copies need refreshing by the coordinator; no external copy was changed."
   ],
   "staleExplicitRowsAfter": {
@@ -543,12 +540,19 @@
       "base": "601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
       "affectedLane": "unset",
       "prs": 80,
-      "matching": 76,
+      "matching": 75,
       "scope": "Mode only on recorded file lists with current tree/common graph; unset effectiveLane comparison is tautological. L4 new uses native rows.",
       "essentialAtBase": 16,
       "differences": [
         {
           "number": 246,
+          "baseMode": "essential",
+          "currentMode": "full",
+          "baseLane": "full",
+          "currentLane": "full"
+        },
+        {
+          "number": 252,
           "baseMode": "essential",
           "currentMode": "full",
           "baseLane": "full",
@@ -672,19 +676,19 @@
     },
     "affectedLaneReplaySummary": {
       "prs": 80,
-      "oldEssential": 12,
-      "newNarrowed": 36,
+      "oldEssential": 11,
+      "newNarrowed": 29,
       "newStatic": 0,
-      "percentNarrowed": 45,
-      "oldJobs": 2770,
-      "newJobs": 2420,
+      "percentNarrowed": 36,
+      "oldJobs": 2785,
+      "newJobs": 2525,
       "fullReasons": {
         "CI machinery": 18,
         "R3": 9,
+        "other": 8,
         "R4": 6,
         "unnarrowed": 8,
         "missing": 1,
-        "browser fan-out": 1,
         "unmapped": 1
       }
     },
@@ -693,6 +697,11 @@
       "unsetModeChanges": [
         {
           "number": 246,
+          "base": "essential",
+          "current": "full"
+        },
+        {
+          "number": 252,
           "base": "essential",
           "current": "full"
         },
@@ -713,48 +722,17 @@
         }
       ],
       "unsupportedUnsetModeChanges": [
-        246,
         253,
-        263,
-        294
+        263
       ],
       "l4UnsupportedSpecModeChanges": [
-        245,
-        246,
-        249,
         253,
-        263,
-        268,
-        294
+        263
       ],
       "unsupportedCostMethod": "Counterfactual omits the listed unsupported specs from source estimates; all other planner inputs stay unchanged. This measures cost only and is never a runnable fallback.",
       "l4NativeDifferences": [
         {
-          "number": 208,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
           "number": 245,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
-          "number": 246,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
-          "number": 247,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
-          "number": 249,
           "native": "essential",
           "planner": "full",
           "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
@@ -773,12 +751,6 @@
         },
         {
           "number": 268,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
-          "number": 294,
           "native": "essential",
           "planner": "full",
           "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
@@ -855,7 +827,7 @@
         "baseMode": "full",
         "mode": "full",
         "matches": true,
-        "nativeL4Mode": "essential",
+        "nativeL4Mode": "full",
         "sourceBoundL4Mode": "full"
       },
       {
@@ -1119,7 +1091,7 @@
         "baseMode": "essential",
         "mode": "full",
         "matches": false,
-        "nativeL4Mode": "essential",
+        "nativeL4Mode": "full",
         "sourceBoundL4Mode": "full"
       },
       {
@@ -1127,7 +1099,7 @@
         "baseMode": "full",
         "mode": "full",
         "matches": true,
-        "nativeL4Mode": "essential",
+        "nativeL4Mode": "full",
         "sourceBoundL4Mode": "full"
       },
       {
@@ -1143,7 +1115,7 @@
         "baseMode": "full",
         "mode": "full",
         "matches": true,
-        "nativeL4Mode": "essential",
+        "nativeL4Mode": "full",
         "sourceBoundL4Mode": "full"
       },
       {
@@ -1165,10 +1137,10 @@
       {
         "pr": 252,
         "baseMode": "essential",
-        "mode": "essential",
-        "matches": true,
-        "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "essential"
+        "mode": "full",
+        "matches": false,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
       },
       {
         "pr": 253,
@@ -1375,8 +1347,8 @@
         "baseMode": "full",
         "mode": "full",
         "matches": true,
-        "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "essential"
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
       },
       {
         "pr": 290,
@@ -1399,7 +1371,7 @@
         "baseMode": "essential",
         "mode": "full",
         "matches": false,
-        "nativeL4Mode": "essential",
+        "nativeL4Mode": "full",
         "sourceBoundL4Mode": "full"
       },
       {
@@ -1428,8 +1400,8 @@
       }
     ],
     "scope": "Recorded file lists evaluated against current source tree and common dependency graph; no historical per-PR tree reconstruction. Mode is compared; effectiveLane with the flag unset is the same classified value by definition. Native L4 after rows do not prove source-bound planner equivalence.",
-    "unsupportedCost": "85/246 specs are unsupported/over-limit, with zero native undercounts. Modes match base on 76/80 PRs. PR246 (headings), PR253 (decision-text), PR263 (ticket-panel), and PR294 (settings, webcore-recovery, work-surfaces-fix2, work-vocabulary) widen essential->full solely due to unsupported browser specs: omitting those specs restores essential for all four. Native-vs-source L4 differs on 9 PRs; unsupported-spec omission changes 7 L4 modes. PR236, PR244 and PR252 recover their base essential mode after these fixes.",
-    "cheapGenericRuleAssessment": "Applied browser-spec import reachability to non-spec tests files, tracked destructured bindings, and accepted division only after proven expression tokens. Unsupported bounds dropped from 94 to 85. A per-file count artifact checked against native counts could retain the same guarantee, but would add regeneration; no artifact fallback was added.",
+    "unsupportedCost": "85/246 files remain unsupported/over-limit with zero native undercounts. Modes match base on 75/80 PRs; PR252 is newly full because role-picker-layout.spec.ts has a computed import. PR246 and PR294 also fail the dependency proof; PR253 and PR263 widen solely from source bounds. Native-vs-source L4 differs on 4 PRs; omitting unsupported source estimates changes 2 L4 modes. These omissions measure cost only, never an execution fallback.",
+    "cheapGenericRuleAssessment": "Retain non-spec Playwright references without requiring graph reachability. Resolve JS specifiers onto TypeScript and propagate unknown import edges. No changes to the registration parser or execution tier policies; unsupported syntax stays conservative.",
     "remainingEssentialToFullCauses": [
       {
         "number": 246,
@@ -1437,12 +1409,15 @@
         "currentMode": "full",
         "baseLane": "full",
         "currentLane": "full",
-        "cause": "Imported or directly changed browser specs have unsupported source bounds; removing those bounds restores the base essential mode.",
+        "newSinceFix3": false,
+        "reason": "browser dependency proof unavailable (unresolved or dynamic import)",
+        "unknownImportSpecs": [
+          "tests/headings.spec.ts"
+        ],
         "unsupportedSpecs": [
           "tests/headings.spec.ts"
         ],
-        "supportedSpecCases": 28,
-        "nonSpecRegistrations": [],
+        "cause": "Non-literal dynamic imports make impacted browser specs unknown; omitting unsupported source counts still leaves the dependency proof unavailable.",
         "unsupportedReasons": [
           {
             "file": "tests/headings.spec.ts",
@@ -1452,17 +1427,32 @@
         ]
       },
       {
+        "number": 252,
+        "baseMode": "essential",
+        "currentMode": "full",
+        "baseLane": "full",
+        "currentLane": "full",
+        "newSinceFix3": true,
+        "reason": "browser dependency proof unavailable (unresolved or dynamic import)",
+        "unknownImportSpecs": [
+          "tests/role-picker-layout.spec.ts"
+        ],
+        "unsupportedSpecs": [],
+        "cause": "Non-literal dynamic imports make impacted browser specs unknown; omitting unsupported source counts still leaves the dependency proof unavailable."
+      },
+      {
         "number": 253,
         "baseMode": "essential",
         "currentMode": "full",
         "baseLane": "full",
         "currentLane": "full",
-        "cause": "Imported or directly changed browser specs have unsupported source bounds; removing those bounds restores the base essential mode.",
+        "newSinceFix3": false,
+        "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)",
+        "unknownImportSpecs": [],
         "unsupportedSpecs": [
           "tests/decision-text.spec.ts"
         ],
-        "supportedSpecCases": 0,
-        "nonSpecRegistrations": [],
+        "cause": "Unsupported browser source bounds force full; omitting those estimates restores essential (cost-only counterfactual).",
         "unsupportedReasons": [
           {
             "file": "tests/decision-text.spec.ts",
@@ -1477,12 +1467,13 @@
         "currentMode": "full",
         "baseLane": "full",
         "currentLane": "full",
-        "cause": "Imported or directly changed browser specs have unsupported source bounds; removing those bounds restores the base essential mode.",
+        "newSinceFix3": false,
+        "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)",
+        "unknownImportSpecs": [],
         "unsupportedSpecs": [
           "tests/ticket-panel.spec.ts"
         ],
-        "supportedSpecCases": 6,
-        "nonSpecRegistrations": [],
+        "cause": "Unsupported browser source bounds force full; omitting those estimates restores essential (cost-only counterfactual).",
         "unsupportedReasons": [
           {
             "file": "tests/ticket-panel.spec.ts",
@@ -1497,15 +1488,18 @@
         "currentMode": "full",
         "baseLane": "full",
         "currentLane": "full",
-        "cause": "Imported or directly changed browser specs have unsupported source bounds; removing those bounds restores the base essential mode.",
+        "newSinceFix3": false,
+        "reason": "browser dependency proof unavailable (unresolved or dynamic import)",
+        "unknownImportSpecs": [
+          "tests/role-picker-layout.spec.ts"
+        ],
         "unsupportedSpecs": [
           "tests/settings.spec.ts",
           "tests/webcore-recovery.spec.ts",
           "tests/work-surfaces-fix2.spec.ts",
           "tests/work-vocabulary.spec.ts"
         ],
-        "supportedSpecCases": 194,
-        "nonSpecRegistrations": [],
+        "cause": "Non-literal dynamic imports make impacted browser specs unknown; omitting unsupported source counts still leaves the dependency proof unavailable.",
         "unsupportedReasons": [
           {
             "file": "tests/settings.spec.ts",
@@ -1529,12 +1523,299 @@
           }
         ]
       }
-    ]
+    ],
+    "changesSinceFix3": [
+      {
+        "number": 208,
+        "changes": [
+          {
+            "mode": "nativeL4",
+            "previous": "essential",
+            "current": "full"
+          }
+        ],
+        "reason": "browser dependency proof unavailable (unresolved or dynamic import)",
+        "unknownImportSpecs": [
+          "tests/no-shift.spec.ts",
+          "tests/role-picker-layout.spec.ts"
+        ]
+      },
+      {
+        "number": 246,
+        "changes": [
+          {
+            "mode": "nativeL4",
+            "previous": "essential",
+            "current": "full"
+          }
+        ],
+        "reason": "browser dependency proof unavailable (unresolved or dynamic import)",
+        "unknownImportSpecs": [
+          "tests/headings.spec.ts"
+        ]
+      },
+      {
+        "number": 247,
+        "changes": [
+          {
+            "mode": "nativeL4",
+            "previous": "essential",
+            "current": "full"
+          }
+        ],
+        "reason": "browser dependency proof unavailable (unresolved or dynamic import)",
+        "unknownImportSpecs": [
+          "tests/dialog-widths.spec.ts",
+          "tests/role-picker-layout.spec.ts",
+          "tests/no-shift.spec.ts"
+        ]
+      },
+      {
+        "number": 249,
+        "changes": [
+          {
+            "mode": "nativeL4",
+            "previous": "essential",
+            "current": "full"
+          }
+        ],
+        "reason": "browser dependency proof unavailable (unresolved or dynamic import)",
+        "unknownImportSpecs": [
+          "tests/headings.spec.ts"
+        ]
+      },
+      {
+        "number": 252,
+        "changes": [
+          {
+            "mode": "unset",
+            "previous": "essential",
+            "current": "full"
+          },
+          {
+            "mode": "nativeL4",
+            "previous": "essential",
+            "current": "full"
+          },
+          {
+            "mode": "sourceBoundL4",
+            "previous": "essential",
+            "current": "full"
+          }
+        ],
+        "reason": "browser dependency proof unavailable (unresolved or dynamic import)",
+        "unknownImportSpecs": [
+          "tests/role-picker-layout.spec.ts"
+        ]
+      },
+      {
+        "number": 289,
+        "changes": [
+          {
+            "mode": "nativeL4",
+            "previous": "essential",
+            "current": "full"
+          },
+          {
+            "mode": "sourceBoundL4",
+            "previous": "essential",
+            "current": "full"
+          }
+        ],
+        "reason": "browser dependency proof unavailable (unresolved or dynamic import)",
+        "unknownImportSpecs": [
+          "tests/dialog-widths.spec.ts"
+        ]
+      },
+      {
+        "number": 294,
+        "changes": [
+          {
+            "mode": "nativeL4",
+            "previous": "essential",
+            "current": "full"
+          }
+        ],
+        "reason": "browser dependency proof unavailable (unresolved or dynamic import)",
+        "unknownImportSpecs": [
+          "tests/role-picker-layout.spec.ts"
+        ]
+      }
+    ],
+    "unknownImportFiles": [
+      "tests/agent-row-fences.unit.test.ts",
+      "tests/calver3.test.ts",
+      "tests/dialog-widths.spec.ts",
+      "tests/doctrine-inbox.test.ts",
+      "tests/headings.spec.ts",
+      "tests/live-agents.spec.ts",
+      "tests/no-shift.spec.ts",
+      "tests/playwright-policy.test.ts",
+      "tests/quote-editor-core.spec.ts",
+      "tests/quote-editor-input.spec.ts",
+      "tests/role-picker-layout.spec.ts",
+      "tests/test-tier-failures.test.ts"
+    ],
+    "unknownBrowserImports": [
+      {
+        "file": "tests/dialog-widths.spec.ts",
+        "importLines": [
+          {
+            "line": 158,
+            "source": "const { confirmState } = await import(path)"
+          },
+          {
+            "line": 172,
+            "source": "const { confirmAction } = await import(path)"
+          }
+        ]
+      },
+      {
+        "file": "tests/headings.spec.ts",
+        "importLines": [
+          {
+            "line": 85,
+            "source": "const { askDoneGate } = await import(path)"
+          },
+          {
+            "line": 347,
+            "source": "const { askDoneGate } = await import(path)"
+          },
+          {
+            "line": 475,
+            "source": "const { createApp, h } = await import(vuePath)"
+          },
+          {
+            "line": 476,
+            "source": "const { default: Card } = await import(cardPath)"
+          },
+          {
+            "line": 673,
+            "source": "const { askDoneGate } = await import(path)"
+          }
+        ]
+      },
+      {
+        "file": "tests/live-agents.spec.ts",
+        "importLines": [
+          {
+            "line": 358,
+            "source": "const { createApp, h, reactive } = await import(vuePath)"
+          },
+          {
+            "line": 359,
+            "source": "const { default: Bot } = await import(botPath)"
+          },
+          {
+            "line": 610,
+            "source": "const { createApp, h, reactive } = await import(vuePath)"
+          },
+          {
+            "line": 611,
+            "source": "const { default: Bot } = await import(botPath)"
+          }
+        ]
+      },
+      {
+        "file": "tests/no-shift.spec.ts",
+        "importLines": [
+          {
+            "line": 233,
+            "source": "const { confirmAction } = await import(/* @vite-ignore */ modulePath)"
+          },
+          {
+            "line": 337,
+            "source": "const { mountShell } = await import(/* @vite-ignore */ path)"
+          },
+          {
+            "line": 343,
+            "source": "const { setLongContent } = await import(/* @vite-ignore */ path)"
+          },
+          {
+            "line": 519,
+            "source": "{ name: 'history arrives', run: async () => { await page.evaluate(async () => { const path = '/tests/helpers/no-shift-shells.ts'; const shell = await import(/* @vite-ignore */ path); shell.setModelHistory(true) }); await expect(second).toContainText('typically ~2.4 h') } },"
+          },
+          {
+            "line": 521,
+            "source": "{ name: 'uncalibrated history', run: async () => { await page.evaluate(async () => { const path = '/tests/helpers/no-shift-shells.ts'; const shell = await import(/* @vite-ignore */ path); shell.setModelHistory(false) }); await expect(second).not.toContainText('typically') } },"
+          }
+        ]
+      },
+      {
+        "file": "tests/quote-editor-core.spec.ts",
+        "importLines": [
+          {
+            "line": 33,
+            "source": "const { saveDraft } = await import(/* @vite-ignore */ '/src/lib/quotes/api.ts')"
+          },
+          {
+            "line": 47,
+            "source": "const { QuoteEditor } = await import(/* @vite-ignore */ modulePath)"
+          },
+          {
+            "line": 48,
+            "source": "const prose = await import(/* @vite-ignore */ prosePath)"
+          },
+          {
+            "line": 107,
+            "source": "const client = await import(/* @vite-ignore */ path)"
+          },
+          {
+            "line": 123,
+            "source": "const prose = await import(/* @vite-ignore */ path)"
+          }
+        ]
+      },
+      {
+        "file": "tests/quote-editor-input.spec.ts",
+        "importLines": [
+          {
+            "line": 24,
+            "source": "const harness = await import(/* @vite-ignore */ path)"
+          },
+          {
+            "line": 65,
+            "source": "const harness = await import(/* @vite-ignore */ path)"
+          }
+        ]
+      },
+      {
+        "file": "tests/role-picker-layout.spec.ts",
+        "importLines": [
+          {
+            "line": 209,
+            "source": "const { mountFloatingList } = await import(/* @vite-ignore */ path)"
+          },
+          {
+            "line": 367,
+            "source": "const { mountProjectRolePicker } = await import(/* @vite-ignore */ '/tests/helpers/floating-lists.ts')"
+          },
+          {
+            "line": 458,
+            "source": "const { mountFloatingList } = await import(/* @vite-ignore */ '/tests/helpers/floating-lists.ts')"
+          },
+          {
+            "line": 486,
+            "source": "const { mountSessionHost } = await import(/* @vite-ignore */ '/tests/helpers/floating-lists.ts')"
+          }
+        ]
+      }
+    ],
+    "newBaseModeDifferenceCause": {
+      "pr": 252,
+      "changedSource": "web/src/components/agents/SessionHost.vue",
+      "importChain": [
+        "tests/helpers/floating-lists.ts:13",
+        "tests/role-picker-layout.spec.ts:8"
+      ],
+      "unknownImport": "tests/role-picker-layout.spec.ts:209: await import(/* @vite-ignore */ path)",
+      "effect": "essential -> full for unset, source-bound L4 and native L4 planners"
+    }
   },
   "changedSourceFileSha256": {
     ".github/workflows/ci.yml": "c9b720ac06ff008c9b4c2800e5fc8a1b50cf8943292b085b97ca89055d20f2c6",
     "README.md": "226cda2166c3e41755875a6625a9fbb86c4085a0e39757fc23e943b76488d01a",
-    "docs/RELEASE.md": "621bfb9562664d9cc0dd7ca98588e36af10e3994aab6ba8bee0b1d27b9845565",
+    "docs/RELEASE.md": "333e39ba215b6a7f7243bedbcce4a5b92a33567c56f91114411339522839b256",
     "scripts/ci-pr-plan.test.mjs": "18c6f20483a5d7c43518ba77d40f4fd6ba9ea53b50e70e57e6b628e4cf114869",
     "scripts/ci-runner-guard/main.go": "90c33fad6645e4ac0c3d5005ae6c4e91eb42b00ba48a8a9bfe174688cf996cc0",
     "scripts/ci-runner-guard/workflow_policy_test.go": "3a8b68ad7f07f0b3ba747d883855b8076516b0bc2e3414e9be557e823243572e",
@@ -1544,22 +1825,22 @@
     "scripts/releaseworkflow/tree_reuse_test.go": "db9ca9f42039569f5e7eba2ddc66a480506376c66a712ae7a3977b25ba67faa7",
     "scripts/test-tiers/cli.mjs": "131c4c3ba0fea27a0f6618f7e385b546987c6aa929a00bacc0279c3c3a0ba600",
     "scripts/test-tiers/collect.mjs": "ec04b744eb32efce3c076ddbfee37c43ca01a4fe21214100bca71f88c3d82cdf",
-    "scripts/test-tiers/core.mjs": "14559a34a5813954b9559579902ba867c60a15eabb2ff019bc44cf1af60145a7",
-    "scripts/test-tiers/diff.mjs": "20873b87065c187a91b216b90565c7be7c315783c75d86909f06579ff24807f6",
+    "scripts/test-tiers/core.mjs": "ea3123f80f1f3774145c43673a22efba646c06f1196c28938fea0b11807a4c00",
+    "scripts/test-tiers/diff.mjs": "4f89e9688d5dded0266d0efbafddd23def16e12bd10be8c9730b375f02c5479c",
     "scripts/test-tiers/manifests.mjs": "b8decc22f2248c451da75d5a5c2c9ae836c89ebfdd8470bdf8c34686fe7177c4",
     "scripts/test-tiers/manifests.test.mjs": "75f4558c668aff21eef3af822c56b484ea657a863a6de2a3026d098167d563bd",
     "scripts/test-tiers/planning-web.mjs": "738e27763f41fc75041fe1e2719c6992adce702b864cb494b29f8b7e42d0beb7",
     "scripts/test-tiers/prove-manifests.mjs": "0043efefb881a4682f7ca861f134e442c371ecae3cde57d9b3ad29ddb07fa6bb",
     "scripts/test-tiers/replay.mjs": "ae7b64bd76ad1a3dc5acd3db2e8f320c44d35a55754b53e05223b553fe456034",
     "scripts/test-tiers/report.mjs": "9c4adb9a2242e060584340df69458eed8fc83d9cfc6ebd44eb4c08bd44116e8c",
-    "scripts/test-tiers/test-tiers.test.mjs": "643746958e28af705ee6391c49b0976b63faaef314f1ffb76d45d2e8420eef1a",
+    "scripts/test-tiers/test-tiers.test.mjs": "f9887f79498a14ebdef87a2e1c6340a3daf1a3536562ac74a9ff8e5c4c2befe1",
     "scripts/test-tiers/tiers-merge-driver.mjs": "a068eb5410389309a1f7b9c8a278dc271b3b5ef1dc57b98796bcdfb53e1d339d",
     "scripts/test-tiers/tiers-merge-driver.test.mjs": "03a7dca1903e879ad51232c90407cb667e39affbb121ae3cdd7ee242aa416195",
     "web/scripts/aeon-676-ci.test.mjs": "0b9551e932ed3a0a9144f16e1d810fb636940e3777978c5966e7efee887bce61",
     "web/scripts/aeon-681-ci.test.mjs": "ddb22cf9c3c02086f2115e223a4491a5dd1a7723e2593bfe4befc76cdb9e9fb4",
     "web/scripts/ci-web-shard.test.mjs": "0f796bd94b5fa905154c087e7b0ea888496be54c154df4e6d5e99a031c89677e"
   },
-  "changedSourceClosureSha256": "83bcaaeae991617a780d90cb51aee89c5ecf97646b9e5a2c41495fb12e1081c1",
+  "changedSourceClosureSha256": "11bedd96c28b7d2da6a5a1065f222297e36d3b7a430e960af9233aae585cf9cd",
   "changedSourceClosureScope": "SHA256 of compact JSON (UTF-8, no spaces, sorted file keys) mapping final-byte SHA256 for tracked files changed since immutable proof base, excluding this self-referential evidence file. Independent of whether those bytes are committed.",
   "fix2WorkerAttribution": "I work on this — session: codex-sol-ops257-l13s2-fix2 (90704f80-a65e-4385-8b4f-f8149be65e13); role: builder; started: 2026-10-06T07:35:54Z",
   "historicalFix1Checks": [
@@ -1671,8 +1952,8 @@
       "version.json",
       "justfile"
     ],
-    "sha256": "b6425eda9e6a6198a6a8a763281820931a26247f47fb77fffaa0fe297c7ac5b6",
-    "algorithm": "SHA256 of compact UTF-8 JSON mapping sorted tracked input paths to final-byte SHA256, with symlinks hashed as their target text; excludes .env* and encrypted inputs, generated local outputs and installed dependency files. This evidence is outside the selected roots.",
+    "sha256": "0d1a91a404edd713abf1e30d3721951d8de020370d54580fdb99f52dcc93d22e",
+    "algorithm": "SHA256 of compact UTF-8 JSON mapping sorted tracked input paths to final-byte SHA256, with symlinks hashed as their target text; excludes .env*, encrypted and secret-shaped filenames, generated local outputs and installed dependency files. This evidence is outside the selected roots.",
     "limits": "Current checkout source/data plus dependency lock/config inputs are hashed; installed dependency tree is reused, not independently attested. Immutable base names baseline Git objects; historical PR trees and hosted execution are not proved."
   },
   "fix3WorkerAttribution": "I work on this — session: codex-sol-ops257-l13s2-fix3 (23bfcf12-8cfe-486f-927f-ea46b1b39c8a); role: builder; started: 2026-10-06T07:58:46Z",
@@ -1774,8 +2055,72 @@
       "fix": "Dropped commit-volatile state/head/uncommitted-patch/untracked-file fields; kept immutable proof base and final-byte input hashes independent of commit status."
     }
   ],
-  "historicalFix2Note": "Historical round-2 checks and findings; current results are in checks, fix3Findings and plannerReplay. Worker history and the coordinator merge gate remain unchanged.",
-  "fix3Findings": [
+  "historicalFix2Note": "Historical round-2 checks and findings; subsequent round-3 results are retained in historicalFix3Checks and historicalFix3Findings. Current results are in checks, fix4Findings and plannerReplay. Worker history and the coordinator merge gate remain unchanged.",
+  "historicalFix3Checks": [
+    {
+      "name": "requested-node-suite",
+      "command": "node --test --test-concurrency=1 scripts/test-tiers/*.test.mjs scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs web/scripts/ci-web-shard.test.mjs web/scripts/aeon-676-ci.test.mjs web/scripts/aeon-681-ci.test.mjs",
+      "passed": 470,
+      "failed": 0,
+      "logSha256": "4538facd4d156338f3d1140df126e63a5ab4d094cff981762fd68830540b9c5c"
+    },
+    {
+      "name": "go-static-with-no-web-dependencies",
+      "command": "NODE_OPTIONS=--import=/private/tmp/ops257-fix1-no-web-deps.mjs node --test scripts/test-tiers/test-tiers.test.mjs",
+      "passed": 222,
+      "failed": 0,
+      "logSha256": "6872a21ec200a7577f86506b316187e9b2f28fcdd7097a9d3911d49759b6b9c8"
+    },
+    {
+      "name": "web-failure-reporting-native-node-runner",
+      "command": "node --experimental-strip-types --test web/tests/test-tier-failures.test.ts",
+      "passed": 8,
+      "failed": 0,
+      "logSha256": "b8c89ddca0dc901608bb54690cf54932e733bad5eac4b4356f1d5a44f11ef1a6"
+    },
+    {
+      "name": "go-packages-installed-nix-store-toolchain",
+      "command": "PATH=/nix/store/5k3v90pgx77ibb4xzabk5hghnaqklmy1-go-1.26.7/bin:$PATH GOCACHE=/private/tmp/ops257-fix2-gocache GOPROXY=off GOTOOLCHAIN=local go test ./scripts/ci-runner-guard ./scripts/releaseworkflow ./scripts/ci-go-shards -count=1",
+      "passedPackages": 3,
+      "output": [
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-runner-guard\t4.442s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/releaseworkflow\t4.417s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-go-shards\t6.291s"
+      ],
+      "logSha256": "0eae92c902c8e521e18eb31f41eb9a7eae7d673adc8a812da7745f827742e479"
+    },
+    {
+      "command": "node scripts/test-tiers/cli.mjs manifests --check",
+      "passed": true,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "node scripts/ci-static.mjs --list --json",
+      "passed": true,
+      "outputSha256": "37da9b98be9927473a2efaaf7779be13e18b6b4742c133a14b1cd7219a5f05fe"
+    },
+    {
+      "command": "git diff --check",
+      "passed": true
+    },
+    {
+      "command": "node scripts/test-tiers/prove-manifests.mjs 601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
+      "passed": true,
+      "outputSha256": "efb8b88d7fc2ff4e192d3eca00a45151cd57796c1e711546ed7ab1ea3856fa27"
+    },
+    {
+      "name": "planner-base-replay-and-native-undercount-sweep",
+      "command": "node scripts/test-tiers/replay.mjs --json --compare-base 601dbaa4f",
+      "passed": true,
+      "prs": 80,
+      "matchingModes": 76,
+      "modeChanges": 4,
+      "undercounts": 0,
+      "unsupported": 85,
+      "outputSha256": "36f46beb5233340821f7cf168ba78093ac61a6b5cfa35e666f7d2ca70b971f64"
+    }
+  ],
+  "historicalFix3Findings": [
     {
       "finding": "guard lane",
       "fix": "Spec-only web-unit collects native web registrations before tests; workflow regression checks failure propagation. Runner guard and its omission test pin the branch; static registry classifies collection; historical CI fixture stays intact."
@@ -1800,5 +2145,29 @@
       "finding": "native sweep and replay",
       "fix": "85/246 specs are unsupported/over-limit, with zero native undercounts. Modes match base on 76/80 PRs. PR246 (headings), PR253 (decision-text), PR263 (ticket-panel), and PR294 (settings, webcore-recovery, work-surfaces-fix2, work-vocabulary) widen essential->full solely due to unsupported browser specs: omitting those specs restores essential for all four. Native-vs-source L4 differs on 9 PRs; unsupported-spec omission changes 7 L4 modes. PR236, PR244 and PR252 recover their base essential mode after these fixes."
     }
+  ],
+  "historicalFix3Note": "Round 3 passed its recorded checks with 76/80 base mode matches, 246 browser files, zero undercounts and 85 unsupported/over-limit bounds. Current round-4 results supersede its non-spec reachability restriction; current checks and causes are below. Attribution history and the coordinator merge gate remain unchanged.",
+  "fix4WorkerAttribution": "I work on this — session: codex-astra-ops257-l13s2-fix4 (6701d744-19fb-40c4-9604-92703087c56b); role: builder; started: 2026-10-06T08:39:44Z",
+  "fix4Findings": [
+    {
+      "finding": "MEDIUM: unseen Playwright registrar excluded from the browser fan-out bound",
+      "fix": "Every impacted non-spec web/tests source referencing @playwright/test remains in the browser bound without a graph edge. Standalone Node and Vitest entries stay outside it; transitive browser helpers remain included. Both unset and on planners force full for the 301-case registrar, and the Go runner retains unrelated GATED-FULL tests even when supplied essential."
+    },
+    {
+      "finding": "Missing JS-to-TypeScript edges and unsupported imports silently disappear",
+      "fix": "Resolve absent .js files to .ts/.tsx/.mts before suffix probes; retain existing .js precedence. Unresolved relative imports, computed/template import() and require() in web/tests add an unknown edge whose reverse dependants fail the browser proof, including native runners. Existing external JSON is a terminal data edge. Comments cannot consume a later import and conceal a computed call."
+    },
+    {
+      "finding": "Required regression scenarios",
+      "fix": "Named tests cover template and interpolated registrar imports, import(path), require(), a 301-test registrar with no literal edge, .js resolution to all three TypeScript extensions via static import/from/reexport/dynamic import, transitive unresolved imports, unrelated specs, standalone Node/Vitest exclusions, and comment boundaries."
+    },
+    {
+      "finding": "Native sweep and 80-PR base replay",
+      "fix": "246 native browser files, 161 bounded, 85 unsupported/over-limit, zero undercounts. Unset source planner matches 75/80 modes against 601dbaa4f. PR252 is the only new base-mode difference; the complete list and all affected-lane changes since round 3 are recorded in plannerReplay."
+    }
+  ],
+  "fix4CostNotes": [
+    "A template containing the word test and const copy = roles still return unknown; these are cost notes, not additional fixes.",
+    "Unknown import propagation is deliberately conservative even for imports inside test callbacks. Existing static/literal imports and terminal JSON data remain mapped; node/Vitest-only changes do not enter the browser bound."
   ]
 }

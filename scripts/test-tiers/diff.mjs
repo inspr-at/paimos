@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { command, root } from './collect.mjs'
 import { planningWebCases, browserCaseLimit } from './planning-web.mjs'
 import { boundedText, inputMetadata, readInput, inputBounds } from './inputs.mjs'
-import { reverseDependants, webGraph, impactRisk, validImpactPaths, manifestPromotions, tierManifestPattern, key, implicitTier, validateImplicitTier } from './core.mjs'
+import { reverseDependants, webGraph, unknownWebImport, impactRisk, validImpactPaths, manifestPromotions, tierManifestPattern, key, implicitTier, validateImplicitTier } from './core.mjs'
 
 export function changedPaths(event, env=process.env, { fetchBase=false, exec=command }={}) {
   if (!['pull_request','merge_group'].includes(event)) return undefined
@@ -67,7 +67,7 @@ export function sourceTree(checkout=root, { bounds=inputBounds, read=readInput }
     if(!statSync(realpathSync(checkout)).isDirectory())throw new Error('missing consumer checkout')
     // Preflight the complete file set and all sizes before the first read.
     for(const directory of ['internal','cmd','scripts']) visit(directory,go,file=>file.endsWith('.go'),true)
-    visit('web/tests',webTests,file=>/\.(?:ts|mjs|js)$/.test(file),true)
+    visit('web/tests',webTests,file=>/\.(?:ts|tsx|mts|mjs|js)$/.test(file),true)
     for(const {file,into,metadata} of files)into.set(file,read(metadata,bounds.fileBytes))
     tree={complete:true,go,webTests:new Map([...webTests].map(([file,text])=>[file.slice(4),text]))}
   } catch(error) {
@@ -146,7 +146,7 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
     if(risk.handled.has(path))continue
     if(/^(?:docs\/|README(?:\.|$)|LICENSE(?:\.|$)|CHANGELOG(?:\.|$))/.test(path))continue
     if(!exists(path)||!/^(?:(?:internal|cmd)\/|web\/(?:src|tests|e2e)\/)/.test(path))return full(`unmapped or deleted input: ${path}`)
-    if(path.startsWith('web/')&&!/\.(?:ts|js|mjs|vue|json|css)$/.test(path))return full(`unsupported web input: ${path}`)
+    if(path.startsWith('web/')&&!/\.(?:ts|tsx|mts|js|mjs|vue|json|css)$/.test(path))return full(`unsupported web input: ${path}`)
   }
   const webSeeds=[...risk.webSeeds]
   if(webChanges.length||webSeeds.length) {
@@ -156,13 +156,20 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
     if(webChanges.some(file=>file.startsWith('src/'))&&![...impacted].some(file=>/^tests\/.*\.(?:spec|test)\.ts$/.test(file)))return full('web module has no mapped test importer')
     // Large mapped fan-outs use the old full layout too. The tier selector
     // still records the exact essential/changed union within those runners.
+    webTree ??= tree ?? sourceTree(checkout)
+    // A registrar can be loaded by an import the graph cannot see. Keep
+    // Playwright references even without a spec edge; standalone unit files
+    // belong to Node/Vitest, not the browser case count.
     const specs = [...impacted].filter(file => file.startsWith('tests/') &&
-      (file.endsWith('.spec.ts') || [...reverseDependants(new Set([file]), graph)].some(importer => /^tests\/.*\.spec\.ts$/.test(importer))))
+      (file.endsWith('.spec.ts') ||
+        !file.endsWith('.test.ts') && (!webTree.complete || webTree.webTests.get(file) === undefined || webTree.webTests.get(file).includes('@playwright/test')) ||
+        [...reverseDependants(new Set([file]), graph)].some(importer => /^tests\/.*\.spec\.ts$/.test(importer))))
     if (specs.length) {
+      const unknown = reverseDependants(new Set([unknownWebImport]), graph)
+      if (specs.some(file => unknown.has(file))) return full('browser dependency proof unavailable (unresolved or dynamic import)')
       const browser = tests.filter(row => row.kind === 'browser')
       // A native runner inventory is complete. The lightweight planner reads
       // bounded source bytes from its own (trusted, for L4) tree snapshot.
-      webTree ??= tree ?? sourceTree(checkout)
       const bound = browser.length ? browser.filter(row => impacted.has(row.file)).length
         : specs.reduce((sum, file) => {
           const source = webTree.complete ? webTree.webTests.get(file) : undefined

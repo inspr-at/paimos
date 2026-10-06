@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { spawnSync, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound } from './core.mjs'
+import { validate, select, shard, key, exactPattern, webGraph, unknownWebImport, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
@@ -613,9 +613,9 @@ test('offline replay CLI policy fixture prints every real PR with selected count
   const report=JSON.parse(result.stdout)
   assert.equal(report.replay.length,80)
   // Measured on the current tree (consumers, migrations); deleted files replay as full.
-  assert.deepEqual(report.transitions,{'full->full':44,'full->essential':24,'essential->essential':12})
-  assert.equal(report.summary.newNarrowed,36)
-  assert.equal(report.summary.oldEssential,12)
+  assert.deepEqual(report.transitions,{'full->full':51,'full->essential':18,'essential->essential':11})
+  assert.equal(report.summary.newNarrowed,29)
+  assert.equal(report.summary.oldEssential,11)
   assert.equal(report.browserBounds.unsupportedSpecs.length,report.browserBounds.overLimitOrUnsupported)
   assert.deepEqual(report.browserBounds.undercounts,[])
   assert.match(report.sourceBoundComparison.unsupportedCostMethod,/cost only/)
@@ -1505,7 +1505,7 @@ for (const [scenario, source] of [
   ...['&&','||','?',';','}'].map(operator=>[`ambiguous slash after ${operator}`, `a ${operator} /it's/.test(s); test('a',()=>{}); test('b',()=>{})`]),
 ]) test(`browser planner rejects ${scenario}`, () => assert.ok(planningWebCases(source) > 300))
 
-test('browser planner bounds non-spec registrations only when a spec imports them transitively', () => {
+test('browser planner bounds non-spec registrations imported transitively by a spec', () => {
   for (const file of ['tests/helper.ts','tests/helper.js','tests/helper.mjs','tests/a.unit.test.ts']) {
     const tree={complete:true,webTests:new Map([[file,"test('case',()=>{})"],['tests/importer.spec.ts',"test('spec',()=>{})"],['tests/bridge.ts','export {}']])}
     for (const affectedLane of [undefined,'on']) {
@@ -1518,6 +1518,84 @@ test('browser planner bounds non-spec registrations only when a spec imports the
         assert.match(imported.reason,/source bound unavailable/)
       }
     }
+  }
+})
+
+function browserImportFixture(files) {
+  const checkout=mkdtempSync(resolve(tmpdir(),'aeon-browser-import-'))
+  for(const dir of ['src','tests','e2e'])mkdirSync(resolve(checkout,'web',dir),{recursive:true})
+  for(const [file,source] of Object.entries(files))writeFileSync(resolve(checkout,'web',file),source)
+  const graph=webGraph(resolve(checkout,'web')),tree=sourceTree(checkout)
+  const decide=(file,affectedLane,tests=[g('internal/auth','TestCore','ESSENTIAL')])=>schedulingDecision('pull_request',[`web/${file}`],()=>true,{checkout,affectedLane,graph,tree,tests})
+  return {graph,tree,decide}
+}
+
+const registrar301="import {test} from '@playwright/test';\n"+Array.from({length:301},(_,i)=>`test('case ${i}',()=>{});`).join('\n')
+for(const [scenario,loader] of [
+  ['template import of a registrar','await import(`./cases.ts`)'],
+  ['interpolated template import','const name="cases"; await import(`./${name}.ts`)'],
+  ['computed import','const path="./cases.ts"; await import(path)'],
+  ['require','require("./cases.ts")'],
+  ['no literal edge',''],
+]) test(`browser registrar forces full without a graph edge: ${scenario}`,()=>{
+  const {graph,decide}=browserImportFixture({'tests/cases.ts':registrar301,'tests/importer.spec.ts':loader})
+  assert.ok(!graph['tests/importer.spec.ts'].includes('tests/cases.ts'))
+  for(const affectedLane of [undefined,'on']) {
+    const result=decide('tests/cases.ts',affectedLane)
+    assert.equal(result.mode,'full')
+    assert.match(result.reason,/browser fan-out exceeds 300/)
+    const gated=g('internal/unrelated','TestFullGate','GATED-FULL')
+    const selection=runnerSelection([gated],{event:'pull_request',paths:['web/tests/cases.ts'],affectedLane},result,{mode:'essential'})
+    assert.equal(selection.scope,'gated-full')
+    assert.deepEqual(selection.tests,[gated],'Go must retain unrelated full-gate tests even if the supplied planner was essential')
+    // The web runner has native rows; the Go runner/planner above has none.
+    assert.equal(decide('tests/cases.ts',affectedLane,Array.from({length:301},(_,i)=>({kind:'browser',file:'tests/cases.ts',name:`case ${i}`}))).mode,'full')
+  }
+})
+
+for(const extension of ['ts','tsx','mts']) test(`browser graph resolves missing cases.js onto cases.${extension}`,()=>{
+  const file=`tests/cases.${extension}`
+  for(const loader of ["import './cases.js'","import * as cases from './cases.js'","export * from './cases.js'","await import('./cases.js')"]) {
+    const {graph,tree,decide}=browserImportFixture({[file]:registrar301,'tests/cases.js.ts':'export {}','tests/importer.spec.ts':loader})
+    assert.deepEqual(graph['tests/importer.spec.ts'],[file])
+    assert.equal(tree.webTests.get(file),registrar301)
+    for(const affectedLane of [undefined,'on'])assert.equal(decide(file,affectedLane).mode,'full')
+  }
+})
+
+test('browser graph prefers existing JS and resolves literal imports, reexports and external JSON',()=>{
+  const {graph}=browserImportFixture({'tests/cases.js':'export {}','tests/cases.ts':registrar301,
+    'tests/importer.spec.ts':"import /* comment */ './cases.js'; export * from './cases.js'; await import(/* comment */ './cases.js' /* comment */)",
+    '../data.json':'{}','tests/data.ts':"import value from '../../data.json'",
+    'tests/missing.ts':"import value from '../../missing.json'"})
+  assert.deepEqual(graph['tests/importer.spec.ts'],['tests/cases.js'])
+  assert.deepEqual(graph['tests/data.ts'],['../data.json'])
+  assert.ok(graph['tests/missing.ts'].includes(unknownWebImport),'missing JSON must be unknown too')
+})
+
+for(const loader of ["import './missing.ts'","import /* comment */ './missing.ts'","export * from './missing'","await import('./missing.js')",
+  'await import(`./cases.ts`)','await import(path)',"await import('./'+name)",'require("./cases.ts")',
+  'await import(/* first */ path); await import(/* second */ "@playwright/test")',
+  'await import /* comment */ (path)','require /* comment */ (path)']) test(`browser import uncertainty propagates to dependants: ${loader}`,()=>{
+  const {graph,decide}=browserImportFixture({'tests/loader.ts':loader,'tests/bridge.ts':"export * from './loader'",
+    'tests/importer.spec.ts':"import './bridge'; test('case',()=>{})",'tests/unrelated.spec.ts':"test('case',()=>{})"})
+  assert.ok(graph['tests/loader.ts'].includes(unknownWebImport))
+  for(const affectedLane of [undefined,'on']) {
+    for(const file of ['tests/loader.ts','tests/bridge.ts','tests/importer.spec.ts']) {
+      for(const tests of [undefined,[g('internal/auth','TestCore','ESSENTIAL'),{kind:'browser',file:'tests/importer.spec.ts',name:'case'}]]) {
+        const result=decide(file,affectedLane,tests)
+        assert.equal(result.mode,'full')
+        assert.match(result.reason,/browser dependency proof unavailable/)
+      }
+    }
+    assert.equal(decide('tests/unrelated.spec.ts',affectedLane).mode,'essential','uncertainty is scoped to dependants')
+  }
+})
+
+test('standalone Node and Vitest sources stay outside the browser bound',()=>{
+  for(const file of ['tests/node.test.ts','tests/unit.unit.test.ts']) {
+    const {decide}=browserImportFixture({[file]:"// @playwright/test\nrequire(path); "+registrar301})
+    for(const affectedLane of [undefined,'on'])assert.equal(decide(file,affectedLane).mode,'essential')
   }
 })
 
