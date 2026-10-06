@@ -9788,6 +9788,8 @@
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"editable metadata cannot invent ticket provenance or a source-edit action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"extreme primary accents keep recurrence glyphs readable without moving controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"moved ticket provenance and source editing use the receipt source project despite spoofed metadata","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"option B has a stable 22 px slot and header at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

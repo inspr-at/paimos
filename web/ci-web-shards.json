@@ -388,7 +388,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/recurrence-marker.spec.ts","weightSeconds":45,"weightSource":"estimate"}
+        {"file":"tests/recurrence-marker.spec.ts","listedTests":36,"weightSeconds":45,"weightSource":"estimate"}
         ,
         {"file":"tests/recurrences.spec.ts","weightSeconds":45,"weightSource":"estimate"}
       ]
