@@ -279,6 +279,14 @@ func TestPostClaimPreparationFailureSettlesWithoutLaunch(t *testing.T) {
 func restartClaimFixture(t *testing.T, s *Supervisor, api *claimFaultAPI, adapter Adapter) *Supervisor {
 	t.Helper()
 	// Simulate loss of the prior daemon without claiming its processes exited.
+	// Proven no-launch records permit clean lock release; uncertain records
+	// retain the checkout fence. The separate subprocess handoff test exercises
+	// actual OS descriptor loss for an unknown fork.
+	if status := s.Lifecycle(""); len(status.ActiveRunIDs) == 0 && len(status.UnconfirmedRunIDs) == 0 {
+		if err := s.Close(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
 	_ = s.lock.Close()
 	_ = s.state.Close()
 	next, err := NewSupervisor(t.Context(), Config{API: api, StateRoot: s.journalDir(), DaemonID: s.daemonID, Workspace: s.workspace, Adapters: []Adapter{adapter}, Accounts: s.accounts, EstimatedUnits: s.estimates})
