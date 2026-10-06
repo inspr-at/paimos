@@ -3,12 +3,46 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { checkMigrations, contractMarker, destructive, publishedMigrations, splitSQL } from './check-migrations.mjs';
 
 const marker = '-- aeon:contract-phase AEON-415 expanded-in=v260930115354.0.0 expansion-migration=0001_tenants.sql\n';
+
+test('AEON-698 historical migration reads preserve exact bytes with two Git launches', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-698-migration-batch-'));
+  const migrations = join(directory, 'internal/db/migrations');
+  mkdirSync(migrations, {recursive: true});
+  const git = (...args) => execFileSync('git', args, {cwd: directory, encoding: 'utf8'}).trim();
+  git('init', '-q');
+  const expected = new Map(Array.from({length: 8}, (_, i) => [
+    `000${i}_fixture.sql`, i === 0 ? '' : `-- Grüße ${i}\r\nSELECT 'blob 123\\n';${i % 2 ? '\n' : ''}`,
+  ]));
+  for (const [name, sql] of expected) writeFileSync(join(migrations, name), sql);
+  writeFileSync(join(migrations, 'README.txt'), 'not SQL');
+  git('add', '.');
+  const tree = git('write-tree');
+  const cwd = process.cwd(), original = childProcess.execFileSync, calls = [];
+  try {
+    process.chdir(directory);
+    childProcess.execFileSync = (bin, args, options) => {
+      calls.push({bin, args});
+      return original(bin, args, options);
+    };
+    syncBuiltinESMExports();
+    assert.deepEqual(publishedMigrations(tree), expected, 'empty, multibyte, CRLF and unterminated SQL stay byte-exact');
+    assert.equal(calls.length, 2, 'Git launch count must not grow with the migration count');
+    assert.ok(calls.every(call => call.bin === 'git'));
+    assert.deepEqual(calls[1].args, ['cat-file', '--batch']);
+  } finally {
+    childProcess.execFileSync = original;
+    syncBuiltinESMExports();
+    process.chdir(cwd);
+  }
+});
 
 test('duplicate numbers fail even with different names and SQL', () => {
   const problems = checkMigrations(new Map([['1050_first.sql', 'SELECT 1;'], ['1050_second.sql', 'SELECT 2;']]));
