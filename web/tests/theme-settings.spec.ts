@@ -1,13 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type Locator } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { fixtures, mockWork, me, watchErrors } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { ActiveTheme, ThemeRecord } from '../src/lib/themes'
+import { CARD_COLOURS, colourContrast } from '../src/lib/themeEngine'
+import { mockDecisionDesk, sampleQuestion } from './decision-desk-fixtures'
+import { pairingGuide } from './agent-pairing-fixtures'
+import { mockPublicQuote } from './quote-list-fixtures'
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
 const record = (id: string, name: string, scope: ThemeRecord['scope']): ThemeRecord => ({ id, name, scope, tenant_id: 't1', owner_principal_id: scope === 'personal' ? me.id : null, revision: 3, created_at: '', updated_at: '', values: { primary: { light: '#0e6f6c', dark: null }, secondary: { light: '#d69b31', dark: '#e2b45a' }, recurring_marker: { source: 'secondary', custom: null }, agents: { avatar: 'robot-5', ring: 'still', hover: true, size: 90, palette: 'deutan' } } })
-async function setup(page: Page, options: { admin?: boolean; fail?: number; defaultLater?: boolean } = {}) {
-  await mockWork(page, fixtures(), { admin: options.admin })
+async function setup(page: Page, options: { admin?: boolean; fail?: number; defaultLater?: boolean; markdownBody?: string; decisionDesk?: boolean | 'paged' } = {}) {
+  const work = fixtures()
+  if (options.markdownBody) work.nodes.find(node => node.key === 'PHAROS-12')!.body = options.markdownBody
+  await mockWork(page, work, { admin: options.admin })
+  if (options.decisionDesk) {
+    const desk = await mockDecisionDesk(page)
+    if (options.decisionDesk === 'paged') for (let at = 2; at < 101; at++) desk.questions.push(sampleQuestion(`question-${at + 1}`))
+  }
   const data = { items: [record('default', 'Porcelain', 'default'), record('contrast', 'High contrast', 'workspace'), record('copper', 'Copper', 'personal')], selected: 'copper', revision: 17, writes: [] as { method: string; path: string; body: Record<string, unknown> | null }[], fail: options.fail ?? 0, copies: 0 }
   const active = (): ActiveTheme => ({ theme: data.items.find(item => item.id === data.selected)!, default_theme_id: 'default', selected_theme_id: data.selected === 'default' ? null : data.selected, revision: data.revision, fallback_notice: null })
   await page.route('**/api/**', async route => {
@@ -63,7 +73,7 @@ async function colour(page: Page, label: string, hex: string, screenshot?: strin
   await page.getByRole('button', { name: /^Done/ }).click()
 }
 for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
-  test(`Theme settings ${width} ${mode}: preview, Suggest, marker and overlay stay still`, async ({ page }) => {
+  test(`Theme settings ${width} ${mode}: preview, derived colours, marker and overlay stay still`, async ({ page }) => {
     await page.setViewportSize({ width, height: 950 })
     const errors = watchErrors(page)
     await setup(page, { admin: true }); await page.goto('/settings/theme')
@@ -78,7 +88,7 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
       { name: 'reset primary dark to derived', run: async () => { await page.getByRole('button', { name: 'Use derived primary dark' }).click(); await expect(page.getByRole('button', { name: 'Use derived primary dark' })).toBeDisabled() } },
       { name: 'reset secondary dark to derived', run: async () => { await page.getByRole('button', { name: 'Use derived secondary dark' }).click(); await expect(page.getByRole('button', { name: 'Use derived secondary dark' })).toBeDisabled() } },
       { name: 'set secondary dark by hand', run: async () => { await colour(page, 'Secondary accent, dark', '#123456'); await expect(page.getByRole('button', { name: 'Use derived secondary dark' })).toBeEnabled() } },
-      { name: 'Suggest only failing light', run: async () => { await page.getByRole('button', { name: 'Suggest readable primary light' }).click(); await expect(page.getByTestId('primary-light-contrast')).not.toContainText('below') } },
+      { name: 'derived text remains readable', run: async () => { await expect(page.getByTestId('primary-light-contrast')).not.toContainText('below'); await expect(page.getByRole('button', { name: /Suggest readable/ })).toHaveCount(0) } },
       { name: 'marker Primary', run: async () => { await page.getByRole('radio', { name: 'Primary', exact: true }).click() } },
       { name: 'marker Secondary', run: async () => { await page.getByRole('radio', { name: 'Secondary', exact: true }).click() } },
       { name: 'marker Neutral grey', run: async () => { await page.getByRole('radio', { name: 'Neutral grey', exact: true }).click() } },
@@ -121,16 +131,246 @@ test('save preserves Agents, manual dark and derived reset; invalid hex never wr
   expect(data.items[2]!.values.agents).toEqual(record('copper', 'Copper', 'personal').values.agents)
   expect(data.writes.filter(write => write.method === 'PATCH')).toHaveLength(1)
 })
-test('Suggest touches only a failing mode and warnings never block Save', async ({ page }) => {
+test('derived contrast preserves chosen colours and staged edits apply only after Save', async ({ page }) => {
   const data = await setup(page); await page.goto('/settings/theme')
-  await page.getByRole('button', { name: 'Suggest readable secondary light', exact: true }).click()
-  await bar(page).getByRole('button', { name: /^Save/ }).click(); await expect(bar(page)).toHaveCount(0)
-  expect(data.items[2]!.values.secondary.dark).toBe('#e2b45a')
+  const primary = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--primary').trim())
+  await expect.poll(primary).toBe('#0e6f6c')
   await colour(page, 'Primary accent, light', '#ffffff')
-  await expect(page.getByTestId('primary-light-contrast')).toContainText('below 4.5:1')
+  await expect(page.getByTestId('primary-light-contrast')).not.toContainText('below 4.5:1')
+  await expect(page.getByRole('button', { name: /Suggest readable/ })).toHaveCount(0)
+  expect(await primary()).toBe('#0e6f6c')
   await expect(bar(page).getByRole('button', { name: /^Save/ })).toBeEnabled()
   await bar(page).getByRole('button', { name: /^Save/ }).click(); await expect(bar(page)).toHaveCount(0)
   expect(data.items[2]!.values.primary.light).toBe('#ffffff')
+  await expect.poll(primary).toBe('#ffffff')
+  expect(data.items[2]!.values.secondary.dark).toBe('#e2b45a')
+  const css = await page.locator('#aeon-theme').textContent()
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
+  expect(await primary()).not.toBe('#ffffff')
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
+  expect(await primary()).toBe('#ffffff')
+  await page.evaluate(() => { delete document.documentElement.dataset.theme })
+  expect(await primary()).not.toBe('#ffffff')
+  expect(await page.locator('#aeon-theme').textContent()).toBe(css)
+  await expect(page.locator('#aeon-theme')).toHaveCount(1)
+})
+function rgbHex(value: string) {
+  const match = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(value)
+  expect(match, `expected an opaque rendered colour: ${value}`).not.toBeNull()
+  return '#' + match!.slice(1).map(channel => Number(channel).toString(16).padStart(2, '0')).join('')
+}
+async function saveExtremePrimary(page: Page) {
+  await colour(page, 'Primary accent, light', '#ffffff')
+  await colour(page, 'Primary accent, dark', '#000000')
+  await bar(page).getByRole('button', { name: /^Save/ }).click()
+  await expect(bar(page)).toHaveCount(0)
+  await expect(page.locator('.theme-status')).toContainText('Saved.')
+}
+// Resolve CSS Color 4 values and composite transparent row tints over their
+// actual ancestor surfaces instead of comparing against an assumed card.
+async function renderedContrast(element: Locator) {
+  const rendered = await element.evaluate(async el => {
+    // Flush the mode change, then measure the settled colours of controls that
+    // transition their fill/text. No elapsed-time sleeps or relaxed threshold.
+    getComputedStyle(el).color
+    await Promise.all(el.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity)
+      .map(animation => animation.finished.catch(() => {})))
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 1
+    const context = canvas.getContext('2d', { willReadFrequently: true })!
+    const rgba = (colour: string) => {
+      context.clearRect(0, 0, 1, 1)
+      context.fillStyle = colour
+      context.fillRect(0, 0, 1, 1)
+      return Array.from(context.getImageData(0, 0, 1, 1).data)
+    }
+    const layers: number[][] = []
+    for (let node: Element | null = el; node; node = node.parentElement) {
+      const background = rgba(getComputedStyle(node).backgroundColor)
+      layers.push(background)
+      if (background[3] === 255) break
+    }
+    let background = [255, 255, 255]
+    for (const layer of layers.reverse()) {
+      const alpha = layer[3]! / 255
+      background = background.map((channel, at) => layer[at]! * alpha + channel * (1 - alpha))
+    }
+    const hex = (rgb: number[]) => '#' + rgb.slice(0, 3).map(channel => Math.round(channel).toString(16).padStart(2, '0')).join('')
+    return { text: hex(rgba(getComputedStyle(el).color)), background: hex(background) }
+  })
+  return colourContrast(rendered.text, rendered.background)
+}
+async function applyExtremePrimary(page: Page) {
+  // These public routes and the isolated badge use the same runtime publisher
+  // as the signed-in theme editor, without borrowing a person's browser.
+  await page.evaluate(async () => {
+    // @ts-expect-error Vite resolves browser source URLs.
+    const { applyTheme } = await import('/src/lib/themeRuntime.ts')
+    // @ts-expect-error Vite resolves browser source URLs.
+    const { PORCELAIN } = await import('/src/lib/themeEngine.ts')
+    applyTheme({ ...PORCELAIN, primary: { light: '#ffffff', dark: '#000000' } })
+  })
+}
+for (const target of ['text', 'action'] as const) {
+  test(`saved extreme primary accents keep Decision Desk ${target} readable`, async ({ page }, testInfo) => {
+    await setup(page, { decisionDesk: true })
+    await page.goto('/settings/theme')
+    await saveExtremePrimary(page)
+    await page.goto('/decision-desk')
+    await page.getByTestId('desk-row-q:question-1').click()
+    const decide = page.getByTestId('desk-decide')
+    await expect(decide).toBeEnabled()
+    const elements = target === 'action' ? [decide] : [page.locator('.recommend'), page.getByTestId('stamp-once'), page.locator('.large-stamp.stamp-once')]
+    for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: 950 })
+      await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+      for (const element of elements) {
+        await expect(element).toBeVisible()
+        expect(await renderedContrast(element), `${width} ${mode}: ${target}`).toBeGreaterThanOrEqual(4.5)
+      }
+      await expectStableControls({ controls: { decide, choices: page.getByTestId('desk-choices'), first: page.getByTestId('choice-0'), second: page.getByTestId('choice-1') }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
+        { name: 'choose another answer', run: async () => { await page.getByTestId('choice-1').click() } },
+        { name: 'restore recommended answer', run: async () => { await page.getByTestId('choice-0').click() } },
+      ] })
+      for (const element of elements) expect(await renderedContrast(element), `${width} ${mode}: selected row`).toBeGreaterThanOrEqual(4.5)
+      await page.screenshot({ path: testInfo.outputPath(`desk-${target}-${width}-${mode}.png`) })
+    }
+  })
+}
+for (const target of ['setup progress', 'unread badge', 'open ticket chip', 'public quote action'] as const) {
+  test(`extreme primary accents keep ${target} readable`, async ({ page }, testInfo) => {
+    const data = await setup(page)
+    data.items[2]!.values.primary = { light: '#ffffff', dark: '#000000' }
+    let element: Locator
+    if (target === 'setup progress') {
+      await page.route('**/api/agent-pairing/guide', route => route.fulfill({ json: pairingGuide() }))
+      await page.goto('/agents/register-agent')
+      element = page.locator('.steps .current .num')
+    } else if (target === 'public quote action') {
+      await mockPublicQuote(page, { acceptable: true })
+      await page.goto('/offers/sel-demo/tok-example')
+      element = page.locator('.pq-btn.primary').first()
+    } else {
+      await page.goto('/settings/theme')
+      await expect(card(page)).toBeVisible()
+      // Mount real components with deterministic count/peek state, retaining
+      // their templates, scoped styles and the app's router/Pinia providers.
+      await page.evaluate(async target => {
+        // @ts-expect-error Vite resolves the same Vue instance as the app.
+        const { createApp, ref } = await import('/node_modules/.vite/deps/vue.js')
+        const host = document.createElement('div')
+        host.id = 'theme-role-sample'
+        document.querySelector('#colours')!.append(host)
+        if (target === 'unread badge') {
+          // @ts-expect-error Vite resolves browser source URLs.
+          const { default: SessionTabs } = await import('/src/components/agents/SessionTabs.vue')
+          createApp(SessionTabs, { selected: 'overview', unread: 3 }).mount(host)
+        } else {
+          // @ts-expect-error Vite resolves browser source URLs.
+          const { default: TicketLink } = await import('/src/components/releases/TicketLink.vue')
+          // @ts-expect-error Vite resolves browser source URLs.
+          const { TICKET_PEEK } = await import('/src/lib/ticketPeek.ts')
+          const app = createApp(TicketLink, { ticketKey: 'PHAROS-11' })
+          const main = document.getElementById('app') as HTMLElement & { __vue_app__: { _context: { provides: object } } }
+          Object.assign(app._context, main.__vue_app__._context)
+          app._context.provides = Object.create(main.__vue_app__._context.provides)
+          app.provide(TICKET_PEEK, { openKey: ref('PHAROS-11'), open: () => {} })
+          app.mount(host)
+        }
+      }, target)
+      element = page.locator(target === 'unread badge' ? '#theme-role-sample .count' : '#theme-role-sample .ticket-link.chip[aria-current="true"]')
+    }
+    await expect(element).toBeVisible()
+    await applyExtremePrimary(page)
+    for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: 950 })
+      await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+      await element.scrollIntoViewIfNeeded()
+      expect(await renderedContrast(element), `${width} ${mode}: ${target}`).toBeGreaterThanOrEqual(4.5)
+      await page.screenshot({ path: testInfo.outputPath(`${target.replaceAll(' ', '-')}-${width}-${mode}.png`) })
+    }
+  })
+}
+test('saved extreme primary accents keep Decision Desk pagination readable', async ({ page }, testInfo) => {
+  await setup(page, { decisionDesk: 'paged' })
+  await page.goto('/settings/theme')
+  await saveExtremePrimary(page)
+  await page.goto('/decision-desk')
+  const loadMore = page.getByRole('button', { name: 'Load 100 more' })
+  for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 950 })
+    await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+    await expect(loadMore).toBeVisible()
+    await loadMore.scrollIntoViewIfNeeded()
+    expect(await renderedContrast(loadMore), `${width} ${mode}: pagination text`).toBeGreaterThanOrEqual(4.5)
+    await page.screenshot({ path: testInfo.outputPath(`desk-pagination-${width}-${mode}.png`) })
+  }
+})
+test('saved extreme primary accents keep ordinary and Markdown links readable', async ({ page }, testInfo) => {
+  await setup(page, { markdownBody: '[Dokumentation für wiederkehrende Aufgaben](https://example.com/docs)' })
+  await page.goto('/settings/theme')
+  await saveExtremePrimary(page)
+  await page.goto('/p/PHAROS/PHAROS-12')
+  const markdown = page.locator('.ticket-ws .markdown-body a[href="https://example.com/docs"]')
+  await expect(markdown).toBeVisible()
+  // An ordinary anchor beside the real Markdown component exercises base.css
+  // without inheriting MarkdownBody's scoped link rule. Both use the card surface.
+  await markdown.evaluate(link => {
+    const card = link.closest('.markdown-body')!.parentElement!
+    card.style.backgroundColor = 'var(--surface-raised)'
+    const ordinary = document.createElement('a')
+    ordinary.href = 'https://example.com/ordinary'
+    ordinary.textContent = 'Arbeitsbereich für persönliche Farbgestaltung'
+    ordinary.dataset.testid = 'theme-base-link'
+    card.append(ordinary)
+  })
+  const ordinary = page.getByTestId('theme-base-link')
+  for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 950 })
+    await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+    for (const link of [ordinary, markdown]) {
+      await expect(link).toBeVisible()
+      const rendered = await link.evaluate(el => ({ colour: getComputedStyle(el).color,
+        surface: getComputedStyle(el.closest('.markdown-body')?.parentElement ?? el.parentElement!).backgroundColor }))
+      expect(rgbHex(rendered.surface)).toBe(CARD_COLOURS[mode])
+      expect(colourContrast(rgbHex(rendered.colour), rgbHex(rendered.surface)), `${width} ${mode}: link text contrast`).toBeGreaterThanOrEqual(4.5)
+    }
+    await markdown.scrollIntoViewIfNeeded()
+    await page.screenshot({ path: testInfo.outputPath(`links-${width}-${mode}.png`) })
+  }
+})
+test('saved extreme primary accents retain visible keyboard focus without moving controls', async ({ page }, testInfo) => {
+  await setup(page)
+  await page.goto('/settings/theme')
+  await saveExtremePrimary(page)
+  const primary = page.getByRole('button', { name: 'Primary accent, light', exact: true })
+  const secondary = page.getByRole('button', { name: 'Secondary accent, light', exact: true })
+  for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 950 })
+    await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+    await primary.scrollIntoViewIfNeeded()
+    await expectStableControls({ controls: { primary, secondary }, scrollAreas: { page: page.locator('.settings-page') }, interactions: [{
+      name: `${width} ${mode}: keyboard focus`, run: async () => {
+        await primary.focus()
+        await page.keyboard.press('Shift+Tab')
+        await page.keyboard.press('Tab')
+        await expect(primary).toBeFocused()
+        expect(await primary.evaluate(el => el.matches(':focus-visible'))).toBe(true)
+        const rendered = await primary.evaluate(el => {
+          const css = getComputedStyle(el)
+          return { shadow: css.boxShadow, outline: css.outlineColor, style: css.outlineStyle, width: css.outlineWidth }
+        })
+        const ring = /^(rgb\(\d+, \d+, \d+\)) 0px 0px 0px 2px$/.exec(rendered.shadow)
+        expect(ring, 'one opaque focus ring without glow').not.toBeNull()
+        expect(colourContrast(rgbHex(ring![1]!), CARD_COLOURS[mode])).toBeGreaterThanOrEqual(3)
+        expect(rendered.style).toBe('solid')
+        expect(rendered.width).toBe('2px')
+        expect(colourContrast(rgbHex(rendered.outline), CARD_COLOURS[mode])).toBeGreaterThanOrEqual(3)
+      },
+    }] })
+    await page.screenshot({ path: testInfo.outputPath(`focus-${width}-${mode}.png`) })
+  }
 })
 test('workspace themes are read-only to members; duplicate and delete use captured revisions', async ({ page }) => {
   const data = await setup(page); await page.goto('/settings/theme')

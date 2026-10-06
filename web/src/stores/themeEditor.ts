@@ -41,7 +41,7 @@
 //      workspace themes need settings.manage. The default is never deletable.
 //   8. Every server-confirmed active theme (a load, a choice, a save, a
 //      selected copy, the fallback after deleting the active theme) is
-//      published to the runtime agent appearance (lib/agentTheme) by the
+//      published as accent CSS and agent appearance (lib/themeRuntime) by the
 //      runner, for the identity it was loaded for. Results land in the shared
 //      editor whether or not a settings card is mounted, so navigation can
 //      never strand a committed change; drafts are never published.
@@ -55,7 +55,8 @@
 import { computed, effectScope, shallowRef, watch, type EffectScope } from 'vue'
 import { useSession } from './session'
 import { can } from '../lib/authz'
-import { publishAgentTheme, registerAgentThemeRestoration } from '../lib/agentTheme'
+import { registerAgentThemeRestoration } from '../lib/agentTheme'
+import { publishTheme } from '../lib/themeRuntime'
 import * as themes from '../lib/themes'
 import type { ActiveTheme, ThemeRecord, ThemesPage } from '../lib/themes'
 
@@ -370,7 +371,7 @@ export function createThemeEditor() {
     const before = state.value, after = transition(before, event)
     if (after === before) return false
     state.value = freeze(after)
-    if (after.active && after.active !== before.active) publishAgentTheme(after.identity, after.active)
+    if (after.active && after.active !== before.active) publishTheme(after.identity, after.active)
     if (after.pending && after.pending !== before.pending) void run(after.pending)
     if (!after.pending) { const ready = waiters; waiters = []; ready.forEach(resolve => resolve()) }
     return true

@@ -390,7 +390,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/recurrence-marker.spec.ts","weightSeconds":45,"weightSource":"estimate"}
+        {"file":"tests/recurrence-marker.spec.ts","listedTests":36,"weightSeconds":45,"weightSource":"estimate"}
         ,
         {"file":"tests/recurrences.spec.ts","weightSeconds":45,"weightSource":"estimate"}
       ]
@@ -990,7 +990,7 @@
         ,
         {"file":"tests/tap-targets.spec.ts","listedTests":28,"weightSeconds":62.146341,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/theme-settings.spec.ts","listedTests":36,"weightSeconds":79.902439,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/theme-settings.spec.ts","listedTests":45,"weightSeconds":84.341463,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/theme.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
         ,
