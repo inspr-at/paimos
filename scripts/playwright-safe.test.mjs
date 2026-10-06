@@ -1,9 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from 'node:assert/strict'
 import childProcess, { spawn, spawnSync } from 'node:child_process'
-import fs from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
-import { appendFileSync, existsSync, fstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import fs, { appendFileSync, existsSync, fstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -414,7 +413,9 @@ for (const mode of ['transient', 'persistent', 'owner-change']) {
         result = await runOwnedCommand(process.execPath, ['-e', script], {
           lockPath, graceMs: 50, rootIdentityWait: barrier?.wait,
           env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}`,
-            ...(supervisorMisses ? { AEON_PW_TEST_START_DELAY_MS: String(SLOW_ROOT_MS) } : { AEON_PW_TEST_ROOT_VERIFIED: verified }) },
+            ...(supervisorMisses
+              ? { AEON_PW_TEST_START_DELAY_MS: String(SLOW_ROOT_MS) }
+              : mode === 'transient' ? { AEON_PW_TEST_ROOT_VERIFIED: verified } : {}) },
         })
       } finally { injected?.mock.restore(); await barrier?.close(); syncBuiltinESMExports() }
       const calls = readFileSync(attempts, 'utf8').trim().split('\n').length
@@ -425,9 +426,16 @@ for (const mode of ['transient', 'persistent', 'owner-change']) {
         assert.equal(result.code, 0)
         const entries = readFileSync(ready, 'utf8').trim().split('\n').map(line => JSON.parse(line))
         assert.equal(entries.length, 1, 'preload must publish the verified root before suite code')
+        if (supervisorMisses) {
+          assert.equal(supervisorEntries.length, 0, 'blind supervisor must not publish an unverified root')
+          assert.equal(existsSync(verified), false, 'blind preload must finish without supervisor verification')
+        } else {
+          assert.equal(supervisorEntries.length, 1, 'supervisor verifies the root before releasing the preload')
+          assert.deepEqual(supervisorEntries, entries, 'parent and preload verify the same identity')
+          assert.deepEqual(entries, supervisorEntries, 'preload independently records the same verified root')
+        }
         assert.ok(entries.every(entry => validStart(entry.started)))
         assert.equal(new Set(entries.map(entry => entry.pid)).size, 1)
-        if (!supervisorMisses) assert.deepEqual(supervisorEntries, entries, 'parent and preload verify the same identity')
       } else if (mode === 'persistent') {
         assert.equal(result.code, 1)
         assert.equal(existsSync(ready), false, 'unverifiable root must not execute suite code')

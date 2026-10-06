@@ -81,6 +81,52 @@ describe('native suite', () => {
 })
 
 test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async()=>{
+  // All modes describe this same checkout. Collect its native registrations
+  // once, then exercise the unchanged planner and CLI against that snapshot.
+  // Production CLI calls still collect fresh; there is no persistent cache.
+  const snapshot=inventory(), before=structuredClone(snapshot)
+  let collections=0
+  const dependencies={collect:kind=>{assert.equal(kind,'web');collections++;return snapshot}}
+  const policy=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8'))
+  const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
+  const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
+  const selection=plan('web',options,dependencies)
+  const browser=selection.all.filter(row=>row.kind==='browser')
+  const declared=new Map(JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8')).tests.map(row=>[key(row),row]))
+  const expected=browser.filter(row=>row.tier==='ESSENTIAL'||(gated.has(row.file)&&declared.get(key(row))?.tier==='GATED-FULL'))
+  assert.ok(browser.length>expected.length,'Fixture must include optional nonessential registrations')
+  assert.deepEqual(selection.tests.map(key).sort(),expected.map(key).sort())
+  assert.equal(selection.full,true)
+  assert.equal(selection.scope,'gated-full')
+  assert.equal(selection.deferredBrowserCases,browser.length-expected.length)
+  // Workflow fan-out and explicit --full both retain the established gate.
+  const original=process.env.AEON_TEST_TIER_MODE,log=console.log,output=[]
+  try {
+    process.env.AEON_TEST_TIER_MODE='full'
+    console.log=value=>output.push(JSON.parse(value))
+    assert.equal(await main(['plan','web','--event','pull_request','--paths',JSON.stringify(options.paths)],dependencies),0)
+    assert.equal(output.at(-1).kinds.browser,expected.length)
+    assert.equal(output.at(-1).deferredBrowserCases,browser.length-expected.length)
+    assert.equal(await main(['plan','web','--full','--event','pull_request','--paths',JSON.stringify(options.paths)],dependencies),0)
+    assert.equal(output.at(-1).kinds.browser,expected.length)
+    assert.equal(output.at(-1).scope,'gated-full')
+    assert.equal(await main(['plan','web','--all','--event','workflow_dispatch','--paths','[]'],dependencies),0)
+    assert.equal(output.at(-1).kinds.browser,browser.length)
+    assert.equal(output.at(-1).scope,'catalogue')
+  } finally {
+    console.log=log
+    if(original===undefined) delete process.env.AEON_TEST_TIER_MODE
+    else process.env.AEON_TEST_TIER_MODE=original
+  }
+  const nightly=plan('web',{...options,event:'schedule'},dependencies)
+  assert.deepEqual(nightly.tests.map(key).sort(),browser.map(key).sort())
+  assert.equal(nightly.scope,'catalogue')
+  assert.equal(nightly.deferredBrowserCases,0)
+  assert.equal(collections,5,'Every planning mode must consume the one native snapshot')
+  assert.deepEqual(snapshot,before,'Planning must not mutate the shared discovery snapshot')
+})
+
+test('production CLI planning reuses one native snapshot without a supplied collector',async()=>{
   // Every planner call sees the same unchanged tree. Collect it natively once,
   // then reuse that snapshot while exercising the unchanged planner and CLI.
   // The selector tests below still run their requested native lists separately.
@@ -107,7 +153,6 @@ export const collectWeb = () => (${JSON.stringify(snapshot)});`
     assert.equal(selection.full,true)
     assert.equal(selection.scope,'gated-full')
     assert.equal(selection.deferredBrowserCases,browser.length-expected.length)
-    // Workflow fan-out and explicit --full both retain the established gate.
     const original=process.env.AEON_TEST_TIER_MODE,log=console.log,output=[]
     try {
       process.env.AEON_TEST_TIER_MODE='full'

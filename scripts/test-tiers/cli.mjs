@@ -45,12 +45,14 @@ export function runnerSelection(tests,options,candidate,planner) {
   return selection
 }
 
-// A caller that already holds a native collection passes it as `inventory`;
-// otherwise every plan recollects the catalogue (minutes of Playwright and
-// Vitest listing when several plans run in one process).
-export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,plannerMode=process.env.AEON_TEST_TIER_MODE,plannerLayout=process.env.AEON_TEST_TIER_LAYOUT,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false,inventory:supplied}={}) {
+// A caller that already holds a native collection passes it as `inventory`.
+// Programmatic comparisons can share one native snapshot of an unchanged
+// checkout through `collect`. Otherwise every plan collects the catalogue
+// (minutes of Playwright and Vitest listing when several plans run in one
+// process). Normal CLI invocations always use fresh discovery.
+export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,plannerMode=process.env.AEON_TEST_TIER_MODE,plannerLayout=process.env.AEON_TEST_TIER_LAYOUT,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false,inventory:supplied}={}, { collect=target }={}) {
   if(supplied!==undefined&&!Array.isArray(supplied?.tests)) throw new Error('Supplied inventory needs a tests array')
-  const inventory=supplied??target(kind)
+  const inventory=supplied??collect(kind)
   const manifest=load(kind)
   const all=validate(manifest,inventory.tests)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
@@ -234,7 +236,7 @@ export function classify(flags, { collect = target, read = load, save = saveMani
   return 0
 }
 
-export async function main(args,{inventory}={}) {
+export async function main(args, dependencies={}) {
   if (args[0] === 'manifests') return manifestsMain(args.slice(1), root)
   if (args[0] === 'classify') return classify(args.slice(1))
   const [mode,kind,...flags]=args
@@ -270,7 +272,7 @@ export async function main(args,{inventory}={}) {
     console.log(JSON.stringify({nativeGoCases:listed.length,inventory:counts(all)}));return 0
   }
   if(options.paths===undefined) options.paths=changedPaths(options.event??process.env.GITHUB_EVENT_NAME,process.env,{fetchBase:true})
-  const selection=plan(kind,{...options,inventory})
+  const selection=plan(kind,{...options,inventory:dependencies.inventory},dependencies)
   console.log(JSON.stringify({kind,full:selection.full,layout:selection.layout??'full',reason:selection.reason,scope:selection.scope??'changed-area',deferredBrowserCases:selection.deferredBrowserCases??0,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
   if(mode==='run') return run(kind,selection,options)
   return 0
