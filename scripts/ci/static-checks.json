@@ -688,7 +688,7 @@
         "node",
         "npm-installed"
       ],
-      "timeout_seconds": 120,
+      "timeout_seconds": 180,
       "optional": true
     },
     {

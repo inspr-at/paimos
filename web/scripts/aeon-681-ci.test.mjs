@@ -5,7 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { run, browserList, plan, main } from '../../scripts/test-tiers/cli.mjs'
-import { command, root, web, evidence, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
+import { command, root, web, evidence, flattenBrowser, collections } from '../../scripts/test-tiers/collect.mjs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { validate, key, select } from '../../scripts/test-tiers/core.mjs'
@@ -14,6 +14,7 @@ test('native full CI planning retains the OPS-257 gate and essential promotions 
   const policy=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8'))
   const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
   const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
+  const collected=collections.web
   const selection=plan('web',options)
   const browser=selection.all.filter(row=>row.kind==='browser')
   const declared=new Map(JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8')).tests.map(row=>[key(row),row]))
@@ -46,6 +47,9 @@ test('native full CI planning retains the OPS-257 gate and essential promotions 
   assert.deepEqual(nightly.tests.map(key).sort(),browser.map(key).sort())
   assert.equal(nightly.scope,'catalogue')
   assert.equal(nightly.deferredBrowserCases,0)
+  // Five plans of an unchanged tree collect the web inventory once (AEON-724 fix 6:
+  // repeated collection pushed this file past the 120 s static self-check budget).
+  assert.equal(collections.web,collected+1)
 })
 
 test('native Node and Vitest selectors execute the requested registrations, rather than skip them', async () => {
