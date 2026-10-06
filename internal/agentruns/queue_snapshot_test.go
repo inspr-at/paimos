@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -261,14 +262,13 @@ func TestParentQueueSnapshotHiddenMovedLeaf(t *testing.T) {
 }
 
 type snapshotFencePause struct {
-	tenant  string
 	first   atomic.Bool
 	entered chan struct{}
 	resume  chan struct{}
 }
 
 func (p *snapshotFencePause) TraceQueryStart(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryStartData) context.Context {
-	if strings.Contains(q.SQL, "FROM tenants") && strings.Contains(q.SQL, "FOR NO KEY UPDATE") && len(q.Args) == 1 && q.Args[0] == p.tenant && p.first.CompareAndSwap(false, true) {
+	if q.SQL == db.TenantFenceSQL && p.first.CompareAndSwap(false, true) {
 		close(p.entered)
 		select {
 		case <-p.resume:
@@ -288,7 +288,7 @@ func TestParentQueueSnapshotRevocationWhileApplyWaits(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `WITH role AS (INSERT INTO roles(tenant_id,key,name) VALUES($1,'snapshot_reader','Snapshot reader') RETURNING tenant_id,id) INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT tenant_id,id,'nodes.read' FROM role`, f.person.TenantID)
 		return err
 	})
-	pause := &snapshotFencePause{tenant: f.person.TenantID, entered: make(chan struct{}), resume: make(chan struct{})}
+	pause := &snapshotFencePause{entered: make(chan struct{}), resume: make(chan struct{})}
 	cfg := f.d.App.Config()
 	cfg.ConnConfig.Tracer = pause
 	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)

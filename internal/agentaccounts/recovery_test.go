@@ -145,7 +145,7 @@ func TestBEarlyAndExpiryRecoveryRaceConsumesOneWait(t *testing.T) {
 	// Pause after tenant acquisition; PostgreSQL proves the second claim is
 	// blocked on that fence before the first can continue.
 	pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool {
-		return sql == `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`
+		return sql == db.TenantFenceSQL
 	})
 	racing := fixedClockModule{Module: New(pool), at: now}
 	statuses := make(chan int, 2)

@@ -758,7 +758,7 @@ func TestAccessChangesStillTakeConflictingTenantFence(t *testing.T) {
 	for file, fragment := range map[string]string{
 		"../authz/module.go":          "FROM tenants WHERE id=$1::uuid FOR UPDATE",
 		"../authz/project_members.go": "return db.LockTree(ctx, tx, tenantID)",
-		"../db/fences.go":             "FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE",
+		"../db/fences.go":             "FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE",
 	} {
 		src, err := os.ReadFile(file)
 		if err != nil {

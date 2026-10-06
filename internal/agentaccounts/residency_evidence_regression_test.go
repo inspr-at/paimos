@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -322,7 +323,7 @@ func TestResidencyEvidenceSerializesWithReadinessAndLifecycle(t *testing.T) {
 			// inverted pairing/tree fence or a completed request cannot satisfy
 			// a tenant statement blocked by the evidence transaction.
 			if err := dbtest.WaitForBlocked(ctx, adminPool, writerPID, evidencePID,
-				`SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`); err != nil {
+				db.TenantFenceSQL); err != nil {
 				t.Fatalf("%s did not queue at the evidence tenant fence: %v", operation, err)
 			}
 			if err := blocker.Commit(ctx); err != nil {

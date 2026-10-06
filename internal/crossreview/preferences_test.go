@@ -167,6 +167,13 @@ func TestReviewStarterPersonAndOperatorKeyCompatibility(t *testing.T) {
 					})
 				} else {
 					want = ""
+					// Fixture keys carry a person creator since AEON-724. An operator
+					// key is the legacy creatorless row; the prepared endpoint re-reads
+					// the creator from the key row, so the row itself must have none.
+					f.tx(t, func(tx pgx.Tx) error {
+						_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=NULL WHERE principal_id=$1`, f.agent.ID)
+						return err
+					})
 				}
 			} else if kind == "linked-person" {
 				alias := testID()

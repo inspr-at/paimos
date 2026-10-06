@@ -3,11 +3,13 @@ package db_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // The literal is deliberate: lock-order proofs (AEON-735 handoff pickup) wait
@@ -87,5 +89,96 @@ func TestLockTenantRefusesACallerTenantOtherThanTheTransactionTenant(t *testing.
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Operator commands, importers and test holders fence a tenant from admin
+// transactions that never entered tenant visibility. That fence must take the
+// caller tenant's row with NO KEY UPDATE: conflicting with the canonical
+// statement inside tenant visibility while leaving FK KEY SHARE locks free.
+func TestLockTenantFencesTheCallerTenantWithoutTenantVisibility(t *testing.T) {
+	f := newStatusFixture(t)
+	ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
+	defer cancel()
+	// A separate transaction keeps the holder clean: a refused statement
+	// would otherwise abort it and hide the fence's own failure reason.
+	blind, err := f.d.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = db.LockCurrentTree(ctx, blind)
+	_ = blind.Rollback(ctx)
+	if err == nil {
+		t.Fatal("LockCurrentTree accepted a transaction without tenant visibility")
+	}
+	holder, err := f.d.Admin.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer holder.Rollback(context.Background())
+	if err = db.LockTenant(ctx, holder, f.tid); err != nil {
+		t.Fatalf("tenant fence without tenant visibility: %v", err)
+	}
+	if err = db.LockTree(ctx, holder, f.tid); err != nil {
+		t.Fatalf("tenant/tree re-entry without tenant visibility: %v", err)
+	}
+	for _, mode := range []struct {
+		lock      string
+		conflicts bool
+	}{{"KEY SHARE", false}, {"NO KEY UPDATE", true}} {
+		probe, err := f.d.Admin.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, err = probe.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR `+mode.lock+` NOWAIT`, f.tid)
+		_ = probe.Rollback(ctx)
+		var pgErr *pgconn.PgError
+		locked := errors.As(err, &pgErr) && pgErr.Code == "55P03"
+		if mode.conflicts && !locked {
+			t.Fatalf("%s probe did not conflict with the operator tenant fence: %v", mode.lock, err)
+		}
+		if !mode.conflicts && err != nil {
+			t.Fatalf("%s probe blocked by the operator tenant fence: %v", mode.lock, err)
+		}
+	}
+	var holderPID int
+	if err = holder.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&holderPID); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- db.InTenant(ctx, f.d.App, f.tid, func(tx pgx.Tx) error {
+			if _, err := tx.Exec(ctx, `SELECT set_config('lock_timeout','5s',true)`); err != nil {
+				return err
+			}
+			return db.LockTenant(ctx, tx, f.tid)
+		})
+	}()
+	for {
+		var waiting bool
+		if err := f.d.Admin.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid)) AND query=$2)`, holderPID, canonicalTenantFence).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		}
+		if waiting {
+			break
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("canonical fence finished before waiting on the operator fence: %v", err)
+		case <-ctx.Done():
+			t.Fatal("canonical fence never waited on the operator tenant fence")
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	if err = holder.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err = <-done:
+		if err != nil {
+			t.Fatalf("released canonical fence: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("canonical fence did not finish after the operator fence was released")
 	}
 }

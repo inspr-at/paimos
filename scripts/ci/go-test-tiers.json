@@ -4672,6 +4672,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestLockTenantBlocksOnTheCanonicalFenceStatement","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestLockTenantFencesTheCallerTenantWithoutTenantVisibility","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestLockTenantRefusesACallerTenantOtherThanTheTransactionTenant","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestMergeWorkSchemas","tier":"GATED-FULL"}
