@@ -19,6 +19,116 @@ info:
 servers:
   - url: /api
 paths:
+  /settings/lead-policy:
+    get:
+      operationId: getWorkspaceLeadPolicy
+      summary: Get inherited lead policy
+      security: [{session: []}]
+      description: "Project members see redacted policy; only the owning person sees host/account IDs. Workspace policy requires a person with model_prefs.manage. No read or edit grants execution."
+      responses:
+        "200":
+          description: "Current policy; automatic launch remains disabled pending separately owned acceptance"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LeadSettingsView"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    put:
+      operationId: putWorkspaceLeadPolicy
+      summary: Put inherited lead policy
+      security: [{session: []}]
+      description: "Revision-checked replacement or reset by a person with current model_prefs.manage; project edits also require the existing owning person. Project restrictions intersect workspace restrictions; recovery ceilings cannot increase them. Reset retains ownership and advances revision."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/LeadSettingsWrite"}
+      responses:
+        "200":
+          description: "Current policy; automatic launch remains disabled pending separately owned acceptance"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LeadSettingsView"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "Stale revision or unavailable project"}
+        "422": {description: "Invalid override or owner/host/account binding"}
+    delete:
+      operationId: deleteWorkspaceLeadPolicy
+      summary: Delete inherited lead policy
+      security: [{session: []}]
+      description: "Revision-checked replacement or reset by a person with current model_prefs.manage; project edits also require the existing owning person. Project restrictions intersect workspace restrictions; recovery ceilings cannot increase them. Reset retains ownership and advances revision."
+      parameters:
+        - {name: revision, in: query, required: true, schema: {type: integer, minimum: 0}}
+      responses:
+        "200":
+          description: "Current policy; automatic launch remains disabled pending separately owned acceptance"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LeadSettingsView"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "Stale revision or unavailable project"}
+        "422": {description: "Invalid override or owner/host/account binding"}
+  /projects/{projectId}/lead-settings:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectLeadSettings
+      summary: Get inherited lead policy
+      security: [{session: []}, {agentKey: []}]
+      description: "Project members see redacted policy; only the owning person sees host/account IDs. Workspace policy requires a person with model_prefs.manage. No read or edit grants execution."
+      responses:
+        "200":
+          description: "Current policy; automatic launch remains disabled pending separately owned acceptance"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LeadSettingsView"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    put:
+      operationId: putProjectLeadSettings
+      summary: Put inherited lead policy
+      security: [{session: []}]
+      description: "Revision-checked replacement or reset by a person with current model_prefs.manage; project edits also require the existing owning person. Project restrictions intersect workspace restrictions; recovery ceilings cannot increase them. Reset retains ownership and advances revision."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/LeadSettingsWrite"}
+      responses:
+        "200":
+          description: "Current policy; automatic launch remains disabled pending separately owned acceptance"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LeadSettingsView"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "Stale revision or unavailable project"}
+        "422": {description: "Invalid override or owner/host/account binding"}
+    delete:
+      operationId: deleteProjectLeadSettings
+      summary: Delete inherited lead policy
+      security: [{session: []}]
+      description: "Revision-checked replacement or reset by a person with current model_prefs.manage; project edits also require the existing owning person. Project restrictions intersect workspace restrictions; recovery ceilings cannot increase them. Reset retains ownership and advances revision."
+      parameters:
+        - {name: revision, in: query, required: true, schema: {type: integer, minimum: 0}}
+      responses:
+        "200":
+          description: "Current policy; automatic launch remains disabled pending separately owned acceptance"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/LeadSettingsView"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "Stale revision or unavailable project"}
+        "422": {description: "Invalid override or owner/host/account binding"}
   /projects/{projectId}/lead:
     get:
       summary: Read the project's explicitly owned lead
@@ -11429,6 +11539,49 @@ components:
     session: {type: apiKey, in: cookie, name: aeon_session}
     agentKey: {type: http, scheme: bearer, description: Bearer token aeon_<prefix>_<secret>}
   schemas:
+    LeadPolicyOverride:
+      type: object
+      additionalProperties: false
+      description: "Sparse replacement. Null or omitted fields inherit. Empty ID arrays allow no targets. Filters never grant use of a host/account. Models continue through existing Default → You → Project preferences; no copied profiles or second dial."
+      properties:
+        allowed_host_ids: {type: [array, 'null'], maxItems: 32, uniqueItems: true, items: {type: string, format: uuid}}
+        allowed_account_ids: {type: [array, 'null'], maxItems: 32, uniqueItems: true, items: {type: string, format: uuid}}
+        work_kind_id: {type: [string, 'null'], format: uuid}
+        bucket: {type: [string, 'null'], enum: [normal, complex, null]}
+        recovery:
+          oneOf:
+            - {type: 'null'}
+            - type: object
+              additionalProperties: false
+              required: [max_attempts, agent_hours]
+              properties:
+                max_attempts: {type: integer, minimum: 0, maximum: 5}
+                agent_hours: {type: number, minimum: 0, maximum: 10000}
+              description: "Shared build/review/fix attempt and agent-hour ceilings, narrowed by workspace policy. Zero disables automatic recovery. No credential change, force stop or release authority."
+    LeadSettingsWrite:
+      type: object
+      additionalProperties: false
+      required: [revision, overrides]
+      properties:
+        revision: {type: integer, minimum: 0}
+        overrides: {$ref: '#/components/schemas/LeadPolicyOverride'}
+    LeadSettingsView:
+      type: object
+      required: [revision, workspace_revision, owner_person_id, effective, model_revisions, automatic_launch_enabled, details_redacted, dial_path]
+      properties:
+        revision: {type: integer, minimum: 0}
+        workspace_revision: {type: integer, minimum: 0}
+        owner_person_id: {type: [string, 'null'], format: uuid}
+        overrides: {$ref: '#/components/schemas/LeadPolicyOverride'}
+        effective: {$ref: '#/components/schemas/LeadPolicyOverride'}
+        model_selector: {type: object, description: "Live modelprefs CellResult; selector metadata is withheld from nonowners"}
+        model_revisions: {type: array, items: {type: integer, minimum: 0}}
+        residency: {type: string, enum: [any, eu, local]}
+        details_redacted: {type: boolean}
+        automatic_launch_enabled: {type: boolean, const: false}
+        wait_reason: {type: string, enum: [acceptance_pending, owner_unavailable, selector_unavailable], description: "An archived or unavailable work kind leaves settings readable and resettable but withholds model_selector; execution must wait until an available selector is configured or restored"}
+        dial_path: {type: string, const: /api/agents/plan}
+        required_start_gates: {type: array, items: {type: string}, description: "Dial, harness, account room and host load must be rechecked on every start; unreadable gates mean wait"}
     ProjectLead:
       type: object
       required: [project_id, revision, generation, state, reason, process_active]
