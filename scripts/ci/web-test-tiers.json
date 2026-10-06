@@ -728,6 +728,22 @@
     ,
     "node:tests/release-membership.test.ts:parents show actual ships-in summaries and deduplicate leaf counts"
     ,
+    "node:tests/test-tier-failures.test.ts:Go subtest diagnostics retain ancestry and package-only failures keep their output"
+    ,
+    "node:tests/test-tier-failures.test.ts:Go tier runner consumes one failing jsonl execution and preserves the original exit code"
+    ,
+    "node:tests/test-tier-failures.test.ts:Node reporter preserves assertion details and console output without changing terminal events"
+    ,
+    "node:tests/test-tier-failures.test.ts:Node tier runner logs a real failure once and retains failure accounting and exit code"
+    ,
+    "node:tests/test-tier-failures.test.ts:Vitest diagnostics name failed assertions and bounded output cannot escape summary fences"
+    ,
+    "node:tests/test-tier-failures.test.ts:Vitest diagnostics retain assertion details and captured stdout stderr within bounds in logs and summary"
+    ,
+    "node:tests/test-tier-failures.test.ts:failed Go jsonl names the package and test with the last 40 lines in logs and summary"
+    ,
+    "node:tests/test-tier-failures.test.ts:native planning regression reuses one collected snapshot for unchanged-tree CLI checks"
+    ,
     "node:tests/theme-colours.test.ts:Suggest changes failing shades, keeps readable shades, hue and saturation"
     ,
     "node:tests/theme-colours.test.ts:contrast uses WCAG luminance and both actual preview card surfaces"
@@ -13335,6 +13351,22 @@
     {"kind":"node","file":"tests/tenant-brand.test.ts","name":"short names are trimmed and capped; the session brand drops what is unset","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/tenant-brand.test.ts","name":"the header draws the dark logo in dark mode, else the light one on a plate","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Go subtest diagnostics retain ancestry and package-only failures keep their output","tier":"NIGHTLY"}
+    ,
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Go tier runner consumes one failing jsonl execution and preserves the original exit code","tier":"NIGHTLY"}
+    ,
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Node reporter preserves assertion details and console output without changing terminal events","tier":"NIGHTLY"}
+    ,
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Node tier runner logs a real failure once and retains failure accounting and exit code","tier":"NIGHTLY"}
+    ,
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Vitest diagnostics name failed assertions and bounded output cannot escape summary fences","tier":"NIGHTLY"}
+    ,
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Vitest diagnostics retain assertion details and captured stdout stderr within bounds in logs and summary","tier":"NIGHTLY"}
+    ,
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"failed Go jsonl names the package and test with the last 40 lines in logs and summary","tier":"NIGHTLY"}
+    ,
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"native planning regression reuses one collected snapshot for unchanged-tree CLI checks","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/text-glyphs.test.ts","name":"no text glyph stands in for an icon anywhere in web/src","tier":"GATED-FULL"}
     ,
