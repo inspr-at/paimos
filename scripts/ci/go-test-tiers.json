@@ -4650,6 +4650,10 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestHumanCheckMigrationUpgradesExistingStrictSchemasUnderRLS","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestLockTenantBlocksOnTheCanonicalFenceStatement","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestLockTenantRefusesACallerTenantOtherThanTheTransactionTenant","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestMergeWorkSchemas","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestMigrationCheckerSplitParity","tier":"GATED-FULL"}
