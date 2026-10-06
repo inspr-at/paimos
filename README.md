@@ -698,6 +698,35 @@ and prices remain unchanged; Security now uses the ticket's role route and rate.
 Work-kind lists use `limit`/`cursor` pagination; editor writes reject oversized
 matrices or atomic re-stamp scopes. See `api/openapi.yaml` for the contract.
 
+## Project lead scheduling (AEON-739 backend groundwork)
+
+Explicit project leads consume the existing person's agent dial, including
+idle leads and generations with unconfirmed exit. The server supplies no extra
+lead slots. Queue is the only scheduling input; it never grants execution rights.
+A successful new route records one project turn. The next turn orders qualified
+project demand by the later of its oldest eligible queue arrival and its last
+successful route. This gives waiting projects a turn while preserving targeted
+and manual ticket order inside each project. Idempotent routing does not advance
+turns. Revoked owners, archived projects, unresolved dependencies, stale reporting
+and unavailable live lead gates cannot win a competing turn. Competing demand
+also needs a usable worker model/account route, live claim permission and no
+pending worker assignment. Scheduling reads are owner-scoped, limited to 200
+entries with a three-second deadline and 64 KiB per ticket's fields; excess
+demand returns an explicit wait error. Lead pickup also caps its project queue
+before fields are decoded or entries projected.
+
+A worker uses `aeon lead yield --project KEY --expected-revision N --generation G
+--worker-lease-file PATH` (or `-` for stdin) when idle, waiting for an accepted
+worker, or yielding its project turn. The server validates that condition and
+reuses cooperative checkpoint/pause. The process keeps its slot until confirmed
+stopped. Only a worker-priority yield with a retained checkpoint allows previously
+routed assignments of the exact current generation to start afterwards. Person
+pauses and replacement generations fence them. Every final worker start still
+checks dial, harness, account room and host load. Ready routed workers have
+priority over lead restart; restart remains an explicit intent through ordinary
+admission. No workers are adopted or reassigned. The production admission adapter
+and automatic launch remain disabled until AEON-603 end-to-end qualification.
+
 ## Agent start plan
 
 `aeon agents plan` shows the person's planned total, per-harness limits and
@@ -1008,16 +1037,26 @@ gates setup and both matrices; spec-only retains one unit job and one exact-spec
 job, while docs-only skips them. Skipped Actions jobs contribute no runner duration;
 executed jobs still reject invalid timestamps. Spec-only measurements explicitly
 report `untiered` scope rather than claim tier case passes.
-OPS-257 schedules tiers using hosted run 37341114152: browser `tierTiming` in
+OPS-257 schedules tiers using hosted run 37377299349: browser `tierTiming` in
 `web/ci-web-shards.json` and unit/Go `timingWeights` in their tier ledgers.
 Browser costs include per-case durations and apportioned group overhead; unit
 costs include Vitest elapsed time, Node test time and shared residual launch
-overhead; Go costs use terminal package elapsed time. Other selections scale
+overhead; Go costs include terminal package elapsed time plus shared residual
+native enumeration and launch time. Other selections scale
 these measured slices by case count. Missing browser/Go artifacts retain
 historical estimates; exact-spec weights and all gated membership stay intact.
-The 39-case `aeon-632b-clip` file stays serial on its own shard. Local balance
-estimates exclude runner setup, native collection and shard 1's extra unit
-checks; the next hosted run must validate total job costs.
+The 39 `aeon-632b-clip` cases keep their original bodies and titles in two
+serial files: planning/touch (27 cases) and settings/rules (12), importing
+shared fixtures. Each half conservatively retains the original launch overhead.
+Unit shard 1 loses equal-load ties to its peers because it also runs the shard
+and browser-supervisor regressions; the heaviest unit file starts on shard 2.
+Scheduling estimates after native inventory reconciliation are 6.28–6.39 browser
+minutes (max/median 1.012), 0.50–0.74 unit minutes and 4.85–6.12 Go minutes
+(max/median about 1.26).
+The indivisible `internal/nodes` package sets the Go floor, slightly above
+the 1.25 execution-only ratio target. Estimates exclude runner setup, initial
+selection and shard 1's extra unit checks; hosted runs must validate complete
+job costs and the intended eight-to-nine-minute critical path.
 The eight-minute target needs hosted measurement; [local selection counts](scripts/ci/test-tier-selection-baseline.json)
 establish coverage only.
 
@@ -1677,7 +1716,7 @@ Named instances and the default live in `~/.aeon/config.yaml`. The agent API key
 
 Classic colleagues without a sign-in identity can join through **Settings → Access → People → Imported from classic → Invite this person**. The invite starts with their email and imported access; the administrator confirms roles they may grant. On acceptance, one active, unlinked imported account with exactly the same verified email (case-insensitive) in this workspace becomes an alias of the new person, with an audited reason. Classic identities and history remain intact. Multiple unlinked matches require manual **Link to person**, including inactive records or records that already have aliases; already linked, deactivated or existing link-target accounts are never automatically linked. A token alone cannot link an account. Invited access stays authoritative even for project-only invites; sign-in and later imports never restore workspace access from the alias's classic roles.
 
-Create a CLI/script identity at **Settings → Access → Agents → New agent**: give it a name, a description, a role ceiling, and workspace or selected-project access. The **Ticket worker** purpose selects project-only access and suggests the smallest role you may grant that covers `nodes.read`, `nodes.write`, `comments.read`, `comments.write`, `events.read` (ticket activity and history), and `search.read`; Admin is never suggested automatically. Role options explain their effect for agent keys. The description is prefilled from the purpose and project keys, stays editable, and may be cleared after confirming **Create without a description**. A person with `keys.manage` can create it, within their own permissions; agent and role changes are audited together. The next sheet offers one-click **Full access**, **Ticket worker** and **Coordinator** presets and previews their scopes before applying only those permitted by the registry, creator and agent role. Scope rows show their label, id, registry explanation and risk; search matches names, ids, groups and descriptions. Built-in Owner, Admin and Member roles exclude `recurrences.manage` for agents; recurrence automation needs an explicit custom-role grant and a key scope. The same previews and search are available when editing scopes; rotation preserves original scopes only within the live ceiling. The first key is shown once, with a copy button (manual selection if clipboard access is blocked) and this instance's `paimos --instance <name> auth login --name <name> --url <origin>` command. Paste the key at the hidden terminal prompt. Computer pairing uses agentd and needs no API key; its page links directly to this alternative.
+Create a CLI/script identity at **Settings → Access → Agents → New agent**: give it a name, a description, a role ceiling, and workspace or selected-project access. The **Ticket worker** purpose selects project-only access and suggests the smallest role you may grant that covers `nodes.read`, `nodes.write`, `comments.read`, `comments.write`, `events.read` (ticket activity and history), and `search.read`; Admin is never suggested automatically. Role options explain their effect for agent keys. The description is prefilled from the purpose and project keys, stays editable, and may be cleared after confirming **Create without a description**. A person with `keys.manage` can create it, within their own permissions; agent and role changes are audited together. The next sheet offers one-click **Full access**, **Ticket worker** and **Coordinator** presets and previews their scopes before applying only those permitted by the registry, creator and agent role. Scope rows show their label, id, registry explanation and risk; search matches names, ids, groups and descriptions. Built-in Owner, Admin and Member roles exclude `recurrences.manage` for agents; recurrence automation needs an explicit custom-role grant and a key scope. The same previews and search are available when editing scopes; rotation preserves original scopes only within the live ceiling. The first key is shown once, with a copy button (manual selection if clipboard access is blocked) and the `paimos auth login --name <workspace> --url <origin>` command (named after the workspace's slug, else the host). Paste the key at the hidden terminal prompt. Computer pairing uses agentd and needs no API key; its page links directly to this alternative.
 
 Manual rotation rechecks live permissions inside the replacement transaction. Shared roles combine workspace and project grants; generated private roles also cap replacement scopes at their configured workspace permissions, even when preserving the old scopes. A project binding cannot restore a scope removed from that private role. The coordinator’s derived project-only `rules.read` remains available. A rejected rotation leaves the old key unchanged and creates no replacement or audit event.
 
@@ -1805,6 +1844,38 @@ and label flags with its usual private registration files. Follow-up one-shot
 heartbeats use the returned session id and lease with `--eta-ready +10m
 --progress 40`, or keep `pct`, `remaining_min` and `note` current in the reporter's
 status file. Each concurrent job needs its own private state directory.
+
+Lead decision evidence (AEON-737) uses the existing project event log. An active
+coordinator generation records bounded, typed metadata with
+`aeon harness decision --project AEON --session UUID --body-file decision.json
+--worker-lease-file PATH`. Only its owning agent and exact generation lease can
+write; current project permission is checked inside the fenced transaction,
+including on replay. Identical `request_id` metadata replays its original event;
+different metadata or a different generation returns a conflict.
+Migration `1263` enforces request uniqueness per tenant and project even when
+a referenced ticket moves out of the coordinator's visibility. Reusing that
+identity for otherwise valid evidence returns a redacted 409, retaining the
+hidden snapshot and rolling back the failed append's event-counter allocation.
+Replay and history still obey event visibility and current authorization.
+
+`aeon project decisions AEON --limit 50 [--after EVENT-ID] [--session UUID]`
+reads a page of redacted reports, with `--json` preserving all evidence and the
+next-page cursor. Project members can read policy scope/revision, attempts,
+reason codes, gate observation times and same-project result links. Review
+links freeze the existing exact base/head commit and provider-family binding.
+`previous_event_id` links a report to an earlier decision for the same ticket;
+attempts may stay the same or advance by one, capped at 32. Existing run IDs
+identify assignments. A `partial` outcome requires `partial_result`; unavailable
+forecasts, model escalation, login selection and connection/process failures
+retain separate reason codes. Prompts, arbitrary
+URLs, account identities and quota values are rejected. Admission reports
+require dial, harness, account-room and host-load readings; unreadable readings,
+missing timestamps and readings older than 120 seconds or in the future produce
+a visible wait. Freshness stays frozen when replayed. These are coordinator
+reports, not launch receipts, verified review verdicts or execution grants;
+recording never starts work, opens a review gate, merges or deploys. The future
+lead executor must supply this evidence alongside its existing admission path.
+Automatic production launch remains gated by AEON-603 and OPS qualification.
 
 The Sessions table retains its existing design, adds a separate **Host** column,
 and calls the intended result column **Name**. Host identity is the exact
@@ -2164,7 +2235,7 @@ aeon-scopes:v1:comments.read+write,events.read,nodes.read+write,search.read:5a07
 
 Paste a code into **New key**, **Change scopes** (the Edit scopes dialog), or **Rotate**. It replaces the selection, leaves unknown or ungrantable scopes unticked, and explains each skipped scope. Review before confirming; a code is not a credential and grants nothing. Pasting never extends an agent's role. Rotation keeps the old scopes unless you explicitly select a different set, and saves the replacement and old-key revocation together. Every rotation rechecks the actor's permissions and the agent's existing role ceiling, even when preserving scopes. Creation, editing and rotation use the same role ceiling: workspace-role permissions plus project-grantable and self-service permissions (`kinds.read`, `profile.read`, `profile.write`, `authz.read`) held through project roles, intersected with the agent-grantable registry. A scope from a project role still requires that project's binding on each request; it grants no workspace access. Rotation never creates or extends a role, restores a removed workspace binding, or adds default permissions; project-only agents keep their existing project access.
 
-Access sheets use more width on larger screens while keeping their phone layouts. New and edited key scopes use one column below 600px of available body width, two from 600px, and three from 900px. The frame follows the window width; filtering or expanding a preview cannot change it. Confirmation actions fit their labels, wrap long words, and stack when the row cannot hold both. `web/tests/dialog-widths.spec.ts` checks label fit, column counts and control stability at 390, 1024, 1440 and 1920px in both themes, and saves the dialog screenshots under `web/test-results/`.
+Dialogs, sheets and modals share one size scale (AEON-730): S (440px) for confirmations, M (560px) for forms and results, L (840px) for editors and multi-column pickers (`--dialog-s/m/l` in `tokens.css`). Each shrinks with the window and never stretches beyond its step on wide screens. Actions sit under the title on desktop, primary first and only as wide as their labels; a label that changes (Create → Creating…) reserves its widest form, so neighbouring buttons stay put. Phones get a full-height sheet with the action bar pinned to the bottom. New and edited key scopes use one column below 600px of available body width and two from 600px. The frame is decided when the dialog opens; filtering or expanding a preview cannot change it. `web/tests/dialog-scale.spec.ts` checks each dialog's width against its step and every action's width against its label at 2560px, and the phone sheets at 390px. Confirmation actions fit their labels, wrap long words, and stack when the row cannot hold both. `web/tests/dialog-widths.spec.ts` checks label fit, column counts and control stability at 390, 1024, 1440 and 1920px in both themes, and saves the dialog screenshots under `web/test-results/`.
 
 Role choices use a bounded, wider frame with one scrolling body and visible actions; phones use the full screen. Rows and the “What changes” area keep their size when a role is picked, and pointer selection does not scroll the clicked row. Paired runtime roles show computer identity names from their existing workspace bindings on the second line; other roles show their descriptions. A runtime role without a bound computer or description still needs a data follow-up, since the role payload has no host or creation date. Other floating choice lists scroll with their panel instead of a second small scroll box. Headings and role details use two lines; clipped names and details are readable on hover, keyboard focus or a touch hold through the shared clip-tip, and the selected role’s full decision context remains in the scrolling preview. Closing choice menus keep a separate **Read full name** action: tap, Enter or Space opens its full text; Escape dismisses that disclosure while leaving the choice menu open. Very long names use a bounded scrollable disclosure: Tab enters it, Shift+Tab returns to the read action, and forward Tab exits the menu. Short role actions retain the full person/project sentence as their accessible name. Enter on Cancel cancels without writing. The computer-name editor uses **Use registered name** rather than putting the hostname in its button. `web/tests/role-picker-layout.spec.ts` covers every role choice, both actions inside the panel, native keyboard cancellation, full-text access, constrained heights and stability in all eight floating list callers, with screenshots of all ten views at 1440, 1024 and 390px in both themes.
 

@@ -4,24 +4,55 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectGo, collectWeb, command, root, web, evidence, saveJSON, saveManifest } from './collect.mjs'
-import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights } from './core.mjs'
+import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights, tierManifestPattern } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { runPlaywright } from '../playwright-safe.mjs'
 import { loadManifest as loadBrowserPolicy, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
-import { changedPaths, schedulingMode } from './diff.mjs'
+import { changedPaths, schedulingDecision, eventBase, sourceTree, promotionsBetween } from './diff.mjs'
+import { boundedText } from './inputs.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
 const target = kind => kind==='go' ? collectGo() : collectWeb()
 
-export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false}={}) {
+// Planner input is authoritative. Candidate uncertainty can widen it to full,
+// but candidate graph additions can never narrow the base planner's full gate.
+export function runnerDecision(candidate,{mode,layout}={}) {
+  if (mode === undefined) return candidate
+  if (!['full','essential','static','spec-only'].includes(mode) ||
+      layout !== undefined && !['full','static'].includes(layout))
+    return {mode:'full',layout:'full',reason:'invalid supplied planner decision'}
+  if (mode === 'full' || candidate.mode === 'full')
+    return {mode:'full',layout:'full',reason:mode === 'full'?'trusted planner requires full':candidate.reason}
+  const plannedLayout=layout ?? (mode === 'static'?'static':undefined)
+  if (plannedLayout !== undefined && plannedLayout !== candidate.layout)
+    return {mode:'full',layout:'full',reason:'candidate and planner layouts disagree'}
+  return {...candidate,layout:plannedLayout??candidate.layout}
+}
+
+export function runnerSelection(tests,options,candidate,planner) {
+  const decision=runnerDecision(candidate,planner)
+  const selection=select(tests,{...options,forceFull:options.forceFull||decision.mode==='full'})
+  selection.layout=selection.full?'full':decision.layout
+  return selection
+}
+
+export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,plannerMode=process.env.AEON_TEST_TIER_MODE,plannerLayout=process.env.AEON_TEST_TIER_LAYOUT,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false}={}) {
   const inventory=target(kind)
   const manifest=load(kind)
   const all=validate(manifest,inventory.tests)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
-  const selection=select(all,{event,paths,imports:inventory.imports,
-    forceFull:full||schedulingMode(event,paths)==='full',forceAll:catalogue,
-    webImports:kind==='web'?webGraph(web):{}})
+  const graph=kind==='web'||affectedLane==='on'?webGraph(web):{}
+  // Consumer rules read the candidate tree; manifest promotions compare the
+  // fetched event base with the checkout. Both are unused unless the switch is on.
+  const on=affectedLane==='on'&&event==='pull_request'&&Array.isArray(paths)
+  const tree=on?sourceTree(root):undefined
+  const promotions=on&&paths.some(path=>tierManifestPattern.test(path))?promotionsBetween(eventBase(),{cwd:root}):undefined
+  const readFile=path=>boundedText(root,path)
+  const candidate=schedulingDecision(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined,tree,promotions})
+  const selection=runnerSelection(all,{event,paths,imports:inventory.imports,affectedLane,
+    forceFull:full,forceAll:catalogue,webImports:graph,tree,promotions,readFile},candidate,
+    {mode:plannerMode,layout:plannerLayout})
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}
   if(kind==='web'&&!unit) Object.assign(weights,tierWeights(browserPolicy,filtered))
@@ -33,7 +64,7 @@ export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',p
     for(const pkg of Object.keys(weights)) weights[pkg]*=filtered.filter(row=>row.package===pkg).length/all.filter(row=>row.package===pkg).length
   }
   if(kind==='go'||unit) Object.assign(weights,measuredWeights(manifest,filtered))
-  return {...selection,all,tests:shard(filtered,index,count,weights)}
+  return {...selection,all,tests:shard(filtered,index,count,weights,{firstShardLast:unit})}
 }
 
 export function browserList(rows,all) {
@@ -167,6 +198,7 @@ export async function main(args) {
   if(mode==='collect') { saveJSON(resolve(evidence,`${kind}-inventory.json`),target(kind));return 0 }
   if(mode==='check') {
     const all=validate(load(kind),target(kind).tests,undefined,{strict:options.strict})
+    measuredWeights(load(kind),all) // malformed timing weights fail the manifest check, not a later plan
     if(kind==='web') { console.log(JSON.stringify({inventory:counts(all)}));return 0 }
     const output=command('go',['test','-p','2','-json','-list','^(Test|Fuzz)','./...'],{env:{...process.env,GOMAXPROCS:'2'},timeout:15*60*1000})
     const listed=[]
@@ -189,7 +221,7 @@ export async function main(args) {
   }
   if(options.paths===undefined) options.paths=changedPaths(options.event??process.env.GITHUB_EVENT_NAME,process.env,{fetchBase:true})
   const selection=plan(kind,options)
-  console.log(JSON.stringify({kind,full:selection.full,reason:selection.reason,scope:selection.scope??'changed-area',deferredBrowserCases:selection.deferredBrowserCases??0,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
+  console.log(JSON.stringify({kind,full:selection.full,layout:selection.layout??'full',reason:selection.reason,scope:selection.scope??'changed-area',deferredBrowserCases:selection.deferredBrowserCases??0,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
   if(mode==='run') return run(kind,selection,options)
   return 0
 }

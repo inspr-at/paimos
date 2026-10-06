@@ -24,6 +24,13 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	// Lead handlers retain their actor/owner checks inside the final transaction.
+	"GET /api/projects/{projectId}/lead":                            "harness.read",
+	"POST /api/projects/{projectId}/lead":                           "harness.control",
+	"POST /api/projects/{projectId}/lead/yield":                     "harness.worker",
+	"POST /api/projects/{projectId}/lead/claim":                     "harness.worker",
+	"POST /api/projects/{projectId}/lead/pause":                     "harness.control|harness.worker",
+	"GET /api/projects/{projectId}/lead/usage":                      "harness.read",
 	"POST /api/projects/{projectId}/chat-roles":                     "chat.bind",
 	"POST /api/projects/{projectId}/chat-threads/resolve":           "chat.read",
 	"GET /api/chat-threads/{id}":                                    "chat.read",
@@ -149,6 +156,10 @@ var RoutePermissions = map[string]string{
 	"POST /api/queue/{nodeId}/undo":                                           "nodes.read", // Handler rechecks queue write permission and receipt ownership in the mutation transaction.
 	"GET /api/queue":                                                          "nodes.read",
 	"POST /api/queue":                                                         "nodes.read",
+	"POST /api/queue/{nodeId}/snapshots":                                      "nodes.read",
+	"GET /api/queue-snapshots/{snapshotId}":                                   "nodes.read",
+	"POST /api/queue-snapshots/{snapshotId}/apply":                            "nodes.read",
+	"DELETE /api/queue-snapshots/{snapshotId}":                                "nodes.read",
 	"DELETE /api/queue/{nodeId}":                                              "nodes.read",
 	"POST /api/queue/{nodeId}/move":                                           "nodes.read",
 	"POST /api/queue/reset":                                                   "nodes.read",
@@ -549,6 +560,8 @@ var RoutePermissions = map[string]string{
 	"GET /api/model-prices":                                                                     "harness.read",
 	"POST /api/model-prices":                                                                    "models.manage",
 	"GET /api/projects/{projectId}/instruction-provenance":                                      "harness.read",
+	"GET /api/projects/{projectId}/lead-decisions":                                              "nodes.read",
+	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/lead-decisions":                  "harness.worker",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/provenance":                     "harness.read",
 	"GET /api/projects/{projectId}/harness-sessions/{sessionId}/usage":                          "harness.read",
 	"POST /api/projects/{projectId}/harness-sessions/{sessionId}/provenance":                    "harness.worker",

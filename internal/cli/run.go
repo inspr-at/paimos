@@ -155,6 +155,7 @@ func (rt *runtime) root() *Command {
 		rt.cmdMe(),
 		rt.cmdIssue(),
 		rt.cmdQueue(),
+		rt.cmdLead(),
 		rt.cmdRecur(),
 		rt.cmdOutcome(),
 		rt.cmdProject(),
