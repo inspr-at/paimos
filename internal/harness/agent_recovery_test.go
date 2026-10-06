@@ -333,11 +333,17 @@ func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T
 			if err != nil {
 				return err
 			}
-			_, err = tx.Exec(t.Context(), `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id) VALUES($1,$2,$3,$4,$5,'attached fixture message',$6,$7)`, f.person.TenantID, id, f.person.ID, f.agent.ID, event.ID, uid(), target)
+			if _, err = tx.Exec(t.Context(), `INSERT INTO inbox_messages(tenant_id,id,sender_principal_id,recipient_principal_id,sent_event_id,body,idempotency_key,recipient_session_id) VALUES($1,$2,$3,$4,$5,'attached fixture message',$6,$7)`, f.person.TenantID, id, f.person.ID, f.agent.ID, event.ID, uid(), target); err != nil {
+				return err
+			}
+			if id == messageID {
+				_, err = tx.Exec(t.Context(), `INSERT INTO inbox_receipts(tenant_id,message_id,state,deliver_by) VALUES($1,$2,'queued',clock_timestamp()+interval '5 minutes')`, f.person.TenantID, id)
+			}
 			return err
 		})
 	}
 	var deliveryID any
+	var delivery map[string]any
 	for round := 0; round < 2; round++ {
 		drain := v.runtimeCall(t, v.path+"/drain", map[string]any{}, v.lease)
 		expect(t, drain, 200)
@@ -350,6 +356,7 @@ func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T
 		} else if deliveryID != deliveries[0]["delivery_id"] {
 			t.Fatal("reconnect did not preserve the replayable delivery")
 		}
+		delivery = deliveries[0]
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		var acked bool
@@ -361,10 +368,45 @@ func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T
 		}
 		return nil
 	})
+	// AEON-660: the verified attached hook must finish the durable lease it
+	// drained. Until foreground handoff, replay remains the same lease; after
+	// completion it must not block later drains or consume the broadcast.
+	handoff := map[string]any{"delivery_id": deliveryID, "cursor": delivery["cursor"], "outcome": "handed_off"}
+	expect(t, v.runtimeCall(t, v.path+"/complete-delivery", handoff, "wrong-lease"), 403)
+	w := v.runtimeCall(t, v.path+"/complete-delivery", handoff, v.lease)
+	expect(t, w, 200)
+	completed := decode(t, w)
+	if completed["delivery_id"] != deliveryID || completed["cursor"] != delivery["cursor"] || completed["completed_at"] == nil {
+		t.Fatalf("attached durable completion=%v", completed)
+	}
+	w = v.runtimeCall(t, v.path+"/complete-delivery", handoff, v.lease)
+	expect(t, w, 200)
+	if got := decode(t, w); got["completed_at"] != completed["completed_at"] {
+		t.Fatal("attached durable retry changed completion evidence")
+	}
+	w = v.runtimeCall(t, v.path+"/drain", map[string]any{}, v.lease)
+	expect(t, w, 200)
+	var remaining []map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &remaining); err != nil || remaining == nil || len(remaining) != 0 {
+		t.Fatalf("completed attached durable lease replayed or consumed broadcast: %s", w.Body.String())
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var acked, finished, released bool
+		var mode, receipt string
+		if err := tx.QueryRow(t.Context(), `SELECT m.acked_at IS NOT NULL,d.completed_at IS NOT NULL,d.released_at IS NOT NULL,d.mode,r.state
+			FROM inbox_messages m JOIN harness_deliveries d ON d.message_id=m.id JOIN inbox_receipts r ON r.message_id=m.id
+			WHERE m.id=$1 AND d.id=$2`, messageID, deliveryID).Scan(&acked, &finished, &released, &mode, &receipt); err != nil {
+			return err
+		}
+		if !acked || !finished || released || mode != "managed" || receipt != "handed_off" {
+			t.Fatalf("attached durable result: acked=%t completed=%t released=%t mode=%s receipt=%s", acked, finished, released, mode, receipt)
+		}
+		return nil
+	})
 	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
 	expect(t, v.runtimeCall(t, endpoint, completion), 403)
 	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
-	w := v.runtimeCall(t, endpoint, completion)
+	w = v.runtimeCall(t, endpoint, completion)
 	expect(t, w, 200)
 	if got := decode(t, w); got["outcome"] != "reconnected" || got["next_run_id"] != nil {
 		t.Fatalf("attached completion=%v", got)
