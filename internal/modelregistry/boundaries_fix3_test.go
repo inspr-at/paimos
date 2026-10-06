@@ -80,7 +80,7 @@ func TestEndpointCancelledHTTPBodyInterruptsTransport(t *testing.T) {
 	}
 	defer response.Body.Close()
 	raw, err := io.ReadAll(response.Body)
-	if err != nil || response.StatusCode != http.StatusRequestTimeout || !strings.Contains(string(raw), "request body did not arrive in time") {
+	if err != nil || response.StatusCode != http.StatusRequestTimeout || !strings.Contains(string(raw), "request body read timed out") {
 		t.Fatalf("wrong transport cancellation result: status=%d error=%v body=%s", response.StatusCode, err, raw)
 	}
 	select {
@@ -253,8 +253,10 @@ func TestEndpointBodyDeadlineBeforePreparation(t *testing.T) {
 	if rec.Code != http.StatusRequestTimeout {
 		t.Fatalf("wrong body timeout status: %d %s", rec.Code, rec.Body.String())
 	}
-	if len(rec.deadlines) != 3 || !rec.deadlines[0].Equal(deadline) || !rec.deadlines[1].Equal(time.Unix(1, 0)) || !rec.deadlines[2].IsZero() {
-		t.Fatalf("transport read deadline not installed, interrupted and cleared: %v", rec.deadlines)
+	// A failed read keeps its transport deadline (AEON-652): the interrupt is
+	// the last deadline call, never followed by a clear.
+	if len(rec.deadlines) != 2 || !rec.deadlines[0].Equal(deadline) || !rec.deadlines[1].Equal(time.Unix(1, 0)) {
+		t.Fatalf("transport read deadline not installed and interrupted, or cleared after the failed read: %v", rec.deadlines)
 	}
 	select {
 	case <-prepared:

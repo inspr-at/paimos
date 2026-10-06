@@ -219,58 +219,93 @@ func workBindingMutation(r *http.Request) bool {
 	return false
 }
 
+// bodyInterruptGrace bounds how long a cancelled request lets an in-flight
+// transport read return on its own before the connection deadline is moved into
+// the past. net/http cancels the request context from inside a failing read
+// (connReader.handleReadErrorLocked), so a cancelled context does not prove a
+// stalled read; the read that just timed out delivers its result within
+// microseconds. Interrupting it anyway would issue a second deadline call on a
+// connection whose post-handler drain already relies on the first one.
+const bodyInterruptGrace = time.Second
+
+type bodyResult struct {
+	raw []byte
+	err error
+}
+
 // BufferEndpointBody finishes all network reads before preparation or a database
 // transaction. A transport deadline interrupts HTTP reads; the context bound
 // also protects callers whose ResponseWriter cannot set transport deadlines.
 // Callers must install a bounded request context before entering this helper.
+//
+// A failed read keeps its transport deadline (AEON-652): net/http drains the
+// unread body after the handler returns, and clearing the deadline would let
+// a stalled client hold that drain indefinitely. Exactly one deadline call is
+// made when the transport ends the read itself; only a read that is still
+// blocked after cancellation is interrupted with an already expired deadline.
 func BufferEndpointBody(w http.ResponseWriter, r *http.Request) error {
 	if r.Body == nil || r.Body == http.NoBody {
 		return nil
 	}
 	controller := http.NewResponseController(w)
+	transport := false
 	if deadline, ok := r.Context().Deadline(); ok {
-		if err := controller.SetReadDeadline(deadline); err == nil {
-			defer controller.SetReadDeadline(time.Time{})
-		}
+		transport = controller.SetReadDeadline(deadline) == nil
 	}
 	body := http.MaxBytesReader(w, r.Body, 1<<20)
-	type bodyResult struct {
-		raw []byte
-		err error
-	}
 	done := make(chan bodyResult, 1)
 	go func() {
 		raw, err := io.ReadAll(body)
 		done <- bodyResult{raw, err}
 	}()
+	var got bodyResult
 	select {
+	case got = <-done:
 	case <-r.Context().Done():
-		// Interrupt transport input immediately on cancellation too, rather
-		// than waiting for the original deadline while Close drains the body.
-		_ = controller.SetReadDeadline(time.Unix(1, 0))
-		_ = body.Close()
-		// HTTP request bodies must unblock a concurrent Read on Close. Join
-		// that read before writing a response or clearing its transport deadline.
-		<-done
-		return Fail(http.StatusRequestTimeout, "request body did not arrive in time")
-	case got := <-done:
-		if got.err != nil {
-			var tooLarge *http.MaxBytesError
-			if errors.As(got.err, &tooLarge) {
-				return Fail(http.StatusRequestEntityTooLarge, "request body too large")
-			}
-			var timedOut net.Error
-			if r.Context().Err() != nil || errors.As(got.err, &timedOut) && timedOut.Timeout() {
-				return Fail(http.StatusRequestTimeout, "request body did not arrive in time")
-			}
-			return Fail(http.StatusBadRequest, "could not read request body")
-		}
-		if r.Context().Err() != nil {
-			return Fail(http.StatusRequestTimeout, "request body did not arrive in time")
-		}
-		r.Body = io.NopCloser(bytes.NewReader(got.raw))
-		return nil
+		got = interruptBody(controller, body, done, transport)
 	}
+	if got.err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(got.err, &tooLarge) {
+			return Fail(http.StatusRequestEntityTooLarge, "request body too large")
+		}
+		var timedOut net.Error
+		if r.Context().Err() != nil || errors.As(got.err, &timedOut) && timedOut.Timeout() {
+			return Fail(http.StatusRequestTimeout, "request body read timed out")
+		}
+		return Fail(http.StatusBadRequest, "could not read request body")
+	}
+	if r.Context().Err() != nil {
+		return Fail(http.StatusRequestTimeout, "request body read timed out")
+	}
+	_ = r.Body.Close()
+	if transport {
+		// Only a complete body resumes keep-alive reads without a deadline.
+		_ = controller.SetReadDeadline(time.Time{})
+	}
+	r.Body = io.NopCloser(bytes.NewReader(got.raw))
+	return nil
+}
+
+// interruptBody ends a read whose request context is already done. With a
+// transport deadline installed, a read that failed on its own (and thereby
+// cancelled the context) is joined without touching the connection again; a
+// read still blocked after the grace period gets an expired deadline. Close
+// releases cancellable bodies without a transport; HTTP bodies must unblock
+// their concurrent Read before the response is written.
+func interruptBody(controller *http.ResponseController, body io.ReadCloser, done <-chan bodyResult, transport bool) bodyResult {
+	if transport {
+		timer := time.NewTimer(bodyInterruptGrace)
+		defer timer.Stop()
+		select {
+		case got := <-done:
+			return got
+		case <-timer.C:
+		}
+		_ = controller.SetReadDeadline(time.Unix(1, 0))
+	}
+	_ = body.Close()
+	return <-done
 }
 
 // CurrentKeyPrincipal repeats the exact initiating key ceiling under the caller's

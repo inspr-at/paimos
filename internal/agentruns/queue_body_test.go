@@ -60,7 +60,7 @@ func TestQueueCancellationInterruptsHTTPTransport(t *testing.T) {
 	}
 	defer response.Body.Close()
 	raw, err := io.ReadAll(response.Body)
-	if err != nil || response.StatusCode != http.StatusRequestTimeout || !strings.Contains(string(raw), "request body did not arrive in time") {
+	if err != nil || response.StatusCode != http.StatusRequestTimeout || !strings.Contains(string(raw), "request body read timed out") {
 		t.Fatalf("wrong transport cancellation result: status=%d error=%v body=%s", response.StatusCode, err, raw)
 	}
 }
@@ -167,11 +167,13 @@ func TestQueueStalledBodyHoldsNoTenantFence(t *testing.T) {
 			case <-time.After(10 * time.Second):
 				t.Fatal("cancellation did not interrupt queue body")
 			}
-			if rec.Code != http.StatusRequestTimeout || !strings.Contains(rec.Body.String(), "request body did not arrive in time") {
+			if rec.Code != http.StatusRequestTimeout || !strings.Contains(rec.Body.String(), "request body read timed out") {
 				t.Fatalf("wrong cancellation result: %d %s", rec.Code, rec.Body.String())
 			}
-			if len(rec.deadlines) != 3 || !rec.deadlines[0].After(time.Time{}) || rec.deadlines[1] != time.Unix(1, 0) || !rec.deadlines[2].IsZero() {
-				t.Fatalf("body deadline not installed, interrupted and cleared: %v", rec.deadlines)
+			// A failed read keeps its transport deadline (AEON-652): the
+			// interrupt is the last deadline call, never followed by a clear.
+			if len(rec.deadlines) != 2 || !rec.deadlines[0].After(time.Time{}) || rec.deadlines[1] != time.Unix(1, 0) {
+				t.Fatalf("body deadline not installed and interrupted, or cleared after the failed read: %v", rec.deadlines)
 			}
 		})
 	}
