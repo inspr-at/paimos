@@ -34,7 +34,7 @@ const props = defineProps<{
   loading: boolean
   density: 'comfortable' | 'compact'
   stuck: boolean
-  view: TicketView | 'journey' | 'knowledge'
+  view: TicketView | 'knowledge'
   knowledgeView?: 'entries' | 'graph'
   // The table's columns for the Display menu's picker.
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
@@ -181,18 +181,18 @@ defineExpose({ focusSearch, openFilterMenu, input })
 </script>
 
 <template>
-  <div ref="root" class="toolbar" :class="{ stuck, graph, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="view === 'knowledge' ? 'Knowledge controls' : view === 'journey' ? 'Journey controls' : 'Ticket list controls'">
-    <ProjectTabs v-if="view !== 'journey'" class="view-switch"
+  <div ref="root" class="toolbar" :class="{ stuck, graph, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="view === 'knowledge' ? 'Knowledge controls' : 'Ticket list controls'">
+    <ProjectTabs class="view-switch"
       :items="view === 'knowledge' ? KNOWLEDGE_VIEWS : TICKET_VIEWS"
       :selected="view === 'knowledge' ? knowledgeView ?? 'entries' : view"
       :tips="view !== 'knowledge'"
       :label="view === 'knowledge' ? 'Knowledge views' : 'Ticket views'" @select="value => emit('view', value)" />
-    <span v-if="view !== 'knowledge' && view !== 'journey'" class="count-live">
+    <span v-if="view !== 'knowledge'" class="count-live">
       <slot name="freshness" />
       <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ plural(total, 'ticket') }}</template></span>
     </span>
-    <span v-if="view !== 'knowledge' && view !== 'journey'" class="phone-break" aria-hidden="true" />
-    <template v-if="view !== 'knowledge' && view !== 'journey'">
+    <span v-if="view !== 'knowledge'" class="phone-break" aria-hidden="true" />
+    <template v-if="view !== 'knowledge'">
     <label class="search-field list-search">
       <AppIcon name="search" :size="14" />
       <input ref="input" v-model="draft" class="field" type="search" :placeholder="narrow ? 'Search' : graph ? 'Search tickets' : 'Search this list'" aria-label="Search tickets in this project" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
@@ -256,9 +256,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
 
     </template>
     <!-- The Knowledge tab teleports its own controls here (KnowledgeTab.vue). -->
-    <div v-else-if="view === 'knowledge'" id="knowledge-controls" class="knowledge-controls" />
-    <span v-else class="spacer" />
-    <slot name="journey" />
+    <div v-else id="knowledge-controls" class="knowledge-controls" />
 
     <FacetMenu
       v-if="open" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]" :loading="facetLoading"

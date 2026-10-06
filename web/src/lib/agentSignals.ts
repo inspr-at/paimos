@@ -83,6 +83,8 @@ export function problemReason(reason?: string | null) {
 // it is the one answer and this file has no second one: it never reads the percent
 // or the stop reason to decide Done. A plain stop, a force stop, a spent budget, a
 // failure and a silence the server closed are not a finish; they are Ended or failed.
+// A stop the person requested reads Stopped only after the worker confirms it.
+// The reporter's default reason "stopped" is still a plain stop (AEON-437).
 export interface StateReason { code: string; detail: string; next: string }
 export interface StateAssessment { state: AgentState; label: string; reasons: StateReason[] }
 export function heartbeatEvidence(evidence: StateEvidence, now: number) {
@@ -107,6 +109,9 @@ function limitUntil(reset: string, now: number) {
 
 export function assessAgentState(evidence: StateEvidence, now: number, preferences = DEFAULT_AGENT_STATE, needs = false): StateAssessment {
   const result = (state: AgentState, reasons: StateReason[] = [], label = STATE_LABEL[state]) => ({ state, label, reasons })
+  if (evidence.pause?.stop_requested && evidence.phase !== 'stopped' && !evidence.stopped_at) {
+    return result('pausing', [{ code: 'stop-requested', detail: 'A stop was requested; the worker has not confirmed it yet.', next: 'Wait for the worker’s stop report. A request does not prove process exit.' }], 'Stop requested')
+  }
   const problems: StateReason[] = []
   if (problemReason(evidence.stop_reason)) problems.push({ code: 'stop', detail: `Reported stop reason: ${evidence.stop_reason}`, next: 'Check the session activity and its bound ticket before starting a replacement.' })
   if (!evidence.vendor_limited && ['failed', 'ownership_lost', 'blocked'].includes(evidence.run_status ?? '')) problems.push({ code: 'run', detail: `The bound run reported ${evidence.run_status!.replace(/_/g, ' ')}.`, next: 'Check the current run and its history for the failure context.' })
@@ -122,7 +127,7 @@ export function assessAgentState(evidence: StateEvidence, now: number, preferenc
   if (evidence.phase === 'stopped' || evidence.stopped_at) {
     if (evidence.pause?.state === 'paused' || evidence.pause?.state === 'resume_requested') return result('paused', [], evidence.pause.state === 'resume_requested' ? 'Resume requested' : 'Paused')
     if (evidence.finished) return result('done')
-    return result('stopped', [], evidence.stop_reason === LOST_CONTACT ? 'Lost contact' : STATE_LABEL.stopped)
+    return result('stopped', [], evidence.stop_reason === LOST_CONTACT ? 'Lost contact' : evidence.pause?.stop_requested ? 'Stopped' : STATE_LABEL.stopped)
   }
   const heartbeat = heartbeatEvidence(evidence, now)
   const working = ['starting', 'working', 'stopping'].includes(evidence.phase) && !['idle', 'throttled'].includes(evidence.activity)

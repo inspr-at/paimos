@@ -347,13 +347,27 @@ func Restamp(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope Scope) ([
 // RestampAfter only advances a stamp when the write tightens the previous live
 // requirement. A nil snapshot preserves the internal catch-up operation.
 func RestampAfter(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope Scope, before map[string]string) ([]RestampedRun, error) {
+	out, changes, err := RestampAfterDeferred(ctx, tx, scope, before)
+	if err != nil {
+		return nil, err
+	}
+	for _, change := range changes {
+		if _, err := events.Append(ctx, tx, p, change); err != nil {
+			return nil, fmt.Errorf("record restamp: %w", err)
+		}
+	}
+	return out, nil
+}
+
+// RestampAfterDeferred leaves the event counter to the outer preference writer.
+func RestampAfterDeferred(ctx context.Context, tx pgx.Tx, scope Scope, before map[string]string) ([]RestampedRun, []events.Change, error) {
 	out := []RestampedRun{}
+	changes := []events.Change{}
 	err := withRoutingVisibility(ctx, tx, func() error {
 		runs, err := activeScopeRuns(ctx, tx, scope)
 		if err != nil {
 			return err
 		}
-		changes := []events.Change{}
 		for _, r := range runs {
 			policy, err := RunRequirement(ctx, tx, r.ID)
 			if err != nil {
@@ -374,12 +388,7 @@ func RestampAfter(ctx context.Context, tx pgx.Tx, p tenant.Principal, scope Scop
 			changes = append(changes, events.Change{Type: "run.residency_restamped", Before: map[string]string{"run_id": r.ID, "residency": before}, After: map[string]string{"run_id": r.ID, "residency": r.Residency}})
 			out = append(out, r)
 		}
-		for _, change := range changes {
-			if _, err := events.Append(ctx, tx, p, change); err != nil {
-				return fmt.Errorf("record restamp: %w", err)
-			}
-		}
 		return nil
 	})
-	return out, err
+	return out, changes, err
 }

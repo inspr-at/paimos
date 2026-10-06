@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/jackc/pgx/v5"
 )
@@ -149,7 +150,7 @@ func TestBConcurrentQueuedClaimsPromoteOneRecovery(t *testing.T) {
 	now := base.Add(time.Hour)
 	bAt(t, &f, now, "g2")
 	pool, barrier, ctx := dbtest.BarrierPool(t, appPool, func(sql string) bool {
-		return sql == `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`
+		return sql == db.TenantFenceSQL
 	})
 	mod := fixedClockModule{Module: New(pool), at: now}
 	statuses := make(chan int, 2)

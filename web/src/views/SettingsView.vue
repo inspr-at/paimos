@@ -18,6 +18,7 @@ import WorkspaceSection from '../components/settings/WorkspaceSection.vue'
 import AccessSection from '../components/access/AccessSection.vue'
 import AgentRulesSection from '../components/rules/AgentRulesSection.vue'
 import AccountsSection from '../components/settings/AccountsSection.vue'
+import PoliciesSection from '../components/settings/PoliciesSection.vue'
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId } from '../lib/settings'
 import { useSession } from '../stores/session'
 import { doctrineInbox } from '../lib/doctrineInbox'
@@ -54,8 +55,8 @@ const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
 // Which sections show depends on my permissions: the layout waits for them, so
 // the nav never re-flows under the pointer (usually a few milliseconds).
 void refreshPermissions()
-const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, workspace: WorkspaceSection, vocabulary: VocabularySection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
-const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', workspace: 'building', vocabulary: 'tag', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'monitor', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
+const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, policies: PoliciesSection, workspace: WorkspaceSection, vocabulary: VocabularySection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
+const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', policies: 'shield', workspace: 'building', vocabulary: 'tag', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'monitor', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
 const groups = computed(() => SETTINGS_GROUPS.map(label => ({ label, sections: sections.value.filter(section => section.group === label) })).filter(group => group.sections.length))
 const pickerOpen = ref(false)
 const picker = ref<HTMLButtonElement>()
@@ -117,7 +118,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
     <header class="page-head">
       <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
       <h1 id="settings-title">Settings</h1>
-      <p class="summary">{{ admin ? 'Your own preferences, and the workspace’s for admins.' : 'Your own preferences.' }}</p>
+      <p class="summary">Preferences, policies and the workspace settings available to you.</p>
     </header>
     <!-- One grid for everyone: with only Personal to show, the nav still holds its column. -->
     <div v-if="!permissionsKnown()" class="layout waiting" role="status" aria-label="Loading settings"><span class="skeleton nav-skeleton" /><span class="skeleton body-skeleton" /></div>
