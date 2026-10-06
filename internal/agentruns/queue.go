@@ -23,11 +23,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-type queueTarget struct {
-	Agent   string  `json:"agent_principal_id,omitempty"`
-	Profile string  `json:"model_profile_id,omitempty"`
-	Account *string `json:"requested_account_id,omitempty"`
-}
+type queueTarget = workqueue.RouteTarget
+
 type queueUndoToken struct {
 	RunID    string    `json:"run_id"`
 	Revision time.Time `json:"revision"`

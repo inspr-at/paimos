@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/escalation"
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
@@ -77,9 +78,10 @@ type Run struct {
 type UsageRecorder func(context.Context, pgx.Tx, tenant.Principal, Run, Telemetry) error
 type CompletionReviewer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange) error
 type module struct {
-	reviews CompletionReviewer
-	pool    *pgxpool.Pool
-	usage   UsageRecorder
+	leadAdmission harness.LeadAdmission
+	reviews       CompletionReviewer
+	pool          *pgxpool.Pool
+	usage         UsageRecorder
 }
 
 // New returns the /api/runs and /api/work-orders/{id}/runs module. The optional
@@ -90,6 +92,14 @@ func New(pool *pgxpool.Pool, recorder ...UsageRecorder) httpapi.Module {
 	if len(recorder) > 0 {
 		m.usage = recorder[0]
 	}
+	return m
+}
+
+// NewWithLeadAdmission connects the qualified existing start checks to explicit
+// project leads. The default constructor waits for configured project dispatch.
+func NewWithLeadAdmission(pool *pgxpool.Pool, admission harness.LeadAdmission, recorder ...UsageRecorder) httpapi.Module {
+	m := New(pool, recorder...).(*module)
+	m.leadAdmission = admission
 	return m
 }
 
@@ -437,6 +447,19 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		seen[id] = true
 	}
 	ctx := r.Context()
+	// The tenant/tree fence is already held. Check the accepting project lead
+	// before order/run row locks, then retain that fence through final claim.
+	var project *string
+	var leadBinding []byte
+	var claimState string
+	if err := tx.QueryRow(ctx, `SELECT n.project_id::text,r.trace->'project_lead',r.status FROM agent_runs r LEFT JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.queue_node_id WHERE r.id=$1`, r.PathValue("runId")).Scan(&project, &leadBinding, &claimState); err != nil {
+		return nil, err
+	}
+	if project != nil && claimState == "queued" && in.Refusal == "" {
+		if err := harness.RequireAssignedLeadStartTx(ctx, tx, p, *project, r.PathValue("runId"), leadBinding, m.leadAdmission); err != nil {
+			return nil, err
+		}
+	}
 	v, o, err := lockRun(ctx, tx, r.PathValue("runId"))
 	if err != nil {
 		return nil, err
