@@ -1234,6 +1234,32 @@
         {"file":"tests/settings-shared.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":6.613,"median":0.701,"min":0.409},"seconds":38.002851,"selectedTests":23},"weightSeconds":20,"weightSource":"unmeasured-test-count-estimate"}
       ]
     }
+    ,
+    {
+      "config": "playwright.ui.config.ts"
+      ,
+      "env": {}
+      ,
+      "flags": [
+        "--workers=1"
+        ,
+        "--trace=retain-on-failure"
+      ]
+      ,
+      "hostedOnly": true
+      ,
+      "id": "lead-flow"
+      ,
+      "project": null
+      ,
+      "sourceSteps": [
+        "AEON-741 lead flow UI regressions"
+      ]
+      ,
+      "specs": [
+        {"file":"tests/lead-flow.spec.ts","listedTests":13,"weightSeconds":10,"weightSource":"unmeasured-test-count-estimate"}
+      ]
+    }
   ]
   ,
   "integrationNotes": [

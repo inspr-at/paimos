@@ -104,10 +104,10 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
         </p>
         <p class="now-copy">{{ nowCopy }}</p>
         <dl class="facts">
-          <div><dt>Workers</dt><dd>{{ workers.length }}</dd><p>this project</p></div>
-          <div><dt>Queued</dt><dd>{{ queued ? queued.length : '—' }}</dd><p>{{ next[0] ? `next ${next[0].key}` : queued ? 'nothing waits' : 'can’t be read' }}</p></div>
-          <div><dt>Gate</dt><dd>{{ gateIds ? gateIds.length : '—' }}</dd><p>{{ gateIds?.[0] ? keyOf(gateIds[0]) ?? '…' : gateIds ? 'none' : 'not read yet' }}</p></div>
-          <div><dt>Merged</dt><dd>{{ mergedIds ? mergedIds.length : '—' }}</dd><p>today</p></div>
+          <div><dt>Workers</dt><dd>{{ workers.length }}</dd><dd class="sub">this project</dd></div>
+          <div><dt>Queued</dt><dd>{{ queued ? queued.length : '—' }}</dd><dd class="sub">{{ next[0] ? `next ${next[0].key}` : queued ? 'nothing waits' : 'can’t be read' }}</dd></div>
+          <div><dt>Gate</dt><dd>{{ gateIds ? gateIds.length : '—' }}</dd><dd class="sub">{{ gateIds?.[0] ? keyOf(gateIds[0]) ?? '…' : gateIds ? 'none' : 'not read yet' }}</dd></div>
+          <div><dt>Merged</dt><dd>{{ mergedIds ? mergedIds.length : '—' }}</dd><dd class="sub">today</dd></div>
         </dl>
       </section>
       <section class="p-sec" aria-labelledby="lp-workers">
@@ -191,7 +191,7 @@ function openSession() { const id = lead.value?.session_id; if (id) { closeLeadP
 .facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px 12px; margin: 16px 0 0; }
 .facts dt { font: 500 10.5px/1.5 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
 .facts dd { margin: 3px 0 0; color: var(--ink); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.3; }
-.facts p { margin: 1px 0 0; font-size: 12px; color: var(--ink-3); }
+.facts dd.sub { margin: 1px 0 0; font-size: 12px; font-weight: 400; color: var(--ink-3); }
 .wk { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 2px 12px; margin: 0 -8px; padding: 10px 8px; border-top: 1px solid var(--line); }
 .wk:first-of-type { border-top: 0; }
 .vendor { grid-row: span 2; align-self: start; margin-top: 2px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); }

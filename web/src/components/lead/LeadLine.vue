@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import type { IconName } from '../AppIcon.vue'
-import type { Station, StationId } from '../../lib/lead'
+import { LEAD_WORDS, type Station, type StationId } from '../../lib/lead'
 import AppIcon from '../AppIcon.vue'
 import TicketPeekLink from '../TicketPeekLink.vue'
 
@@ -13,8 +13,8 @@ const ICON: Record<StationId, IconName> = { queued: 'queue', working: 'agent', g
 const TIP: Record<StationId, string> = {
   queued: 'Queued work in this project, in queue order',
   working: 'Tickets its workers are on right now',
-  gate: 'Waiting for a cross-family review, as the lead reported',
-  merged: 'Merged and handed to release today, as the lead reported',
+  gate: `Waiting for a cross-family review, as the ${LEAD_WORDS.l} reported`,
+  merged: `Merged and handed to release today, as the ${LEAD_WORDS.l} reported`,
 }
 const href = (routeKey: string, key: string) => `/p/${encodeURIComponent(routeKey)}/${encodeURIComponent(key)}`
 </script>
@@ -23,7 +23,7 @@ const href = (routeKey: string, key: string) => `/p/${encodeURIComponent(routeKe
   <div class="line" :class="{ empty }" role="group" aria-label="Where the work is">
     <div v-for="s in stations" :key="s.id" class="station" :class="s.tone" :data-station="s.id">
       <span class="st-mark"><AppIcon :name="ICON[s.id]" :size="13" /></span>
-      <button type="button" class="st-label" :data-tip="TIP[s.id]" :aria-label="`${s.count ?? 'Unknown'} ${s.label}. Open the lead panel`" @click="emit('open', $event.currentTarget as HTMLElement)"><b>{{ s.count ?? '—' }}</b>{{ s.label }}</button>
+      <button type="button" class="st-label" :data-tip="TIP[s.id]" :aria-label="`${s.count ?? 'Unknown'} ${s.label}. Open the ${LEAD_WORDS.l} panel`" @click="emit('open', $event.currentTarget as HTMLElement)"><b>{{ s.count ?? '—' }}</b>{{ s.label }}</button>
       <span class="st-keys"><TicketPeekLink v-for="k in s.keys" :key="k" class="key" :ticket-key="k" :href="href(routeKey, k)" /><span v-if="s.more">+{{ s.more }}</span></span>
     </div>
   </div>

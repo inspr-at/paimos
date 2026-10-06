@@ -102,22 +102,22 @@ watch(() => leadOverlay.start, value => { if (!value) generation++ })
     <div class="sheet-body">
       <p v-if="error" class="sheet-error" role="alert"><AppIcon name="alert" :size="14" />{{ error }}</p>
       <p class="intro">The {{ w.l }} picks up queued work in {{ key }}, sizes it and starts workers within your limits. You only see its questions, on the Decision Desk.</p>
-      <dl class="facts-list">
+      <div class="facts-list">
         <div v-if="projects.length > 1" class="fl-row" data-row="project">
-          <dt>Project</dt>
-          <dd>{{ key }}<small>{{ projects.length }} projects have no {{ w.l }}. One per project.</small></dd>
+          <span class="fl-label">Project</span>
+          <p class="fl-value">{{ key }}<small>{{ projects.length }} projects have no {{ w.l }}. One per project.</small></p>
           <div class="choices project-choices" role="radiogroup" aria-label="Project">
             <button v-for="id in projects" :key="id" type="button" class="choice" role="radio" :aria-checked="chosen === id" @click="chosen = id">
               <span class="radio" /><span class="glyph"><AppIcon name="folder" :size="14" /></span><span><b>{{ projectStore.byId(id)?.routeKey ?? '—' }}</b><span class="small">{{ projectStore.byId(id)?.title ?? '' }}</span></span><span />
             </button>
           </div>
         </div>
-        <div v-else-if="showProject" class="fl-row" data-row="project"><dt>Project</dt><dd>{{ key }}<small>The only project without a {{ w.l }}.</small></dd></div>
+        <div v-else-if="showProject" class="fl-row" data-row="project"><span class="fl-label">Project</span><p class="fl-value">{{ key }}<small>The only project without a {{ w.l }}.</small></p></div>
         <div class="fl-row" data-row="host">
-          <dt>Runs on</dt>
-          <dd v-if="host === 'auto'">Automatic<small>Wherever there is room when work starts.</small></dd>
-          <dd v-else>{{ hostName(host) }}<small>Always this computer. Workers still go wherever the checks pass.</small></dd>
-          <button v-if="owner && choices.length" type="button" class="btn sm ghost" :aria-expanded="hostOpen" aria-controls="lead-host-choices" @click="hostOpen = !hostOpen">{{ hostOpen ? 'Done' : 'Change' }}</button>
+          <span class="fl-label">Runs on</span>
+          <p class="fl-value" v-if="host === 'auto'">Automatic<small>Wherever there is room when work starts.</small></p>
+          <p class="fl-value" v-else>{{ hostName(host) }}<small>Always this computer. Workers still go wherever the checks pass.</small></p>
+          <button v-if="owner && choices.length" type="button" class="btn sm ghost" :aria-expanded="hostOpen" aria-controls="lead-host-choices" data-act="host" @click="hostOpen = !hostOpen"><span class="stack"><span>{{ hostOpen ? 'Done' : 'Change' }}</span><span aria-hidden="true">Change</span></span></button>
           <div v-if="hostOpen" id="lead-host-choices" class="choices">
             <div role="radiogroup" aria-label="Host">
               <button type="button" class="choice" role="radio" :aria-checked="host === 'auto'" @click="pickHost('auto', false)"><span class="radio" /><span class="glyph"><AppIcon name="gauge" :size="14" /></span><span><b>Automatic</b><span class="small">Wherever there is room when work starts</span></span><span class="small faint">Default</span></button>
@@ -126,10 +126,10 @@ watch(() => leadOverlay.start, value => { if (!value) generation++ })
             <p class="choice-note" aria-live="polite">{{ hostNote || `Automatic: the ${w.l} runs where there is room now; its workers go wherever the checks pass.` }}</p>
           </div>
         </div>
-        <div class="fl-row" data-row="model"><dt>Model</dt><dd>By role<small>{{ model ? `Today ${model}. ` : '' }}From Model preferences.</small></dd></div>
-        <div class="fl-row" data-row="works"><dt>Works on</dt><dd>Queued work in {{ key }}<template v-if="queued !== null"> · {{ queued }} now</template><small>In your order. Agents work on leaves; parents follow their children.</small></dd></div>
-        <div class="fl-row" data-row="limits"><dt>Limits</dt><dd>Your dial<template v-if="dial !== null">: up to {{ dial }} agents at once</template>, all projects together<small>The {{ w.l }} counts as one. Before every start PAIMOS checks the dial, harness limits, account room and host load. If any of them can’t be read, nothing starts.</small></dd></div>
-      </dl>
+        <div class="fl-row" data-row="model"><span class="fl-label">Model</span><p class="fl-value">By role<small>{{ model ? `Today ${model}. ` : '' }}From Model preferences.</small></p></div>
+        <div class="fl-row" data-row="works"><span class="fl-label">Works on</span><p class="fl-value">Queued work in {{ key }}<template v-if="queued !== null"> · {{ queued }} now</template><small>In your order. Agents work on leaves; parents follow their children.</small></p></div>
+        <div class="fl-row" data-row="limits"><span class="fl-label">Limits</span><p class="fl-value">Your dial<template v-if="dial !== null">: up to {{ dial }} agents at once</template>, all projects together<small>The {{ w.l }} counts as one. Before every start PAIMOS checks the dial, harness limits, account room and host load. If any of them can’t be read, nothing starts.</small></p></div>
+      </div>
     </div>
   </dialog>
 </template>
@@ -147,10 +147,13 @@ watch(() => leadOverlay.start, value => { if (!value) generation++ })
 .sheet-error { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; color: var(--danger); font-size: 13px; }
 .facts-list { margin: 16px 0 0; border-top: 1px solid var(--line); }
 .fl-row { display: grid; grid-template-columns: 112px minmax(0, 1fr) auto; align-items: start; gap: 4px 14px; padding: 12px 0; border-bottom: 1px solid var(--line); }
-.fl-row dt { padding-top: 1px; font: 500 10.5px/1.6 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
-.fl-row dd { min-width: 0; margin: 0; color: var(--ink); font-size: 13.5px; }
-.fl-row dd small { display: block; margin-top: 2px; color: var(--ink-3); font-size: 12.5px; }
-.fl-row .btn { align-self: center; }
+.fl-label { padding-top: 1px; font: 500 10.5px/1.6 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+.fl-value { min-width: 0; margin: 0; color: var(--ink); font-size: 13.5px; }
+.fl-value small { display: block; margin-top: 2px; color: var(--ink-3); font-size: 12.5px; }
+.fl-row .btn { align-self: start; margin-top: -5px; }
+.stack { display: inline-grid; }
+.stack > * { grid-area: 1 / 1; }
+.stack > [aria-hidden="true"] { visibility: hidden; }
 .choices { grid-column: 1 / -1; margin-top: 6px; }
 .project-choices { max-height: calc(52px * 5); overflow: auto; }
 .choice { display: grid; grid-template-columns: 18px 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; height: 52px; padding: 0 10px; border: 0; border-radius: var(--radius-row, 8px); background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
@@ -173,7 +176,7 @@ watch(() => leadOverlay.start, value => { if (!value) generation++ })
   .sheet-acts { order: 3; border-bottom: 0; border-top: 1px solid var(--line); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); flex-direction: row-reverse; }
   .sheet-acts .btn { flex: 1; min-height: 44px; }
   .fl-row { grid-template-columns: minmax(0, 1fr) auto; }
-  .fl-row dt { grid-column: 1 / -1; }
+  .fl-label { grid-column: 1 / -1; }
 }
 @media (pointer: coarse) { .choice { height: 56px; } .hint { display: none; } }
 </style>
