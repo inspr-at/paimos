@@ -112,5 +112,59 @@
       "web/tests/agent-pairing.test.ts": "065ae487bf282a3e577017f8292eec5b23a5ac19eb94ee392275391c910bf1a4",
       "web/tests/computer-accounts.unit.test.ts": "25fe06b1305bd7c40356b2cf6eec41589e87ef71d2c1aefb8c4f5721828654aa"
     }
+  },
+  "merge_main_round": {
+    "reviewed_head": "d82807d7d",
+    "main_commit": "f2bdf9f56e5a67d1e4a8110ced2475e190af8ee3",
+    "merge_commit": "06dc429d3ed68c197a6ee886b9045d603fda5676",
+    "scope": "Normal local merge of origin/main; no feature changes.",
+    "preservation": {
+      "main_only_changed_files": 200,
+      "branch_only_changed_files": 15,
+      "method": "Compared every non-shared changed file against its source commit by exact git blob identity. Shared OpenAPI differs from main only by the reviewed AEON-716 telemetry contract and verification_stalled field.",
+      "manifests": "Preserved all main entries, metadata and timing weights, plus seven Go and seven web AEON-716 additions. Retained main intentional removals of obsolete cases. Sorted by canonical test identity, including occurrence; no duplicates.",
+      "go_test_entries": 3815,
+      "web_test_entries": 7227,
+      "branch_added_migrations": 0,
+      "migration_collisions": 0
+    },
+    "passed": [
+      "node --test scripts/check-migrations.test.mjs: 33 passed",
+      "node scripts/check-migrations.mjs --base-ref v261005070923.0.0: exit 0, 265 unique migration numbers",
+      "go test ./internal/reportercontract -count=1: full contract suite passed",
+      "internal/agentd: five targeted telemetry lifecycle regressions passed",
+      "internal/agentpairing: nine targeted verification/retry tests passed with isolated local Postgres fixtures",
+      "internal/agentruns: four targeted telemetry/replay/transaction regressions passed with isolated local Postgres fixtures",
+      "web/tests/agent-pairing.test.ts: 54 passed",
+      "web/tests/computer-accounts.unit.test.ts: 32 passed",
+      "web/tests/accounts-computers.spec.ts --grep AEON-716 --workers=1: two passed including stability guards; owned browser processes returned to zero"
+    ],
+    "limitations": [
+      "remote-test.sh was not invoked because it pushes a temporary remote ref; the direct user instruction prohibits pushes. Full remote package suites and hosted CI remain for the coordinator.",
+      "git diff --cached --check reported an existing main-only blank line at EOF in web/tests/aeon-632b-clip-fixtures.ts; preserved main bytes exactly.",
+      "Required static prefilter exit 0 was not achieved: 35 checks passed, web-shard-tests timed out. No timeout increases, skipped checks, hook bypasses or unrelated test changes made."
+    ],
+    "safety": "No pushes (including test refs), deployments, PR merge, feature changes, credential reads, ticket status changes, other-model CLI calls or foreign worktree changes. Selected ppm agent and GitHub account verified; coordinator worker marker confirmed by worker-common.",
+    "static_prefilter": {
+      "command": "GOMAXPROCS=2 GOFLAGS=-p=2 node scripts/ci-static.mjs --merge-main --jobs 1",
+      "exit_code": 1,
+      "seconds": 265.9,
+      "passed_checks": 35,
+      "skipped_checks": 0,
+      "failed_check": "web-shard-tests",
+      "failure": "npm run ci:web:shard:test exceeded the existing 120 second limit during scripts/aeon-681-ci.test.mjs native inventory regression; nested tests cancelled on timeout.",
+      "passed_details": [
+        "Go vet and native tier inventory",
+        "7/4 shard coverage",
+        "release metadata and offline release regressions",
+        "audit tests and ownership coverage",
+        "web typecheck and lint",
+        "migration policy, splitter and probes",
+        "OpenAPI property names",
+        "web native tier and strict spec inventories",
+        "browser runner safety"
+      ],
+      "checked_source": "06dc429d3 (evidence-only uncommitted report changes were excluded)"
+    }
   }
 }
