@@ -116,6 +116,8 @@
     ,
     "browser:tests/agent-pause.spec.ts:without control permission pause actions and wind-down are hidden"
     ,
+    "browser:tests/agents-cleanup.spec.ts:Queued folds per person, says what waits, and a run link opens it without changing the preference"
+    ,
     "browser:tests/agents-dial.spec.ts:AEON-781: a dial folded before the fold sections stays folded"
     ,
     "browser:tests/agents-dial.spec.ts:AEON-781: a held + speeds up, pauses before a mode boundary and saves only the final value once"
@@ -5442,6 +5444,8 @@
     ,
     {"kind":"browser","file":"tests/agent-rules.spec.ts","name":"rule details stay behind the row disclosure","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"Queued folds per person, says what waits, and a run link opens it without changing the preference","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a list read that started before Remove does not bring the computer back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a queued run can be cancelled from /agents","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -8869,6 +8873,12 @@
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Keep for you uses a natural vendor disclosure and stable actions at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Keep for you uses a natural vendor disclosure and stable actions at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Sessions tree and section folds keep their controls put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Sessions tree and section folds keep their controls put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Sessions tree and section folds keep their controls put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Stop now menu and Pause dialog stay put through the session series at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,

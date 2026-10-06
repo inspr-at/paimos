@@ -286,6 +286,29 @@ test('a queued run can be cancelled from /agents', async ({ page }) => {
   })).toBe(true)
 })
 
+// AEON-784 risk: a folded Queued section hides a run a link points at, or its
+// folded head misstates what waits. A ?run= link opens it for this visit only.
+test('Queued folds per person, says what waits, and a run link opens it without changing the preference', async ({ page }) => {
+  const { work } = await setup(page)
+  work.preferences['ui.agents.sections'] = { dial: true, accounts: false, sessions: true, queued: false }
+  await page.goto('/agents')
+  const queue = page.getByRole('region', { name: 'Runs awaiting a session' })
+  const toggle = queue.locator('.fs-head > .fs-tog')
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  // One run says its own state; it waits for a daemon, not for room on an account.
+  await expect(queue.locator('.fs-sum')).toHaveText('Queued')
+  await page.goto(`/agents?run=${QUEUED}`)
+  const item = page.locator(`#run-${QUEUED}`)
+  await expect(item).toBeFocused()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+  expect(work.preferences['ui.agents.sections']).toMatchObject({ queued: false })
+  // Folding it again needs no write: the person's preference already says folded.
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await toggle.click()
+  await expect.poll(() => (work.preferences['ui.agents.sections'] as { queued?: boolean } | undefined)?.queued).toBe(true)
+})
+
 test('accounts and computers fold into one calm line, remembered per person', async ({ page }) => {
   const { work } = await setup(page)
   await open(page)

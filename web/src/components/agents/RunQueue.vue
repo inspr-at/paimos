@@ -119,11 +119,22 @@ function toggleFold() {
   if (revealed.value && !sections.open.queued) revealed.value = false
   else sections.toggle('queued')
 }
+// One run says its own state; several are counted by what they wait for
+// (a vendor wait counts as waiting), never all called waiting.
 const summary = computed(() => {
-  const states = new Set(pending.value.map(stateText))
-  return `${pending.value.length} waiting${states.size === 1 ? ` · ${[...states][0]}` : ''}`
+  if (pending.value.length === 1) return stateText(pending.value[0]!)
+  const kind = (run: AgentRun) => run.wait ? 'waiting' : launchState(run).label.toLowerCase()
+  const counts = new Map<string, number>()
+  for (const run of pending.value) counts.set(kind(run), (counts.get(kind(run)) ?? 0) + 1)
+  return [...counts].map(([label, n]) => `${n} ${label}`).join(' · ')
 })
-defineExpose({ reveal: () => { revealed.value = true } })
+// Opens a folded section for this visit; says whether it had to.
+function reveal() {
+  if (open.value) return false
+  revealed.value = true
+  return true
+}
+defineExpose({ reveal })
 </script>
 
 <template>

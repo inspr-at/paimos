@@ -80,10 +80,10 @@ watch([() => route.query.run, () => agents.loaded, () => agents.sessions, () => 
   if (!loaded || typeof id !== 'string' || !/^[0-9a-f-]{36}$/i.test(id)) return
   const linked = agents.sessions.find(s => s.run_id === id)
   if (linked) { void router.replace({ path: `/agents/${linked.id}`, query: { ...route.query, run: undefined } }); return }
-  // A folded Queued section opens for this visit to show the linked run.
-  runQueue.value?.reveal()
   await nextTick()
   if (route.query.run !== id) return
+  // A folded Queued section opens for this visit to show the linked run.
+  if (runQueue.value?.reveal()) await nextTick()
   const queued = document.getElementById(`run-${id}`)
   if (queued) { queued.focus(); queued.scrollIntoView({ block: 'nearest' }); void router.replace({ query: { ...route.query, run: undefined } }) }
 }, { immediate: true })
