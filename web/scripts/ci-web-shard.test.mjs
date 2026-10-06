@@ -62,6 +62,16 @@ test('LPT balancing distributes a known fixture optimally and covers it exactly 
   const manifest = fixture(), shards = balanceShards(manifest, 3)
   assert.deepEqual(shards.map(s => s.weightSeconds), [13, 13, 13])
   assert.deepEqual(checkCoverage(manifest, shards, files(manifest)), { specs: 6, shards: 3 })
+  // Greedy placement alone gives 17/13. Swapping the 8- and 6-second specs
+  // reaches 15/15 without dropping coverage or understating a timing weight.
+  const uneven = { version: 1, groups: [group('a', [8, 7]), group('b', [6, 5, 4])] }
+  const before = structuredClone(uneven), balanced = balanceShards(uneven, 2)
+  assert.deepEqual(balanced.map(s => s.weightSeconds), [15, 15])
+  assert.deepEqual(checkCoverage(uneven, balanced, files(uneven)), { specs: 5, shards: 2 })
+  assert.deepEqual(uneven, before, 'Balancing must retain source weights and policies')
+  for (const shard of balanced) assert.equal(shard.weightSeconds, shard.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0))
+  uneven.groups.reverse().forEach(g => g.specs.reverse())
+  assert.deepEqual(balanceShards(uneven, 2), balanced, 'Swap selection must not depend on source order')
 })
 
 test('one-worker tier weights convert measured parallel steps but retain serial and unmeasured estimates', async () => {
