@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // What the Agents page says about Accounts and computers (AEON-782): the state
 // in one status line, and the few things that block agents. The lists, panels
-// and editors live in Settings (AEON-686); this derives no new facts, it reads
-// the same sign-in statuses, so both pages always agree.
+// and editors live in Settings (AEON-686); this derives no new facts. It reads
+// the same sign-in statuses and the account readiness projection, so both pages agree.
 import { agentUpdateAdvice, describeComputerStatus, describeEnrollmentStatus, type PairingView } from './agentPairing.ts'
 import type { OverviewAccount, SignInReference } from './accountsOverview.ts'
-import { when, type CapacityWindow } from './capacity.ts'
+import { readiness } from './computerAccounts.ts'
+import { when, type AccountRow, type CapacityWindow } from './capacity.ts'
 import type { QuotaWarningSettings } from './quotaWarnings.ts'
 
 export const DEFAULT_QUOTA_THRESHOLDS: Readonly<QuotaWarningSettings> = Object.freeze({ early_percent: 10, urgent_percent: 3 })
@@ -23,13 +24,35 @@ export const verificationExpired = (s: SignInReference) => s.enrollment.verifica
 
 // Words of a sign-in that cannot start agents until someone acts. Transient ones (checking, starting,
 // waiting for a repin, verification queued) are not here: they settle on their own.
-const BLOCKING = /failed|sign in|unavailable|stalled|needs (attention|repair)|pin (missing|incomplete|changed|invalid|unsafe)|not set up|timed out/i
+// "need repair" is singular on purpose: "Profile permissions need repair" is a blocker.
+const BLOCKING = /failed|sign in|unavailable|stalled|needs? (attention|repair)|pin (missing|incomplete|changed|invalid|unsafe)|not set up|timed out/i
+// Canonical reasons that settle on their own. Every other reported reason blocks, including a code this build does not name yet.
+const TRANSIENT_REASONS = new Set(['repin_pending', 'starting', 'probe_pending', 'capacity_capture'])
+
+/** The reason the computer reported for this sign-in, when that report is about this account. */
+function enrollmentReason(s: SignInReference): string | undefined {
+  const detail = s.computer.harness_details?.[s.enrollment.harness]
+  const reported = s.computer.harness_statuses?.[s.enrollment.harness]
+  if (!detail || (reported && detail.state !== reported)) return undefined
+  const listed = detail.attention_accounts ?? []
+  if (listed.length) {
+    const hit = listed.find(item => item.account_id === s.enrollment.account_id)
+    if (hit) return hit.reason
+    const complete = detail.state === 'ready' && detail.attention_truncated !== true && (detail.attention_count ?? listed.length) === listed.length
+    if (complete) return undefined
+    return detail.reason || 'needs_attention'
+  }
+  if (detail.state === 'blocked' || detail.state === 'login_required') return detail.reason || 'needs_attention'
+  return undefined
+}
 
 /** A connected sign-in whose verification ran out or whose reported status says agents cannot start with it. */
 export function isProblemSignin(s: SignInReference): boolean {
   if (s.computer.computer_state !== 'connected' || s.enrollment.state !== 'connected') return false
   // A computer that stopped reporting shows its last report, not a fresh fault: its own column says offline.
-  return verificationExpired(s) || (s.computer.connectivity === 'online' && BLOCKING.test(signinStatus(s.computer, s.enrollment.account_id)))
+  if (verificationExpired(s) || s.computer.connectivity !== 'online') return verificationExpired(s)
+  const reason = enrollmentReason(s)
+  return (!!reason && !TRANSIENT_REASONS.has(reason)) || BLOCKING.test(signinStatus(s.computer, s.enrollment.account_id))
 }
 
 export function windowLabel(w: CapacityWindow): string {
@@ -84,7 +107,7 @@ export function glanceItems(accounts: OverviewAccount[], computers: PairingView[
   const low: { item: GlanceItem; left: number }[] = []
   for (const account of accounts) {
     if (blocked.has(account.id)) continue
-    const window = account.windows.filter(w => w.freshness === 'fresh' && w.remaining_percent <= thresholds.early_percent).sort((a, b) => a.remaining_percent - b.remaining_percent)[0]
+    const window = account.windows.filter(w => quotaWindowWarns(w, thresholds, now)).sort((a, b) => a.remaining_percent - b.remaining_percent)[0]
     if (!window) continue
     const left = Math.round(window.remaining_percent), urgent = window.remaining_percent <= thresholds.urgent_percent
     const resets = window.reading.resets_at ? ` Resets ${when(window.reading.resets_at, now)}.` : ''
@@ -95,15 +118,49 @@ export function glanceItems(accounts: OverviewAccount[], computers: PairingView[
 
 export const onlineComputers = (computers: PairingView[]) => computers.filter(c => c.computer_state === 'connected' && c.connectivity === 'online').length
 
+// The server's quota warning: a measured reading, at most ten minutes old, whose reset is still ahead.
+// The snapshot's freshness label is not rechecked against the clock, so it is not the authority here.
+const QUOTA_READING_MAX_AGE_MS = 10 * 60 * 1000
+export function quotaWindowWarns(w: CapacityWindow, thresholds: QuotaWarningSettings, now: number): boolean {
+  if (w.reading.source === 'estimate') return false
+  const read = Date.parse(w.reading.read_at)
+  if (!Number.isFinite(read) || read > now || now - read > QUOTA_READING_MAX_AGE_MS) return false
+  const reset = Date.parse(w.reading.resets_at)
+  if (!Number.isFinite(reset) || reset <= now) return false
+  return w.remaining_percent <= thresholds.early_percent
+}
+
+/** A sign-in with no account row yet: the readiness projection still has something to judge. */
+function bareRow(s: SignInReference): AccountRow {
+  return {
+    id: s.enrollment.account_id, name: s.enrollment.label, host: s.computer.computer_name, harness: s.enrollment.harness, state: 'unread',
+    primary: null, five: null, schedule: null, plan: '', limitingReset: '', awaitingReading: false, fingerprint: '', groupId: '', groupName: '',
+    hosts: [s.computer.computer_name], sameQuotaAs: '', ...(s.enrollment.state === 'draining' ? { disconnecting: true } : {}),
+  }
+}
+/**
+ * One aggregated account (a shared login is one). Ready when no sign-in needs a person and
+ * the readiness projection says at least one door can start agents. A draining account or a Hold
+ * is not ready, even while its sign-in still says Ready.
+ */
+function accountReady(account: OverviewAccount, now: number): boolean {
+  if (!account.signins.length || account.signins.some(isProblemSignin)) return false
+  const rows = new Map(account.rows.map(row => [row.id, row]))
+  return account.signins.some(signin => {
+    const row = rows.get(signin.enrollment.account_id)
+    return readiness(row ? { ...bareRow(signin), ...row } : bareRow(signin), signin.computer, now).kind === 'ready'
+  })
+}
+
 export interface GlanceSummary { tone: 'ok' | 'warn'; text: string; ready: number; total: number; more: number }
 /**
  * The status line: "All 3 ready · 2 computers online", or "2 of 3 ready ·
  * Claude needs verifying on mbp2607 · +1" naming the first thing and counting
- * the rest. An account is ready when it has a Ready sign-in and none to verify.
+ * the rest. The count is the readiness projection over aggregated accounts.
  */
-export function glanceSummary(accounts: OverviewAccount[], computers: PairingView[], items: GlanceItem[]): GlanceSummary {
+export function glanceSummary(accounts: OverviewAccount[], computers: PairingView[], items: GlanceItem[], now: number): GlanceSummary {
   const total = accounts.length
-  const ready = accounts.filter(a => !a.signins.some(isProblemSignin) && a.signins.some(s => signinStatus(s.computer, s.enrollment.account_id) === 'Ready')).length
+  const ready = accounts.filter(account => accountReady(account, now)).length
   const online = onlineComputers(computers)
   const head = ready === total ? `All ${total} ready` : `${ready} of ${total} ready`
   if (items.length) return { tone: 'warn', ready, total, more: items.length - 1, text: `${head} · ${items[0].name}${items.length > 1 ? ` · +${items.length - 1}` : ''}` }

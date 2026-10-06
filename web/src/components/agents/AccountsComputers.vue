@@ -45,7 +45,7 @@ const computers = computed(() => props.permissions.canListComputers ? capacity.c
 const accounts = computed(() => props.showAccounts ? overviewAccounts(agents.accounts, capacity.rows, computers.value) : [])
 const thresholds = ref<QuotaWarningSettings>({ ...DEFAULT_QUOTA_THRESHOLDS })
 const items = computed(() => glanceItems(accounts.value, computers.value, thresholds.value, now.value, typeof route.query.verify_account === 'string' ? route.query.verify_account : ''))
-const summary = computed(() => glanceSummary(accounts.value, computers.value, items.value))
+const summary = computed(() => glanceSummary(accounts.value, computers.value, items.value, now.value))
 const pacingLine = computed(() => pacingSummary(capacity.schedule))
 const loaded = computed(() => capacity.loaded || !props.showAccounts)
 const failed = computed(() => !loaded.value && capacity.state === 'error')

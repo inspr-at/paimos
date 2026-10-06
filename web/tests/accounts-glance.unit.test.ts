@@ -9,6 +9,14 @@ import type { PairingView } from '../src/lib/agentPairing'
 import type { OverviewAccount } from '../src/lib/accountsOverview'
 import { glanceItems, glanceSummary } from '../src/lib/accountsGlance'
 
+function door(id: string, over: Record<string, unknown> = {}) {
+  return {
+    id, name: id, host: 'mbp2607', harness: 'claude', state: 'live', primary: null, five: null, schedule: null, plan: '',
+    limitingReset: '', awaitingReading: false, fingerprint: '', groupId: '', groupName: '', hosts: ['mbp2607'], sameQuotaAs: '',
+    ...over,
+  }
+}
+
 const NOW = Date.parse('2026-10-06T12:00:00Z')
 const LOW = { early_percent: 10, urgent_percent: 3 }
 
@@ -35,7 +43,7 @@ describe('the status line', () => {
   it('says all ready with the computers online when nothing blocks agents', () => {
     const items = glanceItems(calm, [mbp, studio], LOW, NOW)
     expect(items).toEqual([])
-    expect(glanceSummary(calm, [mbp, studio], items)).toMatchObject({ tone: 'ok', text: 'All 3 ready · 2 computers online' })
+    expect(glanceSummary(calm, [mbp, studio], items, NOW)).toMatchObject({ tone: 'ok', text: 'All 3 ready · 2 computers online' })
   })
 
   it('names the first thing that blocks agents and counts the rest, so the line is the whole answer', () => {
@@ -44,7 +52,7 @@ describe('the status line', () => {
     const accounts = [account('claude', [expired, studio]), account('codex', [expired, studio], 9), account('cursor', [expired, studio])]
     const items = glanceItems(accounts, [expired, studio], LOW, NOW)
     expect(items.map(i => i.name)).toEqual(['Claude needs verifying on mbp2607', 'Codex is low: 9% left this week'])
-    expect(glanceSummary(accounts, [expired, studio], items)).toMatchObject({ tone: 'warn', text: '2 of 3 ready · Claude needs verifying on mbp2607 · +1' })
+    expect(glanceSummary(accounts, [expired, studio], items, NOW)).toMatchObject({ tone: 'warn', text: '2 of 3 ready · Claude needs verifying on mbp2607 · +1' })
   })
 
   it('does not call a computer that stopped reporting broken, and does not ask for action while a repin settles', () => {
@@ -52,6 +60,73 @@ describe('the status line', () => {
     const settling = computer('mbp2606', { codex: 'blocked' }, { harness_details: { codex: { state: 'blocked', reason: 'repin_pending' } } } as never)
     const accounts = [account('claude', [offline]), account('codex', [settling])]
     expect(glanceItems(accounts, [offline, settling], LOW, NOW)).toEqual([])
-    expect(glanceSummary(accounts, [offline, settling], [])).toMatchObject({ tone: 'warn', text: '0 of 2 ready · 2 not ready' })
+    expect(glanceSummary(accounts, [offline, settling], [], NOW)).toMatchObject({ tone: 'warn', text: '0 of 2 ready · 2 not ready' })
+  })
+
+  it('does not count a draining account or an account on Hold as ready', () => {
+    const mbp = computer('mbp2607', { claude: 'ready' })
+    // A draining account is projected as paused while its sign-in can still say Ready.
+    const draining = account('claude', [mbp])
+    draining.rows = [door('a-claude', { state: 'paused' })] as never
+    expect(glanceSummary([draining], [mbp], [], NOW)).toMatchObject({ ready: 0, total: 1, text: '0 of 1 ready · 1 not ready' })
+    const held = account('claude', [mbp])
+    held.rows = [door('a-claude', { schedule: { override: 'hold' } })] as never
+    expect(glanceSummary([held], [mbp], [], NOW)).toMatchObject({ ready: 0, total: 1, text: '0 of 1 ready · 1 not ready' })
+    const routed = account('claude', [mbp])
+    routed.rows = [door('a-claude', { routing: { rank: 0, available_slots: 0, wait: { code: 'hold' } } })] as never
+    expect(glanceSummary([routed], [mbp], [], NOW)).toMatchObject({ ready: 0, total: 1, text: '0 of 1 ready · 1 not ready' })
+  })
+
+  it('keeps a shared login as one account, ready when one door still is', () => {
+    const mbp = computer('mbp2607', { claude: 'ready' })
+    const studio = computer('mbp2606', { claude: 'ready' })
+    mbp.enrollments[0]!.account_id = 'door-1'
+    studio.enrollments[0]!.account_id = 'door-2'
+    const signins = [
+      { computer: mbp, enrollment: mbp.enrollments[0]! },
+      { computer: studio, enrollment: studio.enrollments[0]! },
+    ]
+    const held = account('claude', [])
+    held.id = 'claude:shared'
+    held.signins = signins as never
+    held.rows = [door('door-1', { schedule: { override: 'hold' } }), door('door-2', { schedule: { override: 'hold' } })] as never
+    expect(glanceSummary([held], [mbp, studio], [], NOW)).toMatchObject({ ready: 0, total: 1, text: '0 of 1 ready · 1 not ready' })
+    const mixed = account('claude', [])
+    mixed.id = 'claude:shared'
+    mixed.signins = signins as never
+    mixed.rows = [door('door-1', { state: 'paused' }), door('door-2')] as never
+    expect(glanceSummary([mixed], [mbp, studio], [], NOW)).toMatchObject({ ready: 1, total: 1, text: 'All 1 ready · 2 computers online' })
+  })
+
+  it('lists a profile-permissions block in Needs you', () => {
+    const mbp = computer('mbp2607', { pi: 'blocked' }, { harness_details: { pi: { state: 'blocked', reason: 'profile_permissions' } } } as never)
+    const accounts = [account('pi', [mbp])]
+    const items = glanceItems(accounts, [mbp], LOW, NOW)
+    expect(items).toEqual([expect.objectContaining({ kind: 'attention', name: 'Pi needs attention on mbp2607', detail: 'Profile permissions need repair' })])
+    expect(glanceSummary(accounts, [mbp], items, NOW).text).toBe('0 of 1 ready · Pi needs attention on mbp2607')
+  })
+
+  it('rejects an estimated quota, a reading older than ten minutes, and a window that already reset', () => {
+    const mbp = computer('mbp2607', { codex: 'ready' })
+    const estimated = account('codex', [mbp], 2)
+    estimated.windows[0]!.reading.source = 'estimate'
+    expect(glanceItems([estimated], [mbp], LOW, NOW).map(item => item.kind)).not.toContain('quota')
+    const reset = account('codex', [mbp], 2)
+    reset.windows[0]!.reading.source = 'harness'
+    reset.windows[0]!.reading.read_at = new Date(NOW - 60_000).toISOString()
+    reset.windows[0]!.reading.resets_at = new Date(NOW - 25 * 60_000).toISOString()
+    expect(glanceItems([reset], [mbp], LOW, NOW)).toEqual([])
+    const stale = account('codex', [mbp], 2)
+    stale.windows[0]!.reading.source = 'harness'
+    stale.windows[0]!.reading.read_at = new Date(NOW - 10 * 60_000 - 1).toISOString()
+    expect(glanceItems([stale], [mbp], LOW, NOW)).toEqual([])
+    const future = account('codex', [mbp], 2)
+    future.windows[0]!.reading.source = 'harness'
+    future.windows[0]!.reading.read_at = new Date(NOW + 1_000).toISOString()
+    expect(glanceItems([future], [mbp], LOW, NOW)).toEqual([])
+    const boundary = account('codex', [mbp], 2)
+    boundary.windows[0]!.reading.source = 'harness'
+    boundary.windows[0]!.reading.read_at = new Date(NOW - 10 * 60_000).toISOString()
+    expect(glanceItems([boundary], [mbp], LOW, NOW).map(item => item.name)).toEqual(['Codex is low: 2% left this week'])
   })
 })
