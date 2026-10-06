@@ -572,7 +572,7 @@
         ,
         {"file":"tests/features.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/settings.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.461,"median":1.774,"min":1.431},"seconds":14.45241,"selectedTests":6},"weightSeconds":32.564102381,"weightSource":"status-autopilot-ui-2"}
+        {"file":"tests/settings.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":3.461,"median":1.774,"min":1.431},"seconds":14.45241,"selectedTests":6},"weightSeconds":32.564102381,"weightSource":"status-autopilot-ui-2"}
         ,
         {"file":"tests/status-autopilot.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":10.514,"median":2.467,"min":0.771},"seconds":29.300782,"selectedTests":8},"weightSeconds":22.794872,"weightSource":"status-autopilot-ui-2"}
         ,
@@ -721,6 +721,8 @@
         {"file":"tests/agents-cleanup.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/agents-dial.spec.ts","listedTests":23,"weightSeconds":66.585366,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/agents-display.spec.ts","listedTests":9,"weightSeconds":19.975609755,"weightSource":"unmeasured-test-count"}
         ,
         {"file":"tests/agents-handover.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
