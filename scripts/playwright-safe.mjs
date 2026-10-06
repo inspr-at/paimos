@@ -11,7 +11,7 @@ export { groupProcesses } from './playwright-processes.mjs'
 
 const delay = ms => new Promise(resolveDelay => setTimeout(resolveDelay, ms))
 
-export async function runOwnedCommand(command, args, { cwd, env = process.env, lockPath = suiteLockPath, graceMs = 5000, capture = false } = {}) {
+export async function runOwnedCommand(command, args, { cwd, env = process.env, lockPath = suiteLockPath, graceMs = 5000, capture = false, rootIdentityWait } = {}) {
   if (process.platform === 'win32') throw new Error('Browser supervision requires POSIX process groups; use Linux CI on Windows')
   const start = Date.now()
   let lock, groupLog, snapshot, child, interrupt, peak = 0, timer, monitoringError, journalCreated = false, stdout = '', stderr = ''
@@ -61,7 +61,9 @@ export async function runOwnedCommand(command, args, { cwd, env = process.env, l
       // 'exit', not 'close': an orphan may still hold inherited output pipes.
       child.once('exit', (code, signal) => resolveExit({ code, signal }))
     })
-    try { await recordRootGroup(child, entry => appendFileSync(groupLog, `${JSON.stringify(entry)}\n`)) }
+    // Tests can wait on a child-exit barrier without racing Node startup
+    // against the production retry window. Identity checks remain unchanged.
+    try { await recordRootGroup(child, entry => appendFileSync(groupLog, `${JSON.stringify(entry)}\n`), { wait: rootIdentityWait }) }
     catch (error) { await exited; throw error }
     if (interrupt) signalOwned(interrupt)
     console.error('AEON_PW_PROCESSES before=0 (new owned group)')

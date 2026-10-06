@@ -69,7 +69,9 @@ jobs:
           GOCACHE: ${{ runner.temp }}/go-build-agentd
           GOMODCACHE: ${{ runner.temp }}/go-mod
           GOFLAGS: -mod=readonly
-        run: bash scripts/build-release-binaries.sh darwin-agentd
+        run: |
+          bash scripts/build-release-binaries.sh darwin-agentd
+          GOCACHE="$RUNNER_TEMP/go-build-cli-darwin" bash scripts/build-release-binaries.sh cli-darwin
       # Before upload: SHA256SUMS in the assets job is computed over the signed
       # binary. Bare binaries cannot be stapled; Gatekeeper checks online.
       - name: Sign and notarize paimos-agentd
@@ -89,6 +91,8 @@ jobs:
             exit 1
           fi
           bash scripts/sign-notarize.sh --identifier paimos-agentd "dist/paimos-agentd-darwin-${{ matrix.arch }}"
+          bash scripts/sign-notarize.sh --identifier aeon-cli "dist/aeon-cli-darwin-${{ matrix.arch }}"
+          /usr/bin/codesign --verify --strict -R='anchor apple generic and identifier "aeon-cli" and certificate leaf[subject.OU] = "P66J39QV6V"' "dist/aeon-cli-darwin-${{ matrix.arch }}"
       # Backstop for sign-notarize.sh's EXIT trap, which a cancellation during
       # notarization can skip: however the signing step ended, delete the
       # temporary keychain (private key), drop it from the search list and
@@ -140,7 +144,9 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: agentd-darwin-${{ matrix.arch }}
-          path: dist/paimos-agentd-darwin-${{ matrix.arch }}
+          path: |
+            dist/paimos-agentd-darwin-${{ matrix.arch }}
+            dist/aeon-cli-darwin-${{ matrix.arch }}
           if-no-files-found: error
 
   # The server digest must never wait for signing/notarization or client builds.
@@ -819,7 +825,8 @@ jobs:
           cache: false
 
       # Darwin paimos-agentd is built on the matching Mac with LocalAuthentication.
-      # Linux agentd and every CLI target stay static. -trimpath and the version
+      # Linux agentd and every CLI target stay static. Darwin CLI assets are
+      # signed/notarized on the Mac jobs; never overwrite them here. -trimpath and the version
       # -X match the server image (scripts/build-image-inputs.mjs).
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -835,7 +842,7 @@ jobs:
           set -euo pipefail
           # One empty build cache per compilation; the script rejects a used one.
           GOCACHE="$RUNNER_TEMP/go-build-linux-agentd" bash scripts/build-release-binaries.sh linux-agentd
-          GOCACHE="$RUNNER_TEMP/go-build-cli" bash scripts/build-release-binaries.sh cli
+          GOCACHE="$RUNNER_TEMP/go-build-cli" bash scripts/build-release-binaries.sh cli-linux
           bash scripts/build-release-binaries.sh verify-darwin
           (
             cd dist

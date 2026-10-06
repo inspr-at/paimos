@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
@@ -30,6 +31,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -85,6 +87,7 @@ func nixGuideFixture() *config.PairingNixGuide {
 }
 
 type fixture struct {
+	messages   []*attachedmsg.Service
 	pairing    *agentpairing.Module
 	t          *testing.T
 	db         *dbtest.DB
@@ -119,19 +122,19 @@ func uuid(t *testing.T, d *dbtest.DB) string {
 	}
 	return id
 }
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T, messages ...*attachedmsg.Service) *fixture {
 	t.Helper()
-	return newFixtureInTenant(t, dbtest.Open(t), "pairtest")
+	return newFixtureInTenant(t, dbtest.Open(t), "pairtest", messages...)
 }
 
-func newFixtureInTenant(t *testing.T, d *dbtest.DB, slug string) *fixture {
+func newFixtureInTenant(t *testing.T, d *dbtest.DB, slug string, messages ...*attachedmsg.Service) *fixture {
 	t.Helper()
 	id, err := tenantbootstrap.Create(t.Context(), d.App, slug, "Pairing test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	sessionKey := []byte(nonce())
-	f := &fixture{t: t, db: d, tenantID: id, tenantSlug: slug, profiles: map[string]string{}, sessionKey: sessionKey}
+	f := &fixture{t: t, db: d, tenantID: id, tenantSlug: slug, profiles: map[string]string{}, sessionKey: sessionKey, messages: messages}
 	f.rebuildHandler()
 	login := f.call("POST", "/api/auth/dev-login", map[string]string{"email": "pairing@example.test"}, false, "", 200)
 	cookies := login.Result().Cookies()
@@ -186,6 +189,14 @@ func (f *fixture) rebuildHandler() {
 	api := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, pairing, events.New(f.db.App), agentaccounts.New(f.db.App), nodes.New(f.db.App, nil), modelregistry.New(f.db.App), harness.New(f.db.App), workorders.New(f.db.App), agentruns.New(f.db.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry, pending *[]events.Change) error {
 		return agentaccounts.SettleDeferred(ctx, tx, p, r.ID, pending)
 	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
+	if len(f.messages) > 0 {
+		pairing.SetAttachedMessages(f.messages[0])
+		messaging, err := inbox.NewMessaging(f.db.App, make([]byte, 32), inbox.WithAttachedMessages(f.messages[0]))
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		api.Modules = append(api.Modules, inbox.New(f.db.App, f.messages[0]), messaging)
+	}
 	f.pairing, f.h = pairing, api.Handler()
 }
 

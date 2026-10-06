@@ -143,7 +143,7 @@ func (s *Sweeper) SweepTenant(ctx context.Context, tenantID string) (int, error)
  LEFT JOIN harness_sessions rs ON rs.tenant_id=m.tenant_id AND rs.id=m.recipient_session_id
  LEFT JOIN inbox_compat_messages c ON c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id
  LEFT JOIN inbox_message_deliveries d ON d.tenant_id=c.tenant_id AND d.message_id=c.id
- WHERE m.chat_thread_id IS NULL AND r.state='queued' AND r.deliver_by IS NOT NULL AND m.acked_at IS NULL
+ WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND r.state='queued' AND r.deliver_by IS NOT NULL AND m.acked_at IS NULL
    AND NOT coalesce(d.state='pending' AND d.lease_until>clock_timestamp(),false)
    AND NOT EXISTS(SELECT 1 FROM harness_deliveries h WHERE h.message_id=m.id AND h.completed_at IS NULL AND h.released_at IS NULL AND h.leased_at>clock_timestamp()-interval '2 minutes')
    AND (r.deliver_by<=clock_timestamp()
