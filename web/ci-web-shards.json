@@ -1259,7 +1259,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/lead-flow.spec.ts","listedTests":13,"weightSeconds":10,"weightSource":"unmeasured-test-count-estimate"}
+        {"file":"tests/lead-flow.spec.ts","listedTests":13,"weightSeconds":8,"weightSource":"unmeasured-test-count-estimate"}
       ]
     }
   ]
