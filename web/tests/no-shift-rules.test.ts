@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import test from 'node:test'
+// Preserve the Node test-tier runner and the brief's targeted Vitest command.
+const test = process.env.VITEST
+  ? (await import('vitest')).test
+  : (await import('node:test')).default
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
