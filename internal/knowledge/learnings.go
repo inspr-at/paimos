@@ -1127,7 +1127,9 @@ func outcomePayload(ctx context.Context, tx pgx.Tx, tenantID, outcomeID string) 
 // updated_at, as learningFromNomination lists it; the id is the source key.
 func listNominated(ctx context.Context, tx pgx.Tx, tenantID, projectID, projectKey string, cursor *learningCursor) ([]Learning, *learningCursor, error) {
 	before, beforeID := cursorArgs(cursor)
-	rows, err := tx.Query(ctx, `SELECT `+nominationColumns+`, m.source_key, x.at
+	// nominationColumns, qualified: nodes and events share their names.
+	rows, err := tx.Query(ctx, `SELECT m.origin, m.excerpt, m.source_hash, coalesce(m.comment_id::text, ''), m.node_id::text,
+		  m.project_id::text, m.outcome_id, m.nominated_at, m.source_key, x.at
 		FROM method_learning_nominations m
 		JOIN nodes n ON n.tenant_id=m.tenant_id AND n.id=m.node_id AND n.deleted_at IS NULL
 		LEFT JOIN events c ON c.tenant_id=m.tenant_id AND c.id=m.comment_id AND c.node_id=m.node_id AND c.type='comment.created'

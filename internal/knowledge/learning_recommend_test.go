@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"gopkg.in/yaml.v3"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -424,14 +425,27 @@ func requestAs(f fixture, p tenant.Principal, scope authz.Scope, method, path, b
 // Learning writes authorize against the source's current project inside the
 // write, under the tenant and tree fence, not against the route's earlier
 // scope (AEON-788): a ticket moved away, or a grant revoked while the write
-// waited, is refused and writes nothing.
+// waited, is refused and writes nothing. The member keeps read access
+// wherever the ticket is, so only the write check can refuse (403, not 404).
 func TestLearningWritesAuthorizeCurrentProject(t *testing.T) {
 	f := setup(t)
 	setFields(t, f, f.ticket, map[string]any{"tags": []any{"process-learning"}})
 	ticketID := nodeLearningID(f.ticket)
 	member := projectPerson(t, f, "Pia Project")
 	bindProjectRole(t, f, member.ID, "member", f.project)
+	bindProjectRole(t, f, member.ID, "viewer", f.other)
 	scope := authz.Scope{ProjectID: f.project}
+	unbind := func(q interface {
+		Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	}, ctx context.Context, role string) {
+		t.Helper()
+		tag, err := q.Exec(ctx, `DELETE FROM role_bindings b USING roles r
+		  WHERE b.tenant_id=$1 AND b.principal_id=$2::uuid AND b.scope_type='project' AND b.scope_id=$3::uuid
+		    AND r.tenant_id=b.tenant_id AND r.id=b.role_id AND r.key=$4`, f.a.TenantID, member.ID, f.project, role)
+		if err != nil || tag.RowsAffected() != 1 {
+			t.Fatalf("unbind %s: %v (%d rows)", role, err, tag.RowsAffected())
+		}
+	}
 	writes := []struct{ method, path, body string }{
 		{"PUT", recommendPath(ticketID), `{"decision":"dismiss","reason":"Covered"}`},
 		{"POST", "/api/knowledge/learnings/" + ticketID + "/dismiss", `{"reason":"Covered"}`},
@@ -466,7 +480,10 @@ func TestLearningWritesAuthorizeCurrentProject(t *testing.T) {
 		if err := authz.LockProjectMutation(ctx, holder, f.a.TenantID); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := holder.Exec(ctx, `DELETE FROM role_bindings WHERE tenant_id=$1 AND principal_id=$2::uuid`, f.a.TenantID, member.ID); err != nil {
+		// member becomes viewer: still reads the ticket, can no longer write.
+		unbind(holder, ctx, "member")
+		if _, err := holder.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id)
+		  SELECT $1,$2,id,'project',$3::uuid FROM roles WHERE tenant_id=$1 AND key='viewer'`, f.a.TenantID, member.ID, f.project); err != nil {
 			t.Fatal(err)
 		}
 		var pid int
@@ -501,6 +518,7 @@ func TestLearningWritesAuthorizeCurrentProject(t *testing.T) {
 			t.Fatalf("%s %s after revocation: %d %s", write.method, write.path, w.Code, w.Body.String())
 		}
 		untouched(write.path)
+		unbind(f.db.Admin, t.Context(), "viewer")
 		bindProjectRole(t, f, member.ID, "member", f.project)
 	}
 	expect(t, requestAs(f, member, scope, "POST", "/api/knowledge/learnings/"+ticketID+"/dismiss", `{"reason":"Covered"}`), 200)
