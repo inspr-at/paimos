@@ -213,7 +213,7 @@
         ,
         {"file":"tests/key-full-access.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":6.268,"median":3.6495,"min":2.445},"seconds":85.345406,"selectedTests":20},"weightSeconds":53.064516,"weightSource":"web-8"}
         ,
-        {"file":"tests/key-scopes.spec.ts","listedTests":16,"tierTiming":{"caseSeconds":{"max":5.013,"median":4.179,"min":0.754},"seconds":57.795015,"selectedTests":16},"weightSeconds":42.451613,"weightSource":"web-8"}
+        {"file":"tests/key-scopes.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":5.013,"median":4.179,"min":0.754},"seconds":57.795015,"selectedTests":16},"weightSeconds":42.451613,"weightSource":"web-8"}
         ,
         {"file":"tests/new-agent.spec.ts","listedTests":12,"tierTiming":{"caseSeconds":{"max":3.595,"median":1.5415,"min":1.009},"seconds":25.672507,"selectedTests":12},"weightSeconds":31.83871,"weightSource":"web-8"}
         ,

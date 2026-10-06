@@ -1,10 +1,10 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { brand } from '../../lib/brand'
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSession } from '../../stores/session'
-import { CONNECTED_COMPUTER_REASON, agentDeactivatePoints, keyHint, revokeAgentKey, splitAgents, type Agent } from '../../lib/access'
+import { CONNECTED_COMPUTER_REASON, agentDeactivatePoints, keyHint, adoptAgentKey, revokeAgentKey, splitAgents, type Agent } from '../../lib/access'
 import type { RowAction } from '../../lib/rowActions'
 import { can, myPermissions } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
@@ -60,7 +60,8 @@ const keysOf = (agent: Agent) => (keys.value ?? []).filter(k => k.principal_id =
 async function loadKeys() {
   if (!manageKeys.value) return
   keysError.value = ''
-  try { keys.value = await listAgentKeys() } catch { keysError.value = 'The agent keys could not be loaded.' }
+  const identity = personIdentity()
+  try { const loaded = await listAgentKeys(); if (active && identity === personIdentity()) keys.value = loaded } catch { if (active && identity === personIdentity()) keysError.value = 'The agent keys could not be loaded.' }
 }
 function toggle(agent: Agent) { const next = new Set(open.value); if (next.has(agent.principal_id)) next.delete(agent.principal_id); else next.add(agent.principal_id); open.value = next }
 async function revoke(key: AgentKey) {
@@ -69,6 +70,28 @@ async function revoke(key: AgentKey) {
   try { await revokeAgentKey(key.id); await Promise.all([loadKeys(), access.load(true)]); toast(`The key ${keyHint(key.prefix)} is revoked`) }
   catch (e) { toast(problem(e, 'The key stays active'), { tone: 'error' }) }
 }
+
+let active = true
+onUnmounted(() => { active = false })
+const adoptionBusy = ref(false)
+const personIdentity = () => `${session.identity?.tenant.id}:${session.identity?.principal.id}`
+watch(personIdentity, () => { keys.value = null; open.value = new Set(); editing.value = null; void loadKeys() })
+async function adopt(key: AgentKey) {
+  if (adoptionBusy.value || !manageKeys.value) return
+  const targetID = key.id
+  const identity = personIdentity()
+  adoptionBusy.value = true
+  try {
+    const ok = await confirmAction({ title: 'Make me the owner?', points: [`Key: ${key.name}`, "This key will follow your current permissions and agent plan.", "The existing key keeps working; its secret is unchanged."], confirmLabel: 'Make me the owner' })
+    if (!ok || !active || identity !== personIdentity() || !manageKeys.value || !keys.value?.some(k => k.id === targetID && k.created_by_principal_id === null)) return
+    const adopted = await adoptAgentKey(targetID)
+    if (!active || identity !== personIdentity() || !keys.value?.some(k => k.id === targetID && k.created_by_principal_id === null)) return
+    keys.value = keys.value?.map(k => k.id === targetID ? adopted : k) ?? null
+    toast('You are now the key owner')
+  } catch (e) { if (active && identity === personIdentity()) toast(problem(e, 'The key owner could not be changed'), { tone: 'error' }) }
+  finally { adoptionBusy.value = false }
+}
+
 const editing = ref<{ agent: Agent; key: AgentKey } | null>(null)
 async function scopesSaved() { await Promise.all([loadKeys(), access.settle()]); toast('Key updated') }
 const newKey = ref<Agent | null>(null)
@@ -191,7 +214,7 @@ onMounted(loadKeys)
         <div v-if="open.has(agent.principal_id)" :id="`keys-${agent.principal_id}`" class="keys">
           <p v-if="keysError" class="set-note error" role="alert"><AppIcon name="alert" :size="14" />{{ keysError }}<button type="button" class="btn sm" @click="loadKeys">Try again</button></p>
           <div v-else-if="!keys" class="set-skeleton" role="status" aria-label="Loading keys"><span class="skeleton" /></div>
-          <KeysTable v-else-if="keysOf(agent).length" :keys="keysOf(agent)" :revocable="manageKeys" :rotatable="manageKeys && !agent.paired_computer" :editable="manageKeys" @edit="editing = { agent, key: $event }" @revoke="revoke" @rotate="showKeySheet(agent, $event)" />
+          <KeysTable v-else-if="keysOf(agent).length" :keys="keysOf(agent)" :revocable="manageKeys" :rotatable="manageKeys && !agent.paired_computer" :editable="manageKeys" :adoptable="manageKeys" @adopt="adopt" @edit="editing = { agent, key: $event }" @revoke="revoke" @rotate="showKeySheet(agent, $event)" />
           <p v-else class="empty">{{ agent.paired_computer ? 'No key: a computer connects by pairing.' : 'No keys yet.' }}</p>
           <!-- A computer takes no key, even after its identity is reactivated: it is paired afresh. -->
           <RouterLink v-if="agent.paired_computer && !agent.connected_computer" class="btn sm" to="/agents/register-agent"><AppIcon name="plus" :size="13" />Connect a computer</RouterLink>

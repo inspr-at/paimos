@@ -564,7 +564,10 @@ func TestRoutingInheritsOwnerScheduleWithoutAccountOverride(t *testing.T) {
 	other := addPrincipal(t, person.TenantID, "person", "Other", []string{"admin"})
 	issueKey(t, runner, []string{"account.read"})
 	err = db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$1 WHERE principal_id=$2 AND created_by_principal_id IS NULL`, other.ID, runner.ID)
+		tag, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$1 WHERE principal_id=$2 AND scopes=ARRAY['account.read']`, other.ID, runner.ID)
+		if err == nil && tag.RowsAffected() != 1 {
+			t.Fatalf("second creator assigned to %d keys, want 1", tag.RowsAffected())
+		}
 		return err
 	})
 	if err != nil {

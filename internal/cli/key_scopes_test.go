@@ -76,3 +76,40 @@ func TestKeyScopesStdinErrorsNameSessionCookie(t *testing.T) {
 		}
 	}
 }
+
+func TestKeyAdoptPersonSessionMetadataAndRefusal(t *testing.T) {
+	isolate(t)
+	const session = "synthetic-person-session"
+	const owner = "11111111-1111-4111-8111-111111111111"
+	for _, status := range []int{200, 403, 409, 302} {
+		calls := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			cookie, err := r.Cookie("aeon_session")
+			if err != nil || cookie.Value != session || r.Header.Get("Authorization") != "" || r.Header.Get("Origin") == "" || r.Method != "POST" || r.URL.Path != "/api/agent-keys/"+tagTranscriptID+"/adopt" {
+				t.Error("incorrect adoption request")
+			}
+			w.Header().Set("Location", "/redirect")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": tagTranscriptID, "created_by_principal_id": owner, "token": "synthetic-response-secret", "error": session})
+		}))
+		code, out, stderr := runCLI([]string{"aeon", "--json", "keys", "adopt", tagTranscriptID, "--session-file", "-", "--url", srv.URL}, session)
+		srv.Close()
+		if calls != 1 || strings.Contains(out, "secret") || strings.Contains(out, session) || strings.Contains(stderr, session) {
+			t.Fatal("adopt disclosed credentials or followed redirect")
+		}
+		if status == 200 {
+			if code != 0 || !strings.Contains(out, owner) {
+				t.Fatal("adopt failed or lost owner metadata")
+			}
+		} else if code != 1 || out != "" {
+			t.Fatal("adopt falsely reported success")
+		}
+	}
+	for _, args := range [][]string{{tagTranscriptID}, {"bad-id", "--session-file", "-"}} {
+		code, _, _ := runCLI(append([]string{"aeon", "keys", "adopt"}, args...), session)
+		if code != 2 {
+			t.Fatalf("usage exit=%d", code)
+		}
+	}
+}
