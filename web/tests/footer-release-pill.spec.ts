@@ -135,7 +135,9 @@ for (const width of [1440, 390, 320]) {
         await expect(pill(page).locator('.fallback')).toHaveText('Version unavailable')
         await expect(pill(page)).toHaveAccessibleName('Release history, version unavailable, 3 new since your last visit')
       } else {
-        await expect(version(page)).toBeVisible()
+        // On a phone the screen's summary takes the middle and the release gives up its time, keeping name and count (AEON-785).
+        if (width <= 600) await expect(version(page)).toBeHidden()
+        else await expect(version(page)).toBeVisible()
         await expect(pill(page).locator('.footer-codename')).toHaveText('An exceptionally long release codename')
         await expect(version(page)).not.toHaveAttribute('aria-hidden')
       }

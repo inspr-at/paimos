@@ -29,6 +29,8 @@ import { onAccessChange, permissionsRevoked } from '../../lib/authz'
 import { appendPendingChanges, getPendingChanges, pendingLine, type PendingChanges } from '../../lib/releasePending'
 import { plainSubject, shortCommit } from '../../lib/releases'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
+import { atRisk, planned, releasesFooter } from '../../lib/footerProviders'
+import { useFooterSummary } from '../../lib/footerSummary'
 
 // The release history: a full-screen sheet over the page. Releases by day on the
 // left, the selected one (or a comparison of two) on the right; on phones the
@@ -190,6 +192,13 @@ const behindLine = computed(() => {
   return `${Math.max(0, behind)} ${behind === 1 ? 'release' : 'releases'} behind live · back to ${liveName}`
 })
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
+
+// While the sheet is open it speaks in the footer: releases on their way (reserved or
+// tagged, not yet published) and the one whose checks failed. Hidden reservations stay uncounted (AEON-785).
+useFooterSummary(() => {
+  const coming = eligible.value.filter(planned), risky = coming.filter(atRisk)
+  return releasesFooter({ loaded: !!history.value, planned: coming.length, atRisk: risky.length, act: { risk: () => { if (risky[0]) publishSelection(risky[0].version) } } })
+})
 
 // ---------- Selection ----------
 // `releases=all` (the header) stays on the list with nothing selected. `releases=current`

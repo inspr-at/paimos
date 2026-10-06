@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref, watch } from 'vue'
 import * as wire from '../lib/access'
+import { listAgentKeys, type AgentKey } from '../lib/settings'
 import type { Agent, Members, Permission, Person, Role } from '../lib/access'
 import { accessChanged } from '../lib/authz'
 import { useSession } from './session'
@@ -13,6 +14,8 @@ export const useAccess = defineStore('access', () => {
   const registry = ref<Permission[]>([])
   const roles = ref<Role[]>([])
   const members = ref<Members | null>(null)
+  // Agent keys, for the footer's count of keys that expire soon; null until read (and for people who may not see keys).
+  const keys = ref<AgentKey[] | null>(null)
   const state = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
   const error = ref('')
   let request: Promise<void> | undefined
@@ -22,7 +25,7 @@ export const useAccess = defineStore('access', () => {
   const session = useSession()
   const owner = () => session.identity ? `${session.identity.tenant.id}:${session.identity.principal.id}` : ''
   let heldFor = owner()
-  function reset() { registry.value = []; roles.value = []; members.value = null; state.value = 'idle'; error.value = ''; request = undefined; heldFor = owner() }
+  function reset() { registry.value = []; roles.value = []; members.value = null; keys.value = null; state.value = 'idle'; error.value = ''; request = undefined; heldFor = owner() }
   // A 401 clears identity but leaves this view mounted so drafts and one-time
   // links survive. A subsequent sign-in starts with fresh access data.
   watch([owner, () => session.requiresSignIn], ([now, needsSignIn]) => {
@@ -83,6 +86,12 @@ export const useAccess = defineStore('access', () => {
     request = mine
     return request
   }
+  // An answer to a question asked for someone else is dropped; a failed read leaves what was known.
+  async function loadKeys() {
+    if (session.requiresSignIn) return
+    const asker = heldFor
+    try { const read = await listAgentKeys(); if (asker === heldFor) keys.value = read } catch { /* the Agents tab says when keys cannot be read */ }
+  }
   // After a change: the lists again, and my own permissions.
   // My own access may have changed too: every cached answer is asked again.
   async function settle() { await Promise.all([load(true), accessChanged()]) }
@@ -105,7 +114,7 @@ export const useAccess = defineStore('access', () => {
   function agent(id: string): Agent | undefined { return agents.value.find(a => a.principal_id === id) }
 
   return {
-    registry, roles, members, state, error, people, agents, invites, imported, roleById, runtimeRoleDetails, names,
+    registry, roles, members, keys, loadKeys, state, error, people, agents, invites, imported, roleById, runtimeRoleDetails, names,
     load, settle, person, agent, setWorkspaceRole, deactivate, reactivate, linkAlias, unlinkAlias, invite, retryInviteProvision, revokeInvite,
     createRole, updateRole, deleteRole, setProjectRole, removeProjectMember,
   }

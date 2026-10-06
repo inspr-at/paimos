@@ -7,6 +7,8 @@ import { brand, setPageTitle } from '../lib/brand'
 import { TYPES, countBy, entryPath, filterItems, highlightWords, isKnowledgeType, kindToken, listKnowledge, sortItems, statusLabel, typeMeta, type KnowledgeItem, type KnowledgeStatus, type KnowledgeType } from '../lib/knowledge'
 import { absoluteTime, plural, relativeTime } from '../lib/work'
 import { useProjects } from '../stores/projects'
+import { knowledgeFooter } from '../lib/footerProviders'
+import { useFooterSummary } from '../lib/footerSummary'
 
 // Knowledge across every project: one search over titles, slugs and text, results
 // grouped by project (each group leads into that project's Knowledge tab), the
@@ -29,6 +31,8 @@ const PER_PROJECT = 6
 const q = computed(() => typeof route.query.q === 'string' ? route.query.q : '')
 const type = computed<KnowledgeType | ''>(() => isKnowledgeType(route.query.type) ? route.query.type : '')
 const archived = computed(() => route.query.archived === '1')
+// ?status=proposed shows only the entries waiting for a person (the footer's "to review").
+const proposedOnly = computed(() => route.query.status === 'proposed' && !archived.value)
 const expanded = ref(new Set<string>())
 const draft = ref(q.value)
 let timer: ReturnType<typeof setTimeout> | undefined
@@ -37,7 +41,7 @@ watch(q, value => { if (value !== draft.value.trim()) draft.value = value })
 watch(draft, value => { clearTimeout(timer); timer = setTimeout(() => { if (value.trim() !== q.value) setQuery({ q: value.trim() }) }, 180) })
 function setQuery(patch: Record<string, string>) {
   const next: Record<string, string> = {}
-  for (const [key, value] of Object.entries({ q: q.value, type: type.value, archived: archived.value ? '1' : '', ...patch })) if (value) next[key] = value
+  for (const [key, value] of Object.entries({ q: q.value, type: type.value, archived: archived.value ? '1' : '', status: proposedOnly.value ? 'proposed' : '', ...patch })) if (value) next[key] = value
   void router.replace({ path: '/knowledge', query: next })
 }
 
@@ -63,7 +67,7 @@ async function load() {
 watch(q, () => { expanded.value = new Set(); void load() }, { immediate: true })
 const stale = computed(() => loaded.value && (loading.value || !!error.value || searchedFor.value !== q.value))
 
-const statuses = computed<KnowledgeStatus[]>(() => archived.value ? [] : ['active', 'proposed'])
+const statuses = computed<KnowledgeStatus[]>(() => archived.value ? [] : proposedOnly.value ? ['proposed'] : ['active', 'proposed'])
 const counts = computed(() => countBy(filterItems(items.value, [], statuses.value)).type)
 const total = computed(() => filterItems(items.value, [], statuses.value).length)
 const visible = computed(() => filterItems(items.value, type.value ? [type.value] : [], statuses.value))
@@ -87,6 +91,13 @@ const groups = computed<ProjectGroup[]>(() => {
   return searchedFor.value ? out : out.sort((a, b) => Date.parse(b.items[0].updated_at) - Date.parse(a.items[0].updated_at))
 })
 const sequence = computed(() => groups.value.flatMap(group => group.shown))
+// The footer says what the list shows: entries, and the proposed ones to review (AEON-785).
+useFooterSummary(() => {
+  const act = { review: () => setQuery({ status: 'proposed' }) }
+  if (!loaded.value) return knowledgeFooter({ loaded: false, entries: 0, toReview: 0, updatedAt: null, now: now.value, act })
+  const updated = visible.value.reduce((latest, item) => Math.max(latest, Date.parse(item.updated_at) || 0), 0)
+  return knowledgeFooter({ loaded: true, entries: visible.value.length, toReview: visible.value.filter(item => item.status === 'proposed').length, updatedAt: updated || null, now: now.value, act })
+})
 const projectLink = (group: ProjectGroup) => ({ path: `/p/${encodeURIComponent(group.routeKey)}/knowledge`, query: type.value ? { type: type.value } : {} })
 const itemLink = (group: ProjectGroup, item: KnowledgeItem) => entryPath(group.routeKey, item.type, item.slug)
 

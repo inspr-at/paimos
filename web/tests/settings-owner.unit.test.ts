@@ -6,6 +6,9 @@ import { compileScript, parse } from '@vue/compiler-sfc'
 import ts from 'typescript'
 import * as Vue from 'vue'
 import * as settings from '../src/lib/settings'
+import * as footerProviders from '../src/lib/footerProviders'
+import * as footerSummary from '../src/lib/footerSummary'
+import * as preferences from '../src/lib/preferences'
 import { scopeOwner } from '../src/lib/identityScope'
 import { flush } from './record-source'
 
@@ -42,7 +45,8 @@ function component() {
   const { descriptor } = parse(source)
   const { content } = compileScript(descriptor, { id: 'settings-owner', inlineTemplate: true, templateOptions: { compilerOptions: { hoistStatic: false } } })
   const modules: Record<string, unknown> = {
-    vue: Vue, 'vue-router': { useRoute: () => route }, '../lib/settings': settings, '../lib/identityScope': { scopeOwner },
+    vue: Vue, 'vue-router': { useRoute: () => route, useRouter: () => ({ push: async () => {} }) }, '../lib/settings': settings,
+    '../lib/footerProviders': footerProviders, '../lib/footerSummary': footerSummary, '../lib/preferences': preferences, '../lib/identityScope': { scopeOwner },
     '../stores/session': { useSession: () => session }, '../lib/doctrineInbox': { doctrineInbox: {} },
     '../lib/authz': { can: (permission: string) => !grants.revoked && (permission === 'settings.manage' ? grants.admin : grants.access), permissionsKnown: () => true, permissionsRevoked: () => grants.revoked, refreshPermissions: async () => {} },
   }

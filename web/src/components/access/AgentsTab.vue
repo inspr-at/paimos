@@ -4,7 +4,7 @@ import { brand } from '../../lib/brand'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSession } from '../../stores/session'
-import { CONNECTED_COMPUTER_REASON, agentDeactivatePoints, keyHint, adoptAgentKey, revokeAgentKey, splitAgents, type Agent } from '../../lib/access'
+import { CONNECTED_COMPUTER_REASON, agentDeactivatePoints, keyExpiry, keyHint, adoptAgentKey, revokeAgentKey, splitAgents, type Agent } from '../../lib/access'
 import type { RowAction } from '../../lib/rowActions'
 import { can, myPermissions } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
@@ -76,6 +76,18 @@ onUnmounted(() => { active = false })
 const adoptionBusy = ref(false)
 const personIdentity = () => `${session.identity?.tenant.id}:${session.identity?.principal.id}`
 watch(personIdentity, () => { keys.value = null; open.value = new Set(); editing.value = null; void loadKeys() })
+// The footer's "key expires soon" lands here: the agents holding such a key open, and the first scrolls into view (AEON-785).
+watch([() => route.query.expiring, keys], async ([flag, list]) => {
+  if (flag !== '1' || !list) return
+  const soon = working.value.filter(agent => list.some(key => key.principal_id === agent.principal_id && keyState(key) === 'active' && keyExpiry(key).soon))
+  const query = { ...route.query }
+  delete query.expiring
+  void router.replace({ query })
+  if (!soon.length) return
+  open.value = new Set([...open.value, ...soon.map(agent => agent.principal_id)])
+  await nextTick()
+  document.getElementById(`keys-${soon[0]!.principal_id}`)?.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+}, { immediate: true })
 async function adopt(key: AgentKey) {
   if (adoptionBusy.value || !manageKeys.value) return
   const targetID = key.id

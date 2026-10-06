@@ -43,6 +43,9 @@ import AttachPending from '../components/agents/AttachPending.vue'
 import WindDownPanel from '../components/agents/WindDownPanel.vue'
 import FloatingPanel from '../components/work/FloatingPanel.vue'
 import { useAgentPause } from '../stores/agentPause'
+import { agentsFooter } from '../lib/footerProviders'
+import { useFooterSummary } from '../lib/footerSummary'
+import { clockTime, liveSession } from '../lib/agentPause'
 
 // Markus's desk for agents: a compact live line under the title, what waits on him
 // (only when something does), the accounts with today's plan, then every session
@@ -252,6 +255,38 @@ function review(approval: Approval) {
   cursor.value = `a:${approval.id}`
   void nextTick(() => focusRow(cursor.value))
 }
+
+// ---------- Footer summary (AEON-785): count · state · the one exception ----------
+const footerWind = computed(() => {
+  const by = pause.report?.deadline_at
+  if (!by) return null
+  const left = pause.reportIds.filter(id => { const s = agents.sessionById(id); return !!s && liveSession(s) }).length
+  return { left, by: clockTime(by) }
+})
+// What this screen lists: live sessions, plus those paused on purpose.
+useFooterSummary(() => {
+  if (!session.identity) return null
+  const live = agents.views.filter(v => !v.session.stopped_at && v.session.phase !== 'stopped')
+  const states = (groups: string[]) => live.filter(v => groups.includes(v.status.group)).length
+  const paused = agents.views.filter(v => v.status.state === 'paused').length
+  const top = () => document.querySelector('main')?.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' })
+  return agentsFooter({
+    loaded: agents.loaded,
+    total: live.length + paused,
+    working: states(['working']),
+    problems: states(['problem', 'unresponsive']),
+    asks: agents.needsCount,
+    paused,
+    wind: footerWind.value,
+    act: {
+      problem: () => void jump('problem'),
+      ask: () => { const first = agents.pending[0] ? `a:${agents.pending[0].id}` : agents.held[0] ? `m:${agents.held[0].id}` : ''; if (first) { cursor.value = first; focusRow(first) } },
+      wind: () => windDown.value?.focusWindDown(),
+      paused: () => void jump('paused'),
+      top,
+    },
+  })
+}, () => session.identity ? { updatedAt: agents.sessionsUpdatedAt, paused: stale.value } : null)
 
 // ---------- Panel ----------
 // Like the ticket panel: opening from the list adds one history entry, switching

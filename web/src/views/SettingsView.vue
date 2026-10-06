@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type Component } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import '../styles/settings.css'
 import { can, permissionsKnown, permissionsRevoked, refreshPermissions } from '../lib/authz'
 import AppIcon from '../components/AppIcon.vue'
@@ -23,10 +23,14 @@ import { SETTINGS_GROUPS, SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, 
 import { useSession } from '../stores/session'
 import { doctrineInbox } from '../lib/doctrineInbox'
 import { scopeOwner } from '../lib/identityScope'
+import { settingsFooter, settingsNeeds } from '../lib/footerProviders'
+import { useFooterSummary } from '../lib/footerSummary'
+import { preferenceSaves, retryFailedPreferences } from '../lib/preferences'
 
 // Settings groups share one frame; explicit grants gate Access, rules and accounts.
 // /settings/<section>#<card> deep-links to one card, which is ringed on arrival.
 const route = useRoute()
+const router = useRouter()
 const session = useSession()
 const admin = computed(() => can('settings.manage'))
 // A session that ends (401) revokes every grant; what is on screen stays as it
@@ -46,6 +50,22 @@ watch(() => scopeOwner(session.identity), now => {
   closePicker()
 }, { flush: 'sync' })
 const current = computed(() => sectionOf(route.params.section))
+
+// The footer stays empty while everything is saved and nothing needs you (AEON-785).
+// Access says its own line.
+useFooterSummary(() => {
+  if (!session.identity || current.value === 'access') return null
+  return settingsFooter({
+    saving: preferenceSaves.saving.size > 0, failed: preferenceSaves.failed.size > 0, needs: settingsNeeds.value,
+    act: {
+      retry: retryFailedPreferences,
+      needs: () => {
+        if (current.value !== 'accounts') void router.push('/settings/accounts')
+        void nextTick(() => document.querySelector('.needs-block')?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }))
+      },
+    },
+  })
+})
 const meta = computed(() => SETTINGS_SECTIONS.find(section => section.id === current.value)!)
 const granted = computed(() => meta.value.permission ? anyOf(meta.value.permission, permission => can(permission)) : !meta.value.admin || admin.value)
 watch([current, granted, mountedOwner], ([section, ok]) => { if (ok) shown.add(section) }, { immediate: true })

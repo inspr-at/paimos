@@ -33,9 +33,11 @@ import { TICKET_PEEK } from '../lib/ticketPeek'
 import { ticketRef } from '../lib/ticketLinks'
 import { scopeOwner } from '../lib/identityScope'
 import { PROJECT_COLUMN_BY_ID, projectProgressTip } from '../lib/projectColumns'
-import { absoluteTime, cycleSort, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
+import { absoluteTime, cycleSort, normaliseState, plural, PRIORITIES, priorityLabel, relativeTime, statusMeta, type SortField, type SortKey } from '../lib/work'
 import { useProjects } from '../stores/projects'
 import { useLiveAgents } from '../stores/liveAgents'
+import { ticketsFooter } from '../lib/footerProviders'
+import { useFooterSummary } from '../lib/footerSummary'
 import { useSession } from '../stores/session'
 import { useWorkQueue } from '../stores/workQueue'
 import { useWorkVocabulary } from '../stores/workVocabulary'
@@ -61,7 +63,6 @@ import ViewBar from '../components/work/ViewBar.vue'
 import SaveViewPanel from '../components/work/SaveViewPanel.vue'
 import BulkBar from '../components/work/BulkBar.vue'
 import LiveUpdatesChip from '../components/work/LiveUpdatesChip.vue'
-import ListFreshness from '../components/work/ListFreshness.vue'
 import LabelMenu, { type LabelChoice } from '../components/work/LabelMenu.vue'
 import OptionMenu from '../components/work/OptionMenu.vue'
 import EpicPicker from '../components/work/EpicPicker.vue'
@@ -544,6 +545,25 @@ function clearFilters() { update(clearedFilters()) }
 function setDate(date: DateFilter | null) { update({ date }) }
 function sortBy(field: SortField, additive: boolean) { update({ sort: cycleSort(filters.value.sort, field, additive) }) }
 function setSort(sort: SortKey[]) { update({ sort }) }
+
+// ---------- Footer summary (AEON-785): what this list shows ----------
+// The same total the toolbar counts; blocked from the state counts, workers from the live read.
+useFooterSummary(() => {
+  if (!session.identity || !project.value || !liveActive.value) return null
+  const states = list.facets.value.state ?? {}
+  const blocked = Object.entries(states).reduce((sum, [state, n]) => sum + (normaliseState(state) === 'blocked' ? n : 0), 0)
+  const loaded = new Set((outlineActive.value ? outline.rows.value : list.rows.value).map(row => row.id))
+  const worked = new Set(liveAgents.forProject(project.value.id).flatMap(agent => agent.ticket ? [agent.ticket.id] : []))
+  return ticketsFooter({
+    loaded: list.loadedOnce.value, total: total.value, blocked, filtered: filtered.value,
+    withAgents: filtered.value ? [...worked].filter(id => loaded.has(id)).length : worked.size,
+    act: {
+      blocked: () => { if (!filters.value.status.some(state => normaliseState(state) === 'blocked')) toggleValue('status', 'blocked') },
+      top: () => { if (scrollRoot.value) scrollRoot.value.scrollTo({ top: 0, behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }) },
+      clear: clearFilters,
+    },
+  })
+}, () => liveActive.value && liveUpdatedAt.value !== null ? { updatedAt: liveUpdatedAt.value, paused: liveDataStale.value } : null)
 function setGroup(group: GroupBy) {
   collapsed.value = new Set()
   if (group === 'tag') void list.requestFacet('tag')
@@ -1774,9 +1794,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
           @expand-groups="setAllGroups(true)" @collapse-groups="setAllGroups(false)"
           :columns="toolbarColumns" @columns="saveColumns" @columns-reset="resetColumns"
           :header-graph="headerGraph" @header-graph="setHeaderGraph"
-        >
-          <template #freshness><ListFreshness v-if="liveActive" :updated-at="liveUpdatedAt" :untrusted="liveDataStale" inline /></template>
-        </ListToolbar>
+        />
         <div v-if="selectable && (sequence.length || picking)" class="phone-pick" :class="{ on: picking }">
           <p v-if="picking" class="phone-pick-status">
             <span aria-live="polite"><b class="mono">{{ selected.size.toLocaleString('en-GB') }}</b> selected</span>
