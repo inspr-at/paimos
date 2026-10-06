@@ -33,6 +33,12 @@ func New(pool *pgxpool.Pool) httpapi.Module {
 
 // Mount registers model registry routes.
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/settings/lead-policy", boundedPreferenceHandler(m.leadSettings))
+	mux.HandleFunc("PUT /api/settings/lead-policy", boundedPreferenceHandler(m.writeLeadSettings))
+	mux.HandleFunc("DELETE /api/settings/lead-policy", boundedPreferenceHandler(m.writeLeadSettings))
+	mux.HandleFunc("GET /api/projects/{projectId}/lead-settings", boundedPreferenceHandler(m.leadSettings))
+	mux.HandleFunc("PUT /api/projects/{projectId}/lead-settings", boundedPreferenceHandler(m.writeLeadSettings))
+	mux.HandleFunc("DELETE /api/projects/{projectId}/lead-settings", boundedPreferenceHandler(m.writeLeadSettings))
 	mux.HandleFunc("GET /api/model-preferences", boundedPreferenceHandler(m.preferences))
 	mux.HandleFunc("PUT /api/model-preferences/levels/{level}", boundedPreferenceHandler(m.writePreferences))
 	mux.HandleFunc("DELETE /api/model-preferences/levels/{level}", boundedPreferenceHandler(m.writePreferences))

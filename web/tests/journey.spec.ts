@@ -8,6 +8,7 @@ import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { journeyWorld, retryJourneyWorld, mockJourney, type JourneyStart, type WorldOptions } from './journey-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { controlStability } from './control-stability'
+import { mkdirSync } from 'node:fs'
 
 async function open(page: Page, start: JourneyStart = 'plan', path = '/p/PHAROS?view=journey', options: WorldOptions & { failPlan?: boolean; kind?: 'person' | 'agent'; noTicketRoute?: boolean } = {}) {
   await page.setViewportSize({ width: 1440, height: 900 })
@@ -129,15 +130,32 @@ test('Journey is a third view of the project, with the stage and next action in 
 
 test('the plan: ticked tickets form the release; features cycle all, none and the last partial pick', async ({ page }) => {
   const { calls } = await open(page)
+  const draft = page.getByLabel('New ticket for this release')
+  const draftFeature = page.getByLabel('Feature of the new ticket')
+  await draft.fill('Keep this unsaved ticket')
+  await draftFeature.selectOption('n-epic')
+  const refresh = () => page.waitForResponse(response => response.request().method() === 'GET' && response.url().endsWith('/releases/r-2/walker'))
   const feature = page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 2 of 3 in the release/ })
   await expect(feature).toHaveAttribute('aria-checked', 'mixed')
+  const firstRefresh = refresh()
   await feature.click()
+  await firstRefresh
   await expect(page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 3 of 3/ })).toHaveAttribute('aria-checked', 'true')
+  await expect(draft).toHaveValue('Keep this unsaved ticket')
+  await expect(draftFeature).toHaveValue('n-epic')
+  const secondRefresh = refresh()
   await page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 3 of 3/ }).click()
+  await secondRefresh
   await expect(page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 0 of 3/ })).toHaveAttribute('aria-checked', 'false')
+  await expect(draft).toHaveValue('Keep this unsaved ticket')
+  await expect(draftFeature).toHaveValue('n-epic')
   // The third click restores the earlier partial pick (PHAROS-11 and PHAROS-13).
+  const thirdRefresh = refresh()
   await page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 0 of 3.*restore the earlier 2/ }).click()
+  await thirdRefresh
   await expect(page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning: 2 of 3/ })).toHaveAttribute('aria-checked', 'mixed')
+  await expect(draft).toHaveValue('Keep this unsaved ticket')
+  await expect(draftFeature).toHaveValue('n-epic')
   await expect.poll(() => writes(calls, '/plan').length).toBe(3)
   const plans = writes(calls, '/plan').map(c => c.body as { expected_revision: number; ordered_ticket_ids: string[]; included_ticket_ids: string[] })
   expect(plans.map(p => p.expected_revision)).toEqual([7, 8, 9])
@@ -605,3 +623,55 @@ test('Plan: a project without a release opens release 1 with one click', async (
   expect(action.release_id).toBeUndefined()
   await expect(page.getByRole('checkbox', { name: 'PHAROS-14 in the release' })).toBeVisible()
 })
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+  test(`the retained plan controls stay put during a deferred refresh at ${width}px in ${theme}`, async ({ page }) => {
+    const { world } = await open(page)
+    await page.setViewportSize({ width, height: 900 })
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    const draft = page.getByLabel('New ticket for this release')
+    await draft.fill('Öffnungszeiten und Abholbedingungen für internationale Bestellungen anzeigen')
+    const feature = page.getByRole('checkbox', { name: /^Guarded multi-cloud provisioning:/ })
+    const guard = await controlStability(page, {
+      title: draft,
+      featureChoice: page.getByLabel('Feature of the new ticket'),
+      addExisting: page.getByRole('button', { name: 'Add existing', exact: true }),
+      add: page.locator('.add-row').getByRole('button', { name: 'Add', exact: true }),
+      fullScreen: page.getByRole('button', { name: 'Full screen', exact: true }),
+      formGroup: page.locator('.add-row'),
+    })
+    const contentGuard = await controlStability(page, {
+      featureCheckbox: feature,
+      featureRow: page.locator('.release-tickets .grp-h').first(),
+      ticketCheckbox: page.getByRole('checkbox', { name: 'PHAROS-11 in the release' }),
+      ticketRow: page.locator('#release-ticket-n-1'),
+    })
+    let release!: () => void, started!: () => void
+    const answer = new Promise<void>(resolve => { release = resolve })
+    const requested = new Promise<void>(resolve => { started = resolve })
+    await page.route('**/releases/r-2/walker', async route => {
+      started()
+      await answer
+      await route.fallback()
+    })
+    const refresh = page.waitForResponse(response => response.url().endsWith('/releases/r-2/walker'))
+    try {
+      await guard.check(async () => { await feature.click(); await requested })
+      await contentGuard.check(async () => { await expect(feature).toHaveAttribute('aria-checked', 'true') })
+      await expect(page.locator('.list-skel')).toHaveCount(0)
+      await expect(page.locator('.release-tickets')).toBeVisible()
+      const directory = join(process.cwd(), 'test-results', 'aeon-706-planbind')
+      mkdirSync(directory, { recursive: true })
+      await page.screenshot({ path: join(directory, `refresh-${width}-${theme}.png`), fullPage: true })
+      await guard.check(async () => {
+        release()
+        await refresh
+        await expect(feature).toHaveAttribute('aria-checked', 'true')
+      })
+      await contentGuard.check(async () => { await expect(feature).toHaveAttribute('aria-checked', 'true') })
+      guard.done(); contentGuard.done()
+      await expect(draft).toHaveValue('Öffnungszeiten und Abholbedingungen für internationale Bestellungen anzeigen')
+      expect(world.walkers['r-2'].revision).toBe(8)
+    } finally { release() }
+  })
+}
