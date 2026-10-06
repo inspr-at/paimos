@@ -9669,9 +9669,9 @@
     {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 light: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
     {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"},
-    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > never calls missing account ownership or routing a full account","tier":"NIGHTLY"},
-    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > claims readiness only from confirmed room when unknown and zero room mix","tier":"NIGHTLY"},
-    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > resolves a shared-quota alias measurement from the canonical gauge","tier":"NIGHTLY"}
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > never calls missing account ownership or routing a full account","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > claims readiness only from confirmed room when unknown and zero room mix","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > resolves a shared-quota alias measurement from the canonical gauge","tier":"GATED-FULL"}
   ],
   "timingWeights": {
     "runId": "37377299349",
