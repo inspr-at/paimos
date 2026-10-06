@@ -28,7 +28,7 @@ function settle(event: TransitionEvent) {
   <section class="fs glass-card" :class="{ open, moving }" :aria-label="label">
     <div class="fs-head">
       <button type="button" class="fs-tog" :aria-expanded="open" :aria-controls="`${id}-body`" :aria-label="`${label}: ${open ? 'fold' : 'unfold'}`" :data-tip="tip ?? (open ? 'Fold' : 'Unfold')" @click="toggle"><AppIcon name="chevron-right" :size="16" /></button>
-      <button v-if="slots.title" type="button" class="fs-title" :aria-expanded="open" :aria-controls="`${id}-body`" @click="toggle"><slot name="title" /></button>
+      <h2 v-if="slots.title" class="fs-heading"><button type="button" class="fs-title" :aria-expanded="open" :aria-controls="`${id}-body`" @click="toggle"><slot name="title" /></button></h2>
       <slot name="head" />
     </div>
     <div :id="`${id}-body`" class="fs-body" :inert="!open || undefined" @transitionend="settle" @transitioncancel="settle">
@@ -43,6 +43,7 @@ function settle(event: TransitionEvent) {
 .fs-tog { display: grid; place-items: center; flex: none; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--ink-3); cursor: pointer; }
 .fs-tog :deep(svg) { transition: transform .22s ease; }
 .fs.open > .fs-head .fs-tog :deep(svg) { transform: rotate(90deg); }
+.fs-heading { display: flex; flex: none; margin: 0; min-width: 0; font: inherit; }
 .fs-title { display: inline-flex; align-items: center; gap: 10px; flex: none; min-height: 32px; margin-left: -6px; padding: 0 6px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: 650 15px/1.3 var(--font); letter-spacing: -.005em; text-align: left; white-space: nowrap; cursor: pointer; }
 .fs-tog:focus-visible, .fs-title:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 @media (hover: hover) {

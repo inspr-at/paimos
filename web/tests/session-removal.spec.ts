@@ -36,10 +36,10 @@ test('row overflow removes a live session; History preserves it and survives ref
   const errors = watchErrors(page)
   const { selected, bodies } = await setup(page)
   await page.goto('/agents')
-  const summary = page.getByRole('group', { name: 'Live sessions' })
-  await expect(summary).toContainText('live')
+  const summary = page.getByRole('group', { name: 'Show sessions by state' })
+  await expect(summary).toContainText('working')
   const before = await summary.innerText()
-  // A live row carries no bin; the live line carries no removal.
+  // A live row carries no bin; the head counts carry no removal.
   await expect(row(page, selected.id).getByRole('button', { name: /^Remove / })).toHaveCount(0)
   await expect(summary.getByRole('button', { name: /^Remove / })).toHaveCount(0)
   await removeFromRow(page, selected.id)
@@ -123,7 +123,7 @@ test('phones show the overflow button on every row; the live line carries no rem
   await page.goto('/agents')
   const more = row(page, selected.id).getByRole('button', { name: 'Actions for ghost-worker' })
   await expect(more).toHaveCSS('opacity', '1')
-  await expect(page.getByRole('group', { name: 'Live sessions' }).getByRole('button', { name: /Remove/ })).toHaveCount(0)
+  await expect(page.getByRole('group', { name: 'Show sessions by state' }).getByRole('button', { name: /Remove/ })).toHaveCount(0)
   await expect(more).toHaveCSS('width', '44px')
   await more.click()
   await page.getByRole('menuitem', { name: /^Remove/ }).click()

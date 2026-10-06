@@ -88,10 +88,6 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
         { name: 'exclude', run: async () => { await facet.getByRole('button', { name: /^Exclude/ }).click(); await expect(facet).toHaveClass(/out/) } },
       ] })
       await keyboardTip(page, checkbox, longName)
-      const open = page.locator('.problem-chip .open')
-      await expectStableControls({ controls: { open, line: page.locator('.live-line') }, interactions: [{ name: 'agent name focus', run: () => keyboardTip(page, page.locator('.who'), longAgent) }] })
-      await expect(open).toBeInViewport()
-      expect(await open.evaluate(el => el.clientWidth)).toBeGreaterThan(40)
       await keyboardTip(page, page.locator('.agent-chip'), `${longAgent} · Codex · Working`)
       await page.getByRole('button', { name: /^Revoked \(/ }).click()
       const revoked = page.locator('.revoked-name')

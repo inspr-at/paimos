@@ -137,6 +137,34 @@ test('ticket: queued without a lead offers Start lead; a parent queues its open 
   expect(state.calls.find(c => c.path === '/api/queue/n-2/snapshots')?.body).toEqual({ expected_revision: expect.any(String) })
 })
 
+test('a ticket preview over any page offers Start lead and the sheet opens there', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await mockLeadFlow(page, { lead: 'none', queue: ['n-4'] })
+  // The Projects page has no lead views of its own: only the shell can host the sheet.
+  await page.goto('/?peek=PHAROS-14')
+  const preview = page.locator('.ticket-peek-host')
+  await expect(preview.locator('.tline')).toContainText('Queued, waiting for a lead.')
+  const start = preview.locator('.tline').getByRole('button', { name: 'Start lead' })
+  await start.click()
+  const sheet = page.getByRole('dialog', { name: 'Start lead for PHAROS' })
+  await expect(sheet).toBeVisible()
+  await expect(sheet.getByRole('button', { name: /Start lead/ })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(sheet).toHaveCount(0)
+  await expect(start).toBeFocused()
+})
+
+test('leaving the page that opened the docked lead panel closes it', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await mockLeadFlow(page, { lead: 'working', aeon: 'none' })
+  await page.goto('/agents')
+  await page.locator('section.zone[aria-labelledby="leads-title"] [data-project="PHAROS"]').click()
+  await expect(panel(page)).toBeVisible()
+  await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Projects' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await expect(panel(page)).toHaveCount(0)
+})
+
 test('ticket header keeps every action inside the default side panel with wide system fonts', async ({ page }) => {
   await mockLeadFlow(page, { lead: 'working', queue: [] })
   // CI's Linux fonts (DejaVu Sans and Sans Mono) run wider than macOS's. Verdana
@@ -161,6 +189,46 @@ test('ticket header keeps every action inside the default side panel with wide s
     expect(await bar.evaluate(el => el.scrollWidth - el.clientWidth), `${width} ${key}: the header does not overflow`).toBeLessThanOrEqual(0)
     // The fold gives up what More also offers first: the default desktop dock keeps Queue's word.
     if (width === 1440) await expect(drawer.locator('.q-action .q-word').first()).toBeVisible()
+  }
+})
+
+test('ticket header steps down at every dock width so Close stays inside with a wide system font', async ({ page }) => {
+  // AEON-780: at 1440 on CI's Linux fonts the labelled Queue pushed Close out of
+  // the dock (work-queue.spec.ts:529). Same wide fonts as the test above.
+  const wide = '.panel-bar, .panel-bar * { font-family: Verdana, "DejaVu Sans", sans-serif !important; } .panel-bar .mono, .panel-bar .mono *, .panel-bar .key-chip, .panel-bar .key-chip *, .panel-bar kbd { font-family: Menlo, "DejaVu Sans Mono", monospace !important; }'
+  await mockLeadFlow(page, { lead: 'working', queue: [] })
+  for (const key of ['PHAROS-14', 'PHAROS-12']) {
+    await page.setViewportSize({ width: 1920, height: 1000 })
+    await page.goto(`/p/PHAROS/${key}`)
+    await page.addStyleTag({ content: wide })
+    const drawer = page.getByRole('complementary', { name: 'Ticket details' })
+    const bar = drawer.locator('.panel-bar-main')
+    // A wide dock keeps the full header: the steps never hide what fits.
+    await expect(drawer.locator('.q-action .q-word').first()).toBeVisible()
+    await expect(drawer.locator('.q-action .q-key')).toBeVisible()
+    await expect(drawer.locator('.position')).toBeVisible()
+    await expect(drawer.getByRole('button', { name: 'Open as full page', exact: true })).toBeVisible()
+    for (const width of [1920, 1600, 1440, 1366, 1280, 1180, 1024, 900, 800, 721]) {
+      await page.setViewportSize({ width, height: 1000 })
+      // The fold runs in a ResizeObserver callback before paint: measure after
+      // the next frame has rendered, as a person would see it.
+      await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))))
+      const geometry = await bar.evaluate(el => {
+        const frame = el.getBoundingClientRect()
+        const buttons = [...el.querySelectorAll('button')].map(button => {
+          const rect = button.getBoundingClientRect()
+          return { name: button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '', left: rect.left, right: rect.right, width: rect.width }
+        }).filter(button => button.width > 0)
+        return { left: frame.left, right: frame.right, overflow: el.scrollWidth - el.clientWidth, buttons }
+      })
+      expect(geometry.overflow, `${key} at ${width}: the header does not overflow`).toBeLessThanOrEqual(0)
+      for (const name of ['Close ticket details', 'More actions', 'Edit']) expect(geometry.buttons.map(b => b.name), `${key} at ${width}: ${name} is shown`).toContain(name)
+      for (const button of geometry.buttons) {
+        expect(button.left, `${key} at ${width}: ${button.name} starts inside the header`).toBeGreaterThanOrEqual(geometry.left - 0.5)
+        expect(button.right, `${key} at ${width}: ${button.name} ends inside the header`).toBeLessThanOrEqual(geometry.right + 0.5)
+      }
+      await expect(drawer.getByRole('button', { name: 'Close ticket details' })).toBeInViewport({ ratio: 1 })
+    }
   }
 })
 
