@@ -38,7 +38,7 @@ func save(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket, project st
 	if err != nil {
 		return err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO work_escalations(tenant_id,ticket_node_id,project_id,state) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id,ticket_node_id) DO UPDATE SET state=EXCLUDED.state,updated_at=clock_timestamp()`, p.TenantID, ticket, project, raw)
+	_, err = tx.Exec(ctx, `INSERT INTO work_escalations(tenant_id,ticket_node_id,project_id,state) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id,ticket_node_id) DO UPDATE SET project_id=EXCLUDED.project_id,state=EXCLUDED.state,updated_at=clock_timestamp()`, p.TenantID, ticket, project, raw)
 	return err
 }
 func route(ctx context.Context, tx pgx.Tx, p tenant.Principal, ticket string, s State) (modelregistry.WorkResolution, error) {

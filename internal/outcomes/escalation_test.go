@@ -20,10 +20,172 @@ import (
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/escalation"
 	"github.com/inspr-at/paimos/internal/modelregistry"
+	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/reviewgate"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+type movedEscalationFixture struct {
+	d                        *dbtest.DB
+	owner, destinationWorker tenant.Principal
+	source, target, ticket   string
+	state                    escalation.State
+}
+
+func setupMovedEscalation(t *testing.T, status, move string) movedEscalationFixture {
+	t.Helper()
+	d := dbtest.Open(t)
+	p := newPerson(t, d, "moved-escalation")
+	source := insertNode(t, d, p, "project", "SRC-1", "Source", nil)
+	target := insertNode(t, d, p, "project", "DST-1", "Destination", nil)
+	parent := source
+	if move == "subtree" {
+		parent = insertNode(t, d, p, "work", "SRC-2", "Branch", &source)
+	}
+	ticket := insertNode(t, d, p, "work", "SRC-3", "Stuck leaf", &parent)
+	state := escalation.State{EpisodeID: ticket, Revision: 7, Status: status, Attempts: 1, HeldCost: 100, MaxAttempts: escalation.MaxAttempts, MaxCost: escalation.MaxCostMicros}
+	worker := tenant.Principal{TenantID: p.TenantID, Kind: tenant.Person}
+	inTenant(t, d, p, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'moved-original','1','codex','openai','gpt-6-sol','high','strong') RETURNING id::text`, p.TenantID).Scan(&state.OriginalProfile); err != nil {
+			return err
+		}
+		state.UsedProfiles = []string{state.OriginalProfile}
+		raw, err := json.Marshal(state)
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO work_escalations(tenant_id,ticket_node_id,project_id,state) VALUES($1,$2,$3,$4)`, p.TenantID, ticket, source, raw); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Destination worker') RETURNING id::text`, p.TenantID).Scan(&worker.ID); err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE tenant_id=$1 AND key='member'`, p.TenantID, worker.ID, target)
+		return err
+	})
+	mux := http.NewServeMux()
+	nodes.New(d.App, nil).Mount(mux)
+	path, body := "/api/nodes/"+ticket+"/move", fmt.Sprintf(`{"parent_id":%q}`, target)
+	if move == "project-move" {
+		path, body = "/api/nodes/"+ticket+"/project-move", fmt.Sprintf(`{"project_id":%q}`, target)
+	} else if move == "subtree" {
+		path = "/api/nodes/" + parent + "/move"
+	}
+	r := httptest.NewRequest("POST", path, strings.NewReader(body)).WithContext(tenant.WithPrincipal(t.Context(), p))
+	w := httptest.NewRecorder()
+	mux.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("move fixture: %d %s", w.Code, w.Body.String())
+	}
+	return movedEscalationFixture{d: d, owner: p, destinationWorker: worker, source: source, target: target, ticket: ticket, state: state}
+}
+
+func TestMovedEscalationVisibilityAndLaunchGate(t *testing.T) {
+	for _, status := range []string{"stuck", "awaiting_decision"} {
+		for _, move := range []string{"move", "project-move", "subtree"} {
+			t.Run(status+"/"+move, func(t *testing.T) {
+				f := setupMovedEscalation(t, status, move)
+				mod := New(f.d.App)
+				w := callAs(t, mod, f.destinationWorker, "GET", "/api/nodes/"+f.ticket+"/escalation", "")
+				var view struct {
+					State *escalation.State `json:"escalation"`
+				}
+				if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &view) != nil || view.State == nil || view.State.Status != status || view.State.EpisodeID != f.state.EpisodeID || view.State.Attempts != 1 || view.State.HeldCost != 100 {
+					t.Fatalf("destination lost moved escalation: %d %s", w.Code, w.Body.String())
+				}
+				ctx := tenant.WithPrincipal(t.Context(), f.destinationWorker)
+				if err := db.InTenant(ctx, f.d.App, f.owner.TenantID, func(tx pgx.Tx) error {
+					if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+						return err
+					}
+					err := escalation.CheckLaunchTx(ctx, tx, f.ticket, "", "", nil)
+					if err == nil || !strings.Contains(err.Error(), "stuck work") {
+						t.Fatalf("destination dispatch bypassed moved episode: %v", err)
+					}
+					return nil
+				}); err != nil {
+					t.Fatal(err)
+				}
+				for _, projects := range [][]string{nil, {f.source}} {
+					ctx := db.OnlyProjects(t.Context(), projects...)
+					if err := db.InTenant(ctx, f.d.App, f.owner.TenantID, func(tx pgx.Tx) error {
+						var count int
+						if err := tx.QueryRow(ctx, `SELECT count(*) FROM work_escalations WHERE ticket_node_id=$1`, f.ticket).Scan(&count); err != nil {
+							return err
+						}
+						if count != 0 {
+							t.Fatalf("old/no project access leaked moved episode: %d", count)
+						}
+						tag, err := tx.Exec(ctx, `UPDATE work_escalations SET state='{}' WHERE ticket_node_id=$1`, f.ticket)
+						if err == nil && tag.RowsAffected() != 0 {
+							t.Fatal("old/no project access changed moved episode")
+						}
+						return err
+					}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				// WITH CHECK must follow the current ticket too, even when the
+				// supplied cached project is one the caller can see.
+				hidden := insertNode(t, f.d, f.owner, "work", "SRC-4", "Hidden leaf", &f.source)
+				err := db.InTenant(ctx, f.d.App, f.owner.TenantID, func(tx pgx.Tx) error {
+					_, err := tx.Exec(ctx, `INSERT INTO work_escalations(tenant_id,ticket_node_id,project_id,state) VALUES($1,$2,$3,'{}')`, f.owner.TenantID, hidden, f.target)
+					return err
+				})
+				var pgErr *pgconn.PgError
+				if !errors.As(err, &pgErr) || pgErr.Code != "42501" {
+					t.Fatalf("hidden-ticket insert was not denied by RLS: %v", err)
+				}
+				foreign := newPerson(t, f.d, "moved-escalation-foreign")
+				if w := callAs(t, mod, foreign, "GET", "/api/nodes/"+f.ticket+"/escalation", ""); w.Code != 404 {
+					t.Fatalf("foreign state: %d %s", w.Code, w.Body.String())
+				}
+			})
+		}
+	}
+}
+
+func TestMovedEscalationObservationPreservesEpisode(t *testing.T) {
+	for _, status := range []string{"stuck", "awaiting_decision"} {
+		t.Run(status, func(t *testing.T) {
+			f := setupMovedEscalation(t, status, "move")
+			// A destination-only writer must update the existing episode, rather
+			// than hit its hidden unique key or start a fresh budget.
+			mux := http.NewServeMux()
+			New(f.d.App).Mount(mux)
+			r := httptest.NewRequest("POST", "/api/outcomes", strings.NewReader(fmt.Sprintf(`{"kind":"fix_round","ticket":%q,"payload":{"round":4}}`, f.ticket)))
+			r.Header.Set("Idempotency-Key", "moved-fix-round-4")
+			r = r.WithContext(tenant.WithPrincipal(t.Context(), f.destinationWorker))
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, r)
+			if w.Code != 201 {
+				t.Fatalf("destination observation failed: %d %s", w.Code, w.Body.String())
+			}
+			ctx := tenant.WithPrincipal(t.Context(), f.destinationWorker)
+			if err := db.InTenant(ctx, f.d.App, f.owner.TenantID, func(tx pgx.Tx) error {
+				s, err := escalation.LoadTx(ctx, tx, f.ticket)
+				if err != nil {
+					return err
+				}
+				if s == nil || s.EpisodeID != f.state.EpisodeID || s.Revision != f.state.Revision+1 || s.Attempts != 1 || s.HeldCost != 100 || s.OriginalProfile != f.state.OriginalProfile || len(s.UsedProfiles) != 1 || s.UsedProfiles[0] != f.state.UsedProfiles[0] {
+					t.Fatalf("observation reset moved episode or budget: %+v", s)
+				}
+				var project string
+				if err := tx.QueryRow(ctx, `SELECT project_id::text FROM work_escalations WHERE ticket_node_id=$1`, f.ticket).Scan(&project); err != nil {
+					return err
+				}
+				if project != f.target {
+					t.Fatalf("save retained stale project %s, want %s", project, f.target)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
 
 func TestEscalationOutcomeReplayAndSingleQuestion(t *testing.T) {
 	d := dbtest.Open(t)
