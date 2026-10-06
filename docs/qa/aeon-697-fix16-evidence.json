@@ -1,0 +1,106 @@
+{
+  "ticket": "AEON-697",
+  "fix_round": 16,
+  "scope": "Final scoped round (LEAD, 2-round cap): fix only the ap251 Medium. TestLeafShapeChangesPreserveCompleteProjectionAndUndo must stay GATED-FULL and must not appear in postGateCases. Nothing else.",
+  "review": {
+    "file": "review-ap251.out",
+    "reviewed_head": "8a4db1d04b7a3423cf757bae4300dbf6aacfdf97",
+    "finding": "Medium: scripts/ci/go-test-tiers.json listed internal/releases:TestLeafShapeChangesPreserveCompleteProjectionAndUndo in postGateCases while its tier is GATED-FULL; postGateCases entries must be NIGHTLY.",
+    "new_behavior_findings": 0
+  },
+  "ownership": {
+    "tracker": "ppm",
+    "branch": "work/aeon-697-set",
+    "worker_marker": "recorded on the ticket by the coordinator before dispatch (worker-common rule)",
+    "release_gates": "Coordinator owned; no review, approval, origin push, deployment, or ticket status change."
+  },
+  "resolution": {
+    "already_fixed_at_head": true,
+    "fixing_commit": "c8840bc7a3fa3814540e990d1d2fe7368c422040",
+    "fixing_commit_note": "Landed after the reviewed head 8a4db1d0 within fix round 15: removed the postGateCases entry and set the row to GATED-FULL.",
+    "manifest_change_this_round": false,
+    "manifests_write_noop": true,
+    "manifests_write_command": "node scripts/test-tiers/cli.mjs manifests --write",
+    "in_memory_assertion": {
+      "post_gate_cases": 152,
+      "post_gate_cases_not_nightly": 0,
+      "leaf_shape_rows": {
+        "internal/releases:TestLeafShapeChangesPreserveCompleteProjectionAndUndo": "GATED-FULL",
+        "internal/releases:TestLeafShapeChangesReconcileMovedAndRestoredChildren": "GATED-FULL"
+      },
+      "matches_origin_main_tiers": true
+    },
+    "assertions_removed_or_loosened": false,
+    "new_regression_required": "No behaviour change in this round; the gated classification and its existing tier regression from round 15 are retained."
+  },
+  "source_commit": "91b11eee2196370e219a1780d2a108ad69356e9e",
+  "main": "70babd810dc23fa7bcdfe4fe11c578c25caf76d1",
+  "merge": {
+    "main_contained_in_head": "70babd810dc23fa7bcdfe4fe11c578c25caf76d1",
+    "newest_origin_main": "f5c5a1bd829a22ae896d6103f380bd501e63a9ba",
+    "newest_origin_main_landed_during_this_round": true,
+    "command": "git merge-tree --write-tree --name-only HEAD origin/main",
+    "exit_code": 0,
+    "merged": false,
+    "merge_reason": "Clean merge-tree with the newest main; the brief merges main only on conflict, and the two new main commits (AEON-767 ci-static timeout noise) touch nothing in this round's scope.",
+    "pr_278_remote_head": "4cea83790ac72d0816c27b590da344659f9124e7",
+    "pr_278_remote_state": "CONFLICTING until the coordinator pushes this branch; the local branch merges cleanly with origin/main."
+  },
+  "validation": {
+    "tier_suite": {
+      "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+      "passed": 179,
+      "failed": 0
+    },
+    "manifests_suite": {
+      "command": "node --test scripts/test-tiers/manifests.test.mjs",
+      "passed": 26,
+      "failed": 0
+    },
+    "web_shard_suite": {
+      "command": "node --test web/scripts/ci-web-shard.test.mjs",
+      "passed": 30,
+      "failed": 0
+    },
+    "audit_suite": {
+      "command": "python3 -m unittest discover -s scripts/audit",
+      "passed": 33,
+      "failed": 0
+    },
+    "tier_check_go_cli": {
+      "status": "not run",
+      "command": "node scripts/test-tiers/cli.mjs check go",
+      "reason": "Go discovery needs a Go toolchain; none is on PATH on this workstation, and `nix develop --offline` started building missing dev-shell derivations (Python, bash, autoconf source tarballs) that cannot be fetched offline, so it was stopped after eleven minutes. The manifest is byte-identical to the one the remote static gate (36 checks, including this classification check) passed on c8840bc7a in round 15, and the in-memory postGateCases assertion above passes.",
+      "covered_by": "round 15 ci-static-locked.sh pass on c8840bc7a3fa3814540e990d1d2fe7368c422040; tmp/aeon-697-fix15-static-final.log"
+    },
+    "remote_go": {
+      "status": "passed",
+      "exit_code": 0,
+      "source_commit": "91b11eee2196370e219a1780d2a108ad69356e9e",
+      "packages": [
+        "internal/releases"
+      ],
+      "command": "remote-test.sh <worktree> -count=1 ./internal/releases/...",
+      "log": "tmp/aeon-697-fix16-remote-go.log",
+      "runner": "mbp2606"
+    },
+    "remote_web": {
+      "status": "not rerun",
+      "reason": "No web or Go source changed since the round 15 proof on a90d2b1cb; the only later commits are docs/qa evidence files. Round 15 recorded build, units and 99 browser cases passed on macOS bundled Chromium.",
+      "linux_ci": "Hosted Linux Chromium proof remains coordinator-owned."
+    }
+  },
+  "preserved_preexisting_local_change": {
+    "file": "docs/qa/aeon-697-fix14-evidence.json",
+    "included_in_fix16_commit": false,
+    "sha256": "b177ed90d08c62fbc4ce5ea3586fd7ff80f73ce9cb98402427097c695a4b8714"
+  },
+  "follow_ups": [
+    {
+      "item": "Hosted Linux Chromium proof",
+      "reason": "Approved offload host is macOS; hosted validation remains coordinator-owned."
+    }
+  ],
+  "status": "Complete locally; the ap251 Medium was already resolved by c8840bc7a and is verified at HEAD. No origin push or deployment.",
+  "updated_at": "2026-10-06T13:37:29Z"
+}

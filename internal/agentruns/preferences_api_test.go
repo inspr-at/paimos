@@ -20,6 +20,28 @@ import (
 
 type prefsEvidence struct{ account string }
 
+// Person writes carry the canonical identity displayed by this fixture.
+func (f *fixture) prefsCall(t *testing.T, p tenant.Principal, body any, status int, dst any) {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest("PUT", "/api/model-preferences/levels/person", strings.NewReader(string(raw)))
+	r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
+	r.Header.Set("If-Prefs-Person", f.person.ID)
+	w := httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	if w.Code != status {
+		t.Fatalf("person preferences: got %d want %d: %s", w.Code, status, w.Body.String())
+	}
+	if dst != nil {
+		if err := json.Unmarshal(w.Body.Bytes(), dst); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func (e prefsEvidence) ResidencyClass(_ context.Context, _ pgx.Tx, a agentaccounts.Account, _ string) (string, string, *time.Time, error) {
 	expires := time.Now().Add(time.Hour)
 	class := "any"
@@ -38,7 +60,7 @@ func TestAliasResidencyOverHTTPAndActiveRunRestamp(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name,linked_to) VALUES($1,$2,'person','Alias',$3)`, f.person.TenantID, alias.ID, f.person.ID)
 		return err
 	})
-	f.call(t, alias, "PUT", "/api/model-preferences/levels/person", map[string]any{"revision": 0, "residency": "eu"}, 200, nil)
+	f.prefsCall(t, alias, map[string]any{"revision": 0, "residency": "eu"}, 200, nil)
 	var aliasDoc, canonicalDoc struct {
 		PersonID string                     `json:"person_id"`
 		Levels   map[string]json.RawMessage `json:"levels"`
@@ -133,7 +155,7 @@ func TestAliasResidencyOverHTTPAndActiveRunRestamp(t *testing.T) {
 		Revision       int64    `json:"revision"`
 		RunningOutside []string `json:"running_outside"`
 	}
-	f.call(t, f.person, "PUT", "/api/model-preferences/levels/person", map[string]any{"revision": 1, "residency": "local"}, 200, &written)
+	f.prefsCall(t, f.person, map[string]any{"revision": 1, "residency": "local"}, 200, &written)
 	if len(written.RunningOutside) != 2 || !containsRun(written.RunningOutside, ids["starting"]) || !containsRun(written.RunningOutside, ids["running"]) {
 		t.Fatal("running_outside mismatch", written)
 	}
@@ -170,7 +192,7 @@ func TestAliasResidencyOverHTTPAndActiveRunRestamp(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET residency=NULL WHERE id=$1`, queued.ID)
 		return err
 	})
-	f.call(t, alias, "PUT", "/api/model-preferences/levels/person", map[string]any{"revision": 2, "residency": "eu"}, 200, &written)
+	f.prefsCall(t, alias, map[string]any{"revision": 2, "residency": "eu"}, 200, &written)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		var stamp *string
 		if err := tx.QueryRow(t.Context(), `SELECT residency FROM agent_runs WHERE id=$1`, queued.ID).Scan(&stamp); err != nil {
@@ -181,7 +203,7 @@ func TestAliasResidencyOverHTTPAndActiveRunRestamp(t *testing.T) {
 		}
 		return nil
 	})
-	f.call(t, alias, "PUT", "/api/model-preferences/levels/person", map[string]any{"revision": 3, "residency": "any"}, 200, &written)
+	f.prefsCall(t, alias, map[string]any{"revision": 3, "residency": "any"}, 200, &written)
 	if len(written.RunningOutside) != 0 || f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.residency_restamped'`) != count {
 		t.Fatal("loosening restamped runs")
 	}

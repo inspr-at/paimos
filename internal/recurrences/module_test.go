@@ -19,6 +19,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type fixture struct {
@@ -637,14 +638,26 @@ func TestDefinitionEditsPreserveDueCursorAndPausedManualRun(t *testing.T) {
 	}
 }
 
-func TestRecurrenceTenantBeforeTree(t *testing.T) {
-	f := setup(t)
-	dbtest.TenantBeforeTree(t, f.d, f.p.TenantID, func(ctx context.Context) error {
-		return db.InTenant(dbtest.Seed(ctx), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
-			_, err := lock(ctx, tx, f.p.TenantID, false)
-			return err
-		})
-	})
+// Signal at the first shared fence: membership writers hold tenant then tree;
+// tree-only node inserts remain compatible through the tenant FK KEY SHARE.
+type treeBarrierTx struct {
+	pgx.Tx
+	attempted chan struct{}
+	once      sync.Once
+}
+
+func (tx *treeBarrierTx) signal(sql string) {
+	if strings.Contains(sql, "FROM tenants") {
+		tx.once.Do(func() { close(tx.attempted) })
+	}
+}
+func (tx *treeBarrierTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
+	tx.signal(sql)
+	return tx.Tx.Exec(ctx, sql, args...)
+}
+func (tx *treeBarrierTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	tx.signal(sql)
+	return tx.Tx.QueryRow(ctx, sql, args...)
 }
 
 func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
@@ -700,8 +713,11 @@ func TestRecurrenceWriteLockOrderWithTreeWriters(t *testing.T) {
 				_, err = other.Exec(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id,position)
  SELECT $1,k.id,aeon_next_node_key($1,k.short_prefix),'Concurrent node',$2,4096 FROM node_kinds k WHERE slug='work'`, f.p.TenantID, f.parent)
 			} else {
-				// The tenant fence was taken before the tree, as by access writers.
-				_, err = other.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='viewer') WHERE principal_id=$1 AND scope_type='workspace'`, caller.ID)
+				// Tenant was fenced before tree, matching LockProjectMutation.
+				_, err = other.Exec(ctx, `SELECT id FROM tenants WHERE id=$1 FOR NO KEY UPDATE`, f.p.TenantID)
+				if err == nil {
+					_, err = other.Exec(ctx, `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='viewer') WHERE principal_id=$1 AND scope_type='workspace'`, caller.ID)
+				}
 			}
 			if err == nil {
 				err = other.Commit(ctx)
@@ -832,4 +848,14 @@ func TestRecurrenceFenceAllowsTenantKeyShare(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("recurrence fence blocks tenant FK key-share: %v", err)
 	}
+}
+
+func TestRecurrenceTenantBeforeTree(t *testing.T) {
+	f := setup(t)
+	dbtest.TenantBeforeTree(t, f.d, f.p.TenantID, func(ctx context.Context) error {
+		return db.InTenant(dbtest.Seed(ctx), f.d.App, f.p.TenantID, func(tx pgx.Tx) error {
+			_, err := lock(ctx, tx, f.p.TenantID, false)
+			return err
+		})
+	})
 }

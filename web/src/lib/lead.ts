@@ -2,6 +2,7 @@
 // AEON-741: the project lead as people see it. One lead per project; the server's
 // lifecycle (AEON-734) is authoritative and every write carries its revision.
 // Inside PAIMOS it is always "lead"; people read the workspace word (LeadWords).
+import { reactive } from 'vue'
 import { api, APIError } from './api.ts'
 import type { Question, QuestionPage } from './decisionDeskApi.ts'
 
@@ -93,9 +94,12 @@ export function leadWords(singular = '', plural = ''): LeadWords {
   const P = plural.trim() || (singular.trim() ? pluralWord(S) : 'Leads')
   return { S, l: lower(S), P, pl: lower(P) }
 }
-// The workspace word has no server contract yet (AEON-741 lists it); every
-// screen reads it from here so the Vocabulary card only has to fill it.
-export const LEAD_WORDS = leadWords()
+// The workspace word (AEON-791): Settings › Vocabulary › Agent names saves it
+// with the work vocabulary; every screen reads it from here, reactively.
+export const LEAD_WORDS: LeadWords = reactive(leadWords())
+export function setLeadWords(names?: { singular: string; plural: string } | null): void {
+  Object.assign(LEAD_WORDS, leadWords(names?.singular, names?.plural))
+}
 
 // ---------- State copy ----------
 export type LeadAction = 'start' | 'cancel' | 'pause' | 'resume' | 'dial' | 'computers' | 'none'

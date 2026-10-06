@@ -69,10 +69,12 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await page.clock.setSystemTime(new Date('2026-10-04T10:00:00Z'))
     let release!: () => void, started!: () => void
     const held = new Promise<void>(r => { release = r }), readStarted = new Promise<void>(r => { started = r })
-    let reads = 0, puts = 0, revision = 1
+    // Hold only the read the Reload click starts; the page's own reads on open
+    // (this card and Agent names, AEON-791) answer at once.
+    let holdNext = false, puts = 0, revision = 1
     await page.route('**/api/settings/work-vocabulary', async route => {
       if (route.request().method() === 'PUT') { puts++; revision++ }
-      else if (++reads === 2) { started(); await held }
+      else if (holdNext) { holdNext = false; started(); await held }
       await route.fulfill({ json: { revision, leaf: { name: `Arbeitsschritt ${revision}`, icon: '' }, levels: [] } })
     })
     await page.goto('/settings/vocabulary')
@@ -80,7 +82,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await expect(card.getByLabel('Leaf name')).toHaveValue('Arbeitsschritt 1')
     await card.scrollIntoViewIfNeeded()
     const stable = await controlStability(page, { reload, save, actions: card.getByLabel('Vocabulary actions') })
-    await stable.check(async () => { await reload.click(); await readStarted; await expect(reload).toBeDisabled(); await expect(save).toBeDisabled() })
+    await stable.check(async () => { holdNext = true; await reload.click(); await readStarted; await expect(reload).toBeDisabled(); await expect(save).toBeDisabled() })
     expect(puts).toBe(0)
     await stable.check(async () => { release(); await expect(save).toBeEnabled(); await save.click(); await expect(card.getByRole('status')).toContainText('Workspace names saved.') })
     stable.done()

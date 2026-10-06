@@ -56,7 +56,7 @@ func (m *messaging) ackCompatMessage(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		return tx.QueryRow(r.Context(), `SELECT inbox_message_id::text FROM inbox_compat_messages
-		 WHERE id=$1::uuid AND project_id=$2::uuid AND recipient_principal_id=$3::uuid AND NOT is_action_request`, id, project, p.ID).Scan(&inboxID)
+		 WHERE content_mode='durable' AND id=$1::uuid AND project_id=$2::uuid AND recipient_principal_id=$3::uuid AND NOT is_action_request`, id, project, p.ID).Scan(&inboxID)
 	})
 	if err != nil {
 		messagingFailure(w, err)
@@ -130,7 +130,7 @@ func (m *messaging) claim(ctx context.Context, p tenant.Principal, project strin
 		 FROM inbox_message_deliveries d
 		 JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id
 		 JOIN inbox_messages i ON i.tenant_id=c.tenant_id AND i.id=c.inbox_message_id
-		 WHERE c.project_id=$1::uuid AND c.recipient_principal_id=$2::uuid AND c.recipient_address=$3
+		 WHERE c.content_mode='durable' AND c.project_id=$1::uuid AND c.recipient_principal_id=$2::uuid AND c.recipient_address=$3
 		 AND i.acked_at IS NULL AND NOT c.is_action_request AND c.recipient_session_id IS NULL AND d.state<>'dead'
 		 AND c.sent_event_id > COALESCE((SELECT last_event_id FROM inbox_message_cursors
 		 WHERE project_id=$1::uuid AND principal_id=$2::uuid AND address=$3 AND adapter=$4),0)
@@ -303,7 +303,7 @@ func (m *messaging) complete(ctx context.Context, p tenant.Principal, project st
 		err := tx.QueryRow(ctx, `SELECT d.message_id::text,c.recipient_address,t.adapter,d.state,d.lease_token::text,COALESCE(d.effective_level,''),d.fallback_reason,c.sent_event_id,c.delivery_level,t.maximum_level,d.lease_until
 		 FROM inbox_message_deliveries d JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id
 		 JOIN inbox_message_targets t ON t.tenant_id=d.tenant_id AND t.id=COALESCE(d.effective_target_id,d.target_id)
-		 WHERE d.id=$1::uuid AND c.project_id=$2::uuid AND c.recipient_principal_id=$3::uuid FOR UPDATE OF d`, in.ID, project, p.ID).Scan(&messageID, &address, &adapter, &state, &token, &effective, &fallback, &cursor, &requested, &maximum, &leaseUntil)
+		 WHERE c.content_mode='durable' AND d.id=$1::uuid AND c.project_id=$2::uuid AND c.recipient_principal_id=$3::uuid FOR UPDATE OF d`, in.ID, project, p.ID).Scan(&messageID, &address, &adapter, &state, &token, &effective, &fallback, &cursor, &requested, &maximum, &leaseUntil)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
@@ -410,7 +410,7 @@ func (m *messaging) unavailableDelivery(w http.ResponseWriter, r *http.Request) 
 		var leaseUntil *time.Time
 		err := tx.QueryRow(r.Context(), `SELECT COALESCE(d.effective_target_id,d.target_id)::text,d.fallback_target_id::text,d.lease_token::text,d.state,d.lease_until
 		 FROM inbox_message_deliveries d JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id
-		 WHERE d.id=$1::uuid AND c.project_id=$2::uuid AND c.recipient_principal_id=$3::uuid FOR UPDATE OF d`, in.ID, project, p.ID).Scan(&target, &fallback, &token, &state, &leaseUntil)
+		 WHERE c.content_mode='durable' AND d.id=$1::uuid AND c.project_id=$2::uuid AND c.recipient_principal_id=$3::uuid FOR UPDATE OF d`, in.ID, project, p.ID).Scan(&target, &fallback, &token, &state, &leaseUntil)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return errNotFound
 		}
@@ -455,6 +455,6 @@ func (m *messaging) databaseNow(ctx context.Context, tx pgx.Tx) (time.Time, erro
 // the one order every inbox path follows (AEON-280).
 func lockDeliveryMessage(ctx context.Context, tx pgx.Tx, deliveryID, project, recipient string) error {
 	_, err := tx.Exec(ctx, `SELECT 1 FROM inbox_messages i WHERE i.id=(SELECT c.inbox_message_id FROM inbox_message_deliveries d JOIN inbox_compat_messages c ON c.tenant_id=d.tenant_id AND c.id=d.message_id
- WHERE d.id=$1::uuid AND c.project_id=$2::uuid AND c.recipient_principal_id=$3::uuid) FOR UPDATE`, deliveryID, project, recipient)
+ WHERE c.content_mode='durable' AND d.id=$1::uuid AND c.project_id=$2::uuid AND c.recipient_principal_id=$3::uuid) FOR UPDATE`, deliveryID, project, recipient)
 	return err
 }

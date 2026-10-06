@@ -20,12 +20,14 @@ import (
 
 // Config is the process configuration for `paimos serve`.
 type Config struct {
-	PhonePush       *PhonePushConfig
-	Addr            string
-	DatabaseURL     string
-	Env             string // "dev" or "prod"
-	StatusAutopilot string // Deployment cap: "off", "suggest" or "on".
-	PublicURL       string
+	AttachedMessages               bool // disabled by default; also requires single-instance qualification
+	AttachedMessagesSingleInstance bool
+	PhonePush                      *PhonePushConfig
+	Addr                           string
+	DatabaseURL                    string
+	Env                            string // "dev" or "prod"
+	StatusAutopilot                string // Deployment cap: "off", "suggest" or "on".
+	PublicURL                      string
 	// Deployment-owned exact host:port exceptions for an operator-local
 	// Aithema service. Empty by default; never writable by tenants.
 	AithemaOperatorLocalServices []string
@@ -80,15 +82,17 @@ type Config struct {
 // file (host-generated secret) so it never appears in the environment.
 func FromEnv() (Config, error) {
 	cfg := Config{
-		Addr:                getenv("AEON_ADDR", ":8080"),
-		DatabaseURL:         os.Getenv("AEON_DATABASE_URL"),
-		Env:                 getenv("AEON_ENV", "dev"),
-		PublicURL:           os.Getenv("AEON_PUBLIC_URL"),
-		WebDir:              os.Getenv("AEON_WEB_DIR"),
-		BootstrapTenantSlug: getenv("AEON_BOOTSTRAP_TENANT_SLUG", "inspr"),
-		BootstrapTenantName: getenv("AEON_BOOTSTRAP_TENANT_NAME", "INSPR"),
-		FilesDir:            getenv("AEON_FILES_DIR", "data/files"),
-		HTMLSandboxOrigin:   os.Getenv("AEON_HTML_SANDBOX_ORIGIN"),
+		AttachedMessages:               os.Getenv("AEON_ATTACHED_MESSAGES") == "true",
+		AttachedMessagesSingleInstance: os.Getenv("AEON_ATTACHED_MESSAGES_SINGLE_INSTANCE") == "true",
+		Addr:                           getenv("AEON_ADDR", ":8080"),
+		DatabaseURL:                    os.Getenv("AEON_DATABASE_URL"),
+		Env:                            getenv("AEON_ENV", "dev"),
+		PublicURL:                      os.Getenv("AEON_PUBLIC_URL"),
+		WebDir:                         os.Getenv("AEON_WEB_DIR"),
+		BootstrapTenantSlug:            getenv("AEON_BOOTSTRAP_TENANT_SLUG", "inspr"),
+		BootstrapTenantName:            getenv("AEON_BOOTSTRAP_TENANT_NAME", "INSPR"),
+		FilesDir:                       getenv("AEON_FILES_DIR", "data/files"),
+		HTMLSandboxOrigin:              os.Getenv("AEON_HTML_SANDBOX_ORIGIN"),
 		// Only the directory path is read here; a token is read at fetch time.
 		DoctrineCredentialsDir:  os.Getenv("AEON_DOCTRINE_CREDENTIALS_DIR"),
 		DoctrineAppID:           os.Getenv("AEON_DOCTRINE_APP_ID"),

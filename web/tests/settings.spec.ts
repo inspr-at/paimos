@@ -31,7 +31,7 @@ test('the account menu opens Settings on Personal: theme, greeting and keys', as
   await page.getByRole('menuitem', { name: 'Personal settings' }).click()
   await expect(page).toHaveURL('/settings/personal')
   await expect(page).toHaveTitle(/^Settings · /)
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Access/, /^Agents/, /^Autopilot/, /^Business/, /^Product portal/])
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Access/, /^Policies/, /^Agents/, /^Autopilot/, /^Business/, /^Product portal/])
   await expect(sections(page).getByRole('link', { name: /^Personal/ })).toHaveAttribute('aria-current', 'page')
 
   await page.getByRole('radio', { name: 'Dark' }).click()
@@ -60,12 +60,12 @@ test('a greeting that cannot be saved goes back to how it was', async ({ page })
   await expect(page.getByRole('checkbox', { name: 'Greeting On' })).toBeChecked()
 })
 
-test('members see Personal and Developer; an admin section explains itself', async ({ page }) => {
+test('members see Personal, Developer and Policies; an admin section explains itself', async ({ page }) => {
   await setup(page, { role: 'member' })
   await page.goto('/settings')
   await expect(page).toHaveURL('/settings/personal')
-  // Members get both per-person settings sections.
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Vocabulary/])
+  // Members get per-person settings, vocabulary and read-only Policies.
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Vocabulary/, /^Policies/])
   await expect(page.getByRole('heading', { name: 'Greeting' })).toBeVisible()
   await page.goto('/settings/workspace')
   await expect(page.getByRole('heading', { name: 'Workspace settings are for workspace admins' })).toBeVisible()
@@ -81,7 +81,7 @@ test('grouped navigation stays put across section changes and places policy card
   await mockAccess(page, accessWorld(), { also: ['account.read', 'rules.read', 'models.read'] })
   await page.goto('/settings/workspace')
   const nav = sections(page)
-  await expect(nav.getByRole('link')).toHaveCount(12)
+  await expect(nav.getByRole('link')).toHaveCount(13)
   await expect(nav.locator('.nav-group')).toHaveText(['You', 'Workspace', 'Agents and automation', 'Business'])
   await expect(page.locator('.body > .who')).toHaveText('Admins only see and change this section.')
   await expect(page.locator('#work-vocabulary, #model-refresh, #status-autopilot, #members, #estimates')).toHaveCount(0)
@@ -280,11 +280,13 @@ test('old workspace bookmarks redirect during section and hash changes inside Se
     await expect.poll(() => page.locator('main').evaluate(el => el.scrollTop)).toBe(0)
   }
   const guard = await controlStability(page, { navigation: sections(page), personal: sections(page).getByRole('link', { name: /^Personal/ }) })
-  await guard.check(async () => {
-    await page.evaluate(() => import('/src/router.ts').then(({ router }) => router.push('/settings/workspace?source=bookmark#estimates')))
-    await expect(page).toHaveURL('/settings/agents?source=bookmark#estimates')
-    await arrivedThenReset('estimates')
-  })
+  for (const anchor of ['estimates', 'agent-activity', 'silent-sessions']) {
+    await guard.check(async () => {
+      await page.evaluate(id => import('/src/router.ts').then(({ router }) => router.push(`/settings/workspace?source=bookmark#${id}`)), anchor)
+      await expect(page).toHaveURL(`/settings/agents?source=bookmark#${anchor}`)
+      await arrivedThenReset(anchor)
+    })
+  }
   await guard.check(async () => {
     await sections(page).getByRole('link', { name: /^Workspace/ }).click()
     await expect(page).toHaveURL('/settings/workspace')

@@ -1,30 +1,19 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
 import { brand } from '../lib/brand'
 import { footerReleaseContent } from '../lib/footerRelease'
 import { codenameOf, releaseAria } from '../lib/codenames'
-import { useDeveloperSettings } from '../lib/developerSettings'
-import { flowNameBudget, placeFlowPill } from '../lib/flowPill'
-import { flowPillContext } from '../lib/flowPillContext'
 import { useReleases } from '../stores/releases'
 import { useSession } from '../stores/session'
 import { useVersion } from '../stores/version'
 import AppIcon from './AppIcon.vue'
 import CalendarVersion from './CalendarVersion.vue'
-import JourneyChip from './journey/JourneyChip.vue'
 
 // The product mark stays left; the running release's name, Pretty version and
-// new count share the history control on the right. The opt-in flow sits between
-// them, taking the wordmark's room when needed.
+// new count share the history control on the right.
 const props = defineProps<{ hidden?: boolean }>()
-const emit = defineEmits<{ releases: []; pill: [shown: boolean] }>()
-const route = useRoute()
-const onProject = computed(() => typeof route.params.projectKey === 'string' && route.params.projectKey !== '')
-const { showFlowControls } = useDeveloperSettings()
-const pill = computed(() => showFlowControls.value && onProject.value ? flowPillContext.value : null)
-const root = ref<HTMLElement>()
+const emit = defineEmits<{ releases: [] }>()
 const releaseControl = ref<HTMLButtonElement>()
 const card = ref<HTMLElement>()
 const cardShown = ref(false)
@@ -67,102 +56,12 @@ function focusCard() {
 }
 function blurCard() { cardFocused = false; if (!cardHovered) hideCard() }
 function openReleases() { hideCard(); emit('releases') }
-const slotEl = ref<HTMLElement>()
-const pillOn = ref(false)
-const placed = ref(false)
-const tight = ref(false)
-const GAP = 8
-let resize: ResizeObserver | undefined
-let mutations: MutationObserver | undefined
-let raf = 0
-let epoch = 0
-
-function naturalWidth(el: HTMLElement): number {
-  const clone = el.cloneNode(true) as HTMLElement
-  clone.setAttribute('aria-hidden', 'true')
-  if (clone instanceof HTMLButtonElement) clone.tabIndex = -1
-  clone.style.cssText = 'position:absolute;left:0;top:0;visibility:hidden;pointer-events:none;height:auto;width:max-content;max-width:none;container-type:normal;'
-  for (const part of clone.querySelectorAll<HTMLElement>('.face, .next')) {
-    part.style.maxWidth = 'none'
-    part.style.width = 'max-content'
-    part.style.overflow = 'visible'
-    part.style.textOverflow = 'clip'
-  }
-  el.ownerDocument.body.appendChild(clone)
-  const width = Math.ceil(clone.getBoundingClientRect().width)
-  clone.remove()
-  return width
-}
-
-async function place() {
-  const token = ++epoch
-  await nextTick()
-  if (token !== epoch) return
-  const footer = root.value
-  const slot = slotEl.value
-  const chip = slot?.querySelector<HTMLElement>('.journey-chip')
-  const name = footer?.querySelector<HTMLElement>('.footer-name')
-  const version = footer?.querySelector<HTMLElement>('.version-pill, .version-plain')
-  if (!footer || !slot || !chip || !name || !version || !pillOn.value) { placed.value = false; return }
-  const style = getComputedStyle(footer)
-  const padL = parseFloat(style.paddingLeft) || 0
-  const padR = parseFloat(style.paddingRight) || 0
-  const content = footer.clientWidth - padL - padR
-  const leading = naturalWidth(name)
-  const want = naturalWidth(chip)
-  const budget = flowNameBudget(content, version.offsetWidth, leading, want, GAP)
-  const nextCap = budget === null ? '' : '0px'
-  if (name.style.maxWidth !== nextCap) name.style.maxWidth = nextCap
-  const placedBox = placeFlowPill(footer.getBoundingClientRect(), name.getBoundingClientRect(), version.getBoundingClientRect(), want, GAP)
-  const left = `${Math.round(placedBox.left)}px`
-  const width = `${Math.round(placedBox.width)}px`
-  if (footer.style.getPropertyValue('--flow-left') !== left) footer.style.setProperty('--flow-left', left)
-  if (footer.style.getPropertyValue('--flow-width') !== width) footer.style.setProperty('--flow-width', width)
-  if (footer.style.getPropertyValue('--flow-shift') !== 'none') footer.style.setProperty('--flow-shift', 'none')
-  tight.value = placedBox.width + 1 < want
-  placed.value = placedBox.width > 0
-}
-
-function schedule() {
-  cancelAnimationFrame(raf)
-  raf = requestAnimationFrame(() => { void place() })
-}
-
-function onShown(shown: boolean) {
-  pillOn.value = shown
-  emit('pill', shown)
-  if (!shown) {
-    placed.value = false
-    tight.value = false
-    root.value?.querySelector<HTMLElement>('.footer-name')?.style.removeProperty('max-width')
-    return
-  }
-  schedule()
-}
-
-function openPill() { pill.value?.open() }
-
-function watchSize() {
-  const footer = root.value
-  if (!footer) return
-  resize?.disconnect()
-  resize = new ResizeObserver(() => schedule())
-  resize.observe(footer)
-  for (const el of footer.querySelectorAll<HTMLElement>('.version-pill, .version-plain')) resize.observe(el)
-}
-
 onMounted(() => {
   window.addEventListener('resize', hideCard)
   document.addEventListener('scroll', hideCard, true)
-  watchSize()
-  const footer = root.value
-  if (!footer) return
-  mutations = new MutationObserver(() => { watchSize(); schedule() })
-  mutations.observe(footer, { childList: true, subtree: true, characterData: true })
-  void document.fonts?.ready.then(() => schedule())
+
 })
-onBeforeUnmount(() => { hideCard(); window.removeEventListener('resize', hideCard); document.removeEventListener('scroll', hideCard, true); resize?.disconnect(); mutations?.disconnect(); cancelAnimationFrame(raf); emit('pill', false) })
-watch(pill, value => { if (!value) onShown(false) })
+onBeforeUnmount(() => { hideCard(); window.removeEventListener('resize', hideCard); document.removeEventListener('scroll', hideCard, true) })
 const version = useVersion()
 const releases = useReleases()
 const session = useSession()
@@ -184,11 +83,8 @@ const label = computed(() => {
 </script>
 
 <template>
-  <footer ref="root" class="app-footer" :class="{ hidden }" :inert="hidden || undefined">
+  <footer class="app-footer" :class="{ hidden }" :inert="hidden || undefined">
     <span class="footer-name"><span class="footer-wordmark">{{ brand.wordmark }}</span></span>
-    <div v-if="pill" ref="slotEl" class="flow-slot" :class="{ placed: placed && pillOn, tight: tight && pillOn }" v-show="pillOn">
-      <JourneyChip :key="pill.projectId" :project-id="pill.projectId" :active="pill.active" @go="openPill" @shown="onShown" />
-    </div>
     <span class="spacer" />
     <button v-if="session.identity" ref="releaseControl" type="button" class="version-pill" :aria-label="label"
       @pointerenter="enterCard" @pointerleave="leaveCard" @focus="focusCard" @blur="blurCard" @keydown.esc="hideCard" @click="openReleases">
@@ -231,17 +127,6 @@ const label = computed(() => {
 }
 .footer-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 600 10px/16px var(--mono); letter-spacing: .24em; color: var(--ink-3); white-space: nowrap; font-variant-ligatures: none; }
 .spacer { flex: 1 1 0; }
-/* Centred on the page when the sides allow it; the version pill stays in its slot. */
-.flow-slot {
-  position: absolute; z-index: 1; top: 0; left: var(--flow-left, 50%); width: var(--flow-width, max-content); max-width: calc(100% - 24px); height: 100%;
-  transform: var(--flow-shift, translateX(-50%)); display: flex; align-items: center; justify-content: center; min-width: 0; visibility: hidden; pointer-events: none;
-}
-.flow-slot.placed { visibility: visible; }
-.flow-slot :deep(.journey-chip) { pointer-events: auto; }
-/* The dot and arrow go when the full line does not fit. The stage and the next action stay. */
-.flow-slot.tight :deep(.led),
-.flow-slot.tight :deep(.go) { display: none; }
-.flow-slot.tight :deep(.face) { gap: 6px; padding-right: 10px; }
 /* The face uses natural widths; hover and focus never resize the target. */
 .version-pill { display: inline-flex; align-items: center; height: 100%; min-width: 0; max-width: 100%; flex: 0 1 auto; margin-right: -8px; padding: 0; border: 0; background: transparent; color: var(--ink-2); }
 .version-pill:focus-visible { box-shadow: none; }
@@ -277,7 +162,6 @@ const label = computed(() => {
   .app-footer { gap: 8px; padding: 0 12px; transition: transform .22s ease; }
   .app-footer.hidden { transform: translateY(100%); }
   .footer-name { font-size: 9px; letter-spacing: .18em; }
-  /* Let the name shrink on narrow phones while retaining room for the flow. */
   .version-pill { flex-shrink: 0; margin-right: -6px; max-width: calc(100% - 8px); }
   .pill-face { height: 32px; padding: 0 6px; }
   .release-divider { margin: 0 7px; }

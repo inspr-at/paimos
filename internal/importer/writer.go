@@ -247,7 +247,7 @@ func (w PostgresWriter) Write(ctx context.Context, s Snapshot, tenantSlug string
 
 func importUsers(ctx context.Context, tx pgx.Tx, tenantID string, s Snapshot, conflicts *[]ImportConflict) (string, map[int64]string, error) {
 	// Imports later write tree rows and bindings. Match project writes and
-	// invite/link enrollment: tree, tenant, alias, then principal/resource rows.
+	// invite/link enrollment: tenant, tree, alias, then principal/resource rows.
 	if err := authz.LockProjectMutation(ctx, tx, tenantID); err != nil {
 		return "", nil, err
 	}

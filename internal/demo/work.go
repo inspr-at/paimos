@@ -43,14 +43,9 @@ func (s *seeder) agents() error {
 }
 
 func (s *seeder) agent(name string, scopes []string) (tenant.Principal, string, error) {
-	keyID, agentID, token, err := auth.OperatorCreateAgentKey(s.ctx, s.pool, s.tenantID, name, "", scopes, nil, s.admin.ID)
+	_, agentID, token, err := auth.OperatorCreateAgentKey(s.ctx, s.pool, s.tenantID, name, "", scopes, nil, s.admin.ID)
 	if err != nil {
 		return tenant.Principal{}, "", fmt.Errorf("agent %s: %w", name, err)
-	}
-	if name == "Lumen Scribe" {
-		if err := auth.OperatorGrantJourneyScopes(s.ctx, s.pool, s.tenantID, keyID, agentID); err != nil {
-			return tenant.Principal{}, "", err
-		}
 	}
 	return tenant.Principal{ID: agentID, TenantID: s.tenantID, Kind: tenant.Agent, Name: name}, token, nil
 }
