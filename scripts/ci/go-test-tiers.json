@@ -3750,6 +3750,7 @@
     {"kind":"go","package":"internal/chat","name":"TestOfflineWaitContractBoundsAndImmutableReceiptDeadline","tier":"GATED-FULL"},
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIClassifiedAggregateResults","tier":"GATED-FULL"},
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIClassifiedWebShardMatrix","tier":"GATED-FULL"},
+    {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIStaticLayoutAggregatesAndJobGates","tier":"GATED-FULL"},
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIMigrationCompatibilityIndependentOfClassification","tier":"GATED-FULL"},
     {"kind":"go","package":"scripts/ci-runner-guard","name":"TestCIPlanUsesTrustedBaseClassifier","tier":"GATED-FULL"},
     {"package":"internal/agentd","name":"TestIdleChildCleanupStopsAndJoinsItsOwnedChild","kind":"go","tier":"GATED-FULL"},

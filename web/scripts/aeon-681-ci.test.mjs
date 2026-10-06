@@ -122,7 +122,9 @@ test('AEON-648 work Node registrations have explicit tiers and remain in changed
     const rows=validate(declared,collected,undefined,{strict:true})
     for(const event of ['pull_request','merge_group']) {
       const changed=select(rows,{event,paths:[`web/${file}`],webImports:{[file]:[]}})
-      assert.deepEqual(changed.tests.map(key).sort(),collected.map(key).sort(),`${event}: ${file}`)
+      const expected=event==='merge_group'?rows.filter(row=>row.tier==='ESSENTIAL'||row.tier==='GATED-FULL'):collected
+      assert.equal(changed.full,event==='merge_group')
+      assert.deepEqual(changed.tests.map(key).sort(),expected.map(key).sort(),`${event}: ${file}`)
     }
     assert.deepEqual(select(rows,{event:'schedule',paths:[]}).tests.map(key).sort(),collected.map(key).sort(),file)
   }
