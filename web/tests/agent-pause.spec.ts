@@ -205,6 +205,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     const session = mock.data.sessions[0]!
     await page.goto(`/agents/${session.id}`)
     const row = page.locator(`[data-row="s:${session.id}"]`)
+    const shotTarget = width === 390 ? page.getByRole('complementary', { name: 'Session details' }) : row
     await expect(row.locator('.c-state .state-word')).toHaveText('Working')
     const guard = await controlStability(page, { row, menu: row.locator('.more') })
     await guard.check(async () => {
@@ -218,14 +219,14 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       expect(mock.calls[0]?.path).toContain(`/harness-sessions/${session.id}/pause`)
       expect(session.stopped_at).toBeNull()
     })
-    await row.screenshot({ path: testInfo.outputPath(`stop-requested-${width}-${theme}.png`) })
+    await shotTarget.screenshot({ path: testInfo.outputPath(`stop-requested-${width}-${theme}.png`) })
     await guard.check(async () => {
       Object.assign(session, { row_version: Number(session.row_version) + 1, phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'stopped' })
       await page.evaluate(() => window.dispatchEvent(new Event('online')))
       await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
     })
     guard.done()
-    await row.screenshot({ path: testInfo.outputPath(`stopped-${width}-${theme}.png`) })
+    await shotTarget.screenshot({ path: testInfo.outputPath(`stopped-${width}-${theme}.png`) })
     await page.reload()
     await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
     expect(errors).toEqual([])
