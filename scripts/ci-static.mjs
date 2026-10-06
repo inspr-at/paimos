@@ -143,16 +143,19 @@ const isolatedGit = ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=fal
 
 export function fixedEnvironment(source = process.env, scratch) {
   const env = {}
-  // Nix's wrappers consume the SDK/search paths only for their declared roles.
-  // Keep this toolchain configuration, including cross-build role variants,
-  // without carrying wrapper state, debug flags or the caller's test options.
+  // Nix's compiler wrapper needs its SDK search paths when Go links cgo tests.
+  // NIX_LDFLAGS alone does not locate libresolv; the per-target wrapper host
+  // variable carries that SDK library path on Darwin. Other wrapper roles stay
+  // limited to their declared flags so cross-build variants pass through without
+  // wrapper state, debug flags or the caller's test options.
   const toolchain = ['NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'DEVELOPER_DIR', 'SDKROOT']
     .flatMap(key => ['', '_FOR_BUILD', '_FOR_TARGET'].map(suffix => key + suffix))
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN', ...toolchain]) {
     if (source[key] !== undefined) env[key] = source[key]
   }
   for (const key of Object.keys(source)) {
-    if (/^NIX_(?:CC|BINTOOLS)_WRAPPER_TARGET_(?:BUILD|HOST|TARGET)_[a-z0-9_]+$/.test(key) && source[key] === '1') env[key] = '1'
+    if (key.startsWith('NIX_CC_WRAPPER_TARGET_HOST_')) env[key] = source[key]
+    else if (/^NIX_(?:CC|BINTOOLS)_WRAPPER_TARGET_(?:BUILD|HOST|TARGET)_[a-z0-9_]+$/.test(key) && source[key] === '1') env[key] = '1'
   }
   Object.assign(env, { CI: 'true', CI_LANE: 'full', AEON_TEST_TIER_MODE: 'full', GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', npm_config_audit: 'false', npm_config_fund: 'false' })

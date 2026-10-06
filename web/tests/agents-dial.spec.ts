@@ -95,7 +95,7 @@ test('AEON-720: idle dial reports real account room and explains unknown reading
         await expect.poll(() => capacityReads).toBeGreaterThan(before)
         await expect(detail).toContainText('Account room is not measured yet; see the reasons below.')
         await expect(detail).toContainText('a current reading is missing')
-        await expect(card.locator('.f-live')).toHaveText('0 running · account room not measured yet')
+        await expect(card.locator('.f-live')).toHaveText('0 running · account room not measured yet · your agents')
         await capture()
       } },
       { name: 'scheduled hours block new starts', run: async () => {
@@ -120,7 +120,7 @@ test('AEON-720: accounts owned by another person never become dial room or a fal
   const card = dial(page)
   await expect(card.locator('.f-info')).toContainText('No linked accounts.')
   await expect(card.locator('.f-info')).toContainText('Codex no linked accounts')
-  await expect(card.locator('.f-live')).toHaveText('0 running · no account starts available')
+  await expect(card.locator('.f-live')).toHaveText('0 running · account room not measured yet · your agents')
   await expect(card.locator('.f-now')).not.toContainText('wait')
   await expect(card.locator('.f-info')).not.toContainText('Full right now')
 })

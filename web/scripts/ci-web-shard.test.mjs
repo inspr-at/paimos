@@ -544,6 +544,15 @@ test('Settings cases stay classified: strict validation rejects stale and unclas
   assert.equal(evidence.length, 1)
   assert.equal(evidence[0].tier, 'NIGHTLY', 'screenshot evidence stays nightly')
   for (const row of rows) if (row !== evidence[0]) assert.ok(['ESSENTIAL', 'GATED-FULL'].includes(row.tier), `${key(row)} needs an explicit gate tier`)
+  for (const event of ['pull_request', 'merge_group']) {
+    const selected = select(rows, { event, paths: ['.github/workflows/ci.yml'] }).tests
+    assert.deepEqual(selected.map(key), rows.filter(row => row !== evidence[0]).map(key), `${event} must gate every functional Settings case`)
+  }
+  const policy = loadManifest()
+  const declarations = policy.groups.flatMap(group => group.specs.filter(spec => spec.file === file).map(spec => ({ group, spec })))
+  assert.equal(declarations.length, 1, 'Settings must have exactly one shard declaration')
+  assert.notEqual(declarations[0].group.gate, false, 'Settings must remain in the full browser gate')
+  assert.equal(declarations[0].spec.listedTests, collected.length)
 })
 
 // Native expansion catches parameterized routing cases; strict reconciliation

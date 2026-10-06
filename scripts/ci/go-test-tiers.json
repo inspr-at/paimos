@@ -1708,9 +1708,21 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSupervisorUsageArchiveDetachesWithoutStoppingRun","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryDeadLettersBoundedAndRecoversAfterObservedExit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryExitedAuthorityRefusalIsBounded","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestTelemetryHTTPAuthorityAndOutagePreserveActiveProcess","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryPollingPreservesOldSettlementAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestTelemetryProtocolStopsOnlyOwnedChild","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryRestartRecoversBeforeProbeChangesGeneration","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryTerminalRecoveryCountsPermanentRefusals","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryTerminalRejectionIsBounded","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestTerminalCannotReadFixtureParentEnvironment","tier":"GATED-FULL"}
     ,
@@ -2122,6 +2134,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestSignOutEverywhereFencesCanonicalSetAndPreservesOtherAccounts","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestStalledVerificationPreservesOwnership","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestStrictWatchRequiresBoundDaemonConfirmation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestStrictWatchUnavailableOnLinuxAndLegacyDaemon","tier":"GATED-FULL"}
@@ -2134,7 +2148,13 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestVerificationAdvertisementMatchesLocalAdapters","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestVerificationErrorOnlyStatusKeepsCauseAndClaimState","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestVerificationRefusalReleasesOnlyOwnedUnclaimedRun","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestVerificationRejectionLogsRunAndProtocolConflicts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestVerificationTelemetryPrestartBatchAndRetry","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestVerifyAgainConnectOnlyPreservesOrdinaryAllowanceAndTenantBoundary","tier":"NIGHTLY"}
     ,

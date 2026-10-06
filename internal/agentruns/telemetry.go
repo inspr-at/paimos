@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"math"
 	"net/http"
 	"strconv"
@@ -97,8 +98,8 @@ func (t Telemetry) validate() error {
 	default:
 		return workorders.Fail(400, "invalid run status")
 	}
-	if t.Kind == "status" && t.Status == "" {
-		return workorders.Fail(400, "status report requires status")
+	if t.Kind == "status" && t.Status == "" && t.Model == "" && t.ErrorCode == "" {
+		return workorders.Fail(400, "status report requires status, effective_model or error_code")
 	}
 	if t.Kind == "started" && t.Status != "" && t.Status != "running" {
 		return workorders.Fail(400, "started report requires running status")
@@ -159,6 +160,33 @@ func sameTelemetry(a, b Telemetry) bool {
 		}
 	}
 	return true
+}
+
+// logRejectedTelemetry records daemon reports refused for shape or sequence
+// reasons (main, AEON-716). It runs for both request phases: decode and
+// validation in prepareTelemetry, authority and sequence checks in telemetry.
+func logRejectedTelemetry(r *http.Request, t Telemetry, err error) {
+	var rejected *workorders.Error
+	if !errors.As(err, &rejected) {
+		return
+	}
+	if rejected.Status != http.StatusBadRequest && !(rejected.Status == http.StatusConflict &&
+		(rejected.Message == "divergent telemetry replay" || rejected.Message == "telemetry sequence is not monotonic" || rejected.Message == "run cannot return to starting")) {
+		return
+	}
+	// Decode/validation messages are fixed field-level text, never values
+	// from the body, headers, vendor output or database errors.
+	runID := r.PathValue("runId")
+	if !workorders.UUID(runID) {
+		runID = "" // Never log arbitrary path text as a run identifier.
+	}
+	kind := ""
+	switch t.Kind {
+	case "started", "heartbeat", "turn", "tool", "usage", "status", "finished":
+		kind = t.Kind
+	}
+	sequence := max(t.Sequence, 0)
+	slog.WarnContext(r.Context(), "run telemetry rejected", "run_id", runID, "kind", kind, "sequence", sequence, "reason", rejected.Message)
 }
 
 type telemetryContextKey struct{}
@@ -274,8 +302,9 @@ func telemetryAuthority(ctx context.Context, tx pgx.Tx, r *http.Request, p tenan
 	return v, o, false, nil
 }
 
-func (m *module) prepareTelemetry(r *http.Request, p tenant.Principal) (*http.Request, error) {
+func (m *module) prepareTelemetry(r *http.Request, p tenant.Principal) (out *http.Request, err error) {
 	var t Telemetry
+	defer func() { logRejectedTelemetry(r, t, err) }()
 	if err := workorders.Decode(r, &t); err != nil {
 		return nil, err
 	}
@@ -305,11 +334,12 @@ func (m *module) prepareTelemetry(r *http.Request, p tenant.Principal) (*http.Re
 	return r.WithContext(context.WithValue(r.Context(), telemetryContextKey{}, t)), nil
 }
 
-func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+func (m *module) telemetry(r *http.Request, tx pgx.Tx, p tenant.Principal) (out any, err error) {
 	t, ok := r.Context().Value(telemetryContextKey{}).(Telemetry)
 	if !ok {
 		return nil, errors.New("telemetry intent was not decoded")
 	}
+	defer func() { logRejectedTelemetry(r, t, err) }()
 	ctx := r.Context()
 	v, o, replay, err := telemetryAuthority(ctx, tx, r, p, t)
 	if err != nil {
