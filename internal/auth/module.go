@@ -452,6 +452,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			if read {
 				return "journey.read", true
 			}
+		case "lead":
+			if len(parts) == 4 && parts[3] == "usage" && read {
+				return "harness.read", true
+			}
 		case "harness-sessions":
 			return harnessScope(parts[3:], read), true
 		case "baseline-batches":
