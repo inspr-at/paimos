@@ -143,8 +143,9 @@ const isolatedGit = ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=fal
 
 export function fixedEnvironment(source = process.env, scratch) {
   const env = {}
-  // Nix's compiler wrapper needs its SDK search paths when Go links cgo tests.
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN', 'NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS']) {
+  // Nix's compiler wrapper needs the selected SDK as well as its search paths
+  // when Go links cgo tests; its fallback SDK may lack libraries such as resolv.
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN', 'NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'DEVELOPER_DIR', 'SDKROOT']) {
     if (source[key] !== undefined) env[key] = source[key]
   }
   Object.assign(env, { CI: 'true', CI_LANE: 'full', AEON_TEST_TIER_MODE: 'full', GIT_CONFIG_NOSYSTEM: '1',
