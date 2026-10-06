@@ -1,8 +1,19 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Imported before the ownership preload to simulate root-only ps misses.
 import childProcess from 'node:child_process'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, existsSync } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
+import { setTimeout as delay } from 'node:timers/promises'
+
+// Keep the preload behind the supervisor's identity check. Readiness, rather
+// than child startup speed, determines when this fixture may proceed.
+if (process.env.AEON_PW_TEST_ROOT_VERIFIED) {
+  const deadline = Date.now() + 15000
+  while (!existsSync(process.env.AEON_PW_TEST_ROOT_VERIFIED)) {
+    if (Date.now() >= deadline) throw new Error('Supervisor root verification barrier timed out')
+    await delay(10)
+  }
+}
 
 const original = childProcess.spawnSync
 let attempts = 0
