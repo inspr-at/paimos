@@ -4,6 +4,10 @@ import childProcess from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
 
+// A slow root start (a loaded host) must never decide the supervisor's verdict.
+const slowStart = Number(process.env.AEON_PW_TEST_SLOW_START_MS)
+if (slowStart > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, slowStart)
+
 const original = childProcess.spawnSync
 let attempts = 0
 childProcess.spawnSync = function (command, args, options) {

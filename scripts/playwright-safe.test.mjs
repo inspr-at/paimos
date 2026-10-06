@@ -349,11 +349,21 @@ for (const mode of ['transient', 'persistent', 'owner-change']) {
     const attempts = join(directory, 'attempts'), ready = join(directory, 'ready')
     const preload = new URL('./testdata/playwright/root-start-miss.mjs', import.meta.url).href
     const script = `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(ready)}, fs.readFileSync(process.env.AEON_PW_GROUP_LOG));`
-    // Isolate preload publication: for the transient case the supervisor
-    // cannot verify the root, so only the preload can record it before work.
+    // Isolate preload publication: for the transient case the supervisor's
+    // root lookups miss until suite code has copied the journal, so only the
+    // preload can record the root before work. The barrier, not the
+    // supervisor's attempt budget, decides when the lookups pass through:
+    // the root starts deliberately slowly (a loaded host), which exhausted the
+    // budget and killed a healthy root when this test raced the child's start.
     const original = childProcess.spawnSync
+    const pause = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+    let barrierDeadline
     const injected = mode === 'transient' ? t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
-      if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) return { status: 1, stdout: '' }
+      if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) {
+        barrierDeadline ??= Date.now() + 30000 // guards only against a hung child
+        while (!existsSync(ready) && Date.now() < barrierDeadline) pause(10)
+        if (!existsSync(ready)) return { status: 1, stdout: '' }
+      }
       return original(command, args, options)
     }) : undefined
     syncBuiltinESMExports()
@@ -361,7 +371,10 @@ for (const mode of ['transient', 'persistent', 'owner-change']) {
     try {
       result = await runOwnedCommand(process.execPath, ['-e', script], {
         lockPath, graceMs: 50,
-        env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}` },
+        env: {
+          ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}`,
+          ...(mode === 'transient' ? { AEON_PW_TEST_SLOW_START_MS: '1500' } : {}),
+        },
       })
     } finally { injected?.mock.restore(); syncBuiltinESMExports() }
     const calls = readFileSync(attempts, 'utf8').trim().split('\n').length
