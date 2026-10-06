@@ -11306,6 +11306,14 @@
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"duplication conflict keeps its banner and Reload through pagination","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"extreme primary accents keep open ticket chip readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"extreme primary accents keep public quote action readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"extreme primary accents keep setup progress readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"extreme primary accents keep unread badge readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"failed Save (409) retains edits and does not report success","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"failed Save (500) retains edits and does not report success","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11329,6 +11337,12 @@
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"platform submit shortcut closes the picker and saves an in-place name","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"save preserves Agents, manual dark and derived reset; invalid hex never writes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents keep Decision Desk action readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents keep Decision Desk pagination readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents keep Decision Desk text readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents keep ordinary and Markdown links readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

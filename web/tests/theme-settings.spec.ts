@@ -1,16 +1,23 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { test, expect, type Page } from '@playwright/test'
+import { test, expect, type Page, type Locator } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { fixtures, mockWork, me, watchErrors } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { ActiveTheme, ThemeRecord } from '../src/lib/themes'
 import { CARD_COLOURS, colourContrast } from '../src/lib/themeEngine'
+import { mockDecisionDesk, sampleQuestion } from './decision-desk-fixtures'
+import { pairingGuide } from './agent-pairing-fixtures'
+import { mockPublicQuote } from './quote-list-fixtures'
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value))
 const record = (id: string, name: string, scope: ThemeRecord['scope']): ThemeRecord => ({ id, name, scope, tenant_id: 't1', owner_principal_id: scope === 'personal' ? me.id : null, revision: 3, created_at: '', updated_at: '', values: { primary: { light: '#0e6f6c', dark: null }, secondary: { light: '#d69b31', dark: '#e2b45a' }, recurring_marker: { source: 'secondary', custom: null }, agents: { avatar: 'robot-5', ring: 'still', hover: true, size: 90, palette: 'deutan' } } })
-async function setup(page: Page, options: { admin?: boolean; fail?: number; defaultLater?: boolean; markdownBody?: string } = {}) {
+async function setup(page: Page, options: { admin?: boolean; fail?: number; defaultLater?: boolean; markdownBody?: string; decisionDesk?: boolean | 'paged' } = {}) {
   const work = fixtures()
   if (options.markdownBody) work.nodes.find(node => node.key === 'PHAROS-12')!.body = options.markdownBody
   await mockWork(page, work, { admin: options.admin })
+  if (options.decisionDesk) {
+    const desk = await mockDecisionDesk(page)
+    if (options.decisionDesk === 'paged') for (let at = 2; at < 101; at++) desk.questions.push(sampleQuestion(`question-${at + 1}`))
+  }
   const data = { items: [record('default', 'Porcelain', 'default'), record('contrast', 'High contrast', 'workspace'), record('copper', 'Copper', 'personal')], selected: 'copper', revision: 17, writes: [] as { method: string; path: string; body: Record<string, unknown> | null }[], fail: options.fail ?? 0, copies: 0 }
   const active = (): ActiveTheme => ({ theme: data.items.find(item => item.id === data.selected)!, default_theme_id: 'default', selected_theme_id: data.selected === 'default' ? null : data.selected, revision: data.revision, fallback_notice: null })
   await page.route('**/api/**', async route => {
@@ -160,6 +167,146 @@ async function saveExtremePrimary(page: Page) {
   await expect(bar(page)).toHaveCount(0)
   await expect(page.locator('.theme-status')).toContainText('Saved.')
 }
+// Resolve CSS Color 4 values and composite transparent row tints over their
+// actual ancestor surfaces instead of comparing against an assumed card.
+async function renderedContrast(element: Locator) {
+  const rendered = await element.evaluate(async el => {
+    // Flush the mode change, then measure the settled colours of controls that
+    // transition their fill/text. No elapsed-time sleeps or relaxed threshold.
+    getComputedStyle(el).color
+    await Promise.all(el.getAnimations().filter(animation => animation.effect?.getTiming().iterations !== Infinity)
+      .map(animation => animation.finished.catch(() => {})))
+    const canvas = document.createElement('canvas')
+    canvas.width = canvas.height = 1
+    const context = canvas.getContext('2d', { willReadFrequently: true })!
+    const rgba = (colour: string) => {
+      context.clearRect(0, 0, 1, 1)
+      context.fillStyle = colour
+      context.fillRect(0, 0, 1, 1)
+      return Array.from(context.getImageData(0, 0, 1, 1).data)
+    }
+    const layers: number[][] = []
+    for (let node: Element | null = el; node; node = node.parentElement) {
+      const background = rgba(getComputedStyle(node).backgroundColor)
+      layers.push(background)
+      if (background[3] === 255) break
+    }
+    let background = [255, 255, 255]
+    for (const layer of layers.reverse()) {
+      const alpha = layer[3]! / 255
+      background = background.map((channel, at) => layer[at]! * alpha + channel * (1 - alpha))
+    }
+    const hex = (rgb: number[]) => '#' + rgb.slice(0, 3).map(channel => Math.round(channel).toString(16).padStart(2, '0')).join('')
+    return { text: hex(rgba(getComputedStyle(el).color)), background: hex(background) }
+  })
+  return colourContrast(rendered.text, rendered.background)
+}
+async function applyExtremePrimary(page: Page) {
+  // These public routes and the isolated badge use the same runtime publisher
+  // as the signed-in theme editor, without borrowing a person's browser.
+  await page.evaluate(async () => {
+    // @ts-expect-error Vite resolves browser source URLs.
+    const { applyTheme } = await import('/src/lib/themeRuntime.ts')
+    // @ts-expect-error Vite resolves browser source URLs.
+    const { PORCELAIN } = await import('/src/lib/themeEngine.ts')
+    applyTheme({ ...PORCELAIN, primary: { light: '#ffffff', dark: '#000000' } })
+  })
+}
+for (const target of ['text', 'action'] as const) {
+  test(`saved extreme primary accents keep Decision Desk ${target} readable`, async ({ page }, testInfo) => {
+    await setup(page, { decisionDesk: true })
+    await page.goto('/settings/theme')
+    await saveExtremePrimary(page)
+    await page.goto('/decision-desk')
+    await page.getByTestId('desk-row-q:question-1').click()
+    const decide = page.getByTestId('desk-decide')
+    await expect(decide).toBeEnabled()
+    const elements = target === 'action' ? [decide] : [page.locator('.recommend'), page.getByTestId('stamp-once'), page.locator('.large-stamp.stamp-once')]
+    for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: 950 })
+      await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+      for (const element of elements) {
+        await expect(element).toBeVisible()
+        expect(await renderedContrast(element), `${width} ${mode}: ${target}`).toBeGreaterThanOrEqual(4.5)
+      }
+      await expectStableControls({ controls: { decide, choices: page.getByTestId('desk-choices'), first: page.getByTestId('choice-0'), second: page.getByTestId('choice-1') }, scrollAreas: { body: page.getByTestId('desk-body') }, interactions: [
+        { name: 'choose another answer', run: async () => { await page.getByTestId('choice-1').click() } },
+        { name: 'restore recommended answer', run: async () => { await page.getByTestId('choice-0').click() } },
+      ] })
+      for (const element of elements) expect(await renderedContrast(element), `${width} ${mode}: selected row`).toBeGreaterThanOrEqual(4.5)
+      await page.screenshot({ path: testInfo.outputPath(`desk-${target}-${width}-${mode}.png`) })
+    }
+  })
+}
+for (const target of ['setup progress', 'unread badge', 'open ticket chip', 'public quote action'] as const) {
+  test(`extreme primary accents keep ${target} readable`, async ({ page }, testInfo) => {
+    const data = await setup(page)
+    data.items[2]!.values.primary = { light: '#ffffff', dark: '#000000' }
+    let element: Locator
+    if (target === 'setup progress') {
+      await page.route('**/api/agent-pairing/guide', route => route.fulfill({ json: pairingGuide() }))
+      await page.goto('/agents/register-agent')
+      element = page.locator('.steps .current .num')
+    } else if (target === 'public quote action') {
+      await mockPublicQuote(page, { acceptable: true })
+      await page.goto('/offers/sel-demo/tok-example')
+      element = page.locator('.pq-btn.primary').first()
+    } else {
+      await page.goto('/settings/theme')
+      await expect(card(page)).toBeVisible()
+      // Mount real components with deterministic count/peek state, retaining
+      // their templates, scoped styles and the app's router/Pinia providers.
+      await page.evaluate(async target => {
+        // @ts-expect-error Vite resolves the same Vue instance as the app.
+        const { createApp, ref } = await import('/node_modules/.vite/deps/vue.js')
+        const host = document.createElement('div')
+        host.id = 'theme-role-sample'
+        document.querySelector('#colours')!.append(host)
+        if (target === 'unread badge') {
+          // @ts-expect-error Vite resolves browser source URLs.
+          const { default: SessionTabs } = await import('/src/components/agents/SessionTabs.vue')
+          createApp(SessionTabs, { selected: 'overview', unread: 3 }).mount(host)
+        } else {
+          // @ts-expect-error Vite resolves browser source URLs.
+          const { default: TicketLink } = await import('/src/components/releases/TicketLink.vue')
+          // @ts-expect-error Vite resolves browser source URLs.
+          const { TICKET_PEEK } = await import('/src/lib/ticketPeek.ts')
+          const app = createApp(TicketLink, { ticketKey: 'PHAROS-11' })
+          const main = document.getElementById('app') as HTMLElement & { __vue_app__: { _context: { provides: object } } }
+          Object.assign(app._context, main.__vue_app__._context)
+          app._context.provides = Object.create(main.__vue_app__._context.provides)
+          app.provide(TICKET_PEEK, { openKey: ref('PHAROS-11'), open: () => {} })
+          app.mount(host)
+        }
+      }, target)
+      element = page.locator(target === 'unread badge' ? '#theme-role-sample .count' : '#theme-role-sample .ticket-link.chip[aria-current="true"]')
+    }
+    await expect(element).toBeVisible()
+    await applyExtremePrimary(page)
+    for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: 950 })
+      await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+      await element.scrollIntoViewIfNeeded()
+      expect(await renderedContrast(element), `${width} ${mode}: ${target}`).toBeGreaterThanOrEqual(4.5)
+      await page.screenshot({ path: testInfo.outputPath(`${target.replaceAll(' ', '-')}-${width}-${mode}.png`) })
+    }
+  })
+}
+test('saved extreme primary accents keep Decision Desk pagination readable', async ({ page }, testInfo) => {
+  await setup(page, { decisionDesk: 'paged' })
+  await page.goto('/settings/theme')
+  await saveExtremePrimary(page)
+  await page.goto('/decision-desk')
+  const loadMore = page.getByRole('button', { name: 'Load 100 more' })
+  for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 950 })
+    await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+    await expect(loadMore).toBeVisible()
+    await loadMore.scrollIntoViewIfNeeded()
+    expect(await renderedContrast(loadMore), `${width} ${mode}: pagination text`).toBeGreaterThanOrEqual(4.5)
+    await page.screenshot({ path: testInfo.outputPath(`desk-pagination-${width}-${mode}.png`) })
+  }
+})
 test('saved extreme primary accents keep ordinary and Markdown links readable', async ({ page }, testInfo) => {
   await setup(page, { markdownBody: '[Dokumentation für wiederkehrende Aufgaben](https://example.com/docs)' })
   await page.goto('/settings/theme')

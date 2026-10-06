@@ -986,7 +986,7 @@
         ,
         {"file":"tests/tap-targets.spec.ts","listedTests":28,"weightSeconds":62.146341,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/theme-settings.spec.ts","listedTests":38,"weightSeconds":84.341463,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/theme-settings.spec.ts","listedTests":45,"weightSeconds":84.341463,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/theme.spec.ts","listedTests":1,"weightSeconds":2.219512,"weightSource":"unmeasured-test-rate"}
         ,
