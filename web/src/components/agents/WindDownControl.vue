@@ -272,6 +272,16 @@ defineExpose({ open: openForm, openStatus: () => { panel.value = 'status' } })
       </form>
       <div v-else class="wds">
         <h3>{{ done ? (pause.completedAt === null ? 'Wound down' : `Wound down at ${hhmm(pause.completedAt)}`) : `Winding down · by ${byClock}` }}</h3>
+        <!-- Outcome copy and the plan grow as reports arrive. Actions stay above that, so a longer sentence never pushes them (AEON-541). -->
+        <div class="wdf-acts">
+          <button type="button" class="btn ghost" @click="closePanel(true)">Close</button>
+          <button v-if="done" type="button" class="btn" :disabled="pause.leavingBusy" @click="cancel">Dismiss</button>
+          <button v-else type="button" class="btn danger" :disabled="pause.leavingBusy" @click="cancel">Cancel the wind-down</button>
+        </div>
+        <div class="wd-sep" role="separator" />
+        <p class="eyebrow now-head">Right now</p>
+        <button type="button" class="wd-item" :aria-disabled="!canPause.length || pause.leavingBusy || undefined" @click="bulk('pause-all')"><AppIcon name="pause" :size="16" /><span class="t">Pause all…</span><span class="d">{{ canPause.length ? 'Each agent saves a handover and pauses at its next safe point.' : 'Nothing outside the wind-down can pause right now.' }}</span></button>
+        <button type="button" class="wd-item" :aria-disabled="!canResume.length || pause.leavingBusy || undefined" @click="bulk('resume-all')"><AppIcon name="play" :size="16" /><span class="t">Resume all…</span><span class="d">{{ canResume.length ? `Continue ${canResume.length} paused agent${canResume.length === 1 ? '' : 's'} from their handovers, leads first.` : 'Nothing is paused.' }}</span></button>
         <div class="bar" aria-hidden="true"><i :style="{ width: `${progressPct}%`, boxShadow: 'none', background: 'var(--teal)' }" /></div>
         <p>{{ progressSentence }}</p>
         <p v-if="pause.leavingError" class="wds-error" role="alert">{{ pause.leavingError }} <button type="button" class="link-btn" @click="pause.refreshLeaving()">Retry</button></p>
@@ -284,15 +294,6 @@ defineExpose({ open: openForm, openStatus: () => { panel.value = 'status' } })
           </template>
           <template v-if="untouched.length"><p class="mono-label wd-host">Keep running, untouched</p><p class="wd-un">{{ untouched.map(s => `${name(s)} · ${hostLabel(s.host)}`).join(', ') }}</p></template>
         </div>
-        <div class="wdf-acts">
-          <button type="button" class="btn ghost" @click="closePanel(true)">Close</button>
-          <button v-if="done" type="button" class="btn" :disabled="pause.leavingBusy" @click="cancel">Dismiss</button>
-          <button v-else type="button" class="btn danger" :disabled="pause.leavingBusy" @click="cancel">Cancel the wind-down</button>
-        </div>
-        <div class="wd-sep" role="separator" />
-        <p class="eyebrow now-head">Right now</p>
-        <button type="button" class="wd-item" :aria-disabled="!canPause.length || pause.leavingBusy || undefined" @click="bulk('pause-all')"><AppIcon name="pause" :size="16" /><span class="t">Pause all…</span><span class="d">{{ canPause.length ? 'Each agent saves a handover and pauses at its next safe point.' : 'Nothing outside the wind-down can pause right now.' }}</span></button>
-        <button type="button" class="wd-item" :aria-disabled="!canResume.length || pause.leavingBusy || undefined" @click="bulk('resume-all')"><AppIcon name="play" :size="16" /><span class="t">Resume all…</span><span class="d">{{ canResume.length ? `Continue ${canResume.length} paused agent${canResume.length === 1 ? '' : 's'} from their handovers, leads first.` : 'Nothing is paused.' }}</span></button>
       </div>
     </FloatingPanel>
   </span>
