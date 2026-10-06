@@ -495,3 +495,25 @@ test('normal CI gates every shared Settings case and records the collected shard
   const group = loadManifest().groups.find(row => row.id === 'settings-shared')
   assert.equal(group.specs.find(row => row.file === file).listedTests, collected.length)
 })
+
+test('normal CI retains renamed Settings cases and gates Vocabulary and bookmark regressions', () => {
+  const file = 'tests/settings.spec.ts', config = 'playwright.ui.config.ts'
+  const result = spawnSync(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '-c', config, file, '--list', '--reporter=json'], {
+    cwd: webRoot, encoding: 'utf8', timeout: 30_000, maxBuffer: 4 * 1024 * 1024,
+  })
+  assert.equal(result.error, undefined)
+  assert.equal(result.status, 0, result.stderr)
+  const collected = flattenBrowser(JSON.parse(result.stdout), config)
+  assert.ok(collected.length >= 20, 'retain renamed cases, Vocabulary sizes/themes and bookmark regressions')
+  const stored = JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json', import.meta.url), 'utf8'))
+  const rows = validate({ version: stored.version, tests: stored.tests.filter(row => row.file === file) }, collected, undefined, { strict: true })
+  for (const event of ['pull_request', 'merge_group']) {
+    const selected = select(rows, { event, paths: ['.github/workflows/ci.yml'] }).tests
+    assert.deepEqual(selected.map(key), collected.map(key), `${event} must gate every Settings case`)
+  }
+  const manifest = loadManifest()
+  const declarations = manifest.groups.flatMap(group => group.specs.filter(spec => spec.file === file).map(spec => ({ group, spec })))
+  assert.equal(declarations.length, 1, 'Settings must have exactly one shard declaration')
+  assert.notEqual(declarations[0].group.gate, false, 'Settings must remain in the full browser gate')
+  assert.equal(declarations[0].spec.listedTests, collected.length)
+})
