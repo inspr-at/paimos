@@ -8518,6 +8518,36 @@
     ,
     {"kind":"browser","file":"tests/knowledge.spec.ts","name":"the palette finds knowledge by its words and leads to the tab and the search","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: one line per lead; + offers Start lead only while a project has none (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Agents page: the expert setting reveals Start agent manually","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Start lead: the project holds still while its request is on the way, and the sheet still finishes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"every lead state keeps the primary action in one place and says what it needs","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"no lead: the band offers Start lead and the sheet requests one at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"no lead: the band offers Start lead and the sheet requests one at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"no lead: the band offers Start lead and the sheet requests one at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"no lead: the band offers Start lead and the sheet requests one at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"phone: band, full-height panel and pinned sheet bar at 390 (dark)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"phone: band, full-height panel and pinned sheet bar at 390 (light)","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"ticket header keeps every action inside a 1024 side panel with a wide system font","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"ticket: Queue keeps its place through Queue and Queued, and the line shows where it stands","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"ticket: queued without a lead offers Start lead; a parent queues its open leaves; manual start stays expert-only","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"working lead: the line opens the docked panel, questions go to the Decision Desk, Pause is revision-bound","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/list-columns.spec.ts","name":"assignee sort uses the live worker when nobody is stored, and progress and ETA stay compact","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/list-columns.spec.ts","name":"progress and ETA columns at 1600px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13032,6 +13062,30 @@
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"the docking width leaves the list 560px beside a 560px pane","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"Resume is only a restart after a confirmed stop; Pause needs an existing intent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"a parent queue reports queued, existing and skipped leaves and what remains","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"a ticket has exactly one current step on its way to Merged","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"every lifecycle state has one fitting action","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"model by role shows the configured line and effort, or nothing","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"no lead: the band offers Start lead and counts queued work honestly","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"start checks: a fresh reading of a full gate is full, and past readings never read as current","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"start checks: the current wait reason wins, reported freshness follows, nothing is invented","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"the gate and today’s merges come from the latest reported decisions","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"the line shows counts, at most two keys and the rest as +n; unknown stays unknown","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"the workspace word reads lower case mid-sentence, keeps acronyms and pluralises","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"unreadable gates mean WAIT, never a start","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/list-views.test.ts","name":"a saved view is the list state with a name; order of values is no change","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/list-views.test.ts","name":"a value is included, excluded or neither; toggles switch between them","tier":"GATED-FULL"}
@@ -15225,6 +15279,16 @@
     {"kind":"vitest","file":"tests/profile-form.unit.test.ts","name":"the preview > loads the preview’s fonts under a new name whenever the faces change","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/profile-permissions.unit.test.ts","name":"profile permissions describe the caller’s personal profile","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a newer read never yields to an older revision answered later","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"a read that began before Pause cannot put the older lead back, and a fresh read follows","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"an unanswered question stays with the lead after its session stopped","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"gate and merged totals cover every generation and survive trimming the retained history","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/project-leads-store.unit.test.ts","name":"open questions are paged within a bound and a remainder is reported, never hidden","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/project-related.unit.test.ts","name":"a pending related lookup cannot navigate after the person changes","tier":"GATED-FULL"}
     ,
