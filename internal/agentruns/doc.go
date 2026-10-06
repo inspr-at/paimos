@@ -97,9 +97,12 @@
 // Account integration: pass the account module's UsageRecorder to New for
 // production allowance settlement. The callback receives updated cumulative
 // totals and the accepted report in the same db.InTenant transaction, once per
-// new sequence. It must append events for its own changed projections and must
+// new sequence. It contributes snapshots to the caller-owned event batch and must
 // not nest transactions. It can release reservations on terminal transitions.
 // Nil performs no allowance settlement: the account worker owns its projections,
 // while work-order budget accounting is always enforced here. Lock order is
-// work_order, run, account, then windows/reservations ordered by window UUID.
+// tenant, tree, pairing, target, work_order, run, account, then windows/reservations
+// ordered by window UUID, with events last. Review-bearing reports use independent
+// authorized catalog preparation before this transaction; identical replay skips
+// setup and repeats current authority checks.
 package agentruns

@@ -400,7 +400,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			usagedashboard.New(pool),
 			workorders.New(pool),
 			reviewMod,
-			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
+			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun, reviewMod.PrepareForRun),
 			approvals.New(pool),
 			phoneMod,
 			questionsMod,
@@ -612,8 +612,8 @@ func resolveWeb(cfg config.Config) (fs.FS, error) {
 }
 
 // settleUsage lets finished runs settle their account allowance projections (R2).
-func settleUsage(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry) error {
-	return agentaccounts.Settle(ctx, tx, p, run.ID)
+func settleUsage(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry, pending *[]events.Change) error {
+	return agentaccounts.SettleDeferred(ctx, tx, p, run.ID, pending)
 }
 
 // runRoutineDispatchers starts one routine dispatcher per tenant that exists at

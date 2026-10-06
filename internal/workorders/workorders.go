@@ -154,6 +154,20 @@ func Record(ctx context.Context, tx pgx.Tx, p tenant.Principal, id, kind string,
 // BlockBudget prevents new dispatch without discarding usage that already
 // happened. The caller holds the order lock and commits this with run telemetry.
 func BlockBudget(ctx context.Context, tx pgx.Tx, p tenant.Principal, o Order) error {
+	var pending []events.Change
+	if err := BlockBudgetDeferred(ctx, tx, p, o, &pending); err != nil {
+		return err
+	}
+	for _, change := range pending {
+		if _, err := events.Append(ctx, tx, p, change); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// BlockBudgetDeferred captures the transition now; its outer owner flushes last.
+func BlockBudgetDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal, o Order, pending *[]events.Change) error {
 	full, err := Exhausted(ctx, tx, o)
 	if err != nil || !full || o.Status == "blocked" || o.Status == "done" || o.Status == "cancelled" {
 		return err
@@ -165,7 +179,8 @@ func BlockBudget(ctx context.Context, tx pgx.Tx, p tenant.Principal, o Order) er
 	if err != nil {
 		return err
 	}
-	return Record(ctx, tx, p, o.NodeID, "work_order.budget_exhausted", o, after)
+	*pending = append(*pending, events.Change{NodeID: &o.NodeID, Type: "work_order.budget_exhausted", Before: o, After: after})
+	return nil
 }
 
 func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
