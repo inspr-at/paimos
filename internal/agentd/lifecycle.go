@@ -514,44 +514,45 @@ func (s *Supervisor) beginAccountProbe(accountID string, now time.Time) {
 }
 
 // settlePending retries the exact persisted sequence; it never restarts a run.
-func (s *Supervisor) settlePending(ctx context.Context) {
+func (s *Supervisor) settlePending(ctx context.Context) error {
 	s.mu.Lock()
 	entries := make([]*owned, 0, len(s.runs))
 	for _, e := range s.runs {
 		entries = append(entries, e)
 	}
 	s.mu.Unlock()
+	var failures []error
 	for _, e := range entries {
 		e.mu.Lock()
 		err := s.flushReports(ctx, e)
 		e.mu.Unlock()
 		s.handleRunError(e, err)
+		failures = append(failures, err)
 	}
+	return errors.Join(failures...)
 }
+
+var errSettlementParked = errors.New("telemetry settlement requires reconciliation")
 
 func (s *Supervisor) flushReports(ctx context.Context, e *owned) error {
 	for len(e.record.Pending) > 0 {
-		// A restarted daemon has one flush before probes rotate account authority.
+		if e.record.ReportParked {
+			return errSettlementParked
+		}
 		// Only proven no-process records may recover under their original claim.
 		oldExited := e.record.Generation != s.generation && noLocalProcess(e.record)
 		rejectionLimit := 3
 		if oldExited {
 			rejectionLimit = 1
 		}
-		if e.record.ReportRejections >= rejectionLimit {
+		if !e.record.TerminalRecovery && e.record.ReportRejections >= rejectionLimit {
 			if !noLocalProcess(e.record) {
-				return ErrTelemetryProtocol
-			}
-			if e.record.TerminalRecovery {
-				// Even the minimal terminal path was permanently rejected. Keep
-				// it pending for operator reconciliation, without an endless POST.
 				return ErrTelemetryProtocol
 			}
 			next := e.record
 			next.DeadLetters = append([]Telemetry(nil), next.Pending...)
 			next.SettlementGap = true
 			next.TerminalRecovery = true
-			next.ReportRejections = 0
 			next.State = "failed"
 			next.Sequence++
 			// Omit model, service tier, usage and evidence: any could be the
@@ -572,14 +573,19 @@ func (s *Supervisor) flushReports(ctx context.Context, e *owned) error {
 			err = s.api.Report(ctx, e.record.RunID, t)
 		}
 		if err != nil {
-			if errors.Is(err, ErrTelemetryProtocol) {
+			authorityLost := errors.Is(err, ErrTelemetryAuthority) && noLocalProcess(e.record)
+			if errors.Is(err, ErrTelemetryProtocol) || authorityLost {
 				next := e.record
 				next.ReportRejections++
+				// A permanently rejected minimal report has no smaller recovery
+				// path. Nor can a fresh sequence repair revoked claim authority.
+				// Park durably; transient delivery errors never consume this stop.
+				next.ReportParked = next.TerminalRecovery || authorityLost
 				if saveErr := s.journal.Put(next); saveErr != nil {
 					return errors.Join(err, saveErr)
 				}
 				e.record = next
-				if oldExited && !e.record.TerminalRecovery {
+				if oldExited && !e.record.TerminalRecovery && !e.record.ReportParked {
 					// Recover in this same flush, before a new-generation account probe.
 					continue
 				}
@@ -588,7 +594,9 @@ func (s *Supervisor) flushReports(ctx context.Context, e *owned) error {
 		}
 		next := e.record
 		next.Pending = next.Pending[1:]
-		next.ReportRejections = 0
+		if !next.TerminalRecovery {
+			next.ReportRejections = 0
+		}
 		if err := s.journal.Put(next); err != nil {
 			return err
 		}

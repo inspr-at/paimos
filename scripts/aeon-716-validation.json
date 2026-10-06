@@ -513,5 +513,61 @@
       "Complete remote ci-static exit 0 remains required before coordinator approval/release.",
       "Migration policy tests/check and incoming web-shard/test-tier checks are not proven in this round: the required remote static runner never started. No migration files were changed and all 266 numbers are unique."
     ]
+  },
+  "fix_round_8": {
+    "baseline_commit": "783f50ec42279e2e43af23520d6e92ca0f7857e9",
+    "review": "Brief review-grok-716.out.out was absent; read the complete matching review at qa/grok-716.out (two Medium findings).",
+    "main_commit": "4a705372c",
+    "merge_commit": "533a6ba7e805900693115d886edd73b535800f7c",
+    "scope": "Merged newest fetched origin/main cleanly, then fixed both settlement-recovery findings on the assigned work/aeon-716-verify branch. No UI, server authorization, verification reservation or version changes.",
+    "changes": [
+      "Retain the original ReportRejections count through minimal terminal recovery. Count the explicit run-is-not-live 409 as a protocol refusal. A rejected terminal is durably parked after its first permanent refusal; pending reports and dead letters remain intact.",
+      "Separate fixed-text authority refusals from protocol failures. Authority refusal never stops a live owned process; after proven exit, count and durably park unauthorized/forbidden/missing/revoked or generation-conflicted settlement instead of retrying forever.",
+      "Flush settlement on normal and probe-only polls, propagate settlement failures, and fence account-generation probes for every old-generation unresolved outbox or settlement gap, including exited runs. Unrelated account probes continue.",
+      "Add three ESSENTIAL Go regressions covering 409/403 terminal refusal, 408/429/503 retry preservation, durable restarts, authority stops, and both dispatch/probe-only ordering with normal and dependency-blocked accounts. Tighten the existing terminal limit from six total attempts to four (old-generation limit stays two), retaining the total rejection history. No assertions skipped or relaxed."
+    ],
+    "regression_proof": {
+      "method": "Go overlay replaces the four changed production files with their exact 783f50ec contents; no internal/agentd changes were introduced by main since that baseline. The API classification test uses its baseline source with the new not_live=true assertion, avoiding a compile dependency on the newly added authority sentinel. The three new regression functions run unchanged.",
+      "exit_code": 1,
+      "expected_failures": [
+        "TestRemoteTelemetryErrorClassification/not_live rejects the new protocol classification.",
+        "TestTelemetryTerminalRecoveryCountsPermanentRefusals: all six cases expose the cleared rejection count.",
+        "TestTelemetryExitedAuthorityRefusalIsBounded: all five authority cases expose repeated posts.",
+        "TestTelemetryPollingPreservesOldSettlementAuthority: both normal-poll cases rotate the account generation after failure; both probe-only cases skip settlement and rotate it."
+      ],
+      "local_log": "tmp/aeon-716-fix8/baseline-failures.log"
+    },
+    "passed": [
+      "GOMAXPROCS=2 go test -p 2 ./internal/agentd -run 'TestTelemetry|TestRemoteTelemetry|TestRemoteLostClaim|Test.*(Unlaunched|Claim|Poll|Outage|ProbeOnly|ProbeOnce)' -count=1: passed (6.771s).",
+      "GOMAXPROCS=2 go test -p 2 ./internal/reportercontract/ -count=1: full package passed (2.322s), including merged OpenAPI.",
+      "GOMAXPROCS=2 go test -p 2 ./cmd/aeon-agentd -run ^TestPairedSyncTombstoneProbesAndFailureDiagnostics$ -count=1: passed (0.331s).",
+      "Vitest computer-accounts.unit.test.ts, one worker: 32 passed.",
+      "Node agent-pairing.test.ts: 54 passed.",
+      "Guarded Playwright accounts-computers.spec.ts, AEON-685|AEON-716, one worker: 15 passed (19.5s), including phone/tablet/desktop light/dark stability and verification fences; owned processes after cleanup: 0.",
+      "Test-tier classifier registered exactly three new internal/agentd cases as ESSENTIAL; no new source files or specs require slice/shard registration.",
+      "git diff --check passed; final diff and exact staged file set reviewed."
+    ],
+    "holding": [
+      "Server telemetry agent-key, claim-generation, run.claim and current-account-owner checks are unchanged.",
+      "Stalled verification, verification_active retry rejection and reservation ownership are unchanged.",
+      "Server log allowlists and redaction are unchanged; protocol and authority refusals returned to the daemon contain only fixed text and HTTP status.",
+      "Rejected accounting remains pending for reconciliation; no process exit, server settlement, new launch or operator approval is inferred."
+    ],
+    "limitations": [
+      "User explicitly prohibited pushes. Both prescribed Go/static remote runners push temporary refs, so they were not invoked. Full affected remote Go packages, just test and complete remote ci-static remain unverified; no full local suite substituted.",
+      "Remote browser lane is disabled in scripts/playwright-remote.mjs pending OPS-247. The permitted single-spec local run used macOS headless Chromium, not CI-equivalent Linux Chromium; Linux browser verification remains open.",
+      "No coordinator review gate, origin push, PR merge, deployment, production access, ticket status change or model CLI review was performed.",
+      "Pre-existing untracked scripts/audit/__pycache__/ preserved."
+    ],
+    "safety": "ppm workstation-agents / INSPR and GitHub markus-barta verified. Coordinator worker attribution is explicitly supplied by worker-common. Edits stayed in the assigned branch/worktree; no credential reads, hook bypass or destructive git. Latest direct no-push/no-deploy instruction takes precedence over the brief push step and runner ref pushes.",
+    "source_sha256": {
+      "internal/agentd/api.go": "e9a6168de4d28ea572d2cb5f07dbd567b4a9194f5db34574d3b01bf3b1a4bdbe",
+      "internal/agentd/api_test.go": "256be0d6ea97cf450bff0036ea2f6bd132e71b434fd505b9caceaf5995d408a5",
+      "internal/agentd/launch.go": "e8e09009c4718ea32adaf7bf1f94969bc9d1d9f4227c19f334fa0cf758fb6b17",
+      "internal/agentd/lifecycle.go": "08f4e3e9fadd3d5e8a099af7a2b23249d54bd48dce6dee2fd2179b7f0f885cf9",
+      "internal/agentd/supervisor.go": "c34e7312f22e63b921f0a7ef0b8b760d68fb7cd74a46f860ff7a78a45ed4173a",
+      "internal/agentd/telemetry_lifecycle_test.go": "baa71f8985d16b15d29e56322ca6161e949cff220b648248c59cb1dea37f8091",
+      "scripts/ci/go-test-tiers.json": "389d6c79a96746160497d7afbfe210111d152465ae4e76fad3751cb5995bdcdf"
+    }
   }
 }

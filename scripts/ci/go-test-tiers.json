@@ -1680,11 +1680,17 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestTelemetryDeadLettersBoundedAndRecoversAfterObservedExit","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryExitedAuthorityRefusalIsBounded","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestTelemetryHTTPAuthorityAndOutagePreserveActiveProcess","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryPollingPreservesOldSettlementAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestTelemetryProtocolStopsOnlyOwnedChild","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestTelemetryRestartRecoversBeforeProbeChangesGeneration","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryTerminalRecoveryCountsPermanentRefusals","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestTelemetryTerminalRejectionIsBounded","tier":"ESSENTIAL"}
     ,

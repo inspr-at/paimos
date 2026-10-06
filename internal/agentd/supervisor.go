@@ -84,6 +84,7 @@ type Record struct {
 	DeadLetters      []Telemetry       `json:"dead_letters,omitempty"`
 	ReportRejections int               `json:"report_rejections,omitempty"`
 	TerminalRecovery bool              `json:"terminal_recovery,omitempty"`
+	ReportParked     bool              `json:"report_parked,omitempty"`
 	SettlementGap    bool              `json:"settlement_gap,omitempty"`
 	TenantID         string            `json:"tenant_id"`
 	PrincipalID      string            `json:"principal_id"`
@@ -490,9 +491,11 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 	if dispatch {
 		// Recover no-launch claims before a fresh probe changes generation.
 		recoveryErr = s.recoverUnlaunched(ctx)
-		s.settlePending(ctx)
 	}
-	if err := pollContextError(ctx, recoveryErr); err != nil {
+	// Probe-only polls run during retryable pairing outages too. Their probes
+	// must not rotate authority while a prior generation still needs to settle.
+	settlementErr := s.settlePending(ctx)
+	if err := pollContextError(ctx, recoveryErr, settlementErr); err != nil {
 		return err
 	}
 	if !s.probeAllowed() || dispatch && !s.dispatchAllowed("") {
@@ -507,7 +510,7 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			return err
 		}
 	}
-	failures := []error{recoveryErr}
+	failures := []error{recoveryErr, settlementErr}
 	s.mu.Lock()
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
 	adapters := map[string]Adapter{}

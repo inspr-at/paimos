@@ -384,6 +384,10 @@ func (r *Remote) Claim(ctx context.Context, runID, daemonID, generation string, 
 // not include authentication, enrollment fences, or uncertain delivery errors.
 var ErrTelemetryProtocol = errors.New("telemetry protocol violation")
 
+// ErrTelemetryAuthority fences dispatch without stopping a live owned child.
+// After proven exit, retrying the same claim cannot repair this refusal.
+var ErrTelemetryAuthority = errors.New("telemetry authority rejected")
+
 func (r *Remote) Report(ctx context.Context, runID string, t Telemetry) error {
 	r.mu.RLock()
 	daemon, generation := r.daemonID, r.generation
@@ -406,13 +410,17 @@ func (r *Remote) ReportForClaim(ctx context.Context, runID, daemon, generation s
 			// Other conflicts include generation changes and enrollment drain.
 			// Only the telemetry endpoint's explicit protocol errors are fatal.
 			switch status.Message {
-			case "divergent telemetry replay", "telemetry sequence is not monotonic", "run cannot return to starting":
+			case "divergent telemetry replay", "telemetry sequence is not monotonic", "run cannot return to starting", "run is not live":
 				protocol = true
 			}
 		}
 		if protocol {
 			// Do not propagate arbitrary server response text as diagnostics.
 			return fmt.Errorf("%w (HTTP %d)", ErrTelemetryProtocol, status.Status)
+		}
+		if status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden || status.Status == http.StatusNotFound || status.Status == http.StatusGone ||
+			status.Status == http.StatusConflict && status.Message == "daemon generation conflict" {
+			return fmt.Errorf("%w (HTTP %d)", ErrTelemetryAuthority, status.Status)
 		}
 	}
 	return err
