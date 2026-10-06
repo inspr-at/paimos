@@ -14,19 +14,6 @@ import { recordDetachedChild } from './playwright-owned-groups.mjs'
 import requireSupervisor from './playwright-global-setup.mjs'
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
-const block = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
-// A persistent root probe miss that lands only once the root has exited (gone
-// or a zombie awaiting reap). The supervisor's next attempt then observes the
-// exit regardless of how long node startup took; the bound is a hang guard.
-function missAfterRootExit(spawn, pid) {
-  const until = Date.now() + 15000
-  while (Date.now() < until) {
-    const probe = spawn('ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
-    if (probe.status !== 0 || probe.stdout.trim().startsWith('Z')) break
-    block(5)
-  }
-  return { status: 1, stdout: '' }
-}
 async function waitReady(path, exited) {
   const deadline = Date.now() + 15000
   while (!existsSync(path)) {
@@ -40,6 +27,23 @@ async function waitFor(check) {
   while (!check()) {
     assert.ok(Date.now() < deadline, 'condition timed out')
     await sleep(25)
+  }
+}
+// A root slower than the supervisor's whole attempt budget. The budget is
+// counted in attempts, so a load-dependent start must never decide these tests.
+const SLOW_ROOT_MS = 1000
+const slowRoot = `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${SLOW_ROOT_MS})`
+// Tests that keep the supervisor blind to its root (every ps answer a miss) hold
+// each blind answer until the root has really finished (zombie or reaped). The
+// retry loop then observes the exit itself instead of racing the root's
+// start-up under load. The deadline only guards against a hung root.
+function holdUntilRootExit(spawnSyncReal, pid) {
+  const guard = Date.now() + 60_000
+  for (;;) {
+    const state = spawnSyncReal('ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
+    if (state.status !== 0 || /^Z/.test(state.stdout.trim())) return
+    assert.ok(Date.now() < guard, 'root did not exit (hang guard)')
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10)
   }
 }
 function fixture(mode, directory, env = process.env) {
@@ -323,12 +327,12 @@ test('supervisor leaves an already-exited root exit code alone after repeated ps
   const original = childProcess.spawnSync
   let calls = 0
   const injected = t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
-    if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) { calls++; return missAfterRootExit(original, Number(args[1])) }
+    if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) { calls++; holdUntilRootExit(original, args[1]); return { status: 1, stdout: '' } }
     return original(command, args, options)
   })
   syncBuiltinESMExports()
   try {
-    const result = await runOwnedCommand(process.execPath, ['-e', 'process.exit(7)'], { lockPath: path, graceMs: 50 })
+    const result = await runOwnedCommand(process.execPath, ['-e', `${slowRoot}; process.exit(7)`], { lockPath: path, graceMs: 50 })
     assert.equal(result.code, 7)
     assert.ok(calls > 0)
     assert.equal(result.metrics.remaining_processes, 0)
@@ -359,24 +363,15 @@ test('persistent supervisor root verification failure kills the group before rel
 for (const mode of ['transient', 'persistent', 'owner-change']) {
   test(`root preload handles ${mode} ps misses before suite code executes`, async t => {
     const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-root-preload-')), lockPath = join(directory, 'suite.lock')
-    const attempts = join(directory, 'attempts'), ready = join(directory, 'ready'), probed = join(directory, 'probed')
+    const attempts = join(directory, 'attempts'), ready = join(directory, 'ready')
     const preload = new URL('./testdata/playwright/root-start-miss.mjs', import.meta.url).href
-    // Suite code runs only after the supervisor's first root probe. The bound
-    // is a hang guard: a supervisor that never probes still lets the root exit.
-    const script = `const fs = require('node:fs'); const until = Date.now() + 5000; while (!fs.existsSync(${JSON.stringify(probed)}) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5); fs.writeFileSync(${JSON.stringify(ready)}, fs.readFileSync(process.env.AEON_PW_GROUP_LOG));`
-    // Isolate preload publication: for the transient case the supervisor's
-    // root probe misses until suite code has run, so only the preload can
-    // record the root before work. The barrier, not node startup speed,
-    // orders the two; a slow root never exhausts the supervisor's attempts.
+    const script = `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(ready)}, fs.readFileSync(process.env.AEON_PW_GROUP_LOG));`
+    // Isolate preload publication: for the transient case the supervisor
+    // cannot verify the root, so only the preload can record it before work.
+    // That root also starts slowly, which the blind supervisor must outwait.
     const original = childProcess.spawnSync
     const injected = mode === 'transient' ? t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
-      if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) {
-        if (existsSync(ready)) return original(command, args, options)
-        writeFileSync(probed, '')
-        const until = Date.now() + 15000
-        while (!existsSync(ready) && Date.now() < until) block(5)
-        return { status: 1, stdout: '' }
-      }
+      if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) { holdUntilRootExit(original, args[1]); return { status: 1, stdout: '' } }
       return original(command, args, options)
     }) : undefined
     syncBuiltinESMExports()
@@ -384,7 +379,8 @@ for (const mode of ['transient', 'persistent', 'owner-change']) {
     try {
       result = await runOwnedCommand(process.execPath, ['-e', script], {
         lockPath, graceMs: 50,
-        env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}` },
+        env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}`,
+          ...(mode === 'transient' ? { AEON_PW_TEST_START_DELAY_MS: String(SLOW_ROOT_MS) } : {}) },
       })
     } finally { injected?.mock.restore(); syncBuiltinESMExports() }
     const calls = readFileSync(attempts, 'utf8').trim().split('\n').length

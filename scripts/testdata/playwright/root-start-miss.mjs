@@ -4,6 +4,11 @@ import childProcess from 'node:child_process'
 import { appendFileSync } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
 
+// A slow root: the supervisor must not give up on a start-up that outlasts
+// its attempt budget while the preload is still establishing identity.
+const startDelay = Number(process.env.AEON_PW_TEST_START_DELAY_MS ?? 0)
+if (startDelay > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, startDelay)
+
 const original = childProcess.spawnSync
 let attempts = 0
 childProcess.spawnSync = function (command, args, options) {

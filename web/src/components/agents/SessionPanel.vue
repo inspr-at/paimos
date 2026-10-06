@@ -23,6 +23,7 @@ import ProvenanceDetail from './ProvenanceDetail.vue'
 import SessionStateEvidence from './SessionStateEvidence.vue'
 import ListeningLabel from './ListeningLabel.vue'
 import SessionRecovery from './SessionRecovery.vue'
+import { useAgentRecovery } from '../../lib/agentRecovery'
 import RemoveSessionDialog from './RemoveSessionDialog.vue'
 import ManagedSessionControls from './ManagedSessionControls.vue'
 import SessionPauseActions from './SessionPauseActions.vue'
@@ -47,6 +48,7 @@ const serviceTiers = useServiceTiers()
 // Overview (now, details, work, runs, provenance) and Messages (thread and composer).
 const actionsAnchor = ref<HTMLElement | null>(null)
 const props = defineProps<{ view: SessionView | undefined; loading: boolean; now: number; canWrite: boolean; controlBlock: (view: SessionView, kind: SessionControl['kind']) => string }>()
+const agentRecovery = useAgentRecovery(() => props.view?.session.id)
 const emit = defineEmits<{ close: []; control: [view: SessionView, kind: SessionControl['kind']]; review: [approval: Approval] }>()
 watch(() => props.view?.session.id, () => { actionsAnchor.value = null })
 const agents = useAgents()
@@ -189,24 +191,28 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
       <div v-if="view && !loading && !compactControls" class="head-actions">
         <span class="host-meta">{{ view.harness }}<template v-if="view.session.host"> on {{ view.session.host }}</template></span>
         <span class="spacer" />
+        <button v-if="agentRecovery.action(view.session)" class="btn sm ghost" type="button" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name)"><AppIcon name="refresh" :size="14" />{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</button>
         <SessionPauseActions v-if="!reported?.watch" :session="reported || view.session" />
         <button v-if="!reported?.watch && !view.session.advertised_capabilities.includes('managed_control_v1') && works('interrupt') && !pausingSession(view.session)" class="icon-btn sm flat" type="button" aria-label="More session actions" aria-haspopup="menu" :aria-expanded="!!actionsAnchor" @click="actionsAnchor = $event.currentTarget as HTMLElement"><AppIcon name="more" /></button>
         <FloatingPanel v-if="actionsAnchor" :anchor="actionsAnchor" align="end" label="More session actions" @close="actionsAnchor = null"><div role="menu"><button class="btn sm ghost" type="button" role="menuitem" @click="control('interrupt'); actionsAnchor = null"><AppIcon name="interrupt" />Interrupt this step</button></div></FloatingPanel>
         <SessionRecovery v-if="!reported?.watch" :session="view.session" />
         <RemoveSessionDialog :session="view.session" :label="view.name" :quick="quick" />
       </div>
-      <p v-if="view && !loading && outside" class="outside-note">Runs outside {{ brand.short_name }} — stop it in its terminal</p>
       <SessionPauseActions v-if="view && !loading && compactControls && !reported?.watch" :session="reported || view.session" />
       <ManagedSessionControls v-if="view && !loading && !reported?.watch" :session="reported || view.session" :now="now" :run-status="view.run?.status">
         <template v-if="compactControls" #more="{ anchor }">
+          <button v-if="view && agentRecovery.action(view.session)" type="button" role="menuitem" class="menu-item" :disabled="agentRecovery.busy[view.session.id]" @click="agentRecovery.request(view.session, view.name)"><AppIcon name="refresh" :size="16" /><span class="mi-text">{{ agentRecovery.action(view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</span></button>
           <button v-if="view && !serviceTiers.unavailable(view.session)" type="button" role="menuitem" class="menu-item" :disabled="!!serviceTiers.state(view.session).pending" @click="pickTier(anchor)"><AppIcon name="gauge" :size="16" /><span class="mi-text">Change tier…</span></button>
           <button v-if="showRecover" type="button" role="menuitem" class="menu-item" @click="recovery?.open()"><AppIcon name="wrench" :size="16" /><span class="mi-text"><span>Recover</span></span></button>
+          <hr v-if="showRemove" class="menu-sep">
           <button v-if="showRemove" type="button" role="menuitem" class="menu-item" :aria-label="`Remove ${view.name}`" @click="removal?.remove()"><AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quick ? 'Remove' : 'Remove…' }}</span></span></button>
         </template>
       </ManagedSessionControls>
       <SessionRecovery v-if="view && !loading && compactControls" ref="recovery" hide-trigger :session="view.session" />
       <RemoveSessionDialog v-if="view && !loading && compactControls" ref="removal" hide-trigger :session="view.session" :label="view.name" :quick="quick" />
       <SessionTabs v-if="view && !loading && !reported?.watch" :selected="tab" :unread="tab === 'messages' ? 0 : unread" @select="selectTab" />
+      <p v-if="view && !loading && view.session.agent_recovery" class="outside-note">{{ view.session.agent_recovery.detail }}</p>
+      <p v-else-if="view && !loading && outside" class="outside-note">Runs outside {{ brand.short_name }} — stop it in its terminal</p>
     </header>
 
     <!-- Until the first load completes the body stays a placeholder, so runs and

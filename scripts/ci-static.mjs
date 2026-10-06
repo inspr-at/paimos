@@ -97,7 +97,7 @@ export function validateRegistry(registry, jobs) {
     ids.add(check.id)
     if (typeof check.command !== 'string' || !check.command.trim() || !['.', 'web'].includes(check.cwd) ||
         !Array.isArray(check.needs) || check.needs.some(n => !['node', 'go', 'python3', 'npm-installed'].includes(n)) ||
-        !Number.isInteger(check.timeout_seconds) || check.timeout_seconds < 1 || check.timeout_seconds > 180 ||
+        !Number.isInteger(check.timeout_seconds) || check.timeout_seconds < 1 || check.timeout_seconds > (check.id === 'web-shard-tests' ? 600 : 180) ||
         (check.optional !== undefined && check.optional !== true) ||
         (check.optional && !check.needs.includes('npm-installed'))) throw new SetupError(`Invalid check: ${check.id}`)
     const ci = check.ci

@@ -31,6 +31,7 @@ import SessionEstimate from './SessionEstimate.vue'
 import { etaFromSession } from '../../lib/eta'
 import { brand } from '../../lib/brand'
 import { toast } from '../../lib/toast'
+import { useAgentRecovery } from '../../lib/agentRecovery'
 import { quickRemoval, sessionMenu, type SessionMenu } from './sessionActions'
 import { controlPermitted, type ControlGrant } from '../../lib/managedControl'
 import { can } from '../../lib/authz'
@@ -47,6 +48,7 @@ const props = defineProps<{
   history?: SessionView[]; historyState?: 'idle' | 'loading' | 'ready' | 'error'; historyMore?: boolean; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
   loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean
 }>()
+const agentRecovery = useAgentRecovery()
 const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: [] }>()
 const showStopped = ref(false)
 // History is a separate, opt-in list of every ended or removed session. The
@@ -287,6 +289,11 @@ function pick(kind: SessionControl['kind']) {
   menu.value = null
   if (view && !controlBlock(view, kind)) emit('control', view, kind)
 }
+function pickRecovery() {
+  const view = menu.value?.view
+  menu.value = null
+  if (view) void agentRecovery.request(view.session, view.name)
+}
 function pickRemove() {
   const view = menu.value?.view
   menu.value = null
@@ -482,8 +489,9 @@ defineExpose({ toggleHistory })
         <button v-if="permittedWorker(menu.view) && leadsFor(menu.view).length" type="button" role="menuitem" class="menu-item" data-autofocus @click="pickMove">
           <AppIcon name="arrow" :size="16" /><span class="mi-text">Move to lead…</span>
         </button>
+        <button v-if="agentRecovery.action(menu.view.session)" type="button" role="menuitem" class="menu-item" :disabled="agentRecovery.busy[menu.view.session.id]" @click="pickRecovery"><AppIcon name="refresh" :size="16" /><span class="mi-text">{{ agentRecovery.action(menu.view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</span></button>
         <button v-if="pause.eligible(menu.view.session, 'pause') && (menu.view.session.supported_pause_levels?.includes('pause') || menu.view.session.advertised_capabilities.includes('inbox') || menu.view.session.advertised_capabilities.includes('pause'))" type="button" role="menuitem" class="menu-item" @click="pause.open('pause', [menu.view.session], menu.anchor); menu = null"><AppIcon name="pause" /><span class="mi-text">Pause…</span></button>
-        <button v-if="pause.eligible(menu.view.session, 'stop')" type="button" role="menuitem" class="menu-item danger" @click="pause.open('stop', [menu.view.session], menu.anchor); menu = null"><AppIcon name="halt" /><span class="mi-text">Stop now…</span></button>
+
         <button v-if="pause.eligible(menu.view.session, 'resume')" type="button" role="menuitem" class="menu-item" @click="pause.open('resume', [menu.view.session], menu.anchor); menu = null"><AppIcon name="play" /><span class="mi-text">Resume</span></button>
         <template v-if="menuItems.control.length">
           <button v-if="menuItems.control.includes('interrupt') && !pausingSession(menu.view.session)" type="button" role="menuitem" class="menu-item" data-autofocus @click="pick('interrupt')">
@@ -501,13 +509,15 @@ defineExpose({ toggleHistory })
         <button type="button" role="menuitem" class="menu-item" :data-autofocus="menuItems.control.length || menu.view.ticket ? undefined : ''" @click="pickCopy">
           <AppIcon name="copy" :size="16" /><span class="mi-text"><span>Copy session id</span></span>
         </button>
+        <hr v-if="pause.eligible(menu.view.session, 'stop') || menuItems.remove" class="menu-sep">
+        <button v-if="pause.eligible(menu.view.session, 'stop')" type="button" role="menuitem" class="menu-item danger" @click="pause.open('stop', [menu.view.session], menu.anchor); menu = null"><AppIcon name="halt" /><span class="mi-text">Stop now…</span></button>
         <template v-if="menuItems.remove">
-          <hr class="menu-sep">
           <button type="button" role="menuitem" class="menu-item" @click="pickRemove">
             <AppIcon name="trash" :size="16" /><span class="mi-text"><span>{{ quickRemoval(menu.view) ? 'Remove' : 'Remove…' }}</span></span>
           </button>
         </template>
-        <p v-if="menuItems.note" class="menu-note">{{ menuItems.note }}</p>
+        <p v-if="menu.view.session.agent_recovery" class="menu-note">{{ menu.view.session.agent_recovery.detail }}</p>
+        <p v-else-if="menuItems.note" class="menu-note">{{ menuItems.note }}</p>
       </div>
     </FloatingPanel>
     <FloatingPanel v-if="moveMenu" :anchor="moveMenu.anchor" align="end" :width="248" :label="`Move ${moveMenu.view.name} to lead`" @close="closeMove">
