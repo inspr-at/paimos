@@ -181,6 +181,30 @@ test('AEON-648 work Node registrations have explicit tiers and remain in changed
   }
 })
 
+test('Settings routing and workspace login registrations have explicit tiers and remain selected when changed', () => {
+  mkdirSync(evidence, { recursive: true })
+  const manifest = JSON.parse(readFileSync(resolve(root, 'scripts/ci/web-test-tiers.json'), 'utf8'))
+  const file = 'tests/settings-routing.unit.test.ts'
+  const listing = resolve(evidence, 'aeon-698-settings-routing.json')
+  command(process.execPath, ['node_modules/vitest/vitest.mjs', 'list', file, `--json=${listing}`,
+    '--no-staticParse', '--maxWorkers=1', '--no-fileParallelism',
+    ...(process.env.VITE_CACHE_DIR ? ['--configLoader=runner'] : [])], { cwd: web })
+  const routing = JSON.parse(readFileSync(listing, 'utf8')).map(row => ({ kind: 'vitest', file, name: row.name }))
+  const loginFile = 'tests/agent-login.test.ts'
+  const login = JSON.parse(command(process.execPath, ['--import', resolve(root, 'scripts/test-tiers/node-collect-hook.mjs'),
+    resolve(root, 'scripts/test-tiers/node-collect.mjs'), resolve(web, loginFile)], { cwd: web }))
+    .map(row => ({ ...row, kind: 'node', file: loginFile }))
+  for (const [owner, native] of [[file, routing], [loginFile, login]]) {
+    assert.ok(native.length > 0, owner)
+    const declared = { version: 1, tests: manifest.tests.filter(row => row.file === owner) }
+    const rows = validate(declared, native, undefined, { strict: true })
+    for (const options of [{ event: 'pull_request', paths: [`web/${owner}`], webImports: { [owner]: [] } },
+      { event: 'schedule', paths: [] }]) {
+      assert.deepEqual(select(rows, options).tests.map(key).sort(), native.map(key).sort(), `${options.event}: ${owner}`)
+    }
+  }
+})
+
 test('default check command warns once per unclassified native work-node case and exits zero', () => {
   const manifest = JSON.parse(readFileSync(resolve(root, 'scripts/ci/web-test-tiers.json'), 'utf8'))
   const cases = []
