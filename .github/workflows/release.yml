@@ -297,7 +297,7 @@ jobs:
         run: |
           set -euo pipefail
           epoch="$(git show -s --format=%ct HEAD)"
-          [[ "$epoch" =~ ^[0-9]+$ && "$epoch" == "$FROZEN_SOURCE_EPOCH" ]]
+          [[ "$epoch" =~ ^[0-9]+$ && "$epoch" == "$FROZEN_SOURCE_EPOCH" ]] || exit 1
           echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
       # Prepared cold in every tag build and rehearsal, from the digest-pinned
       # Alpine base and the pinned chromium/tini. No registry cache is read or
