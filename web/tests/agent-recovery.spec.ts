@@ -33,8 +33,23 @@ async function setup(page: Page, action: '' | 'restart' | 'reconnect' = 'restart
   })
   await page.route('**/recover-agent/*', route => route.fulfill({ json: { id: request?.request_id, session_id: selected.id, action, state: outcome ? 'completed' : 'claimed', outcome, next_run_id: outcome === 'continuation_queued' ? 'continuation-run' : null } }))
   await page.goto(`/agents/${selected.id}`)
-  await expect(page.getByRole('complementary', { name: 'Session details' })).toBeVisible()
-  return { selected, label, diagnosis: async (detail: string) => { selected.agent_recovery!.detail = detail; await page.clock.runFor(21000); await expect(page.getByRole('complementary', { name: 'Session details' })).toContainText(detail) }, request: () => request, complete: (value: string) => { outcome = value } }
+  const panel = page.getByRole('complementary', { name: 'Session details' })
+  await expect(panel).toBeVisible()
+  // From here only runFor advances the page clock, so every wait below is the
+  // exact number of seconds the test names rather than that plus wall time.
+  await page.clock.pauseAt(await page.evaluate(() => Date.now() + 1000))
+  // The daemon confirms process ownership with every heartbeat. A diagnosis
+  // wait models one such confirmation and then the server's next read of the
+  // session, so the managed controls never report a stale owner on their own:
+  // that hint is a different state and would move the tabs below it (AEON-541).
+  const diagnosis = async (detail: string) => {
+    selected.process_observed_at = await page.evaluate(() => new Date().toISOString())
+    selected.agent_recovery!.detail = detail
+    await page.clock.runFor(21000)
+    await expect(panel).toContainText(detail)
+    await expect(panel.getByText('Waiting for the owning daemon to confirm this process.')).toHaveCount(0)
+  }
+  return { selected, label, diagnosis, request: () => request, complete: (value: string) => { outcome = value } }
 }
 
 test('Restart requests the exact row and keeps destructive actions behind the separator', async ({ page }) => {
