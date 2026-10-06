@@ -8538,6 +8538,10 @@
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestAnnotatedTagGuardFailsClosed","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestBuilderChecksumAndPluginPathFailClosed","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestBuilderVersionAssertionFailsClosed","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestComposeAppProbesReadiness","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestComposeDocumentsParse","tier":"GATED-FULL"}
@@ -8595,6 +8599,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestRehearsalPlatformDigestHandoff","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestRehearsalReleaseTagValidation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestRehearsedBuilderPins","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReleaseBinariesRefuseWarmOrUnverifiedGo","tier":"ESSENTIAL"}
     ,
