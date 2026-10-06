@@ -18,8 +18,10 @@ test('model refresh starts private, saves its interval and accepts profiles with
     if (path === '/api/models/refresh' && route.request().method() === 'POST') return route.fulfill({ status: 429, json: { error: 'model refresh interval has not elapsed' } })
     return route.fulfill({ json: status })
   })
+  // AEON-699 keeps Models in Agents; vendor logins and quota live in Accounts.
   await page.goto('/settings/agents')
   const card = page.locator('#models')
+  await expect(card.getByRole('link', { name: 'Accounts and computers' })).toHaveAttribute('href', '/settings/accounts')
   await expect(card.getByRole('checkbox', { name: 'Accept agent model reports' })).toBeChecked()
   await expect(card.getByRole('checkbox', { name: 'Enable vendor API discovery' })).not.toBeChecked()
   await expect(card.getByText('Discovered profiles need your acceptance before they can run.')).toBeVisible()

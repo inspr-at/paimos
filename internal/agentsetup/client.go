@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentcompat"
+	"github.com/inspr-at/paimos/internal/hookcap"
 )
 
 const apiBase = "/api/agent-pairing"
@@ -54,13 +55,14 @@ type DeviceResponse struct {
 	Digest          string    `json:"request_digest"`
 }
 type ProofRequest struct {
-	Progress        *SetupProgress `json:"progress,omitempty"`
-	TenantID        string         `json:"tenant_id"`
-	RequestID       string         `json:"request_id"`
-	DeviceSecret    secret         `json:"device_secret,omitempty"`
-	LifecycleSecret secret         `json:"lifecycle_secret,omitempty"`
-	Cleaned         []string       `json:"cleanup_confirmed_account_ids,omitempty"`
-	ComputerCleaned bool           `json:"computer_cleanup_confirmed,omitempty"`
+	HookCapabilities []hookcap.Capability `json:"hook_capabilities,omitempty"`
+	Progress         *SetupProgress       `json:"progress,omitempty"`
+	TenantID         string               `json:"tenant_id"`
+	RequestID        string               `json:"request_id"`
+	DeviceSecret     secret               `json:"device_secret,omitempty"`
+	LifecycleSecret  secret               `json:"lifecycle_secret,omitempty"`
+	Cleaned          []string             `json:"cleanup_confirmed_account_ids,omitempty"`
+	ComputerCleaned  bool                 `json:"computer_cleanup_confirmed,omitempty"`
 }
 type SetupProgress struct {
 	AgentRelease    *agentcompat.Release     `json:"agent_release,omitempty"`
@@ -108,6 +110,7 @@ type Enrollment struct {
 	ActiveRunIDs       []string `json:"active_run_ids"`
 }
 type View struct {
+	HookCapabilities   []hookcap.Capability     `json:"hook_capabilities,omitempty"`
 	LocalAuthPinned    *bool                    `json:"local_auth_pinned,omitempty"`
 	AgentCompatibility *agentcompat.Result      `json:"agent_compatibility,omitempty"`
 	HarnessDetails     map[string]HarnessDetail `json:"harness_details,omitempty"`

@@ -137,7 +137,7 @@ func loadCandidates(ctx context.Context, tx pgx.Tx, ids []string, now time.Time)
  coalesce(work.live,false),
  EXISTS(SELECT 1 FROM events e JOIN principals p ON p.tenant_id=e.tenant_id AND p.id=e.actor_principal_id WHERE e.tenant_id=n.tenant_id AND e.node_id=n.id AND p.kind='person' AND (e.type IN ('comment.created','comment.updated') OR EXISTS(SELECT 1 FROM events original WHERE original.tenant_id=e.tenant_id AND original.id=e.undo_of AND original.metadata->>'rule'='accept')) AND e.at>=coalesce(episode.at,n.created_at))
  FROM nodes n
- LEFT JOIN LATERAL (SELECT max(e.at) at FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND e.after->>'state'=n.state AND e.before->>'state' IS DISTINCT FROM e.after->>'state') episode ON true
+ LEFT JOIN LATERAL (SELECT max(e.at) at FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND e.after->>'state'=n.state AND e.before->>'state' IS DISTINCT FROM e.after->>'state' AND e.type<>'status_autopilot.attention_undone' AND NOT EXISTS(SELECT 1 FROM events u WHERE u.tenant_id=e.tenant_id AND u.undo_of=e.id)) episode ON true
  LEFT JOIN LATERAL (SELECT max(e.at) at FROM events e WHERE e.node_id=n.id AND e.tenant_id=n.tenant_id AND coalesce(e.metadata->>'job','')<>$2) activity ON true
  LEFT JOIN LATERAL (SELECT max(greatest(h.created_at,h.heartbeat_at,h.stopped_at)) at,
  bool_or(h.archived_at IS NULL AND (

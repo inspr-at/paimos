@@ -71,12 +71,12 @@ function mount() {
 const all = (root: Node): Node[] => [root, ...root.children.flatMap(all)]
 const input = (root: Node) => all(root).find(el => el.tag === 'input')
 beforeEach(() => {
-  session.identity = person(); grants.revoked = false; grants.access = true; grants.admin = true; route.params.section = 'access'
+  session.identity = person(); grants.revoked = false; grants.access = true; grants.admin = true; route.params.section = 'access'; route.hash = ''
   drafts.length = 0; links.length = 0; mounted.mockClear(); unmounted.mockClear()
   vi.stubGlobal('document', { addEventListener() {}, removeEventListener() {} })
   vi.stubGlobal('window', { addEventListener() {}, removeEventListener() {} })
 })
-afterEach(() => { for (const app of apps.splice(0)) app.unmount(); vi.unstubAllGlobals() })
+afterEach(() => { for (const app of apps.splice(0)) app.unmount(); vi.unstubAllGlobals(); vi.useRealTimers() })
 
 it.each(['access', 'personal'])('%s retains the same child, draft and one-time link on expiry, with writes inert', async current => {
   route.params.section = current
@@ -148,4 +148,23 @@ it('an incoming owner clears frozen Access before fresh permissions arrive', asy
   expect(input(root)).toBeDefined()
   session.identity = person('person-b'); await flush()
   expect(input(root) === undefined, 'a new owner has no frozen Access while grants are pending').toBe(true)
+})
+
+it.each(['agent-activity', 'estimates', 'silent-sessions'])('legacy #%s highlights its consolidated field until the arrival expires', async anchor => {
+  vi.useFakeTimers()
+  const classes = new Set<string>(['frow'])
+  const target = {
+    classList: { contains: (name: string) => classes.has(name), add: (name: string) => classes.add(name), remove: (name: string) => classes.delete(name) },
+    querySelector: vi.fn(() => null), scrollIntoView: vi.fn(),
+  }
+  Object.assign(document, { getElementById: (id: string) => id === anchor ? target : null })
+  Object.assign(window, { matchMedia: () => ({ matches: true }) })
+  route.params.section = 'agents'; route.hash = `#${anchor}`
+  mount(); await flush()
+  expect(target.scrollIntoView).toHaveBeenCalledExactlyOnceWith({ block: 'start', behavior: 'auto' })
+  expect(classes.has('arrived'), 'the bookmarked field has a visible arrival ring').toBe(true)
+  await vi.advanceTimersByTimeAsync(1799)
+  expect(classes.has('arrived')).toBe(true)
+  await vi.advanceTimersByTimeAsync(1)
+  expect(classes.has('arrived')).toBe(false)
 })

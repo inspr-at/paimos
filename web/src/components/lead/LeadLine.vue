@@ -1,5 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { IconName } from '../AppIcon.vue'
 import { LEAD_WORDS, type Station, type StationId } from '../../lib/lead'
 import AppIcon from '../AppIcon.vue'
@@ -10,12 +11,12 @@ import TicketPeekLink from '../TicketPeekLink.vue'
 defineProps<{ stations: Station[]; routeKey: string; empty?: boolean }>()
 const emit = defineEmits<{ open: [from: HTMLElement] }>()
 const ICON: Record<StationId, IconName> = { queued: 'queue', working: 'agent', gate: 'shield', merged: 'merge' }
-const TIP: Record<StationId, string> = {
+const TIP = computed<Record<StationId, string>>(() => ({
   queued: 'Queued work in this project, in queue order',
   working: 'Tickets its workers are on right now',
   gate: `Waiting for a cross-family review, as the ${LEAD_WORDS.l} reported`,
   merged: `Merged and handed to release today, as the ${LEAD_WORDS.l} reported`,
-}
+}))
 const href = (routeKey: string, key: string) => `/p/${encodeURIComponent(routeKey)}/${encodeURIComponent(key)}`
 </script>
 

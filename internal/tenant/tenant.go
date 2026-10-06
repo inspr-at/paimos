@@ -18,6 +18,7 @@ const (
 
 // Principal is who acts, always inside exactly one tenant.
 type Principal struct {
+	BrowserSession        bool   // authenticated interactive cookie only
 	ID                    string // principals.id (uuid)
 	TenantID              string // tenants.id (uuid)
 	Kind                  PrincipalKind

@@ -305,7 +305,7 @@ test('fixed check environment removes caller flags and identity but supplies CI 
     NIX_LDFLAGS_FOR_BUILD: '-L/fixture/build-sdk/usr/lib', NIX_CFLAGS_COMPILE_FOR_TARGET: '-isystem /fixture/target-sdk/usr/include',
     NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
     NIX_CC_WRAPPER_TARGET_BUILD_arm64_apple_darwin: '1', NIX_BINTOOLS_WRAPPER_TARGET_TARGET_arm64_apple_darwin: '1',
-    NIX_CC_WRAPPER_FLAGS_SET_arm64_apple_darwin: '1', NIX_DEBUG: '7' }
+    NIX_CC_WRAPPER_FLAGS_SET_arm64_apple_darwin: '1', NIX_DEBUG: '7', NIX_CC: 'fixture-cc' }
   await runChecks([{ id: 'env', command: 'true', cwd: '.', needs: [], timeout_seconds: 5 }], cwd, { env: source, run: async (_command, { env }) => {
     assert.equal(env.GOFLAGS, undefined); assert.equal(env.AEON_TEST_DATABASE_URL, undefined)
     assert.equal(env.RANDOM_EXTRA, undefined); assert.equal(env.AEON_TEST_TIER_MODE, 'full')
@@ -323,10 +323,33 @@ test('fixed check environment removes caller flags and identity but supplies CI 
     assert.equal(env.NIX_BINTOOLS_WRAPPER_TARGET_TARGET_arm64_apple_darwin, '1')
     assert.equal(env.NIX_CC_WRAPPER_FLAGS_SET_arm64_apple_darwin, undefined)
     assert.equal(env.NIX_DEBUG, undefined)
+    assert.equal(env.NIX_CC, undefined)
     assert.ok(env.npm_config_cache.startsWith(tmpdir()))
     return { status: 'passed', seconds: 0 }
   } })
   assert.equal(fixedEnvironment({ PATH: '/bin', GIT_CONFIG_COUNT: '1' }).GIT_CONFIG_COUNT, undefined)
+})
+
+test('fixed check environment retains Nix compiler role markers and SDK flags without caller selection flags', () => {
+  const flags = {
+    NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
+    NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
+    NIX_CC_WRAPPER_TARGET_BUILD_x86_64_apple_darwin: '1',
+    NIX_BINTOOLS_WRAPPER_TARGET_TARGET_aarch64_unknown_linux_gnu: '1',
+    NIX_CFLAGS_COMPILE_arm64_apple_darwin: '-isystem /fixture/sdk/usr/include',
+    NIX_CFLAGS_LINK_arm64_apple_darwin: '-F/fixture/sdk/System/Library/Frameworks',
+    NIX_LDFLAGS_BEFORE_arm64_apple_darwin: '-L/fixture/sdk/usr/lib',
+    NIX_LDFLAGS_arm64_apple_darwin: '-L/fixture/sdk/usr/lib',
+    NIX_LDFLAGS_x86_64_apple_darwin: '-L/fixture/intel-sdk/usr/lib',
+    NIX_LDFLAGS_aarch64_unknown_linux_gnu: '-L/fixture/linux-sdk/lib',
+  }
+  const env = fixedEnvironment({ ...flags, GOFLAGS: '-run=^$', AEON_TEST_TIER_MODE: 'essential',
+    NIX_AUTH_TOKEN: 'fixture', NIX_LDFLAGS_SECRET: 'fixture' })
+  for (const [key, value] of Object.entries(flags)) assert.equal(env[key], value, key)
+  assert.equal(env.GOFLAGS, undefined)
+  assert.equal(env.AEON_TEST_TIER_MODE, 'full')
+  assert.equal(env.NIX_AUTH_TOKEN, undefined)
+  assert.equal(env.NIX_LDFLAGS_SECRET, undefined)
 })
 
 test('version warnings compare installed versions with workflow pins', t => {

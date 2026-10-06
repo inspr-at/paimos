@@ -68,6 +68,8 @@ type runtime struct {
 	kinds              *kindTable
 	messagingDeliverer localDeliverer
 	personClient       *client.Client
+	// pairedHook is a test seam. Production leaves it nil and dials agentd.
+	pairedHook hookPeerExchange
 }
 
 func (rt *runtime) execute(args []string) error {

@@ -3,7 +3,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  atGate, canPause, canResume, checksSummary, decisionLine, leadBand, leadLine, leadWords, mergedToday, modelByRole, pluralWord, startChecks, ticketSteps, waitCopy,
+  atGate, canPause, canResume, checksSummary, decisionLine, LEAD_WORDS, leadBand, leadLine, leadWords, mergedToday, modelByRole, pluralWord, setLeadWords, startChecks, ticketSteps, waitCopy,
   type LeadDecision, type ProjectLead,
 } from '../src/lib/lead.ts'
 import { parentQueueSummary, type ParentQueueSnapshot } from '../src/lib/workQueue.ts'
@@ -21,6 +21,16 @@ test('the workspace word reads lower case mid-sentence, keeps acronyms and plura
   assert.equal(pluralWord('Proxy'), 'Proxies')
   assert.equal(pluralWord('Boss'), 'Boss')
   assert.equal(leadWords('Conductor', 'Dirigenten').P, 'Dirigenten')
+})
+
+test('AEON-791: the saved agent names reach every screen that reads LEAD_WORDS, and clearing restores Lead', () => {
+  setLeadWords({ singular: 'Dirigent', plural: 'Dirigenten' })
+  try {
+    assert.equal(leadBand(null, 'AEON', 0).title, 'No dirigent in AEON')
+    assert.equal(leadBand(null, 'AEON', 0).actionLabel, 'Start dirigent')
+    assert.equal(LEAD_WORDS.P, 'Dirigenten')
+  } finally { setLeadWords(null) }
+  assert.deepEqual({ ...LEAD_WORDS }, { S: 'Lead', l: 'lead', P: 'Leads', pl: 'leads' })
 })
 
 test('no lead: the band offers Start lead and counts queued work honestly', () => {

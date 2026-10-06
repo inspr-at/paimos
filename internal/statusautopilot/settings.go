@@ -148,6 +148,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /api/settings/status-autopilot", m.settings)
 	mux.HandleFunc("GET /api/projects/{projectId}/status-autopilot", m.project)
 	mux.HandleFunc("PUT /api/projects/{projectId}/status-autopilot", m.project)
+	mux.HandleFunc("GET /api/status-autopilot/attention", m.attention)
+	mux.HandleFunc("POST /api/status-autopilot/attention/actions", m.attentionActions)
 	mux.HandleFunc("GET /api/status-autopilot/changes", m.changes)
 	mux.HandleFunc("GET /api/status-autopilot/proposals", m.proposals)
 	mux.HandleFunc("PUT /api/status-autopilot/proposals/{eventId}", m.resolveProposal)

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -42,7 +43,7 @@ func TestLocalPiSetupWithServerSelectedProfile(t *testing.T) {
 		Services: &agentsetup.ServiceManager{Platform: agentsetup.Platform{OS: "darwin", Arch: "arm64"}, Home: home, UID: os.Getuid(), Executable: candidate.Path, Executor: localSetupExecutor{candidate.Path}},
 		Now:      func() time.Time { return now },
 	}
-	p, err := e.Begin(t.Context(), agentsetup.Options{Origin: origin, TenantID: f.tenantID, ComputerName: "pi fixture", Workspace: physicalSetupTemp(t), Platform: agentsetup.Platform{OS: "darwin", Arch: "arm64"}, Candidates: []agentsetup.Candidate{candidate}})
+	p, err := e.Begin(t.Context(), agentsetup.Options{Origin: origin, TenantID: f.tenantID, ComputerName: "pi fixture", Workspace: physicalSetupTemp(t), Platform: agentsetup.Platform{OS: runtime.GOOS, Arch: runtime.GOARCH}, Candidates: []agentsetup.Candidate{candidate}})
 	if err != nil || p.Stage != "awaiting_approval" {
 		t.Fatal("pi device creation failed", err)
 	}
@@ -56,6 +57,11 @@ func TestLocalPiSetupWithServerSelectedProfile(t *testing.T) {
 	now = now.Add(time.Minute)
 	if p, err = e.Step(t.Context()); err != nil || p.Stage != "connected" {
 		t.Fatal("pi redemption failed", err)
+	}
+	var computer agentpairing.View
+	decodeResult(t, f.call("GET", "/api/agent-pairing/computers/"+p.ComputerID, nil, true, "", 200), &computer)
+	if computer.Platform != runtime.GOOS || len(computer.HookCapabilities) != 1 || computer.HookCapabilities[0].OS != computer.Platform || computer.HookCapabilities[0].Verified || computer.HookCapabilities[0].Blocker != "feature_disabled" {
+		t.Fatal("pi setup reported the wrong platform or enabled hooks", computer.HookCapabilities)
 	}
 	c, err := agentsetup.ReadRuntimeConfig(store.Path())
 	if err != nil || len(c.Accounts) != 1 || c.Accounts[0].Harness != "pi" || c.Accounts[0].Identity != "anthropic" || c.Accounts[0].Home != home {

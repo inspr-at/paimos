@@ -33,19 +33,6 @@ async function waitFor(check) {
 // counted in attempts, so a load-dependent start must never decide these tests.
 const SLOW_ROOT_MS = 1000
 const slowRoot = `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${SLOW_ROOT_MS})`
-// Tests that keep the supervisor blind to its root (every ps answer a miss) hold
-// each blind answer until the root has really finished (zombie or reaped). The
-// retry loop then observes the exit itself instead of racing the root's
-// start-up under load. The deadline only guards against a hung root.
-function holdUntilRootExit(spawnSyncReal, pid) {
-  const guard = Date.now() + 60_000
-  for (;;) {
-    const state = spawnSyncReal('ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
-    if (state.status !== 0 || /^Z/.test(state.stdout.trim())) return
-    assert.ok(Date.now() < guard, 'root did not exit (hang guard)')
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10)
-  }
-}
 function fixture(mode, directory, env = process.env) {
   const lock = join(directory, 'suite.lock'), ready = join(directory, `${mode}.ready`)
   const pid = join(directory, `${mode}.pid`), output = join(directory, `${mode}.json`)
@@ -293,11 +280,15 @@ test('unverifiable live roots terminate their group without an invalid journal e
   } finally { probe.child.kill('SIGKILL'); await probe.completion }
 })
 
-test('root retries allow a fast child to exit normally instead of failing verification', async () => {
+test('root retries allow a fast child to exit normally instead of failing verification', { timeout: 15000 }, async () => {
   const child = spawn(process.execPath, ['-e', 'process.exit(7)'], { detached: true, stdio: 'ignore' })
   const exited = new Promise(resolve => child.once('exit', resolve)), entries = []
   try {
-    assert.equal(await recordRootGroup(child, entry => entries.push(entry), { start: () => '', attempts: 200 }), child)
+    let retries = 0
+    assert.equal(await recordRootGroup(child, entry => entries.push(entry), {
+      start: () => '', wait: async () => { retries++; await exited },
+    }), child)
+    assert.equal(retries, 1, 'the root exits between the failed lookup and the next attempt')
     assert.equal(await exited, 7)
     assert.deepEqual(entries, [])
     assert.throws(() => process.kill(-child.pid, 0), { code: 'ESRCH' })
@@ -322,22 +313,60 @@ test('supervisor retries a root ps miss without overriding a successful suite ex
   } finally { injected.mock.restore(); syncBuiltinESMExports() }
 })
 
-test('supervisor leaves an already-exited root exit code alone after repeated ps misses', async t => {
-  const path = join(mkdtempSync(join(tmpdir(), 'aeon-pw-root-exited-')), 'suite.lock')
+// Hold retry scheduling at a real child-exit barrier. Startup speed is not
+// evidence that the next lookup sees an exited child, especially on loaded CI.
+function rootExitBarrier(t, release) {
+  const original = childProcess.spawn
+  let child, exited, waits = 0
+  const injected = t.mock.method(childProcess, 'spawn', (...args) => {
+    assert.equal(child, undefined, 'barrier belongs to exactly one spawned root')
+    child = original(...args)
+    exited = new Promise((resolveExit, reject) => {
+      child.once('error', reject)
+      child.once('exit', (code, signal) => resolveExit({ code, signal }))
+    })
+    return child
+  })
+  const abort = () => child?.kill('SIGKILL')
+  t.signal.addEventListener('abort', abort, { once: true })
+  return {
+    async wait() {
+      assert.ok(child, 'root must be spawned before its retry')
+      if (++waits === 1) return // Establish repeated misses before allowing exit.
+      assert.equal(waits, 2)
+      writeFileSync(release, 'exit permitted')
+      const result = await exited
+      assert.equal(result.signal, null, 'root must exit naturally at the barrier')
+    },
+    get waits() { return waits },
+    restore() { t.signal.removeEventListener('abort', abort); injected.mock.restore() },
+  }
+}
+
+function afterRelease(release, script) {
+  return `const fs = require('node:fs'); const run = () => { if (!fs.existsSync(${JSON.stringify(release)})) return false; ${script}; return true }; if (!run()) { const timer = setInterval(() => { if (run()) clearInterval(timer) }, 10) }`
+}
+
+test('supervisor leaves an already-exited root exit code alone after repeated ps misses', { timeout: 15000 }, async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-root-exited-')), path = join(directory, 'suite.lock')
+  const release = join(directory, 'release'), barrier = rootExitBarrier(t, release)
   const original = childProcess.spawnSync
   let calls = 0
   const injected = t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
-    if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) { calls++; holdUntilRootExit(original, args[1]); return { status: 1, stdout: '' } }
+    if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) { calls++; return { status: 1, stdout: '' } }
     return original(command, args, options)
   })
   syncBuiltinESMExports()
   try {
-    const result = await runOwnedCommand(process.execPath, ['-e', `${slowRoot}; process.exit(7)`], { lockPath: path, graceMs: 50 })
+    const result = await runOwnedCommand(process.execPath, ['-e', `${slowRoot}; ${afterRelease(release, 'process.exit(7)')}`], {
+      lockPath: path, graceMs: 50, rootIdentityWait: barrier.wait,
+    })
     assert.equal(result.code, 7)
-    assert.ok(calls > 0)
+    assert.equal(calls, 2)
+    assert.equal(barrier.waits, 2)
     assert.equal(result.metrics.remaining_processes, 0)
     assert.equal(existsSync(path), false)
-  } finally { injected.mock.restore(); syncBuiltinESMExports() }
+  } finally { barrier.restore(); injected.mock.restore(); syncBuiltinESMExports() }
 })
 
 test('persistent supervisor root verification failure kills the group before releasing its lock', async t => {
@@ -406,73 +435,75 @@ test('root preload keeps a slow transient root until the journal barrier passes'
   assert.equal(new Set(entries.map(entry => entry.pid)).size, 1)
 })
 
-for (const { mode, blind } of [
-  { mode: 'transient', blind: false },
-  { mode: 'transient', blind: true },
-  { mode: 'persistent', blind: false },
-  { mode: 'owner-change', blind: false },
-]) {
-  test(`root preload handles ${mode} ps misses${blind ? ' with a blind supervisor' : ''} before suite code executes`, async t => {
-    const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-root-preload-')), lockPath = join(directory, 'suite.lock')
-    const attempts = join(directory, 'attempts'), ready = join(directory, 'ready')
-    const verified = join(directory, 'root-verified')
-    const preload = new URL('./testdata/playwright/root-start-miss.mjs', import.meta.url).href
-    const script = `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(ready)}, fs.readFileSync(process.env.AEON_PW_GROUP_LOG));`
-    // A verified supervisor releases the preload through a journal barrier.
-    // A blind supervisor waits for root exit, so bounded identity retries never
-    // race the slow preload. Both cases isolate the preload's journal entry.
-    const originalAppend = fs.appendFileSync, originalSpawn = childProcess.spawnSync, supervisorEntries = []
-    const injected = mode !== 'transient' ? undefined : blind
-      ? t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
-        if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) {
-          holdUntilRootExit(originalSpawn, args[1]); return { status: 1, stdout: '' }
-        }
-        return originalSpawn(command, args, options)
-      })
-      : t.mock.method(fs, 'appendFileSync', (file, data, ...options) => {
+for (const mode of ['transient', 'persistent', 'owner-change']) {
+  test(`root preload handles ${mode} ps misses before suite code executes`, { timeout: 15000 }, async t => {
+    for (const supervisorMisses of mode === 'transient' ? [false, true] : [false]) {
+      const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-root-preload-')), lockPath = join(directory, 'suite.lock')
+      const attempts = join(directory, 'attempts'), ready = join(directory, 'ready'), verified = join(directory, 'verified')
+      const preload = new URL('./testdata/playwright/root-start-miss.mjs', import.meta.url).href
+      const release = join(directory, 'release')
+      const publish = `fs.writeFileSync(${JSON.stringify(ready)}, fs.readFileSync(process.env.AEON_PW_GROUP_LOG))`
+      const script = supervisorMisses ? afterRelease(release, publish) : `const fs = require('node:fs'); ${publish}`
+      const barrier = supervisorMisses ? rootExitBarrier(t, release) : undefined
+      // Preserve both publication paths: a verified supervisor suppresses its
+      // journal write, or a blind supervisor outwaits a slow root's own preload.
+      // The blind path retains its explicit child-exit barrier; the verified
+      // path waits for the parent to verify identity before preload publication.
+      // A verified supervisor releases the preload through a journal barrier.
+      // A blind supervisor waits for root exit, so bounded identity retries never
+      // race the slow preload. Both cases isolate the preload's journal entry.
+      const original = fs.appendFileSync
+      const spawnSyncReal = childProcess.spawnSync
+      const supervisorEntries = []
+      const injected = supervisorMisses ? t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
+        if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) return { status: 1, stdout: '' }
+        return spawnSyncReal(command, args, options)
+      }) : mode === 'transient' ? t.mock.method(fs, 'appendFileSync', (file, data, ...options) => {
         if (typeof file === 'string' && file.startsWith(`${lockPath}.`) && file.endsWith('.groups')) {
           supervisorEntries.push(JSON.parse(data))
           writeFileSync(verified, '')
           return
         }
-        return originalAppend(file, data, ...options)
-      })
-    syncBuiltinESMExports()
-    let result
-    try {
-      result = await runOwnedCommand(process.execPath, ['-e', script], {
-        lockPath, graceMs: 50,
-        env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode,
-          ...(mode === 'transient' ? blind ? { AEON_PW_TEST_START_DELAY_MS: String(SLOW_ROOT_MS) } : { AEON_PW_TEST_ROOT_VERIFIED: verified } : {}),
-          NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}` },
-      })
-    } finally { injected?.mock.restore(); syncBuiltinESMExports() }
-    const calls = readFileSync(attempts, 'utf8').trim().split('\n').length
-    assert.ok(calls >= 2)
-    assert.equal(result.metrics.remaining_processes, 0)
-    assert.equal(existsSync(lockPath), false)
-    if (mode === 'transient') {
-      assert.equal(result.code, 0)
-      const entries = readFileSync(ready, 'utf8').trim().split('\n').map(line => JSON.parse(line))
-      assert.equal(entries.length, 1, 'preload must publish the verified root before suite code')
-      if (blind) {
-        assert.equal(supervisorEntries.length, 0, 'blind supervisor must not publish an unverified root')
-        assert.equal(existsSync(verified), false, 'blind preload must finish without supervisor verification')
+        return original(file, data, ...options)
+      }) : undefined
+      syncBuiltinESMExports()
+      let result
+      try {
+        result = await runOwnedCommand(process.execPath, ['-e', script], {
+          lockPath, graceMs: 50, rootIdentityWait: barrier?.wait,
+          env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}`,
+            ...(supervisorMisses ? { AEON_PW_TEST_START_DELAY_MS: String(SLOW_ROOT_MS) } : { AEON_PW_TEST_ROOT_VERIFIED: verified }) },
+        })
+      } finally { barrier?.restore(); injected?.mock.restore(); syncBuiltinESMExports() }
+      const calls = readFileSync(attempts, 'utf8').trim().split('\n').length
+      assert.ok(calls >= 2)
+      assert.equal(result.metrics.remaining_processes, 0)
+      assert.equal(existsSync(lockPath), false)
+      if (mode === 'transient') {
+        assert.equal(result.code, 0)
+        if (supervisorMisses) assert.equal(barrier.waits, 2)
+        const entries = readFileSync(ready, 'utf8').trim().split('\n').map(line => JSON.parse(line))
+        assert.equal(entries.length, 1, 'preload must publish the verified root before suite code')
+        if (supervisorMisses) {
+          assert.equal(supervisorEntries.length, 0, 'blind supervisor must not publish an unverified root')
+          assert.equal(existsSync(verified), false, 'blind preload must finish without supervisor verification')
+        } else {
+          assert.equal(supervisorEntries.length, 1, 'supervisor verifies the root before releasing the preload')
+          assert.deepEqual(supervisorEntries, entries, 'parent and preload verify the same identity')
+          assert.deepEqual(entries, supervisorEntries, 'preload independently records the same verified root')
+        }
+        assert.ok(entries.every(entry => validStart(entry.started)))
+        assert.equal(new Set(entries.map(entry => entry.pid)).size, 1)
+      } else if (mode === 'persistent') {
+        assert.equal(result.code, 1)
+        assert.equal(existsSync(ready), false, 'unverifiable root must not execute suite code')
+        assert.equal(calls, 20)
+        assert.equal(result.metrics.signal, 'SIGKILL')
       } else {
-        assert.equal(supervisorEntries.length, 1, 'supervisor verifies the root before releasing the preload')
-        assert.deepEqual(entries, supervisorEntries, 'preload independently records the same verified root')
+        assert.equal(result.code, 1)
+        assert.equal(existsSync(ready), false, 'supervisor identity must be checked after recording the root')
+        assert.equal(calls, 2)
       }
-      assert.ok(entries.every(entry => validStart(entry.started)))
-      assert.equal(new Set(entries.map(entry => entry.pid)).size, 1)
-    } else if (mode === 'persistent') {
-      assert.equal(result.code, 1)
-      assert.equal(existsSync(ready), false, 'unverifiable root must not execute suite code')
-      assert.equal(calls, 20)
-      assert.equal(result.metrics.signal, 'SIGKILL')
-    } else {
-      assert.equal(result.code, 1)
-      assert.equal(existsSync(ready), false, 'supervisor identity must be checked after recording the root')
-      assert.equal(calls, 2)
     }
   })
 }
