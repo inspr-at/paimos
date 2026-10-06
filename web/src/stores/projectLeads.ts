@@ -114,9 +114,12 @@ export const useProjectLeads = defineStore('projectLeads', () => {
   }
   async function loadPrincipal(id: string, session: string, started: number) {
     try {
+      const read = await getSession(id, session)
+      // A reset or another lead meanwhile: the read belongs to nobody on screen now.
+      if (started !== epoch || view(id).lead?.session_id !== session) return
       // The session read passes the session ledger like every other copy (AEON-449).
-      const [row] = useAgents().admitSessions([await getSession(id, session)])
-      if (row && started === epoch && view(id).lead?.session_id === session) view(id).principal = { session, id: row.agent_principal_id }
+      const [row] = useAgents().admitSessions([read])
+      if (row) view(id).principal = { session, id: row.agent_principal_id }
     } catch { /* read again with the next load; the previous lead's asker stays */ }
   }
   async function loadQuestions(id: string, started: number) {
@@ -124,7 +127,10 @@ export const useProjectLeads = defineStore('projectLeads', () => {
       const page = await readOpenQuestions(id)
       if (started !== epoch) return
       Object.assign(view(id), { questions: page.items.filter(q => q.project_id === id), questionsMore: page.more })
-    } catch { if (started === epoch) Object.assign(view(id), { questions: null, questionsMore: false }) }
+    } catch {
+      // Unread questions are reported, never hidden: the previous read stays, marked incomplete.
+      if (started === epoch) view(id).questionsMore = true
+    }
   }
   /** Ticket keys for ids the lead reported; at most 12 reads per call, each once. */
   async function resolveKeys(ids: string[], started = epoch) {

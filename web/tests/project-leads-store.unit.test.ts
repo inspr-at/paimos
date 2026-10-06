@@ -8,7 +8,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import type { LeadDecision, ProjectLead } from '../src/lib/lead'
 
 type Handler = (path: string, init?: RequestInit) => unknown | Promise<unknown>
-const http = vi.hoisted(() => ({ handler: (() => ({})) as Handler, paths: [] as string[] }))
+const http = vi.hoisted(() => ({ handler: (() => ({})) as Handler, paths: [] as string[], admitted: [] as unknown[] }))
 vi.mock('../src/lib/api', () => {
   class APIError extends Error { constructor(readonly status: number, message: string, readonly body: Record<string, unknown> = {}) { super(message) } }
   const api = async (path: string, init?: RequestInit) => {
@@ -21,12 +21,13 @@ vi.mock('../src/lib/agentRows', async importOriginal => ({ ...await importOrigin
   http.paths.push(`GET /projects/${project}/harness-sessions/${session}`)
   return http.handler(`/projects/${project}/harness-sessions/${session}`)
 } }))
-vi.mock('../src/stores/agents', () => ({ useAgents: () => ({ admitSessions: (rows: unknown[]) => rows }) }))
+vi.mock('../src/stores/agents', () => ({ useAgents: () => ({ admitSessions: (rows: unknown[]) => { http.admitted.push(...rows); return rows } }) }))
 vi.mock('../src/lib/authz', () => ({ onAccessChange: () => () => {}, can: () => true }))
 vi.mock('../src/stores/liveAgents', () => ({ useLiveAgents: () => ({ items: [], watch: () => () => {} }) }))
 vi.mock('../src/stores/workQueue', () => ({ useWorkQueue: () => ({ snapshots: {} }) }))
 import { useProjectLeads } from '../src/stores/projectLeads'
 import { useLeadSummary } from '../src/lib/useLeadSummary'
+import { resetPositions } from '../src/lib/position'
 
 const NOW = '2026-10-06T12:00:00Z'
 const P = 'p1', S1 = 's1', S2 = 's2', AGENT = 'agent-lead'
@@ -55,7 +56,7 @@ function summary() {
   const result = scope.run(() => useLeadSummary(ref(P), ref('PHAROS')))!
   return { ...result, stop: () => scope.stop() }
 }
-beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW)); setActivePinia(createPinia()); http.paths.length = 0; http.handler = routes(); vi.spyOn(console, 'warn').mockImplementation(() => {}) })
+beforeEach(() => { vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date(NOW)); setActivePinia(createPinia()); http.paths.length = 0; http.admitted.length = 0; http.handler = routes(); vi.spyOn(console, 'warn').mockImplementation(() => {}) })
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 it('a read that began before Pause cannot put the older lead back, and a fresh read follows', async () => {
@@ -129,6 +130,46 @@ it('open questions are paged within a bound and a remainder is reported, never h
   await leads.load(P)
   expect(offsets).toEqual([0, 100, 200, 300, 400])
   expect(lines.questions.value.map(q => q.id)).toEqual(['q-307'])
+  expect(lines.questionsPartial.value).toBe(true)
+  lines.stop()
+})
+
+it('a session read answered after a reset is not admitted for the next person', async () => {
+  const leads = useProjectLeads()
+  const session = deferred<unknown>()
+  http.handler = routes({ session: () => session.promise })
+  const loading = leads.load(P)
+  await vi.waitFor(() => expect(http.paths).toContain(`GET /projects/${P}/harness-sessions/${S1}`))
+  resetPositions()
+  session.resolve({ agent_principal_id: AGENT })
+  await loading; await settle()
+  expect(http.admitted).toEqual([])
+  expect(leads.view(P).principal).toBeNull()
+})
+
+it('a failed later question page keeps the questions read and says the rest are unread', async () => {
+  const leads = useProjectLeads()
+  http.handler = routes({ questions: path => {
+    const offset = Number(new URL(path, 'http://x').searchParams.get('offset'))
+    if (offset > 0) throw new Error('page failed')
+    return { items: [question('q-lead'), ...Array.from({ length: 99 }, (_, i) => question(`q-${i}`, 'someone'))], has_more: true }
+  } })
+  const lines = summary()
+  await leads.load(P)
+  expect(lines.questions.value.map(q => q.id)).toEqual(['q-lead'])
+  expect(lines.questionsPartial.value).toBe(true)
+  lines.stop()
+})
+
+it('a failed question read keeps the last questions shown and reports them incomplete', async () => {
+  const leads = useProjectLeads()
+  http.handler = routes({ questions: () => ({ items: [question('q-lead')], has_more: false }) })
+  const lines = summary()
+  await leads.load(P)
+  expect(lines.questionsPartial.value).toBe(false)
+  http.handler = routes({ questions: () => { throw new Error('read failed') } })
+  await leads.load(P)
+  expect(lines.questions.value.map(q => q.id)).toEqual(['q-lead'])
   expect(lines.questionsPartial.value).toBe(true)
   lines.stop()
 })
