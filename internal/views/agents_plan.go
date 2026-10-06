@@ -79,7 +79,10 @@ func (m *Module) getAgentsPlan(w http.ResponseWriter, r *http.Request) {
 			return err // Malformed stored plans fail closed, never fall back.
 		}
 		rows, err := tx.Query(ctx, `SELECT s.harness,count(*) FROM harness_sessions s
-			WHERE s.tenant_id=$1::uuid AND s.stopped_at IS NULL AND s.archived_at IS NULL AND s.phase<>'stopped'
+			WHERE s.tenant_id=$1::uuid AND (
+			 (s.stopped_at IS NULL AND s.archived_at IS NULL AND s.phase<>'stopped')
+			 OR (EXISTS(SELECT 1 FROM project_leads l WHERE l.tenant_id=s.tenant_id AND l.session_id=s.id)
+			     AND NOT aeon_work_session_stopped(s.stopped_at,s.stop_reason)))
 			AND (s.owner_principal_id IN (SELECT id FROM principals WHERE tenant_id=$1::uuid AND coalesce(linked_to,id)=$2::uuid)
 			OR (s.owner_principal_id IS NULL AND EXISTS (
 				SELECT 1 FROM agent_keys k JOIN principals creator ON creator.tenant_id=k.tenant_id AND creator.id=k.created_by_principal_id

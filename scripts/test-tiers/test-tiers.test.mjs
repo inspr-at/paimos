@@ -4,6 +4,8 @@ import assert from 'node:assert/strict'
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
@@ -275,8 +277,8 @@ test('two tier shards contain every selected identity exactly once, including eq
   assert.ok(pattern.test('test [1]'));assert.ok(!pattern.test('test 1'));assert.ok(!pattern.test('other ends.$'))
 })
 
-for(const [kind,maxShards] of [['go',7],['browser',12],['node',4]]) {
-  test(`${kind} zero-weight owners fill shards before reusing tied bins for counts 1..${maxShards}`,()=>{
+for(const [kind,maxShards,options] of [['go',7,{}],['browser',12,{}],['node',4,{}],['node',4,{firstShardLast:true}]]) {
+  test(`${kind}${options.firstShardLast?' (first shard last)':''} zero-weight owners fill shards before reusing tied bins for counts 1..${maxShards}`,()=>{
     for(let count=1;count<=maxShards;count++) {
       for(const ownerCount of new Set([0,1,Math.max(0,count-1),count,count+1,2*count+1])) {
         for(const distribution of ['mixed','all-zero','equal-positive']) {
@@ -290,18 +292,18 @@ for(const [kind,maxShards] of [['go',7],['browser',12],['node',4]]) {
           const weights=Object.fromEntries(owners.map((owner,i)=>[owner,
             distribution==='all-zero'?0:distribution==='mixed'?(i===0?1:0):1]))
           const before={rows:structuredClone(rows),weights:{...weights}}
-          const bins=Array.from({length:count},(_,i)=>shard(rows,i+1,count,weights))
+          const bins=Array.from({length:count},(_,i)=>shard(rows,i+1,count,weights,options))
           const ownerOf=row=>kind==='go'?row.package:row.file
           const ownerBins=bins.map(bin=>[...new Set(bin.map(ownerOf))])
-          const context=`${kind}: ${count} shards, ${ownerCount} owners, ${distribution}`
+          const context=`${kind}${options.firstShardLast?' (first shard last)':''}: ${count} shards, ${ownerCount} owners, ${distribution}`
           assert.deepEqual(bins.flat().map(key).sort(),rows.map(key).sort(),context)
           assert.equal(new Set(bins.flat().map(key)).size,rows.length,context)
           assert.deepEqual(ownerBins.flat().sort(),owners,`${context}: owners stay whole`)
           assert.equal(ownerBins.filter(bin=>bin.length).length,Math.min(count,ownerCount),`${context}: empty shards only when owners are fewer`)
           for(let i=0;i<count;i++) {
-            assert.deepEqual(shard([...rows].reverse(),i+1,count,weights).map(key).sort(),bins[i].map(key).sort(),`${context}: input order cannot change assignment`)
+            assert.deepEqual(shard([...rows].reverse(),i+1,count,weights,options).map(key).sort(),bins[i].map(key).sort(),`${context}: input order cannot change assignment`)
           }
-          if(distribution==='all-zero') {
+          if(distribution==='all-zero'&&!options.firstShardLast) {
             // Equal weights and owner counts resolve by path then shard index.
             assert.deepEqual(ownerBins,Array.from({length:count},(_,i)=>owners.filter((_,j)=>j%count===i)),context)
           }
@@ -360,20 +362,21 @@ test('Actions skipped jobs with zero completed_at never invalidate PR, queue, pu
   const skipped={name:'tree-reuse',status:'completed',conclusion:'skipped',
     started_at:'2026-10-05T10:00:00Z',completed_at:'0001-01-01T00:00:00Z',steps:[]}
   const lanes={
-    pull_request:['tree-reuse','cache-prime','go-test (1)','go-timing','web-setup','web-shard (1)'],
-    merge_group:['tree-reuse','cache-prime'],
-    push:['go-test (1)','go-timing','web-setup','web-shard (1)','release-check-run','e2e-run'],
-    workflow_dispatch:['tree-reuse','cache-prime'],
-    schedule:['nightly-go-test (1)','nightly-go-timing','nightly-web-setup','nightly-web-shard (1)'],
+    pull_request:{names:['tree-reuse','cache-prime','go-test (1)','go-timing','web-setup','web-shard (1)'],options:{lane:'docs-only'},missing:[]},
+    merge_group:{names:['tree-reuse','cache-prime'],options:{lane:'full'},missing:[]},
+    push:{names:['go-test (1)','go-timing','web-setup','web-shard (1)','release-check-run','e2e-run'],options:{lane:'full',reusedFrom:'123'},missing:[]},
+    workflow_dispatch:{names:['tree-reuse','cache-prime'],options:{lane:'full'},missing:[]},
+    schedule:{names:['nightly-go-test (1)','nightly-go-timing','nightly-web-setup','nightly-web-shard (1)'],options:{},missing:['go-test-1','go-timing','web-unit','web-shard-1']},
   }
-  for(const [event,names] of Object.entries(lanes)) for(const timestamps of [
+  for(const [event,{names,options,missing}] of Object.entries(lanes)) for(const timestamps of [
     {},{started_at:'0001-01-01T00:00:00Z'},
     {started_at:null,completed_at:null},{started_at:0,completed_at:0},
   ]) {
     const jobs=names.map(name=>({...skipped,name,...timestamps}))
-    const report=aggregate([],jobs)
+    const report=aggregate([],jobs,options)
     assert.ok(report.jobs.every(job=>job.conclusion==='skipped'&&job.runnerMinutes===null),event)
-    assert.deepEqual(report.missingEvidence,[],event)
+    assert.deepEqual(report.missingEvidence,missing,event)
+    assert.equal(report.coverage,missing.length?'incomplete':options.reusedFrom?'reused':'reported',event)
     assert.equal(report.measured.goRunnerMinutes,0,event)
     assert.equal(report.measured.webRunnerMinutes,0,event)
     assert.deepEqual(report.classes,{},'Skipped jobs must not fabricate case passes')
@@ -382,6 +385,109 @@ test('Actions skipped jobs with zero completed_at never invalidate PR, queue, pu
   assert.equal(jobMinutes({...skipped,conclusion:'cancelled',runner_id:0}),null)
   assert.throws(()=>jobMinutes({...skipped,conclusion:'cancelled',runner_id:1}),/Invalid job timestamps/)
   assert.throws(()=>jobMinutes({...skipped,conclusion:'cancelled',runner_id:0,steps:[{name:'Checkout',conclusion:'success'}]}),/Invalid job timestamps/)
+})
+
+// Classification: fixed go-static/nightly-go-static CI checks, outside the
+// dynamically collected Go/web tier and browser-shard inventories.
+test('AEON-732 full and nightly skipped tier fixtures remain incomplete after upstream failures',()=>{
+  const finished={status:'completed',started_at:'2026-10-05T10:00:00Z',completed_at:'2026-10-05T10:02:00Z'}
+  const skipped={...finished,conclusion:'skipped',completed_at:'0001-01-01T00:00:00Z',steps:[]}
+  for(const lane of [undefined,'full']) for(const prerequisite of ['tier-plan','web-setup']) {
+    const jobs=[{...finished,name:prerequisite,conclusion:'failure'},
+      ...['go-test (1)','go-timing','web-unit (1)','web-shard (1)'].map(name=>({...skipped,name}))]
+    const report=aggregate([],jobs,{lane})
+    assert.equal(report.coverage,'incomplete')
+    assert.equal(report.coverageReason,'skipped after upstream failure')
+    assert.deepEqual(report.missingEvidence,['go-test-1','go-timing','web-unit-1','web-shard-1'])
+    assert.deepEqual(report.upstreamFailures,[{name:prerequisite,status:'completed',conclusion:'failure'}])
+    assert.deepEqual(report.skippedJobs,jobs.slice(1).map(job=>job.name))
+    assert.ok(report.jobs.slice(1).every(job=>job.runnerMinutes===null))
+    assert.equal(report.measured.goRunnerMinutes,0)
+    assert.equal(report.measured.webRunnerMinutes,prerequisite==='web-setup'?2:0)
+    assert.deepEqual(report.classes,{})
+    // Required skips remain incomplete even without prerequisite metadata.
+    const noPrerequisite=aggregate([],jobs.slice(1),{lane})
+    assert.equal(noPrerequisite.coverage,'incomplete')
+    assert.equal(noPrerequisite.coverageReason,'required tier jobs skipped')
+  }
+  const nightly=aggregate([], [{...finished,name:'nightly-web-setup',conclusion:'failure'},
+    {...skipped,name:'nightly-web-shard (1)'}])
+  assert.equal(nightly.coverage,'incomplete')
+  assert.equal(nightly.coverageReason,'skipped after upstream failure')
+  assert.deepEqual(nightly.missingEvidence,['web-unit','web-shard-1'])
+  assert.deepEqual(nightly.upstreamFailures,[{name:'nightly-web-setup',status:'completed',conclusion:'failure'}])
+  for(const name of ['tier-plan','web-setup','nightly-web-setup']) for(const conclusion of ['failure','cancelled','skipped']) {
+    const job={...finished,name,conclusion,...(conclusion==='skipped'?{completed_at:'0001-01-01T00:00:00Z'}:{})}
+    // Even a retained unit artifact cannot conceal a later setup/build failure.
+    const report=aggregate([reportCases([],[],0,'web-unit')],[job])
+    const skippedUnit=name==='nightly-web-setup'&&conclusion==='skipped'
+    assert.deepEqual(report.missingEvidence,skippedUnit?['web-unit']:[])
+    assert.equal(report.coverage,'incomplete')
+    assert.equal(report.coverageReason,skippedUnit?'skipped after upstream failure':'upstream jobs did not succeed')
+    assert.deepEqual(report.upstreamFailures,[{name,status:'completed',conclusion}])
+  }
+  const jobs=['go-test (1)','go-timing','web-unit (1)','web-shard (1)'].map(name=>({...skipped,name}))
+  const exact=aggregate([],jobs,{lane:'spec-only'})
+  assert.equal(exact.coverage,'untiered')
+  assert.deepEqual(exact.missingEvidence,[])
+  assert.deepEqual(exact.classes,{})
+  // Actions may skip a matrix before it expands, leaving the family name.
+  const unexpanded=aggregate([],jobs.map(job=>({...job,name:job.name.replace(/ \(\d+\)$/,'')})))
+  assert.equal(unexpanded.coverage,'incomplete')
+  assert.deepEqual(unexpanded.missingEvidence,['go-test','go-timing','web-unit','web-shard'])
+  const unexpected=aggregate([], [{...finished,name:'go-test (1)',conclusion:'success'}],{lane:'docs-only'})
+  assert.equal(unexpected.coverage,'incomplete','Executed docs-only jobs still require evidence')
+  const successful=aggregate([reportCases([],[],0,'go-test-1')],[{...finished,name:'go-test (1)',conclusion:'success'}],{lane:'full'})
+  assert.equal(successful.coverage,'reported')
+  assert.deepEqual(successful.missingEvidence,[])
+  const artifactForSkipped=aggregate([reportCases([],[],0,'go-test-1')],[jobs[0]],{lane:'full'})
+  assert.equal(artifactForSkipped.coverage,'incomplete')
+  assert.deepEqual(artifactForSkipped.missingEvidence,['go-test-1'])
+})
+
+test('AEON-732 measurement CLI fixtures expose upstream skips in JSON, summary and exit status',()=>{
+  const root=mkdtempSync(resolve(tmpdir(),'aeon-tier-measurement-'))
+  const finished={status:'completed',started_at:'2026-10-05T10:00:00Z',completed_at:'2026-10-05T10:02:00Z'}
+  const skipped={...finished,conclusion:'skipped',completed_at:'0001-01-01T00:00:00Z',steps:[]}
+  const jobs=[{...finished,name:'tier-plan',conclusion:'failure'},
+    ...['go-test (1)','go-timing','web-setup','web-unit (1)','web-shard (1)'].map(name=>({...skipped,name}))]
+  const evidence=resolve(root,'evidence'),summary=resolve(root,'summary.txt')
+  mkdirSync(evidence)
+  for(const fixture of [
+    {lane:'full',status:1,coverage:'incomplete',reason:'skipped after upstream failure'},
+    {lane:'docs-only',planned:true,status:0,coverage:'reported'},
+    {lane:'full',planned:true,reuse:'merge_group',status:0,coverage:'reused'},
+    {lane:'spec-only',planned:true,status:0,coverage:'untiered'},
+    {lane:'spec-only',status:1,coverage:'incomplete',reason:'upstream jobs did not succeed'},
+  ]) {
+    const fixtureJobs=jobs.map(job=>fixture.planned&&(job.name==='tier-plan'||fixture.lane==='spec-only'&&job.name.startsWith('web-'))
+      ? {...job,...finished,conclusion:'success'}:job)
+    writeFileSync(resolve(root,'gh'),`#!${process.execPath}\nif (process.argv[2] !== 'api' || process.argv[3] !== 'repos/example/aeon/actions/runs/123/attempts/2/jobs?per_page=100&page=1') process.exit(2)\nprocess.stdout.write(${JSON.stringify(JSON.stringify({total_count:fixtureJobs.length,jobs:fixtureJobs}))})\n`,{mode:0o755})
+    writeFileSync(summary,'')
+    const result=spawnSync(process.execPath,[fileURLToPath(new URL('./measure.mjs',import.meta.url)),evidence],{
+      cwd:root,encoding:'utf8',timeout:10_000,
+      env:{PATH:root,GITHUB_REPOSITORY:'example/aeon',GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:'a'.repeat(40),
+        GITHUB_STEP_SUMMARY:summary,CI_LANE:fixture.lane,REUSE:fixture.reuse??'',SOURCE_RUN:fixture.reuse?'456':''},
+    })
+    assert.ifError(result.error)
+    assert.equal(result.status,fixture.status,result.stderr)
+    assert.equal(result.stderr,'')
+    const report=JSON.parse(readFileSync(resolve(root,'tmp/test-tier-run-measurement.json'),'utf8'))
+    const output=JSON.parse(result.stdout)
+    for(const evidence of [report,output]) {
+      assert.equal(evidence.coverage,fixture.coverage)
+      assert.equal(evidence.coverageReason,fixture.reason)
+      assert.deepEqual(evidence.classes,{})
+    }
+    assert.ok(readFileSync(summary,'utf8').includes(`Test tiers: ${fixture.coverage}${fixture.reason?` — ${fixture.reason}`:''};`))
+    if(fixture.lane==='full'&&!fixture.reuse) {
+      assert.deepEqual(report.missingEvidence,['go-test-1','go-timing','web-unit-1','web-shard-1'])
+      assert.ok(readFileSync(summary,'utf8').includes('tier-plan (failure), web-setup (skipped)'))
+      assert.equal(report.measured.sharedPlanningRunnerMinutes,2)
+      assert.equal(report.measured.goRunnerMinutes,0)
+      assert.equal(report.measured.webRunnerMinutes,0)
+    } else assert.deepEqual(report.missingEvidence,[])
+  }
 })
 
 test('completed jobs that ran still reject absent, zero, invalid and reversed timestamps',()=>{
@@ -439,7 +545,7 @@ test('hosted unit and Go weights preserve files/packages and every selected iden
     for(const event of ['pull_request','merge_group','push','schedule']) {
       const rows=select(manifest.tests,{event,paths:['.github/workflows/ci.yml']}).tests.filter(row=>kind==='web'?row.kind!=='browser':row.lane!=='timing')
       const weights=measuredWeights(manifest,rows),count=kind==='web'?4:7
-      const bins=Array.from({length:count},(_,i)=>shard(rows,i+1,count,weights))
+      const bins=Array.from({length:count},(_,i)=>shard(rows,i+1,count,weights,{firstShardLast:kind==='web'}))
       assert.deepEqual(bins.flat().map(key).sort(),rows.map(key).sort())
       const owners=new Map()
       bins.forEach((bin,i)=>bin.forEach(row=>{
@@ -449,6 +555,17 @@ test('hosted unit and Go weights preserve files/packages and every selected iden
       }))
     }
   }
+})
+
+test('unit tie preference keeps the heaviest file away from shard 1 extra checks without losing cases',()=>{
+  const rows=[...Array(4)].flatMap((_,i)=>[1,2].map(n=>({kind:'node',file:`tests/unit-${i}.test.ts`,name:`case ${n}`})))
+  const weights=Object.fromEntries(rows.map(row=>[row.file, row.file.includes('unit-0')?44:30]))
+  const bins=Array.from({length:4},(_,i)=>shard(rows,i+1,4,weights,{firstShardLast:true}))
+  assert.deepEqual(bins.flat().map(key).sort(),rows.map(key).sort())
+  assert.deepEqual(bins[1],rows.slice(0,2))
+  assert.ok(bins[0].every(row=>row.file!=='tests/unit-0.test.ts'))
+  assert.deepEqual(shard(rows,1,1,weights,{firstShardLast:true}).map(key).sort(),rows.map(key).sort())
+  assert.deepEqual(shard(rows,1,4,weights),rows.slice(0,2),'Go/browser default tie policy stays unchanged')
 })
 
 test('measured weights scale the selected slice, retain zero elapsed and reject invalid data',()=>{

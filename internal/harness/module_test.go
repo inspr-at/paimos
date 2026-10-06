@@ -93,9 +93,10 @@ func fixtureWithKind(t *testing.T, now func() time.Time, kind string) *harnessFi
 	secret := uid()
 	sum := sha256.Sum256([]byte(secret))
 	prefix := strings.ReplaceAll(uid(), "-", "")
+	// Production authentication carries the key row on the principal; lead
+	// claims bind it as the generation's dispatch credential.
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'harness-test',$3,$4,$5,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, f.agent.TenantID, f.agent.ID, prefix, hex.EncodeToString(sum[:]), []string{"harness.read", "harness.write", "harness.worker", "harness.control"})
-		return err
+		return tx.QueryRow(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'harness-test',$3,$4,$5,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1)) RETURNING id::text`, f.agent.TenantID, f.agent.ID, prefix, hex.EncodeToString(sum[:]), []string{"harness.read", "harness.write", "harness.worker", "harness.control"}).Scan(&f.agent.AuthKeyID)
 	})
 	f.key = "aeon_" + prefix + "_" + secret
 	// Registration needs worker authority; keep read authority absent so the

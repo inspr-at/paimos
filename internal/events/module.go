@@ -133,41 +133,19 @@ func validUUID(s string) bool {
 }
 
 type page struct {
-	Items      []Event         `json:"items"`
-	NextAfter  *int64          `json:"next_after"`
-	NextCursor *string         `json:"next_cursor,omitempty"`
-	Window     *briefingWindow `json:"window,omitempty"`
+	Items      []Event `json:"items"`
+	NextAfter  *int64  `json:"next_after"`
+	NextCursor *string `json:"next_cursor,omitempty"`
 }
 
 type eventRange struct {
-	from, to         *time.Time
-	types            []string
-	briefing, byTime bool
-	since, cursorAt  *time.Time
-	cursorID         int64
-	project          string
+	from, to *time.Time
+	types    []string
+	byTime   bool
+	cursorAt *time.Time
+	cursorID int64
+	project  string
 }
-
-type briefingWindow struct {
-	From   time.Time `json:"from"`
-	To     time.Time `json:"to"`
-	First  bool      `json:"first"`
-	Capped bool      `json:"capped"`
-}
-
-const briefingWindowSQL = `WITH clock AS MATERIALIZED (SELECT statement_timestamp() AS at),
-			 bounds AS MATERIALIZED (
-			 SELECT greatest(coalesce($2::timestamptz,at-interval '24 hours'),at-interval '8784 hours') AS start,
-			        greatest(at,coalesce($2::timestamptz,at)) AS finish,
-			        $2::timestamptz IS NULL AS first,
-			        $2::timestamptz < at-interval '8784 hours' AS capped FROM clock)
-			 SELECT start,finish,first,coalesce(capped,false),
-			        coalesce((SELECT jsonb_agg(e ORDER BY e.at,e.id) FROM (
-			          SELECT id,actor_principal_id::text,node_id::text,type,before,after,at,undo_of
-			          FROM events WHERE tenant_id=$1 AND at>=start AND at<finish AND type NOT LIKE 'quote.%'
-			            AND ($3::text[] IS NULL OR type=ANY($3))
-			          ORDER BY at,id LIMIT $4) e),'[]'::jsonb)
-			 FROM bounds`
 
 func (m *module) read(ctx context.Context, p tenant.Principal, node string, after int64, limit int, ranges ...eventRange) (page, error) {
 	result := page{Items: make([]Event, 0)}
@@ -177,25 +155,6 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, afte
 	}
 	// Read as the reader: row-level security shows its projects only.
 	err := db.InTenant(tenant.WithPrincipal(ctx, p), m.pool, p.TenantID, func(tx pgx.Tx) error {
-		if bounds.briefing {
-			// The statement start and first log page share one snapshot; the
-			// cutoff cannot consume commits made after that snapshot.
-			// An empty page still returns bounds. A backwards clock never replays a day.
-			window := briefingWindow{}
-			var body []byte
-			err := tx.QueryRow(ctx, briefingWindowSQL, p.TenantID, bounds.since, bounds.types, limit+1).Scan(&window.From, &window.To, &window.First, &window.Capped, &body)
-			if err != nil {
-				return err
-			}
-			if err := json.Unmarshal(body, &result.Items); err != nil {
-				return err
-			}
-			result.Window = &window
-			if err := redactAccountEvents(ctx, tx, p, result.Items); err != nil {
-				return err
-			}
-			return attachNodeChanges(ctx, tx, p.TenantID, result.Items)
-		}
 		// Quote events use the quote-scoped collaboration stream, which rechecks
 		// resource access and plugin installation. Never expose them on the
 		// tenant-wide list or stream, even when node_id is supplied.
@@ -244,7 +203,7 @@ func (m *module) read(ctx context.Context, p tenant.Principal, node string, afte
 		result.Items = result.Items[:limit]
 		last := result.Items[limit-1].ID
 		result.NextAfter = &last
-		if bounds.byTime || bounds.briefing {
+		if bounds.byTime {
 			at := result.Items[limit-1].At
 			cursor := base64.RawURLEncoding.EncodeToString([]byte(at.Format(time.RFC3339Nano) + "|" + strconv.FormatInt(last, 10)))
 			result.NextCursor = &cursor
@@ -281,28 +240,15 @@ func (m *module) list(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var bounds eventRange
-	if q.Has("briefing") && q.Get("briefing") != "true" && q.Get("briefing") != "false" || q.Has("order") && q.Get("order") != "id" && q.Get("order") != "time" {
-		writeError(w, 400, "invalid_request", "invalid briefing or order")
+	if q.Has("briefing") || q.Has("since") {
+		writeError(w, 400, "invalid_request", "briefing and since are no longer supported; use from/to")
 		return
 	}
-	bounds.briefing, bounds.byTime = q.Get("briefing") == "true", q.Get("order") == "time" || q.Has("cursor")
-	if bounds.briefing {
-		if q.Has("from") || q.Has("to") || q.Has("after") || q.Has("cursor") || q.Has("node_id") || q.Has("project_id") {
-			writeError(w, 400, "invalid_request", "briefing establishes its own window")
-			return
-		}
-		if q.Has("since") {
-			at, err := time.Parse(time.RFC3339Nano, q.Get("since"))
-			if err != nil {
-				writeError(w, 400, "invalid_request", "invalid since")
-				return
-			}
-			bounds.since = &at
-		}
-	} else if q.Has("since") {
-		writeError(w, 400, "invalid_request", "since requires briefing=true")
+	if q.Has("order") && q.Get("order") != "id" && q.Get("order") != "time" {
+		writeError(w, 400, "invalid_request", "invalid order")
 		return
 	}
+	bounds.byTime = q.Get("order") == "time" || q.Has("cursor")
 	if q.Has("project_id") {
 		if !validUUID(q.Get("project_id")) {
 			writeError(w, 400, "invalid_request", "invalid project_id")
@@ -319,7 +265,7 @@ func (m *module) list(w http.ResponseWriter, r *http.Request) {
 		}
 		bounds.from, bounds.to = &from, &to
 	}
-	if bounds.byTime && !bounds.briefing && (bounds.from == nil || q.Has("after")) {
+	if bounds.byTime && (bounds.from == nil || q.Has("after")) {
 		writeError(w, 400, "invalid_request", "time order requires from/to and excludes after")
 		return
 	}
