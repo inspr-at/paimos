@@ -62,15 +62,15 @@ watch(() => props.state, state => { if (state !== 'working') glint.value = 0 })
 
   display: inline-block; flex: none; width: var(--size); height: var(--size); vertical-align: middle; overflow: visible;
 }
-.disk { fill: var(--surface-raised, #fffefa); }
+.disk { fill: var(--surface-raised); }
 .rim { fill: none; stroke: var(--signal); stroke-width: 1.25; opacity: .38; }
-.linework { fill: none; stroke: var(--ink, #203c3d); stroke-width: calc(1.35px * var(--art-stroke, 1)); stroke-linecap: round; stroke-linejoin: round; }
-.head { fill: var(--surface-raised, #fffefa); }
+.linework { fill: none; stroke: var(--ink); stroke-width: calc(1.35px * var(--art-stroke, 1)); stroke-linecap: round; stroke-linejoin: round; }
+.head { fill: var(--surface-raised); }
 .waiting .linework, .stale .linework { stroke: var(--signal); }
 .stale .rim { stroke-dasharray: .6 3.2; stroke-linecap: round; opacity: .6; }
-.clock { fill: var(--surface-raised, #fffefa); stroke: var(--signal); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
+.clock { fill: var(--surface-raised); stroke: var(--signal); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .clock path { fill: none; }
-.glint { fill: #c9a24a; stroke: var(--surface-raised, #fffefa); stroke-width: .6; opacity: 0; animation: event-opacity .6s ease-out both; }
+.glint { fill: var(--secondary-line); stroke: var(--surface-raised); stroke-width: .6; opacity: 0; animation: event-opacity .6s ease-out both; }
 @media (prefers-reduced-motion: no-preference) {
   .working.lead .eyes { transform-origin: 16px 15.5px; animation: rare-blink 11s linear infinite; animation-delay: var(--phase); }
   .lead .glint { transform-origin: 6px 7px; animation-name: event-glint; }

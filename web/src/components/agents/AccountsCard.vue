@@ -267,18 +267,18 @@ async function backInPool(account: AgentAccount) {
 .meta > span:not(.sep) { white-space: nowrap; }
 .plan { color: var(--ink-2); }
 .state { color: var(--ink-2); font-weight: 600; }
-.account.signin .state { color: var(--gold-ink); }
+.account.signin .state { color: var(--warn-ink); }
 .sep { font-weight: 400; color: var(--ink-3); }
-.name-it { height: 22px; padding: 0 8px; border: 0; border-radius: 999px; background: var(--gold-wash); color: var(--gold-ink); font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.name-it { height: 22px; padding: 0 8px; border: 0; border-radius: 999px; background: var(--gold-wash); color: var(--warn-ink); font-size: 11.5px; font-weight: 600; cursor: pointer; }
 .name-it:focus-visible { box-shadow: var(--focus-ring); }
 .use { display: inline-grid; place-items: center; width: 50px; height: 32px; padding: 0; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
 @media (hover: hover) { .use:not(:disabled, [aria-disabled="true"]):hover { background: var(--row-selected); } }
 .use:focus-visible { box-shadow: var(--focus-ring); }
 .use:disabled, .use[aria-disabled="true"] { cursor: default; }
 .track { position: relative; flex: none; width: 34px; height: 20px; border-radius: 999px; background: var(--track); box-shadow: inset 0 0 0 1px var(--line-2); transition: background-color .15s ease; }
-.thumb { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface-raised); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s ease; }
-.use[aria-checked="true"] .track { background: linear-gradient(90deg, #0e6f6c, #1a8683); box-shadow: none; }
-.use[aria-checked="true"] .thumb { transform: translateX(14px); background: #fff; }
+.thumb { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface-raised); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-black) 25%, transparent); transition: transform .15s ease; }
+.use[aria-checked="true"] .track { background: linear-gradient(90deg, var(--primary), var(--primary-hi)); box-shadow: none; }
+.use[aria-checked="true"] .thumb { transform: translateX(14px); background: var(--primary-on); }
 .use:disabled .track, .use[aria-disabled="true"] .track { opacity: .55; }
 .more { justify-self: end; color: var(--ink-3); }
 .more :deep(svg) { transition: transform .15s ease; }

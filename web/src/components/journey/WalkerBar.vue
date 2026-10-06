@@ -241,7 +241,7 @@ defineExpose({ reveal })
 .fn { min-width: 0; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .fn:hover { color: var(--teal-ink); }
 .fn:focus-visible { border-radius: 4px; box-shadow: var(--focus-ring); }
-.rid { margin-right: 6px; font: 500 10px/1 var(--mono); letter-spacing: .06em; color: var(--gold-ink); }
+.rid { margin-right: 6px; font: 500 10px/1 var(--mono); letter-spacing: .06em; color: var(--secondary-ink); }
 .fg.cur .fl { color: var(--teal-ink); font-weight: 600; }
 .nofeat .fn { color: var(--ink-3); }
 .ekey { position: sticky; right: 52px; display: inline-flex; align-items: center; gap: 3px; margin-left: auto; padding-left: 6px; flex-shrink: 0; font: 500 10.5px/1 var(--mono); letter-spacing: .04em; color: var(--ink-3); text-decoration: none; transition: opacity .15s ease; }
@@ -257,7 +257,7 @@ defineExpose({ reveal })
 .ck:hover { box-shadow: inset 0 0 0 1px var(--aqua); }
 .ck:has(.go:focus-visible) { box-shadow: inset 0 0 0 1px var(--aqua), var(--focus-ring); }
 .go { display: inline-flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; outline: none; }
-.ck.on { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line), 0 4px 12px -6px rgba(14, 111, 108, .55); }
+.ck.on { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line), 0 4px 12px -6px color-mix(in srgb, var(--primary-line) 55%, transparent); }
 .k { font: 500 11.5px/1 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
 .ck.out .k { color: var(--ink-3); }
 .ck.on .k { color: var(--teal-ink); }

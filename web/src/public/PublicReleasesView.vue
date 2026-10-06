@@ -242,7 +242,7 @@ h1 {
   padding: 18px;
   border-radius: 16px;
   background: var(--surface-raised);
-  box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(20, 40, 40, 0.04);
+  box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-color) 4%, transparent);
 }
 .release h2 {
   margin: 0;

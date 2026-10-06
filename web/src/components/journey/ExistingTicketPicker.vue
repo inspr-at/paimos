@@ -256,7 +256,7 @@ h2 { font-size: 18px; }
 .key { flex-shrink: 0; width: 92px; font-size: 11.5px; color: var(--ink-3); }
 .copy { display: contents; }
 .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
-.title :deep(mark) { background: color-mix(in oklab, var(--gold) 35%, transparent); color: inherit; }
+.title :deep(mark) { background: color-mix(in oklab, var(--secondary-line) 35%, transparent); color: inherit; }
 .type, .mark { flex-shrink: 0; font-size: 11.5px; color: var(--ink-3); }
 .type { order: 1; }
 .mark { order: 2; }

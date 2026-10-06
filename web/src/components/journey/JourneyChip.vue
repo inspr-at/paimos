@@ -54,7 +54,7 @@ onBeforeUnmount(() => emit('shown', false))
   display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-width: 0; height: 30px; padding: 0 12px 0 4px; border-radius: 999px;
   background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 12.5px; white-space: nowrap; overflow: hidden;
 }
-.journey-chip:hover .face { box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .6); color: var(--ink); }
+.journey-chip:hover .face { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 60%, transparent); color: var(--ink); }
 .journey-chip:focus-visible .face { box-shadow: var(--focus-ring); }
 .journey-chip.active .face { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .n { display: inline-grid; place-items: center; flex-shrink: 0; width: 22px; height: 22px; border-radius: 7px; background: radial-gradient(circle at 40% 35%, var(--surface), var(--aqua)); box-shadow: 0 0 0 1px var(--aqua); color: var(--teal-ink); font-size: 10.5px; }

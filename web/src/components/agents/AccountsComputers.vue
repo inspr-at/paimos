@@ -658,7 +658,7 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 .c-side { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .more { width: 36px; height: 36px; color: var(--ink-2); }
 .notice { display: flex; gap: 12px; align-items: flex-start; margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: color-mix(in srgb, var(--gold) 11%, transparent); color: var(--ink); }
-.n-icon { flex: none; margin-top: 2px; color: var(--gold-ink); }
+.n-icon { flex: none; margin-top: 2px; color: var(--warn-ink); }
 .n-text { min-width: 0; flex: 1; }
 .n-title { margin: 0; font-size: 14px; font-weight: 600; line-height: 1.45; }
 .n-body { margin: 2px 0 0; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; }
@@ -709,10 +709,10 @@ const statusOf = (card: ComputerCard) => (card.computer ? describeComputerStatus
 .seg button[data-v="custom"] { padding: 0 12px; white-space: nowrap; }
 .seg button:disabled { cursor: default; }
 .seg button:disabled:not([aria-checked="true"]) { opacity: .6; }
-.tog { position: relative; display: inline-flex; align-items: center; flex: none; width: 38px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: var(--line-2); box-shadow: inset 0 1px 2px rgba(0, 0, 0, .12); cursor: pointer; }
-.tog::after { content: ''; position: absolute; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .28); transition: transform .18s ease; }
-.tog[aria-checked="true"] { background: linear-gradient(180deg, #1a8683, #0e6f6c); }
-.tog[aria-checked="true"]::after { transform: translateX(16px); }
+.tog { position: relative; display: inline-flex; align-items: center; flex: none; width: 38px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: var(--line-2); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-black) 12%, transparent); cursor: pointer; }
+.tog::after { content: ''; position: absolute; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--switch-knob); box-shadow: 0 1px 3px color-mix(in srgb, var(--shadow-black) 28%, transparent); transition: transform .18s ease; }
+.tog[aria-checked="true"] { background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo)); }
+.tog[aria-checked="true"]::after { background: var(--primary-on); transform: translateX(16px); }
 .tog:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .tog:disabled { cursor: default; opacity: .6; }
 .gear { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 999px; background: transparent; color: var(--ink-3); }

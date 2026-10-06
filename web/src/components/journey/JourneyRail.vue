@@ -63,7 +63,7 @@ function stepLabel(stage: Stage, index: number) {
 
 <style scoped>
 .rail {
-  --rail-gold: var(--gold);
+  --rail-gold: var(--secondary-line);
   position: relative; display: grid; gap: 8px; padding: 12px 18px 14px; border-radius: var(--radius);
   background: var(--glass); box-shadow: var(--shadow); -webkit-backdrop-filter: blur(18px) saturate(1.1); backdrop-filter: blur(18px) saturate(1.1);
 }
@@ -71,7 +71,7 @@ function stepLabel(stage: Stage, index: number) {
 .rail-title .tt { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rail-title b { color: var(--ink); font-weight: 600; }
 /* What comes next: fades in while the rail is hovered or focused. */
-.hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--gold-ink); opacity: 0; transition: opacity .5s ease-in-out; }
+.hint { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; color: var(--secondary-ink); opacity: 0; transition: opacity .5s ease-in-out; }
 .rail:hover .hint, .rail:focus-within .hint { opacity: 1; }
 .stages { display: flex; align-items: center; gap: 0; margin: 0; padding: 0; list-style: none; }
 .stages li { display: flex; align-items: center; flex: 1 1 0; min-width: 0; gap: 6px; }
@@ -86,21 +86,21 @@ li.viewed:not(.here) .t { font-weight: 600; }
 .n {
   display: inline-grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; border-radius: 8px;
   background: var(--surface); color: var(--ink-3); font: 500 10.5px/1 var(--mono); font-variant-numeric: tabular-nums;
-  box-shadow: 0 0 0 1px var(--line-2), 0 2px 4px -2px rgba(32, 60, 61, .25);
+  box-shadow: 0 0 0 1px var(--line-2), 0 2px 4px -2px color-mix(in srgb, var(--shadow-color) 25%, transparent);
 }
-li.done .n { color: var(--gold-ink); background: linear-gradient(160deg, var(--surface), var(--gold-wash)); box-shadow: 0 0 0 1px rgba(214, 155, 49, .7), 0 0 10px -2px rgba(214, 155, 49, .45); }
+li.done .n { color: var(--secondary-ink); background: linear-gradient(160deg, var(--surface), var(--secondary-tint-3)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--secondary-line) 70%, transparent), 0 0 10px -2px color-mix(in srgb, var(--secondary-line) 45%, transparent); }
 li.skipped .step { opacity: .55; }
 li.blocked .n { color: var(--danger); box-shadow: 0 0 0 1px var(--danger-line); background: var(--danger-bg); }
-li.here .n { color: var(--teal-ink); background: radial-gradient(circle at 40% 35%, var(--surface), var(--aqua)); box-shadow: 0 0 0 1px var(--aqua), 0 0 14px rgba(164, 229, 223, .75); }
+li.here .n { color: var(--teal-ink); background: radial-gradient(circle at 40% 35%, var(--surface), var(--aqua)); box-shadow: 0 0 0 1px var(--aqua), 0 0 14px color-mix(in srgb, var(--primary-tint) 75%, transparent); }
 li.here .step { padding-right: 12px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-weight: 600; }
-li.here .step:hover { box-shadow: inset 0 0 0 1px var(--gold), 0 0 16px -6px rgba(214, 155, 49, .7); }
+li.here .step:hover { box-shadow: inset 0 0 0 1px var(--secondary-line), 0 0 16px -6px color-mix(in srgb, var(--secondary-line) 70%, transparent); }
 li.here .led { margin-left: 2px; }
 /* Connectors: a faint gold hairline ahead, a bright one (with a dot) after a done stage. */
-.link { position: relative; flex: 1 1 auto; min-width: 10px; height: 1px; margin: 0 6px; background: linear-gradient(90deg, rgba(214, 155, 49, .12), rgba(214, 155, 49, .5), rgba(214, 155, 49, .12)); }
-li.done .link { background: linear-gradient(90deg, var(--gold-2), var(--gold), var(--gold-2)); box-shadow: 0 0 6px rgba(214, 155, 49, .35); }
-li.done .link::after { content: ''; position: absolute; right: -2px; top: -2px; width: 5px; height: 5px; border-radius: 50%; background: var(--gold); }
+.link { position: relative; flex: 1 1 auto; min-width: 10px; height: 1px; margin: 0 6px; background: linear-gradient(90deg, color-mix(in srgb, var(--secondary-line) 12%, transparent), color-mix(in srgb, var(--secondary-line) 50%, transparent), color-mix(in srgb, var(--secondary-line) 12%, transparent)); }
+li.done .link { background: linear-gradient(90deg, var(--secondary-tint), var(--secondary-line), var(--secondary-tint)); box-shadow: 0 0 6px color-mix(in srgb, var(--secondary-line) 35%, transparent); }
+li.done .link::after { content: ''; position: absolute; right: -2px; top: -2px; width: 5px; height: 5px; border-radius: 50%; background: var(--secondary-line); }
 .led { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-3); flex-shrink: 0; }
-.led.on { background: #a4e5df; box-shadow: 0 0 8px #a4e5df; }
+.led.on { background: var(--primary-line); box-shadow: 0 0 8px var(--primary-line); }
 @media (prefers-reduced-motion: no-preference) { .led.on { animation: led 2.4s ease-in-out infinite; } }
 @keyframes led { 50% { opacity: .55; } }
 @media (max-width: 1180px) { .stages li:not(.here):not(.viewed) .t { display: none; } .stages li:not(.here) .step { padding-right: 4px; } }

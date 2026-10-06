@@ -20,14 +20,14 @@
 .j-kv dd.faint { color: var(--ink-3); }
 .j-checks { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: 13.5px; color: var(--ink); }
 .j-checks li { display: grid; grid-template-columns: 18px minmax(0, 1fr); gap: 8px; align-items: start; }
-.j-checks .ok { color: var(--ok); } .j-checks .warn { color: var(--gold-ink); } .j-checks .info { color: var(--teal); } .j-checks .bad { color: var(--danger); }
+.j-checks .ok { color: var(--ok); } .j-checks .warn { color: var(--warn-ink); } .j-checks .info { color: var(--teal); } .j-checks .bad { color: var(--danger); }
 .j-checks svg { margin-top: 3px; }
 .j-note { font-size: 12.5px; color: var(--ink-2); }
 .j-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
 .j-stat { display: grid; gap: 2px; padding: 10px 12px; border-radius: 10px; background: var(--surface); box-shadow: 0 0 0 1px var(--line); }
 .j-stat b { font: 500 20px/1.2 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
 .j-stat span { font-size: 12px; color: var(--ink-2); }
-.j-stat.warn b { color: var(--gold-ink); }
+.j-stat.warn b { color: var(--warn-ink); }
 .j-segs { display: flex; gap: 3px; height: 6px; }
 .j-segs i { flex: 1; border-radius: 3px; background: var(--track); }
 .j-segs i.on { background: linear-gradient(180deg, color-mix(in oklab, var(--aqua) 60%, var(--teal)), var(--teal)); }
@@ -39,13 +39,13 @@
 .j-timeline .dot.ok { color: var(--ok); box-shadow: 0 0 0 1px color-mix(in oklab, var(--ok) 50%, transparent); }
 .j-timeline .dot.bad { color: var(--danger); box-shadow: 0 0 0 1px var(--danger-line); background: var(--danger-bg); }
 .j-timeline .dot.run { color: var(--teal); box-shadow: 0 0 0 1px var(--aqua); }
-.j-timeline .dot.gold { color: var(--gold-ink); box-shadow: 0 0 0 1px rgba(214, 155, 49, .6); }
+.j-timeline .dot.gold { color: var(--secondary-ink); box-shadow: 0 0 0 1px color-mix(in srgb, var(--secondary-line) 60%, transparent); }
 .j-timeline .what { display: grid; gap: 2px; min-width: 0; font-size: 13.5px; color: var(--ink); }
 .j-timeline .what small { font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }
 .j-timeline time, .j-timeline .when { font-size: 12px; color: var(--ink-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .j-chip { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10px/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); white-space: nowrap; }
 .j-chip.teal { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
-.j-chip.gold { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: var(--gold-ink); }
+.j-chip.gold { background: var(--secondary-tint-3); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--secondary-line) 45%, transparent); color: var(--secondary-ink); }
 .j-chip.bad { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); }
 .j-chip.ok { color: var(--ok); }
 .j-cite { display: inline-flex; align-items: center; height: 20px; padding: 0 7px; border: 0; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 500 10.5px/1 var(--mono); cursor: pointer; }
@@ -57,7 +57,7 @@
 .j-rows .mono { font-size: 11.5px; color: var(--ink-3); font-variant-ligatures: none; }
 .j-rows .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .j-flash { animation: j-flash 1.8s ease; }
-@keyframes j-flash { 0%, 40% { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .6); } }
+@keyframes j-flash { 0%, 40% { background: var(--gold-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 60%, transparent); } }
 @media (prefers-reduced-motion: reduce) { .j-flash { animation: none; } }
 @media (max-width: 1080px) { .j-grid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 720px) {

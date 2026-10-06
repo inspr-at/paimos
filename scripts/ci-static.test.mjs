@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { parseWorkflow, staticSteps, validateRegistry, parseArgs, runCommand, runChecks, mergedTree, main, fixedEnvironment, reuseDependencies, versionWarnings } from './ci-static.mjs'
+import { colourLiterals, checkThemeColours } from './check-theme-colours.mjs'
 
 const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
 const registry = JSON.parse(readFileSync(new URL('./ci/static-checks.json', import.meta.url), 'utf8'))
@@ -48,7 +49,7 @@ test('drift guard catches newly added commands in each full static job', () => {
 })
 
 test('every primary mirror is required even when a supplement shares its origin', () => {
-  for (const row of registry.checks.filter(c => !c.supplement)) {
+  for (const row of registry.checks.filter(c => !c.supplement && !c.local_only)) {
     const copy = { ...registry, checks: registry.checks.filter(c => c.id !== row.id) }
     assert.throws(() => validateRegistry(copy, parseWorkflow(workflow)), /Unregistered static CI command/, row.id)
   }
@@ -68,7 +69,7 @@ test('new jobs, new excluded-job steps and unknown multiline commands require cl
 
 test('drift guard rejects deleted origins, changed commands/cwd, duplicate ids and missing mirrors', () => {
   const jobs = parseWorkflow(workflow)
-  for (const row of registry.checks) {
+  for (const row of registry.checks.filter(c => !c.local_only)) {
     const copy = structuredClone(registry)
     copy.checks.find(c => c.id === row.id).ci.command += ' --changed'
     assert.throws(() => validateRegistry(copy, jobs), /Stale CI reference/, row.id)
@@ -404,4 +405,32 @@ test('merge-main selects the merged registry and workflow, including checks chan
   assert.match(report.results[0].command, /process.exit\(7\)/)
   assert.equal(repo.git(['worktree', 'list', '--porcelain']), before)
   assert.match(readFileSync(join(repo.dir, 'scripts/ci/static-checks.json'), 'utf8'), /process.exit\(0\)/)
+})
+
+test('colour guard rejects literals in CSS, inline SVG and component script colours', () => {
+  for (const value of ['#fff', '#abc4', '#123456', '#12345678', 'rgba(14,111,108,.2)', 'rgb(0 0 0 / .4)', 'hsl(30 50% 40%)', 'oklch(.8 .09 20)', 'color(display-p3 1 0 0)']) {
+    const source = `<style>\n.control { background: ${value}; }</style>`
+    assert.equal(colourLiterals(source, 'components/Test.vue')[0]?.line, 2, value)
+  }
+  assert.equal(colourLiterals('<svg fill="#a4e5df" />', 'components/Test.vue').length, 1)
+  assert.equal(colourLiterals('<script>const fill = "#a4e5df"</script>', 'components/Test.vue').length, 1)
+  assert.equal(colourLiterals('<style>.x { color: red; }</style>', 'components/Test.vue').length, 1)
+  assert.equal(colourLiterals('<style>.x { background: linear-gradient(white, rebeccapurple); box-shadow: 0 0 2px silver; }</style>', 'components/Test.vue').length, 3)
+})
+test('colour exceptions remain narrow: masks, documents, identity and artwork', () => {
+  assert.deepEqual(colourLiterals('<!-- #fff --> <style>/* #fff */ .x { background: var(--primary); mask-image: linear-gradient(#000, transparent); }</style><a href="#add-account" data-color="blue" />', 'components/Test.vue'), [])
+  assert.equal(colourLiterals('<style>.x { mask-image: linear-gradient(#000, transparent); color: #fff; }</style>', 'components/Test.vue').length, 1)
+  assert.deepEqual(colourLiterals('<style>.paper { color: #fff; }</style>', 'components/quotes/editor/QuoteDocument.vue'), [])
+  assert.equal(colourLiterals('<style>.control { color: #fff; }</style>', 'components/settings/ThemeColoursCard.vue').length, 1)
+  assert.equal(colourLiterals('<style>.glint { fill: #c9a24a; } --blush: oklch(.8 .09 20 / .55);</style>', 'components/indicators/Robot5.vue').length, 1)
+  assert.deepEqual(checkThemeColours(root).failures, [])
+})
+test('colour guard is local-only and cannot replace or weaken a CI mirror', () => {
+  const check = registry.checks.find(c => c.id === 'theme-colour-literals')
+  assert.ok(check.local_only); assert.equal(check.ci, undefined)
+  const copy = structuredClone(registry)
+  copy.checks.find(c => c.id === 'go-vet').local_only = 'pretend this mirror is local'
+  assert.throws(() => validateRegistry(copy, parseWorkflow(workflow)), /Invalid local-only/)
+  copy.checks = copy.checks.filter(c => c.id !== 'go-vet')
+  assert.throws(() => validateRegistry(copy, parseWorkflow(workflow)), /Unregistered static CI command/)
 })

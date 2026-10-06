@@ -108,3 +108,13 @@ test('first-paint bootstrap tolerates unavailable storage and rejects corrupt, o
   }
   assert.equal(bootstrap(null, true).styles.length, 0)
 })
+
+test('component category colours and warning aliases remain outside the theme engine', () => {
+  const css = readFileSync(new URL('../src/styles/tokens.css', import.meta.url), 'utf8')
+  const fixed = ['--label-blue', '--label-red', '--label-green', '--label-yellow', '--label-purple', '--label-teal', '--label-pink', '--kind-parent', '--warn-ink', '--ok-bg', '--ok-line']
+  for (const mode of ['light', 'dark'] as const) {
+    const values = { ...PORCELAIN, primary: { light: '#ff0000', dark: '#00ff00' }, secondary: { light: '#0000ff', dark: '#ffffff' } }
+    const tokens = themeTokens(values, mode)
+    for (const name of fixed) { assert.ok(css.includes(`${name}:`), name); assert.equal(tokens[name], undefined, name) }
+  }
+})

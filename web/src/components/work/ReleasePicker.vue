@@ -142,7 +142,7 @@ function keydown(event: KeyboardEvent) {
 .sheet-card {
   display: flex; flex-direction: column; height: 100%; padding: env(safe-area-inset-top) 8px 0;
   background: var(--surface-raised);
-  box-shadow: 0 -18px 40px -18px rgba(0, 0, 0, .35);
+  box-shadow: 0 -18px 40px -18px color-mix(in srgb, var(--shadow-black) 35%, transparent);
 }
 .grabber { align-self: center; width: 40px; height: 4px; margin-top: 8px; border-radius: 999px; background: var(--line-2); }
 .sheet-card .menu-title { padding: 10px 12px 6px; }

@@ -29,7 +29,7 @@ const id = useId()
 
 <style scoped>
 .history-head { display: flex; align-items: flex-start; gap: 12px; }
-.history-mark { display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px; color: var(--gold-ink); background: var(--gold-wash); box-shadow: 0 0 0 1px rgba(214, 155, 49, .5); }
+.history-mark { display: grid; place-items: center; flex-shrink: 0; width: 28px; height: 28px; border-radius: 8px; color: var(--secondary-ink); background: var(--secondary-tint-3); box-shadow: 0 0 0 1px color-mix(in srgb, var(--secondary-line) 50%, transparent); }
 .history-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
 .history-text h3 { font-size: 16px; font-weight: 500; }
 .chev { transition: transform .15s ease; }

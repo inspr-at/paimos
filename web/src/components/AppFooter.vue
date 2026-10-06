@@ -256,8 +256,8 @@ const label = computed(() => {
 .pill-skeleton { position: absolute; left: 0; right: 0; height: 8px; }
 .fallback { font: 500 11.5px/16px var(--font); }
 .version-plain .fallback { position: absolute; left: 0; }
-.new-badge { display: inline-flex; align-items: center; flex: none; gap: 5px; margin-left: 10px; font: 600 11px/16px var(--font); color: var(--gold-ink); }
-.new-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gold); }
+.new-badge { display: inline-flex; align-items: center; flex: none; gap: 5px; margin-left: 10px; font: 600 11px/16px var(--font); color: var(--secondary-ink); }
+.new-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--secondary-line); }
 @media (hover: hover) {
   .version-pill:hover .pill-face { background-color: var(--row-hover); }
   .version-pill:hover .footer-codename, .version-pill:hover .pill-face > svg { color: var(--teal-ink); }
@@ -271,7 +271,7 @@ const label = computed(() => {
 .card-version { margin-top: 3px; font-size: 13px; line-height: 18px; color: var(--ink); }
 .card-meta { margin-top: 2px; font-size: 12px; line-height: 1.45; color: var(--ink-2); }
 .card-foot { display: flex; align-items: center; gap: 7px; margin-top: 10px; padding-top: 9px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
-.card-new { margin-left: auto; color: var(--gold-ink); font-weight: 600; white-space: nowrap; }
+.card-new { margin-left: auto; color: var(--secondary-ink); font-weight: 600; white-space: nowrap; }
 .version-plain { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; min-width: 112px; font-size: 12px; color: var(--ink); }
 @media (max-width: 600px) {
   .app-footer { gap: 8px; padding: 0 12px; transition: transform .22s ease; }

@@ -50,15 +50,15 @@ const emit = defineEmits<{ act: [] }>()
   -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px);
 }
 /* A gold hairline just inside the edge. */
-.gate-card::after { content: ''; position: absolute; inset: 6px; z-index: -1; border-radius: calc(var(--radius) - 5px); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); pointer-events: none; }
+.gate-card::after { content: ''; position: absolute; inset: 6px; z-index: -1; border-radius: calc(var(--radius) - 5px); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 35%, transparent); pointer-events: none; }
 .gate-card.record { background: var(--glass); box-shadow: var(--shadow); }
 .gate-card.record::after { box-shadow: inset 0 0 0 1px var(--line); }
 .gate-card.blocked { background: radial-gradient(120% 90% at 100% 0%, var(--gold-wash), transparent 60%), var(--glass); box-shadow: var(--shadow); }
-.gate-card.blocked::after { box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); }
+.gate-card.blocked::after { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 35%, transparent); }
 .gh { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px 12px; min-width: 0; }
 .gh-text { flex: 1 1 220px; min-width: 0; }
 .gate-eyebrow { display: inline-flex; align-items: center; gap: 6px; color: var(--teal-ink); }
-.blocked .gate-eyebrow { color: var(--gold-ink); }
+.blocked .gate-eyebrow { color: var(--warn-ink); }
 .record .gate-eyebrow { color: var(--ink-3); }
 .gh h2 { margin-top: 4px; font-size: 22px; font-weight: 300; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .gate-btn { flex-shrink: 0; gap: 8px; }

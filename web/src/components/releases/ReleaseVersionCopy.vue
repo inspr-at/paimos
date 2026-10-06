@@ -23,7 +23,7 @@ watchEffect(() => {
   void dark.value
   off?.(); off = undefined
   if (!pretty.value || !full.value || !trigger.value) return
-  const options = { config: display, interactive: false, brand: getComputedStyle(pretty.value).getPropertyValue('--gold-ink').trim() }
+  const options = { config: display, interactive: false, brand: getComputedStyle(pretty.value).getPropertyValue('--secondary-ink').trim() }
   renderVersion(pretty.value, canonical.value, CALENDAR_DISPLAY_SCHEME, { ...options, mode: 'pretty' })
   renderVersion(full.value, canonical.value, CALENDAR_DISPLAY_SCHEME, { ...options, mode: 'reduced' })
   off = attachVersionCrossfade(pretty.value, full.value, trigger.value)

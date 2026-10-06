@@ -252,7 +252,7 @@ defineExpose({ reset, focus: focusFirst, openPicker: () => { picker.value = pick
 .pick:disabled, .field:disabled, .days button:disabled { cursor: not-allowed; opacity: .55; }
 .log-foot { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; min-height: 18px; }
 .log-status { flex: 1; min-width: 0; font-size: 12px; color: var(--ink-3); }
-.log-status.warn { color: var(--gold-ink); }
+.log-status.warn { color: var(--warn-ink); }
 .edit-keys { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
 .remove-btn { gap: 6px; }
 /* Correcting an entry: the same line plus Cancel beside Save. */

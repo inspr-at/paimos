@@ -61,9 +61,9 @@ const stateOf = (ticket: WalkerTicket) => props.workById.get(ticket.ticket_node_
 .release-tickets { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .release-tickets, .grp, .tks, .tk { min-width: 0; }
 .grp { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
-.grp-h { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 4px 6px 6px; border-bottom: 1px solid color-mix(in oklab, var(--gold) 45%, transparent); font-size: 12.5px; color: var(--ink-2); }
+.grp-h { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 4px 6px 6px; border-bottom: 1px solid color-mix(in oklab, var(--secondary-line) 45%, transparent); font-size: 12.5px; color: var(--ink-2); }
 .fcb-ph { width: 16px; flex-shrink: 0; }
-.rid { flex-shrink: 0; font-size: 10.5px; font-weight: 500; letter-spacing: .06em; color: var(--gold-ink); }
+.rid { flex-shrink: 0; font-size: 10.5px; font-weight: 500; letter-spacing: .06em; color: var(--secondary-ink); }
 .ft { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ekey { display: inline-flex; align-items: center; gap: 3px; flex-shrink: 0; font-size: 10.5px; font-weight: 500; letter-spacing: .04em; color: var(--ink-3); text-decoration: none; }
 .ekey:hover { color: var(--teal-ink); }

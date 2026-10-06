@@ -301,7 +301,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
 /* Chevron and count badge share one slot so buttons never change width. */
 .facet-end { display: inline-grid; place-items: center; width: 18px; }
 .facet-chevron { color: var(--ink-3); }
-.facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: linear-gradient(180deg, #1a8683, #0e6f6c); color: #fff; font-size: 10.5px; font-weight: 700; }
+.facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: linear-gradient(180deg, var(--primary-hi), var(--primary)); color: var(--primary-on); font-size: 10.5px; font-weight: 700; }
 .clear-all { padding: 0 8px; }
 .spacer { flex: 1; }
 /* The count keeps its width while numbers change, so the controls beside it never shift. */

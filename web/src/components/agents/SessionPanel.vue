@@ -351,7 +351,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .host-meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; }
 .name { min-width: 0; white-space: normal; overflow-wrap: anywhere; font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
 .state-text { flex-shrink: 0; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
-.state-text.needs { color: var(--gold-ink); }
+.state-text.needs { color: var(--warn-ink); }
 .head-sub { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 6px; padding-right: 8px; font-size: 12.5px; color: var(--ink-2); }
 .head-sub .ticket-detail { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex: 0 1 auto; color: var(--ink); text-decoration: none; }
 .head-sub .ticket-detail:hover .head-ticket { color: var(--teal-ink); }
@@ -381,7 +381,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .metadata-history time { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
 .metadata-history span { overflow-wrap: anywhere; }
 .ticket-status { flex: none; color: var(--ink-3); font-size: 12px; white-space: nowrap; }
-.callout { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 12px 12px 12px 14px; border-radius: 12px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); color: var(--gold-ink); }
+.callout { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; padding: 12px 12px 12px 14px; border-radius: 12px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 35%, transparent); color: var(--warn-ink); }
 .callout-text { display: grid; flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-2); }
 .callout-text strong { color: var(--ink); font-size: 13px; }
 .facts { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; gap: 12px 20px; margin: 0; }
@@ -406,7 +406,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
 .metric-label { font-size: 11.5px; color: var(--ink-2); }
 .metric b { font: 600 15px/1.2 var(--mono); color: var(--ink); font-variant-numeric: tabular-nums; }
 .run-chip { justify-self: start; display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10.5px/1 var(--mono); letter-spacing: .04em; font-variant-ligatures: none; background: var(--chip-bg); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--chip-line); }
-.run-chip.ok { background: rgba(47, 122, 90, .1); color: color-mix(in oklab, var(--ok), var(--ink) 28%); box-shadow: inset 0 0 0 1px rgba(47, 122, 90, .3); }
+.run-chip.ok { background: var(--ok-bg); color: color-mix(in oklab, var(--ok), var(--ink) 28%); box-shadow: inset 0 0 0 1px var(--ok-line); }
 .run-chip.busy { background: var(--chip-teal-bg); color: var(--teal-ink); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .run-chip.bad { background: var(--danger-bg); color: color-mix(in oklab, var(--danger), var(--ink) 28%); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .empty-line { font-size: 13px; color: var(--ink-3); }

@@ -128,13 +128,13 @@ const targetNote = computed(() => !pharos.value ? 'Pharos is not installed on th
 .ready p:not(.eyebrow) { font-size: 13.5px; color: var(--ink-2); }
 .host { font-weight: 600; }
 .faint { color: var(--ink-3); }
-.target-note { color: var(--gold-ink); }
+.target-note { color: var(--warn-ink); }
 .target-note.faint { color: var(--ink-3); }
 .deploy-checks li { grid-template-columns: 20px minmax(0, 1fr); }
 .check-mark { display: inline-grid; place-items: center; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%; color: var(--ink-3); }
 .check-mark svg { margin: 0; }
 .check-mark.ok { color: var(--ok); background: color-mix(in oklab, var(--ok) 12%, transparent); }
-.check-mark.wait { color: var(--gold-ink); background: var(--gold-wash); }
+.check-mark.wait { color: var(--warn-ink); background: var(--gold-wash); }
 .check-mark.you { color: var(--teal-ink); background: var(--chip-teal-bg); }
 .check-text { display: grid; gap: 1px; min-width: 0; }
 .check-text small { font-size: 12px; color: var(--ink-2); }

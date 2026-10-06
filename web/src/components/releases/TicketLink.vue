@@ -51,7 +51,7 @@ function click(event: MouseEvent) {
 
 .chip { height: 24px; }
 .ticket-plain.chip { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); }
-@media (hover: hover) { .ticket-link.chip:hover { box-shadow: inset 0 0 0 1px var(--teal), 0 4px 10px -6px rgba(14, 111, 108, .5); } }
+@media (hover: hover) { .ticket-link.chip:hover { box-shadow: inset 0 0 0 1px var(--teal), 0 4px 10px -6px color-mix(in srgb, var(--primary-line) 50%, transparent); } }
 /* The ticket open beside the history: a filled chip, not an edge mark. */
 .ticket-link.chip[aria-current="true"] { background: var(--primary); box-shadow: inset 0 0 0 1px var(--primary-line); color: var(--primary-on); }
 

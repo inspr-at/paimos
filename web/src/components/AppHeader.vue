@@ -335,7 +335,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .phone-header-fold { display: none; }
 .lockup { display: inline-flex; align-items: center; gap: 10px; min-height: 40px; padding-right: 4px; color: var(--ink); flex-shrink: 0; border-radius: 10px; }
 .lockup:focus-visible { box-shadow: var(--focus-ring); }
-.mark-backing { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim); }
+.mark-backing { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: var(--brand-plate); box-shadow: 0 0 0 1px var(--glass-rim); }
 .mark-backing img { display: block; }
 .wordmark { font: 600 13px/1 var(--mono); letter-spacing: .28em; white-space: nowrap; font-variant-ligatures: none; }
 .wordmark sup { position: relative; top: -.15em; margin-left: 2px; font: 600 8px/1 var(--mono); letter-spacing: .16em; color: var(--teal-ink); }
@@ -343,10 +343,10 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .tenant-logo { display: grid; place-items: center; flex-shrink: 0; height: 32px; }
 .tenant-logo img { display: block; object-fit: contain; }
 /* Dark mode without a dark logo: the logo keeps its colours on a light plate, like the product mark. */
-.tenant-logo.plate { padding: 0 8px; border-radius: 9px; background: #f7f6f2; box-shadow: 0 0 0 1px var(--glass-rim); }
+.tenant-logo.plate { padding: 0 8px; border-radius: 9px; background: var(--brand-plate); box-shadow: 0 0 0 1px var(--glass-rim); }
 .tenant-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 14px/1.2 var(--font); letter-spacing: -.005em; color: var(--ink); }
 /* Places: a quiet segmented group; the active place is the raised segment. */
-.places { display: flex; align-items: center; gap: 2px; flex-shrink: 0; padding: 3px; border-radius: 999px; background: var(--seg-bg); box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); }
+.places { display: flex; align-items: center; gap: 2px; flex-shrink: 0; padding: 3px; border-radius: 999px; background: var(--seg-bg); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent); }
 .place {
   position: relative; display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px 0 10px; border-radius: 999px;
   color: var(--ink-2); font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap;
@@ -355,7 +355,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 @media (hover: hover) { .place:hover { color: var(--teal-ink); background: var(--row-hover); } .place:hover svg { color: var(--teal-ink); } }
 .place:active { background: var(--row-selected); }
 .place:focus-visible { box-shadow: var(--focus-ring); }
-.place.active { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--glass-edge); }
+.place.active { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--glass-edge); }
 .place.active svg { color: var(--teal); }
 .place .needs-badge { margin: 0 -4px 0 1px; }
 /* The breadcrumb continues from the active place; pages outside a place start it. */
@@ -383,7 +383,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
 .mono-crumb { font: 500 12px/1 var(--mono); letter-spacing: .02em; font-variant-ligatures: none; }
 .spacer { flex: 1 1 0; min-width: 0; }
 .search-pill, .header-btn { flex-shrink: 0; }
-.needs-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--gold-2); color: #3a2804; font: 700 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface-raised); }
+.needs-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--gold-2); color: var(--gold-on); font: 700 10.5px/1 var(--mono); font-variant-numeric: tabular-nums; box-shadow: 0 0 0 2px var(--surface-raised); }
 .search-pill {
   display: inline-flex; align-items: center; gap: 9px; width: 240px; height: 34px; padding: 0 6px 0 12px; border: 1px solid var(--glass-edge); border-radius: 999px;
   background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink-3); font-size: 13px;
@@ -426,7 +426,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
   .places { gap: 2px; padding: 0; background: none; box-shadow: none; }
   .place { width: 44px; height: 44px; }
   .place:not(.active) { border: 1px solid var(--glass-edge); background: var(--btn-bg); box-shadow: var(--shadow-btn); }
-  .place.active { box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--chip-teal-line); }
+  .place.active { box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--chip-teal-line); }
   .place .needs-badge { top: 2px; right: 0; }
   /* The breadcrumb keeps only where you are. */
   .crumbs { gap: 6px; }

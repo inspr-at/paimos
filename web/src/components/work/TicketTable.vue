@@ -971,7 +971,7 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .root-drop-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; min-height: 36px; padding: 6px 0; font-size: 12px; color: var(--ink-3); }
 .root-drop-hint { margin-left: auto; }
 .outline-root-drop.drop-target td { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--teal); }
-.drop-pill { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 22px; margin-left: auto; padding: 0 10px; border-radius: 999px; background: linear-gradient(180deg, #1a8683, #0e6f6c); color: #fff; font-size: 11.5px; font-weight: 600; box-shadow: 0 6px 14px -8px rgba(14, 111, 108, .8); }
+.drop-pill { display: inline-flex; align-items: center; gap: 5px; flex-shrink: 0; height: 22px; margin-left: auto; padding: 0 10px; border-radius: 999px; background: linear-gradient(180deg, var(--primary-hi), var(--primary)); color: var(--primary-on); font-size: 11.5px; font-weight: 600; box-shadow: 0 6px 14px -8px color-mix(in srgb, var(--primary-line) 80%, transparent); }
 .outline-group th { top: calc(var(--toolbar-h, 0px) + 35px); }
 .more-row td { height: 34px; padding: 0 12px; border-bottom: 1px solid var(--line); }
 .more-btn { height: 26px; padding: 0 10px; border: 0; border-radius: 999px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
@@ -987,7 +987,7 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .key { font: 500 11.5px/18px var(--mono); color: var(--ink-2); letter-spacing: .01em; font-variant-ligatures: none; }
 .ticket-row.open .key, .ticket-row.cursor .key { color: var(--teal-ink); }
 .kind-glyph { color: var(--ink-3); }
-.kind-glyph.epic { color: var(--gold); }
+.kind-glyph.epic { color: var(--kind-parent); }
 .title-link { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink); text-decoration: none; }
 .title-text { display: block; overflow: hidden; text-overflow: ellipsis; }
 .ticket-row.epic .title-link { font-weight: 650; }
@@ -997,7 +997,7 @@ tbody .ticket-row.top:first-child td { border-top: 0; }
 .parent-chip { display: inline-flex; align-items: center; gap: 5px; flex: 0 3 auto; min-width: 0; max-width: 180px; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--code-bg); color: var(--ink-3); font-size: 12px; line-height: 20px; }
 .parent-chip.epic { min-width: 64px; }
 .parent-chip:not(.epic) { flex-shrink: 0; }
-.parent-chip.epic svg { color: var(--gold); opacity: .85; }
+.parent-chip.epic svg { color: var(--kind-parent); opacity: .85; }
 .parent-chip .mono { font-size: 11px; }
 .parent-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Row actions float over the end of the title cell instead of reserving space in every
@@ -1092,13 +1092,13 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .tag-chip { display: inline-flex; flex-shrink: 1; align-items: center; gap: 5px; min-width: 0; max-width: 100%; height: 20px; padding: 0 7px; border-radius: 999px; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The classic tag colours as a small dot; the name carries the meaning. */
 .tag-dot { flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%; background: var(--ink-3); }
-.tag-dot[data-color="blue"] { background: #4f86c6; }
-.tag-dot[data-color="red"] { background: #d0625b; }
-.tag-dot[data-color="green"] { background: #4f9e6f; }
-.tag-dot[data-color="yellow"], .tag-dot[data-color="orange"] { background: var(--gold); }
-.tag-dot[data-color="purple"] { background: #8a6cc2; }
-.tag-dot[data-color="teal"], .tag-dot[data-color="cyan"] { background: var(--teal); }
-.tag-dot[data-color="pink"] { background: #c7679a; }
+.tag-dot[data-color="blue"] { background: var(--label-blue); }
+.tag-dot[data-color="red"] { background: var(--label-red); }
+.tag-dot[data-color="green"] { background: var(--label-green); }
+.tag-dot[data-color="yellow"], .tag-dot[data-color="orange"] { background: var(--label-yellow); }
+.tag-dot[data-color="purple"] { background: var(--label-purple); }
+.tag-dot[data-color="teal"], .tag-dot[data-color="cyan"] { background: var(--label-teal); }
+.tag-dot[data-color="pink"] { background: var(--label-pink); }
 .tag-more { flex-shrink: 0; color: var(--ink-3); font-size: 11px; }
 .c-prio.narrow .prio-label { display: none; }
 
@@ -1111,7 +1111,7 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
 .group-label { font-size: 13px; font-weight: 650; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .group-label.muted { color: var(--ink-2); }
 .group-count { font-size: 11px; color: var(--ink-3); }
-.epic-glyph { color: var(--gold); }
+.epic-glyph { color: var(--kind-parent); }
 .group-epic { display: inline-flex; align-items: center; gap: 10px; min-width: 0; height: 26px; padding: 0 8px; margin-left: -4px; border: 0; border-radius: 6px; background: transparent; }
 .group-epic:hover { background: var(--row-hover); }
 .group-epic.cursor, .group-epic.open { background: var(--row-selected); }
@@ -1177,13 +1177,13 @@ button.release-chip:focus-visible { box-shadow: var(--focus-ring); }
   .c-check { display: flex; grid-area: check; align-self: center; justify-content: center; }
   .phone-check {
     display: grid; place-items: center; width: 44px; height: 44px; margin: 0; padding: 0; border: 0; border-radius: 50%;
-    background: transparent; color: #fffefa;
+    background: transparent; color: var(--primary-on);
   }
   .phone-check .mark {
     display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
     box-shadow: inset 0 0 0 1.5px var(--ink-2); background: var(--surface);
   }
-  .phone-check[aria-checked="true"] .mark { background: linear-gradient(180deg, #1a8683, #0e6f6c); box-shadow: none; }
+  .phone-check[aria-checked="true"] .mark { background: linear-gradient(180deg, var(--primary-hi), var(--primary)); box-shadow: none; }
   .phone-check:focus-visible { box-shadow: var(--focus-ring); }
   .ticket-row.selected { background: var(--row-selected); }
   .ticket-row td { display: block !important; height: auto; padding: 0; border: 0; background: none !important; box-shadow: none !important; }

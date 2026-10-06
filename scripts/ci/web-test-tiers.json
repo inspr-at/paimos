@@ -9868,6 +9868,8 @@
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"readers and retired sources keep a marker without a management link","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"theme token consumers recolour while fixed warnings and controls stay still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › coarse-pointer list keeps the recurring marker and title still at 1024px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"touch permission changes › coarse-pointer list keeps the recurring marker and title still at 1440px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13569,6 +13571,8 @@
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"WCAG contrast measures the rounded hex and actual card surfaces","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"automatic dark mirrors lightness and fixes the unchanged green regression","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"component category colours and warning aliases remain outside the theme engine","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"first-paint bootstrap restores derived CSS before app startup with its CSP nonce","tier":"ESSENTIAL"}
     ,

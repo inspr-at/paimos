@@ -348,7 +348,7 @@ onBeforeUnmount(() => { window.removeEventListener('keydown', keydown); clearInt
 .state-chip { display: inline-flex; align-items: center; height: 18px; margin-left: 4px; padding: 0 8px; border-radius: 999px; font: 600 10px/1 var(--mono); letter-spacing: .08em; background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); vertical-align: 1px; }
 .state-chip.current { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .state-chip.done { color: var(--ok); }
-.state-chip.blocked { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: var(--gold-ink); }
+.state-chip.blocked { background: var(--gold-wash); box-shadow: inset 0 0 0 1px var(--warn-line); color: var(--warn-ink); }
 .subtitle { padding-bottom: 4px; font-size: 13.5px; color: var(--ink-2); }
 .spacer { flex: 1; }
 .owner { flex-shrink: 0; padding: 3px 9px; border-radius: 999px; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-3); background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); }

@@ -450,7 +450,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .context-link:focus-visible { box-shadow: var(--focus-ring); }
 /* One quiet freshness element: a dot and a word, details on hover. */
 .freshness { display: inline-flex; align-items: center; gap: 7px; height: 40px; padding: 0 8px 0 4px; margin-right: 4px; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.freshness.stale { color: var(--gold-ink); }
+.freshness.stale { color: var(--warn-ink); }
 .live-mark { width: 7px; height: 7px; border-radius: 50%; background: var(--st-backlog); flex: none; }
 .freshness.on .live-mark { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent); }
 .freshness.stale .live-mark { background: var(--gold); }

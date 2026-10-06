@@ -44,11 +44,11 @@ const hello = computed(() => greeting.value ? `${greeting.value.salutation}, ${g
 .welcome { display: flex; align-items: center; gap: 14px; min-height: 48px; margin-bottom: 18px; }
 .me { position: relative; display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border-radius: 50%; }
 .me:focus-visible { box-shadow: var(--focus-ring); }
-.me :deep(.avatar) { box-shadow: 0 0 0 1px var(--glass-rim), 0 4px 12px -6px rgba(32, 60, 61, .35); }
+.me :deep(.avatar) { box-shadow: 0 0 0 1px var(--glass-rim), 0 4px 12px -6px color-mix(in srgb, var(--shadow-color) 35%, transparent); }
 /* On hover or focus a small pencil says it opens your profile. */
 .pencil {
   position: absolute; right: -2px; bottom: -2px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%;
-  background: var(--surface-raised); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--line-2), 0 2px 6px -2px rgba(32, 60, 61, .3);
+  background: var(--surface-raised); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--line-2), 0 2px 6px -2px color-mix(in srgb, var(--shadow-color) 30%, transparent);
   opacity: 0; transform: scale(.85); transition: opacity .15s ease, transform .15s ease;
 }
 .me:hover .pencil, .me:focus-visible .pencil { opacity: 1; transform: none; }

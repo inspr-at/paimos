@@ -140,11 +140,11 @@ function saveCaption(item: Attachment) { if (editing.value !== item.id) return; 
 .item { position: relative; flex-shrink: 0; display: grid; gap: 5px; }
 .tile {
   position: relative; display: grid; place-items: center; width: 132px; height: 88px; padding: 0; border: 0; border-radius: 10px; overflow: hidden; cursor: zoom-in;
-  background: var(--surface-sunken, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(16, 35, 39, .08);
+  background: var(--surface-sunken, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent);
 }
 .tile.file { cursor: pointer; }
 .tile img { width: 100%; height: 100%; object-fit: cover; object-position: top center; }
-.tile:hover { box-shadow: inset 0 0 0 1px var(--chip-teal-line), 0 6px 16px -10px rgba(16, 35, 39, .45); }
+.tile:hover { box-shadow: inset 0 0 0 1px var(--chip-teal-line), 0 6px 16px -10px color-mix(in srgb, var(--shadow-color) 45%, transparent); }
 .tile:focus-visible { box-shadow: var(--focus-ring); }
 .item.dragging { opacity: .4; }
 .item.drop-before::before, .item.drop-after::after { content: ''; position: absolute; top: 0; bottom: 18px; width: 3px; border-radius: 2px; background: var(--teal); }
@@ -157,16 +157,16 @@ function saveCaption(item: Attachment) { if (editing.value !== item.id) return; 
 .file-size { font-size: 10.5px; color: var(--ink-2); }
 .remove {
   position: absolute; top: 5px; right: 5px; display: grid; place-items: center; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 50%;
-  background: rgba(16, 35, 39, .72); color: #fff; opacity: 0; transition: opacity .12s ease;
+  background: color-mix(in srgb, var(--overlay-ink) 72%, transparent); color: var(--surface-highlight); opacity: 0; transition: opacity .12s ease;
 }
 .item:hover .remove, .item:focus-within .remove { opacity: 1; }
 .remove:focus-visible { opacity: 1; box-shadow: var(--focus-ring); }
 .strip-caption { max-width: 132px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--ink-2); }
-.progress { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 4px; border-radius: 999px; background: rgba(255, 255, 255, .6); overflow: hidden; }
+.progress { position: absolute; left: 8px; right: 8px; bottom: 8px; height: 4px; border-radius: 999px; background: color-mix(in srgb, var(--surface-highlight) 60%, transparent); overflow: hidden; }
 .progress i { display: block; height: 100%; width: calc(var(--p) * 100%); background: var(--teal); transition: width .15s ease; }
 .uploading img { opacity: .55; }
 .failed .tile { box-shadow: inset 0 0 0 1.5px var(--danger-line); }
-.failed-veil { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(178, 74, 68, .18); color: var(--danger); }
+.failed-veil { position: absolute; inset: 0; display: grid; place-items: center; background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); }
 .upload-actions { display: flex; gap: 10px; }
 .sk-thumb { width: 132px; height: 88px; border-radius: 10px; }
 /* Gallery: the context column's two-up grid with captions. */

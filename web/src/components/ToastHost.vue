@@ -45,17 +45,17 @@ onBeforeUnmount(() => dialogs?.disconnect())
 .toast-host { position: fixed; z-index: 60; left: 50%; bottom: calc(var(--footer-h) + 14px); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; width: max-content; max-width: calc(100vw - 32px); }
 .toast {
   display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 8px 6px 18px; border-radius: 999px; pointer-events: auto;
-  background: var(--tip-bg); color: var(--tip-ink); font-size: 13.5px; box-shadow: 0 0 0 1px var(--glass-rim), 0 18px 36px -14px rgba(0, 0, 0, .45);
+  background: var(--tip-bg); color: var(--tip-ink); font-size: 13.5px; box-shadow: 0 0 0 1px var(--glass-rim), 0 18px 36px -14px color-mix(in srgb, var(--shadow-black) 45%, transparent);
   -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px);
 }
-.toast.error svg { color: #f3b0a8; }
+.toast.error svg { color: var(--inverse-danger); }
 .toast span { min-width: 0; }
 /* A release's stamp on the toast's dark glass: the toast's own ink and a hairline, in both themes. */
-.toast :deep(.rn-stamp) { background: transparent; border-color: rgba(255, 255, 255, .28); box-shadow: none; color: var(--tip-ink); }
-.toast-action { height: 28px; padding: 0 12px; border: 0; border-radius: 999px; background: rgba(164, 229, 223, .18); color: #bff0eb; font-size: 12.5px; font-weight: 700; }
-.toast-action:hover { background: rgba(164, 229, 223, .3); }
+.toast :deep(.rn-stamp) { background: transparent; border-color: color-mix(in srgb, var(--surface-highlight) 28%, transparent); box-shadow: none; color: var(--tip-ink); }
+.toast-action { height: 28px; padding: 0 12px; border: 0; border-radius: 999px; background: color-mix(in srgb, var(--primary-tint) 18%, transparent); color: var(--tip-ink); font-size: 12.5px; font-weight: 700; }
+.toast-action:hover { background: color-mix(in srgb, var(--primary-tint) 30%, transparent); }
 .toast-close { display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; color: inherit; opacity: .7; }
-.toast-close:hover { opacity: 1; background: rgba(255, 255, 255, .08); }
+.toast-close:hover { opacity: 1; background: color-mix(in srgb, var(--surface-highlight) 8%, transparent); }
 @media (prefers-reduced-motion: no-preference) {
   .toast-enter-active, .toast-leave-active { transition: opacity .2s ease, transform .2s ease; }
   .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(8px); }
@@ -71,11 +71,11 @@ onBeforeUnmount(() => dialogs?.disconnect())
   .toast-close::before { inset: 8px; }
   .toast-action { isolation: isolate; }
   .toast-close { isolation: isolate; }
-  .toast-action::before { background: rgba(164, 229, 223, .18); }
+  .toast-action::before { background: color-mix(in srgb, var(--primary-tint) 18%, transparent); }
   .toast-action:hover { background: transparent; }
-  .toast-action:hover::before { background: rgba(164, 229, 223, .3); }
+  .toast-action:hover::before { background: color-mix(in srgb, var(--primary-tint) 30%, transparent); }
   .toast-close:hover { background: transparent; }
-  .toast-close:hover::before { background: rgba(255, 255, 255, .08); }
+  .toast-close:hover::before { background: color-mix(in srgb, var(--surface-highlight) 8%, transparent); }
 }
 @media (max-width: 600px) { .toast-host { bottom: calc(var(--footer-h) + 10px); } .toast { font-size: 13px; } .toast.sticky { flex-wrap: wrap; justify-content: flex-end; border-radius: 20px; padding: 8px 8px 8px 16px; } .toast.sticky span { flex: 1 1 100%; } .toast.sticky:has(> svg) span { flex-basis: calc(100% - 24px); } }
 </style>

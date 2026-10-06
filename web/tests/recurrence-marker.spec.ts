@@ -41,7 +41,7 @@ async function setup(page: Page, manage = true, locale = 'en-GB') {
 test('extreme primary accents keep recurrence glyphs readable without moving controls', async ({ page }, testInfo) => {
   const { errors } = await setup(page, true, 'de-AT')
   const theme: ThemeRecord = { id: 'recurrence-contrast', name: 'Recurrence contrast', scope: 'personal', tenant_id: 't1', owner_principal_id: me.id, revision: 1, created_at: '', updated_at: '',
-    values: { ...PORCELAIN, primary: { light: '#ffffff', dark: '#000000' } } }
+    values: { ...PORCELAIN, primary: { light: '#ffffff', dark: '#000000' }, recurring_marker: { source: 'custom', custom: '#3a5fc4' } } }
   await page.route('**/api/themes?*', route => route.fulfill({ json: { items: [theme], next_cursor: null } }))
   await page.route('**/api/me/theme', route => route.fulfill({ json: { theme, default_theme_id: 'default', selected_theme_id: theme.id, revision: 1, fallback_notice: null } }))
   await page.goto('/p/PHAROS?sort=key&group=none')
@@ -62,12 +62,12 @@ test('extreme primary accents keep recurrence glyphs readable without moving con
         return { hex: '#' + channels.slice(0, 3).map(channel => channel.toString(16).padStart(2, '0')).join(''), alpha: channels[3] }
       }
       const style = getComputedStyle(el), background = getComputedStyle(el.parentElement!).backgroundColor
-      return { stroke: rgba(style.stroke), fill: rgba(background), gold: rgba(style.getPropertyValue('--gold').trim()) }
+      return { stroke: rgba(style.stroke), fill: rgba(background), marker: rgba(style.getPropertyValue('--marker').trim()) }
     })
     expect(rendered.stroke.alpha).toBe(255)
     expect(rendered.fill.alpha).toBe(255)
-    expect(rendered.fill).toEqual(rendered.gold)
-    expect(colourContrast(rendered.stroke.hex, rendered.fill.hex), `${width} ${mode}: recurrence glyph on its gold fill`).toBeGreaterThanOrEqual(3)
+    expect(rendered.fill).toEqual(rendered.marker)
+    expect(colourContrast(rendered.stroke.hex, rendered.fill.hex), `${width} ${mode}: recurrence glyph on its configured marker fill`).toBeGreaterThanOrEqual(3)
     await expectStableControls({
       controls: { 'type slot': icon, 'recurrence marker': marker, 'ticket title': row(page).locator('.title-link'), 'clicked row': row(page) },
       interactions: [{ name: 'hover marker', run: () => icon.hover() }, { name: 'keyboard focus marker', run: () => icon.focus() }],
@@ -172,9 +172,9 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     }
     const icon = row(page).locator('.ticket-type-icon'), title = row(page).locator('.title-link')
     await expect(icon).toHaveAttribute('title', label)
-    const geometry = await icon.locator('.recurrence-dot').evaluate(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height, ring: getComputedStyle(el).boxShadow, gold: getComputedStyle(el).backgroundColor, token: getComputedStyle(document.documentElement).getPropertyValue('--gold').trim() }))
+    const geometry = await icon.locator('.recurrence-dot').evaluate(el => ({ width: el.getBoundingClientRect().width, height: el.getBoundingClientRect().height, ring: getComputedStyle(el).boxShadow, gold: getComputedStyle(el).backgroundColor, token: getComputedStyle(document.documentElement).getPropertyValue('--marker').trim() }))
     expect(geometry.width).toBe(11); expect(geometry.height).toBe(11); expect(geometry.ring).toContain('1.5px')
-    expect(geometry.gold).toBe(await page.evaluate(() => { const el = document.createElement('span'); el.style.color = 'var(--gold)'; document.body.append(el); const color = getComputedStyle(el).color; el.remove(); return color }))
+    expect(geometry.gold).toBe(await page.evaluate(() => { const el = document.createElement('span'); el.style.color = 'var(--marker)'; document.body.append(el); const color = getComputedStyle(el).color; el.remove(); return color }))
     mkdirSync(shots, { recursive: true })
     await page.screenshot({ path: join(shots, `list-${width}-${theme}.png`) })
     await expectStableControls({
@@ -428,3 +428,51 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     } finally { releasePermissions() }
   })
 }
+
+test('theme token consumers recolour while fixed warnings and controls stay still', async ({ page }, testInfo) => {
+  const { errors } = await setup(page, true, 'de-AT')
+  await page.goto('/p/PHAROS?sort=key&group=none')
+  await expect(row(page)).toBeVisible()
+  // Exercise the real shared styles with deliberately long labels. The app's
+  // actual list/recurrence components remain on screen beneath this specimen.
+  await page.evaluate(() => {
+    const sample = document.createElement('section')
+    sample.id = 'theme-consumers'
+    sample.setAttribute('aria-label', 'Theme token specimens')
+    sample.style.cssText = 'position:fixed;inset:0;z-index:10000;overflow:auto;padding:20px;background:var(--canvas);color:var(--ink);display:grid;align-content:start;gap:20px'
+    sample.innerHTML = `<h2>Regelmäßige Prüfung umfangreicher Zugangsberechtigungen</h2>
+      <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center"><button class="btn primary" id="sample-action">Änderungen speichern</button><button class="button" id="sample-legacy">Prüfung abschließen</button></div>
+      <div style="display:flex;gap:20px"><label class="switch"><input id="sample-switch" type="checkbox" checked aria-label="Automatische Prüfung">Automatisch</label><input id="sample-check" class="check-box" type="checkbox" checked aria-label="Ausgewählt"></div>
+      <div class="bar"><i id="sample-progress" style="width:68%"></i></div>
+      <p><a href="#theme-consumers" id="sample-link">Weitere Informationen</a> · <mark id="sample-highlight">Prüfergebnis</mark></p>
+      <div id="sample-warning" style="padding:10px;background:var(--gold-wash);color:var(--warn-ink);box-shadow:inset 0 0 0 1px var(--warn-line)">Warnung: Berechtigung fehlt</div>
+      <div id="sample-categories" style="display:flex;gap:12px"><svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="var(--label-blue)" /></svg><svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="var(--st-progress)" /></svg></div>`
+    document.body.append(sample)
+  })
+  const { themeCss } = await import('../src/lib/themeEngine')
+  const action = page.locator('#sample-action'), toggle = page.locator('#sample-switch'), check = page.locator('#sample-check')
+  const colour = (selector: string, property: string) => page.locator(selector).evaluate((el, property) => getComputedStyle(el).getPropertyValue(property), property)
+  for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+    const baseline = { action: await colour('#sample-action', 'background-image'), highlight: await colour('#sample-highlight', 'background-color'), warning: await colour('#sample-warning', 'color'), category: await colour('#sample-categories svg:first-child circle', 'fill'), status: await colour('#sample-categories svg:nth-child(2) circle', 'fill') }
+    await expectStableControls({ controls: { action, legacy: page.locator('#sample-legacy'), toggle, check }, interactions: [
+      { name: 'apply different accents', run: async () => {
+        await page.addStyleTag({ content: themeCss({ ...PORCELAIN, primary: { light: '#3a5fc4', dark: '#c8a0ee' }, secondary: { light: '#bf3d6d', dark: '#89d875' } }) })
+        expect(await colour('#sample-action', 'background-image')).not.toBe(baseline.action)
+        expect(await colour('#sample-highlight', 'background-color')).not.toBe(baseline.highlight)
+        expect(await colour('#sample-warning', 'color')).toBe(baseline.warning)
+        expect(await colour('#sample-categories svg:first-child circle', 'fill')).toBe(baseline.category)
+        expect(await colour('#sample-categories svg:nth-child(2) circle', 'fill')).toBe(baseline.status)
+        const tick = await check.evaluate(el => getComputedStyle(el, '::after').borderBottomColor)
+        expect(tick).toBe(await colour('#sample-action', 'color'))
+      } },
+      { name: 'hover primary action', run: () => action.hover() },
+      { name: 'toggle shared switch', run: () => toggle.uncheck() },
+      { name: 'check shared switch', run: () => toggle.check() },
+    ] })
+    await page.screenshot({ path: testInfo.outputPath(`theme-consumers-${width}-${mode}.png`) })
+    await page.addStyleTag({ content: themeCss(PORCELAIN) })
+  }
+  expect(errors).toEqual([])
+})

@@ -141,13 +141,13 @@ const target = (event: Event) => event.currentTarget as HTMLElement
 .chev { color: var(--ink-3); margin-left: -2px; }
 .dash, .faint, .unset { color: var(--ink-3); }
 .kind { color: var(--ink-3); }
-.kind.epic { color: var(--gold); }
+.kind.epic { color: var(--kind-parent); }
 .agent-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .row .agent-chips { flex-wrap: nowrap; }
 .agent-chip { min-width: 0; text-decoration: none; }
 .agent-chips { min-width: 0; max-width: 100%; }
 .agent-chip > svg, .agent-state { flex: none; }
-.agent-chip.needs { box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); }
+.agent-chip.needs { box-shadow: inset 0 0 0 1px var(--warn-line); }
 .agent-state { font-size: 11.5px; }
 .agent-state.quiet :deep(.state-word) { display: none; }
 .agent-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 600; }

@@ -120,7 +120,7 @@ defineExpose({ open, close })
 <style scoped>
 .filter-sheet { width: 100vw; max-width: none; height: 100dvh; max-height: 100dvh; margin: auto 0 0; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .filter-sheet::backdrop { background: var(--scrim); }
-.sheet-card { display: flex; flex-direction: column; height: 100%; max-height: 100%; border-radius: 20px 20px 0 0; border-top: 1px solid var(--glass-edge); background: var(--surface-raised); box-shadow: 0 -18px 40px -18px rgba(0, 0, 0, .35); }
+.sheet-card { display: flex; flex-direction: column; height: 100%; max-height: 100%; border-radius: 20px 20px 0 0; border-top: 1px solid var(--glass-edge); background: var(--surface-raised); box-shadow: 0 -18px 40px -18px color-mix(in srgb, var(--shadow-black) 35%, transparent); }
 .grabber { align-self: center; width: 40px; height: 4px; margin-top: 8px; border-radius: 999px; background: var(--line-2); }
 header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px 8px 20px; }
 h2 { font-size: 19px; }

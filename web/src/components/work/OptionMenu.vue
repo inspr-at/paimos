@@ -77,7 +77,7 @@ function move(event: KeyboardEvent) {
 .menu-item:hover .digit, .menu-item:focus-visible .digit { opacity: 1; }
 .none-mark { width: 14px; height: 2px; border-radius: 2px; background: var(--line-2); }
 .faint-icon, .kind-icon { color: var(--ink-3); }
-.kind-icon.epic { color: var(--gold); }
+.kind-icon.epic { color: var(--kind-parent); }
 .none { padding: 8px 10px; font-size: 13px; color: var(--ink-3); }
 @media (pointer: coarse) { .menu-item { height: 44px; } }
 

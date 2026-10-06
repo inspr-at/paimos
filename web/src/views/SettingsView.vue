@@ -174,7 +174,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
 @media (hover: hover) { .section-link:hover { background: var(--row-hover); } }
 .section-link:focus-visible { box-shadow: var(--focus-ring); }
 /* The current section: a raised card, like the active place. */
-.section-link[aria-current="page"] { background: var(--surface-raised); box-shadow: 0 0 0 1px var(--line), 0 6px 18px -12px rgba(32, 60, 61, .4); }
+.section-link[aria-current="page"] { background: var(--surface-raised); box-shadow: 0 0 0 1px var(--line), 0 6px 18px -12px color-mix(in srgb, var(--shadow-color) 40%, transparent); }
 .link-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--surface-2); color: var(--ink-2); }
 .section-link[aria-current="page"] .link-icon { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .link-text { display: grid; min-width: 0; }
