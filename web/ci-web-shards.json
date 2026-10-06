@@ -575,6 +575,8 @@
         {"file":"tests/settings.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.461,"median":1.774,"min":1.431},"seconds":14.45241,"selectedTests":6},"weightSeconds":32.564102381,"weightSource":"status-autopilot-ui-2"}
         ,
         {"file":"tests/status-autopilot.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":10.514,"median":2.467,"min":0.771},"seconds":29.300782,"selectedTests":8},"weightSeconds":22.794872,"weightSource":"status-autopilot-ui-2"}
+        ,
+        {"file":"tests/workspace-activity.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -660,28 +662,6 @@
       ,
       "specs": [
         {"file":"tests/project-header.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
-      ]
-    }
-    ,
-    {
-      "config": "playwright.ui.config.ts"
-      ,
-      "env": {}
-      ,
-      "flags": [
-        "--workers=1"
-        ,
-        "--trace=retain-on-failure"
-      ]
-      ,
-      "hostedOnly": true
-      ,
-      "id": "needs-attention"
-      ,
-      "project": null
-      ,
-      "specs": [
-        {"file":"tests/needs-attention.spec.ts","listedTests":29,"weightSeconds":46.609756,"weightSource":"estimate"}
       ]
     }
     ,
@@ -1250,6 +1230,28 @@
       ,
       "specs": [
         {"file":"tests/settings-shared.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":6.613,"median":0.701,"min":0.409},"seconds":38.002851,"selectedTests":23},"weightSeconds":20,"weightSource":"unmeasured-test-count-estimate"}
+      ]
+    }
+    ,
+    {
+      "config": "playwright.ui.config.ts"
+      ,
+      "env": {}
+      ,
+      "flags": [
+        "--workers=1"
+        ,
+        "--trace=retain-on-failure"
+      ]
+      ,
+      "hostedOnly": true
+      ,
+      "id": "needs-attention"
+      ,
+      "project": null
+      ,
+      "specs": [
+        {"file":"tests/needs-attention.spec.ts","listedTests":29,"weightSeconds":46.609756,"weightSource":"estimate"}
       ]
     }
   ]
