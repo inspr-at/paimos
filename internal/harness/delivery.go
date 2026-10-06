@@ -33,8 +33,8 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if err != nil {
 		return nil, err
 	}
-	if s.Management != "managed" || !has(s, "inbox") {
-		return nil, workorders.Fail(409, "managed inbox capability required")
+	if !has(s, "inbox") || s.Management != "managed" && !has(s, "attached_reconnect_v1") {
+		return nil, workorders.Fail(409, "managed inbox or paired attached hook required")
 	}
 	// Every drain is this generation listening, with or without work (AEON-280).
 	if err := inbox.MarkSessionSeen(ctx, tx, s.ID, inbox.SeenDrain); err != nil {
@@ -53,7 +53,7 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	// another generation for the same principal continue independently.
 	var messageID, sender, body string
 	var cursor int64
-	err = tx.QueryRow(ctx, `SELECT m.id::text,m.sender_principal_id::text,m.body,m.sent_event_id FROM inbox_messages m WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.recipient_principal_id=$1 AND (m.recipient_session_id IS NULL OR m.recipient_session_id=$2::uuid) AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) AND NOT EXISTS(SELECT 1 FROM harness_deliveries d WHERE d.message_id=m.id AND d.completed_at IS NULL AND d.released_at IS NULL) ORDER BY m.sent_event_id LIMIT 1 FOR UPDATE OF m SKIP LOCKED`, s.AgentPrincipalID, s.ID).Scan(&messageID, &sender, &body, &cursor)
+	err = tx.QueryRow(ctx, `SELECT m.id::text,m.sender_principal_id::text,m.body,m.sent_event_id FROM inbox_messages m WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.recipient_principal_id=$1 AND ((m.recipient_session_id IS NULL AND $3) OR m.recipient_session_id=$2::uuid) AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) AND NOT EXISTS(SELECT 1 FROM harness_deliveries d WHERE d.message_id=m.id AND d.completed_at IS NULL AND d.released_at IS NULL) ORDER BY m.sent_event_id LIMIT 1 FOR UPDATE OF m SKIP LOCKED`, s.AgentPrincipalID, s.ID, s.Management == "managed").Scan(&messageID, &sender, &body, &cursor)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return []Delivery{}, nil
 	}

@@ -600,6 +600,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "", false
 		}
 		return harnessScope(parts[1:], read), true
+	case "harness-recoveries":
+		if r.Method == http.MethodPost && (len(parts) == 2 && parts[1] == "claim" || len(parts) == 3 && validRouteUUID(parts[1]) && parts[2] == "complete") {
+			return "harness.worker", true
+		}
 	case "agentd":
 		if r.Pattern == "GET /api/agentd/step-ups/{challenge_id}" {
 			return "harness.worker", true

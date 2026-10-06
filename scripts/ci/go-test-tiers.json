@@ -934,6 +934,12 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestAdditionalHarnessAttachRequiresRecordedNativeImage","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestAgentRecoveryGenerationIdentityAndDeadlineRefuseSignals","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestAgentRecoveryReconnectRefreshesReportingWithoutStopping","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestAgentRecoveryRestartWaitsForExitAndRetriesOnlyOutcome","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestApprovedDeadlineDoesNotWaitForTelemetryLock","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestArchivedWorkerResponseDetachesWithoutStoppingChild","tier":"GATED-FULL"}
@@ -1063,6 +1069,10 @@
     {"kind":"go","package":"internal/agentd","name":"TestAttachWrapperFixtureArgv","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestAttachWrapperMarkerNormalArgvDoesNotSkip","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestAttachedHookHelperCrashResumePreservesBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestAttachedHookSocketAndReconnectPreserveExternalOwnership","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestAttachedMessageExchangePinsOriginAndRejectsRedirect","tier":"GATED-FULL"}
     ,
@@ -1805,6 +1815,10 @@
     {"kind":"go","package":"internal/agentd","name":"TestWireWriteLockWaitIsCancellable","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentdwire","name":"TestAttachConflictDiagnosticIsSurfacedAndBounded","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentdwire","name":"TestAttachedHookInboxResponseBoundsAndStrictJSON","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentdwire","name":"TestAttachedHookMaximumInboxDeliveryDoesNotBlockNext","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentdwire","name":"TestAuthenticatedLocalControl","tier":"ESSENTIAL"}
     ,
@@ -2958,6 +2972,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestAgentKeyReleaseMembershipReadScopeAndVisibility","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestAgentRecoveryRuntimeRouteCeiling","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestAgentRoleCannotManageKeys","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestAgentScopeSeparatesProjectSubpathsAndUnknownRoutes","tier":"GATED-FULL"}
@@ -4012,6 +4028,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatOmitsOverlongHarnessVersion","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHeartbeatPairedReconnectBindsOnlyItsLiveIndexedSession","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatRegistersHarnessVersion","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatRejectedStatusEstimatesRetryWithoutBlockingLiveness","tier":"GATED-FULL"}
@@ -4221,6 +4239,8 @@
     {"kind":"go","package":"internal/cli","name":"TestPairedHookSettlesOnlyAfterFullWrite","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestPairedHookSubagentGuardSkipsDial","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPairedInboxHookAcknowledgesOnlyForegroundHandoff","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestParseCLIETABounds","tier":"GATED-FULL"}
     ,
@@ -4904,7 +4924,19 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestActivityNotesValidationHistoryAndIsolation","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryDiagnosisDoesNotGuessExitOrAuth","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryOpenAPIContractsAgree","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryRequestAuthorityAndSingleClaim","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryRestartQueuesOneBoundContinuation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryRevocationExpiryAndObservationFence","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestArchivedSessionRejectsProvenanceReplayAndNewRevision","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestAutomaticProvenanceFitsTheRulesBudget","tier":"GATED-FULL"}
     ,

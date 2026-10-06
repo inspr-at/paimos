@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/2.8",
-    "sha256": "6c278d6c5d3cd519760bb5506225ea3c70d9bea74966cb9376e863832d29be2a",
+    "version": "harness-session/2.9",
+    "sha256": "7168e041b7c237c6fffa17d8552bb40a7a4c2496453338f9105fe3b19550a919",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -768,6 +768,41 @@
           "agent_principal_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "agent_recovery": {
+            "properties": {
+              "action": {
+                "enum": [
+                  "",
+                  "restart",
+                  "reconnect"
+                ],
+                "type": "string"
+              },
+              "cause": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "observed_revision": {
+                "maxLength": 64,
+                "minLength": 64,
+                "type": "string"
+              },
+              "session_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "session_id",
+              "observed_revision",
+              "cause",
+              "detail",
+              "action"
+            ],
+            "type": "object"
           },
           "archived_at": {
             "format": "date-time",
@@ -2067,6 +2102,41 @@
           "agent_principal_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "agent_recovery": {
+            "properties": {
+              "action": {
+                "enum": [
+                  "",
+                  "restart",
+                  "reconnect"
+                ],
+                "type": "string"
+              },
+              "cause": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "observed_revision": {
+                "maxLength": 64,
+                "minLength": 64,
+                "type": "string"
+              },
+              "session_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "session_id",
+              "observed_revision",
+              "cause",
+              "detail",
+              "action"
+            ],
+            "type": "object"
           },
           "archived_at": {
             "format": "date-time",

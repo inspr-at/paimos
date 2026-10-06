@@ -162,6 +162,56 @@ func ServeLocal(s *Supervisor, socket string, attachments ...*AttachManager) (_ 
 		_ = json.NewEncoder(w).Encode(out)
 	})
 	if len(attachments) == 1 && attachments[0] != nil {
+
+		s.recoveryMu.Lock()
+		s.attachedHookVerifier = attachments[0]
+		s.recoveryMu.Unlock()
+		mux.HandleFunc("POST /v1/attached-hook", func(w http.ResponseWriter, r *http.Request) {
+			if !authorized(r, token) {
+				http.Error(w, "unauthorized", 403)
+				return
+			}
+			// Binding reporting is not watch consent. Require the unchanged
+			// kernel peer; no browser, TTY or user-supplied helper PID grants it.
+			peer, ok := r.Context().Value(attachPeerKey{}).(attachObservation)
+			if !ok {
+				http.Error(w, "kernel peer required", 403)
+				return
+			}
+			r.Body = http.MaxBytesReader(w, r.Body, 4096)
+			d := json.NewDecoder(r.Body)
+			d.DisallowUnknownFields()
+			var in AttachedHookRequest
+			if d.Decode(&in) != nil || d.Decode(&struct{}{}) != io.EOF {
+				http.Error(w, "invalid hook binding", 400)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			defer cancel()
+
+			if in.Operation != "" {
+				out, err := s.serviceAttachedHook(ctx, peer, in)
+				if err != nil {
+					code := 409
+					if errors.Is(err, ErrNotOwned) {
+						code = 404
+					}
+					http.Error(w, "attached hook unavailable", code)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "no-store")
+				_ = json.NewEncoder(w).Encode(out)
+				return
+			}
+			if s.bindAttachedHook(ctx, peer, in) != nil {
+				http.Error(w, "attached hook binding refused", 409)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = w.Write([]byte("{}"))
+		})
 		mux.HandleFunc("POST /v1/attach", func(w http.ResponseWriter, r *http.Request) { attachments[0].serve(w, r, token) })
 	}
 	mux.HandleFunc("GET /v1/account-environment", func(w http.ResponseWriter, r *http.Request) {
