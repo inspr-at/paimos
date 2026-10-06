@@ -11354,6 +11354,30 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /nodes/{nodeId}/escalation:
+    parameters:
+      - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getWorkEscalation
+      summary: Read bounded stuck-work escalation state
+      description: "Requires outcome.read for the current project. Null means no observations. State never opens the exact-commit review gate or authorizes launch, merge or deployment. Retry routes still require ordinary live admission and proven exit. AEON-601 consumes the transactional retry adapter; AEON-741 may display this state."
+      security: *auth
+      responses:
+        '200':
+          description: "Current escalation episode"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [escalation]
+                properties:
+                  escalation:
+                    oneOf:
+                      - {$ref: '#/components/schemas/WorkEscalation'}
+                      - {type: 'null'}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /outcomes:
     get:
       operationId: listOutcomes
@@ -18955,6 +18979,30 @@ components:
         actor_principal_id: {type: string, format: uuid}
         recorded_at: {type: string, format: date-time}
         idempotency_key: {type: string}
+    WorkEscalation:
+      description: "Tier A state. work.escalation_changed events carry the same public projection; a successfully created retry also freezes its charged episode in the run trace. No raw findings or account identities are exposed."
+      type: object
+      required: [episode_id, revision, status, reason, fix_rounds, attempts, held_cost_micros, max_attempts, max_cost_micros]
+      properties:
+        episode_id: {type: string, format: uuid}
+        revision: {type: integer, minimum: 1}
+        status: {type: string, enum: [observing, stuck, awaiting_decision, resolved]}
+        reason: {type: string}
+        fix_rounds: {type: integer, minimum: 0}
+        attempts: {type: integer, minimum: 0, maximum: 2}
+        held_cost_micros: {type: integer, minimum: 0}
+        max_attempts: {type: integer, const: 2}
+        max_cost_micros: {type: integer, const: 20000000}
+        route_role: {type: string}
+        route_area: {type: string}
+        prefs_revision: {type: integer, minimum: 0}
+        route_block_reason: {type: string}
+        wait_reason: {type: string, enum: [admission_wait]}
+        planned_profile_id: {type: string, format: uuid}
+        question_id: {type: string, format: uuid}
+        question_pending: {type: boolean, description: "Question creation waits for questions.ask/read authority; retries remain closed."}
+        last_outcome_id: {type: string, format: uuid}
+        used_profile_ids: {type: array, maxItems: 2, items: {type: string, format: uuid}}
     OutcomeRecord:
       type: object
       additionalProperties: false
@@ -18967,7 +19015,7 @@ components:
         payload:
           type: object
           additionalProperties: true
-          description: "review_verdict requires verdict ok or changes and may include reviewer_model, route, author_family, round, blocking_count, findings and summary. fix_round requires round. ci_result requires result pass or fail, repo and number (the pull request) and may include name and summary. revert requires summary and may include target."
+          description: "review_verdict requires verdict ok or changes and may include reviewer_model, route, author_family, round, blocking_count, findings, findings_fingerprint (lowercase SHA-256 of canonical findings), review_id (work-order UUID), and summary. Escalation resolves on ok only when review_id identifies the latest verified exact-range cross-family review; an unbound reported ok never resets its attempt budget. Repeated fingerprints count only in distinct increasing rounds. fix_round requires round. ci_result requires result pass or fail, repo and number (the pull request) and may include name, attempt_id (UUID of a distinct CI execution), and summary. Stuck detection needs a named check and distinct attempt IDs; duplicate reports of one execution do not count twice. revert requires summary and may include target."
     Error:
       type: object
       required: [error]

@@ -41,8 +41,7 @@ func PlacementFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuer
 		q.PersonID = modelprefs.PrefsPerson(ctx, tx, p)
 	}
 	if KnownRouteRole(q.Role) && !(strings.HasPrefix(q.Role, "review-gate") && q.AuthorFamily == "") {
-		// Fields are already read in this transaction; avoid a second lookup.
-		q.TicketID = ""
+		// Retain identity so ticket-aware routing consumes its escalation episode.
 		resolved, err := ResolveWork(ctx, tx, tenant.Principal{}, q, now)
 		if err != nil {
 			return out, err
