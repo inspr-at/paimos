@@ -15,7 +15,6 @@ import { Q, mockPublicQuote, mockQuotes, quoteWorld } from './quote-list-fixture
 import { mockSettings, settingsData, makePng } from './settings-fixtures'
 import { mockProfiles, profileWorld, PROFILE } from './profile-fixtures'
 import { mockReleases, releaseHistory, RELEASE_HISTORY_NAME } from './releases-fixtures'
-import { journeyWorld, mockJourney } from './journey-fixtures'
 import { domAudit, expectedMockConsole, decorativeVersionContrast, installLayoutShiftAudit, armLayoutShiftAudit, readLayoutShiftAudit, type Kind, type Raw } from './ui-audit-rules'
 import { mockQuoteEditor, QUOTE_ID } from './quote-inspector-fixtures'
 import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
@@ -24,7 +23,7 @@ import { JONAS as ACCESS_JONAS, ME as ACCESS_ME, accessWorld, mockAccess } from 
 import { mockEffectivePermissions } from './authz-fixtures'
 
 type Finding = Raw & { id: string; route: string; state: string; viewport: string; theme: string; screenshot: string }
-type Setup = 'default' | 'editor' | 'journey' | 'public' | 'signed-out' | 'groups' | 'cards' | 'views' | 'live' | 'live-list'
+type Setup = 'default' | 'editor' | 'public' | 'signed-out' | 'groups' | 'cards' | 'views' | 'live' | 'live-list'
 type Scenario = { state: string; route: string; setup?: Setup; act?: (page: Page) => Promise<void> }
 
 const output = resolve(process.cwd(), 'test-results/qa2b-findings.json')
@@ -53,8 +52,6 @@ const scenarios: Scenario[] = [
   { state: 'project', route: '/p/PHAROS', act: visible('tr.ticket-row:not(.ghost)') },
   { state: 'ticket panel', route: '/p/PHAROS/PHAROS-11', act: visible('.ticket-ws') },
   { state: 'workspace redirect', route: '/workspace', act: visible('main') },
-  { state: 'legacy project redirect', route: '/projects/p-pharos/journey/plan', setup: 'journey', act: visible('main') },
-  { state: 'project journey', route: '/p/PHAROS?view=journey', setup: 'journey', act: visible('main') },
   { state: 'business overview', route: '/business', act: visible('main') },
   { state: 'customers', route: '/business/customers', act: listContent('Bäckerei Hofer') },
   { state: 'customer page', route: `/business/customers/${HOFER}`, act: visible('main') },
@@ -165,7 +162,6 @@ async function installMocks(page: Page, setup: Setup) {
   await mockQuotes(page, quoteWorld())
   await mockSettings(page, settingsData({ photo: true }), { photo: true, people: ['22222222-2222-4222-8222-222222222222'] })
   await mockProfiles(page, profileWorld())
-  if (setup === 'journey') await mockJourney(page, journeyWorld())
   await mockKnowledge(page, knowledgeWorld())
   await mockReleases(page, history)
   if (setup === 'editor') await mockQuoteEditor(page)

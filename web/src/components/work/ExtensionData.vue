@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { IntakeExtensions } from '../../lib/journey'
+import type { IntakeExtensions } from '../../lib/releaseData'
 import AppIcon from '../AppIcon.vue'
 
 const props = defineProps<{ extensions?: IntakeExtensions }>()

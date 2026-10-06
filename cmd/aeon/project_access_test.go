@@ -122,8 +122,8 @@ func TestProjectAccessOverHTTP(t *testing.T) {
 	for _, path := range []string{
 		"/api/nodes/" + w.ids["TB"], "/api/node-keys/TB-1", "/api/nodes/" + w.ids["TB"] + "/activity",
 		"/api/nodes/" + w.ids["TB"] + "/attachments", "/api/attachments/" + w.ids["attB"] + "/content",
-		"/api/knowledge/" + w.ids["GB"], "/api/projects/" + w.ids["B"] + "/journey",
-		"/api/projects/" + w.ids["B"] + "/requirements", "/api/projects/" + w.ids["B"] + "/intake",
+		"/api/knowledge/" + w.ids["GB"], "/api/projects/" + w.ids["B"] + "/releases",
+		"/api/projects/" + w.ids["B"] + "/intake",
 		"/api/relations?node_id=" + w.ids["TB"], "/api/events?node_id=" + w.ids["TB"],
 		"/api/knowledge/resolve?project_id=" + w.ids["B"] + "&type=guideline&slug=gb",
 		"/api/projects/" + w.ids["B"] + "/members", "/api/knowledge/graph?project_id=" + w.ids["B"],

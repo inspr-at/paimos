@@ -408,7 +408,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			modelMod,
 			agentaccounts.New(pool),
 			pairingMod,
-			// R3: journey
+			// Retired Flow compatibility routes
 			journey.New(pool),
 			requirements.New(pool),
 			releases.New(pool),
@@ -418,7 +418,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			plugins.NewWithRegistry(pool, pluginRegistry),
 			// EvidenceLaunchChecks admits only from the recorded candidate artifact
 			// and a fresh launch_readiness row. A missing record stays refused.
-			stagehandoff.New(pool, pluginRegistry, stagehandoff.EvidenceLaunchChecks{Pool: pool}),
+			stagehandoff.New(pool, pluginRegistry),
 			// R4: business plugins
 			costunits.New(pool, pluginRegistry),
 			crm.NewWithNoteGenerator(pool, pluginRegistry, workspaceNotes),
