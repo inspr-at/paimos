@@ -277,6 +277,195 @@ nightly retains its existing once-only `web-unit` evidence. Skipped Actions jobs
 with zero timestamps report absent duration; executed jobs with invalid timestamps
 still fail accounting. Spec-only reports explicitly use `untiered` coverage and
 claim no tier case passes; its native checks still block `web`.
+
+**Affected PR planning (OPS-257 / AEON-743):** `CI_AFFECTED_LANE` is a repository
+variable, default off. Only its exact value `on` enables new rules; unset, `off`
+and every other value preserve old PR selection byte for byte (the selector test
+replays all 80 recorded merged-PR file lists plus one list per rule against the
+frozen phase-1 selector). The workflow environment passes it to the planners and
+tier runners. Merge groups always use the full gated catalogue and the full
+layout regardless of the switch. Main push, manual and nightly selection keep
+their established behavior. Required check names, skipped-job accounting, tier
+evidence, tree reuse and unconditional `migration-compat` stay unchanged.
+
+**The bar (OPS decision, phase 2):** the PR lane is feedback only. The merge
+queue is the authoritative full gate, main push stays full or exact-tree reuse,
+nightly stays full, and any change to CI machinery stays full in the PR lane
+too (`.github/**`, `scripts/ci-*`, `scripts/ci/static-checks.json`,
+`scripts/test-tiers/**`, `scripts/test-tier-go/**`, `scripts/releaseworkflow/**`,
+`go.mod`/`go.sum`/`go.work`, `web/package*.json`, Playwright, Vite and
+TypeScript configuration, `web/scripts/` except the three manifest regression
+tests). A PR can already edit its own `ci.yml`, so narrowing the PR lane creates
+no new bypass while the merge group is full; the phase-1 "trusted bootstrap"
+concern is therefore not a blocker for narrowing. The tier planner still runs
+the base-SHA snapshot of its classifier, graph and manifests, which keeps lane
+decisions reproducible, not as a security boundary. A narrowing miss costs one
+merge-group ejection (about 12 to 25 minutes), so rules narrow wherever a
+plausible, cheap-to-compute mapping exists and stay full where a miss is likely
+or the mapping is unknowable.
+
+**Modes and layouts.** The planner publishes `mode` (`full` or `essential`) and
+`layout` (`full` or `static`). `essential`/`full` is the phase-1 shape: two Go
+shards, two browser shards, four unit shards, timing, static, release, smoke and
+migration jobs (22 hosted jobs). `essential`/`static` keeps only `ci-plan`,
+`tier-plan`, `runner-route`, `go-static`, `go`, `web-setup`, four `web-unit`
+shards, `web`, `release-check-run`, `release-check`, `e2e`, `migration-compat`
+and `tier-measurements` (16 jobs): no Go shards, no timing, no browsers, no
+server smoke. The `go`, `web` and `e2e` aggregates accept exactly those skips,
+only for `pull_request` events with lane `full`, and reject any other layout
+value. The static layout applies only when every changed path is docs-like,
+a manifest (R1), audit tooling (R5) or an always-on regression test (R9), and
+no promoted case needs a Go or browser shard. `tier-measurements` treats the
+skipped shard jobs as expected and still requires unit evidence.
+
+Rules, each with how a regression could slip through the PR lane and what
+catches it:
+
+- **R1 manifests** (`scripts/ci/*.json` tier, flaky and baseline registries,
+  `scripts/ci/go-shards*.txt` weights, `web/ci-web-shards.json`,
+  `scripts/migration-policy*.json`, `scripts/audit/*.json`, and the manifest
+  regression tests `web/scripts/{ci-web-shard,aeon-676-ci,aeon-681-ci}.test.mjs`):
+  static layout. `go-static` re-validates the Go manifest against native
+  collection (`check go` now also rejects malformed timing weights), `web-unit`
+  shard 1 runs the shard manifest tests and `ci:web:shard:check`, the tier
+  runner validates the web manifest, `migration-compat` applies the policy
+  JSON and `release-check-run` runs the audit suite. Tier manifests are diffed
+  against the event base: a row promoted to GATED-FULL or ESSENTIAL (absent or
+  lower tier at base) executes; unit promotions stay static, Go or browser
+  promotions switch to the full layout; new NIGHTLY rows need only the checks.
+  A missing base manifest fails closed to full. Slip: a shard regrouping that
+  starves a browser group only shows when browsers run; caught by the merge
+  group's 12-shard full run.
+- **R2 API contracts** (`api/**`): essential/full layout with the Go packages
+  whose sources name the changed file (grep over `internal/`, `cmd/` and
+  `scripts/` Go sources), their bounded reverse dependants, web typecheck and
+  lint in `web-setup`, the smoke in `e2e-run`, and ESSENTIAL web. This tree has
+  handwritten web wire types and no generated API code, so there are no
+  generated-type importers to select. A diff that also touches the OpenAPI lint
+  package `internal/reportercontract/`, codegen configuration or generated
+  sources stays full; a contract nobody reads stays full. Slip: a response
+  shape change that only a NIGHTLY browser spec notices; caught by nightly,
+  while the Go contract tests and the smoke run in the lane.
+- **R3 web helpers and fixtures:** unchanged from phase 1: ESSENTIAL plus every
+  transitive importing spec and unit; unknown, deleted or unimported helpers
+  and helpers imported by more than 15 specs stay full; the 300-browser-case
+  layout bound applies. Harness pages loaded by URL are not import edges (an
+  experiment with page edges cost more PRs to the 300-case bound than it won).
+- **R4 migrations** (`internal/db/migrations/*.sql`): essential/full layout.
+  A SQL-aware tokenizer handles strings, quoted identifiers, dollar quotes,
+  and nested block/line comments together. Only completely parsed statements
+  may narrow: simple CREATE TABLE, ALTER TABLE ADD COLUMN, CREATE INDEX, and
+  INSERT/UPDATE/DELETE on a plain named table with constant values and simple
+  predicates. Quoted names and the `public` schema are supported. Every token
+  must belong to the whitelist. Any unsupported statement or tail, DO/function
+  body, CTE, TRUNCATE, complex expression/constraint/policy, ambiguous escape,
+  malformed quote/comment or empty intermediate statement makes the **whole
+  migration full**, even if preceding statements have known objects.
+  Every Go package whose sources mention one of those identifiers runs, plus
+  `internal/db` itself (the owning package: migration runner, RLS bootstrap and
+  split-parity tests), bounded reverse dependants, `migration-compat` as always
+  and the real-server smoke. Browser specs are API-mocked and never reach the
+  database, so the web side stays at ESSENTIAL. Unreadable migrations, no
+  recognised object, no referencing package, or more than the consumer bound
+  stay full. Other `internal/db/` sources and `internal/dbtest/` stay full. The
+  migrations README belongs to `internal/db`. Slip: a package that reads a
+  changed table only through a view or function defined elsewhere, or through
+  dynamically assembled SQL; caught by the merge group's full Go run and by
+  `migration-compat` for the previous release.
+- **R5 audit tooling** (`scripts/audit/**`): static layout; `release-check-run`
+  runs the audit unit tests and coverage check in every lane. Slip: none in
+  the product; a broken audit script fails its own job.
+- **R6 release data** (`version.json`, with `internal/releasehistory/data/`
+  through the ordinary package mapping): packages and web tests that name
+  `version.json` (`internal/releasehistory`, `internal/releases`,
+  `tests/calver3.test.ts`) plus the release checks in `release-check-run`.
+  Slip: a build-time consumer that reads the file under another name; caught
+  by the merge group and the release rehearsal.
+- **R7 Go test data** (`internal/**/testdata/`, `cmd/**/testdata/`): the owning
+  package through the ordinary mapping plus every Go package and web test that
+  names the file. Slip: a sibling package reading the directory with a
+  computed path; caught by the merge group.
+- **R8 harness pages** (`web/tests/*.html`): the specs that navigate to the
+  page by name. Slip: a page reached through a variable URL; caught by the
+  merge group.
+- **R9 always-on regression tests** (`scripts/check-migrations.test.mjs`,
+  `scripts/migration_compat_probe_test.py`): static layout; `migration-compat`
+  executes them in every lane. Their executables (`check-migrations.mjs`,
+  `migration-compat.sh`, `migration-compat-probe.py`) stay full.
+- **Docs-like files** (`docs/`, root notices, any Markdown outside `testdata`,
+  `internal/` and `cmd/`): no tier impact; Markdown inside Go packages maps to
+  the package. Every other path keeps its phase-1 handling: ordinary Go and
+  web sources select the changed area, everything unmapped stays full.
+
+Bounds: R3 keeps 15 specs; mapped browser fan-outs above 300 cases keep the
+full layout; optional Go reverse dependants above 300 extra cases are dropped;
+consumer rules (R2, R4, R6, R7) stay full above 1000 extra gated Go cases,
+because the two essential Go shards carry about one full hosted shard each and a
+wider set is cheaper on the seven-shard layout. `consumerCaseBound` in
+`scripts/test-tiers/core.mjs` is the knob; hosted timings calibrate it.
+
+With `CI_AFFECTED_LANE=on`, `tier-plan.outputs.lane` is the single effective
+workflow lane. Wider trusted coverage wins: `full`, `essential` and `static`
+planner modes force the `full` aggregate lane, with the trusted layout deciding
+which jobs execute. `spec-only` is retained only when both classifiers say
+`spec-only`; `docs-only` only when the trusted planner says `docs`. A raw `full`
+lane never narrows. Missing or invalid planner data fails closed to full; merge
+queue, main and manual events stay full. With the flag off (including unset or
+any value other than exact `on`), the raw `ci-plan` lane is preserved unchanged.
+Every execution condition, shard matrix, runner tier selection, full-execution
+check, required aggregate and tier measurement uses this effective output.
+Only `tier-plan` reads the raw classifier lane. All consumers depend on successful
+tier planning; a new spec missing from the trusted graph therefore runs full
+validation and inventory checks, even if the raw classifier called it spec-only.
+
+The runner honours `AEON_TEST_TIER_MODE` from the trusted planner (full,
+essential, static or spec-only); a candidate graph cannot narrow a supplied
+full decision. Candidate uncertainty or an explicit planner/candidate layout
+disagreement widens to full. `AEON_TEST_TIER_LAYOUT`, when supplied, preserves
+the planner's layout. Explicit `--full`/`--all` retain their existing meanings.
+
+Consumer scans preflight the complete file set before reading: reaching 20,000
+files, 100,000 walked entries, 64 MiB total or 2 MiB per file invalidates the
+whole scan. Source and migration reads are bounded, reject binary/invalid UTF-8
+and non-regular files, check file identity/size around reads, and reject symlink
+escapes. Scan errors and symlinks discard partial results and force full for
+the whole affected selection. These checks do not alter the flag-off selector.
+
+Replay the 80 recorded merged PR file lists without browsers using
+`node scripts/test-tiers/replay.mjs` (`--json` adds a summary and exact per-PR
+counts and reasons). The fixture pins the old selector and Go graph to
+`b6f74faa11d506efd3d21387ca4e2f5a9c687dcf`; replay uses the current manifest
+catalogue, web graph, Go sources and migrations rather than each historical PR
+tree, and cannot reconstruct historical manifest promotions (R1 edits replay as
+registration-only). Result after OPS-257 L4 fix round 2: old lane 16 of 80
+essential (20%); new lane 36 of 80 narrowed (45%: 20 newly essential,
+16 unchanged, 0 static
+because every sampled manifest or audit PR also changed sources). Projected
+hosted jobs for the sample fall from 2710 to 2420 (full 37, essential 22,
+static 16, spec-only 12, docs-only 9). The pre-fix lane narrowed 38; two of
+those PRs now correctly stay full on unsupported SQL. PR 235 retains its
+essential tier selection but widens its raw spec-only workflow lane to full
+(22 jobs rather than 12), following trusted planner precedence. The 44 PRs that stay
+full: CI machinery
+18 (mostly `ci.yml`), R3 helpers above 15 specs 9 (`work-fixtures.ts`,
+`agents-fixtures.ts`, `capacity-fixtures.ts`), unnarrowed `internal/db/`
+sources or ad-hoc scripts 8, unsupported SQL migrations 6, one browser fan-out above
+300, one deleted-file replay artifact (PR 224 narrows on its live tree) and one
+`.dockerignore`. The 50% target is missed by four PRs on this sample; SQL
+uncertainty is a safety fallback, not a reason to loosen the whitelist.
+
+Rollout stays coordinator-owned: keep the variable unset while this change is
+reviewed and merged, measure the next full runs (rule reasons, selected cases,
+promotion counts, jobs, PR wall time, merge-group and nightly failures), then
+set `CI_AFFECTED_LANE=on`. Acceptance for keeping it on: at least 50% of PR runs
+essential or static with p50 wall time at or below 5 minutes, merge-group red
+rate at or below 10%, and nightly finding nothing the lane missed. Roll back by
+unsetting the variable or setting `off`; the merge-group full fix remains.
+Reverting planner code requires a reviewed revert that retains that fix. The
+workflow shape change (static-layout gates on `go-test`, `go-timing`,
+`web-shard`, `e2e-run`; the `layout` output; layout-aware aggregates) is inert
+while the variable is off because the planner then never emits `static`.
+
 The historical shard inventory selected 53 gated specs: the original
 49 measured specs plus `clip-tip`, `aeon-632b-clip`, `key-trim` and `model-prefs`, whose
 weights are scheduling estimates. `clip-tip` uses its complete local serial
