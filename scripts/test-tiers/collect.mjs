@@ -4,12 +4,23 @@ import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { formatManifest } from './manifests.mjs'
+import { goFailures } from './failures.mjs'
 export const root = fileURLToPath(new URL('../../', import.meta.url))
 export const web = resolve(root, 'web')
 export const evidence = resolve(root, 'tmp/test-tiers')
 export function command(bin, args, { cwd = root, env = process.env, timeout = 180_000 } = {}) {
   const result = spawnSync(bin, args, { cwd, env, encoding: 'utf8', timeout, maxBuffer: 32*1024*1024 })
-  if (result.error || result.status !== 0) throw new Error(`${bin} ${args.slice(0,4).join(' ')} failed (${result.status ?? result.error?.code}); ${result.stderr?.slice(-2000) ?? ''}`)
+  if (result.error || result.status !== 0) {
+    let output = result.stdout
+    if (bin === 'go' && args.includes('-json')) {
+      try {
+        const failures = goFailures(output ?? '')
+        if (failures.length) output = failures.map(row => `${row.owner}: ${row.output}`).join('\n')
+      } catch { /* Interrupted JSON falls back to the captured output tail. */ }
+    }
+    const diagnostic = [output, result.stderr].map(text => text?.slice(-2000)).filter(Boolean).join('\n')
+    throw new Error(`${bin} ${args.slice(0,4).join(' ')} failed (${result.status ?? result.error?.code}); ${diagnostic}`)
+  }
   return result.stdout
 }
 export function collectGo() {
