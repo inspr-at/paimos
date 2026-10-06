@@ -46,7 +46,6 @@ func TestCLIAdditionalRootTranscripts(t *testing.T) {
 		{"tag create", []string{"tag", "create", "--name", "Ready", "--color", "blue"}, "", "POST", "/api/nodes", "kind_id"},
 		{"attach list", []string{"attach", "list", "--issue", "AEON-1"}, "", "GET", "/api/nodes/" + rootIssueID + "/attachments", ""},
 		{"attach upload", []string{"attach", "AEON-1", upload}, "", "POST", "/api/nodes/" + rootIssueID + "/attachments", ""},
-		{"external-stage pull", []string{"external-stage", "pull", rootHandoffID}, "", "GET", "/api/stage-handoffs/" + rootHandoffID, ""},
 		{"apply dry-run", []string{"apply", "--from-file", plan, "--dry-run"}, "", "", "", ""},
 		{"schema", []string{"schema", "--refresh"}, "", "GET", "/api/kinds", ""},
 		{"doctor", []string{"doctor"}, "", "GET", "/api/me", ""},

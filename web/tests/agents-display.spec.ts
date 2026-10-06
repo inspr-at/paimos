@@ -9,6 +9,8 @@ import { expectStableControls } from './helpers/stable'
 
 const id = (n: number) => `5e000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const row = (page: Page, n: number) => page.locator(`[data-row="s:${id(n)}"]`)
+// The tree's live-family fold; `.worker-toggle` is the stopped-history control.
+const familyFold = (page: Page, n: number) => row(page, n).locator('[data-fold="family"]')
 const dial = (page: Page) => page.getByRole('region', { name: 'Agents at once' })
 const liveCount = (page: Page) => page.locator('.sessions .group-row.live .mono')
 const shots = process.env.AEON691_SHOTS
@@ -69,7 +71,7 @@ test('live families count all external workers, hide hundreds of ended siblings 
   await expect(row(page, 1).locator('.history-toggle')).toHaveAttribute('aria-expanded', 'false')
   await expect(dial(page).locator('.f-live')).toContainText('4 running · room for 16 more · your agents')
   await expect(dial(page).locator('.f-live')).toHaveAttribute('data-tip', /including sessions started outside PAIMOS/)
-  const toggle = row(page, 1).locator('.worker-toggle').first()
+  const toggle = familyFold(page, 1)
   await expectStableControls({
     controls: { lead: row(page, 1), workers: toggle, history: row(page, 1).locator('.history-toggle'), sort: page.locator('.th-sort').first() },
     scrollAreas: { sessions: page.locator('.sessions') },
@@ -107,7 +109,7 @@ test('ended workers remain recoverable through an opt-in fold without cleanup wr
   const history = row(page, 1).locator('.history-toggle')
   await expect(history).toHaveAttribute('aria-expanded', 'false')
   await expectStableControls({
-    controls: { lead: row(page, 1), history, workers: row(page, 1).locator('.worker-toggle').first() },
+    controls: { lead: row(page, 1), history, workers: familyFold(page, 1) },
     scrollAreas: { sessions: page.locator('.sessions') },
     interactions: [
       { name: 'show ended workers', run: async () => { await history.click(); await expect(page.locator('.sessions .row')).toHaveCount(7); await expect(history).toHaveAttribute('aria-expanded', 'true'); await expect(row(page, 10)).toHaveClass(/stopped/) } },
@@ -152,11 +154,17 @@ test('attention counts relevant descendants through family folds and stopped his
   const count = page.locator('.sessions .group-row.attention .mono')
   await expect(count).toHaveText('2')
   await expect(count).toHaveAttribute('data-tip', /needing attention/)
-  const fold = row(page, 1).locator('.worker-toggle').first()
-  await fold.click()
-  await expect(page.locator('.sessions .row')).toHaveCount(1)
-  await expect(count).toHaveText('2')
-  await row(page, 1).locator('.history-toggle').click()
+  const fold = familyFold(page, 1)
+  const history = row(page, 1).locator('.history-toggle')
+  // Folded, the problem roll joins the line end; the stopped-history control stays put and clickable.
+  await expectStableControls({
+    controls: { lead: row(page, 1), fold, history },
+    scrollAreas: { sessions: page.locator('.sessions') },
+    interactions: [
+      { name: 'fold family with a problem below', run: async () => { await fold.click(); await expect(page.locator('.sessions .row')).toHaveCount(1); await expect(count).toHaveText('2'); await expect(row(page, 1).locator('.roll.problem')).toBeVisible() } },
+    ],
+  })
+  await history.click()
   await expect(row(page, 10)).toHaveAttribute('data-state', 'problem')
   await expect(row(page, 11)).toHaveAttribute('data-state', 'done')
   await expect(count).toHaveText('2')
@@ -179,7 +187,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       })
     }
     await expectStableControls({
-      controls: { lead, workers: lead.locator('.worker-toggle').first(), history: lead.locator('.history-toggle'), leadActions: lead.locator('.more'), nextWorker: worker, nextActions: worker.locator('.more') },
+      controls: { lead, workers: familyFold(page, 1), history: lead.locator('.history-toggle'), leadActions: lead.locator('.more'), nextWorker: worker, nextActions: worker.locator('.more') },
       scrollAreas: { sessions: page.locator('.sessions') },
       interactions: [
         { name: 'first reported estimate', run: async () => {
@@ -213,7 +221,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await expect(row(page, 2).locator('.report-source')).toBeVisible()
     await expect(row(page, 2).locator('.pct')).toHaveText('80%')
     await expectStableControls({
-      controls: { more: dial(page).getByRole('button', { name: 'One agent more at once' }), fewer: dial(page).getByRole('button', { name: 'One agent fewer at once' }), fold: dial(page).locator('.f-fold') },
+      controls: { more: dial(page).getByRole('button', { name: 'One agent more at once' }), fewer: dial(page).getByRole('button', { name: 'One agent fewer at once' }), fold: dial(page).locator('.fs-tog') },
       scrollAreas: { dial: dial(page), page: page.locator('.agents-page') },
       interactions: [{ name: 'increase total without moving actions', run: async () => { await dial(page).getByRole('button', { name: 'One agent more at once' }).click(); await expect(dial(page).locator('.f-num')).toHaveText('21') } }],
     })

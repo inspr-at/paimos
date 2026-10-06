@@ -186,8 +186,8 @@ func (f *fixture) rebuildHandler() {
 	if err := pairing.ConfigureAccountLink(f.sessionKey); err != nil {
 		f.t.Fatal(err)
 	}
-	api := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, pairing, events.New(f.db.App), agentaccounts.New(f.db.App), nodes.New(f.db.App, nil), modelregistry.New(f.db.App), harness.New(f.db.App), workorders.New(f.db.App), agentruns.New(f.db.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
-		return agentaccounts.Settle(ctx, tx, p, r.ID)
+	api := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, pairing, events.New(f.db.App), agentaccounts.New(f.db.App), nodes.New(f.db.App, nil), modelregistry.New(f.db.App), harness.New(f.db.App), workorders.New(f.db.App), agentruns.New(f.db.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry, pending *[]events.Change) error {
+		return agentaccounts.SettleDeferred(ctx, tx, p, r.ID, pending)
 	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
 	if len(f.messages) > 0 {
 		pairing.SetAttachedMessages(f.messages[0])

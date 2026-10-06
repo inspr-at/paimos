@@ -5,6 +5,7 @@ package modelregistry
 import (
 	"context"
 	"encoding/json"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -76,28 +77,32 @@ func writeEvent(ctx context.Context, tx pgx.Tx, p tenant.Principal, eventType st
 	return err
 }
 
-func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+func prepareCatalogDeferred(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]events.Change, error) {
 	var n int
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles`).Scan(&n); err != nil {
-		return err
+		return nil, err
 	}
 	if n > 0 {
-		if err := ensureAdditionalCatalog(ctx, tx, p); err != nil {
-			return err
+		changes, err := prepareAdditionalCatalog(ctx, tx, p)
+		if err != nil {
+			return nil, err
 		}
-		return upgradeCatalog(ctx, tx, p)
+		upgraded, err := prepareCatalogUpgrade(ctx, tx, p)
+		return append(changes, upgraded...), err
 	}
 	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-model-registry:' || current_setting('aeon.tenant_id', true), 0))`); err != nil {
-		return err
+		return nil, err
 	}
 	if err := tx.QueryRow(ctx, `SELECT count(*) FROM model_profiles`).Scan(&n); err != nil {
-		return err
+		return nil, err
 	}
 	if n > 0 {
-		if err := ensureAdditionalCatalog(ctx, tx, p); err != nil {
-			return err
+		changes, err := prepareAdditionalCatalog(ctx, tx, p)
+		if err != nil {
+			return nil, err
 		}
-		return upgradeCatalog(ctx, tx, p)
+		upgraded, err := prepareCatalogUpgrade(ctx, tx, p)
+		return append(changes, upgraded...), err
 	}
 	profiles := catalogProfiles()
 	ids := make(map[string]string, len(profiles))
@@ -108,7 +113,7 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 			Family: profile.Family, Model: profile.Model, Effort: profile.Effort, Tier: profile.Tier,
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		ids[profile.Slug] = row.ID
 		seeded = append(seeded, row)
@@ -117,21 +122,21 @@ func ensureCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 	for _, route := range defaultRoutes(profiles) {
 		id := ids[route.Slug]
 		if id == "" {
-			return fail(http.StatusInternalServerError, "catalog route is missing its profile")
+			return nil, fail(http.StatusInternalServerError, "catalog route is missing its profile")
 		}
 		stored := Route{Role: route.Role, Priority: route.Priority, ProfileID: id, State: "available"}
 		if err := insertRoute(ctx, tx, p.TenantID, stored); err != nil {
-			return err
+			return nil, err
 		}
 		routes = append(routes, stored)
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO model_refresh_settings(tenant_id,catalog_version) VALUES($1,$2) ON CONFLICT (tenant_id) DO UPDATE SET catalog_version=EXCLUDED.catalog_version`, p.TenantID, CatalogVersion); err != nil {
-		return err
+		return nil, err
 	}
-	return writeEvent(ctx, tx, p, evSeeded, nil, struct {
+	return []events.Change{{Type: evSeeded, After: struct {
 		Profiles []Profile `json:"profiles"`
 		Routes   []Route   `json:"routes"`
-	}{seeded, routes})
+	}{seeded, routes}}}, nil
 }
 
 func insertProfile(ctx context.Context, tx pgx.Tx, tenantID string, in profileWrite) (Profile, error) {
@@ -194,10 +199,18 @@ func insertRoute(ctx context.Context, tx pgx.Tx, tenantID string, route Route) e
 }
 
 func listProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
-	return readProfiles(ctx, tx, `
+	return listProfilesLimit(ctx, tx, 0)
+}
+
+func listProfilesLimit(ctx context.Context, tx pgx.Tx, limit int) ([]Profile, error) {
+	query := `
 		SELECT p.id::text, p.slug, p.version, p.harness, p.family, p.model, p.effort, p.tier, p.enabled, p.created_at, d.model_display->>'display_name', d.model_display->>'short_name', d.model_display->>'model_version', d.effort_level, d.provider
 		FROM model_profiles p JOIN model_profile_display d ON d.tenant_id=p.tenant_id AND d.profile_id=p.id
-		ORDER BY p.slug, p.version, p.id`)
+		ORDER BY p.slug, p.version, p.id`
+	if limit > 0 {
+		return readProfiles(ctx, tx, query+` LIMIT $1`, limit)
+	}
+	return readProfiles(ctx, tx, query)
 }
 
 // listPickerProfiles bounds editor metadata before decoding and excludes retired revisions.
@@ -209,8 +222,8 @@ func listPickerProfiles(ctx context.Context, tx pgx.Tx) ([]Profile, error) {
 		ORDER BY p.slug, p.version, p.id LIMIT 257`)
 }
 
-func readProfiles(ctx context.Context, tx pgx.Tx, query string) ([]Profile, error) {
-	rows, err := tx.Query(ctx, query)
+func readProfiles(ctx context.Context, tx pgx.Tx, query string, args ...any) ([]Profile, error) {
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -295,15 +308,20 @@ func validateProfile(in profileWrite) error {
 	return nil
 }
 
-func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite) (Profile, error) {
+func normalizeProfileWrite(in profileWrite) profileWrite {
 	in.Slug = strings.TrimSpace(in.Slug)
 	in.Version = strings.TrimSpace(in.Version)
 	in.Model = strings.TrimSpace(in.Model)
 	in.Effort = strings.TrimSpace(in.Effort)
+	return in
+}
+
+func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profileWrite) (Profile, error) {
+	in = normalizeProfileWrite(in)
 	if err := validateProfile(in); err != nil {
 		return Profile{}, err
 	}
-	if err := ensureCatalog(ctx, tx, p); err != nil {
+	if err := requireCatalog(ctx, tx); err != nil {
 		return Profile{}, err
 	}
 	out, err := insertProfile(ctx, tx, p.TenantID, in)
@@ -316,22 +334,24 @@ func createProfile(ctx context.Context, tx pgx.Tx, p tenant.Principal, in profil
 	return out, nil
 }
 
+// replaceRoutes is the transaction-injected legacy fixture helper. Production
+// writes enter through Module.replace with final authority and shared fences.
 func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming []Route, now time.Time) ([]Route, error) {
-	if incoming == nil {
-		return nil, fail(http.StatusBadRequest, "routes must be an array")
-	}
-	if err := ensureCatalog(ctx, tx, p); err != nil {
+	if err := routeBounds(incoming); err != nil {
 		return nil, err
 	}
-	normalized, err := normalizeRoutes(incoming, now)
+	if err := requireCatalog(ctx, tx); err != nil {
+		return nil, err
+	}
+	before, err := boundedStoredRoutes(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	normalized, err := normalizeStoredRoutes(incoming, before, now, false)
 	if err != nil {
 		return nil, err
 	}
 	if err := profilesExist(ctx, tx, normalized); err != nil {
-		return nil, err
-	}
-	before, err := listRoutes(ctx, tx)
-	if err != nil {
 		return nil, err
 	}
 	if routesEqual(before, normalized) {
@@ -343,18 +363,43 @@ func replaceRoutes(ctx context.Context, tx pgx.Tx, p tenant.Principal, incoming 
 	if _, err := tx.Exec(ctx, `DELETE FROM model_security_role_routes`); err != nil {
 		return nil, err
 	}
+	if _, err := tx.Exec(ctx, `DELETE FROM model_security_role_routes`); err != nil {
+		return nil, err
+	}
 	for _, route := range normalized {
 		if err := insertRoute(ctx, tx, p.TenantID, route); err != nil {
 			return nil, err
 		}
 	}
-	if err := writeEvent(ctx, tx, p, evRoutes, before, normalized); err != nil {
+	after, err := boundedStoredRoutes(ctx, tx)
+	if err != nil {
 		return nil, err
 	}
-	return normalized, nil
+	if err := writeEvent(ctx, tx, p, evRoutes, before, after); err != nil {
+		return nil, err
+	}
+	return after, nil
 }
 
 func normalizeRoutes(incoming []Route, now time.Time) ([]Route, error) {
+	out, err := normalizeRouteStructure(incoming)
+	if err != nil {
+		return nil, err
+	}
+	for _, route := range out {
+		if route.State != "available" && !route.ValidUntil.After(now) {
+			return nil, fail(http.StatusBadRequest, "suppression requires a future expiry")
+		}
+	}
+	return out, nil
+}
+
+// Structural checks run before standalone setup. Expiry and profile existence
+// remain authoritative in the final transaction.
+func normalizeRouteStructure(incoming []Route) ([]Route, error) {
+	if incoming == nil {
+		return nil, fail(http.StatusBadRequest, "routes must be an array")
+	}
 	seenPriority := map[string]bool{}
 	seenProfile := map[string]bool{}
 	out := make([]Route, 0, len(incoming))
@@ -364,6 +409,9 @@ func normalizeRoutes(incoming []Route, now time.Time) ([]Route, error) {
 		}
 		if route.Priority < 1 {
 			return nil, fail(http.StatusBadRequest, "priority must be positive")
+		}
+		if route.Priority > math.MaxInt32 {
+			return nil, fail(http.StatusBadRequest, "priority exceeds storage range")
 		}
 		if !uuidRE.MatchString(route.ProfileID) {
 			return nil, fail(http.StatusBadRequest, "invalid profile id")
@@ -389,7 +437,7 @@ func normalizeRoutes(incoming []Route, now time.Time) ([]Route, error) {
 			if route.Reason == "" || len(route.Reason) > 512 || strings.ContainsAny(route.Reason, "\x00\r\n") {
 				return nil, fail(http.StatusBadRequest, "suppression requires a reason")
 			}
-			if route.ValidUntil == nil || !route.ValidUntil.After(now) {
+			if route.ValidUntil == nil {
 				return nil, fail(http.StatusBadRequest, "suppression requires a future expiry")
 			}
 		}
@@ -464,4 +512,14 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(buf[i:])
+}
+
+// flushCatalogChanges runs after the caller's final resource operation.
+func flushCatalogChanges(ctx context.Context, tx pgx.Tx, p tenant.Principal, changes []events.Change) error {
+	for _, change := range changes {
+		if _, err := events.Append(ctx, tx, p, change); err != nil {
+			return err
+		}
+	}
+	return nil
 }

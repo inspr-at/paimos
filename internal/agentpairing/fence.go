@@ -6,6 +6,8 @@ import (
 	"errors"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/inspr-at/paimos/internal/events"
 )
 
 // AccountFence runs with Lock held before account locks. telemetry=true allows
@@ -81,6 +83,16 @@ func PairedPrincipal(ctx context.Context, tx pgx.Tx, principal string) (bool, er
 // FinishDrain is called only after accepted terminal telemetry has settled its
 // existing reservation in the same transaction.
 func FinishDrain(ctx context.Context, tx pgx.Tx, account string) error {
+	return finishDrain(ctx, tx, account)
+}
+
+// FinishDrainDeferred completes enrollment/account/key writes before the outer
+// completion appends events. The authenticated telemetry principal remains actor.
+func FinishDrainDeferred(ctx context.Context, tx pgx.Tx, account string, pending *[]events.Change) error {
+	return finishDrain(ctx, tx, account, pending)
+}
+
+func finishDrain(ctx context.Context, tx pgx.Tx, account string, pending ...*[]events.Change) error {
 	var computer string
 	err := tx.QueryRow(ctx, `SELECT computer_id::text FROM agent_pairing_enrollments WHERE account_id=$1`, account).Scan(&computer)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -89,5 +101,5 @@ func FinishDrain(ctx context.Context, tx pgx.Tx, account string) error {
 	if err != nil {
 		return err
 	}
-	return finalizeDrain(ctx, tx, computer)
+	return finalizeDrain(ctx, tx, computer, pending...)
 }

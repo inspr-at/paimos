@@ -4,6 +4,7 @@ package harness_test
 
 import (
 	"encoding/json"
+	"net/http"
 	"sort"
 	"strings"
 	"testing"
@@ -12,7 +13,37 @@ import (
 
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/tenant"
+	"github.com/inspr-at/paimos/internal/workorders"
 )
+
+func TestOrdinaryEndpointPreservesNarrowedCallerAndOwner(t *testing.T) {
+	f := fixture(t)
+	f.agent.KeyCreatorID = f.person.ID
+	calls := 0
+	f.mux.HandleFunc("GET /endpoint-caller", workorders.Endpoint(f.db.App, "harness.worker", true, 200,
+		func(_ *http.Request, _ pgx.Tx, p tenant.Principal) (any, error) {
+			calls++
+			return map[string]any{"scopes": p.Scopes, "creator": p.KeyCreatorID}, nil
+		}))
+	w := f.call(f.agent, "GET", "/endpoint-caller", nil, "")
+	expect(t, w, 200)
+	body := decode(t, w)
+	scopes := body["scopes"].([]any)
+	if len(scopes) != 1 || scopes[0] != "harness.worker" || body["creator"] != f.person.ID {
+		t.Fatalf("ordinary endpoint replaced the authenticated caller ceiling/owner: %s", w.Body)
+	}
+	// Retaining a narrowed caller never bypasses the exact bearer's current
+	// initiating scope: a live reduction must still fence the handler.
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET scopes=ARRAY['harness.read'] WHERE principal_id=$1`, f.agent.ID)
+		return err
+	})
+	w = f.call(f.agent, "GET", "/endpoint-caller", nil, "")
+	expect(t, w, 403)
+	if !strings.Contains(w.Body.String(), "key scope required: harness.worker") || calls != 1 {
+		t.Fatalf("scope reduction reached the handler or failed for the wrong reason: calls=%d body=%s", calls, w.Body)
+	}
+}
 
 // AEON-184: the Projects page asks once which agents are working where. Only
 // fresh, unstopped, non-idle sessions count; project visibility decides what

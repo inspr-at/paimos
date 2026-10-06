@@ -282,8 +282,8 @@ func expired(ctx context.Context) bool {
 // binding, member and invite mutations in internal/authz) and holds it until
 // commit. Every permission decision of a rules write is made after it, so a
 // concurrent demotion either commits first and is seen, or waits for this
-// write. Order: the tenant row first, then the tree advisory lock, matching
-// authz.lockProjectMutation, operator calls and Undo.
+// write. Order: the tenant row first, then the tree advisory lock, as in
+// authz.lockProjectMutation, so the two never deadlock.
 //
 // NO KEY UPDATE conflicts with other access fences but permits the KEY SHARE
 // held by foreign-key checks while another writer waits for the tree lock.

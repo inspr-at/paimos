@@ -2,7 +2,6 @@
 // PN1 / AEON-195: sections own view controls; old bookmarks and ticket links survive.
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
-import { journeyWorld, mockJourney } from './journey-fixtures'
 import { knowledgeWorld, mockKnowledge } from './knowledge-fixtures'
 
 test.use({ launchOptions: { args: ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] } })
@@ -14,7 +13,6 @@ const panel = (page: Page) => page.getByRole('complementary', { name: 'Ticket de
 async function setup(page: Page) {
   const errors = watchErrors(page)
   await mockWork(page, fixtures())
-  await mockJourney(page, journeyWorld('plan'))
   const world = knowledgeWorld()
   await mockKnowledge(page, world)
   await page.route('**/api/knowledge/graph?*', route => {
@@ -26,12 +24,12 @@ async function setup(page: Page) {
   return errors
 }
 
-test('section tabs separate Tickets views, Journey and Knowledge views; each keeps its filters', async ({ page }) => {
+test('section tabs separate Tickets and Knowledge views; each keeps its filters', async ({ page }) => {
   test.setTimeout(90_000)
   await page.setViewportSize({ width: 1600, height: 1000 })
   const errors = await setup(page)
   await page.goto('/p/PHAROS/tickets')
-  await expect(sections(page).getByRole('tab')).toHaveText(['Tickets', 'Journey', 'Knowledge', 'Settings'])
+  await expect(sections(page).getByRole('tab')).toHaveText(['Tickets', 'Knowledge', 'Settings'])
   await expect(ticketViews(page).getByRole('tab')).toHaveText(['List', 'Outline', 'Graph'])
   await expect(ticketViews(page).getByRole('tab', { name: 'List', exact: true })).toHaveAttribute('aria-selected', 'true')
   await expect(page.getByRole('button', { name: 'Display: Display' })).toBeVisible()
@@ -42,14 +40,6 @@ test('section tabs separate Tickets views, Journey and Knowledge views; each kee
   await expect(page).toHaveURL(/view=outline/)
   await expect(page.getByRole('treegrid', { name: 'Ticket outline' })).toBeVisible()
   await expect(page.getByRole('searchbox', { name: 'Search tickets in this project' })).toHaveValue('Hetzner')
-
-  await sections(page).getByRole('tab', { name: 'Journey', exact: true }).click()
-  await expect(page).toHaveURL('/p/PHAROS/journey')
-  await expect(page.getByRole('navigation', { name: 'Project journey' })).toBeVisible()
-  await expect(ticketViews(page)).toHaveCount(0)
-  await expect(knowledgeViews(page)).toHaveCount(0)
-  await page.getByRole('navigation', { name: 'Project journey' }).getByRole('button', { name: '1. Inspire, done' }).click()
-  await expect(page).toHaveURL('/p/PHAROS/journey?stage=inspire')
 
   await sections(page).getByRole('tab', { name: 'Knowledge', exact: true }).click()
   await expect(knowledgeViews(page).getByRole('tab')).toHaveText(['Entries', 'Graph'])
@@ -78,8 +68,8 @@ for (const [old, canonical, section, view] of [
   ['/p/PHAROS', '/p/PHAROS/tickets', 'Tickets', 'List'],
   ['/p/PHAROS?view=list&q=Hetzner', '/p/PHAROS/tickets?view=list&q=Hetzner', 'Tickets', 'List'],
   ['/p/PHAROS?view=outline&closed=1', '/p/PHAROS/tickets?view=outline&closed=1', 'Tickets', 'Outline'],
-  ['/p/PHAROS?view=journey&stage=plan', '/p/PHAROS/journey?stage=plan', 'Journey', ''],
-  ['/projects/p-pharos/journey/plan', '/p/PHAROS/journey?stage=plan', 'Journey', ''],
+  ['/p/PHAROS?view=journey&stage=plan', '/p/PHAROS/tickets', 'Tickets', ''],
+  ['/projects/p-pharos/journey/plan', '/p/PHAROS/tickets', 'Tickets', ''],
   ['/p/PHAROS?view=knowledge', '/p/PHAROS/knowledge', 'Knowledge', 'Entries'],
   ['/p/PHAROS/knowledge?mode=graph', '/p/PHAROS/knowledge?view=graph', 'Knowledge', 'Graph'],
   ['/p/PHAROS/knowledge?view=entries&mode=graph', '/p/PHAROS/knowledge?view=entries', 'Knowledge', 'Entries'],
@@ -96,7 +86,7 @@ for (const [old, canonical, section, view] of [
   await expect(page).toHaveURL('/')
 })
 
-for (const [section, view] of [['tickets', 'list'], ['tickets', 'outline'], ['journey', ''], ['knowledge', 'entries'], ['knowledge', 'graph']]) {
+for (const [section, view] of [['tickets', 'list'], ['tickets', 'outline'], ['knowledge', 'entries'], ['knowledge', 'graph']]) {
   test(`ticket side panel retains ${section}/${view} through reload, expand, collapse and close`, async ({ page }) => {
     await page.setViewportSize({ width: 1600, height: 1000 })
     const errors = await setup(page)
@@ -125,7 +115,7 @@ test('an open ticket stays mounted as its background section changes', async ({ 
   await page.goto('/p/PHAROS/tickets')
   await page.locator('#row-n-1').click()
   await expect(panel(page)).toBeVisible()
-  for (const section of ['Journey', 'Knowledge', 'Tickets']) {
+  for (const section of ['Knowledge', 'Tickets']) {
     await sections(page).getByRole('tab', { name: section, exact: true }).click()
     await expect(page).toHaveURL(section === 'Tickets'
       ? '/p/PHAROS/PHAROS-11'
@@ -139,9 +129,9 @@ test('an open ticket stays mounted as its background section changes', async ({ 
 test('legacy ticket links still open a panel, including the Journey and full-page variants', async ({ page }) => {
   await setup(page)
   await page.goto('/p/PHAROS/PHAROS-11?view=journey&stage=plan')
-  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11?stage=plan&section=journey')
+  await expect(page).toHaveURL('/p/PHAROS/PHAROS-11')
   await expect(panel(page)).toBeVisible()
-  await expect(sections(page).getByRole('tab', { name: 'Journey', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(sections(page).getByRole('tab', { name: 'Tickets', exact: true })).toHaveAttribute('aria-selected', 'true')
   await page.goto('/p/PHAROS/PHAROS-11?view=full')
   await expect(page).toHaveURL('/p/PHAROS/PHAROS-11?view=full')
   await expect(page.getByRole('button', { name: 'Show beside the list' })).toBeVisible()
@@ -200,8 +190,8 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     const tickets = sections(page).getByRole('tab', { name: 'Tickets', exact: true })
     await tickets.focus()
     await page.keyboard.press('ArrowRight')
-    await expect(sections(page).getByRole('tab', { name: 'Journey', exact: true })).toBeFocused()
-    await expect(page).toHaveURL('/p/PHAROS/journey')
+    await expect(sections(page).getByRole('tab', { name: 'Knowledge', exact: true })).toBeFocused()
+    await expect(page).toHaveURL('/p/PHAROS/knowledge')
     await page.keyboard.press('End')
     await expect(sections(page).getByRole('tab', { name: 'Settings', exact: true })).toBeFocused()
     await expect(page).toHaveURL('/p/PHAROS/settings')
@@ -217,7 +207,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.keyboard.press('Home')
     await expect(page).toHaveURL('/p/PHAROS/knowledge?view=entries')
     await expect(page.locator('.k-row').first()).toBeVisible()
-    for (const section of ['Tickets', 'Journey', 'Knowledge', 'Settings']) {
+    for (const section of ['Tickets', 'Knowledge', 'Settings']) {
       await sections(page).getByRole('tab', { name: section, exact: true }).click()
       await expect(sections(page).getByRole('tab', { name: section, exact: true })).toHaveAttribute('aria-selected', 'true')
       await expect(sections(page).locator('[tabindex="0"]')).toHaveCount(1)

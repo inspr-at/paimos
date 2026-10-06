@@ -432,7 +432,7 @@ type quotaFenceContext struct{}
 
 func (q *quotaFenceTrace) TraceQueryStart(ctx context.Context, c *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	switch data.SQL {
-	case `SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')::uuid FOR NO KEY UPDATE`:
+	case db.TenantFenceSQL:
 		q.started <- c.PgConn().PID()
 		return context.WithValue(ctx, quotaFenceContext{}, !q.first.Swap(true))
 	}

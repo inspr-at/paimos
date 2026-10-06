@@ -13,7 +13,7 @@ import HeaderRoomyChoice from './HeaderRoomyChoice.vue'
 // saved view these are part of the view; otherwise columns are the person's own.
 defineProps<{
   filters: ListFilters
-  view: 'list' | 'outline' | 'journey'
+  view: 'list' | 'outline'
   density: 'comfortable' | 'compact'
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
   grouped?: boolean

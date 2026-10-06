@@ -404,7 +404,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			usagedashboard.New(pool),
 			workorders.New(pool),
 			reviewMod,
-			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
+			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun, reviewMod.PrepareForRun),
 			approvals.New(pool),
 			phoneMod,
 			questionsMod,
@@ -412,7 +412,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			modelMod,
 			agentaccounts.New(pool),
 			pairingMod,
-			// R3: journey
+			// Retired Flow compatibility routes
 			journey.New(pool),
 			requirements.New(pool),
 			releases.New(pool),
@@ -422,7 +422,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			plugins.NewWithRegistry(pool, pluginRegistry),
 			// EvidenceLaunchChecks admits only from the recorded candidate artifact
 			// and a fresh launch_readiness row. A missing record stays refused.
-			stagehandoff.New(pool, pluginRegistry, stagehandoff.EvidenceLaunchChecks{Pool: pool}),
+			stagehandoff.New(pool, pluginRegistry),
 			// R4: business plugins
 			costunits.New(pool, pluginRegistry),
 			crm.NewWithNoteGenerator(pool, pluginRegistry, workspaceNotes),
@@ -616,8 +616,8 @@ func resolveWeb(cfg config.Config) (fs.FS, error) {
 }
 
 // settleUsage lets finished runs settle their account allowance projections (R2).
-func settleUsage(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry) error {
-	return agentaccounts.Settle(ctx, tx, p, run.ID)
+func settleUsage(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry, pending *[]events.Change) error {
+	return agentaccounts.SettleDeferred(ctx, tx, p, run.ID, pending)
 }
 
 // runRoutineDispatchers starts one routine dispatcher per tenant that exists at

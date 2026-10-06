@@ -4,25 +4,6 @@ package journey
 
 import "github.com/inspr-at/paimos/internal/deploytarget"
 
-// Gate and approval scope names are the R2 contract for journey decisions.
-// An agent proposes the scope on the project or release node; a person decides
-// it through the approvals API. This package never writes that decision.
-const (
-	GateShape        = "shape"
-	GateRequirements = "requirements"
-	GateBuild        = "build"
-	GateCandidate    = "candidate"
-	GateDeploy       = "deploy"
-	GateAccess       = "access"
-
-	ScopeShape        = "journey.shape"
-	ScopeRequirements = "journey.requirements"
-	ScopeBuild        = "journey.build"
-	ScopeCandidate    = "journey.candidate"
-	ScopeDeploy       = "journey.deploy"
-	ScopeAccess       = "journey.access"
-)
-
 // Journey is the derived projection returned by the journey routes. Imported is
 // true for a project that came from classic Paimos with its history: its stages
 // before Plan were never recorded here, so the face shows what came with it
@@ -81,45 +62,4 @@ type JourneyNextAction struct {
 	Available           bool    `json:"available"`
 	Reason              string  `json:"reason,omitempty"`
 	ApprovalRequestID   *string `json:"approval_request_id"`
-}
-
-type profileWrite struct {
-	Profile          string `json:"profile"`
-	ExpectedRevision int64  `json:"expected_revision"`
-}
-
-type actionWrite struct {
-	Action            string   `json:"action"`
-	ExpectedRevision  int64    `json:"expected_revision"`
-	IdempotencyKey    string   `json:"idempotency_key"`
-	ApprovalRequestID *string  `json:"approval_request_id"`
-	ReleaseID         *string  `json:"release_id"`
-	Reason            *string  `json:"reason"`
-	TicketNodeIDs     []string `json:"ticket_node_ids,omitempty"`
-}
-
-type httpError struct {
-	status int
-	msg    string
-}
-
-func (e *httpError) Error() string { return e.msg }
-
-func fail(status int, msg string) error {
-	return &httpError{status: status, msg: msg}
-}
-
-func strPtr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	v := s
-	return &v
-}
-
-func ptrVal(s *string) string {
-	if s == nil {
-		return ""
-	}
-	return *s
 }

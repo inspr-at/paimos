@@ -215,7 +215,7 @@ test('execution kinds and person-specific host names on the real agents table', 
   const accounts = page.getByRole('button', { name: /^Accounts and computers/ })
   if (await accounts.getAttribute('aria-expanded') === 'true') await accounts.click()
   await expect(page.locator(`[data-row="s:${ai.id}"]`)).toBeVisible()
-  const table = page.getByRole('table', { name: 'Agent sessions' })
+  const table = page.getByRole('treegrid', { name: 'Agent sessions' })
   if (!before) {
     await expect(table.getByRole('columnheader').filter({ hasText: /^Name/ })).toBeVisible()
     await expect(table.getByRole('columnheader').filter({ hasText: /^Host/ })).toBeVisible()
