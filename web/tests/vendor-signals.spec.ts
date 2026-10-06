@@ -37,11 +37,17 @@ async function setup(page: Page, theme: 'light' | 'dark', grants = { manage: tru
   return { first, changes, account }
 }
 
+// AEON-686: each account's logins and switches live in its docked panel.
+async function openAccount(page: Page, id: string) {
+  await page.locator(`.list-row[data-accounts~="${id}"]`).click()
+  await page.locator(`section.pane [data-account="${id}"]`).getByRole('button', { name: /^Details for/ }).click()
+}
+
 test('a computer approver loses the statusline toggle when account.manage is revoked', async ({ page }) => {
   const grants = { manage: true }
   const { changes, account } = await setup(page, 'light', grants)
   await page.goto('/settings/accounts')
-  await page.locator(`[data-account="${account.id}"]`).getByRole('button', { name: /^Details for/ }).click()
+  await openAccount(page, account.id)
   const toggle = page.getByRole('switch', { name: /Show .* in your Claude status line/ })
   await expect(toggle).toBeVisible()
   expect(account.statusline_opt_in).toBe('own')
@@ -50,7 +56,9 @@ test('a computer approver loses the statusline toggle when account.manage is rev
   await expect(toggle).toHaveCount(0)
   expect(changes).toEqual([])
   await page.reload()
-  await expect(page.getByRole('heading', { name: 'Accounts', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Accounts and computers', exact: true })).toBeVisible()
+  await openAccount(page, account.id)
+  await expect(page.locator(`section.pane [data-account="${account.id}"] .detail`)).toBeVisible()
   await expect(toggle).toHaveCount(0)
 })
 
@@ -72,7 +80,7 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
     const dir = process.env.AEON354_SHOTS
     if (dir) { mkdirSync(dir, { recursive: true }); await page.screenshot({ path: join(dir, `throttled-${width}-${theme}.png`), fullPage: true }) }
     await page.goto('/settings/accounts')
-    await page.locator(`[data-account="${account.id}"]`).getByRole('button', { name: /^Details for/ }).click()
+    await openAccount(page, account.id)
     const toggle = page.getByRole('switch', { name: /Show .* in your Claude status line/ })
     await expect(toggle).toBeVisible()
     await expect(toggle).toHaveAttribute('aria-checked', 'false')

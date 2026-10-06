@@ -1054,6 +1054,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaWarningRestartHeartbeatRetainsNotices","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaWarningSettingsUndoRejectsInterveningWrite","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaWarningSettingsValidation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestQuotaWarningThresholdFreshness","tier":"GATED-FULL"}
@@ -1646,6 +1648,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestHeartbeatAndChildDeadline","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestHostCapacityNegotiationRenegotiatesAndFailsClosed","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestIdleCapacityCadenceAndLiveRunFence","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestIdleCaptureLookupFailureFallsBackAcrossRestart","tier":"GATED-FULL"}
@@ -1733,6 +1737,12 @@
     {"kind":"go","package":"internal/agentd","name":"TestManagedSettingWaitUsesLocalBudget","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestManagedSettingsFencedReceiptsAndHeartbeat","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestManagedStartFollowsLegacyPathOnServerWithoutHostCapacity","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestManagedStartHostReportFailureNeverClaims","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestManagedStartWaitsForHostCapacityBeforeRouteAndClaim","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestManagedToolsRunBinding","tier":"ESSENTIAL"}
     ,
@@ -2254,6 +2264,10 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestHostCapacityBoundsHeldByWritersWithoutDatabaseChecks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestHostCapacityOwnerRevisionRuntimeAndClaimFence","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestLaterConnectOnlyApprovalCancelsQueuedVerification","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestLegacyAttachRegistrationKeepsDaemonIdentityButGrantsNoAttach","tier":"GATED-FULL"}
@@ -2375,6 +2389,10 @@
     {"kind":"go","package":"internal/agentpairing","name":"TestRemoveRefusesUnsettledRuns","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestRemoveRevokedComputerArchivesItAndItsAccounts","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestSignOutEverywhereAppendsNestedEventsAfterEveryTargetLock","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestSignOutEverywhereFencesCanonicalSetAndPreservesOtherAccounts","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestStrictWatchRequiresBoundDaemonConfirmation","tier":"GATED-FULL"}
     ,
@@ -5629,6 +5647,12 @@
     {"kind":"go","package":"internal/harnesslaunch","name":"TestMissingLauncherAndNodeErrorsPreservePaths","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harnesslaunch","name":"TestModelFamilyUsesProviderBinding","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hostcapacity","name":"TestHostCapacityAdmission","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/hostcapacity","name":"TestHostCapacityBounds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/hostcapacity","name":"TestHostCapacityLargestEncodingsStayBounded","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestAttachmentFramePolicyComposesWithAithema","tier":"GATED-FULL"}
     ,
