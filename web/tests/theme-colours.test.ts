@@ -93,7 +93,7 @@ test('first-paint bootstrap restores derived CSS before app startup with its CSP
 })
 test('first-paint bootstrap tolerates unavailable storage and rejects corrupt, oversized or unsafe CSS', () => {
   for (const raw of [null, '{', 'null', '0', '{}', JSON.stringify({ principal: '', css: themeCss(PORCELAIN) }), 'x'.repeat(32769),
-    ...['body { display: none; }', '@import "https://example.invalid";', themeCss(PORCELAIN).replace('#0e6f6c', 'url(https://example.invalid)'), themeCss(PORCELAIN) + '\nbody {}'].map(css => JSON.stringify({ principal: 'tenant/person', css }))]) {
+    ...['body { display: none; }', '@import "https://example.invalid";', themeCss(PORCELAIN).replace('#0e6f6c', 'url(https://example.invalid)'), themeCss(PORCELAIN) + '\nbody {}', themeCss(PORCELAIN).replace('#0e6f6c', '1'.repeat(20000) + 'x')].map(css => JSON.stringify({ principal: 'tenant/person', css }))]) {
     assert.equal(bootstrap(raw).styles.length, 0)
   }
   assert.equal(bootstrap(null, true).styles.length, 0)

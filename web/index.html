@@ -16,10 +16,18 @@
         var cached = raw && raw.length <= 32768 ? JSON.parse(raw) : null;
         // Generated custom properties only: no URLs, imports, selectors or arbitrary rules.
         var blocks = cached && typeof cached.css === 'string' && /^:root, :root\[data-theme="light"\] \{ ([^{}]*) \}\n:root\[data-theme="dark"\] \{ ([^{}]*) \}\n@media \(prefers-color-scheme: dark\) \{ :root:not\(\[data-theme="light"\]\) \{ ([^{}]*) \} \}$/.exec(cached.css);
-        var declaration = /^--[a-z][a-z0-9-]*: (?:#[0-9a-fA-F]{3,6}|[0-9.]+(?:px|deg|%)?|color-mix|in|srgb|transparent|linear-gradient|radial-gradient|circle|at|[(), +\-])+$/;
+        var declaration = /^--[a-z][a-z0-9-]*: (.+)$/;
+        // Consume one token at a time; malformed numeric runs cannot trigger regex backtracking.
+        var valueToken = /#[0-9a-fA-F]{3,6}|[0-9.]+(?:px|deg|%)?|color-mix|in|srgb|transparent|linear-gradient|radial-gradient|circle|at|[(), +\-]/y;
         var safe = blocks && blocks.slice(1).every(function (block) {
           var parts = block.trim().split(';');
-          return parts.length <= 64 && parts.pop() === '' && parts.every(function (part) { return declaration.test(part.trim()); });
+          return parts.length <= 64 && parts.pop() === '' && parts.every(function (part) {
+            var match = declaration.exec(part.trim());
+            if (!match) return false;
+            valueToken.lastIndex = 0;
+            while (valueToken.lastIndex < match[1].length) if (!valueToken.exec(match[1])) return false;
+            return true;
+          });
         });
         if (safe && typeof cached.principal === 'string' && cached.principal.length > 0 && cached.principal.length <= 256) {
           var style = document.createElement('style');
