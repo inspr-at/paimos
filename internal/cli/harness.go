@@ -32,7 +32,8 @@ import (
 // cmdHarnessV2 is the complete P5.3 harness command tree.
 func (rt *runtime) cmdHarnessV2() *Command {
 	return &Command{Name: "harness", Short: "Manage durable harness generations", Use: "harness <command>", subs: []*Command{
-		rt.harnessRegister(), rt.harnessLeavingAt(), rt.harnessPauseDefault(), rt.harnessPause("pause"), rt.harnessPause("resume"), rt.harnessWorker("pause-plan"), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessRun(), rt.harnessProvenance(), rt.harnessInvoke(),
+		rt.harnessDecision(),
+		rt.harnessRegister(), rt.harnessLeadUsage(), rt.harnessLeavingAt(), rt.harnessPauseDefault(), rt.harnessPause("pause"), rt.harnessPause("resume"), rt.harnessWorker("pause-plan"), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessRun(), rt.harnessProvenance(), rt.harnessInvoke(),
 	}}
 }
 
@@ -813,7 +814,10 @@ func (rt *runtime) harnessSessionFull(project, agent, format, sid string) error 
 	if err != nil {
 		return err
 	}
-	nodes, err := rt.walkNodes(nil, nil)
+	// The API proves project membership, including deep descendants and nodes
+	// whose ancestors are not visible to the caller. walkNodes retains bounded
+	// pagination and returns an error rather than a partial successful bundle.
+	nodes, err := rt.walkNodes(url.Values{"within": {projectNode.ID}}, nil)
 	if err != nil {
 		return err
 	}
@@ -821,39 +825,31 @@ func (rt *runtime) harnessSessionFull(project, agent, format, sid string) error 
 	if err != nil {
 		return err
 	}
-	byID := make(map[string]apiNode, len(nodes))
-	for _, n := range nodes {
-		byID[n.ID] = n
-	}
-	belongs := func(n apiNode) bool {
-		for depth := 0; depth < 32; depth++ {
-			if n.ID == projectNode.ID {
-				return true
-			}
-			if n.ParentID == nil {
-				return false
-			}
-			parent, ok := byID[*n.ParentID]
-			if !ok {
-				return false
-			}
-			n = parent
-		}
-		return false
-	}
+	// within excludes its root; keep the already authorized project in nodes.
+	nodes = append([]apiNode{projectNode}, nodes...)
 	relevant := []map[string]any{}
-	byKind := map[string][]map[string]any{"memory": {}, "runbook": {}, "guideline": {}, "work_order": {}, "ticket": {}, "task": {}, "epic": {}}
+	byKind := map[string][]map[string]any{"memory": {}, "runbook": {}, "guideline": {}, "work_order": {}, "work": {}, "ticket": {}, "task": {}, "epic": {}}
 	for _, n := range nodes {
 		slug := kinds.slug(n.KindID)
-		if belongs(n) {
-			entry := map[string]any{"id": n.ID, "key": n.Key, "kind": slug, "title": n.Title, "body": n.Body, "fields": fieldMap(n.Fields)}
-			relevant = append(relevant, entry)
-			if _, ok := byKind[slug]; ok {
-				byKind[slug] = append(byKind[slug], entry)
+		entry := map[string]any{"id": n.ID, "key": n.Key, "kind": slug, "title": n.Title, "body": n.Body, "fields": fieldMap(n.Fields)}
+		relevant = append(relevant, entry)
+		if _, ok := byKind[slug]; ok {
+			byKind[slug] = append(byKind[slug], entry)
+		}
+		// As with issue --type aliases, migrated work appears in each legacy
+		// collection. Keep its canonical kind; nesting is not a retired type.
+		if slug == "work" {
+			for _, alias := range []string{"ticket", "task", "epic"} {
+				byKind[alias] = append(byKind[alias], entry)
 			}
 		}
 	}
-	bundle := map[string]any{"schema": "aeon.session.bundle.v1", "project": map[string]any{"id": projectNode.ID, "key": projectNode.Key}, "agent_name": agent, "session_id": sid, "nodes": relevant, "memory": byKind["memory"], "runbooks": byKind["runbook"], "guidelines": byKind["guideline"], "tickets": byKind["ticket"], "tasks": byKind["task"], "epics": byKind["epic"], "work_orders": byKind["work_order"]}
+	bundle := map[string]any{
+		"schema": "aeon.session.bundle.v1", "project": map[string]any{"id": projectNode.ID, "key": projectNode.Key},
+		"agent_name": agent, "session_id": sid, "nodes": relevant, "work": byKind["work"],
+		"memory": byKind["memory"], "runbooks": byKind["runbook"], "guidelines": byKind["guideline"],
+		"tickets": byKind["ticket"], "tasks": byKind["task"], "epics": byKind["epic"], "work_orders": byKind["work_order"],
+	}
 	content, err := json.Marshal(bundle)
 	if err != nil {
 		return err

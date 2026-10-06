@@ -60,14 +60,17 @@
 //	/api/projects/{id}/intake: intake.read or intake.write.
 //	/api/stage-handoffs, /api/projects/{id}/baseline-batches:
 //	  stage.<op>; the handler rechecks the exact operation and grant.
-//	/api/agent-accounts, GET /api/me: account.manage.
+//	/api/agent-accounts: account.manage.
+//	GET /api/me and /api/status/help: authenticated, no key scope required.
+//	  Status help reads tenant metadata; project overrides retain visibility checks.
 //	/api/time-entries, /api/time-periods, /api/nodes/{id}/time-totals:
 //	  hours.read or hours.write.
 //
 // Every other API path returns 403 to an authenticated agent key, including
 // business/customer/admin and public-capability paths when a key is presented.
-// Empty scope lists grant nothing. Anonymous public calls retain their normal
-// behavior. Person sessions are governed by role and module checks.
+// Empty scope lists grant only self identity and status help reads. Anonymous
+// public calls retain their normal behavior. Person sessions are governed by
+// role and module checks.
 // AEON-580 adds one explicitly Owner-marked workstation key per tenant. It
 // remains an agent, bound to a connected redeemed computer and its pinned P-256
 // key. Ordinary keys and all person-only rules above remain unchanged unless

@@ -32,6 +32,9 @@ func TestStatusDefinitions(t *testing.T) {
 				t.Fatalf("missing rule %s", key)
 			}
 		}
+		if def.State == "cancelled" && (!strings.Contains(def.Meaning, "merged into another ticket") || !strings.Contains(def.Meaning, "destination ticket") || !strings.Contains(def.Hint, "destination ticket")) {
+			t.Fatalf("merged ticket cancellation is undefined: %+v", def)
+		}
 	}
 	if !reflect.DeepEqual(states, want) || help.Queued.IsStatus || !strings.Contains(help.Queued.Meaning, "Open or Blocked plus a place") || !strings.Contains(help.Queued.Meaning, "Blocked waits on its named blocker") || !strings.Contains(help.Queued.Meaning, "AEON-522") {
 		t.Fatalf("status order or queued: %+v", help)
