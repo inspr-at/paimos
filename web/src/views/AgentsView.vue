@@ -39,7 +39,7 @@ import RunQueue from '../components/agents/RunQueue.vue'
 import QuotaWarnings from '../components/agents/QuotaWarnings.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
 import AttachPending from '../components/agents/AttachPending.vue'
-import WindDownPanel from '../components/agents/WindDownPanel.vue'
+import WindDownControl from '../components/agents/WindDownControl.vue'
 import FloatingPanel from '../components/work/FloatingPanel.vue'
 import { useAgentPause } from '../stores/agentPause'
 
@@ -391,6 +391,8 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <p v-if="stale" class="freshness" role="status" :data-tip="freshnessTip"><span class="live-mark" aria-hidden="true" />Update delayed</p>
       </HeadCounts>
       <div class="head-side">
+        <!-- Wind down is a head control (AEON-783): ghost button, then a teal chip while it runs. -->
+        <WindDownControl v-if="agents.loaded" />
         <button v-if="showNew" type="button" class="btn primary add-agent" aria-label="New: start a lead, attach a session or connect a machine" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'add'" @click="headerAction('add', $event)"><AppIcon name="plus" :size="17" /></button>
         <button type="button" class="icon-btn flat more-agent" aria-label="More agent actions" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'more'" @click="headerAction('more', $event)"><AppIcon name="more" /></button>
       </div>
@@ -406,7 +408,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
               <button type="button" role="menuitem" class="menu-item" @click="menuAction(() => startDialog?.open())"><AppIcon name="agent" /><span>Start agent manually…<small>Pick ticket, host, harness, account, model and thinking yourself. Same checks apply.</small></span></button>
             </template>
           </template>
-          <!-- Pause all, Resume all and Wind down live with the wind-down; History in the Sessions head (AEON-780). -->
+          <!-- Pause all, Resume all and Wind down live in the Wind down popover; History in the Sessions head (AEON-780). -->
           <template v-else>
             <button role="menuitem" type="button" class="menu-item" aria-label="Model preferences" @click="menuAction(() => openModelPrefs())"><AppIcon name="gear" /><span>Model preferences<small>Which models do which work.</small></span></button>
             <RouterLink role="menuitem" class="menu-item" to="/agents/usage" @click="headerMenu = null"><AppIcon name="pulse" /><span>Usage<small>Tokens and cost per agent, account and day.</small></span></RouterLink>
@@ -437,7 +439,6 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <LeadsList v-if="agents.loaded" ref="leadsList" />
         <AccountsComputers v-if="showSetup" :permissions="pairingAccess" :show-accounts="showCapacity" />
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
-        <WindDownPanel v-if="agents.loaded" />
         <SessionList
           v-if="agents.loaded" ref="sessionList"
           :groups="agents.grouped" :history="agents.historyViews" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
