@@ -576,7 +576,7 @@ test('the access log reads as sentences and filters by kind, person and words', 
   await expect(page.locator('.event', { hasText: 'changed Jonas Weber’s role on Pharos from Member to Delivery lead' })).toBeVisible()
   await page.getByRole('button', { name: 'Invites' }).click()
   await expect(events).toHaveCount(3)
-  await page.getByRole('button', { name: 'Keys' }).click()
+  await page.getByRole('button', { name: 'Keys', exact: true }).click()
   await expect(events).toHaveCount(4)
   await page.getByRole('button', { name: 'Clear filters' }).click()
   await page.getByLabel('Changes by or about').selectOption({ label: 'Mira Holm' })

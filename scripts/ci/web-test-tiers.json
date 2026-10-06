@@ -186,6 +186,8 @@
     ,
     "browser:tests/agents-worker-tree.spec.ts:a live-line count keeps Sessions open when the section preference lands after the jump"
     ,
+    "browser:tests/agents-worker-tree.spec.ts:the footer problem jump switches a Working filter to Problem and focuses the folded row"
+    ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1024"
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1440"
@@ -345,6 +347,38 @@
     "browser:tests/features.spec.ts:members receive no rollout administration controls"
     ,
     "browser:tests/features.spec.ts:project OFF overrides workspace ON and inherit restores it"
+    ,
+    "browser:tests/footer-summary.spec.ts:a phone save does not move the release control"
+    ,
+    "browser:tests/footer-summary.spec.ts:a review filter stays through search and kind, and All entries clears it"
+    ,
+    "browser:tests/footer-summary.spec.ts:access says people, agent keys and the key that expires soon, and the click opens it"
+    ,
+    "browser:tests/footer-summary.spec.ts:agents › say how many there are and the one exception, and the click goes to it"
+    ,
+    "browser:tests/footer-summary.spec.ts:knowledge says what waits for review and the click filters to it"
+    ,
+    "browser:tests/footer-summary.spec.ts:releases on their way are counted, a failed run is the exception, and the sheet gives the footer back when it closes"
+    ,
+    "browser:tests/footer-summary.spec.ts:settings stay silent when calm, and a failed save says so until it is saved again"
+    ,
+    "browser:tests/footer-summary.spec.ts:the release at risk opens from inside the sheet"
+    ,
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 1024 in dark"
+    ,
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 1024 in light"
+    ,
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 1440 in dark"
+    ,
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 1440 in light"
+    ,
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 390 in dark"
+    ,
+    "browser:tests/footer-summary.spec.ts:the summary sits between the mark and the release without touching either at 390 in light"
+    ,
+    "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (full at 1440)"
+    ,
+    "browser:tests/footer-summary.spec.ts:tickets say count, agents and the blocked ones, and the click adds the filter (short at 390)"
     ,
     "browser:tests/knowledge-learnings.spec.ts:a learning that changed after review is refused and shown again"
     ,
@@ -886,6 +920,10 @@
     ,
     "node:tests/work-vocabulary.test.ts:workspace names depend on leaf shape first, then project-relative depth"
     ,
+    "vitest:tests/access-keys.unit.test.ts:drops a stale key read and keeps the last keys when the newest read fails"
+    ,
+    "vitest:tests/access-keys.unit.test.ts:refreshes the shared key cache when access settles after a key change"
+    ,
     "vitest:tests/agent-pause-store.unit.test.ts:Resume all sends only the selected paused generations"
     ,
     "vitest:tests/agent-pause-store.unit.test.ts:Undo cannot revive an earlier request after another cancellation"
@@ -965,6 +1003,56 @@
     "vitest:tests/features.unit.test.ts:releases and disables on the same page after a revisioned write"
     ,
     "vitest:tests/features.unit.test.ts:starts dark, keeps project scopes separate and never enables unknown keys"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:the ping and who speaks > lets a sheet speak over its page and gives the centre back when it closes"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:the ping and who speaks > rings at most once per two seconds, on fresh data of the same screen only"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > access with an expiring key"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > access, only you"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > agents all paused"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > agents all working"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > agents that ask"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > agents winding down"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > agents with a problem"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > counts a release as at risk only while it is on its way and a run failed"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > does not call idle, throttled, awaiting or a paused mix all working"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > keeps a transient settings line from taking the phone release slot"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > knowledge calm"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > knowledge to review"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > labels a with-agents count that does not cover the filtered list"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > no agents"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > nothing planned"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > releases at risk"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > says nothing when settings are calm, and a skeleton while a screen loads"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > settings not saved wins"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > settings saving"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > settings that need you"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > tickets calm"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > tickets filtered to none"
+    ,
+    "vitest:tests/footer-summary.unit.test.ts:what each screen says > tickets with blocked"
     ,
     "vitest:tests/live-list.unit.test.ts:leaf changes invalidate parent projections without a status transition > refreshes shown ancestors after harness.heartbeat on an unseen deep child"
     ,
@@ -1121,6 +1209,10 @@
     "vitest:tests/row-store.unit.test.ts:derived parent status > successive same-revision node refreshes each apply their status to a full cache"
     ,
     "vitest:tests/row-store.unit.test.ts:derived parent status > updates a full cached row without changing the edit revision or opening a conflict"
+    ,
+    "vitest:tests/session-tree.unit.test.ts:session tree rows > chooses the folded live problem the footer counted, not an earlier ended failure"
+    ,
+    "vitest:tests/session-tree.unit.test.ts:session tree rows > names a problem hidden by a fold, including a lost heartbeat, and the ancestors that must open"
     ,
     "vitest:tests/theme-editor.unit.test.ts:runtime appearance follows every confirmed theme > a settings card unmounting never stops the shared editor"
     ,
@@ -5870,6 +5962,8 @@
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"nested live workers stay visible through stopped parents and each level closes its last connector","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"the footer problem jump switches a Working filter to Problem and focuses the folded row","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"worker tree fits 1440px in dark, passes axe, and captures coordinator evidence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"worker tree fits 1440px in light, passes axe, and captures coordinator evidence","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -7323,6 +7417,38 @@
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"the footer stays at rest even when motion is enabled","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/footer-release-pill.spec.ts","name":"unknown count reserves no badge; failed versions still open history","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"a phone save does not move the release control","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"a review filter stays through search and kind, and All entries clears it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"access says people, agent keys and the key that expires soon, and the click opens it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"agents › say how many there are and the one exception, and the click goes to it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"knowledge says what waits for review and the click filters to it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"releases on their way are counted, a failed run is the exception, and the sheet gives the footer back when it closes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"settings stay silent when calm, and a failed save says so until it is saved again","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the release at risk opens from inside the sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 1024 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 1024 in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 1440 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 1440 in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 390 in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"the summary sits between the mark and the release without touching either at 390 in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"tickets say count, agents and the blocked ones, and the click adds the filter (full at 1440)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/footer-summary.spec.ts","name":"tickets say count, agents and the blocked ones, and the click adds the filter (short at 390)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/from-classic.spec.ts","name":"known and unknown classic links resolve through the API","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13860,6 +13986,10 @@
     ,
     {"kind":"node","file":"tests/work.test.ts","name":"statuses read the same in every spelling and carry product labels","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/access-keys.unit.test.ts","name":"drops a stale key read and keeps the last keys when the newest read fails","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/access-keys.unit.test.ts","name":"refreshes the shared key cache when access settles after a key change","tier":"NIGHTLY"}
+    ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > accepts percent readings and structured first-run waits without inventing headroom","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/account-cascade.unit.test.ts","name":"account catalog contract > accepts the nested catalog and rejects the old flat launch catalog","tier":"GATED-FULL"}
@@ -14471,6 +14601,56 @@
     {"kind":"vitest","file":"tests/footer-release.unit.test.ts","name":"only shows a known positive new count (null)","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/footer-release.unit.test.ts","name":"uses the running release publication time, then tag time, then reservation","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"the ping and who speaks > lets a sheet speak over its page and gives the centre back when it closes","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"the ping and who speaks > rings at most once per two seconds, on fresh data of the same screen only","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > access with an expiring key","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > access, only you","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > agents all paused","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > agents all working","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > agents that ask","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > agents winding down","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > agents with a problem","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > counts a release as at risk only while it is on its way and a run failed","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > does not call idle, throttled, awaiting or a paused mix all working","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > keeps a transient settings line from taking the phone release slot","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > knowledge calm","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > knowledge to review","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > labels a with-agents count that does not cover the filtered list","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > no agents","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > nothing planned","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > releases at risk","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > says nothing when settings are calm, and a skeleton while a screen loads","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > settings not saved wins","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > settings saving","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > settings that need you","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets calm","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets filtered to none","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/footer-summary.unit.test.ts","name":"what each screen says > tickets with blocked","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/graph-focus.unit.test.ts","name":"contains a rejected exit and tolerates a missing exit API","tier":"GATED-FULL"}
     ,
@@ -15732,9 +15912,13 @@
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"filters before limiting and keeps two sessions of one principal separate","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > chooses the folded live problem the footer counted, not an earlier ended failure","tier":"NIGHTLY"}
+    ,
     {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > keeps a deep match with its ancestors as unfolded context, even where a person folded them","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > lays out any depth with levels, sibling positions and guides, and a fold hides the whole subtree","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > names a problem hidden by a fold, including a lost heartbeat, and the ancestors that must open","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > rolls a deep problem up to every ancestor and counts asks separately","tier":"GATED-FULL"}
     ,

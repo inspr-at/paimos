@@ -176,7 +176,6 @@ watch(() => releases.available, async version => {
 })
 
 // ---------- Footer: on phones it folds away while reading down and returns on the way up ----------
-// A project flow pill lives in the footer, so the bar stays while that pill is shown.
 const footerHidden = ref(false)
 const phoneQuery = window.matchMedia('(max-width: 600px)')
 let lastTop = 0, travel = 0, settleUntil = 0

@@ -4,11 +4,11 @@ import { brand } from '../../lib/brand'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useSession } from '../../stores/session'
-import { CONNECTED_COMPUTER_REASON, agentDeactivatePoints, keyHint, adoptAgentKey, revokeAgentKey, splitAgents, type Agent } from '../../lib/access'
+import { CONNECTED_COMPUTER_REASON, agentDeactivatePoints, keyExpiry, keyHint, adoptAgentKey, revokeAgentKey, splitAgents, type Agent } from '../../lib/access'
 import type { RowAction } from '../../lib/rowActions'
 import { can, myPermissions } from '../../lib/authz'
 import { confirmAction } from '../../lib/confirm'
-import { keyState, listAgentKeys, type AgentKey } from '../../lib/settings'
+import { keyState, type AgentKey } from '../../lib/settings'
 import { toast } from '../../lib/toast'
 import { relativeTime } from '../../lib/work'
 import { useAccess } from '../../stores/access'
@@ -46,7 +46,8 @@ async function agentCreated(agent: Agent, presetId: string) {
   void access.load(true)
 }
 const manage = computed(() => can('members.manage'))
-const keys = ref<AgentKey[] | null>(null)
+// The same cache the footer counts. A revoke, a new key or a settled change refreshes both.
+const keys = computed(() => access.keys)
 const keysError = ref('')
 const open = ref(new Set<string>())
 const groups = computed(() => splitAgents(access.agents))
@@ -60,8 +61,7 @@ const keysOf = (agent: Agent) => (keys.value ?? []).filter(k => k.principal_id =
 async function loadKeys() {
   if (!manageKeys.value) return
   keysError.value = ''
-  const identity = personIdentity()
-  try { const loaded = await listAgentKeys(); if (active && identity === personIdentity()) keys.value = loaded } catch { if (active && identity === personIdentity()) keysError.value = 'The agent keys could not be loaded.' }
+  try { await access.loadKeys() } catch { if (active) keysError.value = 'The agent keys could not be loaded.' }
 }
 function toggle(agent: Agent) { const next = new Set(open.value); if (next.has(agent.principal_id)) next.delete(agent.principal_id); else next.add(agent.principal_id); open.value = next }
 async function revoke(key: AgentKey) {
@@ -75,7 +75,19 @@ let active = true
 onUnmounted(() => { active = false })
 const adoptionBusy = ref(false)
 const personIdentity = () => `${session.identity?.tenant.id}:${session.identity?.principal.id}`
-watch(personIdentity, () => { keys.value = null; open.value = new Set(); editing.value = null; void loadKeys() })
+watch(personIdentity, () => { open.value = new Set(); editing.value = null; void loadKeys() })
+// The footer's "key expires soon" lands here: the agents holding such a key open, and the first scrolls into view (AEON-785).
+watch([() => route.query.expiring, keys], async ([flag, list]) => {
+  if (flag !== '1' || !list) return
+  const soon = working.value.filter(agent => list.some(key => key.principal_id === agent.principal_id && keyState(key) === 'active' && keyExpiry(key).soon))
+  const query = { ...route.query }
+  delete query.expiring
+  void router.replace({ query })
+  if (!soon.length) return
+  open.value = new Set([...open.value, ...soon.map(agent => agent.principal_id)])
+  await nextTick()
+  document.getElementById(`keys-${soon[0]!.principal_id}`)?.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+}, { immediate: true })
 async function adopt(key: AgentKey) {
   if (adoptionBusy.value || !manageKeys.value) return
   const targetID = key.id
@@ -86,7 +98,7 @@ async function adopt(key: AgentKey) {
     if (!ok || !active || identity !== personIdentity() || !manageKeys.value || !keys.value?.some(k => k.id === targetID && k.created_by_principal_id === null)) return
     const adopted = await adoptAgentKey(targetID)
     if (!active || identity !== personIdentity() || !keys.value?.some(k => k.id === targetID && k.created_by_principal_id === null)) return
-    keys.value = keys.value?.map(k => k.id === targetID ? adopted : k) ?? null
+    access.noteKey(adopted)
     toast('You are now the key owner')
   } catch (e) { if (active && identity === personIdentity()) toast(problem(e, 'The key owner could not be changed'), { tone: 'error' }) }
   finally { adoptionBusy.value = false }

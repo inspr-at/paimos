@@ -76,13 +76,18 @@ async function adoptionTab() {
   const key = { id: 'legacy', principal_id: 'agent', name: 'Legacy', created_by_principal_id: null, prefix: 'test', scopes: [], expires_at: null, revoked_at: null, created_at: '', last_used_at: null }
   const calls: string[] = [], toasts: string[] = []
   let confirm!: (ok: boolean) => void, respond!: (result: unknown) => void, unmount!: () => void
+  // The Agents tab reads the shared key cache of the access store, so the store stands in with the same shape.
+  const store = Vue.reactive({
+    agents: [], keys: [{ ...key }] as Array<typeof key> | null, load: async () => {}, loadKeys: async () => {},
+    noteKey: (next: typeof key) => { store.keys = store.keys?.map(k => k.id === next.id ? next : k) ?? null },
+  })
   const modules: Record<string, unknown> = {
     vue: { ...Vue, onMounted: () => {}, onUnmounted: (callback: () => void) => { unmount = callback } },
     'vue-router': { useRoute: () => ({ query: {} }), useRouter: () => ({ replace: async () => {} }) },
     '../../stores/session': { useSession: () => session },
-    '../../stores/access': { useAccess: () => ({ agents: [], load: async () => {} }) },
+    '../../stores/access': { useAccess: () => store },
     '../../lib/access': { ...Access, adoptAgentKey: (id: string) => { calls.push(id); return new Promise(resolve => { respond = resolve }) } },
-    '../../lib/settings': { keyState: () => 'active', listAgentKeys: async () => [{ ...key }] },
+    '../../lib/settings': { keyState: () => 'active' },
     '../../lib/confirm': { confirmAction: () => new Promise(resolve => { confirm = resolve }) },
     '../../lib/toast': { toast: (message: string) => toasts.push(message) },
     '../../lib/authz': { can: () => true, myPermissions: () => new Set() },
@@ -100,8 +105,7 @@ async function adoptionTab() {
   }, exports)
   const scope = Vue.effectScope()
   const state = scope.run(() => exports.default!.setup({}, { expose: () => {} }))!
-  state.keys.value = [{ ...key }]
-  return { session, key, state, calls, toasts, confirm: (ok: boolean) => confirm(ok), respond: () => respond({ ...key, created_by_principal_id: 'person-a' }), unmount: () => unmount(), stop: () => scope.stop() }
+  return { session, key, state, store, calls, toasts, confirm: (ok: boolean) => confirm(ok), respond: () => respond({ ...key, created_by_principal_id: 'person-a' }), unmount: () => unmount(), stop: () => scope.stop() }
 }
 
 it('adoption confirmation is bound to the acting person and key', async () => {
@@ -109,7 +113,7 @@ it('adoption confirmation is bound to the acting person and key', async () => {
     const tab = await adoptionTab()
     const pending = tab.state.adopt(tab.key)
     if (changed === 'person') { tab.session.identity.principal.id = 'person-b'; await Vue.nextTick() }
-    else tab.state.keys.value = []
+    else tab.store.keys = []
     tab.confirm(true)
     await pending
     expect(tab.calls).toEqual([])
@@ -126,12 +130,12 @@ it('late adoption results cannot restore another person or a departed key', asyn
     await Vue.nextTick()
     expect(tab.calls).toEqual(['legacy'])
     if (changed === 'person') { tab.session.identity.principal.id = 'person-b'; await Vue.nextTick() }
-    else if (changed === 'key') tab.state.keys.value = []
+    else if (changed === 'key') tab.store.keys = []
     else tab.unmount()
     tab.respond()
     await pending
     expect(tab.toasts).toEqual([])
-    expect(tab.state.keys.value?.every(k => k.created_by_principal_id === null) ?? true).toBe(true)
+    expect(tab.store.keys?.every(k => k.created_by_principal_id === null) ?? true).toBe(true)
     tab.stop()
   }
 })

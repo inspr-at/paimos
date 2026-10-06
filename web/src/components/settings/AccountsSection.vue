@@ -20,6 +20,7 @@ import { useCapacity } from '../../stores/capacity'
 import { useSession } from '../../stores/session'
 import { vClipTip } from '../../directives/clipTip'
 import AppIcon from '../AppIcon.vue'
+import { settingsNeeds } from '../../lib/footerProviders'
 import AccountsCard from '../agents/AccountsCard.vue'
 import HarnessMark from '../agents/HarnessMark.vue'
 import AddAccountPanel from './AddAccountPanel.vue'
@@ -79,6 +80,8 @@ const attention = computed<NeedsYouItem[]>(() => {
   }
   return items
 })
+// The footer on Settings says how many of these need you while this section is open (AEON-785).
+watch(() => attention.value.reduce((total, item) => total + Math.max(0, item.count), 0), total => { settingsNeeds.value = total }, { immediate: true })
 function windowLabel(w: CapacityWindow) { return w.reading.window_kind === '5h' ? '5-hour window' : w.reading.window_kind === 'weekly' ? 'Weekly' : w.reading.window_kind === 'monthly' ? 'Monthly allowance' : w.reading.bucket || 'Quota window' }
 function accountSummary(a: OverviewAccount) {
   const problem = problemSignins.value.find(p => p.account.id === a.id)
@@ -110,7 +113,7 @@ const poller = usePoller(refresh, 20_000)
 // shows up); the poller coalesces it with a read already in flight.
 function onFocus() { poller.tick(true) }
 onMounted(() => { poller.start(true); window.addEventListener('focus', onFocus) })
-onBeforeUnmount(() => { generation++; poller.stop(); window.removeEventListener('focus', onFocus) })
+onBeforeUnmount(() => { generation++; poller.stop(); window.removeEventListener('focus', onFocus); settingsNeeds.value = 0 })
 watch(() => route.hash, async hash => {
   if (hash === '#add-account' && manage.value) { add.value = true; void router.replace({ path: route.path, query: route.query, hash: '' }) }
   // The Agents page's pacing line links here (AEON-721).

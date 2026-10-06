@@ -307,3 +307,26 @@ test('a stopped lead links its successor instead of claiming live workers', asyn
   await expect(row(page, id(2)).getByRole('link', { name: 'Adopted from Release lead' })).toBeVisible()
   await expect(row(page, lead).locator('.history-toggle')).toContainText('8 stopped')
 })
+
+// AEON-785 risk (fix round 6): the footer's problem jump meets an active Sessions
+// state filter that hides the folded problem row, so the focus lands nowhere.
+test('the footer problem jump switches a Working filter to Problem and focuses the folded row', async ({ page }) => {
+  const { data, session } = await setup(page)
+  data.sessions.push(session(100, { parent_harness_session_id: id(2), display_label: 'Mid lead' }), session(200, { parent_harness_session_id: id(100), display_label: 'Deep worker', has_problem: true }))
+  await page.goto('/agents')
+  await expect(page.getByRole('treegrid', { name: 'Agent sessions' })).toBeVisible()
+  // Fold the family that holds the problem, then filter to Working: the problem row is gone from the page.
+  await expand(page, id(2)).click()
+  await expect(row(page, id(200))).toHaveCount(0)
+  await page.locator('.agents-page .page-head [data-filter="working"]').click()
+  const chip = page.locator('.sessions .filter-chip .chip-value')
+  await expect(chip).toHaveText('Working')
+  await expect(row(page, id(200))).toHaveCount(0)
+  const box = await page.locator('.sessions .filter-chip').boundingBox()
+  await page.locator('footer.app-footer .sum').click()
+  await expect(chip).toHaveText('Problem')
+  await expect(row(page, id(200))).toBeFocused()
+  const after = await page.locator('.sessions .filter-chip').boundingBox()
+  expect(after!.y).toBeCloseTo(box!.y, 0)
+  expect(after!.x).toBeCloseTo(box!.x, 0)
+})

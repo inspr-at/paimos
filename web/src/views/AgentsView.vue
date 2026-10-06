@@ -8,6 +8,7 @@ import type { AttachQueueRow, AttachReview } from '../lib/attachWatch'
 import { pairingPermissions } from '../lib/agentPairing'
 import { message, subscribeAgents, type Approval, type SessionControl } from '../lib/agents'
 import { canDecideApproval as allowedToDecide, controlBlocked, decidedApprovals, type Resource } from '../lib/agentState'
+import type { AgentState } from '../lib/agentSignals'
 import { confirmAction } from '../lib/confirm'
 import { toast } from '../lib/toast'
 import { TICKET_PEEK } from '../lib/ticketPeek'
@@ -26,7 +27,7 @@ import { useServiceTiers } from '../stores/serviceTiers'
 import { controlPermitted } from '../lib/managedControl'
 import SessionPanel from '../components/agents/SessionPanel.vue'
 import HeadCounts from '../components/agents/HeadCounts.vue'
-import type { HeadFilter } from '../components/agents/headCounts'
+import { FILTER_LABEL, matchesFilter, type HeadFilter } from '../components/agents/headCounts'
 import AccountsComputers from '../components/agents/AccountsComputers.vue'
 import { openModelPrefs } from '../lib/modelPrefsCommand'
 import AgentsWorking from '../components/agents/AgentsWorking.vue'
@@ -41,6 +42,10 @@ import AttachPending from '../components/agents/AttachPending.vue'
 import WindDownPanel from '../components/agents/WindDownPanel.vue'
 import FloatingPanel from '../components/work/FloatingPanel.vue'
 import { useAgentPause } from '../stores/agentPause'
+import { agentsFooter } from '../lib/footerProviders'
+import { countedLive, jumpTarget } from '../components/agents/sessionTree'
+import { useFooterSummary } from '../lib/footerSummary'
+import { clockTime, liveSession } from '../lib/agentPause'
 
 // Markus's desk for agents: one head line whose counts filter Sessions, what waits
 // on him (only when something does), the accounts with today's plan, then every
@@ -70,6 +75,7 @@ const route = useRoute()
 const router = useRouter()
 const cursor = ref('')
 const runQueue = ref<InstanceType<typeof RunQueue>>()
+const windDown = ref<InstanceType<typeof WindDownPanel>>()
 const sessionList = ref<InstanceType<typeof SessionList>>()
 const filter = ref<HeadFilter | null>(null)
 // Decision Desk and notification links focus the existing request card.
@@ -255,11 +261,64 @@ function clearFilter() {
   // The chip is gone; focus goes back to the count that set it.
   if (was) document.querySelector<HTMLElement>(`.agents-page .page-head [data-filter="${was}"]`)?.focus({ preventScroll: true })
 }
+// The footer's counts jump to the first session in that state. The row may be
+// a folded descendant: pick it from the sessions, open its ancestors, then focus it.
+async function jump(state: AgentState) {
+  const target = jumpTarget(agents.views, state)
+  if (!target) return
+  // An active Sessions filter that hides the row moves to the footer's own state: the chip stays where it is and only its word changes.
+  const view = agents.views.find(v => v.session.id === target.id)
+  if (filter.value && view && !matchesFilter(view, filter.value)) {
+    filter.value = matchesFilter(view, state as HeadFilter) ? state as HeadFilter : null
+    announce(filter.value ? `Sessions now show ${FILTER_LABEL[filter.value].toLowerCase()} only` : 'Sessions now show all')
+  }
+  sessionList.value?.revealSession(target.id)
+  await nextTick()
+  cursor.value = `s:${target.id}`
+  focusRow(cursor.value)
+}
 function review(approval: Approval) {
   if (window.innerWidth < 1100) void closePanel()
   cursor.value = `a:${approval.id}`
   void nextTick(() => focusRow(cursor.value))
 }
+
+// ---------- Footer summary (AEON-785): count · state · the one exception ----------
+const footerWind = computed(() => {
+  const by = pause.report?.deadline_at
+  if (!by) return null
+  const left = pause.reportIds.filter(id => { const s = agents.sessionById(id); return !!s && liveSession(s) }).length
+  return { left, by: clockTime(by) }
+})
+// What this screen lists: live sessions, plus those paused on purpose.
+useFooterSummary(() => {
+  // A first read that failed shows its own error; the footer does not wait for it.
+  if (!session.identity || (!agents.loaded && agents.sessionsError)) return null
+  const live = agents.views.filter(countedLive)
+  const states = (groups: string[]) => live.filter(v => groups.includes(v.status.group)).length
+  const paused = agents.views.filter(v => v.status.state === 'paused').length
+  const top = () => document.querySelector('main')?.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' })
+  return agentsFooter({
+    loaded: agents.loaded,
+    total: live.length + paused,
+    working: states(['working']),
+    idle: states(['idle']),
+    throttled: states(['throttled']),
+    awaiting: states(['awaiting']),
+    pausing: states(['pausing']),
+    problems: states(['problem', 'unresponsive']),
+    asks: agents.needsCount,
+    paused,
+    wind: footerWind.value,
+    act: {
+      problem: () => void jump('problem'),
+      ask: () => { const first = agents.pending[0] ? `a:${agents.pending[0].id}` : agents.held[0] ? `m:${agents.held[0].id}` : ''; if (first) { cursor.value = first; focusRow(first) } },
+      wind: () => windDown.value?.focusWindDown(),
+      paused: () => void jump('paused'),
+      top,
+    },
+  })
+}, () => session.identity ? { updatedAt: agents.sessionsUpdatedAt, paused: stale.value } : null)
 
 // ---------- Panel ----------
 // Like the ticket panel: opening from the list adds one history entry, switching
@@ -436,7 +495,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <LeadsList v-if="agents.loaded" ref="leadsList" />
         <AccountsComputers v-if="showSetup" :permissions="pairingAccess" :show-accounts="showCapacity" />
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
-        <WindDownPanel v-if="agents.loaded" />
+        <WindDownPanel v-if="agents.loaded" ref="windDown" />
         <SessionList
           v-if="agents.loaded" ref="sessionList"
           :groups="agents.grouped" :history="agents.historyViews" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"

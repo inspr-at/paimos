@@ -188,7 +188,6 @@ defineExpose({ focusSearch, openFilterMenu, input })
       :tips="view !== 'knowledge'"
       :label="view === 'knowledge' ? 'Knowledge views' : 'Ticket views'" @select="value => emit('view', value)" />
     <span v-if="view !== 'knowledge'" class="count-live">
-      <slot name="freshness" />
       <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ plural(total, 'ticket') }}</template></span>
     </span>
     <span v-if="view !== 'knowledge'" class="phone-break" aria-hidden="true" />

@@ -742,7 +742,7 @@
         ,
         {"file":"tests/agents-phone-rows.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/agents-worker-tree.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agents-worker-tree.spec.ts","listedTests":10,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/agents.spec.ts","listedTests":29,"weightSeconds":64.365854,"weightSource":"unmeasured-test-rate"}
         ,
@@ -787,6 +787,8 @@
         {"file":"tests/first-impression.spec.ts","listedTests":38,"weightSeconds":84.341463,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/first-run.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/footer-summary.spec.ts","listedTests":13,"weightSeconds":20,"weightSource":"estimate"}
         ,
         {"file":"tests/from-classic.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
