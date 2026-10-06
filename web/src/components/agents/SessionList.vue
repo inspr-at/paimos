@@ -466,7 +466,7 @@ defineExpose({ toggleHistory, menuHistory, reveal })
           <span role="gridcell" class="c-agent">
             <span v-if="row.depth" class="sr-only">Worker of {{ row.parent?.view.name }}. </span>
             <button
-              v-if="row.foldable" type="button" class="tree-fold" tabindex="-1" :aria-expanded="row.open" :aria-label="foldLabel(row)"
+              v-if="row.foldable" type="button" class="tree-fold" data-fold="family" tabindex="-1" :aria-expanded="row.open" :aria-label="foldLabel(row)"
               :data-tip="row.open ? 'Fold · ←' : 'Unfold · →'" @click="toggle(row.branch)"
             ><AppIcon name="chevron-right" :size="14" class="chev" :class="{ turned: row.open }" /></button>
             <span v-else class="tree-fold-space" aria-hidden="true" />
@@ -494,11 +494,11 @@ defineExpose({ toggleHistory, menuHistory, reveal })
                  Folded, a problem or ask below joins it at the line end. -->
             <span v-else-if="row.foldable || stoppedChildren(row.branch)" class="worker-tools">
               <span v-if="row.foldable" class="kid-count">{{ plural(row.sub, 'sub-agent') }}</span>
-              <span v-if="row.foldable && !row.open && (row.under.problem || row.under.ask)" class="roll" :class="row.under.problem ? 'problem' : 'ask'" :title="`${rollLabel(row)}: ${(row.under.problem ? row.under.names.problem : row.under.names.ask).join(', ')}`">{{ rollLabel(row) }}</span>
               <button
                 v-if="stoppedChildren(row.branch)" type="button" class="worker-toggle history-toggle" :aria-expanded="!!history[row.view.session.id]"
                 :aria-label="`${history[row.view.session.id] ? 'Hide' : 'Show'} stopped workers of ${row.view.name}: ${stoppedChildren(row.branch)} stopped`" @click="toggleStopped(row.branch)"
               >{{ stoppedChildren(row.branch) }} stopped</button>
+              <span v-if="row.foldable && !row.open && (row.under.problem || row.under.ask)" class="roll" :class="row.under.problem ? 'problem' : 'ask'" :title="`${rollLabel(row)}: ${(row.under.problem ? row.under.names.problem : row.under.names.ask).join(', ')}`">{{ rollLabel(row) }}</span>
             </span>
             <RouterLink v-if="row.view.session.adopted_from_id" class="lineage adopted" :to="`/agents/${row.view.session.adopted_from_id}`" :title="`Adopted from ${lineageName(row.view.session.adopted_from_id)}`">Adopted from {{ lineageName(row.view.session.adopted_from_id) }}</RouterLink>
           </span>
@@ -698,7 +698,7 @@ defineExpose({ toggleHistory, menuHistory, reveal })
 .worker-tools > :not(.roll) { flex: none; }
 .roll.problem { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); }
 .roll.ask { background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); color: var(--queue-wait-ink); }
-.worker-tools { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 6px; flex-basis: 100%; min-height: 28px; padding: 0 0 6px 70px; color: var(--ink-2); font-size: 11.5px; }
+.worker-tools { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 6px; flex-basis: 100%; min-width: 0; min-height: 28px; padding: 0 0 6px 70px; color: var(--ink-2); font-size: 11.5px; }
 .worker-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 28px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-weight: 550; white-space: nowrap; }
 .worker-toggle:hover:not(:disabled) { background: var(--row-hover); }
 .worker-toggle:disabled { cursor: default; }
