@@ -410,7 +410,10 @@ planner modes force the `full` aggregate lane, with the trusted layout deciding
 which jobs execute. `spec-only` is retained only when both classifiers say
 `spec-only`; `docs-only` only when the trusted planner says `docs`. A raw `full`
 lane never narrows. Missing or invalid planner data fails closed to full; merge
-queue, main and manual events stay full. With the flag off (including unset or
+queue, main and manual events stay full. The workflow itself forces full mode,
+layout and lane for merge groups without executing the candidate planner,
+restricts essential/static shortcuts to PRs, and checks full execution on every
+merge-group shard. With the flag off (including unset or
 any value other than exact `on`), the raw `ci-plan` lane is preserved unchanged.
 Every execution condition, shard matrix, runner tier selection, full-execution
 check, required aggregate and tier measurement uses this effective output.
@@ -950,6 +953,8 @@ the evidence. Fixture timings are not live acceptance evidence.
 `.github/workflows/release-image-check.yml` supports `workflow_dispatch` and draft-PR validation of the release workflow, smoke script and Dockerfile. Its two native hosted matrix jobs run the workflow/index and assembly-script regression tests, generate offline release history once, compile externally with the tag build's exact Go and npm cache settings, read the matching architecture's assembly cache, prepare the runtime closure cold and freeze it by digest, load that platform's production assembly and run the same full smoke gate. Both must also produce complete assembly/smoke timing evidence and pass the two-clean-rebuild digest proof. The 90-second target is an AEON-422 acceptance measurement; slower successful samples warn without blocking releases. The rehearsal exports production BuildKit provenance locally with the identical digest-bound base and inputs, then requires that export to carry the smoked image config, using the code that checks the pushed digest in a tag build. Its token has only `contents: read`; it has no signing environment, registry login, registry cache export, image push, attestation or release creation. Before tagging, require the successful exact-SHA `main` receipt described in [Mandatory pre-tag rehearsal (AEON-531)](#mandatory-pre-tag-rehearsal-aeon-531); a work-branch or PR run is diagnostic only and cannot authorize a release tag. Hosted timing can be measured in rehearsal; real attestation verification still requires a coordinator-authorized publishing run. A local fixture test establishes neither.
 
 ### Host compilation, runtime pin and digest proof (AEON-422)
+
+The tag and rehearsal workflows pin Buildx `v0.37.1` and the docker-container builder to `moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea`. All three setups disable the shared Buildx binary cache. Their identical guards resolve Docker CLI plugin precedence, reject missing, symlinked or shadowed plugins, and verify the downloaded binary against the pinned per-architecture SHA256 before invoking Buildx to assert its version and the bootstrapped BuildKit version. Both platform jobs have a 45-minute budget. To bump the pins, update both workflows and the releaseworkflow expectations with the Buildx version, both Linux amd64/arm64 checksums from the official versioned `https://github.com/docker/buildx/releases/download/<version>/checksums.txt`, and the BuildKit version and multi-architecture image digest; regenerate the changed rehearsal coverage fingerprints with `go run scripts/rehearsal-step.go inventory`, preserving the reviewed counterparts. Rehearse on both native architectures, then tag only after a green PR rehearsal and a green exact-SHA main rehearsal of the merged commit. Release 124 requires both new green rehearsals; the earlier receipt (run 37427550810) no longer covers the changed release workflow.
 
 `scripts/Dockerfile.runtime` pins the official Alpine 3.24 multi-platform index
 by digest (3.24.2 when observed on 2026-10-05), while preserving Chromium

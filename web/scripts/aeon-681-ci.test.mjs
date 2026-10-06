@@ -4,21 +4,26 @@ import assert from 'node:assert/strict'
 import { readFileSync, writeFileSync, mkdirSync, mkdtempSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { run, browserList } from '../../scripts/test-tiers/cli.mjs'
+import { run, browserList, plan, main } from '../../scripts/test-tiers/cli.mjs'
 import { command, root, web, evidence, flattenBrowser, collectWeb } from '../../scripts/test-tiers/collect.mjs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerHooks } from 'node:module'
 import { validate, key, select } from '../../scripts/test-tiers/core.mjs'
 
+// One native collection serves every plan in this file: the web-unit shard
+// budget is 120 seconds and each recollection costs tens of seconds.
+let collected
+const inventory=()=>collected??=collectWeb()
+
 test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async()=>{
   // Every planner call sees the same unchanged tree. Collect it natively once,
   // then reuse that snapshot while exercising the unchanged planner and CLI.
   // The selector tests below still run their requested native lists separately.
-  const inventory=collectWeb()
+  const snapshot=inventory()
   const collector=pathToFileURL(resolve(root,'scripts/test-tiers/collect.mjs')).href
   const wrapper=`export * from ${JSON.stringify(`${collector}?native-planning-snapshot`)};
-export const collectWeb = () => (${JSON.stringify(inventory)});`
+export const collectWeb = () => (${JSON.stringify(snapshot)});`
   const hooks=registerHooks({resolve(specifier,context,next) {
     const result=next(specifier,context)
     if(result.url===collector)return {url:`data:text/javascript,${encodeURIComponent(wrapper)}`,shortCircuit:true}
@@ -62,6 +67,28 @@ export const collectWeb = () => (${JSON.stringify(inventory)});`
     assert.equal(nightly.scope,'catalogue')
     assert.equal(nightly.deferredBrowserCases,0)
   } finally { hooks.deregister() }
+})
+
+test('plan and the CLI reuse a supplied inventory instead of recollecting the catalogue',async()=>{
+  const sentinel={kind:'vitest',file:'tests/plan-owner.unit.test.ts',name:'AEON-706 supplied inventory sentinel (never registered on disk)'}
+  const supplied={tests:[...inventory().tests,sentinel]}
+  assert.ok(!inventory().tests.some(row=>key(row)===key(sentinel)))
+  const warnings=[],warn=console.warn
+  console.warn=message=>warnings.push(String(message))
+  let selection,output=[]
+  const log=console.log
+  try {
+    selection=plan('web',{event:'pull_request',paths:['.github/workflows/ci.yml'],inventory:supplied})
+    console.log=value=>output.push(JSON.parse(value))
+    assert.equal(await main(['plan','web','--unit','--event','pull_request','--paths','[]'],{inventory:supplied}),0)
+  } finally { console.warn=warn;console.log=log }
+  // The sentinel only exists in the supplied inventory: a recollection drops it.
+  const planned=selection.all.find(row=>key(row)===key(sentinel))
+  assert.equal(planned?.tier,'NIGHTLY')
+  assert.equal(selection.all.length,supplied.tests.length)
+  assert.equal(Object.values(output.at(-1).inventory).reduce((sum,n)=>sum+n,0),supplied.tests.length)
+  assert.ok(warnings.some(line=>line.includes(key(sentinel))),warnings.join('\n'))
+  assert.throws(()=>plan('web',{event:'pull_request',paths:[],inventory:{tests:'not a list'}}),/Supplied inventory needs a tests array/)
 })
 
 test('native Node and Vitest selectors execute the requested registrations, rather than skip them', async () => {

@@ -8110,6 +8110,18 @@
     ,
     {"kind":"browser","file":"tests/journey.spec.ts","name":"the plan: ticked tickets form the release; features cycle all, none and the last partial pick","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"the retained plan controls stay put during a deferred refresh at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/journey.spec.ts","name":"the walker (A3): release eyebrow, features and tickets, arrows, Space, the sheet and Esc","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/journey.spec.ts","name":"the walker checkbox shows only over its slot, never over the chip","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10062,6 +10074,8 @@
     ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing parent picker counts leaves 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing picker recovers a revision conflict without losing the selection","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing release rejects a building member and preserves the whole batch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"existing release rejects a released member and preserves the whole batch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10073,6 +10087,18 @@
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"new release rejects a released member and preserves the whole batch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"parent replay with a backlog leaf does not claim full placement","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/release-picker.spec.ts","name":"retained existing picker refreshes revision and keeps controls stable 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/release-picker.spec.ts","name":"screenshot plan picker 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11981,6 +12007,32 @@
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Show all opens the automatic view and a delayed Undo never marks a different view","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"delayed project-filter failure keeps retained rows and Undo still at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"delayed project-filter failure keeps retained rows and Undo still at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"delayed project-filter failure keeps retained rows and Undo still at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"older-page failure and retry keep retained rows and Undo still at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"older-page failure and retry keep retained rows and Undo still at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"older-page failure and retry keep retained rows and Undo still at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"Full access includes mixed workspace/project role scopes without promoting workspace-only project permissions","tier":"ESSENTIAL"}
     ,
@@ -14100,6 +14152,8 @@
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"retains the other unavailable reasons and their precedence","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"blocks a retained picker write until its refreshed options arrive","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"counts returned leaves for a parent","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"counts returned leaves for a parent after move confirmation","tier":"NIGHTLY"}
@@ -14108,7 +14162,33 @@
     ,
     {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"counts returned leaves for a parent plus an overlapping leaf after move confirmation","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"discards a retained picker success after same-release refresh","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"discards a retained picker success after same-release refresh on the move retry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"discards stale picker failure feedback after a same-release refresh","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"does not dispatch membership after its initial confirmation owner is refreshed","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"does not invent a leaf count when an older server omits the leaf IDs","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"does not retry membership after its move confirmation owner is refreshed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"ignores an older options response after a retained picker owner refresh","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"keeps a picker action busy while its person confirmation is pending","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"keeps failed conflict recovery honest and blocks another stale write","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"reconciles retained selections with refreshed availability and move details","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"refreshes a retained picker revision and submits its retained selection successfully","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"reloads a revision conflict for a successful person retry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"reloads a revision conflict for a successful person retry after move confirmation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/existing-ticket-picker.unit.test.ts","name":"reports a current picker failure without emitting success","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/features.unit.test.ts","name":"discards old tenant and revoked-session responses","tier":"NIGHTLY"}
     ,
@@ -14773,6 +14853,62 @@
     {"kind":"vitest","file":"tests/phone-controls.unit.test.ts","name":"matching selection in the phone dock > offers unloaded matches only after all loaded tickets are selected","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/phone-controls.unit.test.ts","name":"uses a constant Add label in the sheet while preserving desktop sort wording","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a current picker result adopts its captured owner and reports the returned leaf count","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a foreign-release membership result cannot patch the plan or report success","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a late ticket creation result cannot replace another project or refresh its work","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a retained picker cannot adopt a deferred result from before a same-release refresh","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"a same-release reload invalidates an in-flight write and queued successor","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"adopts current-owner ticket creation and refreshes work for that project","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"an old save cannot clear the busy state or block writes for a new owner","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"discards a late plan conflict without rollback toast or stale refresh","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"discards a late plan success without refreshing the newly selected release","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"discards a plan result after its view scope is disposed","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"drops a queued toggle when its project changes and comes back synchronously","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"drops a queued toggle when the selected release changes before dispatch","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"drops an explicitly captured ticket creation owner before dispatch after navigation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"only the latest walker load can install a result after release A B A navigation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"project navigation clears drafts picker and selection memory even for the same release id","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"rechecks editability immediately before a queued write","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"reloads a current-owner conflict from its captured release","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"resets partial feature selection memory for a different release owner","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"rolls back a current-owner transport failure and surfaces its real error","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release refreshes fence old ticket creation without erasing drafts or current busy state","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release refreshes preserve the partial selection through the feature cycle","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release refreshes prune removed tickets and features from partial selection memory","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"same-release save refreshes preserve ticket drafts and the open picker","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"serializes same-owner toggles using the preceding saved revision","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the retained plan content belongs to the displayed record during deferred loading","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the ticket form discards late failure feedback after release navigation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the ticket form preserves a new release draft and busy state after an old success","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/plan-owner.unit.test.ts","name":"the ticket form rechecks editability before submitting its captured draft","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/planning-states.unit.test.ts","name":"actual models and saved picker choices > compares Cursor Grok profile effort high with the normalized used model","tier":"GATED-FULL"}
     ,
@@ -19067,6 +19203,8 @@
     {"kind":"vitest","file":"tests/work-surfaces-fix2.unit.test.ts","name":"stops at the lazy item budget while retaining an honest incomplete result","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/work-vocabulary-card.unit.test.ts","name":"serializes a deferred Reload with Save and leaves the saved revision visible","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/workspace-activity.unit.test.ts","name":"drops another person’s history and binds every delayed Undo result to the exact displayed event, ticket and revision","tier":"GATED-FULL"}
   ]
   ,
   "ticket": "AEON-681"
