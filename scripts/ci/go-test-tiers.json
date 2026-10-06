@@ -6750,6 +6750,8 @@
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestPinnedShapeKeys","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestProjectLeadResponseDescriptions","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/reportercontract","name":"TestReporterRoutesDeclareHeaderBeforeAuthentication","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestRequiredBump","tier":"GATED-FULL"}
