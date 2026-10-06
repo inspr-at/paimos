@@ -77,7 +77,7 @@ func TestPhoneDecisionHidesUnavailableAttach(t *testing.T) {
 		args []any
 		id   *string
 	}{
-		{`INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash) VALUES($1,$2,'Phone fixture','phone-fixture','fixture') RETURNING id::text`, []any{f.p.TenantID, f.agent.ID}, &key},
+		{`INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,created_by_principal_id) VALUES($1,$2,'Phone fixture','phone-fixture','fixture',(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1)) RETURNING id::text`, []any{f.p.TenantID, f.agent.ID}, &key},
 		{`INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,approved_by,state) VALUES($1,gen_random_uuid(),'123456789',$2,$2,$2,'{}',$2,$3,'redeemed') RETURNING id::text`, []any{f.p.TenantID, strings.Repeat("0", 64), f.p.ID}, &pairing},
 	}
 	for _, q := range queries {

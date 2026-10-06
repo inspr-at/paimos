@@ -48,7 +48,7 @@ func TestAgentIdentityDeactivateAndReactivate(t *testing.T) {
 	key := func(principal, prefix string, revoked bool) string {
 		t.Helper()
 		var id string
-		if err := d.Admin.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,revoked_at) VALUES($1::uuid,$2::uuid,'key',$3,$4,'{nodes.read}',CASE WHEN $5 THEN now() END) RETURNING id::text`, tid, principal, prefix, prefix+"-hash", revoked).Scan(&id); err != nil {
+		if err := d.Admin.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,revoked_at,created_by_principal_id) VALUES($1::uuid,$2::uuid,'key',$3,$4,'{nodes.read}',CASE WHEN $5 THEN now() END,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1)) RETURNING id::text`, tid, principal, prefix, prefix+"-hash", revoked).Scan(&id); err != nil {
 			t.Fatal(err)
 		}
 		return id

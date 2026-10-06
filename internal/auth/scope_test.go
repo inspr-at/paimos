@@ -186,7 +186,7 @@ func TestEmptyAgentKeyDeniedAcrossRegisteredAPIRoutes(t *testing.T) {
 	reset(t)
 	tenantID := insertTenant(t, "scope-audit", "Scope audit")
 	m := newMod(t, Config{})
-	key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "empty-audit", "", []string{}, nil)
+	key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, "empty-audit", "", []string{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestCoordinatorScopesReachWorkRoutes(t *testing.T) {
 	reset(t)
 	tenantID := insertTenant(t, "coordinator-audit", "Coordinator audit")
 	m := newMod(t, Config{})
-	key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "aeon-coordinator", "", []string{"harness.worker", "inbox.read", "inbox.send", "nodes.read"}, nil)
+	key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, "aeon-coordinator", "", []string{"harness.worker", "inbox.read", "inbox.send", "nodes.read"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,7 +256,7 @@ func TestAccountMetadataScopeAtMiddleware(t *testing.T) {
 		{"empty", []string{}, http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, tc.name, "", tc.scopes, nil)
+			key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, tc.name, "", tc.scopes, nil)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -286,7 +286,7 @@ func TestServicePrincipalsCannotReceiveAgentKeys(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, name, "", []string{"nodes.read"}, nil); !errors.Is(err, errServicePrincipal) {
+			if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, name, "", []string{"nodes.read"}, nil); !errors.Is(err, errServicePrincipal) {
 				t.Fatalf("service key error: %v", err)
 			}
 		})
@@ -298,11 +298,11 @@ func TestServicePrincipalsCannotReceiveAgentKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "person-service", "", nil, nil); !errors.Is(err, errServicePrincipal) {
+	if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, "person-service", "", nil, nil); !errors.Is(err, errServicePrincipal) {
 		t.Fatalf("person service name collision: %v", err)
 	}
 	// A colliding ordinary agent must not hide a service principal of the same name.
-	normalKey, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "collision", "", []string{"nodes.read"}, nil)
+	normalKey, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, "collision", "", []string{"nodes.read"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +313,7 @@ func TestServicePrincipalsCannotReceiveAgentKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "collision", "", nil, nil); !errors.Is(err, errServicePrincipal) {
+	if _, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, "collision", "", nil, nil); !errors.Is(err, errServicePrincipal) {
 		t.Fatalf("collision key error: %v", err)
 	}
 	if got := countInTenant(t, tenantID, `SELECT count(*) FROM agent_keys WHERE name='collision'`); got != 1 {

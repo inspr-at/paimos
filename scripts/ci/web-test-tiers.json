@@ -5496,6 +5496,40 @@
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"zero and thirty are real ceilings; idle glyph rests and disabled boundaries keep focus","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 dark: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 light: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1024 light: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 dark: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 light: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"1440 light: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 dark: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 dark: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 light: existing Agents layout shows the report source and stable capacity controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"390 light: first ETA report keeps family controls and following rows still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"a stopped failed session still counts as needing attention","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"another person’s visible account never becomes your full account or your capacity","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"attention counts relevant descendants through family folds and stopped history","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"ended workers remain recoverable through an opt-in fold without cleanup writes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-display.spec.ts","name":"live families count all external workers, hide hundreds of ended siblings and retain counts when folded","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agents-handover.spec.ts","name":"drag and drop moves only onto an authorized live lead","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-handover.spec.ts","name":"foreign worker has neither drag permission nor a move menu","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -8281,6 +8315,20 @@
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption refusal reports failure and owned keys have no takeover action","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"cancel or untick a role extension writes nothing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -14006,6 +14054,8 @@
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > carries real API room through accounts, pools and the dial when nothing runs","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > claims readiness only from confirmed room when unknown and zero room mix","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > explains routing blockers without calling scheduled, held or unapproved accounts full","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > keeps known room when another harness has no current advice","tier":"NIGHTLY"}
@@ -14017,6 +14067,8 @@
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > rejects stale projections and never doubles shared quota aliases across groups","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > reserves full for explicitly occupied slots and keeps absent accounts distinct","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > resolves a shared-quota alias measurement from the canonical gauge","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"honest account room (AEON-720) > retains server start advice while explaining unmeasured usage","tier":"NIGHTLY"}
     ,
@@ -14031,6 +14083,8 @@
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > includes all configured harnesses and counts beyond a lowered ceiling","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > keeps no own limit, numeric zero and off distinct","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > never calls missing account ownership or routing a full account","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-working.unit.test.ts","name":"the one dial > reports actual waiting work without simulating starts or inventing an empty queue","tier":"GATED-FULL"}
     ,
@@ -14292,7 +14346,11 @@
     ,
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > retains membership and screen shortcuts outside the description and Escape inside it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"adoption confirmation is bound to the acting person and key","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"keeps an explicit custom-role recurrence grant and names the creator ceiling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"late adoption results cannot restore another person or a departed key","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"names the built-in Admin agent role as the recurrence ceiling","tier":"ESSENTIAL"}
     ,

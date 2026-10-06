@@ -233,15 +233,37 @@ not live GitHub enforcement. This worker changes no permissions, settings,
 rulesets, watcher deployment, merges or queues. Acceptance remains with the
 lead; the process runbook is PPM AEON `runbook/flywheel`, §2.5–§2.7.
 
-### Test runner routing (AEON-438, AEON-459)
+### Test runner routing (AEON-438, AEON-459, AEON-777)
 
 CI's hosted `runner-route` job calls `test-runner-route.yml`, requests four idle
 slots, and selects the entire Go batch behind independent event, ref and
 rerun-attempt guards. The manual smoke workflow calls its own router for one
-slot. Only `push` and `workflow_dispatch` on `refs/heads/main` may use the pool:
+slot. By default, only `push` and `workflow_dispatch` on `refs/heads/main` may use the pool:
 
 - A verified main push: `runs-on: [self-hosted, Linux, ARM64, mbp2606, mbp2606-push]`.
 - A verified main dispatch: `runs-on: [self-hosted, Linux, ARM64, mbp2606, mbp2606-dispatch]`.
+
+**AEON-777 event switch:** set the repository variable `AEON_POOL_EVENTS` to
+`push,workflow_dispatch,pull_request,merge_group` to opt all four CI events
+into the pool. A nonempty comma list replaces the default event list. PRs use
+`mbp2606-pr` only when their head repository equals `github.repository`; even
+approved fork PRs stay hosted. Merge groups use `mbp2606-mq` and retain full
+coverage. Each also requires its event in the controller's **schema-2 lease
+`events` array**. A schema-1 lease or missing, malformed or nonmatching event
+advertisement keeps that event hosted even with the switch on. With this router
+deployed, the switch and controller upgrade can be enabled in either order:
+PR/merge-group routing begins only when both advertise the event. The controller
+must advertise an event only after its allowlist, event-class labels, ref checks
+and job-started hook support it. Pushes and dispatches still require
+`refs/heads/main` and accept schema 1 or 2 without requiring `events`. Every route
+still requires a fresh 30-second lease and enough idle capacity; CI requests
+four slots and uses four Go shards on the pool. Runner selection and shard
+count retain the run-attempt guard. Revert by unsetting `AEON_POOL_EVENTS` (or
+setting it to the empty string): this restores the original main push/dispatch
+routing and hosted PR/merge-group routing for new routing decisions. Removing
+the event from the lease also stops new routing for that event. Drain already
+routed jobs before rolling back controller admission support. The controller
+details below describe the pinned AEON-438 deployment, not an AEON-777 rollout.
 
 The controller mints the base labels `self-hosted, Linux, ARM64, mbp2606` plus
 **exactly one** class label matching the verified run's event; the configured
@@ -250,7 +272,7 @@ sets contain neither both classes on one runner nor hosted-looking labels
 `could_take` is a case-insensitive **subset** check against the complete minted
 label set, so a competing job need not request a class label to match
 ([aeon_builder.py:93–100](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L93-L100)).
-The reviewed workflows route PRs to `ubuntu-latest`;
+Without the event opt-in, the reviewed workflows route PRs to `ubuntu-latest`;
 a PR can modify those workflows or the guard, so runner-side admission is the
 enforcement boundary. The manual `Test runner smoke` workflow exercises the same
 router and small Go/Node checks. Go tests use four pool shards when routing
@@ -719,22 +741,38 @@ retaining the baked job-started hook as defence in depth.
 Fork-PR approval is `all_external_contributors` (set by the lead, 2026-09-30).
 That is defence in depth, not the runner admission boundary. A `merge_group` run
 executes PR code, so queueing a PR is a decision to run it on the Mac if routing
-is ever enabled for that event. **It is excluded from the mbp2606 allowlist in
-mode B today**: GitHub documents exact pinned workflow refs; matching
+is enabled for that event. **It is excluded from the mbp2606 allowlist in the
+pinned AEON-438 deployment**: GitHub documents exact pinned workflow refs; matching
 `gh-readonly-queue/…` refs to the selected `main` workflows is unverified.
-Merge-queue CI continues on hosted runners. See GitHub's
+Merge-queue CI stays hosted until both the event switch and a schema-2 lease
+advertise `merge_group`, backed by the upgraded controller admission checks.
+See GitHub's
 [runner-group workflow restrictions](https://docs.github.com/en/enterprise-cloud%40latest/actions/how-tos/manage-runners/self-hosted-runners/manage-access).
 
-Routing is disabled until NIX-600's controller publishes the repository variable
-`AEON_MBP2606_AVAILABILITY` on `inspr-at/paimos` with this value-free shape
+Routing is disabled until the controller publishes the repository variable
+`AEON_MBP2606_AVAILABILITY` on `inspr-at/paimos`. The pinned NIX-600 controller
+publishes schema 1, which supports only main push/dispatch routing
 ([aeon_builder.py:161–172](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L161-L172), [aeon_builder.py:388–404](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L388-L404)):
 
 ```json
 {"schema":1,"repository":"inspr-at/paimos","os":"linux","arch":"arm64","online":true,"busy":false,"observed_at":"2026-09-30T10:00:00Z","idle_runners":4}
 ```
 
-The schema remains **version 1**; mode and rerun-attempt metadata require no new
-availability fields. In mode B, `idle_runners` counts free VM slots after
+The paired AEON-777 controller upgrade publishes **schema 2** with this exact
+shape (refresh `observed_at` at publication and advertise only supported events):
+
+```json
+{"schema":2,"repository":"inspr-at/paimos","os":"linux","arch":"arm64","online":true,"busy":false,"observed_at":"2026-10-06T13:40:39Z","idle_runners":4,"events":["push","workflow_dispatch","pull_request","merge_group"]}
+```
+
+`events` is an array of zero to four unique exact names from `push`,
+`workflow_dispatch`, `pull_request`, `merge_group`; order does not matter.
+Unknown names, duplicates, non-string entries, non-arrays and more than four
+entries invalidate the advertisement for PR/merge-group routing. Empty or
+missing arrays advertise neither event. Schema 1 never advertises PR/merge-group
+support, even if it contains an `events` field. Push/dispatch retain the existing
+lease checks under schema 1 or 2 regardless of `events`; unknown schema versions
+fall back to hosted. In mode B, `idle_runners` counts free VM slots after
 occupied slots and pending jobs are subtracted, not idle registered runners
 ([aeon_builder.py:161–172](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L161-L172), [aeon_builder.py:607–616](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L607-L616)).
 The publisher waits `min(5, pollSeconds)` seconds between publication attempts;
