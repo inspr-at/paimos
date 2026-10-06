@@ -5,8 +5,13 @@ import { appendFileSync } from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
 
 // A slow root start (a loaded host) must never decide the supervisor's verdict.
-const slowStart = Number(process.env.AEON_PW_TEST_SLOW_START_MS)
-if (slowStart > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, slowStart)
+// The reviewed barrier test sets AEON_PW_TEST_SLOW_START_MS. Main's blind
+// supervisor sets AEON_PW_TEST_START_DELAY_MS so a start that outlasts the
+// attempt budget still finishes while the preload establishes identity.
+const slowStart = Number(process.env.AEON_PW_TEST_SLOW_START_MS ?? 0)
+const startDelay = Number(process.env.AEON_PW_TEST_START_DELAY_MS ?? 0)
+const waitMs = (slowStart > 0 ? slowStart : 0) + (startDelay > 0 ? startDelay : 0)
+if (waitMs > 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, waitMs)
 
 const original = childProcess.spawnSync
 let attempts = 0
