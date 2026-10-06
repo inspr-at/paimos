@@ -821,7 +821,9 @@ func inheritPauseRegistration(ctx context.Context, tx pgx.Tx, projectID string, 
 	return nil
 }
 
-func completeResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, old, next Session) (Session, error) {
+// storeContinuation reuses the durable handover format without changing worker
+// parents. Explicit project-lead succession chooses its own generation fence.
+func storeContinuation(ctx context.Context, tx pgx.Tx, old, next Session) (Session, error) {
 	c := Continuation{SucceedsID: old.ID, Handover: *old.Pause.Handover, Brief: handoverBrief(*old.Pause.Handover) + deskdelivery.Brief(old.DeskAnswers), DeskAnswers: old.DeskAnswers}
 	raw, err := json.Marshal(c)
 	if err != nil {
@@ -830,6 +832,14 @@ func completeResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, old, nex
 	// Registration already resolved the retained owner before validating native
 	// context ownership. Completing resume must not change that identity later.
 	next, err = scanSession(tx.QueryRow(ctx, `UPDATE harness_sessions SET continuation_handover=$2::jsonb,desk_answers=coalesce($2::jsonb->'desk_answers','[]'::jsonb),revision=revision+1 WHERE id=$1 RETURNING `+sessionColumns, next.ID, string(raw)))
+	if err != nil {
+		return next, err
+	}
+	return next, nil
+}
+
+func completeResume(ctx context.Context, tx pgx.Tx, p tenant.Principal, old, next Session) (Session, error) {
+	next, err := storeContinuation(ctx, tx, old, next)
 	if err != nil {
 		return next, err
 	}
