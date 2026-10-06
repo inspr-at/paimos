@@ -12546,9 +12546,9 @@
     ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"web fixes and labels follow the shared daemon/server vocabulary","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/agent-palettes.test.ts","name":"every palette colour is defined and readable as text on each surface of both themes","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/agent-palettes.test.ts","name":"every approved look defines five marks with 3:1 contrast on cards in both modes","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/agent-palettes.test.ts","name":"five named palettes, with the saved colour-blind choice read as Deutan","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/agent-palettes.test.ts","name":"seven approved looks, with the saved colour-blind choice read as Deutan","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agent-palettes.test.ts","name":"the system dark scheme and the explicit dark theme use the same state colours","tier":"GATED-FULL"}
     ,
@@ -13795,6 +13795,8 @@
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"Porcelain generated accent blocks cannot drift from the engine in CI","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"WCAG contrast measures the rounded hex and actual card surfaces","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"agent tokens preserve approved looks, Custom dark derivation, fading and drawn geometry","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"automatic dark mirrors lightness and fixes the unchanged green regression","tier":"ESSENTIAL"}
     ,

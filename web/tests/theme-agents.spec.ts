@@ -12,7 +12,8 @@ import type { ActiveTheme, ThemeRecord } from '../src/lib/themes'
 // Reserve time for those real interactions on shared CI runners.
 test.setTimeout(90_000)
 
-const shots = resolve('test-results/aeon-643')
+let shots: string
+test.beforeEach(async ({}, testInfo) => { shots = testInfo.outputPath('aeon-750') })
 const initial = (): ThemeRecord => ({
   id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', tenant_id: 't1', name: 'Porcelain', scope: 'default', owner_principal_id: null, revision: 1, created_at: '', updated_at: '',
   values: { primary: { light: '#0e6f6c', dark: '#a4e5df' }, secondary: { light: '#d69b31', dark: '#e2b45a' }, recurring_marker: { source: 'secondary', custom: null }, agents: { avatar: 'robot-1', ring: null, size: null, hover: false, palette: 'standard' } },
@@ -155,7 +156,7 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
         { name: 'drawn geometry', run: () => reset.click() },
         { name: 'dim off', run: () => dim.uncheck() },
         { name: 'dim on', run: () => dim.check() },
-        ...['Protan', 'Deutan', 'Tritan', 'Monochrome', 'Standard'].map(name => ({ name: `palette ${name}`, run: () => card.getByRole('radio', { name, exact: true }).click() })),
+        ...['Focus', 'Errors only', 'Protan', 'Deutan', 'Tritan', 'One colour', 'Standard'].map(name => ({ name: `palette ${name}`, run: () => card.getByRole('radio', { name, exact: true }).click() })),
       ],
     })
     expect(state.writes).toHaveLength(0)
@@ -163,8 +164,8 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
     await robot.click()
     await card.getByRole('radio', { name: 'Tritan', exact: true }).click()
     // Both modes render their own state tokens regardless of the page mode.
-    const colors = await card.locator('.live-row .live-bot').evaluateAll(nodes => nodes.map(el => getComputedStyle(el.querySelector('svg')!).getPropertyValue('--agent-state-color').trim()))
-    expect(colors[0]).not.toEqual(colors[1])
+    const colors = await card.locator('.live-row .live-bot').evaluateAll(nodes => nodes.map(el => getComputedStyle(el.querySelector('.agent-state-mark')!).color))
+    expect(colors).toEqual(['rgb(0, 110, 75)', 'rgb(95, 233, 193)'])
     for (const mode of ['light', 'dark']) for (const state of ['waiting', 'throttled', 'problem', 'idle']) {
       expect(await card.locator(`.${mode} [data-preview-state="${state}"] .live-bot`).evaluate(el => el.getAnimations({ subtree: true }).filter(a => a.effect?.getTiming().iterations === Infinity).length)).toBe(0)
     }
@@ -194,8 +195,19 @@ for (const width of [390, 1024, 1440]) for (const mode of ['light', 'dark'] as c
 
 test('failed saves preserve the draft and saved appearance; discard restores it', async ({ page }) => {
   const { state } = await mock(page)
+  state.theme.values.agents = { ...state.theme.values.agents, palette: 'custom', custom_states: {
+    working: { light: '#00870e', dark: null }, waiting: { light: '#c47a08', dark: null },
+    throttled: { light: '#7039c6', dark: null }, problem: { light: '#b92229', dark: '#abcdef' }, idle: { light: '#be31ac', dark: '#fcb1ec' },
+  } }
   await page.goto('/settings/theme#agents')
   const card = page.locator('#agents')
+  const mark = (mode: string, state: string) => card.locator(`.${mode} [data-preview-state="${state}"] .agent-state-mark`)
+  await expect.poll(() => mark('light', 'problem').evaluate(el => getComputedStyle(el).color)).toBe('rgb(185, 34, 41)')
+  await expect.poll(() => mark('dark', 'problem').evaluate(el => getComputedStyle(el).color)).toBe('rgb(171, 205, 239)')
+  // An idle custom colour keeps its chosen hue; dimming never grays its mark.
+  await expect.poll(() => mark('light', 'idle').evaluate(el => getComputedStyle(el).color)).toBe('rgb(190, 49, 172)')
+  await expect(page.locator('html')).toHaveAttribute('data-agent-ring', 'moving')
+  await expect(page.locator('html')).toHaveAttribute('data-agent-float', 'false')
   await card.getByRole('radio', { name: 'Sprite', exact: true }).click()
   state.fail = true
   await page.getByRole('button', { name: /^Save/ }).click()
