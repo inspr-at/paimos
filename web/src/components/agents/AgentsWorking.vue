@@ -104,7 +104,7 @@ function modeKeys(event: KeyboardEvent, key: string) {
             <WorkingStepper :value="row.limit" :effective="row.effective" :label="row.label" :viewer="viewer()" :revision="snapshot.updated_at" :interrupt="interrupts" @step="changeLimit(row.key, $event)" @edit="editLimit(row.key, $event)" @boundary="changeMode(row.key, $event)" @hold="hold" />
           </div>
         </div>
-        <p class="f-live" :data-tip="error || status" :class="{ failed: error }" role="status"><span class="live-mark" aria-hidden="true" /><span>{{ error || live }}</span><span v-if="saving" class="sr-only">Saving</span></p>
+        <p class="f-live" :data-tip="error || `Your sessions across projects, including sessions started outside PAIMOS. Other people's sessions appear in the live count above. ${status}`" :class="{ failed: error }" role="status"><span class="live-mark" aria-hidden="true" /><span>{{ error || `${live} · your agents` }}</span><span v-if="saving" class="sr-only">Saving</span></p>
       </template>
       <p v-else class="load-state" role="status">{{ error || 'Reading the total…' }} <button v-if="error" type="button" class="link-btn" @click="control.refresh">Try again</button></p>
     </template>

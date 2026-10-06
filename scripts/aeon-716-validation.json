@@ -1,0 +1,599 @@
+{
+  "ticket": "AEON-716",
+  "base_commit": "67c13c32541a8467e7d7d20501ba95f509ccf781",
+  "scope": "Local implementation and validation only; no push, PR, merge or deployment.",
+  "root_cause": [
+    "Claude emits vendor model evidence as a status event with no status field before Start returns; the server rejected it with HTTP 400.",
+    "The supervisor interpreted that telemetry rejection as a protocol failure, stopped only its owned child, and mislabeled the finished event app_server_protocol; the rejected head blocked terminal settlement forever.",
+    "Claude CLI 2.1.287 completed an isolated no-tools, no-session-persistence print probe with compatible init/model/capabilities and success result; no stream drift was observed."
+  ],
+  "changes": [
+    "Accept model-only status reports while preserving starting state; continue rejecting empty status and malformed fields; fixed field-level 400 reasons in server logs.",
+    "Persist three-attempt rejection limits; after proven local exit archive the bounded pending outbox and use a fresh minimal finished/failed reporter_unavailable event under the original claim. Preserve disputed usage as an explicit settlement gap. Bound permanent rejection of the fallback too.",
+    "Project stalled verification after the 60 second runtime plus 60 second settlement grace without changing run ownership or releasing holds. Explain failures and keep the owner retry action usable; the server refuses to replace unconfirmed work.",
+    "Preserve displayed computer-card order through readiness changes to keep retry controls stationary; reset this order on identity change."
+  ],
+  "proof": {
+    "server_before": "Same exact daemon DTO four-event test failed at seq1: HTTP400 status report requires status when the original predicate was restored.",
+    "server_after": "Exact sequence, replay, model evidence, failed terminal, reservation settlement, error projection and fresh owner retry passed through real authentication/handler/Postgres/RLS fixtures.",
+    "daemon_before": "Same new recovery regression fails with original flushReports: unbounded rejection retries.",
+    "daemon_after": "Three attempts, durable original evidence, no terminal without exit proof, identical terminal replay after a 503, and bounded fallback rejection pass.",
+    "browser_before": "New rendered stability guard found a 345.890625px button displacement when attention-based sorting changed after retry.",
+    "browser_after": "14 targeted existing/new browser cases pass; owned browser processes after=0."
+  },
+  "passed": [
+    "internal/agentpairing: TestVerificationTelemetryPrestartBatchAndRetry, TestStalledVerificationPreservesOwnership and all five TestVerifyAgain cases (5.728s).",
+    "internal/agentd: TestTelemetry*, TestClaudeVerificationSDKEnforcesNoTools, TestRemoteTelemetryErrorClassification, TestCodexModelUsageThroughSupervisorAndTelemetryHTTP and TestOutagePreservesProcessAndPersistsExactSettlement (5.927s).",
+    "internal/agentruns: telemetry/replay/fencing selection (5.151s).",
+    "Full internal/reportercontract package including OpenAPI parsing, response pins and backward-compatibility checks (2.119s).",
+    "30 computer-accounts Vitest tests and 53 agent-pairing Node tests.",
+    "14 AEON-685/AEON-716 cases in accounts-computers.spec.ts through the guarded runner with one worker; includes 390/1024/1440 light/dark and control bounding-box checks.",
+    "Web vue-tsc typecheck and ESLint on changed web sources.",
+    "33 scripts/audit tests; no new Go/web source files require new slice assignments.",
+    "Test-tier manifest validation: four new Go tests, two Vitest cases and one browser case classified ESSENTIAL.",
+    "git diff --check."
+  ],
+  "limitations": [
+    "Full just test, full web suite, hosted/Linux CI and live verification were not run. The prescribed remote runner pushes a temporary ref, so the user no-push instruction limits this handoff to targeted local checks. Lead owns consolidated review and release.",
+    "Stalled is diagnostic only. Retry remains server-fenced until the previous process and reservations have settled; no timeout-based replacement authority was added.",
+    "Dead-lettered usage remains unconfirmed; a terminal failure does not claim discarded usage was applied.",
+    "OPS: the Homebrew formula generator defines no service. The repo paired LaunchAgent renderer already includes StandardOutPath/StandardErrorPath; identify and upgrade the owning legacy/brew service separately. No live plist or daemon checkpoint was read or changed.",
+    "UI reuses existing account rows, status labels and retry controls; needs Opus design (worker-common). No new layout direction was invented."
+  ],
+  "safety": "Only assigned worktree changed. No new secrets; no real daemon state or person-only project access; no model review CLI, force stop of foreign processes, ticket status change, push or deployment. The sole Claude CLI call beyond help/version was the brief-authorized harmless print probe. Owned fixture databases were dropped after checks.",
+  "source_sha256": {
+    "api/openapi.yaml": "97bc93a51ed85c1f21b2e179f32aeaf03a60ce024f7f9fa0fb3101a9646851e8",
+    "internal/agentd/lifecycle.go": "8e4838c26f5f6cda26e329c082067e1025aef98cfdc8af014e084b1cc81baf32",
+    "internal/agentd/supervisor.go": "653e97f09285adff610254b1c7173371b1a5e2345d9dbf4b0189318411d6882c",
+    "internal/agentd/telemetry_lifecycle_test.go": "714adb6ce8e4045edda4a6ae66e887f812b917a246d9a7e5a6ec2c8076c6050a",
+    "internal/agentd/verification_test.go": "725fc54bd445845694a5f55abaf676d2e7acf6a1533540aac58eb9cfd2fa5aea",
+    "internal/agentpairing/provision.go": "c464c41096f1507fd03abb43eaa7cbc991a1b43fb7f585509b39d7bfbaffb96d",
+    "internal/agentpairing/types.go": "cff31407d458401a89e48c03ff13733bf380734021ad39dd9f633b7fabc7a8f8",
+    "internal/agentpairing/verification_retry_test.go": "10eaf472a43f988b209171350348f7529a17a851c9d1f483e1012167df718a99",
+    "internal/agentruns/telemetry.go": "c1a514a4d90deeb5480f64c731020d515f5d46a52052c6d8b90e8297c6ad719c",
+    "scripts/ci/go-test-tiers.json": "19bf2ac7a7e048d1ba2751de69db35d77a62d666852c3de0445b7d858d7a7d65",
+    "scripts/ci/web-test-tiers.json": "d94879582b6ffe8b9c4da07517ca4d91c373c3d0dc0cf9b35f2d1cfef988e12f",
+    "web/src/components/agents/AccountsComputers.vue": "05c112dcacdb81b2758db753ea380f641d5236ba383cb84e54dbf3af8dcd5806",
+    "web/src/lib/agentPairing.ts": "c6326ae1d94131bfad10199e623c679af5373534fc2048ada05533e7a2fd438f",
+    "web/src/lib/computerAccounts.ts": "93929503e863913194b4f16cb7a1dc3cd730be6b6724f3caf87acf2778f8dbed",
+    "web/tests/accounts-computers.spec.ts": "1834f36807fa00db08e59c7fce1d637f3675c78af4b51e03a3b930df0771d91f",
+    "web/tests/computer-accounts.unit.test.ts": "c2c65ea36dd39a3eb1060101694f07cd05995998934e8ddbff95a515b1690426"
+  },
+  "source_sha256_for": "1661b47f02fd9bea55ae1b64fdcab9b83577da91 (original implementation; fix-round-2 hashes below)",
+  "fix_round_2": {
+    "base_commit": "1661b47f02fd9bea55ae1b64fdcab9b83577da91",
+    "review": "review-aeon-716-opus.out plus full cross-family-review-gate-claude-woolly-harbor.md; the brief reference review-review-aeon-716-opus.out.out does not exist",
+    "findings": {
+      "M1": "Removed premature verification return; failed/stalled explanations remain in the existing label branch. Offline, draining, setup, sign-in and harness repair states/commands take precedence, including stalled enrollment labels.",
+      "M2": "Accept recognized error-only status reports and preserve current state. Updated quoted OpenAPI descriptions. Exact event_stream_bound DTO is accepted, replayed once and preserved through terminal settlement; empty/unknown reports remain invalid with exact failure reasons.",
+      "M3": "Prior-generation no-process records recover on their first permanent protocol rejection in the same flush, before probes rotate account authority. Original fencing headers, fresh terminal sequence, dead-letter evidence and unknown usage are retained. Permanent fallback rejection stays bounded through another generation change; no exit proof means no recovery.",
+      "L1": "Log validated run UUID, recognized kind, nonnegative sequence and fixed reason for 400s and all three permanent protocol 409s. Tests reject model/key/kind disclosure and prove replay, monotonicity and starting-state conflict reasons without deleting fixtures.",
+      "L2": "Claude verification SDK confinement test runs both absent and interrupt_receipt_v1 capability variants without changing production bridge behavior.",
+      "L3": "Stalled setup progress follows offline, login_required, service_conflict and setup_failed recovery states.",
+      "Info": "SettlementGap deliberately remains visible in settlement-pending status; local exit and failed terminal acceptance do not prove disputed usage was settled. No accounting evidence was pruned."
+    },
+    "regression_before": [
+      "New computer readiness regressions failed on the unchanged 1661b47f sources: attention instead of offline; Verification failed instead of Signed out.",
+      "New setup-progress regression failed on 1661b47f: Verification stalled instead of The computer is offline.",
+      "New real supervisor restart regression failed on 1661b47f: first old-generation flush posted once and left two reports pending, instead of recovering immediately.",
+      "New exact error-only DTO handler regression failed on 1661b47f: HTTP400 status report requires status instead of HTTP200.",
+      "New protocol diagnostics regression failed on 1661b47f: missing run id/fixed conflict reason."
+    ],
+    "passed": [
+      "Targeted internal/agentd telemetry, authority/outage, owned-child, dead-letter and exact settlement checks (4.272s); final telemetry and both Claude no-tools capability variants after retry-bound coverage update (4.472s).",
+      "Targeted internal/agentpairing new status/log cases, exact four-event batch/recovery, stalled ownership and all VerifyAgain checks (6.750s); final status/log/batch checks after bounded diagnostic fields and exact negative-reason assertions (4.705s).",
+      "Four internal/agentruns telemetry/replay/budget/fencing/overflow/concurrency tests (4.497s).",
+      "Full internal/reportercontract package, including OpenAPI syntax, response pins and compatibility (2.264s).",
+      "32 computer-accounts Vitest cases; 54 agent-pairing Node cases, including the new precedence regressions.",
+      "Two AEON-716 browser cases in accounts-computers.spec.ts with isolated headless Chromium and one worker (3.7s). Existing retry stability guard passes; new offline/sign-in/repair-control regression passes. Owned browser processes after=0, remaining=0.",
+      "Web vue-tsc typecheck and ESLint on both changed library sources.",
+      "34 test-tier checks, 22 web-shard checks and 33 ownership audit tests. Three new Go cases and four new web cases registered ESSENTIAL; existing spec remains in the web shard source manifest.",
+      "git diff --check."
+    ],
+    "limitations": [
+      "User expressly forbids push and deploy. remote-test.sh uploads a temporary Git ref, so it was not invoked. No origin push, PR, merge, deployment, live verification, hosted/Linux Chromium run or full suite was performed. Validation uses light targeted local package/spec runs only.",
+      "Lead owns the consolidated review and release. Required rollout order remains server first, confirm outstanding run settlement through the still-running daemon, then update agentd; no rollout performed.",
+      "Already-fenced old claims cannot regain authority through recovery; 403/authentication/generation/enrollment failures remain distinct from permanent telemetry rejection, preserving evidence and ownership.",
+      "No layout design was invented or replaced. No finding conflicts with an approved ticket decision."
+    ],
+    "safety": "Read mandatory skill and both normative references, worker-common and repo instructions. Verified selected ppm account/INSPR principal and AEON-716; coordinator attribution is recorded per worker-common. Only assigned worktree changed. No credentials read/displayed, live daemon state access, model CLI review, ticket status change, foreign process stop, secret creation, version migration, push or deploy. Tests use private local fixtures; owned temporary database and audit bytecode cache cleaned.",
+    "source_sha256": {
+      "api/openapi.yaml": "31d27cc440cee556b1be6c12b73ae487c4908e762e80fc940453dae600223670",
+      "internal/agentd/lifecycle.go": "7de2b26a3cc264fcd1478702fc52770f49cd182371f61664b06544fe47b6605e",
+      "internal/agentd/telemetry_lifecycle_test.go": "d630859d26fc28f042f70d803d9d3d4ed7063db11576c589081a4ae9b8426fb5",
+      "internal/agentd/verification_test.go": "edeb6f96011686f2f7780423e52e28306ec3b177100364845b7e9bd6ad4f7608",
+      "internal/agentpairing/verification_retry_test.go": "9a27781f9de32e107378dcaf0f178b336cbf5d4d24e28c2084367b128d0ef056",
+      "internal/agentruns/telemetry.go": "e4fbb0f14e5ef71a278328a17cda9bb427720e20929c0f07b53dc1dc98661fee",
+      "scripts/ci/go-test-tiers.json": "885f99dabe67f4700508b8ce117dfbdf754314927c0590a4fc42d4b88c3ac49b",
+      "scripts/ci/web-test-tiers.json": "9cb71d7482f1ce0741804baf7a8e223cc370e63b85cfbb495aaa41b344d3adb5",
+      "web/src/lib/agentPairing.ts": "7495c3d1ff0d0f2073d4d453fdb35d2fbd69cbac4796136e5f67772e6e0bcfbb",
+      "web/src/lib/computerAccounts.ts": "79cac1e376972cb8b84a906d09a2d7903a3c375ac60235a349bca7d3bbbb29fc",
+      "web/tests/accounts-computers.spec.ts": "80705bc137087af3c679c5c9ecc4d4f24c3aeb1c7f9938b59f93cfc4a74655ad",
+      "web/tests/agent-pairing.test.ts": "065ae487bf282a3e577017f8292eec5b23a5ac19eb94ee392275391c910bf1a4",
+      "web/tests/computer-accounts.unit.test.ts": "25fe06b1305bd7c40356b2cf6eec41589e87ef71d2c1aefb8c4f5721828654aa"
+    }
+  },
+  "merge_main_round": {
+    "reviewed_head": "d82807d7d",
+    "main_commit": "f2bdf9f56e5a67d1e4a8110ced2475e190af8ee3",
+    "merge_commit": "06dc429d3ed68c197a6ee886b9045d603fda5676",
+    "scope": "Normal local merge of origin/main; no feature changes.",
+    "preservation": {
+      "main_only_changed_files": 200,
+      "branch_only_changed_files": 15,
+      "method": "Compared every non-shared changed file against its source commit by exact git blob identity. Shared OpenAPI differs from main only by the reviewed AEON-716 telemetry contract and verification_stalled field.",
+      "manifests": "Preserved all main entries, metadata and timing weights, plus seven Go and seven web AEON-716 additions. Retained main intentional removals of obsolete cases. Sorted by canonical test identity, including occurrence; no duplicates.",
+      "go_test_entries": 3815,
+      "web_test_entries": 7227,
+      "branch_added_migrations": 0,
+      "migration_collisions": 0
+    },
+    "passed": [
+      "node --test scripts/check-migrations.test.mjs: 33 passed",
+      "node scripts/check-migrations.mjs --base-ref v261005070923.0.0: exit 0, 265 unique migration numbers",
+      "go test ./internal/reportercontract -count=1: full contract suite passed",
+      "internal/agentd: five targeted telemetry lifecycle regressions passed",
+      "internal/agentpairing: nine targeted verification/retry tests passed with isolated local Postgres fixtures",
+      "internal/agentruns: four targeted telemetry/replay/transaction regressions passed with isolated local Postgres fixtures",
+      "web/tests/agent-pairing.test.ts: 54 passed",
+      "web/tests/computer-accounts.unit.test.ts: 32 passed",
+      "web/tests/accounts-computers.spec.ts --grep AEON-716 --workers=1: two passed including stability guards; owned browser processes returned to zero"
+    ],
+    "limitations": [
+      "remote-test.sh was not invoked because it pushes a temporary remote ref; the direct user instruction prohibits pushes. Full remote package suites and hosted CI remain for the coordinator.",
+      "git diff --cached --check reported an existing main-only blank line at EOF in web/tests/aeon-632b-clip-fixtures.ts; preserved main bytes exactly.",
+      "Required static prefilter exit 0 was not achieved: 35 checks passed, web-shard-tests timed out. No timeout increases, skipped checks, hook bypasses or unrelated test changes made."
+    ],
+    "safety": "No pushes (including test refs), deployments, PR merge, feature changes, credential reads, ticket status changes, other-model CLI calls or foreign worktree changes. Selected ppm agent and GitHub account verified; coordinator worker marker confirmed by worker-common.",
+    "static_prefilter": {
+      "command": "GOMAXPROCS=2 GOFLAGS=-p=2 node scripts/ci-static.mjs --merge-main --jobs 1",
+      "exit_code": 1,
+      "seconds": 265.9,
+      "passed_checks": 35,
+      "skipped_checks": 0,
+      "failed_check": "web-shard-tests",
+      "failure": "npm run ci:web:shard:test exceeded the existing 120 second limit during scripts/aeon-681-ci.test.mjs native inventory regression; nested tests cancelled on timeout.",
+      "passed_details": [
+        "Go vet and native tier inventory",
+        "7/4 shard coverage",
+        "release metadata and offline release regressions",
+        "audit tests and ownership coverage",
+        "web typecheck and lint",
+        "migration policy, splitter and probes",
+        "OpenAPI property names",
+        "web native tier and strict spec inventories",
+        "browser runner safety"
+      ],
+      "checked_source": "06dc429d3 (evidence-only uncommitted report changes were excluded)"
+    }
+  },
+  "merge_main_round_2": {
+    "reviewed_head": "adb4d57ad7e093a2a9c280acad38ca2835863065",
+    "main_commit": "e1571d6a6f3567a8349b349396f6eb2944d7ea8f",
+    "merge_commit": "d439c9668b2d5787a099042f6342d41387a90b9c",
+    "scope": "Normal local merge of newest origin/main; no feature changes.",
+    "preservation": {
+      "main_files": 3,
+      "branch_files": 18,
+      "shared_files": 0,
+      "method": "Every incoming file matches origin/main by exact git blob identity; all 18 reviewed branch files match reviewed HEAD.",
+      "migration_numbers": 265,
+      "migration_collisions": 0,
+      "manifests": "No incoming manifest changes; both branch manifests preserved byte-for-byte."
+    },
+    "passed": [
+      "GOMAXPROCS=2 go test -p 2 ./internal/agentaccounts -run ^TestResidencyEvidence -count=1 -timeout=90s: passed (13.836s), isolated dbtest databases and restricted app roles; fixtures cleaned by TestMain.",
+      "Static prefilter first full run: 34 passed, 0 skipped; includes migration policy tests/check, OpenAPI property check, Go vet, test tiers, ownership audit, web typecheck and lint.",
+      "Second static run: 35 checks passed, 0 skipped, including browser safety. Migration tests and policy check passed on both runs against published v261005070923.0.0; OpenAPI property checks also passed although this merge does not change the contract."
+    ],
+    "limitations": [
+      "remote-test.sh not invoked: it pushes a temporary Git ref, contrary to the direct user no-push instruction. No hosted CI or full remote suites run.",
+      "Required static prefilter exit 0 not achieved after two complete runs: unchanged web-shard-tests times out at 120 seconds, also recorded in the prior merge-main round. No skipped-check override, timeout increase, hook bypass or unrelated source/test edits; coordinator must resolve this gate before release."
+    ],
+    "safety": "Verified active GitHub markus-barta account and ppm workstation-agents/INSPR principal; coordinator marker recorded per worker-common. No feature changes, migration renumbering, pushes, deployment, PR merge, ticket status changes, credentials access, other-model calls or edits to other worker worktrees.",
+    "static_prefilter": {
+      "command": "GOMAXPROCS=2 GOFLAGS=-p=2 node scripts/ci-static.mjs --merge-main --jobs 1 --json",
+      "attempts": 2,
+      "first_run": {
+        "exit_code": 1,
+        "seconds": 386.75,
+        "passed_checks": 34,
+        "skipped_checks": 0,
+        "failures": [
+          "web-shard-tests: 120 second timeout",
+          "web-browser-safety: two process-group start-time fixture failures"
+        ]
+      },
+      "retry": {
+        "exit_code": 1,
+        "seconds": 440.09,
+        "passed_checks": 35,
+        "skipped_checks": 0,
+        "results": [
+          {
+            "id": "volatile-identity",
+            "status": "passed",
+            "seconds": 0.4
+          },
+          {
+            "id": "go-vet",
+            "status": "passed",
+            "seconds": 15.74
+          },
+          {
+            "id": "rules-bootstrap",
+            "status": "passed",
+            "seconds": 0.93
+          },
+          {
+            "id": "test-tiers",
+            "status": "passed",
+            "seconds": 2.14
+          },
+          {
+            "id": "go-tiers",
+            "status": "passed",
+            "seconds": 91.8
+          },
+          {
+            "id": "go-shards-7",
+            "status": "passed",
+            "seconds": 4.09
+          },
+          {
+            "id": "go-shards-4",
+            "status": "passed",
+            "seconds": 3.31
+          },
+          {
+            "id": "release-metadata",
+            "status": "passed",
+            "seconds": 0.1
+          },
+          {
+            "id": "release-rehearsal-tests",
+            "status": "passed",
+            "seconds": 3.46
+          },
+          {
+            "id": "own-release-notes-tests",
+            "status": "passed",
+            "seconds": 0.22
+          },
+          {
+            "id": "own-release-notes",
+            "status": "passed",
+            "seconds": 0.09
+          },
+          {
+            "id": "release-tool-tests",
+            "status": "passed",
+            "seconds": 0.42
+          },
+          {
+            "id": "live-policy-tests",
+            "status": "passed",
+            "seconds": 0.34
+          },
+          {
+            "id": "cross-family-tests",
+            "status": "passed",
+            "seconds": 4.77
+          },
+          {
+            "id": "release-pin-tests",
+            "status": "passed",
+            "seconds": 0.46
+          },
+          {
+            "id": "audit-tests",
+            "status": "passed",
+            "seconds": 2.91
+          },
+          {
+            "id": "audit-coverage",
+            "status": "passed",
+            "seconds": 1.9
+          },
+          {
+            "id": "ci-plan-tests",
+            "status": "passed",
+            "seconds": 8.5
+          },
+          {
+            "id": "full-ui-qa-tests",
+            "status": "passed",
+            "seconds": 0.3
+          },
+          {
+            "id": "releaseworkflow-tests",
+            "status": "passed",
+            "seconds": 7.73
+          },
+          {
+            "id": "runner-route-tests",
+            "status": "passed",
+            "seconds": 0.26
+          },
+          {
+            "id": "runner-guard-tests",
+            "status": "passed",
+            "seconds": 9.59
+          },
+          {
+            "id": "runner-guard",
+            "status": "passed",
+            "seconds": 0.46
+          },
+          {
+            "id": "docker-web-inputs",
+            "status": "passed",
+            "seconds": 0.41
+          },
+          {
+            "id": "web-typecheck",
+            "status": "passed",
+            "seconds": 21.62
+          },
+          {
+            "id": "web-lint",
+            "status": "passed",
+            "seconds": 8.81
+          },
+          {
+            "id": "migration-tests",
+            "status": "passed",
+            "seconds": 14.4
+          },
+          {
+            "id": "migrations",
+            "status": "passed",
+            "seconds": 3.78
+          },
+          {
+            "id": "migration-splitter",
+            "status": "passed",
+            "seconds": 1.8
+          },
+          {
+            "id": "migration-probe-tests",
+            "status": "passed",
+            "seconds": 4.48
+          },
+          {
+            "id": "web-shard-spec-tests",
+            "status": "passed",
+            "seconds": 1.14
+          },
+          {
+            "id": "web-shard-tests",
+            "status": "timeout",
+            "seconds": 120.01
+          },
+          {
+            "id": "openapi-properties",
+            "status": "passed",
+            "seconds": 1.53
+          },
+          {
+            "id": "web-tiers",
+            "status": "passed",
+            "seconds": 71.7
+          },
+          {
+            "id": "web-spec-inventory",
+            "status": "passed",
+            "seconds": 0.1
+          },
+          {
+            "id": "web-browser-safety",
+            "status": "passed",
+            "seconds": 24.85
+          }
+        ],
+        "failure": "web-shard-tests reached its existing 120 second timeout again in aeon-681-ci.test.mjs; browser safety passed on retry."
+      },
+      "checked_source": "d439c9668; uncommitted evidence report excluded"
+    }
+  },
+  "merge_main_round_3": {
+    "reviewed_head": "82b370ab4",
+    "main_commit": "d0b149c305b95580a41a4fabeade44eb26f6d7f2",
+    "merge_commit": "a8f06b86c0a269f96410719331ffe2362f685689",
+    "scope": "Normal merge of newest fetched origin/main on work/aeon-716-verify; no feature changes, no origin push, no PR merge or deployment.",
+    "preservation": [
+      "All 26 incoming files inspected; merge had no conflicts.",
+      "All non-overlapping files equal their owning parent byte-for-byte.",
+      "OpenAPI retains every added line from both parents; Go tier registrations equal the exact duplicate-free union.",
+      "No migration number collisions."
+    ],
+    "passed": [
+      "Full internal/reportercontract package (2.395s).",
+      "33 scripts/check-migrations.test.mjs cases; migration guard against published v261005070923.0.0: 266 unique numbers.",
+      "Targeted internal/agentpairing verification/retry/stalled/null-trace tests (11.686s).",
+      "Targeted internal/agentd telemetry/recovery/SDK confinement tests (7.871s).",
+      "Targeted internal/outcomes escalation and moved-escalation regressions (9.275s).",
+      "Targeted internal/modelregistry escalation regressions (3.174s).",
+      "Both internal/escalation detector tests (0.205s).",
+      "git diff --check."
+    ],
+    "failed": [
+      "Targeted internal/agentruns selection: TestEscalatedClaimRequiresFreshMeasuredRoom rejects its fresh fixture with HTTP 409 at escalation_test.go:46. Test, claim handler and account code equal origin/main byte-for-byte. Postgres clock measured at least 23.77\u201324.43 ms ahead of host across three probes; EscalationRoomIDs explicitly rejects future readings. No clock or code changes made."
+    ],
+    "limitations": [
+      "remote-test.sh returned exit 3: remote Colima not running; its probe script is also missing. Remote heavy package suites remain unproven; no full local suite substituted.",
+      "No conflicts touched web specs; no browser suite run. Hosted CI must prove the heavy suites after coordinator push.",
+      "Pre-existing untracked scripts/audit/__pycache__/ preserved.",
+      "The approved remote-test runner creates its temporary test ref before checking Colima, and its exit-3 Colima branch skips cleanup. Temporary remote ref refs/runs/a8f06b86c0 and its test worktree may remain. Direct SSH cleanup is outside worker-common authorization; coordinator must handle runner residue.",
+      "Required complete static exit-0 gate remains open. Coordinator must rerun through the shared wrapper; this worker does not grant merge/release approval."
+    ],
+    "safety": "Selected GitHub account markus-barta verified; coordinator attribution supplied in worker-common. Only assigned branch/worktree changed. No secrets read or displayed, model CLI reviews, production access, origin push, deployment or ticket status changes.",
+    "static_prefilter": {
+      "status": "incomplete",
+      "command": "ci-static-locked.sh --merge-main --jobs 1",
+      "exit_code": 143,
+      "reason": "Mandatory shared lock was not acquired after approximately 30 minutes; own invocation process tree remained bash -> sleep across multiple lock handoffs. Stopped only that queued invocation. No static check result was emitted; no lock bypass, --allow-skips or green claim.",
+      "checked_source": "a8f06b86c; uncommitted evidence report excluded"
+    }
+  },
+  "merge_main_round_4": {
+    "checked_source": "e37e1a8dca28779083a49f01d4a2b798be5450ca",
+    "main_commit": "601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
+    "merge_result": "Already up to date: newest origin/main is already included in existing normal merge e37e1a8dc. No amend or redundant merge commit.",
+    "scope": "Merge-main verification only; no feature changes.",
+    "preservation": [
+      "All 18 incoming files checked against both parents by exact Git blob identity.",
+      "All non-manifest incoming files match main; reviewed branch source and tests match pre-merge HEAD byte-for-byte.",
+      "Go and web tier manifests equal the exact semantic union of both parents, without duplicate entries or changed policy metadata.",
+      "All 266 migration numbers are unique; no migration changes or renumbering.",
+      "git diff --check passed."
+    ],
+    "remote_go": {
+      "command": "remote-test.sh <assigned-worktree> ./internal/agentd/... ./internal/agentpairing/... ./internal/agentruns/... ./internal/reportercontract/...",
+      "exit_code": 1,
+      "passed": [
+        "internal/reportercontract (2.402s)"
+      ],
+      "blocked": [
+        "internal/agentd",
+        "internal/agentpairing",
+        "internal/agentruns"
+      ],
+      "cause": "Remote Postgres bootstrap cannot create vector extension: extension vector is not available (SQLSTATE 0A000). Database-backed suites remain unproven; shared host not modified."
+    },
+    "safety": "ppm workstation-agents / INSPR and active GitHub markus-barta verified; coordinator marker recorded per worker-common. Only assigned branch/worktree edited. No origin push, PR merge, deployment, production access, secret reads, ticket status changes, model CLI reviews, foreign worktree edits or hook bypass. Approved remote test/static runners use temporary build refs. Pre-existing untracked scripts/audit/__pycache__/ preserved.",
+    "static_prefilter": {
+      "command": "ci-static-locked.sh (remote-first node scripts/ci-static.mjs --merge-main)",
+      "status": "incomplete",
+      "exit_code": 137,
+      "reason": "Queued approximately 20 minutes across repeated shared-lock handoffs. Process tree confirmed own wrapper had only a sleep child; no checks started. Stopped only own queued wrapper and sleep child without running its lock-removing exit trap; another worker shared lock was preserved. No local static fallback, lock bypass, skipped-check override or green claim."
+    },
+    "migration_checks": {
+      "location": "local, lightweight targeted Node checks after remote/static attempts; remote Node execution remains unproven",
+      "tests": "node --test scripts/check-migrations.test.mjs: 33 passed, 0 failed, 0 skipped",
+      "guard": "node scripts/check-migrations.mjs --base-ref v261005070923.0.0: passed",
+      "invocation_note": "Bare check-migrations.mjs requires --base-ref and returned usage exit 1; rerun with latest reachable published tag."
+    },
+    "open_gates": [
+      "Full remote database-backed Go suites require vector-enabled Postgres on mbp2606.",
+      "Complete ci-static exit 0 including incoming test-tier/web-shard checks remains required; shared queue produced no result.",
+      "No conflict-touched browser specs; no browser suite run in this round."
+    ]
+  },
+  "merge_main_round_5": {
+    "checked_source": "783f50ec42279e2e43af23520d6e92ca0f7857e9",
+    "main_commit": "ce67524cf904525ead694170ba6c4d841a40687f",
+    "merge_result": "git merge --no-ff origin/main -m \"AEON-716: merge main\" returned Already up to date; newest fetched main is already the second parent of normal merge 25010c9fb. No redundant merge or amend.",
+    "scope": "Merge-main verification only; no feature changes.",
+    "preservation": [
+      "Inspected all seven incoming files in existing merge 25010c9fb; the five non-manifest files match main by exact Git blob identity.",
+      "All main Go/web test registrations and policy metadata preserved; branch additions retained. Four stale Settings names are intentionally replaced by current main registrations. Occurrence-aware identities are unique.",
+      "All 266 migration numbers are unique; no migration changes or renumbering.",
+      "git diff --check passed."
+    ],
+    "remote_go": {
+      "command": "remote-test.sh <assigned-worktree> ./internal/agentd/... ./internal/agentpairing/... ./internal/agentruns/... ./internal/reportercontract/...",
+      "exit_code": 0,
+      "passed": {
+        "internal/agentd": "149.931s",
+        "internal/agentpairing": "196.960s",
+        "internal/agentruns": "126.456s",
+        "internal/reportercontract": "2.089s"
+      },
+      "retries": "Two exit-3 remote load refusals; waited and retried, without local suite fallback."
+    },
+    "static_prefilter": {
+      "command": "ci-static-locked.sh (remote-first node scripts/ci-static.mjs --merge-main)",
+      "status": "incomplete",
+      "exit_code": 137,
+      "reason": "Queued 15m16s without acquiring shared lane; no static checks started and no output was emitted. Verified own worktree wrapper had only a sleep child; stopped only that queued wrapper and child without executing its shared-lock-removing EXIT trap. Shared locks preserved; no local fallback, gate bypass or skipped-check override."
+    },
+    "safety": "Verified ppm workstation-agents / INSPR and active GitHub markus-barta; coordinator attribution recorded per worker-common. Only assigned branch/worktree edited. No origin push, PR merge, deploy, production access, credentials read, ticket status changes, model review CLI, hook bypass or other worktree edits. Approved runners may use temporary build refs. Pre-existing untracked scripts/audit/__pycache__/ preserved.",
+    "open_gates": [
+      "Complete remote ci-static exit 0 remains required before coordinator approval/release.",
+      "Migration policy tests/check and incoming web-shard/test-tier checks are not proven in this round: the required remote static runner never started. No migration files were changed and all 266 numbers are unique."
+    ]
+  },
+  "fix_round_8": {
+    "baseline_commit": "783f50ec42279e2e43af23520d6e92ca0f7857e9",
+    "review": "Brief review-grok-716.out.out was absent; read the complete matching review at qa/grok-716.out (two Medium findings).",
+    "main_commit": "4a705372c",
+    "merge_commit": "533a6ba7e805900693115d886edd73b535800f7c",
+    "scope": "Merged newest fetched origin/main cleanly, then fixed both settlement-recovery findings on the assigned work/aeon-716-verify branch. No UI, server authorization, verification reservation or version changes.",
+    "changes": [
+      "Retain the original ReportRejections count through minimal terminal recovery. Count the explicit run-is-not-live 409 as a protocol refusal. A rejected terminal is durably parked after its first permanent refusal; pending reports and dead letters remain intact.",
+      "Separate fixed-text authority refusals from protocol failures. Authority refusal never stops a live owned process; after proven exit, count and durably park unauthorized/forbidden/missing/revoked or generation-conflicted settlement instead of retrying forever.",
+      "Flush settlement on normal and probe-only polls, propagate settlement failures, and fence account-generation probes for every old-generation unresolved outbox or settlement gap, including exited runs. Unrelated account probes continue.",
+      "Add three ESSENTIAL Go regressions covering 409/403 terminal refusal, 408/429/503 retry preservation, durable restarts, authority stops, and both dispatch/probe-only ordering with normal and dependency-blocked accounts. Tighten the existing terminal limit from six total attempts to four (old-generation limit stays two), retaining the total rejection history. No assertions skipped or relaxed."
+    ],
+    "regression_proof": {
+      "method": "Go overlay replaces the four changed production files with their exact 783f50ec contents; no internal/agentd changes were introduced by main since that baseline. The API classification test uses its baseline source with the new not_live=true assertion, avoiding a compile dependency on the newly added authority sentinel. The three new regression functions run unchanged.",
+      "exit_code": 1,
+      "expected_failures": [
+        "TestRemoteTelemetryErrorClassification/not_live rejects the new protocol classification.",
+        "TestTelemetryTerminalRecoveryCountsPermanentRefusals: all six cases expose the cleared rejection count.",
+        "TestTelemetryExitedAuthorityRefusalIsBounded: all five authority cases expose repeated posts.",
+        "TestTelemetryPollingPreservesOldSettlementAuthority: both normal-poll cases rotate the account generation after failure; both probe-only cases skip settlement and rotate it."
+      ],
+      "local_log": "tmp/aeon-716-fix8/baseline-failures.log"
+    },
+    "passed": [
+      "GOMAXPROCS=2 go test -p 2 ./internal/agentd -run 'TestTelemetry|TestRemoteTelemetry|TestRemoteLostClaim|Test.*(Unlaunched|Claim|Poll|Outage|ProbeOnly|ProbeOnce)' -count=1: passed (6.771s).",
+      "GOMAXPROCS=2 go test -p 2 ./internal/reportercontract/ -count=1: full package passed (2.322s), including merged OpenAPI.",
+      "GOMAXPROCS=2 go test -p 2 ./cmd/aeon-agentd -run ^TestPairedSyncTombstoneProbesAndFailureDiagnostics$ -count=1: passed (0.331s).",
+      "Vitest computer-accounts.unit.test.ts, one worker: 32 passed.",
+      "Node agent-pairing.test.ts: 54 passed.",
+      "Guarded Playwright accounts-computers.spec.ts, AEON-685|AEON-716, one worker: 15 passed (19.5s), including phone/tablet/desktop light/dark stability and verification fences; owned processes after cleanup: 0.",
+      "Test-tier classifier registered exactly three new internal/agentd cases as ESSENTIAL; no new source files or specs require slice/shard registration.",
+      "git diff --check passed; final diff and exact staged file set reviewed."
+    ],
+    "holding": [
+      "Server telemetry agent-key, claim-generation, run.claim and current-account-owner checks are unchanged.",
+      "Stalled verification, verification_active retry rejection and reservation ownership are unchanged.",
+      "Server log allowlists and redaction are unchanged; protocol and authority refusals returned to the daemon contain only fixed text and HTTP status.",
+      "Rejected accounting remains pending for reconciliation; no process exit, server settlement, new launch or operator approval is inferred."
+    ],
+    "limitations": [
+      "User explicitly prohibited pushes. Both prescribed Go/static remote runners push temporary refs, so they were not invoked. Full affected remote Go packages, just test and complete remote ci-static remain unverified; no full local suite substituted.",
+      "Remote browser lane is disabled in scripts/playwright-remote.mjs pending OPS-247. The permitted single-spec local run used macOS headless Chromium, not CI-equivalent Linux Chromium; Linux browser verification remains open.",
+      "No coordinator review gate, origin push, PR merge, deployment, production access, ticket status change or model CLI review was performed.",
+      "Pre-existing untracked scripts/audit/__pycache__/ preserved."
+    ],
+    "safety": "ppm workstation-agents / INSPR and GitHub markus-barta verified. Coordinator worker attribution is explicitly supplied by worker-common. Edits stayed in the assigned branch/worktree; no credential reads, hook bypass or destructive git. Latest direct no-push/no-deploy instruction takes precedence over the brief push step and runner ref pushes.",
+    "source_sha256": {
+      "internal/agentd/api.go": "e9a6168de4d28ea572d2cb5f07dbd567b4a9194f5db34574d3b01bf3b1a4bdbe",
+      "internal/agentd/api_test.go": "256be0d6ea97cf450bff0036ea2f6bd132e71b434fd505b9caceaf5995d408a5",
+      "internal/agentd/launch.go": "e8e09009c4718ea32adaf7bf1f94969bc9d1d9f4227c19f334fa0cf758fb6b17",
+      "internal/agentd/lifecycle.go": "08f4e3e9fadd3d5e8a099af7a2b23249d54bd48dce6dee2fd2179b7f0f885cf9",
+      "internal/agentd/supervisor.go": "c34e7312f22e63b921f0a7ef0b8b760d68fb7cd74a46f860ff7a78a45ed4173a",
+      "internal/agentd/telemetry_lifecycle_test.go": "baa71f8985d16b15d29e56322ca6161e949cff220b648248c59cb1dea37f8091",
+      "scripts/ci/go-test-tiers.json": "389d6c79a96746160497d7afbfe210111d152465ae4e76fad3751cb5995bdcdf"
+    }
+  },
+  "merge_main_round_6": {
+    "reviewed_head": "c5141a0b2bb37394508d7eddeddec7a62114b0f9",
+    "main_commit": "fc5a1e5e77045cf6238ce2e6362567c53741a466",
+    "scope": "Normal merge of fetched newest origin/main on work/aeon-716-verify; no feature changes, PR merge, push or deployment.",
+    "preservation": [
+      "All 27 incoming files checked against both parents. Main-only and branch-only files match their owning parent byte-for-byte.",
+      "All added/replacement blocks from both parents retained in the four overlapping Go files.",
+      "OpenAPI sole conflict resolved by retaining every sentence from both telemetry descriptions. Every other added OpenAPI line from both parents retained.",
+      "Go tier manifest is the exact semantic union of both parents with no duplicate rows or policy metadata changes.",
+      "All 268 migration numbers unique; no migration changes or renumbering."
+    ],
+    "passed": [
+      "Full internal/reportercontract package locally, GOMAXPROCS=2 go test -p 2: 2.248s.",
+      "All 33 scripts/check-migrations.test.mjs tests locally.",
+      "node scripts/check-migrations.mjs --base-ref v261005070923.0.0: passed against latest published release.",
+      "node scripts/ci-static.mjs --list: static registry validates (not check execution).",
+      "git diff --check and git diff --cached --check.",
+      "node --test scripts/test-tiers/test-tiers.test.mjs: 173 passed, 0 failed, 0 skipped."
+    ],
+    "limitations": [
+      "Direct user no-push instruction overrides runner temporary-ref pushes: remote-test.sh and ci-static-locked.sh were inspected and not invoked. Required affected remote Go suites and complete ci-static exit-0 gate remain unverified. No heavy local suite substituted.",
+      "Conflicts touched no web spec; no browser suite run. Coordinator must prove hosted CI after its push.",
+      "Pre-existing untracked scripts/audit/__pycache__/ preserved."
+    ],
+    "safety": "Selected ppm instance, workstation-agents principal, INSPR tenant and GitHub markus-barta verified. Coordinator attribution recorded per worker-common. Only assigned worktree/branch edited; no secret reads, model CLI review, hook bypass, origin/test-ref push, deployment, production mutation or ticket status change."
+  }
+}
