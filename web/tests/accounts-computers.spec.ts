@@ -220,9 +220,10 @@ test('loading, a failed read with Try again, and an empty workspace each say so 
 })
 
 // Verify again leaves the head when the section unfolds. If the head wrapped only while it was
-// there, the toggle jumped half a row gap on unfold (the CI Linux fonts at 1024). Scanning the widths
-// above the phone layout makes that independent of the font the machine happens to have.
-test('the head stays one row, and the toggle stays put, whether or not Verify again is shown', async ({ page }) => {
+// there, the toggle jumped half a row gap on unfold (the CI Linux fonts at 1024). The head now wraps
+// by the container's width alone, in two fixed rows. Scanning the widths above the phone layout
+// makes that independent of the font the machine happens to have.
+test('the head keeps its height, and the toggle stays put, whether or not Verify again is shown', async ({ page }) => {
   // Tall enough that the section stays in view at every width, so nothing scrolls under the measurement.
   await page.setViewportSize({ width: 1100, height: 3000 })
   const { capacity } = await setup(page, { thresholds: { early_percent: 10, urgent_percent: 3 } })
@@ -247,6 +248,56 @@ test('the head stays one row, and the toggle stays put, whether or not Verify ag
     scanned++
   }
   expect(scanned).toBeGreaterThan(10)
+})
+
+// Away and an expired verification are the widest head: both pills beside the status, then Verify
+// again, Manage and the title. Between the phone layout and a wide one the controls stopped fitting
+// one row and Manage left the card (AEON-782 gate, 700 to 800 px). The head wraps by the container's
+// width alone, never by what is shown, so these controls keep their place through hover, focus and
+// unfolding (which removes Verify again), and nothing leaves the card at any width in between.
+test('Away with an expired verification keeps the head inside the card and its controls put at 640, 720 and 800', async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 3000 })
+  const { capacity } = await setup(page, { away: true, thresholds: { early_percent: 10, urgent_percent: 3 } })
+  expireClaude(capacity)
+  await open(page)
+  const card = section(page)
+  const manage = card.getByRole('link', { name: /Manage/ })
+  const back = card.getByRole('button', { name: 'Back now: end Away' })
+  const verify = card.locator('.fs-act').getByRole('button', { name: 'Verify again' })
+  const toggle = card.locator('.fs-tog')
+  const spill = () => card.evaluate(el => {
+    const edge = el.getBoundingClientRect().right
+    const out: string[] = []
+    for (const node of el.querySelectorAll('*')) {
+      const box = node.getBoundingClientRect()
+      if ((box.width >= 1 || box.height >= 1) && box.right - edge > 1) out.push(`${node.tagName.toLowerCase()}.${(node.getAttribute('class') || '').split(/\s+/)[0]} +${Math.round(box.right - edge)}px`)
+    }
+    return { out, over: document.documentElement.scrollWidth - document.documentElement.clientWidth }
+  })
+  for (let width = 1100; width >= 640; width -= 20) {
+    await page.setViewportSize({ width, height: 3000 })
+    await expect(verify).toBeVisible()
+    const found = await spill()
+    expect(found.out, `${width}px spills`).toEqual([])
+    expect(found.over, `${width}px page scrolls`).toBeLessThanOrEqual(1)
+  }
+  for (const width of [640, 720, 800]) {
+    await page.setViewportSize({ width, height: 3000 })
+    await expect(verify).toBeVisible()
+    expect((await spill()).out, `${width}px spills`).toEqual([])
+    await expectStableControls({
+      controls: { toggle, title: title(page), manage, back },
+      scrollAreas: { page: page.locator('html') },
+      interactions: [
+        { name: 'hover Back now', run: () => back.hover() },
+        { name: 'hover Verify again', run: () => verify.hover() },
+        { name: 'hover Manage', run: () => manage.hover() },
+        { name: 'focus Verify again', run: () => verify.focus() },
+        { name: 'unfold removes Verify again', run: async () => { await title(page).click(); await expect(verify).toHaveCount(0); await expect(card.getByRole('table')).toBeVisible() } },
+        { name: 'fold shows it again', run: async () => { await title(page).click(); await expect(verify).toBeVisible() } },
+      ],
+    })
+  }
 })
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {

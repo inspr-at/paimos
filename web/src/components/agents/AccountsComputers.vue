@@ -230,7 +230,7 @@ const grid = computed(() => accounts.value.map(a => ({
 <style scoped>
 .acc-section { container: acc / inline-size; border-radius: 20px; min-width: 0; }
 .acc-ico { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--surface-sunken); color: var(--ink-2); }
-/* The head: title, then the state; Verify again and Manage sit at the line end, so a part that appears moves nothing before it. One row above the phone layout: the state shortens with an ellipsis instead of wrapping, so Verify again leaving never changes the head's height. */
+/* The head: title, then the state; Verify again and Manage sit at the line end, so a part that appears moves nothing before it. Wide: one row, and the state shortens with an ellipsis instead of wrapping, so Verify again leaving never changes the head's height. Medium (below): two fixed rows, whatever is shown, so nothing jumps when Away or Verify again comes or goes. */
 .acc-section :deep(.fs-head) { flex-wrap: nowrap; gap: 6px 12px; }
 .fs-sum { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink-2); font-size: 13px; }
 .fs-sum .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -286,6 +286,16 @@ const grid = computed(() => accounts.value.map(a => ({
 .acc-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin: 0; font-size: 12.5px; color: var(--ink-3); }
 .acc-foot b { color: var(--ink-2); font-weight: 600; }
 @media (pointer: coarse) { .mx-head, .mx-cell { min-height: 44px; } }
+
+/* Medium: Away and Verify again beside the status no longer fit one row with the title and Manage (about 780 px of controls in the widest case, Away plus Verify again, before the status gets any room). The head then always has two rows, chosen by the container's width alone and never by what is shown: row 1 chevron, title, Manage at the line end; row 2 the status with Away after it, and Verify again at the line end, as in the wide head, so neither moves the other. The state still shortens with an ellipsis, so no part ever leaves the card. */
+@container acc (min-width: 641px) and (max-width: 63.75rem) {
+  .acc-section :deep(.fs-head) { flex-wrap: wrap; row-gap: 0; }
+  .acc-section :deep(.fs-head)::after { content: ''; order: 2; flex: 0 0 100%; height: 0; }
+  .fs-tools, .fs-act + .fs-tools { order: 1; margin-left: auto; }
+  .fs-sum { order: 3; flex: 0 1 auto; min-height: 28px; margin: 0 0 4px; padding-left: 40px; }
+  .away { order: 4; margin-bottom: 4px; }
+  .fs-act { order: 5; margin: 0 0 4px auto; }
+}
 
 /* Phone: line 1 chevron, title, Manage (44 px); line 2 the status, wrapping; line 3 Verify again. */
 @container acc (max-width: 640px) {
