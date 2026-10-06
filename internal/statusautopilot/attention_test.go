@@ -208,14 +208,22 @@ func TestAttentionBulkReturnsPartialResultsAndGuardsUndo(t *testing.T) {
 	}
 }
 
-// The barrier reports the exact authority-fence query, so revocation happens
-// while the final write is queued behind it, with no timing assumptions.
-type attentionFenceProbe struct{ reached chan struct{} }
+// The barrier reports the authority-fence query, so revocation happens while
+// the final write is queued behind it, with no timing assumptions. Attention
+// still issues its historical tenant-row statement. Settings overrides enter
+// through authz.LockProjectMutation and block on the canonical tenant fence.
+type attentionFenceProbe struct {
+	reached chan struct{}
+	seen    chan string
+}
 
 func (p attentionFenceProbe) TraceQueryStart(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryStartData) context.Context {
-	if q.SQL == `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE` || q.SQL == `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE` {
+	if q.SQL == `SELECT id::text FROM tenants WHERE id=$1 FOR NO KEY UPDATE` || q.SQL == `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE` || q.SQL == db.TenantFenceSQL {
 		select {
 		case p.reached <- struct{}{}:
+			if p.seen != nil {
+				p.seen <- q.SQL
+			}
 		default:
 		}
 	}
@@ -245,7 +253,7 @@ func TestAttentionChecksRevocationUnderFinalWriteFence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	probe := attentionFenceProbe{make(chan struct{}, 1)}
+	probe := attentionFenceProbe{reached: make(chan struct{}, 1)}
 	config.ConnConfig.Tracer = probe
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
@@ -697,7 +705,7 @@ func TestSettingsRevocationAtFinalWriteFence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	probe := attentionFenceProbe{make(chan struct{}, 1)}
+	probe := attentionFenceProbe{reached: make(chan struct{}, 1), seen: make(chan string, 1)}
 	config.ConnConfig.Tracer = probe
 	pool, err := pgxpool.NewWithConfig(ctx, config)
 	if err != nil {
@@ -715,7 +723,10 @@ func TestSettingsRevocationAtFinalWriteFence(t *testing.T) {
 		done <- w
 	}()
 	select {
-	case <-probe.reached:
+	case sql := <-probe.seen:
+		if sql != db.TenantFenceSQL {
+			t.Fatalf("override writer blocked on %q, not the canonical tenant fence", sql)
+		}
 	case <-ctx.Done():
 		t.Fatal("override writer never reached tenant fence")
 	}
