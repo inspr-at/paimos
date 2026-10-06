@@ -336,6 +336,17 @@ b.num { font-weight: 650; }
 .mine { display: grid; gap: 2px; margin: 0; padding: 0; list-style: none; }
 .mine li { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 16px; min-height: 30px; }
 .mine .what { font-variant-numeric: tabular-nums; }
+/* In Settings' docked pane (AEON-686) the card is phone-narrow at any viewport
+   width: labels go above their values so a limit's actions never overflow. */
+.detail { container: account-detail / inline-size; }
+@container account-detail (max-width: 420px) {
+  .account-facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  dt, .limit:has(.sentence) dt, .mine-fact dt { padding-top: 10px; }
+  .fact:first-child dt { padding-top: 0; }
+  dd { padding-top: 0; }
+  .sentence .actions, .mine .actions { margin-left: -10px; }
+  .sentence .actions { flex-basis: 100%; }
+}
 @media (max-width: 600px) {
   .detail { margin: 0 0 10px; padding: 12px; }
   .account-facts { grid-template-columns: minmax(0, 1fr); gap: 2px; }

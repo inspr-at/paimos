@@ -28,6 +28,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
 )
 
@@ -102,24 +103,28 @@ type Verification struct {
 	Task           string    `json:"task"`
 }
 type Enrollment struct {
-	CanVerify                bool     `json:"can_verify"`
-	LocalProcesses           string   `json:"local_processes"`
-	AccountingState          string   `json:"accounting_state"`
-	VerificationExpiredReady bool     `json:"verification_expired_ready"`
-	VerificationState        string   `json:"verification_state"`
-	VerificationError        string   `json:"verification_error"`
-	VerificationReason       string   `json:"verification_reason,omitempty"`
-	AccountID                string   `json:"account_id"`
-	AccountKey               string   `json:"account_key"`
-	Harness                  string   `json:"harness"`
-	Label                    string   `json:"label"`
-	ProfileID                string   `json:"model_profile_id"`
-	State                    string   `json:"state"`
-	Cleanup                  string   `json:"local_cleanup"`
-	VerificationRunID        *string  `json:"verification_run_id"`
-	ActiveRunIDs             []string `json:"active_run_ids"`
+	VerifiedAt               *time.Time `json:"verified_at,omitempty"`
+	VerificationExpiresAt    *time.Time `json:"verification_expires_at,omitempty"`
+	LastUsedAt               *time.Time `json:"last_used_at,omitempty"`
+	CanVerify                bool       `json:"can_verify"`
+	LocalProcesses           string     `json:"local_processes"`
+	AccountingState          string     `json:"accounting_state"`
+	VerificationExpiredReady bool       `json:"verification_expired_ready"`
+	VerificationState        string     `json:"verification_state"`
+	VerificationError        string     `json:"verification_error"`
+	VerificationReason       string     `json:"verification_reason,omitempty"`
+	AccountID                string     `json:"account_id"`
+	AccountKey               string     `json:"account_key"`
+	Harness                  string     `json:"harness"`
+	Label                    string     `json:"label"`
+	ProfileID                string     `json:"model_profile_id"`
+	State                    string     `json:"state"`
+	Cleanup                  string     `json:"local_cleanup"`
+	VerificationRunID        *string    `json:"verification_run_id"`
+	ActiveRunIDs             []string   `json:"active_run_ids"`
 }
 type View struct {
+	HostCapacity              *hostcapacity.View                  `json:"host_capacity,omitempty"`
 	LocalAuthPinned           *bool                               `json:"local_auth_pinned,omitempty"`
 	AgentRelease              agentcompat.Release                 `json:"agent_release"`
 	AgentCompatibility        agentcompat.Result                  `json:"agent_compatibility"`

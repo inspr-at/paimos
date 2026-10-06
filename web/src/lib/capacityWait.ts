@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
+import { hostCapacityReason } from './hostCapacity.ts'
 export const WAIT_CODES = ['schedule', 'reserve', 'reading', 'vendor', 'offline', 'sign_in', 'hold', 'approval', 'capacity', 'allowance', 'models', 'state', 'residency'] as const
 export interface CapacityWait {
   code: typeof WAIT_CODES[number]
+  host_reason?: string
   until?: string
   read_at?: string
   timezone?: string
@@ -33,7 +35,7 @@ export function capacityWaitText(wait: CapacityWait, subject = 'Agents', now = D
     case 'sign_in': return 'Sign in again on the computer'
     case 'hold': return at ? `On hold until ${at}` : 'On hold until you resume'
     case 'approval': return 'Allow agents in Settings / Accounts'
-    case 'capacity': return 'Waiting for the current run to finish'
+    case 'capacity': return wait.host_reason ? `Waiting for host capacity: ${hostCapacityReason(wait.host_reason)}` : 'Waiting for the current run to finish'
     case 'allowance': return at ? `Capacity available after ${at}` : 'Waiting for capacity'
     case 'residency': return 'Waiting for an account within the allowed providers'
     case 'models': return 'No model is granted for this account'

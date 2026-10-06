@@ -37,6 +37,9 @@ func RunFence(ctx context.Context, tx pgx.Tx, account, run string, claim bool) e
 	if err := AccountFence(ctx, tx, account, false); err != nil {
 		return err
 	}
+	if err := hostStartFence(ctx, tx, account); err != nil {
+		return err
+	}
 	var verification *string
 	var claimed, expired, ongoing bool
 	var harness, platform, arch string

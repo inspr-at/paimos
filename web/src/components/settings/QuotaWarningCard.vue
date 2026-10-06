@@ -2,76 +2,65 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { api } from '../../lib/api'
+import { can } from '../../lib/authz'
 import { validQuotaThresholds, type QuotaWarningSettings } from '../../lib/quotaWarnings'
 import { useSession } from '../../stores/session'
-import SettingsCard from './SettingsCard.vue'
-import KeyCap from '../KeyCap.vue'
+import { toast } from '../../lib/toast'
+import SettingsPopover from './SettingsPopover.vue'
+const emit = defineEmits<{ changed: [settings: QuotaWarningSettings] }>()
 const session = useSession()
 const identity = computed(() => `${session.identity?.tenant.id ?? ''}/${session.identity?.principal.id ?? ''}`)
-const early = ref(10), urgent = ref(3), ready = ref(false), saving = ref(false), feedback = ref('')
+const early = ref(10), urgent = ref(3), saved = ref<QuotaWarningSettings>({ early_percent: 10, urgent_percent: 3 })
+const ready = ref(false), saving = ref(false), feedback = ref(''), open = ref(false), anchor = ref<HTMLElement | null>(null)
+const manage = computed(() => session.identity?.principal.kind === 'person' && can('settings.manage'))
 let generation = 0
 onBeforeUnmount(() => { generation++ })
 const valid = computed(() => validQuotaThresholds({ early_percent: Number(early.value), urgent_percent: Number(urgent.value) }))
-watch(identity, async () => {
+watch([identity, () => can('account.read')], async () => {
   const turn = ++generation
-  ready.value = false; saving.value = false; feedback.value = ''; early.value = 10; urgent.value = 3
-  if (!session.identity) return
+  ready.value = false; saving.value = false; feedback.value = ''; open.value = false; early.value = 10; urgent.value = 3
+  if (!session.identity || !can('account.read')) return
   try {
     const response = await api('/settings/quota-warnings')
     if (!response.ok) throw new Error('read')
     const body: QuotaWarningSettings = await response.json()
     if (!validQuotaThresholds(body)) throw new Error('read')
     if (turn !== generation) return
-    early.value = body.early_percent; urgent.value = body.urgent_percent; ready.value = true
-  } catch { if (turn === generation) feedback.value = 'Thresholds could not be loaded. Reload to retry.' }
+    saved.value = body; early.value = body.early_percent; urgent.value = body.urgent_percent; ready.value = true; emit('changed', body)
+  } catch { if (turn === generation) feedback.value = 'Thresholds could not be loaded.' }
 }, { immediate: true })
-const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
-function keys(event: KeyboardEvent) {
-  if (!(event.target instanceof HTMLInputElement) || event.isComposing || event.repeat) return
-  if (event.key === 'Escape' && !event.metaKey && !event.ctrlKey && !event.altKey) {
-    event.preventDefault(); event.stopPropagation(); event.target.blur()
-  }
-  if (event.key !== 'Enter') return
-  event.preventDefault()
-  if ((mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && !event.altKey && !event.shiftKey) {
-    event.stopPropagation(); void save()
-  }
+watch(manage, allowed => { if (!allowed) open.value = false })
+function edit(event: Event) { anchor.value = event.currentTarget as HTMLElement; early.value = saved.value.early_percent; urgent.value = saved.value.urgent_percent; feedback.value = ''; open.value = true }
+async function write(next: QuotaWarningSettings, expected: QuotaWarningSettings) {
+  const response = await api('/settings/quota-warnings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ...next, expected_early_percent: expected.early_percent, expected_urgent_percent: expected.urgent_percent }) })
+  if (!response.ok) throw new Error(response.status === 409 ? 'Thresholds changed. Reopen Change before saving.' : 'Could not save thresholds. Try again.')
+  const body: QuotaWarningSettings = await response.json()
+  if (!validQuotaThresholds(body)) throw new Error('Saved thresholds could not be confirmed.')
+  return body
 }
 async function save() {
-  if (!ready.value || saving.value || !valid.value) return
-  const turn = generation, owner = identity.value
+  if (!manage.value || !ready.value || saving.value || !valid.value) return
+  const turn = generation, owner = identity.value, previous = { ...saved.value }
   const next = { early_percent: Number(early.value), urgent_percent: Number(urgent.value) }
   saving.value = true; feedback.value = ''
   try {
-    const response = await api('/settings/quota-warnings', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) })
-    if (!response.ok) throw new Error('save')
-    const saved: QuotaWarningSettings = await response.json()
-    if (!validQuotaThresholds(saved)) throw new Error('save')
+    const body = await write(next, previous)
     if (turn !== generation || owner !== identity.value) return
-    early.value = saved.early_percent; urgent.value = saved.urgent_percent; feedback.value = 'Thresholds saved.'
-  } catch { if (turn === generation && owner === identity.value) feedback.value = 'Could not save thresholds. Try again.' }
+    saved.value = body; emit('changed', body); open.value = false
+    toast('Low-quota warnings saved.', { action: { label: 'Undo', run: () => {
+      if (turn !== generation || owner !== identity.value || !manage.value) return
+      void write(previous, body).then(restored => { if (turn === generation && owner === identity.value) { saved.value = restored; emit('changed', restored); toast('Low-quota warnings restored.') } }).catch(error => { if (turn === generation && owner === identity.value) toast(error.message, { tone: 'error' }) })
+    } } })
+  } catch (error) { if (turn === generation && owner === identity.value) feedback.value = error instanceof Error ? error.message : 'Could not save thresholds.' }
   finally { if (turn === generation && owner === identity.value) saving.value = false }
 }
 </script>
 <template>
-  <SettingsCard title="Low-quota warnings" icon="agent" anchor="quota-warnings">
-    <template #lead>Two notices from fresh measured usage, with no reminders between them. Private quota figures follow the account owner's sharing choice.</template>
-    <form @submit.prevent="save" @keydown="keys">
-      <fieldset class="thresholds" :disabled="!ready || saving">
-        <legend class="sr-only">Percent remaining</legend>
-        <label for="quota-early">Early notice (%)<input id="quota-early" v-model.number="early" type="number" min="2" max="50" step="1" inputmode="numeric" aria-describedby="quota-guidance" /></label>
-        <label for="quota-urgent">Urgent notice (%)<input id="quota-urgent" v-model.number="urgent" type="number" min="1" max="49" step="1" inputmode="numeric" aria-describedby="quota-guidance" /></label>
-      </fieldset>
-      <button class="btn sm" type="submit" :disabled="!ready || saving || !valid" :aria-busy="saving">Save thresholds <KeyCap k="mod" /><KeyCap k="enter" /></button>
-      <p id="quota-guidance" class="guidance">1–50% remaining; urgent must be lower than early.</p>
-      <p class="feedback" role="status" aria-live="polite">{{ feedback || (ready && !valid ? 'Use whole percentages, with urgent below early.' : '\u00a0') }}</p>
-    </form>
-  </SettingsCard>
+  <p id="quota-warnings" class="quota-line">Low-quota warnings: <template v-if="ready">early {{ saved.early_percent }} %, urgent {{ saved.urgent_percent }} %</template><template v-else>{{ feedback || 'Loading…' }}</template><template v-if="ready && manage"> · <button type="button" @click="edit">Change</button></template></p>
+  <SettingsPopover v-model:open="open" :anchor="anchor" label="Low-quota warnings" mode="form" :context-key="identity" :busy="saving || !valid" :error="feedback || (!valid ? 'Use whole percentages, with urgent below early.' : '')" hint="1–50% remaining; urgent must be lower than early." @submit="save">
+    <div class="thresholds"><label>Early notice (%)<input v-model.number="early" type="number" min="2" max="50" step="1" inputmode="numeric" :disabled="saving" /></label><label>Urgent notice (%)<input v-model.number="urgent" type="number" min="1" max="49" step="1" inputmode="numeric" :disabled="saving" /></label></div>
+  </SettingsPopover>
 </template>
 <style scoped>
-.thresholds { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; border: 0; padding: 0; margin: 0 0 12px; max-width: 330px; }
-label { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }
-input { width: 100%; height: 36px; padding: 0 10px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); color: var(--ink); font: 500 14px/1 var(--mono); }
-.guidance, .feedback { font-size: 12px; line-height: 1.4; color: var(--ink-2); margin: 8px 0 0; }
-.feedback { min-height: 2.8em; max-width: 330px; }
+.quota-line { margin: 12px 0 0; color: var(--ink-3); font-size: 12.5px; }.quota-line button { border: 0; padding: 0; background: transparent; color: var(--teal-ink); text-decoration: underline; }.thresholds { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }.thresholds label { display: grid; gap: 6px; font-size: 13px; color: var(--ink-2); }.thresholds input { width: 100%; min-height: 36px; padding: 4px 8px; border: 1px solid var(--line-2); border-radius: var(--radius-s); background: var(--field-bg); color: var(--ink); }@media(pointer:coarse) { .quota-line button, .thresholds input { min-height: 44px; } }
 </style>
