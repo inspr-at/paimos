@@ -15,7 +15,13 @@ import { manifestsMain, classifyManifest } from './manifests.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
-const target = kind => kind==='go' ? collectGo() : collectWeb()
+// Collection spawns the Vitest, Node and Playwright listers. One process may
+// plan repeatedly (tests, multi-step runs), so collect each inventory once.
+const inventories = new Map()
+const target = kind => {
+  if (!inventories.has(kind)) inventories.set(kind, kind==='go' ? collectGo() : collectWeb())
+  return inventories.get(kind)
+}
 
 // Planner input is authoritative. Candidate uncertainty can widen it to full,
 // but candidate graph additions can never narrow the base planner's full gate.
@@ -39,8 +45,12 @@ export function runnerSelection(tests,options,candidate,planner) {
   return selection
 }
 
-export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,plannerMode=process.env.AEON_TEST_TIER_MODE,plannerLayout=process.env.AEON_TEST_TIER_LAYOUT,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false}={}) {
-  const inventory=target(kind)
+// A caller that already holds a native collection passes it as `inventory`;
+// otherwise every plan recollects the catalogue (minutes of Playwright and
+// Vitest listing when several plans run in one process).
+export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,plannerMode=process.env.AEON_TEST_TIER_MODE,plannerLayout=process.env.AEON_TEST_TIER_LAYOUT,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false,inventory:supplied}={}) {
+  if(supplied!==undefined&&!Array.isArray(supplied?.tests)) throw new Error('Supplied inventory needs a tests array')
+  const inventory=supplied??target(kind)
   const manifest=load(kind)
   const all=validate(manifest,inventory.tests)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
@@ -224,7 +234,7 @@ export function classify(flags, { collect = target, read = load, save = saveMani
   return 0
 }
 
-export async function main(args) {
+export async function main(args,{inventory}={}) {
   if (args[0] === 'manifests') return manifestsMain(args.slice(1), root)
   if (args[0] === 'classify') return classify(args.slice(1))
   const [mode,kind,...flags]=args
@@ -260,7 +270,7 @@ export async function main(args) {
     console.log(JSON.stringify({nativeGoCases:listed.length,inventory:counts(all)}));return 0
   }
   if(options.paths===undefined) options.paths=changedPaths(options.event??process.env.GITHUB_EVENT_NAME,process.env,{fetchBase:true})
-  const selection=plan(kind,options)
+  const selection=plan(kind,{...options,inventory})
   console.log(JSON.stringify({kind,full:selection.full,layout:selection.layout??'full',reason:selection.reason,scope:selection.scope??'changed-area',deferredBrowserCases:selection.deferredBrowserCases??0,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
   if(mode==='run') return run(kind,selection,options)
   return 0
