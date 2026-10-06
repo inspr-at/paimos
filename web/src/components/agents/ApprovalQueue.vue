@@ -493,7 +493,7 @@ defineExpose({ begin, cancel, isOpen: () => !!open.value })
   .revoke { grid-column: 2 / -1; justify-self: start; }
 }
 .item .mark { color: var(--agent-state-color); background: color-mix(in srgb, var(--agent-state-color) 10%, var(--surface-raised)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--agent-state-color) 25%, transparent); }
-.count-badge { background: var(--agent-state-color); color: var(--surface-raised); }
+.count-badge { background: var(--surface-raised); color: var(--ink); box-shadow: inset 0 0 0 1px var(--line-2); }
 /* A decided request (AEON-505): the outcome in the card's place, a quiet full tint and a
    hairline ring (approved in the ok hue, denied neutral), then a height fold whose negative
    margin takes the list gap with it, so nothing below jumps when the card goes. */

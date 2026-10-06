@@ -970,6 +970,8 @@
         ,
         {"file":"tests/session-rows.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/settings-account-pacing.spec.ts","listedTests":10,"weightSeconds":22.19512,"weightSource":"unmeasured-test-rate"}
+        ,
         {"file":"tests/settings-accounts.spec.ts","listedTests":24,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/stability.spec.ts","listedTests":13,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
@@ -1238,20 +1240,18 @@
         "--trace=retain-on-failure"
       ]
       ,
-      "gate": true
-      ,
       "hostedOnly": true
       ,
-      "id": "coarse-hit-area"
+      "id": "lead-flow"
       ,
       "project": null
       ,
       "sourceSteps": [
-        "AEON-723 coarse hit-area selector regression"
+        "AEON-741 lead flow UI regressions"
       ]
       ,
       "specs": [
-        {"file":"tests/coarse-hit-area.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/lead-flow.spec.ts","listedTests":14,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
       ]
     }
     ,
@@ -1266,18 +1266,20 @@
         "--trace=retain-on-failure"
       ]
       ,
+      "gate": true
+      ,
       "hostedOnly": true
       ,
-      "id": "lead-flow"
+      "id": "coarse-hit-area"
       ,
       "project": null
       ,
       "sourceSteps": [
-        "AEON-741 lead flow UI regressions"
+        "AEON-723 coarse hit-area selector regression"
       ]
       ,
       "specs": [
-        {"file":"tests/lead-flow.spec.ts","listedTests":14,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
+        {"file":"tests/coarse-hit-area.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
       ]
     }
   ]

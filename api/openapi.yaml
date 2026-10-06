@@ -6305,10 +6305,17 @@ paths:
         that now looks like it holds a credential hides it. A review verdict
         shows only in the project it was recorded in, while the ticket is
         still there, to people who can read that verdict. Accepted, dismissed
-        and drafted items are omitted. At most 50, newest first.
+        and drafted items are omitted. At most 50, newest first. Each item
+        carries its current recommendation when an agent or person prepared
+        one (AEON-788). When truncated is true, next_cursor continues the list
+        after the last item.
       security: *auth
       parameters:
         - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - name: cursor
+          in: query
+          description: "next_cursor of the previous page; at most 160 characters"
+          schema: {type: string, maxLength: 160}
       responses:
         '200':
           description: Open method learnings
@@ -6332,7 +6339,10 @@ paths:
         Text that looks like it holds a credential is not copied: 409
         learning_sensitive with the matched ranges (positions only). A person
         may repeat the request with confirm_not_sensitive; the event records
-        confirmed_not_sensitive. An agent cannot confirm (403).
+        confirmed_not_sensitive. An agent cannot confirm (403). An optional
+        lesson (AEON-788) replaces the learning's own text in the line. With
+        learning_text, a learning whose text changed since the person
+        reviewed it is 409 learning_changed and nothing is written.
       parameters:
         - {name: learningId, in: path, required: true, schema: {type: string}}
         - {name: If-Unmodified-Since, in: header, schema: {type: string}}
@@ -6355,7 +6365,7 @@ paths:
         '404':
           $ref: '#/components/responses/Error'
         '409':
-          description: already_decided, or learning_sensitive with the suspected credential ranges
+          description: already_decided, learning_changed, or learning_sensitive with the suspected credential ranges
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MethodLearningProblem'}
@@ -6370,10 +6380,19 @@ paths:
       description: |
         A person with knowledge.write dismisses one open method learning.
         Records knowledge.learning_dismissed and does not change a knowledge
-        entry. Agents cannot dismiss.
+        entry. Agents cannot dismiss. An optional reason (AEON-788) is
+        recorded in the event; no body or an empty object still dismisses.
+        With learning_text, a learning whose text changed since the person
+        reviewed it is 409 learning_changed. A reason that looks like it holds
+        a credential is 409 learning_sensitive with ranges in field reason.
       parameters:
         - {name: learningId, in: path, required: true, schema: {type: string}}
       security: *auth
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MethodLearningDismiss'}
       responses:
         '200':
           description: Dismissed
@@ -6387,7 +6406,48 @@ paths:
         '404':
           $ref: '#/components/responses/Error'
         '409':
+          description: already_decided, learning_changed, or learning_sensitive with the suspected credential ranges
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningProblem'}
+  /knowledge/learnings/{learningId}/recommendation:
+    put:
+      operationId: recommendMethodLearning
+      description: |
+        Prepares a decision on one open method learning (AEON-788): accept with
+        a target entry in the learning's project and an optional lesson line,
+        or dismiss with a reason. Agents and people with knowledge.write may
+        recommend; nothing is accepted or dismissed. A person applies it
+        through accept and dismiss. The recommendation replaces any earlier one
+        for the learning and records knowledge.learning_recommended. A decided
+        learning is 409 already_decided; a closed one is 404. Lesson or reason
+        text that looks like it holds a credential is 409 learning_sensitive
+        and cannot be confirmed here.
+      parameters:
+        - {name: learningId, in: path, required: true, schema: {type: string}}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MethodLearningRecommend'}
+      responses:
+        '200':
+          description: The stored recommendation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningRecommendation'}
+        '400':
           $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: already_decided, or learning_sensitive with the suspected credential ranges
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningProblem'}
   /knowledge/learnings/{learningId}/draft:
     post:
       operationId: draftMethodLearning
@@ -12260,6 +12320,16 @@ components:
       properties:
         light: {type: string, pattern: '^#[0-9a-fA-F]{6}$'}
         dark: {type: [string, 'null'], pattern: '^#[0-9a-fA-F]{6}$', description: 'Null means derived; explicit Porcelain dark preserves the current look'}
+    ThemeAgentStates:
+      type: object
+      additionalProperties: false
+      required: [working, waiting, throttled, problem, idle]
+      properties:
+        working: {$ref: '#/components/schemas/ThemeAccent'}
+        waiting: {$ref: '#/components/schemas/ThemeAccent'}
+        throttled: {$ref: '#/components/schemas/ThemeAccent'}
+        problem: {$ref: '#/components/schemas/ThemeAccent'}
+        idle: {$ref: '#/components/schemas/ThemeAccent'}
     ThemeValues:
       type: object
       additionalProperties: false
@@ -12278,12 +12348,27 @@ components:
           type: object
           additionalProperties: false
           required: [avatar, ring, hover, size, palette]
+          allOf:
+            - if:
+                properties:
+                  palette: {const: custom}
+                required: [palette]
+              then:
+                required: [custom_states]
+                properties:
+                  custom_states: {$ref: '#/components/schemas/ThemeAgentStates'}
           properties:
             avatar: {type: string, enum: [pulse, robot-1, robot-2, robot-3, robot-4, robot-5, orbit, quill, sprite]}
             ring: {type: [string, 'null'], enum: [moving, still, off, null], description: Null retains the selected style's drawn ring}
             hover: {type: boolean}
             size: {type: [integer, 'null'], minimum: 30, maximum: 100, description: Artwork fullness percentage; null retains the style's drawn size}
-            palette: {type: string, enum: [standard, protan, deutan, tritan, monochrome]}
+            palette: {type: string, enum: [standard, protan, deutan, tritan, monochrome, focus, errors, custom]}
+            custom_states:
+              description: 'Five state accents; required and non-null for custom, retained for other looks. Omitted means null; no migration needed.'
+              default: null
+              oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/ThemeAgentStates'
             dim_inactive: {type: boolean, description: 'Dim idle and ended agents; omitted means true'}
             inactive_opacity: {type: integer, minimum: 40, maximum: 80, description: 'Inactive opacity percent; omitted means 55'}
     Theme:
@@ -19934,18 +20019,51 @@ components:
         author:
           oneOf: [{type: 'null'}, {$ref: '#/components/schemas/KnowledgePerson'}]
         href: {type: string}
+        recommendation: {$ref: '#/components/schemas/MethodLearningRecommendation'}
     MethodLearningPage:
       type: object
       required: [items, truncated]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/MethodLearning'}}
         truncated: {type: boolean}
+        next_cursor: {type: string, description: "Present when truncated; pass as cursor for the next page"}
+    MethodLearningRecommend:
+      type: object
+      required: [decision]
+      additionalProperties: false
+      properties:
+        decision: {type: string, enum: [accept, dismiss]}
+        knowledge_id: {type: string, format: uuid, description: "Required for accept; not allowed for dismiss"}
+        lesson: {type: string, maxLength: 240, description: "Accept only. The changelog sentence; the learning's own text when absent"}
+        reason: {type: string, maxLength: 500, description: "Required for dismiss, optional for accept"}
+    MethodLearningRecommendation:
+      type: object
+      required: [decision, by, at, event_id, stale, target_missing]
+      properties:
+        decision: {type: string, enum: [accept, dismiss]}
+        knowledge_id: {type: string, format: uuid}
+        knowledge_title: {type: string}
+        lesson: {type: string}
+        reason: {type: string}
+        by:
+          oneOf: [{type: 'null'}, {$ref: '#/components/schemas/KnowledgePerson'}]
+        at: {type: string, format: date-time}
+        event_id: {type: integer, format: int64}
+        stale: {type: boolean, description: "The learning's text changed after it was recommended"}
+        target_missing: {type: boolean, description: "The chosen entry was deleted or left the project"}
+    MethodLearningDismiss:
+      type: object
+      properties:
+        reason: {type: string, maxLength: 500}
+        learning_text: {type: string, maxLength: 2000, description: "The learning's text as the person reviewed it; a learning that reads differently now is 409 learning_changed"}
     MethodLearningAccept:
       type: object
       required: [knowledge_id]
       additionalProperties: false
       properties:
         knowledge_id: {type: string, format: uuid}
+        lesson: {type: string, maxLength: 240, description: "Replaces the learning's own text in the changelog line"}
+        learning_text: {type: string, maxLength: 2000, description: "The learning's text as the person reviewed it; a learning that reads differently now is 409 learning_changed"}
         confirm_not_sensitive:
           type: boolean
           description: A person confirms that text flagged as a credential is not one. Agents cannot confirm.
@@ -19967,14 +20085,14 @@ components:
         code: {type: string}
         ranges:
           type: array
-          description: With learning_sensitive, the suspected credentials as Unicode code point offsets into the learning's text or title. The text itself is never returned.
+          description: "With learning_sensitive, the suspected credentials as Unicode code point offsets into the learning's text or title, or into the lesson or reason sent with the request. The text itself is never returned."
           items: {$ref: '#/components/schemas/SensitiveRange'}
     SensitiveRange:
       type: object
       required: [field, start, end]
       additionalProperties: false
       properties:
-        field: {type: string, enum: [text, title]}
+        field: {type: string, enum: [text, title, lesson, reason]}
         start: {type: integer, minimum: 0}
         end: {type: integer, minimum: 0}
     MethodLearningDecision:

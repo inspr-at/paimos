@@ -96,6 +96,20 @@ func completeValues(raw json.RawMessage) bool {
 			return false
 		}
 	}
+	if raw, present := a["custom_states"]; present && string(raw) != "null" {
+		states, ok := object(raw, "working", "waiting", "throttled", "problem", "idle")
+		if !ok {
+			return false
+		}
+		for _, key := range []string{"working", "waiting", "throttled", "problem", "idle"} {
+			if _, ok := object(states[key], "light", "dark"); !ok {
+				return false
+			}
+		}
+	}
+	if string(a["palette"]) == `"custom"` && (a["custom_states"] == nil || string(a["custom_states"]) == "null") {
+		return false
+	}
 	return true
 }
 func input(w http.ResponseWriter, r *http.Request, out any, required ...string) bool {
