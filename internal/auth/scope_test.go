@@ -78,6 +78,7 @@ func TestAgentScopeSeparatesProjectSubpathsAndUnknownRoutes(t *testing.T) {
 		{"POST", "/api/knowledge/learnings/n-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/accept", ""},
 		{"POST", "/api/knowledge/learnings/n-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/dismiss", ""},
 		{"POST", "/api/knowledge/learnings/n-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/draft", ""},
+		{"PUT", "/api/knowledge/learnings/n-aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/recommendation", "knowledge.write"},
 		{"GET", "/api/tickets/graph", "nodes.read"},
 		{"GET", "/api/tickets", ""},
 		{"POST", "/api/knowledge", "knowledge.write"},
