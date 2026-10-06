@@ -11375,6 +11375,7 @@ paths:
       summary: Recent automatic changes with reasons and Undo state
       security: [{session: []}, {agentKey: []}]
       parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50, default: 50}, description: Bounds recent changes; legacy suggestions listing is unchanged}
         - {name: node_id, in: query, schema: {type: string, format: uuid}}
         - {name: suggestions, in: query, schema: {type: boolean, default: false}}
       responses:
@@ -11389,6 +11390,40 @@ paths:
                   items:
                     type: array
                     items: {$ref: '#/components/schemas/StatusAutopilotChange'}
+  /status-autopilot/projects:
+    get:
+      operationId: listAutopilotProjects
+      summary: Project overrides or inheriting projects, 50 per keyset page
+      description: Workspace settings.manage required. Only visible live projects are returned; inherited_count counts visible projects following the workspace. Search and cursor are bounded; reads have a ten-second deadline.
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: mode, in: query, schema: {type: string, enum: [overrides, inherit], default: overrides}}
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: q, in: query, schema: {type: string, maxLength: 200}}
+      responses:
+        '200':
+          description: Bounded project page and exact visible inheritance count
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, next_cursor, inherited_count]
+                properties:
+                  inherited_count: {type: integer, minimum: 0}
+                  next_cursor: {type: [string, 'null'], format: uuid}
+                  items:
+                    type: array
+                    maxItems: 50
+                    items:
+                      type: object
+                      required: [id, key, title, override]
+                      properties:
+                        id: {type: string, format: uuid}
+                        key: {type: string}
+                        title: {type: string}
+                        override: {$ref: '#/components/schemas/StatusAutopilotOverride'}
+        '400': {description: "Invalid mode, search or cursor"}
+        '403': {description: Workspace settings.manage required}
   /status-autopilot/proposals:
     get:
       operationId: listStatusAutopilotProposals

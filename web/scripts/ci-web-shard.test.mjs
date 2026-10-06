@@ -520,15 +520,27 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   // Preserve main's five-minute estimate for every gated group except
   // AEON-697's attention spec. That spec is one file, so the balancer cannot
   // spread it; the expanded gate may grow by its whole weight and no more.
+  // AEON-696 grew status-autopilot.spec.ts from 7 to 11 cases (weight 22.794872
+  // on main); the prior gate keeps main's weight and may also grow by that delta.
   // These weights are scheduling estimates, not a hosted-runtime promise.
   const attention = real.groups.find(group => group.id === 'needs-attention')
   assert.ok(attention, 'Attention regressions must remain in the gate')
-  const priorGate = { ...real, groups: real.groups.filter(group => group !== attention) }
+  const autopilotOnMain = 22.794872
+  const autopilot = real.groups.flatMap(group => group.specs).find(spec => spec.file === 'tests/status-autopilot.spec.ts')
+  assert.ok(autopilot && autopilot.weightSeconds >= autopilotOnMain, 'Autopilot regressions must remain in the gate')
+  const autopilotGrowth = autopilot.weightSeconds - autopilotOnMain
+  const priorGate = {
+    ...real,
+    groups: real.groups.filter(group => group !== attention).map(group => ({
+      ...group,
+      specs: group.specs.map(spec => spec === autopilot ? { ...spec, weightSeconds: autopilotOnMain } : spec),
+    })),
+  }
   const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
   assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
-  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0)
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0) + autopilotGrowth
   assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
-    'expanded gate exceeds the prior estimate plus the attention specs')
+    'expanded gate exceeds the prior estimate plus the attention and autopilot specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {

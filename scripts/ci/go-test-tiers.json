@@ -8322,6 +8322,8 @@
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestProjectOffRunsNoRulesButWorkspaceOffListsSuggestions","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestProjectSettingsPagesSearchInheritanceAndAuthority","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestProposalApplyDismissAndStaleGuards","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestProposalResolutionPermissionsAndTenantIsolation","tier":"GATED-FULL"}
@@ -8333,6 +8335,8 @@
     {"kind":"go","package":"internal/statusautopilot","name":"TestServerModesCapProjectsAndPublication","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestSettingsAndOverrides","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestSettingsRevocationAtFinalWriteFence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestSettingsValidation","tier":"GATED-FULL"}
     ,

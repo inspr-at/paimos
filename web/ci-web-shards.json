@@ -88,30 +88,6 @@
     {
       "config": "playwright.ui.config.ts"
       ,
-      "env": {}
-      ,
-      "flags": [
-        "--workers=1"
-      ]
-      ,
-      "hostedOnly": true
-      ,
-      "id": "usage-dashboard"
-      ,
-      "project": null
-      ,
-      "sourceSteps": [
-        "web-2"
-      ]
-      ,
-      "specs": [
-        {"file":"tests/usage-dashboard.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.25,"median":1.125,"min":1.018},"seconds":19.134431,"selectedTests":10},"weightSeconds":14.8,"weightSource":"web-2"}
-      ]
-    }
-    ,
-    {
-      "config": "playwright.ui.config.ts"
-      ,
       "env": {
         "AEON_SCREENSHOTS_DIR": "test-results/footer-release-pill"
         ,
@@ -576,7 +552,7 @@
         ,
         {"file":"tests/settings.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":3.461,"median":1.774,"min":1.431},"seconds":14.45241,"selectedTests":6},"weightSeconds":32.564102381,"weightSource":"status-autopilot-ui-2"}
         ,
-        {"file":"tests/status-autopilot.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":10.514,"median":2.467,"min":0.771},"seconds":29.300782,"selectedTests":8},"weightSeconds":22.794872,"weightSource":"status-autopilot-ui-2"}
+        {"file":"tests/status-autopilot.spec.ts","listedTests":11,"tierTiming":{"caseSeconds":{"max":10.514,"median":2.467,"min":0.771},"seconds":29.300782,"selectedTests":8},"weightSeconds":35.820513,"weightSource":"AEON-696 proportional estimate from status-autopilot-ui-2"}
         ,
         {"file":"tests/workspace-activity.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
       ]
@@ -664,6 +640,28 @@
       ,
       "specs": [
         {"file":"tests/project-header.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
+      ]
+    }
+    ,
+    {
+      "config": "playwright.ui.config.ts"
+      ,
+      "env": {}
+      ,
+      "flags": [
+        "--workers=1"
+        ,
+        "--trace=retain-on-failure"
+      ]
+      ,
+      "hostedOnly": true
+      ,
+      "id": "needs-attention"
+      ,
+      "project": null
+      ,
+      "specs": [
+        {"file":"tests/needs-attention.spec.ts","listedTests":29,"weightSeconds":46.609756,"weightSource":"estimate"}
       ]
     }
     ,
@@ -1250,32 +1248,6 @@
         "--trace=retain-on-failure"
       ]
       ,
-      "hostedOnly": true
-      ,
-      "id": "lead-flow"
-      ,
-      "project": null
-      ,
-      "sourceSteps": [
-        "AEON-741 lead flow UI regressions"
-      ]
-      ,
-      "specs": [
-        {"file":"tests/lead-flow.spec.ts","listedTests":14,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
-      ]
-    }
-    ,
-    {
-      "config": "playwright.ui.config.ts"
-      ,
-      "env": {}
-      ,
-      "flags": [
-        "--workers=1"
-        ,
-        "--trace=retain-on-failure"
-      ]
-      ,
       "gate": true
       ,
       "hostedOnly": true
@@ -1306,12 +1278,40 @@
       ,
       "hostedOnly": true
       ,
-      "id": "needs-attention"
+      "id": "lead-flow"
       ,
       "project": null
       ,
+      "sourceSteps": [
+        "AEON-741 lead flow UI regressions"
+      ]
+      ,
       "specs": [
-        {"file":"tests/needs-attention.spec.ts","listedTests":29,"weightSeconds":46.609756,"weightSource":"estimate"}
+        {"file":"tests/lead-flow.spec.ts","listedTests":14,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
+      ]
+    }
+    ,
+    {
+      "config": "playwright.ui.config.ts"
+      ,
+      "env": {}
+      ,
+      "flags": [
+        "--workers=1"
+      ]
+      ,
+      "hostedOnly": true
+      ,
+      "id": "usage-dashboard"
+      ,
+      "project": null
+      ,
+      "sourceSteps": [
+        "web-2"
+      ]
+      ,
+      "specs": [
+        {"file":"tests/usage-dashboard.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.25,"median":1.125,"min":1.018},"seconds":19.134431,"selectedTests":10},"weightSeconds":14.8,"weightSource":"web-2"}
       ]
     }
   ]
@@ -1343,9 +1343,9 @@
     ,
     "OPS-257 fix1: hosted per-case tierTiming replaces serial historical allocations for 58 measured files. aeon-632b-clip has 39 cases / 432.3 seconds including group overhead: keep one worker and schedule it alone; no gated membership or launch flags change. Unmeasured files keep explicit historical estimates; the next hosted run must validate runner and native collection costs."
     ,
-    "OPS-257 round 4 L3: refresh measured per-case browser and per-owner Go/unit costs from full PR run 37377299349 (b2f9935a4264e932eae0fa2acd07c71e8d1fc417). The 39 clip cases split into planning/touch (27) and settings/rules (12), with shared imported fixtures and unchanged policies/tiers. Browser costs include group and tier execution residuals; each clip half conservatively retains the full original launch overhead. Go costs include terminal package elapsed plus each shard's residual native enumeration/launch time shared equally by its owners. Unit costs include Vitest elapsed or top-level Node durations plus shared residual launch time. Runner setup and unit shard 1's separate safety checks are excluded; hosted CI must validate total wall time. Exact-spec weightSeconds retain their historical allocation model; only the old clip allocation is divided proportionally between the two new files. The full-gate tier scheduler uses the refreshed tierTiming costs. Unit tie preference assigns shard 1 last on equal loads, moving the largest file to shard 2 without estimating the separate safety-check duration."
-    ,
     "AEON-697: Needs attention gates once in its own serial, trace-preserving group. listedTests comes from native collection; weightSeconds uses the existing unmeasured seconds/test estimate, not hosted runtime evidence."
+    ,
+    "OPS-257 round 4 L3: refresh measured per-case browser and per-owner Go/unit costs from full PR run 37377299349 (b2f9935a4264e932eae0fa2acd07c71e8d1fc417). The 39 clip cases split into planning/touch (27) and settings/rules (12), with shared imported fixtures and unchanged policies/tiers. Browser costs include group and tier execution residuals; each clip half conservatively retains the full original launch overhead. Go costs include terminal package elapsed plus each shard's residual native enumeration/launch time shared equally by its owners. Unit costs include Vitest elapsed or top-level Node durations plus shared residual launch time. Runner setup and unit shard 1's separate safety checks are excluded; hosted CI must validate total wall time. Exact-spec weightSeconds retain their historical allocation model; only the old clip allocation is divided proportionally between the two new files. The full-gate tier scheduler uses the refreshed tierTiming costs. Unit tie preference assigns shard 1 last on equal loads, moving the largest file to shard 2 without estimating the separate safety-check duration."
   ]
   ,
   "originalNpmScripts": {

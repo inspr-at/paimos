@@ -16,16 +16,16 @@ export interface NeedsYouItem {
 <script setup lang="ts">
 import { computed, useId } from 'vue'
 import AppIcon from '../AppIcon.vue'
-const props = defineProps<{ items: readonly NeedsYouItem[]; heading?: string; aside?: string }>()
+const props = defineProps<{ items: readonly NeedsYouItem[]; heading?: string; aside?: string; showCalm?: boolean }>()
 const emit = defineEmits<{ action: [id: string] }>()
 const titleId = useId()
 const count = computed(() => props.items.reduce((total, item) => total + Math.max(0, item.count), 0))
-const title = computed(() => count.value === 0 ? 'Nothing needs you' : props.heading ?? `${count.value.toLocaleString()} ${count.value === 1 ? 'thing needs' : 'things need'} you`)
+const title = computed(() => props.heading ?? (count.value === 0 ? 'Nothing needs you' : `${count.value.toLocaleString()} ${count.value === 1 ? 'thing needs' : 'things need'} you`))
 </script>
 <template>
   <section class="needs-block" :aria-labelledby="titleId">
     <header class="needs-head"><h2 :id="titleId">{{ title }}</h2><div class="needs-aside"><slot name="aside"><p v-if="aside">{{ aside }}</p></slot></div></header>
-    <ul v-if="count" class="attention">
+    <ul v-if="count || showCalm" class="attention">
       <li v-for="item in items" :key="item.id" class="att-row" :class="{ calm: item.count === 0 }">
         <span class="att-icon" :class="item.count > 0 && item.tone !== 'waiting' ? 'warn' : 'mute'"><AppIcon :name="item.count === 0 ? 'check' : item.icon ?? 'alert'" /></span>
         <a v-if="item.count > 0 && item.href" :href="item.href" class="att-name">{{ item.name }}</a><span v-else class="att-name">{{ item.name }}</span>
