@@ -170,6 +170,58 @@ test('OPS-257 classify CLI requires an explicit tier in new syntax while retaini
   assert.equal(result.status, 1); assert.match(result.stderr, /requires --tier/)
 })
 
+test('AEON-588 classification records only newly added NIGHTLY identities as post-gate cases', () => {
+  const source = {
+    ...manifest([row('TestCore', 'ESSENTIAL'), row('TestLegacy', 'NIGHTLY'), row('TestRecorded', 'NIGHTLY')]),
+    postGateCases: ['internal/auth:TestRecorded'],
+  }
+  const before = structuredClone(source)
+  const discovered = [...source.tests, row('TestNew'), row('TestElse', 'NIGHTLY', 'internal/nodes')]
+  const result = classifyManifest(source, discovered, { tier: 'NIGHTLY', only: 'internal/auth:' })
+  assert.deepEqual(result.manifest.postGateCases, ['internal/auth:TestRecorded', 'internal/auth:TestNew'])
+  assert.deepEqual(result.manifest.tests, [...source.tests, row('TestNew', 'NIGHTLY')])
+  assert.deepEqual(source, before, 'classification must not mutate its input')
+  const again = classifyManifest(result.manifest, discovered, { tier: 'NIGHTLY', only: 'internal/auth:' })
+  assert.deepEqual(again.added, [])
+  assert.deepEqual(again.manifest, result.manifest, 'repeated classification must not duplicate post-gate entries')
+  for (const tier of ['ESSENTIAL', 'GATED-FULL']) {
+    const gated = classifyManifest(source, discovered, { tier, only: 'internal/auth:' })
+    assert.deepEqual(gated.manifest.postGateCases, source.postGateCases)
+    assert.deepEqual(gated.added, [row('TestNew', tier)])
+  }
+})
+
+test('AEON-588 classification initializes post-gate identities for Go and native web occurrences', () => {
+  const cases = [
+    [row('TestNew'), 'internal/auth:TestNew'],
+    [{ kind: 'node', file: 'tests/a.test.ts', name: 'case' }, 'node:tests/a.test.ts:case'],
+    [{ kind: 'vitest', file: 'tests/a.unit.test.ts', name: 'case', occurrence: 2 }, 'vitest:tests/a.unit.test.ts:case#2'],
+    [{ kind: 'browser', file: 'tests/a.spec.ts', name: 'case', occurrence: 2, config: 'playwright.ui.config.ts', project: '' }, 'browser:tests/a.spec.ts:case#2'],
+  ]
+  for (const [entry, id] of cases) {
+    const source = manifest([])
+    const result = classifyManifest(source, [entry], { tier: 'NIGHTLY' })
+    assert.deepEqual(result.manifest.postGateCases, [id])
+    assert.deepEqual(source, manifest([]))
+    assert.deepEqual(classifyManifest(source, [entry], { tier: 'NIGHTLY', only: 'no match' }).manifest, source)
+    for (const tier of ['ESSENTIAL', 'GATED-FULL']) {
+      assert.equal(Object.hasOwn(classifyManifest(source, [entry], { tier }).manifest, 'postGateCases'), false)
+    }
+  }
+})
+
+test('AEON-588 legacy classify CLI saves NIGHTLY rows and post-gate identities together', () => {
+  const source = manifest([row('TestKnown')]), saves = []
+  assert.equal(classify(['go'], {
+    collect: () => ({ tests: [row('TestKnown'), row('TestNew')] }),
+    read: () => source,
+    save: (path, data) => saves.push({ path, data: roundtrip(data) }),
+  }), 0)
+  assert.equal(saves.length, 1)
+  assert.deepEqual(saves[0].data.tests, [row('TestKnown'), row('TestNew', 'NIGHTLY')])
+  assert.deepEqual(saves[0].data.postGateCases, ['internal/auth:TestNew'])
+})
+
 test('OPS-257 classify CLI saves canonical rows through discovery and validates both kinds before writing', t => {
   const initial = manifest([row('TestKnown')]), saves = []
   const deps = { collect: () => ({ tests: [row('TestKnown'), row('TestNew')] }), read: () => structuredClone(initial), save: (path, data) => saves.push({ path, data: roundtrip(data) }) }
