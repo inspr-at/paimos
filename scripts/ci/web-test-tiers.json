@@ -596,18 +596,6 @@
     ,
     "browser:tests/service-tier.spec.ts:390: phone Change tier menu opens and restores its actual trigger"
     ,
-    "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1024px in dark"
-    ,
-    "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1024px in light"
-    ,
-    "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1440px in dark"
-    ,
-    "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1440px in light"
-    ,
-    "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 390px in dark"
-    ,
-    "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 390px in light"
-    ,
     "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
     ,
     "browser:tests/start-agent.spec.ts:New menu restores its trigger without moving header controls at 1024 dark"
@@ -10962,17 +10950,17 @@
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"grouped navigation stays put across section changes and places policy cards in their new homes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members can read long German Vocabulary names without overflow at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"members read Vocabulary as text and cannot invoke its write actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
