@@ -271,7 +271,11 @@ func TestUnmanagedStopRequestSurvivesHeartbeatUntilWorkerReportsStop(t *testing.
 	if out["stopped_at"] != nil || pause["stop_requested"] != true || pause["deliver"] != true {
 		t.Fatal("heartbeat lost pending stop", out)
 	}
-	expect(t, f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "stopped"}, "wrong-lease"), 403)
+	rejected := f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "stopped"}, "wrong-lease")
+	expect(t, rejected, 403)
+	if !strings.Contains(rejected.Body.String(), "harness worker proof rejected") {
+		t.Fatal("wrong rejection reason", rejected.Body.String())
+	}
 	stopped := f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "stopped"}, lease)
 	expect(t, stopped, 200)
 	out = decode(t, stopped)

@@ -4278,6 +4278,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatStateDirIsPrivate","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatStopRequestFailureKeepsRetryIntent","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatTerminalStatusExits","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatUsageAndControls","tier":"GATED-FULL"}

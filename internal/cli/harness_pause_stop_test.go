@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -198,5 +199,58 @@ func TestRunHeartbeatDoesNotStopForScheduledOrForeignResponse(t *testing.T) {
 				t.Fatal("foreign response was not rejected")
 			}
 		})
+	}
+}
+
+func TestRunHeartbeatStopRequestFailureKeepsRetryIntent(t *testing.T) {
+	var calls []hbCall
+	failed := true
+	srv := hbServer(t, &calls, func(r *http.Request, _ map[string]any, w http.ResponseWriter) bool {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/heartbeat"):
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": transcriptSessionID, "pause": harness.Pause{StopRequested: true, Deliver: true}})
+			return true
+		case strings.HasSuffix(r.URL.Path, "/stop"):
+			if !failed {
+				return false
+			}
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"error":"stop temporarily unavailable"}`))
+			return true
+		}
+		return false
+	})
+	defer srv.Close()
+	rt, _, stderr := heartbeatRuntime(t, srv)
+	o := heartbeatTestOptions(t.TempDir())
+	waits := 0
+	err := rt.runHeartbeat(t.Context(), o, heartbeatDeps{alive: func(int) bool { return true }, wait: func(context.Context, int, time.Duration) error { waits++; return context.Canceled }})
+	if heartbeatStatus(err) != http.StatusServiceUnavailable {
+		t.Fatalf("wrong stop failure: %v", err)
+	}
+	if waits != 0 || loadHeartbeatDisk(t, o.StateDir).Closed {
+		t.Fatal("failed stop continued reporting or claimed closed")
+	}
+	raw, readErr := os.ReadFile(filepath.Join(o.StateDir, "stop.intent"))
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	id, _, attempts, code, reason := heartbeatStopIntent(raw)
+	if id != transcriptSessionID || attempts != 1 || code != http.StatusServiceUnavailable || reason != "" {
+		t.Fatal("failed stop lost retry intent")
+	}
+	if strings.Contains(stderr.String(), "is stopped") {
+		t.Fatal("failed stop reported success")
+	}
+	failed = false
+	if err := rt.runHeartbeat(t.Context(), o, heartbeatDeps{alive: func(int) bool { return true }}); err != nil {
+		t.Fatal(err)
+	}
+	if !loadHeartbeatDisk(t, o.StateDir).Closed || len(hbWhere(calls, http.MethodPost, "/heartbeat")) != 1 {
+		t.Fatal("retry did not close without another heartbeat")
+	}
+	stops := hbWhere(calls, http.MethodPost, "/stop")
+	if len(stops) != 2 || stops[1].body["reason"] != "stopped" {
+		t.Fatal("retry did not preserve plain stop")
 	}
 }

@@ -34,7 +34,7 @@ async function setup(page: Page, readonly = false, configure?: (data: ReturnType
   await page.route(/\/api\/projects\/[^/]+\/harness-sessions\/[^/]+\/(pause|resume)$/, async route => {
     const path = new URL(route.request().url()).pathname, id = path.split('/').at(-2)!, s = data.sessions.find(s => s.id === id)!, body = route.request().postDataJSON(); calls.push({ path, body })
     if (path.endsWith('/resume')) { Object.assign(s, { row_version: Number(s.row_version) + 1, pause: { ...(s.pause as object), state: 'resume_requested' } }); return route.fulfill({ json: { session: s, continuation: { brief: 'Saved handover continuation' } } }) }
-    Object.assign(s, { row_version: Number(s.row_version) + 1, pause: { control_id: `pause-${id}`, state: 'requested', level: body.level, note: body.note, requested_at: new Date(NOW).toISOString(), deadline_at: new Date(NOW + 600000).toISOString(), deliver: true, stop_requested: body.level === 'stop_now' } })
+    Object.assign(s, { row_version: Number(s.row_version) + 1, pause: { control_id: `pause-${id}`, state: body.level === 'stop_now' ? 'cancelled' : 'requested', level: body.level, note: body.note, requested_at: new Date(NOW).toISOString(), deadline_at: new Date(NOW + 600000).toISOString(), deliver: true, stop_requested: body.level === 'stop_now' } })
     return route.fulfill({ json: s })
   })
   return { data, calls, deletes }
@@ -200,28 +200,32 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     const errors = watchErrors(page)
     const mock = await setup(page, false, data => {
       data.sessions = [data.sessions[0]!]
-      Object.assign(data.sessions[0]!, { management_mode: 'unmanaged', activity: 'busy', heartbeat_at: new Date(NOW).toISOString(), display_label: 'Datenbankänderungen und Wiederherstellungsprüfung abschließen' })
+      Object.assign(data.sessions[0]!, { management_mode: 'unmanaged', run_id: null, ticket_node_id: null, ticket: null, activity: 'busy', heartbeat_at: new Date(NOW).toISOString(), display_label: 'Datenbankänderungen und Wiederherstellungsprüfung abschließen' })
     })
     const session = mock.data.sessions[0]!
     await page.goto(`/agents/${session.id}`)
     const row = page.locator(`[data-row="s:${session.id}"]`)
     await expect(row.locator('.c-state .state-word')).toHaveText('Working')
     const guard = await controlStability(page, { row, menu: row.locator('.more') })
-    // The same durable snapshot returned by the pause route, while the heartbeat
-    // still says working. No worker stop report has arrived yet.
     await guard.check(async () => {
-      Object.assign(session, { row_version: Number(session.row_version) + 1, pause: { control_id: 'pause-stop', state: 'cancelled', level: 'stop_now', stop_requested: true, deliver: true } })
-      await page.evaluate(() => window.dispatchEvent(new Event('online')))
+      await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop now…', exact: true }).click()
+      const dialog = page.getByRole('dialog', { name: /^Stop now / })
+      await dialog.locator('[data-submit]').click()
+      await expect(dialog).not.toBeVisible()
       await expect(row.locator('.c-state .state-word')).toHaveText('Stop requested')
+      expect(mock.calls).toHaveLength(1)
+      expect(mock.calls[0]?.body.level).toBe('stop_now')
+      expect(mock.calls[0]?.path).toContain(`/harness-sessions/${session.id}/pause`)
+      expect(session.stopped_at).toBeNull()
     })
-    await page.screenshot({ path: testInfo.outputPath(`stop-requested-${width}-${theme}.png`), fullPage: true })
+    await row.screenshot({ path: testInfo.outputPath(`stop-requested-${width}-${theme}.png`) })
     await guard.check(async () => {
       Object.assign(session, { row_version: Number(session.row_version) + 1, phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'stopped' })
       await page.evaluate(() => window.dispatchEvent(new Event('online')))
       await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
     })
     guard.done()
-    await page.screenshot({ path: testInfo.outputPath(`stopped-${width}-${theme}.png`), fullPage: true })
+    await row.screenshot({ path: testInfo.outputPath(`stopped-${width}-${theme}.png`) })
     await page.reload()
     await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
     expect(errors).toEqual([])
