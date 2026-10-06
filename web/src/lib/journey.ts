@@ -34,10 +34,10 @@ export interface JourneyStage {
   target_digest_sha256?: string
 }
 export type ActionKey = 'confirm_brief' | 'go' | 'reduce_scope' | 'park' | 'drop' | 'reopen' | 'open_first_release' | 'start_build' | 'mark_candidate'
-  | 'approve_candidate' | 'reject_candidate' | 'approve_deploy' | 'renew_candidate' | 'renew_deploy' | 'retry_deploy' | 'approve_permit' | 'plan_next_release'
+  | 'approve_candidate' | 'reject_candidate' | 'approve_deploy' | 'renew_candidate' | 'renew_deploy' | 'renew_permit' | 'retry_deploy' | 'approve_permit' | 'plan_next_release'
 export type NextKey = 'continue_intake' | 'confirm_brief' | 'decide' | 'reopen' | 'approve_requirements' | 'open_first_release' | 'start_build' | 'wait_for_build'
   | 'mark_candidate' | 'approve_candidate' | 'approve_deploy' | 'retry_deploy' | 'approve_permit' | 'plan_next_release'
-export interface NextAction { key: NextKey; renewal_action?: 'renew_candidate' | 'renew_deploy'; label: string; stage: Stage; available: boolean; reason?: string; approval_request_id: string | null }
+export interface NextAction { key: NextKey; renewal_action?: 'renew_candidate' | 'renew_deploy'; access_renewal_action?: 'renew_permit'; label: string; stage: Stage; available: boolean; reason?: string; approval_request_id: string | null }
 // Whether Pharos can admit a launch now; the reason is the current blocker (empty when it can).
 export interface LaunchReadiness { can_admit: boolean; reason: string }
 export interface Journey {
@@ -333,7 +333,7 @@ function decisionIdentity(journey: Journey): string {
     journey.project_node_id, journey.revision, journey.profile, journey.stage, journey.current_release_id,
     journey.requirements_revision, journey.requirements_digest_sha256, journey.requirements_approval_scope,
     targetIdentity(deploy?.target, deploy?.target_digest_sha256),
-    journey.next_action.key, journey.next_action.renewal_action, journey.next_action.stage, journey.next_action.approval_request_id,
+    journey.next_action.key, journey.next_action.renewal_action, journey.next_action.access_renewal_action, journey.next_action.stage, journey.next_action.approval_request_id,
   ])
 }
 function requestIdentity(approval: Approval): string {
@@ -354,7 +354,7 @@ export function matchesJourneyConfirmation(confirmation: JourneyConfirmation, jo
 
 // ---------- Copy ----------
 // What each next action means, in the prototype's words.
-export const ACTION_LONG: Record<NextKey | 'renew_candidate' | 'renew_deploy', string> = {
+export const ACTION_LONG: Record<NextKey | 'renew_candidate' | 'renew_deploy' | 'renew_permit', string> = {
   continue_intake: 'Aithema turns the conversation and sources into the brief. Nothing is decided yet.',
   confirm_brief: 'Aithema drafted the brief from the sources. Confirm it; the lenses then check business, market, reuse, compliance and risk.',
   decide: 'Compare the estimate with the budget, then go, reduce scope, park or drop. The decision is recorded.',
@@ -368,6 +368,7 @@ export const ACTION_LONG: Record<NextKey | 'renew_candidate' | 'renew_deploy', s
   approve_deploy: 'Backup evidence and the build are recorded, then the host applies the release.',
   renew_candidate: 'Apply a fresh candidate approval to this release. Preparation and deployment must report fresh evidence before deployment can resume.',
   renew_deploy: 'Apply a fresh deployment approval to this release. Preparation and deployment must report fresh evidence before deployment can resume.',
+  renew_permit: 'Apply a fresh Access permit to this release. Janus must report fresh Access evidence; the completed deployment stays recorded.',
   retry_deploy: 'The host refused the release. Retry with fresh evidence, or send the candidate back.',
   approve_permit: 'Grants the bounded permit to the people who use it. Every use is recorded. Then it is live.',
   plan_next_release: 'Backlog tickets and new input form the next release. The agreed requirements stay; tickets that revise them say so.',

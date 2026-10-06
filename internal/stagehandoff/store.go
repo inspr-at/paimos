@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/approvals"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/plugins"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -24,6 +25,19 @@ func loadHandoff(ctx context.Context, tx pgx.Tx, id string, lock bool) (Handoff,
 	var h Handoff
 	q := `SELECT ` + handoffColumns + ` FROM stage_handoffs WHERE id=$1::uuid`
 	if lock {
+		// Every handoff writer shares the journey/tree fence and row order.
+		// Reading immutable IDs first preserves stale/terminal replay handling;
+		// authority and routing are still checked against the locked handoff.
+		if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+			return h, err
+		}
+		var project, release string
+		if err := tx.QueryRow(ctx, `SELECT project_node_id::text,release_node_id::text FROM stage_handoffs WHERE id=$1::uuid`, id).Scan(&project, &release); err != nil {
+			return h, err
+		}
+		if err := lockJourneyRows(ctx, tx, project, release); err != nil {
+			return h, err
+		}
 		q += ` FOR UPDATE`
 	}
 	var targetDigest *string
@@ -54,6 +68,16 @@ func loadHandoff(ctx context.Context, tx pgx.Tx, id string, lock bool) (Handoff,
 		return h, err
 	}
 	return h, nil
+}
+
+// Lock parents before their handoff, in separate statements so PostgreSQL's
+// join plan cannot choose the row order. NO KEY UPDATE permits FK share locks.
+func lockJourneyRows(ctx context.Context, tx pgx.Tx, project, release string) error {
+	if _, err := tx.Exec(ctx, `SELECT 1 FROM journey_projects WHERE project_node_id=$1::uuid FOR NO KEY UPDATE`, project); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `SELECT 1 FROM journey_releases WHERE release_node_id=$1::uuid FOR NO KEY UPDATE`, release)
+	return err
 }
 func planDigest(ctx context.Context, tx pgx.Tx, releaseID string) (string, error) {
 	var plan string
@@ -111,7 +135,8 @@ func dependencySet(ctx context.Context, tx pgx.Tx, h Handoff, accessRequired boo
 		err := tx.QueryRow(ctx, `SELECT h.id::text,h.state,h.plan_digest,h.expires_at,
 			EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=h.tenant_id AND e.node_id=h.project_node_id
 			  AND e.after->>'current_release_id'=h.release_node_id::text
-			  AND e.type IN ('journey.candidate_renewed','journey.deploy_renewed')
+			  AND (e.type IN ('journey.candidate_renewed','journey.deploy_renewed')
+		       OR (e.type='journey.permit_renewed' AND h.stage='access'))
 			  AND (e.after->>'revision')::bigint>h.journey_revision)
 			FROM stage_handoffs h WHERE h.project_node_id=$4::uuid AND h.release_node_id=$1::uuid AND h.stage=$2 AND h.operation=$3
 			ORDER BY h.attempt DESC LIMIT 1`, h.ReleaseNodeID, req.stage, req.operation, h.ProjectNodeID).Scan(&id, &state, &dependencyPlan, &expires, &renewed)
@@ -156,6 +181,12 @@ type dependency struct {
 
 func (m *Module) create(ctx context.Context, tx pgx.Tx, p tenant.Principal, in RequestWrite, plugin string, ceiling []string, gate string) (Handoff, error) {
 	var h Handoff
+	if err := db.LockWorkTreeTx(ctx, tx); err != nil {
+		return h, err
+	}
+	if err := lockJourneyRows(ctx, tx, in.ProjectNodeID, in.ReleaseNodeID); err != nil {
+		return h, err
+	}
 	h.ProjectNodeID = in.ProjectNodeID
 	h.ReleaseNodeID = in.ReleaseNodeID
 	h.Stage = in.Stage
