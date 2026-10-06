@@ -76,7 +76,9 @@ const roots = (bucket: Bucket) => showRemoved.value
   : forest.value.filter(branch => bucketOf(branch.group) === bucket)
 // Count sessions, including folded descendants, rather than family roots.
 const pausedCount = (branch: Branch): number => Number(branch.view.status.state === 'paused') + branch.children.reduce((sum, child) => sum + pausedCount(child), 0)
-const bucketCount = (bucket: Bucket) => roots(bucket).reduce((sum, branch) => sum + (showRemoved.value || bucket === 'stopped' ? branch.count : bucket === 'paused' ? pausedCount(branch) : branch.liveCount), 0)
+const attentionCount = (branch: Branch): number => Number(bucketOf(branch.view.status.group) === 'attention') + branch.children.reduce((sum, child) => sum + attentionCount(child), 0)
+const bucketCount = (bucket: Bucket) => roots(bucket).reduce((sum, branch) => sum + (showRemoved.value || bucket === 'stopped' ? branch.count : bucket === 'paused' ? pausedCount(branch) : bucket === 'attention' ? attentionCount(branch) : branch.liveCount), 0)
+const countTip = (bucket: Bucket) => bucket === 'attention' ? 'Sessions needing attention, including collapsed workers' : bucket === 'paused' ? 'Paused sessions, including collapsed workers' : 'Live sessions in these families, including collapsed workers'
 const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
 const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)
@@ -382,7 +384,7 @@ defineExpose({ toggleHistory })
             <button v-else-if="group.id === 'stopped'" type="button" class="group-toggle" :aria-expanded="showStopped" @click="showStopped = !showStopped">
               <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: showStopped }" />{{ group.label }}<span class="mono">{{ bucketCount(group.id) }}</span>
             </button>
-            <template v-else>{{ group.label }}<span class="mono" data-tip="Live sessions in these families, including collapsed workers">{{ bucketCount(group.id) }}</span></template>
+            <template v-else>{{ group.label }}<span class="mono" :data-tip="countTip(group.id)">{{ bucketCount(group.id) }}</span></template>
           </span>
         </div>
         <div

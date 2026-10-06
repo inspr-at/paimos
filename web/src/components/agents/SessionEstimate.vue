@@ -8,7 +8,7 @@ defineProps<{ eta: EtaInput | null; now: number; missing?: boolean; labelled?: b
 
 <template>
   <span class="session-estimate">
-    <span v-if="eta" class="report-source" tabindex="0" data-tip="ETA and progress are self-reported by this agent, not measured.">Agent report</span>
+    <span class="report-source" :class="{ pending: !eta }" :tabindex="eta ? 0 : undefined" :aria-hidden="!eta || undefined" data-tip="ETA and progress are self-reported by this agent, not measured.">Agent report</span>
     <EtaCell align="start" :labelled="labelled" :eta="eta" :now="now" :missing="missing" />
   </span>
 </template>
@@ -16,5 +16,7 @@ defineProps<{ eta: EtaInput | null; now: number; missing?: boolean; labelled?: b
 <style scoped>
 .session-estimate { display: inline-flex; flex-direction: column; min-width: 0; max-width: 100%; }
 .report-source { color: var(--ink-3); font-size: 11px; line-height: 16px; white-space: nowrap; }
+/* Keep the attribution slot when the first report arrives or is cleared. */
+.report-source.pending { visibility: hidden; }
 .report-source:focus-visible { outline: 1px solid var(--teal-ink); outline-offset: 1px; }
 </style>

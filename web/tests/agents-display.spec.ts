@@ -128,6 +128,80 @@ test('ended workers remain recoverable through an opt-in fold without cleanup wr
   await expect(liveCount(page)).toHaveCount(0)
 })
 
+test('a stopped failed session still counts as needing attention', async ({ page }) => {
+  const { data } = await setup(page, 'light', false, 0)
+  data.sessions = [data.sessions[0]!]
+  Object.assign(data.sessions[0]!, { phase: 'stopped', stopped_at: new Date(NOW - 60_000).toISOString(), stop_reason: 'failed', run_status: 'failed', has_problem: true })
+  await page.goto('/agents')
+  await expect(row(page, 1)).toHaveAttribute('data-state', 'problem')
+  await expect(row(page, 1)).toBeVisible()
+  await expect(page.locator('.sessions .group-row.attention .mono')).toHaveText('1')
+})
+
+test('attention counts relevant descendants through family folds and stopped history', async ({ page }) => {
+  const { data } = await setup(page, 'light', false, 2)
+  // A healthy lead and worker, one live problem, one paused worker, one failed
+  // stopped worker and one successful stopped worker share the same family.
+  Object.assign(data.sessions.find(s => s.id === id(3))!, { has_problem: true })
+  Object.assign(data.sessions.find(s => s.id === id(4))!, { phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'paused', pause: { state: 'paused' } })
+  Object.assign(data.sessions.find(s => s.id === id(10))!, { stop_reason: 'failed', run_status: 'failed', has_problem: true })
+  Object.assign(data.sessions.find(s => s.id === id(11))!, { stop_reason: 'completed', run_status: 'completed', finished: true })
+  await page.goto('/agents')
+  await expect(row(page, 3)).toHaveAttribute('data-state', 'problem')
+  await expect(row(page, 4)).toHaveAttribute('data-state', 'paused')
+  const count = page.locator('.sessions .group-row.attention .mono')
+  await expect(count).toHaveText('2')
+  await expect(count).toHaveAttribute('data-tip', /needing attention/)
+  const fold = row(page, 1).locator('.worker-toggle').first()
+  await fold.click()
+  await expect(page.locator('.sessions .row')).toHaveCount(1)
+  await expect(count).toHaveText('2')
+  await row(page, 1).locator('.history-toggle').click()
+  await expect(row(page, 10)).toHaveAttribute('data-state', 'problem')
+  await expect(row(page, 11)).toHaveAttribute('data-state', 'done')
+  await expect(count).toHaveText('2')
+})
+
+for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`${width} ${theme}: first ETA report keeps family controls and following rows still`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    const { data } = await setup(page, theme, false, 1)
+    for (const session of data.sessions) Object.assign(session, { eta_ready_at: null, eta_reported_at: null, progress_pct: null })
+    await page.goto('/agents')
+    const lead = row(page, 1), worker = row(page, 2)
+    await expect(lead.locator('.eta-cell')).toHaveText('no ETA')
+    await expect(lead.locator('.report-source')).not.toBeVisible()
+    const refresh = async () => {
+      await page.evaluate(() => {
+        Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
+        document.dispatchEvent(new Event('visibilitychange'))
+      })
+    }
+    await expectStableControls({
+      controls: { lead, workers: lead.locator('.worker-toggle').first(), history: lead.locator('.history-toggle'), leadActions: lead.locator('.more'), nextWorker: worker, nextActions: worker.locator('.more') },
+      scrollAreas: { sessions: page.locator('.sessions') },
+      interactions: [
+        { name: 'first reported estimate', run: async () => {
+          Object.assign(data.sessions[0]!, { revision: 3, eta_ready_at: new Date(NOW + 5 * 60_000).toISOString(), eta_reported_at: new Date(NOW).toISOString(), progress_pct: 80 })
+          await refresh()
+          await expect(lead.locator('.report-source')).toBeVisible()
+          await expect(lead.locator('.report-source')).toHaveAttribute('tabindex', '0')
+          await expect(lead.locator('.pct')).toHaveText('80%')
+          await page.locator('.sessions').screenshot({ path: testInfo.outputPath(`first-report-${width}-${theme}.png`) })
+        } },
+        { name: 'report cleared', run: async () => {
+          Object.assign(data.sessions[0]!, { revision: 4, eta_ready_at: null, eta_reported_at: null, progress_pct: null })
+          await refresh()
+          await expect(lead.locator('.eta-cell')).toHaveText('no ETA')
+          await expect(lead.locator('.report-source')).not.toBeVisible()
+          await expect(lead.locator('.report-source')).not.toHaveAttribute('tabindex', '0')
+        } },
+      ],
+    })
+  })
+}
+
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   test(`${width} ${theme}: existing Agents layout shows the report source and stable capacity controls`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
