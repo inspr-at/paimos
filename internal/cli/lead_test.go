@@ -13,7 +13,7 @@ func TestLeadCLIContractAndProofPrivacy(t *testing.T) {
 	const project = "11111111-1111-1111-1111-111111111111"
 	const session = "22222222-2222-2222-2222-222222222222"
 	const proof = "fixture-lead-lease-private-000000000000"
-	for _, action := range []string{"status", "start", "claim", "pause"} {
+	for _, action := range []string{"status", "start", "claim", "pause", "yield"} {
 		t.Run(action, func(t *testing.T) {
 			isolate(t)
 			calls := 0
@@ -34,7 +34,7 @@ func TestLeadCLIContractAndProofPrivacy(t *testing.T) {
 				if action != "status" {
 					method = "POST"
 				}
-				if action == "claim" || action == "pause" {
+				if action == "claim" || action == "pause" || action == "yield" {
 					path += "/" + action
 				}
 				if r.URL.Path != path || r.Method != method {
@@ -43,10 +43,10 @@ func TestLeadCLIContractAndProofPrivacy(t *testing.T) {
 					return
 				}
 				calls++
-				if action == "claim" && r.Header.Get("X-Aeon-Worker-Lease") != proof {
+				if (action == "claim" || action == "yield") && r.Header.Get("X-Aeon-Worker-Lease") != proof {
 					t.Error("lease not bound to claim")
 				}
-				if action != "claim" && r.Header.Get("X-Aeon-Worker-Lease") != "" {
+				if (action != "claim" && action != "yield") && r.Header.Get("X-Aeon-Worker-Lease") != "" {
 					t.Error("person control sent worker proof")
 				}
 				if action != "status" {
@@ -60,7 +60,7 @@ func TestLeadCLIContractAndProofPrivacy(t *testing.T) {
 					if action == "claim" && body["session_id"] != session {
 						t.Error("session missing")
 					}
-					if action == "pause" && body["generation"] != float64(2) {
+					if (action == "pause" || action == "yield") && body["generation"] != float64(2) {
 						t.Error("generation missing")
 					}
 					if _, ok := body["worker_lease"]; ok {
@@ -81,7 +81,11 @@ func TestLeadCLIContractAndProofPrivacy(t *testing.T) {
 				args = append(args, "--session", session, "--worker-lease-file", "-")
 				input = proof
 			}
-			if action == "pause" {
+			if action == "yield" {
+				args = append(args, "--worker-lease-file", "-")
+				input = proof
+			}
+			if action == "pause" || action == "yield" {
 				args = append(args, "--generation", "2")
 			}
 			code, out, stderr := runCLI(args, input)

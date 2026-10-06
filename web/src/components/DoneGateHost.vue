@@ -164,7 +164,7 @@ watch(() => doneGateState.request, async (next) => {
   position: fixed;
   inset: 96px 0 auto;
   margin: 0 auto;
-  width: min(680px, calc(100vw - 48px));
+  width: min(var(--dialog-m), calc(100vw - 48px));
   max-height: calc(100dvh - 112px);
   padding: 0;
   border: 0;

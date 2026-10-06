@@ -229,7 +229,7 @@ func TestProjectLeadResponseDescriptions(t *testing.T) {
 			}
 			if source.prefix == "" {
 				cases = append(cases, struct{ path, status, description string }{
-					"/queue/next", "409", "Lead proof missing, stale assignment, paused/revoked/archived lead, or mandatory admission unavailable",
+					"/queue/next", "409", "Lead proof missing, stale assignment, paused/revoked/archived lead, mandatory admission unavailable, or bounded scheduling snapshot overflow",
 				})
 			}
 			for _, tc := range cases {

@@ -4,16 +4,12 @@ package agentruns
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
-	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/harness"
-	"github.com/inspr-at/paimos/internal/modelprefs"
-	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -46,7 +42,12 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			return nil, err
 		}
 	}
-	entries, err := m.queueEntries(r.Context(), tx)
+	if leadProject != "" {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		r = r.WithContext(ctx)
+	}
+	entries, err := m.queueEntriesFor(r.Context(), tx, leadProject, "", leadProject != "")
 	if err != nil {
 		return nil, err
 	}
@@ -129,63 +130,29 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 			}
 			continue
 		}
+		if leadProject != "" {
+			reason, err := harness.LeadDispatchTurnTx(r.Context(), tx, p, leadProject, e.Run.ID, m.leadAdmission)
+			if err != nil {
+				return nil, err
+			}
+			if reason == "work_not_eligible" {
+				continue
+			}
+			if reason != "" {
+				return map[string]any{"entry": nil, "wait_reason": reason}, nil
+			}
+		}
 		fields, err := json.Marshal(t.Fields)
 		if err != nil {
 			return nil, err
-		}
-		f := modelprefs.PlacementFields(fields)
-		role := f.RouteRole
-		if role == "" {
-			role = "build"
-		}
-		if readiness(t).SecurityReviewRequired {
-			role = "build-hard"
 		}
 		project := ""
 		if t.ProjectID != nil {
 			project = *t.ProjectID
 		}
-		var starter *string
-		if err := tx.QueryRow(r.Context(), `SELECT prefs_person_id::text FROM agent_runs WHERE id=$1::uuid`, e.Run.ID).Scan(&starter); err != nil {
-			return nil, err
-		}
-		placement, err := modelregistry.PlacementFor(r.Context(), tx, tenant.Principal{}, modelregistry.WorkQuery{
-			Role: role, TicketRole: f.RouteRole, Area: f.Area, Complexity: f.Complexity, ComplexitySource: f.ComplexitySource, TicketResidency: f.Residency, ProjectID: project, PersonID: starter}, time.Now().UTC())
+		candidates, rawPlacement, err := workqueue.RouteCandidatesTx(r.Context(), tx, e.Run.ID, fields, project, readiness(t).SecurityReviewRequired, target)
 		if err != nil {
 			return nil, err
-		}
-		rawPlacement, err := placement.JSON()
-		if err != nil {
-			return nil, err
-		}
-		if target.Profile == "" {
-			if placement.PlannedProfileID == nil {
-				continue
-			}
-			target.Profile = *placement.PlannedProfileID
-		}
-		candidates := []queueTarget{}
-		if target.Agent != "" {
-			candidates = append(candidates, target)
-		} else {
-			rows, err := tx.Query(r.Context(), `SELECT DISTINCT a.registered_by_principal_id::text FROM agent_accounts a JOIN model_profiles m ON m.tenant_id=a.tenant_id AND m.harness=a.harness
-    WHERE m.id=$1 AND m.enabled AND a.state='available' AND a.last_probe_ok AND a.last_probe_at>clock_timestamp()-interval '2 minutes'
-    AND (a.allowed_model_profile_ids IS NULL OR m.id=ANY(a.allowed_model_profile_ids)) ORDER BY 1`, target.Profile)
-			if err != nil {
-				return nil, err
-			}
-			for rows.Next() {
-				var agent string
-				if err = rows.Scan(&agent); err != nil {
-					rows.Close()
-					return nil, err
-				}
-				candidates = append(candidates, queueTarget{Agent: agent, Profile: target.Profile})
-			}
-			rows.Close()
-			if err = rows.Err(); err != nil {
-				return nil, err
-			}
 		}
 		for _, candidate := range candidates {
 			picked, err := queueTryRoute(r.Context(), tx, p, t, e.Run, candidate, rawPlacement, leadBinding)
@@ -193,7 +160,7 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 				return nil, err
 			}
 			if picked {
-				entry, err := m.queueEntry(r.Context(), tx, e.NodeID)
+				entry, err := m.queueEntryFor(r.Context(), tx, e.NodeID, leadProject, leadProject != "")
 				return map[string]any{"entry": entry}, err
 			}
 		}
@@ -201,22 +168,12 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 	return map[string]any{"entry": nil}, nil
 }
 func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTicket, v Run, target queueTarget, placement, lead json.RawMessage) (bool, error) {
-	// Live role check is separate from the daemon's key ceiling, which is
-	// authenticated again by reserve and claim. Never mint a runtime grant.
-	agent := tenant.Principal{TenantID: p.TenantID, ID: target.Agent, Kind: tenant.Agent, Scopes: []string{"run.claim"}}
 	project := ""
 	if t.ProjectID != nil {
 		project = *t.ProjectID
 	}
-	if err := authz.RequireTx(ctx, tx, agent, "run.claim", authz.Scope{ProjectID: project}); err != nil {
-		if errors.Is(err, authz.ErrForbidden) {
-			return false, nil
-		}
-		return false, err
-	}
-	var pending bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_runs r JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.queue_node_id WHERE r.id<>$1 AND r.agent_principal_id=$2 AND r.status='queued' AND r.queue_routed_at IS NOT NULL AND n.state='open' AND n.deleted_at IS NULL)`, v.ID, target.Agent).Scan(&pending)
-	if err != nil || pending {
+	ready, err := workqueue.RouteReadyTx(ctx, tx, p.TenantID, project, v.ID, target)
+	if err != nil || !ready {
 		return false, err
 	}
 	attempt, err := tx.Begin(ctx)
@@ -248,6 +205,11 @@ func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTi
 	_, err = attempt.Exec(ctx, `UPDATE agent_runs SET queue_routed_at=clock_timestamp() WHERE id=$1`, v.ID)
 	if err != nil {
 		return false, err
+	}
+	if lead != nil {
+		if err = harness.RecordLeadTurnTx(ctx, attempt, project); err != nil {
+			return false, err
+		}
 	}
 	if err = workorders.Record(ctx, attempt, p, t.ID, "queue.routed", v, target); err != nil {
 		return false, err
