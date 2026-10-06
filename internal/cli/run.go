@@ -165,7 +165,6 @@ func (rt *runtime) root() *Command {
 		rt.cmdDoctrine(),
 		rt.cmdTag(),
 		rt.cmdAttach(),
-		rt.cmdExternalStage(),
 		rt.cmdApply(),
 		rt.cmdSchema(),
 		rt.cmdDoctor(),

@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
-import { journeyWorld, mockJourney } from './journey-fixtures'
+import { releaseWorld, mockReleases } from './release-fixtures'
 import { expectStableControls } from './helpers/stable'
 
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
@@ -21,10 +21,10 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     data.nodes.find(n => n.id === 'n-2')!.state = 'done'
     data.nodes.find(n => n.id === 'n-2')!.title = 'Wiederkehrende Sicherheitsprüfung und Veröffentlichung der abgestimmten Verbesserungen'
     await mockWork(page, data)
-    const world = journeyWorld('plan')
+    const world = releaseWorld('plan')
     const marketingName = 'Kobaltkomet · Abgestimmte Verbesserungen der wiederkehrenden Sicherheitsprüfungen'
-    world.releases.find(r => r.id === world.journey.current_release_id)!.title = marketingName
-    await mockJourney(page, world)
+    world.releases.find(r => r.id === world.currentReleaseId)!.title = marketingName
+    await mockReleases(page, world)
     let split = false
     let backlog = false
     await page.route('**/api/projects/*/release-memberships*', async route => {
@@ -32,7 +32,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       await route.fulfill({ json: { tickets: ids.map(id => ({
         ...(id === 'n-3' && backlog ? { ticket_node_id: id, is_parent: false, release_count: 0, release_node_id: null, release_title: null, release_state: null, leaf_node_ids: [id], inheritance_note: 'parent_release_closed' } : {
         ticket_node_id: id, is_parent: id === 'n-2', release_count: id === 'n-2' && split ? 2 : 1,
-        release_node_id: id === 'n-2' && split ? null : world.journey.current_release_id,
+        release_node_id: id === 'n-2' && split ? null : world.currentReleaseId,
         release_title: id === 'n-2' && split ? null : marketingName,
         release_state: id === 'n-2' && split ? null : 'planning', leaf_node_ids: id === 'n-2' ? ['n-3'] : [id],
       }) })) } })
@@ -40,7 +40,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     const writes: unknown[] = []
     await page.route('**/api/projects/*/releases/*/membership', async route => {
       writes.push(route.request().postDataJSON())
-      const walker = world.walkers[world.journey.current_release_id!]!
+      const walker = world.walkers[world.currentReleaseId!]!
       await route.fulfill({ json: { walker, event_id: 0, leaf_node_ids: ['n-3'] } })
     })
     await page.goto('/p/PHAROS/PHAROS-12')

@@ -24,7 +24,7 @@
     ,
     {"kind":"browser-test","name":"Decision Desk keyboard, protected adapters and geometry (AEON-567)","command":"npm test -- tests/decision-desk.spec.ts --workers=1 --trace=retain-on-failure","config":"playwright.ui.config.ts","disposition":"Replaced by manifest groups; original jobs must not rerun these current-code specs.","env":{"AEON_DESK_SHOTS":"${{ runner.temp }}/aeon-desk-shots"},"flags":["--workers=1","--trace=retain-on-failure"],"id":"web-14","job":"web","listedTests":35,"measuredSeconds":128,"project":null,"specs":["tests/decision-desk.spec.ts"]}
     ,
-    {"kind":"browser-test","name":"Footer and affected release/brand integration checks","command":"npx playwright test -c playwright.ui.config.ts --workers=2 tests/footer-release-pill.spec.ts tests/footer-flow-pill.spec.ts tests/release-codenames.spec.ts tests/version-reveal.spec.ts tests/developer-settings.spec.ts tests/brand.spec.ts tests/tenant-brand.spec.ts tests/header-menus.spec.ts tests/shell.spec.ts tests/releases.spec.ts","config":"playwright.ui.config.ts","disposition":"Replaced by manifest groups; original jobs must not rerun these current-code specs.","env":{"AEON_SCREENSHOTS_DIR":"test-results/footer-release-pill"},"flags":["--workers=2"],"id":"footer-ui-2","job":"footer-ui","listedTests":246,"measuredSeconds":172,"project":null,"specs":["tests/footer-release-pill.spec.ts","tests/footer-flow-pill.spec.ts","tests/release-codenames.spec.ts","tests/version-reveal.spec.ts","tests/developer-settings.spec.ts","tests/brand.spec.ts","tests/tenant-brand.spec.ts","tests/header-menus.spec.ts","tests/shell.spec.ts","tests/releases.spec.ts"]}
+    {"kind":"browser-test","name":"Footer and affected release/brand integration checks","command":"npx playwright test -c playwright.ui.config.ts --workers=2 tests/footer-release-pill.spec.ts tests/footer-flow-pill.spec.ts tests/release-codenames.spec.ts tests/version-reveal.spec.ts tests/developer-settings.spec.ts tests/brand.spec.ts tests/tenant-brand.spec.ts tests/header-menus.spec.ts tests/shell.spec.ts tests/releases.spec.ts","config":"playwright.ui.config.ts","disposition":"Replaced by manifest groups; original jobs must not rerun these current-code specs.","env":{"AEON_SCREENSHOTS_DIR":"test-results/footer-release-pill"},"flags":["--workers=2"],"id":"footer-ui-2","job":"footer-ui","listedTests":246,"measuredSeconds":172,"project":null,"specs":["tests/footer-release-pill.spec.ts","tests/release-codenames.spec.ts","tests/version-reveal.spec.ts","tests/developer-settings.spec.ts","tests/brand.spec.ts","tests/tenant-brand.spec.ts","tests/header-menus.spec.ts","tests/shell.spec.ts","tests/releases.spec.ts"]}
     ,
     {"kind":"browser-test","name":"Planning columns regression and theme screenshots","command":"npx playwright test tests/planning-columns.spec.ts -c playwright.ui.config.ts --workers=2","config":"playwright.ui.config.ts","disposition":"Replaced by manifest groups; original jobs must not rerun these current-code specs.","env":{},"flags":["--workers=2"],"id":"web-9","job":"web","listedTests":14,"measuredSeconds":31,"project":null,"specs":["tests/planning-columns.spec.ts"]}
     ,
@@ -484,8 +484,6 @@
       "specs": [
         {"file":"tests/developer-settings.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":7.875,"median":2.7355,"min":1.056},"seconds":29.211495,"selectedTests":8},"weightSeconds":5.593496,"weightSource":"footer-ui-2"}
         ,
-        {"file":"tests/footer-flow-pill.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":22.334,"median":12.1665,"min":1.999},"seconds":27.863367,"selectedTests":2},"weightSeconds":1.398374,"weightSource":"footer-ui-2"}
-        ,
         {"file":"tests/footer-release-pill.spec.ts","listedTests":40,"tierTiming":{"caseSeconds":{"max":8.312,"median":2.0035,"min":0.89},"seconds":87.614969,"selectedTests":40},"weightSeconds":27.96748,"weightSource":"footer-ui-2"}
         ,
         {"file":"tests/shell.spec.ts","listedTests":32,"tierTiming":{"caseSeconds":{"max":3.212,"median":1.001,"min":0.774},"seconds":43.094797,"selectedTests":32},"weightSeconds":22.373984,"weightSource":"footer-ui-2"}
@@ -822,16 +820,6 @@
         ,
         {"file":"tests/intake-extensions.spec.ts","listedTests":17,"weightSeconds":37.731707,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/journey-confirmation.spec.ts","listedTests":19,"weightSeconds":42.170732,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/journey-imported.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/journey-overflow.spec.ts","listedTests":60,"weightSeconds":133.170732,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/journey-renewal.spec.ts","listedTests":6,"weightSeconds":13.317073,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/journey.spec.ts","listedTests":38,"weightSeconds":84.341463,"weightSource":"unmeasured-test-rate"}
-        ,
         {"file":"tests/kind-convert.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/knowledge-dock.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
@@ -1117,7 +1105,7 @@
       "project": null
       ,
       "specs": [
-        {"file":"tests/agent-pause.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agent-pause.spec.ts","listedTests":15,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -1264,6 +1252,34 @@
       ,
       "specs": [
         {"file":"tests/lead-flow.spec.ts","listedTests":14,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
+      ]
+    }
+    ,
+    {
+      "config": "playwright.ui.config.ts"
+      ,
+      "env": {}
+      ,
+      "flags": [
+        "--workers=1"
+        ,
+        "--trace=retain-on-failure"
+      ]
+      ,
+      "gate": true
+      ,
+      "hostedOnly": true
+      ,
+      "id": "coarse-hit-area"
+      ,
+      "project": null
+      ,
+      "sourceSteps": [
+        "AEON-723 coarse hit-area selector regression"
+      ]
+      ,
+      "specs": [
+        {"file":"tests/coarse-hit-area.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
       ]
     }
   ]
