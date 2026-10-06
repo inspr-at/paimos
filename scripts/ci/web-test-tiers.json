@@ -8494,7 +8494,11 @@
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"Start lead: the project holds still while its request is on the way, and the sheet still finishes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"a ticket preview over any page offers Start lead and the sheet opens there","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"every lead state keeps the primary action in one place and says what it needs","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"leaving the page that opened the docked lead panel closes it","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"no lead: the band offers Start lead and the sheet requests one at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
