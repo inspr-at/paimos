@@ -66,7 +66,7 @@
     "tier_check_go_cli": {
       "status": "not run",
       "command": "node scripts/test-tiers/cli.mjs check go",
-      "reason": "Go discovery needs a Go toolchain; none is on PATH on this workstation and `nix develop --offline` blocked at zero CPU for over eleven minutes and was stopped. The manifest is byte-identical to the one the remote static gate (36 checks, including this classification check) passed on c8840bc7a in round 15, and the in-memory postGateCases assertion above passes.",
+      "reason": "Go discovery needs a Go toolchain; none is on PATH on this workstation, and `nix develop --offline` started building missing dev-shell derivations (Python, bash, autoconf source tarballs) that cannot be fetched offline, so it was stopped after eleven minutes. The manifest is byte-identical to the one the remote static gate (36 checks, including this classification check) passed on c8840bc7a in round 15, and the in-memory postGateCases assertion above passes.",
       "covered_by": "round 15 ci-static-locked.sh pass on c8840bc7a3fa3814540e990d1d2fe7368c422040; tmp/aeon-697-fix15-static-final.log"
     },
     "remote_go": {
@@ -98,5 +98,5 @@
     }
   ],
   "status": "Complete locally; the ap251 Medium was already resolved by c8840bc7a and is verified at HEAD. No origin push or deployment.",
-  "updated_at": "2026-10-06T13:36:40Z"
+  "updated_at": "2026-10-06T13:36:55Z"
 }
