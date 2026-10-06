@@ -195,9 +195,10 @@ for (const width of [1440, 1024, 390]) {
         // geometry through focus, hover and press instead of its CSS spelling.
         { name: 'focus total stepper', run: async () => { await more.focus(); await expect(more).toBeFocused() } },
         { name: 'hover total stepper', run: () => more.hover() },
+        // A held + repeats (AEON-781); it may reach 30 and disable itself, so the steps below start downward.
         { name: 'hold total stepper', run: () => page.mouse.down() },
         { name: 'release total stepper', run: () => page.mouse.up() },
-        ...[more, more, fewer, fewer].map((button, i) => ({ name: `total step ${i + 1}`, run: () => button.click() })),
+        ...[fewer, fewer, more, more].map((button, i) => ({ name: `total step ${i + 1}`, run: () => button.click() })),
         ...[rowMore, rowFewer].map((button, i) => ({ name: `${i ? 'fewer' : 'more'} on Codex`, run: async () => { await expect(button).toHaveAccessibleName(/^Codex:/); await button.click() } })),
       ],
     })

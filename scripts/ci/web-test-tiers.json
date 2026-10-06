@@ -116,6 +116,14 @@
     ,
     "browser:tests/agent-pause.spec.ts:without control permission pause actions and wind-down are hidden"
     ,
+    "browser:tests/agents-dial.spec.ts:AEON-781: a dial folded before the fold sections stays folded"
+    ,
+    "browser:tests/agents-dial.spec.ts:AEON-781: a held + speeds up, pauses before a mode boundary and saves only the final value once"
+    ,
+    "browser:tests/agents-dial.spec.ts:AEON-781: an arrow key keeps its own pace; leaving, blur and a disabled end stop a hold"
+    ,
+    "browser:tests/agents-dial.spec.ts:AEON-781: the chevron comes first, folding moves nothing above the body, and the fold follows the person"
+    ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1024"
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1440"
@@ -5457,6 +5465,14 @@
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-720: accounts owned by another person never become dial room or a false full","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-720: idle dial reports real account room and explains unknown readings without inventing waiting agents","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: a dial folded before the fold sections stays folded","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: a held + speeds up, pauses before a mode boundary and saves only the final value once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: an arrow key keeps its own pace; leaving, blur and a disabled end stop a hold","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: the chevron comes first, folding moves nothing above the body, and the fold follows the person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"a changed plan revision discards a typed draft even when its value is unchanged","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13906,7 +13922,15 @@
     ,
     {"kind":"vitest","file":"tests/agents-live.unit.test.ts","name":"tier and completion events wake consumers while heartbeats remain quiet","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a hold saves only its final value, once, after release","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a hold that starts during an in-flight write never saves its intermediate steps","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a late read cannot erase a newer dial edit","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a page hidden within the settle time sends the released value with keepalive","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a released edit is dropped, never written, when the viewer changes before it settles","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > does not choose a total when the canonical read is forbidden","tier":"GATED-FULL"}
     ,
@@ -13916,7 +13940,7 @@
     ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > failure is visible and restores the last confirmed ceiling without touching running work","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > fold memory is private to the viewer and independent of the start ceiling","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > leaving the page within the settle time still sends the released value","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > loads the canonical owner count and saves only total and limits, never session controls","tier":"GATED-FULL"}
     ,
@@ -15118,6 +15142,14 @@
     ,
     {"kind":"vitest","file":"tests/preferences-owner.unit.test.ts","name":"S9-001: delayed A reads and queued writes cannot be adopted or sent as B","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/press-hold.unit.test.ts","name":"press and hold on − and + > a smart stop ends the hold before the step that would cross, and needs a fresh press","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/press-hold.unit.test.ts","name":"press and hold on − and + > a stop requested from inside a step schedules nothing more","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/press-hold.unit.test.ts","name":"press and hold on − and + > release ends the hold at once, runs onStop exactly once and leaves no timer behind","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/press-hold.unit.test.ts","name":"press and hold on − and + > steps once at once, waits 450 ms, then speeds up by about 0.8 to a 90 ms floor","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/profile-form.unit.test.ts","name":"colours > measures WCAG contrast","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/profile-form.unit.test.ts","name":"colours > warns when small print loses AA on the paper, and never for the paper itself","tier":"GATED-FULL"}
@@ -15523,6 +15555,18 @@
     {"kind":"vitest","file":"tests/row-store.unit.test.ts","name":"review 326g: authoritative child counts replace local dedupe history > node reads and rejected list copies keep the dedupe for the current count","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/run-kinds.unit.test.ts","name":"renders the registered host by default, an owner override, and an ellipsis-ready long label","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a failed read is retried before a write; failures are reported, not hidden","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a new viewer starts from their own state; the old viewer’s queued write is dropped","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a toggle during the first read keeps the choice and never writes defaults over other sections","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > first visit: dial open, Accounts folded, Sessions and Queued open","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > serial toggles each send the whole current object, so the last one wins","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > the server is the truth; the cache paints the first frame; the old dial fold is honoured once","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/service-tier-store.unit.test.ts","name":"Undo refuses another switch instead of overwriting it","tier":"ESSENTIAL"}
     ,
