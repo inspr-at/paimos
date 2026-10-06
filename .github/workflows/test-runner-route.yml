@@ -34,5 +34,7 @@ jobs:
         id: route
         env:
           AEON_MBP2606_AVAILABILITY: ${{ vars.AEON_MBP2606_AVAILABILITY }}
+          AEON_POOL_EVENTS: ${{ vars.AEON_POOL_EVENTS }}
+          AEON_PR_HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
           AEON_REQUIRED_IDLE_RUNNERS: ${{ inputs.required-idle-runners }}
         run: node scripts/ci-runner-route.mjs
