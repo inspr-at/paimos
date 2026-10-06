@@ -115,11 +115,28 @@ func suggestion(in Input) (string, string) {
 func (m *Module) ask(ctx context.Context, p tenant.Principal, project string, in Input) (Question, bool, error) {
 	var q Question
 	replay := false
+	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		q, replay, err = m.AskTx(ctx, tx, p, project, in)
+		return err
+	})
+	return q, replay, err
+}
+
+// AskTx creates/replays through the same question authority in the caller's
+// transaction. Call before appending any event; acquire the tenant/tree fence
+// before other resources. It does not grant human decision authority.
+func (m *Module) AskTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, project string, in Input) (Question, bool, error) {
+	var q Question
+	replay := false
+	if err := in.Validate(); err != nil {
+		return q, false, err
+	}
 	hash, body, err := digest(in)
 	if err != nil {
 		return q, false, err
 	}
-	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err = func() error {
 		if err := treeLock(ctx, tx, p.TenantID); err != nil {
 			return err
 		}
@@ -224,9 +241,10 @@ func (m *Module) ask(ctx context.Context, p tenant.Principal, project string, in
 		}
 		q, err = m.read(ctx, tx, p, id)
 		return err
-	})
+	}()
 	return q, replay, err
 }
+
 func (m *Module) get(ctx context.Context, p tenant.Principal, id string) (Question, error) {
 	var q Question
 	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error { var err error; q, err = m.read(ctx, tx, p, id); return err })
