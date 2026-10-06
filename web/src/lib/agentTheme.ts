@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import type { ActiveTheme } from './themes.ts'
 import type { AgentIndicatorStyle, IndicatorRing } from './indicatorVariants.ts'
 import type { AgentPalette } from './agentPalettes.ts'
+import { publishTheme, resetTheme } from './themeRuntime.ts'
 
 export interface AgentThemeAppearance {
   avatar: AgentIndicatorStyle; ring: IndicatorRing | null; hover: boolean; size: number | null; palette: AgentPalette
@@ -23,6 +24,7 @@ export function registerAgentThemeRestoration(restore: (identity: string) => Pro
 }
 export function resetAgentTheme(identity = '') {
   epoch++; person = identity; agentTheme.value = null; agentThemeBound.value = true
+  resetTheme(identity)
 }
 export function installAgentTheme(value: AgentThemeAppearance) {
   agentTheme.value = { ...value }
@@ -33,8 +35,7 @@ export function installAgentTheme(value: AgentThemeAppearance) {
 // reset, never reaches the runtime.
 export function publishAgentTheme(identity: string, active: ActiveTheme) {
   if (!identity || identity !== person) return false
-  installAgentTheme(active.theme.values.agents)
-  return true
+  return publishTheme(identity, active)
 }
 export async function restoreAgentTheme(identity: string) {
   if (person !== identity) resetAgentTheme(identity)

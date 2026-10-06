@@ -638,6 +638,20 @@
     ,
     "browser:tests/theme-agents.spec.ts:visible screenshots and Personal agent behaviour controls stay stable in all viewport modes"
     ,
+    "browser:tests/theme-settings.spec.ts:Theme settings 1024 dark: preview, derived colours, marker and overlay stay still"
+    ,
+    "browser:tests/theme-settings.spec.ts:Theme settings 1024 light: preview, derived colours, marker and overlay stay still"
+    ,
+    "browser:tests/theme-settings.spec.ts:Theme settings 1440 dark: preview, derived colours, marker and overlay stay still"
+    ,
+    "browser:tests/theme-settings.spec.ts:Theme settings 1440 light: preview, derived colours, marker and overlay stay still"
+    ,
+    "browser:tests/theme-settings.spec.ts:Theme settings 390 dark: preview, derived colours, marker and overlay stay still"
+    ,
+    "browser:tests/theme-settings.spec.ts:Theme settings 390 light: preview, derived colours, marker and overlay stay still"
+    ,
+    "browser:tests/theme-settings.spec.ts:derived contrast preserves chosen colours and staged edits apply only after Save"
+    ,
     "browser:tests/webcore-recovery.spec.ts:a 2051-event access history shows its newest revocation and accurately reports the bounded window"
     ,
     "browser:tests/webcore-recovery.spec.ts:knowledge keeps a failed second query visibly stale, with retry and the previous query named"
@@ -745,12 +759,6 @@
     "node:tests/test-tier-failures.test.ts:failed Go jsonl names the package and test with the last 40 lines in logs and summary"
     ,
     "node:tests/test-tier-failures.test.ts:native planning regression reuses one collected snapshot for unchanged-tree CLI checks"
-    ,
-    "node:tests/theme-colours.test.ts:Suggest changes failing shades, keeps readable shades, hue and saturation"
-    ,
-    "node:tests/theme-colours.test.ts:contrast uses WCAG luminance and both actual preview card surfaces"
-    ,
-    "node:tests/theme-colours.test.ts:derived dark retains the hue and produces a legible shade"
     ,
     "node:tests/work-aggregates.test.ts:fractional progress rounded by the formatter to 100% retains ETA and staleness in every mode"
     ,
@@ -9840,6 +9848,8 @@
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"editable metadata cannot invent ticket provenance or a source-edit action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"extreme primary accents keep recurrence glyphs readable without moving controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"moved ticket provenance and source editing use the receipt source project despite spoofed metadata","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"option B has a stable 22 px slot and header at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -11382,19 +11392,17 @@
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"New theme duplicates the default even on a later list page; managers may edit it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Suggest touches only a failing mode and warnings never block Save","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1024 dark: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1024 dark: preview, Suggest, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1024 light: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1024 light: preview, Suggest, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1440 dark: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1440 dark: preview, Suggest, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1440 light: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1440 light: preview, Suggest, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 390 dark: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 390 dark: preview, Suggest, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 390 light: preview, Suggest, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 390 light: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"consecutive record conflicts retain active recovery through pagination (1024 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11420,7 +11428,17 @@
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"delete confirmation stays still through a conflict and needs reconfirming after Reload (390 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"derived contrast preserves chosen colours and staged edits apply only after Save","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"duplication conflict keeps its banner and Reload through pagination","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"extreme primary accents keep open ticket chip readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"extreme primary accents keep public quote action readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"extreme primary accents keep setup progress readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"extreme primary accents keep unread badge readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"failed Save (409) retains edits and does not report success","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11445,6 +11463,16 @@
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"platform submit shortcut closes the picker and saves an in-place name","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"save preserves Agents, manual dark and derived reset; invalid hex never writes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents keep Decision Desk action readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents keep Decision Desk pagination readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents keep Decision Desk text readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents keep ordinary and Markdown links readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents retain visible keyboard focus without moving controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"selection after a deletion conflict restores editable Colours and Save","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13520,11 +13548,23 @@
     ,
     {"kind":"node","file":"tests/text-glyphs.test.ts","name":"the guard catches what it is meant to catch","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/theme-colours.test.ts","name":"Suggest changes failing shades, keeps readable shades, hue and saturation","tier":"NIGHTLY"}
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"5000 deterministic colours satisfy ink, line and fill-label contrast in both modes","tier":"ESSENTIAL"}
     ,
-    {"kind":"node","file":"tests/theme-colours.test.ts","name":"contrast uses WCAG luminance and both actual preview card surfaces","tier":"NIGHTLY"}
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"OKLCH round trips sRGB and maps excessive chroma without changing hue","tier":"ESSENTIAL"}
     ,
-    {"kind":"node","file":"tests/theme-colours.test.ts","name":"derived dark retains the hue and produces a legible shade","tier":"NIGHTLY"}
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"Porcelain generated accent blocks cannot drift from the engine in CI","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"WCAG contrast measures the rounded hex and actual card surfaces","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"automatic dark mirrors lightness and fixes the unchanged green regression","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"first-paint bootstrap restores derived CSS before app startup with its CSP nonce","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"first-paint bootstrap tolerates unavailable storage and rejects corrupt, oversized or unsafe CSS","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"keyboard focus is a solid contrast-safe ring for extreme primary accents","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"token aliases follow both accents and every marker source without theming semantic colours","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"a numeric cost in the payload is unknown, not displayed","tier":"GATED-FULL"}
     ,
@@ -19119,6 +19159,16 @@
     {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"a newer restoration owns runtime and editor in both response orders: editor first","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"a newer restoration owns runtime and editor in both response orders: restoration first","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-runtime.unit.test.ts","name":"another authenticated person and sign-out clear boot CSS and cache synchronously","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/theme-runtime.unit.test.ts","name":"blocked browser storage never stops application or identity resets","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/theme-runtime.unit.test.ts","name":"first authenticated restore keeps matching first-paint CSS until the server answers","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/theme-runtime.unit.test.ts","name":"late answers from a previous tenant or person cannot change CSS, cache or agent appearance","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/theme-runtime.unit.test.ts","name":"one runtime writer updates CSS and agent appearance and caches only owner plus derived CSS","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/themes-api.unit.test.ts","name":"client sends complete values, nullable derivation and captured CAS without altering Agents","tier":"NIGHTLY"}
     ,

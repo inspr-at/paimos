@@ -2,11 +2,13 @@
 import { test, expect, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, me, watchErrors } from './work-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { NodeRecurrence } from '../src/lib/api'
 import type { Recurrence } from '../src/lib/recurrences'
+import { colourContrast, PORCELAIN } from '../src/lib/themeEngine'
+import type { ThemeRecord } from '../src/lib/themes'
 
 const id = '63700000-0000-4000-8000-000000000001'
 const provenance: NodeRecurrence = { id, project_id: 'p-pharos', project_key: 'PRJ-17', number: 4, retired: false, trigger: { kind: 'time', rrule: 'FREQ=WEEKLY;BYDAY=MO', time_of_day: '09:00', timezone: 'Europe/Vienna' } }
@@ -35,6 +37,46 @@ async function setup(page: Page, manage = true, locale = 'en-GB') {
   })
   return { data, errors, calls, recurrenceReads }
 }
+
+test('extreme primary accents keep recurrence glyphs readable without moving controls', async ({ page }, testInfo) => {
+  const { errors } = await setup(page, true, 'de-AT')
+  const theme: ThemeRecord = { id: 'recurrence-contrast', name: 'Recurrence contrast', scope: 'personal', tenant_id: 't1', owner_principal_id: me.id, revision: 1, created_at: '', updated_at: '',
+    values: { ...PORCELAIN, primary: { light: '#ffffff', dark: '#000000' } } }
+  await page.route('**/api/themes?*', route => route.fulfill({ json: { items: [theme], next_cursor: null } }))
+  await page.route('**/api/me/theme', route => route.fulfill({ json: { theme, default_theme_id: 'default', selected_theme_id: theme.id, revision: 1, fallback_notice: null } }))
+  await page.goto('/p/PHAROS?sort=key&group=none')
+  await expect.poll(() => page.locator('#aeon-theme').textContent()).toContain('--primary: #000000;')
+  const icon = row(page).locator('.ticket-type-icon'), marker = icon.locator('.recurrence-dot'), glyph = marker.locator('svg')
+  for (const width of [390, 1024, 1440]) for (const mode of ['dark', 'light'] as const) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(mode => { document.documentElement.dataset.theme = mode }, mode)
+    await expect(glyph).toBeVisible()
+    const rendered = await glyph.evaluate(el => {
+      const rgba = (value: string) => {
+        const canvas = document.createElement('canvas')
+        canvas.width = canvas.height = 1
+        const context = canvas.getContext('2d', { willReadFrequently: true })!
+        context.fillStyle = value
+        context.fillRect(0, 0, 1, 1)
+        const channels = Array.from(context.getImageData(0, 0, 1, 1).data)
+        return { hex: '#' + channels.slice(0, 3).map(channel => channel.toString(16).padStart(2, '0')).join(''), alpha: channels[3] }
+      }
+      const style = getComputedStyle(el), background = getComputedStyle(el.parentElement!).backgroundColor
+      return { stroke: rgba(style.stroke), fill: rgba(background), gold: rgba(style.getPropertyValue('--gold').trim()) }
+    })
+    expect(rendered.stroke.alpha).toBe(255)
+    expect(rendered.fill.alpha).toBe(255)
+    expect(rendered.fill).toEqual(rendered.gold)
+    expect(colourContrast(rendered.stroke.hex, rendered.fill.hex), `${width} ${mode}: recurrence glyph on its gold fill`).toBeGreaterThanOrEqual(3)
+    await expectStableControls({
+      controls: { 'type slot': icon, 'recurrence marker': marker, 'ticket title': row(page).locator('.title-link'), 'clicked row': row(page) },
+      interactions: [{ name: 'hover marker', run: () => icon.hover() }, { name: 'keyboard focus marker', run: () => icon.focus() }],
+      scrollAreas: { list: page.locator('.table-card') },
+    })
+    await page.screenshot({ path: testInfo.outputPath(`recurrence-contrast-${width}-${mode}.png`) })
+  }
+  expect(errors).toEqual([])
+})
 
 test.describe('touch permission changes', () => {
   test.use({ hasTouch: true })
