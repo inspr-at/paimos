@@ -11326,21 +11326,27 @@
     ,
     {"kind":"browser","file":"tests/state-colours.spec.ts","name":"saved thresholds load before sessions can flash a default heartbeat warning","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"250 attention ticket pills stay steady for 3 seconds with bounded lookups","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"Show all opens the automatic changes in workspace Activity","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"approved rules, master switch, validation, inheritance and audited Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"a save finishing after session expiry cannot update controls or offer Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"light, dark and narrow settings evidence beside the approved fragment","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"adding overrides to a full page keeps every override reachable through the pages","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"large queues become five exact counts and filtered links, with only five latest changes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"members have no workspace autopilot controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"owner explicitly confirms upgrade while server Suggest remains the cap","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"picker pages are reachable with arrow keys alone","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"project picker searches inheriting projects, adds the opposite value and restores a removed override with Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"rules validate and save, master off disables all seven, and latest Undo stays audited","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"stale setting writes explain recovery and keep the saved limits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"ticket Activity shows the autopilot reason, automatic filter and guarded Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
-    ,
-    {"kind":"browser","file":"tests/status-autopilot.spec.ts","name":"upgrade proposals offer Apply and Dismiss while stale proposals stay guarded","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/status-buckets.spec.ts","name":"card and header count open, blocked and unknown work at 390 and 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

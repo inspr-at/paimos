@@ -24,7 +24,7 @@ func TestSharedFenceCallerInventory(t *testing.T) {
 		"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
 		"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go"},
 		"agentpairing.LockMutation": {"agentaccounts/module.go", "agentpairing/module.go", "agentruns/queue.go", "auth/owner_workstation.go", "harness/agent_recovery.go", "harness/module.go", "modelprovider/settings.go", "parentbenefits/module.go", "portal/market.go", "portal/moderate.go", "portal/module.go", "portal/products.go"},
-		"authz.LockProjectMutation": {"authz/agent_creation.go", "authz/members.go", "authz/project_members.go", "importer/users_backfill.go", "importer/writer.go"},
+		"authz.LockProjectMutation": {"authz/agent_creation.go", "authz/members.go", "authz/project_members.go", "importer/users_backfill.go", "importer/writer.go", "statusautopilot/settings.go"},
 		"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "events/causal_undo.go", "events/module.go", "harness/lead_decisions.go", "knowledge/learnings.go", "nodes/causal_undo.go", "nodes/portal_publish.go", "themes/store.go", "themes/undo.go"},
 		"operatoractor.Ensure":      {"auth/store.go", "authz/operator.go", "operatoractor/actor.go"},
 		"rules.PrepareWrite":        {"knowledge/learning_draft.go"},
@@ -111,6 +111,12 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"../knowledge/learnings.go", "acceptLearning", "lockNode(", "events.Append("},
 		{"../knowledge/learnings.go", "dismissLearning", "fenceLearningWrite(", "lockLearning("},
 		{"../knowledge/learnings.go", "dismissLearning", "lockLearning(", "events.Append("},
+		// Autopilot settings and project overrides (AEON-696) enter the shared
+		// project fence before the settings row; the event is appended after it.
+		{"../statusautopilot/settings.go", "settings", "authz.LockProjectMutation(", "INSERT INTO status_autopilot_settings"},
+		{"../statusautopilot/settings.go", "settings", "INSERT INTO status_autopilot_settings", "events.Append("},
+		{"../statusautopilot/settings.go", "project", "authz.LockProjectMutation(", "INSERT INTO status_autopilot_projects"},
+		{"../statusautopilot/settings.go", "project", "INSERT INTO status_autopilot_projects", "events.Append("},
 	}
 	for _, c := range checks {
 		raw, err := os.ReadFile(c.path)
@@ -134,4 +140,33 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 			t.Errorf("%s.%s must acquire %s before %s", c.path, c.fn, c.first, c.second)
 		}
 	}
+	// The first admin check is before the fence. The revocation re-check is the
+	// admin call that remains after LockProjectMutation.
+	for _, fn := range []string{"settings", "project"} {
+		body := functionBody(t, "../statusautopilot/settings.go", fn)
+		lock := strings.Index(body, "authz.LockProjectMutation(")
+		if lock < 0 || !strings.Contains(body[lock:], "admin(") {
+			t.Errorf("statusautopilot.%s must re-check admin after LockProjectMutation", fn)
+		}
+	}
+}
+
+func functionBody(t *testing.T, path, name string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tree, err := parser.ParseFile(token.NewFileSet(), path, raw, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, decl := range tree.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == name {
+			return string(raw[int(fn.Pos())-1 : int(fn.End())-1])
+		}
+	}
+	t.Fatalf("%s missing function %s", path, name)
+	return ""
 }
