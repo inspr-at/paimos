@@ -34,6 +34,11 @@ type Remote struct {
 	mu                   sync.RWMutex
 	daemonID, generation string
 	accountLinkProof     string
+	// Host capacity is negotiated from the server's own computer view; see
+	// hostCapacitySupported. now is injectable for tests.
+	hostCapacitySupport   int8
+	hostCapacityCheckedAt time.Time
+	now                   func() time.Time
 }
 
 func NewRemote(baseURL, token string) *Remote {

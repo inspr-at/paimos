@@ -118,6 +118,28 @@ export function balanceShards(manifest, count, { all = false } = {}) {
     shard.specs.push(spec)
     shard.weightSeconds += spec.weightSeconds
   }
+  // LPT can leave avoidable peaks when independent branches add specs. Refine
+  // its result with deterministic swaps, keeping every weight and group intact.
+  // Each swap strictly reduces the pair's peak; cap work at one pass per shard.
+  for (let pass = 0; pass < count; pass++) {
+    const from = shards.reduce((best, candidate) => candidate.weightSeconds > best.weightSeconds ? candidate : best)
+    let best, peak = from.weightSeconds
+    for (const to of shards) {
+      if (to === from) continue
+      for (let give = 0; give < from.specs.length; give++) {
+        for (let take = 0; take < to.specs.length; take++) {
+          const delta = from.specs[give].weightSeconds - to.specs[take].weightSeconds
+          const nextPeak = Math.max(from.weightSeconds - delta, to.weightSeconds + delta)
+          if (nextPeak < peak - 1e-9) { best = { to, give, take, delta }; peak = nextPeak }
+        }
+      }
+    }
+    if (!best) break
+    const { to, give, take, delta } = best
+    ;[from.specs[give], to.specs[take]] = [to.specs[take], from.specs[give]]
+    from.weightSeconds -= delta
+    to.weightSeconds += delta
+  }
   for (const shard of shards) shard.specs.sort((a, b) => compare(a.file, b.file))
   return shards
 }

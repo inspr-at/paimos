@@ -70,7 +70,7 @@ test('dates: presets stay relative, custom ranges include their last day, labels
 test('a saved view is the list state with a name; order of values is no change', () => {
   const filters = filtersFromQuery({ status: 'new,backlog', q: 'fleet', sort: 'priority,-updated_at', group: 'status', cols: 'status,assignee', closed: '1' })
   const shape = viewShape(filters)
-  assert.deepEqual(shape, { filters: { q: 'fleet', status: 'new,backlog', closed: '1' }, sort_keys: ['priority', '-updated_at'], group_by: 'status', columns: ['status', 'assignee'] })
+  assert.deepEqual(shape, { filters: { q: 'fleet', status: 'new,backlog', closed: '1' }, sort_keys: ['priority', '-updated_at'], group_by: 'status', columns: ['key', 'title', 'status', 'assignee'], mode: 'list' })
   const back = filtersFromView({ id: '11111111-aaaa-4aaa-8aaa-000000000001', ...shape })
   assert.equal(back.view, '11111111-aaaa-4aaa-8aaa-000000000001')
   assert.ok(sameListState(back, filters))
@@ -134,4 +134,22 @@ test('the palette offers a project’s views by name, after recent work and befo
   assert.deepEqual(empty.map(g => g.id), ['views', 'actions'])
   const typed = assemble('bugs', { recent: [], tickets: [], projects: [], actions: [], views: viewResults('bugs', views) })
   assert.deepEqual(typed.map(g => g.id), ['views'])
+})
+
+// AEON-718 regression: modes are saved even for List, and a pinned-only choice
+// remains explicit rather than falling back to the person's columns.
+test('saved views retain each mode and an explicit pinned-only column choice', () => {
+  for (const mode of ['list', 'outline', 'graph'] as const) {
+    const filters = filtersFromQuery({ view: mode, cols: 'key,title', priority: 'high' })
+    const shape = viewShape(filters)
+    assert.equal(shape.mode, mode)
+    assert.deepEqual(shape.columns, ['key', 'title'])
+    assert.equal(shape.filters.view, undefined)
+    const reopened = filtersFromView({ id: '11111111-aaaa-4aaa-8aaa-000000000001', ...shape })
+    assert.equal(reopened.mode, mode)
+    assert.deepEqual(reopened.cols, [])
+    assert.equal(sameListState(filters, reopened), true)
+    assert.equal(sameListState({ ...reopened, mode: mode === 'list' ? 'graph' : 'list' }, reopened), false)
+    assert.equal(sameListState({ ...reopened, cols: ['updated'] }, reopened), false)
+  }
 })

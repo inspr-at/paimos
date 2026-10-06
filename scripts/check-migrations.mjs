@@ -325,9 +325,34 @@ export function checkMigrations(files, published = new Map(), previousVersion = 
 }
 
 export function publishedMigrations(ref, directory = 'internal/db/migrations') {
-  const names = execFileSync('git', ['ls-tree', '--name-only', `${ref}:${directory}`], { encoding: 'utf8' }).trim().split('\n').filter(name => name.endsWith('.sql'));
-  if (!names.length) throw new Error('Published release has no migrations');
-  return new Map(names.map(name => [name, execFileSync('git', ['show', `${ref}:${directory}/${name}`], { encoding: 'utf8', maxBuffer: 10 << 20 })]));
+  // Resolve the tree once, then read its immutable blobs in one bounded batch.
+  // Per-file git show made historical-policy tests launch thousands of processes.
+  const tree = execFileSync('git', ['ls-tree', '-z', `${ref}:${directory}`], {
+    encoding: 'utf8', timeout: 30_000, maxBuffer: 10 << 20,
+  });
+  const files = tree.split('\0').filter(entry => entry.endsWith('.sql')).map(entry => {
+    const match = /^\d+ blob ([a-f0-9]{40,64})\t(.+)$/s.exec(entry);
+    if (!match) throw new Error('Published migration must be a blob');
+    return { hash: match[1], name: match[2] };
+  });
+  if (!files.length) throw new Error('Published release has no migrations');
+  const blobs = execFileSync('git', ['cat-file', '--batch'], {
+    input: files.map(file => file.hash).join('\n') + '\n', timeout: 30_000, maxBuffer: 64 << 20,
+  });
+  let offset = 0;
+  const result = new Map();
+  for (const file of files) {
+    const end = blobs.indexOf(10, offset);
+    const header = end < 0 ? null : /^([a-f0-9]{40,64}) blob (\d+)$/.exec(blobs.subarray(offset, end).toString('ascii'));
+    const size = Number(header?.[2]);
+    if (!header || header[1] !== file.hash || !Number.isSafeInteger(size) || size > (10 << 20) || end + 1 + size >= blobs.length || blobs[end + 1 + size] !== 10) {
+      throw new Error('Invalid published migration blob batch');
+    }
+    result.set(file.name, blobs.subarray(end + 1, end + 1 + size).toString('utf8'));
+    offset = end + 2 + size;
+  }
+  if (offset !== blobs.length) throw new Error('Unexpected published migration blob data');
+  return result;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
