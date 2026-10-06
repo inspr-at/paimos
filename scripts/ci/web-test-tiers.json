@@ -118,6 +118,8 @@
     ,
     "browser:tests/agents-cleanup.spec.ts:Queued folds per person, says what waits, and a run link opens it without changing the preference"
     ,
+    "browser:tests/agents-cleanup.spec.ts:a section preference that lands after a run link keeps Queued open until the person folds it"
+    ,
     "browser:tests/agents-dial.spec.ts:AEON-781: a dial folded before the fold sections stays folded"
     ,
     "browser:tests/agents-dial.spec.ts:AEON-781: a held + speeds up, pauses before a mode boundary and saves only the final value once"
@@ -135,6 +137,8 @@
     "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 390px"
     ,
     "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 390px with reported metadata"
+    ,
+    "browser:tests/agents-worker-tree.spec.ts:a live-line count and the menu History open a folded Sessions section without a preference write"
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1024"
     ,
@@ -5452,6 +5456,8 @@
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a runs read that started before account Remove does not bring its cancelled run back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a section preference that lands after a run link keeps Queued open until the person folds it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a stored folded choice opens folded, without a flash of the cards","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"account and capacity reads that started before computer Remove do not bring its account back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -5735,6 +5741,8 @@
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a deep problem marks every ancestor, folded parents name it, and arrow keys fold and walk the tree","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a lead with only stopped workers opens history only through its stopped count","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a live-line count and the menu History open a folded Sessions section without a preference write","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a stopped lead links its successor instead of claiming live workers","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -15619,6 +15627,8 @@
     {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a failed read is retried before a write; failures are reported, not hidden","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a new viewer starts from their own state; the old viewer’s queued write is dropped","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a reveal holds against a later preference read, ends on fold, and resets for a new viewer","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a toggle during the first read keeps the choice and never writes defaults over other sections","tier":"GATED-FULL"}
     ,
