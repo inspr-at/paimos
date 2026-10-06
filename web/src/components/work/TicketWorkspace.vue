@@ -52,6 +52,9 @@ import { openedMembershipMessage, releaseViewIsParent, type NativeReleaseView } 
 import ReleasePicker from './ReleasePicker.vue'
 import { useJourney } from '../../stores/journey'
 import QueueAction from './QueueAction.vue'
+import ParentQueueAction from './ParentQueueAction.vue'
+import TicketLeadLine from './TicketLeadLine.vue'
+import { useDeveloperSettings } from '../../lib/developerSettings'
 import WorkLifecycleSheet from './WorkLifecycleSheet.vue'
 import QueueDetails from './QueueDetails.vue'
 import QueueView from './QueueView.vue'
@@ -191,6 +194,11 @@ watch(() => props.project.id, id => { void queue.load(id) }, { immediate: true }
 onMounted(() => queuePoller.start())
 onBeforeUnmount(() => queuePoller.stop())
 const canQueue = computed(() => props.item?.is_leaf !== false && !ticket.readOnly.value && !ticket.gone.value && can('run.create', props.project.id))
+// AEON-741: a parent queues its open leaves; Start now on… is an expert control.
+const parentQueue = ref<InstanceType<typeof ParentQueueAction>>()
+const openLeaves = ref<number | null>(null)
+const canQueueParent = computed(() => props.item?.is_leaf === false && !ticket.readOnly.value && !ticket.gone.value && can('run.create', props.project.id))
+const { showExpertStart } = useDeveloperSettings()
 const canRelease = computed(() => editable.value && !!props.item && can('releases.write', props.project.id))
 const releaseView = computed(() => props.nativeReleases?.get(props.item?.id ?? ''))
 const journeys = useJourney()
@@ -590,10 +598,11 @@ function focus() { root.value?.focus({ preventScroll: true }) }
 function queueKey(event: KeyboardEvent) {
   const repeatTarget = event.target as HTMLElement | null
   if (event.key.toUpperCase() === 'R' && event.shiftKey && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey && !editing.value && !repeatTarget?.isContentEditable && !repeatTarget?.closest('input, textarea, select') && !document.querySelector('dialog[open], .floating') && mayRepeat.value) { event.preventDefault(); event.stopPropagation(); repeat(); return }
-  if (event.key !== 'q' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || editing.value || !queueAction.value || document.querySelector('.floating')) return
+  const action = queueAction.value ?? parentQueue.value
+  if (event.key !== 'q' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || editing.value || !action || document.querySelector('.floating')) return
   const target = event.target as HTMLElement | null
   if (target?.isContentEditable || target?.closest('input, textarea, select')) return
-  event.preventDefault(); event.stopPropagation(); void queueAction.value.toggle()
+  event.preventDefault(); event.stopPropagation(); void action.toggle()
 }
 defineExpose({
   el: root, focus, isDirty, discard,
@@ -603,7 +612,7 @@ defineExpose({
   startEdit, editing,
   openStatus: () => { const anchor = anchorFor('s'); if (anchor && editable.value) emit('status', anchor) },
   openPriority: () => openMenu('priority', anchorFor('p')),
-  toggleQueue: () => queueAction.value?.toggle(),
+  toggleQueue: () => (queueAction.value ?? parentQueue.value)?.toggle(),
   openAssignee: () => openMenu('assignee', anchorFor('a')),
   openRelease: () => openMenu('release', anchorFor('g')),
   openLink: () => openLink(anchorFor('r')),
@@ -630,7 +639,7 @@ defineExpose({
       @edit-recurrence="editRecurrence"
       @work-actions="workActionsOpen = true"
     >
-      <template #queue><QueueAction v-if="item && canQueue" ref="queueAction" :row="item" :project-id="project.id" label /></template>
+      <template #queue><QueueAction v-if="item && canQueue" ref="queueAction" :row="item" :project-id="project.id" label /><ParentQueueAction v-else-if="item && canQueueParent" ref="parentQueue" :row="item" :project-id="project.id" @preview="count => openLeaves = count" /></template>
       <template v-if="item?.recurrence" #marker><RecurringPill :recurrence="item.recurrence" /></template>
     </TicketHeaderBar>
     <p class="sr-only" role="status" aria-live="polite">{{ ticket.liveMessage.value }}</p>
@@ -703,6 +712,7 @@ defineExpose({
         <div class="ws-main">
           <p v-if="!editable" class="read-only" role="note"><AppIcon name="alert" :size="13" />You can read this {{ workNoun(workLabel(item, vocabulary.value)) }} but not change it.</p>
           <InlineTitle :record-id="item.id" ref="title" :class="{ 'live-tint': liveTint.title }" :value="item.title" :editable="editable" :large="mode === 'full'" :save="record.setTitle" />
+          <TicketLeadLine :item="item" :project-id="project.id" :project-key="project.routeKey" :open-leaves="item.is_leaf === false ? openLeaves : null" />
           <TicketProperties
             class="ws-props" :class="{ 'only-narrow': mode === 'full', 'live-tint': liveTint.props }" :item="item" :editable="editable" layout="row" :now="now"
             :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate" :save-placement="fields => ticket.patch({ fields })" :queue-editable="canQueue" :queue-entry="queueEntry"
@@ -713,7 +723,7 @@ defineExpose({
             <QueueDetails :entry="queueEntry" :manual="queue.snapshots[project.id]?.manual_order" />
             <div class="q-card-acts">
               <button v-if="!queueEntry.target_agent_id" type="button" class="btn sm" :disabled="!canQueue || queue.busy || queue.firstShared(project.id)?.ticket_id === item.id" @click="queue.move(project.id, item.id, 'top').catch(e => toast(e.message, { tone: 'error' }))"><AppIcon name="to-top" :size="13" />Move to top</button>
-              <button v-if="item.is_leaf !== false" type="button" class="btn sm" :disabled="!canQueue" @click="openMenu('assignee', $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="12" />Start now on…</button>
+              <button v-if="item.is_leaf !== false && showExpertStart" type="button" class="btn sm" :disabled="!canQueue" @click="openMenu('assignee', $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="12" />Start now on…</button>
               <button type="button" class="btn sm ghost" :disabled="!canQueue || queue.busy" @click="queue.remove(project.id, item.id).catch(e => toast(e.message, { tone: 'error' }))"><AppIcon name="close" :size="13" />Remove</button>
               <button type="button" class="btn sm ghost" @click="queueAnchor = $event.currentTarget as HTMLElement"><AppIcon name="queue" :size="13" />Open the queue</button>
             </div>

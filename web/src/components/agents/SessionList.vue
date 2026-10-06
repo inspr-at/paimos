@@ -49,7 +49,7 @@ const serviceTiers = useServiceTiers()
 // opt-in for this mounted list only; refreshes never open it or persist it.
 const props = defineProps<{
   history?: SessionView[]; historyState?: 'idle' | 'loading' | 'ready' | 'error'; historyMore?: boolean; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
-  loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean
+  loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean; canLead?: boolean
 }>()
 const agentRecovery = useAgentRecovery()
 const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: [] }>()
@@ -419,7 +419,7 @@ defineExpose({ toggleHistory, menuHistory, reveal })
       <div v-for="i in 5" :key="i" class="sk-row"><span class="skeleton dot" /><span class="skeleton" :style="{ width: `${18 + (i * 7) % 16}%` }" /><span class="skeleton key" /><span class="skeleton" style="width: 12%" /></div>
     </div>
     <p v-else-if="showRemoved && !removedCount" class="state" :role="historyState === 'error' ? 'alert' : undefined">{{ historyState === 'loading' ? 'Loading history…' : historyState === 'error' ? 'History could not be loaded.' : 'No ended sessions yet.' }}</p>
-    <ConnectHint v-else-if="!total && !showRemoved" :can-start="canStart" @start="emit('start')" />
+    <ConnectHint v-else-if="!total && !showRemoved" :can-start="canStart" :can-lead="canLead" @start="emit('start')" />
 
     <div v-else ref="table" class="table" :class="{ 'has-eta': hasEta }" role="treegrid" :aria-label="showRemoved ? 'Ended sessions' : 'Agent sessions'" @keydown="treeKey">
       <div class="thead" role="row">

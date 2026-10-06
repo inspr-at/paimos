@@ -32,7 +32,7 @@ for (const width of [1440, 1024, 390]) {
     await page.goto('/agents')
     const header = page.locator('.agents-page .page-head')
     const more = header.getByRole('button', { name: 'More agent actions', exact: true })
-    const add = header.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })
+    const add = header.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })
     await expectStableControls({
       controls: { more, add },
       interactions: [{ name: 'open merged navigation', run: async () => {
