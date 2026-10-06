@@ -142,15 +142,23 @@ start_app() {
 start_app prod
 SMOKE_BASE="$base" python3 - <<'PY'
 import os
+import re
 import urllib.request
 u = os.environ['SMOKE_BASE']
-with urllib.request.urlopen(u + '/') as response:
-    assert response.status == 200
-    assert response.headers['Content-Security-Policy'] == "default-src 'self'; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
-    assert response.headers['X-Content-Type-Options'] == 'nosniff'
-    assert response.headers['X-Frame-Options'] == 'DENY'
-    assert response.headers['Referrer-Policy'] == 'no-referrer'
-    assert b'<html' in response.read().lower()
+base_csp = "default-src 'self'; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+spa_csp = re.compile(re.escape(base_csp) + r"; script-src 'self' 'nonce-([A-Za-z0-9+/_-]+={0,2})'; style-src 'self' 'nonce-\1'")
+nonces = set()
+for _ in range(2):
+    with urllib.request.urlopen(u + '/') as response:
+        assert response.status == 200
+        match = spa_csp.fullmatch(response.headers['Content-Security-Policy'])
+        assert match, 'unexpected SPA Content-Security-Policy'
+        assert match.group(1) not in nonces, 'SPA CSP nonce reused across requests'
+        nonces.add(match.group(1))
+        assert response.headers['X-Content-Type-Options'] == 'nosniff'
+        assert response.headers['X-Frame-Options'] == 'DENY'
+        assert response.headers['Referrer-Policy'] == 'no-referrer'
+        assert b'<html' in response.read().lower()
 print('prod: embedded web and security headers OK')
 PY
 docker container rm -f "$app" >/dev/null
