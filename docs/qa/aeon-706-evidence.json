@@ -272,5 +272,68 @@
       "Focused macOS Chromium evidence only. CI-equivalent Linux Chromium, full just test/build/unit/browser suites and consolidated release review remain coordinator gates.",
       "Local commit only; no pushes, deploys, production access, model review gates, destructive git or changes outside this worktree."
     ]
+  },
+  "merge_main_round": {
+    "baseline": "f50c641001ed928bd79e2576cc53b0a0d2f824d7",
+    "reviewed_head": "fe24ee58ca209c7377dcde3002e96d2f8610d52b",
+    "main": "ce67524cf904525ead694170ba6c4d841a40687f",
+    "merge": "Newest origin/main was already the second parent of coordinator merge f50c64100. git merge origin/main -m \"AEON-706: merge main\" reported Already up to date; no redundant merge or feature change.",
+    "ownership": "Verified ppm tenant INSPR / workstation-agents, gh markus-barta, assigned branch and coordinator worker markers on AEON-706. Ticket status and release gates remain coordinator-owned.",
+    "audit": [
+      "Inspected all 12 files in the coordinator merge. Main-only files match main exactly; both branch supplied-inventory behavior and main cached native collection behavior remain in the overlapping planner and test files.",
+      "All three manifests exactly match the semantic three-way merge of both parents and their common base. Canonical formatting and unique identities checked; no dropped or duplicated rows.",
+      "Reviewed plan source, owner/picker unit regressions and journey/release-picker specs are unchanged from gated head fe24ee58c. No OpenAPI or migration edits, migration collisions or version changes."
+    ],
+    "validation": [
+      {
+        "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+        "result": "169 passed; includes manifest and standalone merge-driver parity regressions."
+      },
+      {
+        "command": "node --test web/scripts/aeon-681-ci.test.mjs",
+        "result": "7 passed; supplied-inventory reuse, native gate/selector coverage and main collect-once regression all pass. Existing unrelated unclassified native cases warn; no classifications changed."
+      },
+      {
+        "command": "node --test web/scripts/ci-web-shard.test.mjs",
+        "result": "25 passed, including strict Settings registration validation."
+      },
+      {
+        "command": "GOTOOLCHAIN=local GOMAXPROCS=2 go test -p 2 ./internal/reportercontract/ -count=1",
+        "result": "passed; the single small local Go package permitted by worker-common. Includes main response-description regression and OpenAPI pins/property checks."
+      },
+      {
+        "command": "node --test scripts/check-migrations.test.mjs",
+        "result": "33 passed."
+      },
+      {
+        "command": "node scripts/check-migrations.mjs --base-ref v261005070923.0.0",
+        "result": "passed: 266 unique migration numbers; immutable published/grandfathered/exception files retained. Base verified as a published non-draft, non-prerelease via gh release view."
+      },
+      {
+        "command": "node scripts/test-tiers/cli.mjs manifests --check",
+        "result": "passed; all three manifests canonical."
+      },
+      {
+        "command": "python3 -B -m unittest discover -s scripts/audit",
+        "result": "33 passed."
+      },
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/plan-owner.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "result": "28 passed."
+      },
+      {
+        "command": "node node_modules/vitest/vitest.mjs run tests/existing-ticket-picker.unit.test.ts --maxWorkers=1 --no-fileParallelism --retry=0",
+        "result": "19 passed."
+      },
+      {
+        "command": "git fetch origin main; git merge-base --is-ancestor origin/main HEAD; git diff --check",
+        "result": "passed; final fetch still resolves ce67524cf, included by coordinator merge f50c64100."
+      }
+    ],
+    "limits": [
+      "The direct user instruction forbids pushes. remote-test.sh and ci-static-locked.sh/ci-static-remote.sh push temporary refs, so neither was invoked. Worker-common also forbids full local Go/static fallback; full node scripts/ci-static.mjs --merge-main and remote/hosted CI remain unverified coordinator gates. No claim that the full static gate is green.",
+      "Focused local checks only. Browser execution/full suites remain coordinator gates; no layout or browser geometry claims.",
+      "No pushes, deployments, production access, model reviews, ticket-status changes, hook bypasses or amendments."
+    ]
   }
 }
