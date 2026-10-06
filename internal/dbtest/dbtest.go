@@ -406,3 +406,31 @@ func randomIdent(prefix string) string {
 	}
 	return prefix + hex.EncodeToString(b[:])
 }
+
+// KeyPerson gives fixture keys an explicit person creator. Prefer the fixture's
+// existing workspace owner; an otherwise personless fixture gets its own owner.
+func KeyPerson(t testing.TB, pool *pgxpool.Pool, tenantID string) string {
+	t.Helper()
+	var id string
+	err := db.InTenant(Seed(t.Context()), pool, tenantID, func(tx pgx.Tx) error {
+		err := tx.QueryRow(t.Context(), `SELECT p.id::text FROM principals p
+   JOIN role_bindings b ON b.tenant_id=p.tenant_id AND b.principal_id=p.id AND b.scope_type='workspace'
+   JOIN roles r ON r.tenant_id=b.tenant_id AND r.id=b.role_id
+   WHERE p.tenant_id=$1::uuid AND p.kind='person' AND p.status='active' AND r.key IN ('owner','admin')
+   ORDER BY (r.key='owner') DESC,p.created_at,p.id LIMIT 1`, tenantID).Scan(&id)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'person','Key fixture owner','{super_admin}') RETURNING id::text`, tenantID).Scan(&id); err != nil {
+			return err
+		}
+		return BindLegacyTx(t.Context(), tx, tenantID, id)
+	})
+	if err != nil {
+		t.Fatalf("key fixture person: %v", err)
+	}
+	return id
+}

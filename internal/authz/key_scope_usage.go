@@ -19,6 +19,14 @@ func LockKeyScopeUseTx(ctx context.Context, tx pgx.Tx, tenantID, keyID string) e
 	return db.LockKeyScopeUseTx(ctx, tx, tenantID, keyID)
 }
 
+func validateKeyCreatorTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+	if err := db.ValidateKeyCreatorTx(ctx, tx, p); errors.Is(err, db.ErrKeyAuthorityChanged) {
+		return ErrForbidden
+	} else {
+		return err
+	}
+}
+
 func recordKeyScopeUseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string) error {
 	if p.Kind != tenant.Agent || p.KeyID == "" {
 		return nil // internal principals without an authenticating key
@@ -30,8 +38,9 @@ func recordKeyScopeUseTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, per
 	// takes no key row lock; the usage fence, shared with trims, is authoritative.
 	var scopes []string
 	err := tx.QueryRow(ctx, `SELECT scopes FROM agent_keys WHERE tenant_id=$1::uuid AND id=$2::uuid
-	 AND principal_id=$3::uuid AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())`,
-		p.TenantID, p.KeyID, p.ID).Scan(&scopes)
+	 AND principal_id=$3::uuid AND created_by_principal_id IS NOT DISTINCT FROM NULLIF($4,'')::uuid
+	 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp())`,
+		p.TenantID, p.KeyID, p.ID, p.KeyCreatorID).Scan(&scopes)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrForbidden
 	}

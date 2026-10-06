@@ -121,7 +121,7 @@ func newCatalogFixture(t *testing.T, complete bool, cold ...bool) *fixture {
 	prefix, secret := strings.ReplaceAll(tid, "-", "")+strings.ReplaceAll(testID(), "-", "")[:16], testID()
 	sum := sha256.Sum256([]byte(secret))
 	f.tx(t, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'review fixture',$3,$4,$5)`, tid, f.agent.ID, prefix, hex.EncodeToString(sum[:]), f.agent.Scopes)
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'review fixture',$3,$4,$5,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, tid, f.agent.ID, prefix, hex.EncodeToString(sum[:]), f.agent.Scopes)
 		return err
 	})
 	f.token = "aeon_" + prefix + "_" + secret

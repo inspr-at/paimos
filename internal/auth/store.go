@@ -479,6 +479,7 @@ func (m *Module) authenticateAgent(ctx context.Context, prefix, secret string) (
 }
 
 type keyRecord struct {
+	CreatedByPrincipalID  *string
 	OwnerWorkstation      bool
 	WorkstationComputerID *string
 	ID                    string
@@ -519,6 +520,24 @@ func (m *Module) issueAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princi
 	}
 	var rec keyRecord
 	err := func() error {
+		creatorID := p.ID
+		if p.ID == "" || authz.OwnerWorkstation(p) {
+			creatorID = p.KeyCreatorID
+		}
+		if creatorID == "" {
+			return authz.ErrForbidden
+		}
+		var tenantLock string
+		if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, p.TenantID).Scan(&tenantLock); err != nil {
+			return err
+		}
+		var person bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals WHERE tenant_id=$1::uuid AND id=$2::uuid AND kind='person' AND status='active')`, p.TenantID, creatorID).Scan(&person); err != nil {
+			return err
+		}
+		if !person {
+			return authz.ErrForbidden
+		}
 		actorID := p.ID
 		if actorID == "" {
 			var err error
@@ -527,10 +546,6 @@ func (m *Module) issueAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princi
 				return err
 			}
 		} else {
-			var tenantLock string
-			if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR UPDATE`, p.TenantID).Scan(&tenantLock); err != nil {
-				return err
-			}
 			if p.Kind != tenant.Person && !authz.OwnerWorkstation(p) {
 				return authz.ErrForbidden
 			}
@@ -635,21 +650,10 @@ func (m *Module) issueAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princi
 			}
 			var id string
 			var created time.Time
-			// This column caps HTTP-created keys by the creator's live
-			// permissions. Operator keys have no human creator ceiling.
-			var creator any
-			if p.ID != "" {
-				creator = p.ID
-				if authz.OwnerWorkstation(p) {
-					if p.KeyCreatorID == "" {
-						return authz.ErrForbidden
-					}
-					creator = p.KeyCreatorID
-				}
-			}
+			creator := creatorID
 			err = tx.QueryRow(ctx, `
-				INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes, expires_at, created_by_principal_id)
-				VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::uuid)
+				INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes, expires_at, created_by_principal_id, person_owner_required)
+				VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::uuid, true)
 				RETURNING id::text, created_at
 			`, p.TenantID, principalID, name, prefix, hash, scopes, expires, creator).Scan(&id, &created)
 			if isUnique(err) {
@@ -665,14 +669,15 @@ func (m *Module) issueAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princi
 				return err
 			}
 			rec = keyRecord{
-				ID:          id,
-				PrincipalID: principalID,
-				Name:        name,
-				Prefix:      prefix,
-				Scopes:      scopes,
-				CreatedAt:   created,
-				ExpiresAt:   expires,
-				Token:       "aeon_" + prefix + "_" + secret,
+				CreatedByPrincipalID: &creatorID,
+				ID:                   id,
+				PrincipalID:          principalID,
+				Name:                 name,
+				Prefix:               prefix,
+				Scopes:               scopes,
+				CreatedAt:            created,
+				ExpiresAt:            expires,
+				Token:                "aeon_" + prefix + "_" + secret,
 			}
 			_, err = events.Append(ctx, tx, tenant.Principal{ID: actorID, TenantID: p.TenantID}, events.Change{
 				Type: "agent_key.created", After: keySnapshot(rec),
@@ -845,7 +850,7 @@ func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecor
 	var out []keyRecord
 	err := m.inTenant(ctx, m.pool, tenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `
-			SELECT id::text, principal_id::text, name, prefix, scopes, created_at, expires_at, last_used_at, revoked_at, owner_workstation, workstation_computer_id::text
+			SELECT id::text, principal_id::text, name, prefix, scopes, created_at, expires_at, last_used_at, revoked_at, owner_workstation, workstation_computer_id::text, created_by_principal_id::text
 			FROM agent_keys
 			ORDER BY created_at DESC, id
 		`)
@@ -856,7 +861,7 @@ func (m *Module) listAgentKeys(ctx context.Context, tenantID string) ([]keyRecor
 		for rows.Next() {
 			var rec keyRecord
 			var scopes pgtype.FlatArray[string]
-			if err := rows.Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt, &rec.OwnerWorkstation, &rec.WorkstationComputerID); err != nil {
+			if err := rows.Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt, &rec.OwnerWorkstation, &rec.WorkstationComputerID, &rec.CreatedByPrincipalID); err != nil {
 				return err
 			}
 			rec.Scopes = []string(scopes)
@@ -922,8 +927,8 @@ func (m *Module) revokeAgentKeyTx(ctx context.Context, tx pgx.Tx, p tenant.Princ
 
 func lockAgentKey(ctx context.Context, tx pgx.Tx, id string) (keyRecord, error) {
 	var rec keyRecord
-	err := tx.QueryRow(ctx, `SELECT id::text,principal_id::text,name,prefix,scopes,created_at,expires_at,last_used_at,revoked_at,owner_workstation,workstation_computer_id::text
-		FROM agent_keys WHERE id=$1::uuid FOR UPDATE`, id).Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &rec.Scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt, &rec.OwnerWorkstation, &rec.WorkstationComputerID)
+	err := tx.QueryRow(ctx, `SELECT id::text,principal_id::text,name,prefix,scopes,created_at,expires_at,last_used_at,revoked_at,owner_workstation,workstation_computer_id::text,created_by_principal_id::text
+		FROM agent_keys WHERE id=$1::uuid FOR UPDATE`, id).Scan(&rec.ID, &rec.PrincipalID, &rec.Name, &rec.Prefix, &rec.Scopes, &rec.CreatedAt, &rec.ExpiresAt, &rec.LastUsedAt, &rec.RevokedAt, &rec.OwnerWorkstation, &rec.WorkstationComputerID, &rec.CreatedByPrincipalID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = errNotFound
 	}
@@ -931,7 +936,7 @@ func lockAgentKey(ctx context.Context, tx pgx.Tx, id string) (keyRecord, error) 
 }
 
 func keySnapshot(rec keyRecord) map[string]any {
-	return map[string]any{"key_id": rec.ID, "principal_id": rec.PrincipalID, "name": rec.Name, "prefix": rec.Prefix,
+	return map[string]any{"created_by_principal_id": rec.CreatedByPrincipalID, "key_id": rec.ID, "principal_id": rec.PrincipalID, "name": rec.Name, "prefix": rec.Prefix,
 		"scopes": rec.Scopes, "created_at": rec.CreatedAt, "expires_at": rec.ExpiresAt, "last_used_at": rec.LastUsedAt, "revoked_at": rec.RevokedAt,
 		"owner_workstation": rec.OwnerWorkstation, "workstation_computer_id": rec.WorkstationComputerID}
 }

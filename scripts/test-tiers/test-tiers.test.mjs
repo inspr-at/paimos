@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, truncateSync } from 'node:fs'
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, truncateSync, utimesSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync, execFileSync } from 'node:child_process'
@@ -13,6 +13,7 @@ import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
 import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain, effectiveLane, sourceTree, promotionsBetween } from './diff.mjs'
 import { runnerDecision, runnerSelection } from './cli.mjs'
+import { treeStamp, reuse, webStampEntries } from './collect.mjs'
 import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs'
 import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import './manifests.test.mjs'
@@ -1536,4 +1537,39 @@ test('three-tier full proof rejects incomplete gated results and old two-tier ev
   const {['GATED-FULL']:gated,...oldClasses}=report.classes
   assert.throws(()=>checkFull({...report,classes:oldClasses},env),/Full execution/)
   for(const counts of [{...gated,notRun:1},{...gated,failed:1}])assert.throws(()=>checkFull({...report,classes:{...report.classes,'GATED-FULL':counts}},env),/Full execution/)
+})
+
+test('web collection is reused within a process only while the stamped tree is unchanged', () => {
+  const base = mkdtempSync(resolve(tmpdir(), 'aeon-724-stamp-'))
+  mkdirSync(resolve(base, 'src/deep'), { recursive: true }); mkdirSync(resolve(base, 'tests'))
+  mkdirSync(resolve(base, 'node_modules/pkg'), { recursive: true }); mkdirSync(resolve(base, 'dist'))
+  writeFileSync(resolve(base, 'package.json'), '{}'); writeFileSync(resolve(base, 'src/deep/a.ts'), 'a')
+  writeFileSync(resolve(base, 'tests/a.test.ts'), 'a'); writeFileSync(resolve(base, 'node_modules/pkg/index.js'), '1')
+  assert.deepEqual(webStampEntries, ['.', 'src', 'tests'])
+  const initial = treeStamp(base, webStampEntries)
+  assert.equal(treeStamp(base, webStampEntries), initial, 'stable without changes')
+  // Installed dependencies and build output never invalidate the inventory.
+  writeFileSync(resolve(base, 'node_modules/pkg/index.js'), '22'); writeFileSync(resolve(base, 'dist/bundle.js'), 'x')
+  assert.equal(treeStamp(base, webStampEntries), initial)
+  // A same-size edit changes mtime; nested source, native tests and top-level configs all count.
+  const stamps = new Set([initial])
+  for (const [file, text] of [['src/deep/a.ts', 'b'], ['tests/b.test.ts', 'new'], ['playwright.ui.config.ts', 'export {}']]) {
+    const clock = new Date(Date.now() + stamps.size * 2000)
+    writeFileSync(resolve(base, file), text); utimesSync(resolve(base, file), clock, clock)
+    const stamp = treeStamp(base, webStampEntries)
+    assert.ok(!stamps.has(stamp), file); stamps.add(stamp)
+  }
+  // Missing entries stamp as absent rather than throwing; the memo hands out private copies.
+  assert.notEqual(treeStamp(base, ['missing']), treeStamp(base, ['.']))
+  const memo = {}, runs = []
+  const compute = () => { runs.push(1); return { tests: [{ kind: 'vitest', name: 'a' }] } }
+  const first = reuse(memo, 'one', compute)
+  first.tests[0].name = 'poisoned'
+  assert.deepEqual(reuse(memo, 'one', compute), { tests: [{ kind: 'vitest', name: 'a' }] })
+  assert.equal(runs.length, 1, 'unchanged stamp reuses')
+  assert.deepEqual(reuse(memo, 'two', compute), { tests: [{ kind: 'vitest', name: 'a' }] })
+  assert.equal(runs.length, 2, 'changed stamp recomputes')
+  reuse(memo, 'two', compute, { fresh: true })
+  assert.equal(runs.length, 3, 'fresh recomputes')
+  assert.equal(memo.stamp, 'two')
 })

@@ -263,11 +263,13 @@ Keep private pairing state and runtime credentials outside the Nix store. A decl
 
 ## Agent keys and scopes
 
-An operator creates a key with `paimos agent-key create --tenant SLUG (--name AGENT | --principal-id UUID) --out-file PATH`. The token is written only to that file (mode `0600`, never overwritten) and is not printed. `paimos agent-key revoke` revokes by id.
+An operator creates a key with `paimos agent-key create --tenant SLUG (--name AGENT | --principal-id UUID) --creator-id PERSON_UUID --out-file PATH`. The token is written only to that file (mode `0600`, never overwritten) and is not printed. `paimos agent-key revoke` revokes by id. Legacy keys with no creator can be adopted by a person with `keys.manage` through **Make me the owner** in Settings, or `aeon keys adopt KEY_UUID --session-file PATH`. Adoption records an audit event and keeps the same key and secret; keys with an existing person owner cannot be taken over. Current creation paths require an active person creator in the same tenant, including pairing, demo seeds and rotation.
+
+Migration 1256 is expand-only: older binaries can still write creatorless keys during rollout. Current issuance and adoption set `person_owner_required=true`; the database constraint and ownership guard are deferred to a later contract-phase migration on AEON-724 after release 124 ships the expansion and older writers are retired.
 
 Use `--workspace-role ROLEKEY` when the agent needs workspace access. This binds the agent principal as part of key creation; its effective permissions are the intersection of the key scopes and that role. The operator cannot grant Owner or workspace Guest. For an existing principal, use `aeon access bind --tenant SLUG --principal NAME_OR_UUID --workspace-role ROLEKEY`; remove the binding with `aeon access unbind --tenant SLUG --principal NAME_OR_UUID --workspace-role`. Repeating either action is safe. These commands use the same workspace binding rules and audit event as the Members API.
 
-Scopes are an outer ceiling. An empty list grants nothing. Unknown names and permissions that are not agent-grantable are rejected. Typical scopes are registry keys such as `nodes.read`, `nodes.write`, `inbox.send`, `intake.write`, `approvals.request`, `work_orders.write`, `run.create`, `run.claim`, `run.telemetry`, `harness.write`, and `account.manage`. For HTTP key creation, the creating principal must hold every requested scope. The operator-only `paimos agent-key create` command runs on the host without a creating principal; it can create an agent principal and does not perform that creator-permission check. It still validates requested scopes against the registry.
+Scopes are an outer ceiling. An empty list grants nothing. Unknown names and permissions that are not agent-grantable are rejected. Typical scopes are registry keys such as `nodes.read`, `nodes.write`, `inbox.send`, `intake.write`, `approvals.request`, `work_orders.write`, `run.create`, `run.claim`, `run.telemetry`, `harness.write`, and `account.manage`. For HTTP key creation, the creating principal must hold every requested scope. The operator-only `paimos agent-key create` command runs on the host and requires `--creator-id` naming an active person in the same tenant. It can create an agent principal and does not perform the HTTP creator-permission check. It validates requested scopes against the registry and records that person as creator, so the key follows their live permission ceiling.
 
 The HTTP middleware applies that ceiling before module handlers run. Routes with no agent mapping answer 403. Person sessions are governed by role instead. An approval grant cannot exceed the key. Journey gate scopes such as `journey.build` are checked against this ceiling. They are not themselves keys in the permission registry, so `paimos agent-key create` will not accept them. A key that already holds a registry prefix covers dotted refinements of that prefix (`nodes.read` covers `nodes.read.fields`).
 
@@ -276,8 +278,8 @@ The HTTP middleware applies that ceiling before module handlers run. Routes with
 On the AEON host, with `AEON_DATABASE_URL` set for the tenant database, an operator can create an agent key and grant project access together:
 
 ```sh
-paimos agent-key create --tenant inspr --name pharos-worker --out-file /secure/path/pharos.key --scopes nodes:read --project PHAROS_PROJECT_KEY --project-role viewer
-paimos agent-key create --tenant inspr --name janus-worker --out-file /secure/path/janus.key --scopes nodes:read --project JANUS_PROJECT_KEY=viewer
+paimos agent-key create --tenant inspr --name pharos-worker --creator-id PERSON_UUID --out-file /secure/path/pharos.key --scopes nodes:read --project PHAROS_PROJECT_KEY --project-role viewer
+paimos agent-key create --tenant inspr --name janus-worker --creator-id PERSON_UUID --out-file /secure/path/janus.key --scopes nodes:read --project JANUS_PROJECT_KEY=viewer
 ```
 
 Repeat `--project KEY --project-role ROLEKEY` or use a comma-separated `KEY=ROLE` list for several projects. The key goes only to the specified new 0600 file. If binding fails after key creation, the command reports the key ID and file path so the operator can correct access or revoke the key.
