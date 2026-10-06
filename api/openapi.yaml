@@ -7417,7 +7417,7 @@ paths:
       operationId: completeAgentRecovery
       parameters:
         - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
-      description: "Paired exact agent/daemon generation only. Reports a bounded outcome: reconnected, exited, or rejected. A verified exit must accompany a terminal old run; no new run from silence. Rechecks the initiating person's permissions and original session binding before queuing a continuation through standard run creation. Exact completion retry returns the saved receipt and never creates another run. No credential mutation."
+      description: "Paired exact agent/daemon generation only. Reports a bounded outcome: reconnected, exited, or rejected. A verified exit must accompany a terminal old run; no new run from silence. Rechecks the initiating person's permissions and original session binding before queuing a continuation through standard run creation. A committed escalation budget refusal is recorded without a continuation. Exact completion retry returns the saved receipt and never creates another run. No credential mutation."
       requestBody:
         required: true
         content:
@@ -7425,7 +7425,7 @@ paths:
             schema: {type: object, required: [daemon_id, generation, outcome], additionalProperties: false, properties: {daemon_id: {type: string, maxLength: 128}, generation: {type: string, pattern: '^[0-9a-f]{32}$'}, outcome: {type: string, enum: [reconnected, exited, rejected]}}}
       responses:
         '200': {description: "Recorded result; continuation_queued means waiting for normal dispatch, not process started", content: {application/json: {schema: {$ref: '#/components/schemas/AgentRecoveryReceipt'}}}}
-        '409': {description: "Claim expired, binding changed, prior exit unconfirmed, or divergent completion"}
+        '409': {description: "Claim expired, binding changed, prior exit unconfirmed, divergent completion, or a committed escalation budget refusal"}
   /projects/{projectId}/harness-sessions/{sessionId}/recovery:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
