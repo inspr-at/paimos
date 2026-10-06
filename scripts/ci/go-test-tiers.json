@@ -2030,6 +2030,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingVerificationCapabilitiesEnforcedAndProgressTruthful","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestPairingVerificationClaimsWithNullTrace","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingZeroUsageCannotRefillOrSubstituteAccount","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPartialAttentionCountsSixOfSeven","tier":"GATED-FULL"}
@@ -2110,6 +2112,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestCapacityClaimRechecksReadingAuthorityAndStaleHardStop","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestClaimAllowsLegacyNullTrace","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestClaimRejectsStaleProbeAndReplacedGeneration","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestClaimReleasesHoldAfterAccountLeavesRunGroup","tier":"GATED-FULL"}
@@ -2129,6 +2133,8 @@
     {"kind":"go","package":"internal/agentruns","name":"TestDeriveOutcomeDetail","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestElapsedBudgetAndZeroCostCeiling","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestEscalatedClaimRequiresFreshMeasuredRoom","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestHeartbeatKeepsWaiting","tier":"GATED-FULL"}
     ,
@@ -2179,6 +2185,10 @@
     {"kind":"go","package":"internal/agentruns","name":"TestPooledSiblingLocalRecoveryThroughClaim","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestProjectWritesSerializeWithPairingTenantBeforeTree","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestQueueEscalationCannotBypassBoundedRetry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentruns","name":"TestQueuedEscalationRechecksRoutingAndClaim","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestQueuedMeasuredReservationRecoversThroughClaim","tier":"GATED-FULL"}
     ,
@@ -4610,6 +4620,10 @@
     ,
     {"kind":"go","package":"internal/embedding","name":"TestWorkerStoresRewritesAndIsolates","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/escalation","name":"TestCICheckIdentityAndBounds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/escalation","name":"TestDistinctFailureEvidence","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/eta","name":"TestAllowedWindow","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestAccountEventHistoryAndSSEUseCurrentOwnerSharing","tier":"ESSENTIAL"}
@@ -5628,6 +5642,12 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestDiscoveryVaultIsAccountBoundAndOutageKeepsPolicy","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestEscalationAreaPolicy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestEscalationRouteGrantsAndLocks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestEscalationUnknownAdmissionWaits","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestEveryAgentObservationRequiresAvailableOwnedHarnessAccount","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestExistingTenantGetsAdditionalRoutesWithoutReplacingPolicy","tier":"ESSENTIAL"}
@@ -6049,6 +6069,20 @@
     {"kind":"go","package":"internal/openrouter","name":"TestKeyProjectionAndNoRedirect","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/openrouter","name":"TestNullKeyCapDoesNotImplyBalance","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/outcomes","name":"TestEscalationOutcomeReplayAndSingleQuestion","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/outcomes","name":"TestEscalationPayloadValidation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/outcomes","name":"TestEscalationRetainsOriginalModelAcrossSelections","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/outcomes","name":"TestEscalationRetryBudgetExitAndRollback","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/outcomes","name":"TestEscalationRetryFreezesReservedPlacement","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/outcomes","name":"TestMovedEscalationObservationPreservesEpisode","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/outcomes","name":"TestMovedEscalationVisibilityAndLaunchGate","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/outcomes","name":"TestOutcomeBriefingRangePagination","tier":"GATED-FULL"}
     ,

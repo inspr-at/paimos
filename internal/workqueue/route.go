@@ -33,12 +33,16 @@ func RouteCandidatesTx(ctx context.Context, tx pgx.Tx, run string, fields []byte
 	if security {
 		role = "build-hard"
 	}
-	var starter *string
-	if err := tx.QueryRow(ctx, `SELECT prefs_person_id::text FROM agent_runs WHERE id=$1`, run).Scan(&starter); err != nil {
+	var starter, ticket *string
+	if err := tx.QueryRow(ctx, `SELECT prefs_person_id::text,queue_node_id::text FROM agent_runs WHERE id=$1`, run).Scan(&starter, &ticket); err != nil {
 		return nil, nil, err
 	}
+	ticketID := ""
+	if ticket != nil {
+		ticketID = *ticket
+	}
 	placement, err := modelregistry.PlacementFor(ctx, tx, tenant.Principal{}, modelregistry.WorkQuery{
-		Role: role, TicketRole: f.RouteRole, Area: f.Area, Complexity: f.Complexity,
+		TicketID: ticketID, Role: role, TicketRole: f.RouteRole, Area: f.Area, Complexity: f.Complexity,
 		ComplexitySource: f.ComplexitySource, TicketResidency: f.Residency, ProjectID: project, PersonID: starter,
 	}, time.Now().UTC())
 	if err != nil {
