@@ -7,9 +7,20 @@ export const key = row => row.kind === 'go' ? `${row.package}:${row.name}` : `${
 export const escapeRE = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 export const exactPattern = names => `^(?:${names.map(escapeRE).join('|')})$`
 export const tiers = ['ESSENTIAL', 'GATED-FULL', 'NIGHTLY']
+export const implicitTier = 'GATED-FULL'
+export const resolvedTier = row => row?.tier ?? implicitTier
+export function validateImplicitTier(manifest) {
+  if (manifest.implicitTier !== implicitTier || Object.hasOwn(manifest, 'defaultNewTier')) throw new Error('Expected implicitTier GATED-FULL (defaultNewTier is obsolete)')
+}
+// Browser config/project are discovery routing, not exception policy. An
+// implicit browser row uses the current native collector's routing; it gates
+// in either configuration. Explicit exceptions retain their routing fence.
+export const plainFullRow = row => row.tier === implicitTier && Object.keys(row).every(field =>
+  ['kind', row.kind === 'go' ? 'package' : 'file', 'name', 'tier', ...(row.kind === 'browser' ? ['config', 'project'] : [])].includes(field))
 
 export function validate(manifest, discovered, knownFlaky = JSON.parse(readFileSync(new URL('../ci/known-flaky.json', import.meta.url), 'utf8')), { strict = false, warn = console.warn } = {}) {
-  if (manifest.version !== 1 || !Array.isArray(manifest.tests) || !manifest.tests.length) throw new Error('Expected nonempty tier manifest version 1')
+  if (manifest.version !== 1 || !Array.isArray(manifest.tests)) throw new Error('Expected tier manifest version 1')
+  validateImplicitTier(manifest)
   if (knownFlaky.version !== 1 || !Array.isArray(knownFlaky.entries)) throw new Error('Expected known-flaky registry version 1')
   const flaky = new Map()
   for (const entry of knownFlaky.entries) {
@@ -18,9 +29,6 @@ export function validate(manifest, discovered, knownFlaky = JSON.parse(readFileS
     flaky.set(entry.key, entry.owner)
   }
   const declared = new Map()
-  for(const group of manifest.deleteCandidateGroups??[]) {
-    if(group.tag!=='delete-candidate'||!manifest.tests.some(row=>row.file===group.file&&row.tier!=='ESSENTIAL'))throw new Error(`Invalid deletion candidate group: ${group.file}`)
-  }
   for (const row of manifest.tests) {
     if (!tiers.includes(row.tier) || typeof row.name !== 'string' || !row.name ||
         !['go', 'node', 'vitest', 'browser'].includes(row.kind) ||
@@ -34,24 +42,24 @@ export function validate(manifest, discovered, knownFlaky = JSON.parse(readFileS
     if (row.tier === 'ESSENTIAL' && flaky.has(key(row))) throw new Error(`Known-flaky case cannot be ESSENTIAL: ${key(row)} (${flaky.get(key(row))})`)
     declared.set(key(row), row)
   }
+  for(const group of manifest.deleteCandidateGroups??[]) {
+    if(group.tag!=='delete-candidate'||![...manifest.tests,...discovered].some(row=>row.file===group.file&&resolvedTier(declared.get(key(row)))!=='ESSENTIAL'))throw new Error(`Invalid deletion candidate group: ${group.file}`)
+  }
   const found = new Map()
   const drift = []
   for (const row of discovered) {
     if (found.has(key(row))) throw new Error(`Duplicate collected identity: ${key(row)}`)
     found.set(key(row), row)
-    if (!declared.has(key(row))) {
-      drift.push(`Unclassified test (defaults to NIGHTLY; classify these): ${key(row)}`)
-      continue
-    }
+    if (!declared.has(key(row))) continue
     const stored = declared.get(key(row))
     if (row.kind === 'browser' && (stored.config !== row.config || stored.project !== row.project)) throw new Error(`Changed browser configuration: ${key(row)}`)
   }
   for (const id of declared.keys()) if (!found.has(id)) drift.push(`Stale manifest entry (dropped): ${id}`)
   if (strict && drift.length) throw new Error(`Tier manifest drift; classify these:\n${drift.join('\n')}`)
-  // Reconcile in memory: unrelated PRs must not edit the large allowlists.
+  // Unlisted discoveries gate without a warning; stale exceptions drop.
   // Escape Actions command data so parameterized titles stay one warning each.
   for (const message of drift) warn(`::warning::${message.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A')}`)
-  return discovered.map(row => ({ ...row, ...(declared.get(key(row)) ?? { tier: 'NIGHTLY' }), active: row.active ?? true }))
+  return discovered.map(row => ({ ...row, ...(declared.get(key(row)) ?? { tier: implicitTier }), active: row.active ?? true }))
 }
 
 export function uncertain(path) {
@@ -90,11 +98,16 @@ export const consumerCaseBound = 1000
 export function manifestPromotions(base = {}, head = {}) {
   const promoted = []
   for (const kind of ['go', 'web']) {
+    for (const manifest of [base[kind], head[kind]]) if (manifest && Object.hasOwn(manifest, 'implicitTier')) validateImplicitTier(manifest)
     const before = new Map((base[kind]?.tests ?? []).map(row => [key(row), row]))
-    for (const row of head[kind]?.tests ?? []) {
-      if (!Object.hasOwn(tierRank, row.tier)) throw new Error(`Invalid tier in ${kind} manifest: ${key(row)}`)
-      const previous = before.get(key(row))
-      if (row.tier !== 'NIGHTLY' && (tierRank[previous?.tier] ?? 0) < tierRank[row.tier]) promoted.push(row)
+    const after = new Map((head[kind]?.tests ?? []).map(row => [key(row), row]))
+    for (const row of [...before.values(), ...after.values()]) if (!Object.hasOwn(tierRank, row.tier)) throw new Error(`Invalid tier in ${kind} manifest: ${key(row)}`)
+    // Old manifests defaulted to NIGHTLY; new manifests default to full.
+    const fallback = manifest => manifest?.implicitTier === implicitTier ? implicitTier : 'NIGHTLY'
+    for (const id of new Set([...before.keys(), ...after.keys()])) {
+      const previous = before.get(id)?.tier ?? fallback(base[kind])
+      const next = after.get(id)?.tier ?? fallback(head[kind])
+      if (next !== 'NIGHTLY' && tierRank[previous] < tierRank[next]) promoted.push({ ...(after.get(id) ?? before.get(id)), tier: next })
     }
   }
   return { keys: new Set(promoted.map(key)), kinds: new Set(promoted.map(row => row.kind)), count: promoted.length }
@@ -152,7 +165,7 @@ export function affectedRisk(path, webImports = {}) {
   return { full: true, reason: `unmapped input: ${path}` }
 }
 
-const goCaseCount = (tests, packages) => tests.filter(row => row.kind === 'go' && row.tier === 'GATED-FULL' && packages.has(row.package)).length
+const goCaseCount = (tests, packages) => tests.filter(row => row.kind === 'go' && resolvedTier(row) === 'GATED-FULL' && packages.has(row.package)).length
 
 // Whole-diff decision. layout "static" keeps only the static, unit, release
 // and migration jobs; "full" keeps the essential shard layout. The returned
@@ -232,6 +245,7 @@ export function reverseDependants(changed, imports) {
 // A missing diff, unmapped source, or shared input widens selection. The merge
 // queue always proves the full gate, independently of the affected PR switch.
 export function select(tests, { event, paths, imports = {}, webImports = {}, affectedLane, forceFull = false, forceAll = false, tree, promotions, readFile }) {
+  tests = tests.map(row => row.tier === undefined ? { ...row, tier: implicitTier } : row)
   const full = reason => {
     // Full CI retains the established gate. Only nightly/--all widens to the
     // entire catalogue; missing impact data must not promote ungated cases.
@@ -341,5 +355,5 @@ export function webGraph(root) {
 }
 
 export function counts(rows) {
-  return Object.fromEntries(tiers.map(tier => [tier, rows.filter(row => row.tier === tier).length]))
+  return Object.fromEntries(tiers.map(tier => [tier, rows.filter(row => resolvedTier(row) === tier).length]))
 }

@@ -40,7 +40,8 @@ test('AEON-676 regressions retain hosted launch policy and full nightly coverage
   assert.ok(scripts['test:unit'].startsWith('npm run ci:web:shard:test &&'))
   assert.ok(scripts['ci:web:shard:test'].includes('scripts/aeon-676-ci.test.mjs'))
   const tiers = JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json', import.meta.url)))
-  for (const file of requiredSpecs) assert.ok(tiers.tests.some(row => row.file === file), `${file} must stay classified`)
+  assert.equal(tiers.implicitTier, 'GATED-FULL')
+  for (const file of requiredSpecs) assert.ok(!tiers.tests.some(row => row.file === file && row.tier === 'NIGHTLY'), `${file} must stay gated`)
   const nightly = readFileSync(new URL('../../.github/workflows/nightly-full.yml', import.meta.url), 'utf8')
   const nightlyShard = job('nightly-web-shard', nightly)
   // Three-tier --full covers only ESSENTIAL + GATED-FULL; --all also runs

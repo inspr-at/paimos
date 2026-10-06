@@ -1,16 +1,18 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// Offline manifest-level replay, without native test collection or browsers.
+// Offline native-catalogue replay; collection never launches browsers.
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { resolve } from 'node:path'
-import { select, webGraph } from './core.mjs'
+import { select, validate, webGraph } from './core.mjs'
+import { collectGo, collectWeb } from './collect.mjs'
 import { schedulingDecision, effectiveLane, sourceTree } from './diff.mjs'
 import { boundedText } from './inputs.mjs'
 import { classifyPaths } from '../ci-pr-plan.mjs'
 
 const fixture=JSON.parse(readFileSync(new URL('./affected-replay.json',import.meta.url)))
 const legacy=await import(`data:text/javascript;base64,${Buffer.from(fixture.legacySelector).toString('base64')}`)
-const rows=['go','web'].flatMap(kind=>JSON.parse(readFileSync(new URL(`../ci/${kind}-test-tiers.json`,import.meta.url))).tests)
+const inventories = {go: collectGo(), web: collectWeb()}
+const rows=['go','web'].flatMap(kind=>validate(JSON.parse(readFileSync(new URL(`../ci/${kind}-test-tiers.json`,import.meta.url))), inventories[kind].tests))
 const root=fileURLToPath(new URL('../../',import.meta.url))
 const graph=webGraph(resolve(root,'web'))
 // Replay reads consumers and migrations from the current tree. Historical
@@ -23,8 +25,8 @@ const exists=path=>readFile(path)!==undefined
 const replay=fixture.prs.map(({number,paths})=>{
   const options={event:'pull_request',paths,imports:fixture.goImports,webImports:graph}
   const classifiedLane=classifyPaths(paths).lane
-  const before=schedulingDecision('pull_request',paths,undefined,{graph})
-  const after=schedulingDecision('pull_request',paths,exists,{affectedLane:'on',graph,tree,promotions})
+  const before=schedulingDecision('pull_request',paths,undefined,{graph,tests:rows})
+  const after=schedulingDecision('pull_request',paths,exists,{affectedLane:'on',graph,tree,promotions,tests:rows})
   const oldLane=effectiveLane(classifiedLane,{...before,event:'pull_request',affectedLane:'off'})
   const lane=effectiveLane(classifiedLane,{...after,event:'pull_request',affectedLane:'on'})
   const old=legacy.select(rows,{...options,forceFull:before.mode==='full'})

@@ -1,0 +1,482 @@
+{
+  "ticket": "OPS-257",
+  "package": "L13 stage 2",
+  "workerAttribution": "I work on this — session: codex-sol-ops257-l13s2 (1286b8da-59c2-4c57-bae8-b1a52b6e1270); role: builder; started: 2026-10-06T06:31:14Z",
+  "branch": "work/ops-257-l13-stage2",
+  "state": "uncommitted; no push, PR, rebase or deployment",
+  "mergeGate": "OPS merges only after release 124 is cut",
+  "trackedSourcePatchSha256": "ee95fd008720a2950ee6dbd48249f0b99774ca7c2217186d4ff2e71895e17e13",
+  "proof": {
+    "base": "601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
+    "files": [
+      {
+        "file": "scripts/ci/go-test-tiers.json",
+        "rows": 722,
+        "removed": 3104,
+        "tiersWeightsAndMetadataUnchanged": true
+      },
+      {
+        "file": "scripts/ci/web-test-tiers.json",
+        "rows": 4776,
+        "removed": 2452,
+        "tiersWeightsAndMetadataUnchanged": true
+      },
+      {
+        "perFileWeightsUnchanged": true,
+        "file": "web/ci-web-shards.json",
+        "rows": 246,
+        "removed": 0,
+        "tiersWeightsAndMetadataUnchanged": true
+      }
+    ],
+    "inventories": [
+      {
+        "kind": "go",
+        "discovered": 3967,
+        "unchanged": 3826,
+        "newlyGated": [
+          "internal/agentruns:TestWorkLeafDispatchAndClaimRejectParents",
+          "internal/auth:TestExitConfirmationAgentRouteCeiling",
+          "internal/authz:TestExitConfirmationRoutePermission",
+          "internal/crossreview:TestCompletedBuilderDuringWorkHandover",
+          "internal/crossreview:TestReviewHistoryAndActionsAfterWorkMigration",
+          "internal/crossreview:TestReviewRejectsWorkParentWithoutCreatingOrders",
+          "internal/crossreview:TestBuilderCompletionDuringWorkHandover",
+          "internal/db:TestWorkNodesMigrationBusyGuardAndAtomicRetry",
+          "internal/db:TestWorkNodesMigrationExactNumbers",
+          "internal/db:TestWorkNodesMigrationPreservesRowsHistoryAndIdentities",
+          "internal/db:TestWorkNodesUpgradeFromRelease122",
+          "internal/db:TestWorkNodesVerifiedBackupRestoreDrill",
+          "internal/db:TestMergeWorkSchemas",
+          "internal/db:TestWorkStatusEndpointBodiesPrecedeAdmission",
+          "internal/db:TestWorkStatusLastChildKindConversionRetainsAudit",
+          "internal/db:TestWorkStatusBoundaryFlagAndCoalescing",
+          "internal/db:TestWorkStatusConcurrentWritersUseCommittedTree",
+          "internal/db:TestWorkStatusDeepAndWideBoundedCascade",
+          "internal/db:TestWorkStatusMovesDeletionRestoreAndRevisions",
+          "internal/db:TestWorkStatusNodeLimitCrossingRollsBack",
+          "internal/db:TestWorkStatusNodeLimitRecoveryAndTombstones",
+          "internal/db:TestWorkStatusRejectsOversizedChangesAtomically",
+          "internal/db:TestWorkStatusRulesAndCategories",
+          "internal/db:TestWorkStatusTenantVisibilityRestored",
+          "internal/eta:TestAggregateReadsHaveDeadline",
+          "internal/events:TestCausalPreviewRejectsOversizedBulkBeforeTransfer",
+          "internal/events:TestImportParentChangeHintInHistoryAndStream",
+          "internal/events:TestImportParentChangeSummarizesMembershipWithoutRevisionChange",
+          "internal/events:TestPositionReadForwardsDeadlinesWithoutFlushing",
+          "internal/events:TestLateUsageReportHasAuthorizedNodeHint",
+          "internal/harness:TestControlEventBounds",
+          "internal/harness:TestLiveEtaRechecksWorkPermission",
+          "internal/harness:TestWorkLeafExitBodyReadBeforeLocks",
+          "internal/harness:TestWorkLeafUncertainExitConfirmation",
+          "internal/harness:TestCoordinatorLargeHandover",
+          "internal/harness:TestWorkLeafBusyScopeAllowsSiblingWork",
+          "internal/harness:TestWorkLeafPendingLostContactCanReviveAndStop",
+          "internal/harness:TestWorkLeafRecoveryFencesBeforeResourceLocks",
+          "internal/harness:TestWorkLeafRegistrationBindingAndGracefulDeadline",
+          "internal/harness:TestWorkLeafResumeDefersEventsUntilSuccessorLocks",
+          "internal/importer:TestWorkNodesImporterLegacyMappingAndProvenance",
+          "internal/importer:TestWorkNodesImporterReplaysMigrationWithoutMaskingPersonEdits",
+          "internal/importer:TestWorkParentStatusImporterReplayAndChildChange",
+          "internal/journey:TestLiveReleaseFactsExcludeFormerLeavesInBothProjections",
+          "internal/knowledge:TestKnowledgeUndoPairingBeforeTreeWithWorkStatusOff",
+          "internal/modelprovider:TestParentBenefitsRequiresSeparateOptInAndRevision",
+          "internal/nodes:TestBenefitCompletionCategoryOverridesLiteralNames",
+          "internal/nodes:TestTicketBenefitsCausalUndoCompletion",
+          "internal/nodes:TestWorkBenefitsCausalUndoRejectsIncompleteCompletion",
+          "internal/nodes:TestListEpicMembershipSetBasedAndScoped",
+          "internal/nodes:TestPlanningDisplayedPlacementsInvariantAcrossSorts",
+          "internal/nodes:TestFieldSchemaExactNumbers",
+          "internal/nodes:TestFitKindFieldsExactNumbers",
+          "internal/nodes:TestWorkName",
+          "internal/nodes:TestWorkShapeFilterBounds",
+          "internal/nodes:TestWorkVocabularyRoundTripAndShape",
+          "internal/nodes:TestWorkAggregateLimitsAreExplicitHTTPFailures",
+          "internal/nodes:TestWorkAggregatesCalibratedTokenEstimates",
+          "internal/nodes:TestWorkAggregatesClosedLeafEstimateOrder",
+          "internal/nodes:TestWorkAggregatesCoverageRegroupingCountsAndSort",
+          "internal/nodes:TestWorkAggregatesDeepWideAndRLS",
+          "internal/nodes:TestWorkAggregatesUnweightedAndHistoricalSpend",
+          "internal/nodes:TestWorkScopeRootAndExpansionBudgets",
+          "internal/nodes:TestWorkLifecycleBodyDeadlineClearedOnlyAfterCompleteRead",
+          "internal/nodes:TestWorkLifecycleBodyNetworkDeadline",
+          "internal/nodes:TestWorkLifecycleBackgroundCompletionAndRevocation",
+          "internal/nodes:TestWorkLifecycleBindingSerializesChildCreation",
+          "internal/nodes:TestWorkLifecycleCancelOpenLeavesAfterStop",
+          "internal/nodes:TestWorkLifecycleCancelSettlesOrderWithAudit",
+          "internal/nodes:TestWorkLifecycleExpiredHandoverRetriesDelivery",
+          "internal/nodes:TestWorkLifecycleLeafGuardAndHistory",
+          "internal/nodes:TestWorkLifecycleLostContactBlocksOrdinaryWrites",
+          "internal/nodes:TestWorkLifecycleLostContactRetainsStopFence",
+          "internal/nodes:TestWorkLifecyclePendingFencesOrderAndRunBindings",
+          "internal/nodes:TestWorkLifecyclePendingFencesOriginalBindings",
+          "internal/nodes:TestWorkLifecycleSplitWaitsAndReplays",
+          "internal/nodes:TestWorkLifecycleStalePreviewAndAbandon",
+          "internal/nodes:TestWorkLifecycleWorkOrderAndDispatchBindings",
+          "internal/nodes:TestWorkCausalUndoAgentOrdinaryEditPreservesProtectedFields",
+          "internal/nodes:TestWorkCausalUndoProtectedTransitions",
+          "internal/nodes:TestWorkParentStatusCausalUndo",
+          "internal/nodes:TestWorkParentStatusCausalUndoAuditRedactsHiddenCause",
+          "internal/nodes:TestWorkParentStatusConfirmationReadsBeforeTenantLocks",
+          "internal/nodes:TestWorkParentStatusDeleteCausalUndo",
+          "internal/nodes:TestWorkParentStatusDisabledUndoFencesRevocation",
+          "internal/nodes:TestWorkParentStatusHiddenCauseAndPermissionRevocation",
+          "internal/nodes:TestWorkParentStatusMoveAndCreateCausalUndo",
+          "internal/nodes:TestWorkParentStatusOrdinaryUndoOrdersAcrossActivation",
+          "internal/nodes:TestWorkParentStatusPatchAndBulkBoundary",
+          "internal/nodes:TestWorkParentStatusReusesAutopilotActivity",
+          "internal/outcomes:TestOutcomeHistoryAndRecordingAfterWorkMigration",
+          "internal/parentbenefits:TestRetryDeadlineBoundsBothBodyDecodes",
+          "internal/parentbenefits:TestCombinedHumanEditAndStatusChangeKeepsAuthoredText",
+          "internal/parentbenefits:TestDoneDoesNotWaitAndSummarisesLeaves",
+          "internal/parentbenefits:TestFailureVisibleRetryAndLeafGate",
+          "internal/parentbenefits:TestFlagAndProviderOffNeverPreventDone",
+          "internal/parentbenefits:TestGenerationRechecksCurrentFieldSchema",
+          "internal/parentbenefits:TestHumanEditAndSourceChangeFence",
+          "internal/parentbenefits:TestLeaseRecoveryAndTenantIsolation",
+          "internal/parentbenefits:TestNestedLeafSourcesAndExplicitLimits",
+          "internal/parentbenefits:TestPublishedSnapshotAndUnrelatedFieldsSurvive",
+          "internal/parentbenefits:TestRetryIsPersonOnlyAndRechecksPermission",
+          "internal/parentbenefits:TestSourceTextBudgetAndMissingBenefitsFailVisibly",
+          "internal/parentbenefits:TestSummaryRejectsInvalidOrUnboundedModelOutput",
+          "internal/recurrences:TestRecurrenceCreatesWorkLeafAndReopensDoneParent",
+          "internal/recurrences:TestStoredLegacyTemplateCreatesQueuedWorkLeafAfterLockedReload",
+          "internal/recurrences:TestStoredRecurrenceKindMigrationPreservesReceipts",
+          "internal/releases:TestLeafParentRoundTripPreservesPlanningMetadata",
+          "internal/releases:TestParentReassignmentInvalidatesRetainedScopeApproval",
+          "internal/releases:TestTicketOptionsHistoricalParentCanJoinNextRelease",
+          "internal/releases:TestTicketOptionsParentMatchesCurrentLeaves",
+          "internal/releases:TestNativeWorkMembershipReadProjection",
+          "internal/releases:TestQuickCreateUnderPlacedParentHonorsExplicitInclusion",
+          "internal/releases:TestWorkParentStatusReleaseQuickCreate",
+          "internal/releases:TestExistingPlanningParentRepairPreservesExplicitBacklog",
+          "internal/releases:TestFormerParentPlanRemovalAndUndoRespectsBacklog",
+          "internal/releases:TestFormerParentReassignmentUpdatesFutureIntentAndUndo",
+          "internal/releases:TestInheritedLeafBecomingParentReconcilesLiveMembership",
+          "internal/releases:TestLeafShapeChangesPreserveCompleteProjectionAndUndo",
+          "internal/releases:TestLeafShapeChangesReconcileMovedAndRestoredChildren",
+          "internal/releases:TestParentPlacementUndoPreservesRetainedBacklogProjection",
+          "internal/releases:TestParentReleaseSummaryReportsPartialCoverage",
+          "internal/releases:TestPlacedLeafBecomingParentPreservesFrozenSnapshot",
+          "internal/releases:TestWorkParentFrozenReleaseLeavesScopeUnchanged",
+          "internal/releases:TestWorkParentPlacementAndFutureLeaves",
+          "internal/releases:TestWorkParentPlacementBoundAndWorkEdges",
+          "internal/releases:TestWorkParentPlacementDoesNotPermitUnrelatedClosedLeaf",
+          "internal/releases:TestWorkParentPlacementRechecksRevokedGrantUnderFence",
+          "internal/releases:TestWorkParentPlacementThousandLeavesWithNestedParents",
+          "internal/releases:TestWorkParentPlacementUndoRestoresFutureLeafIntent",
+          "internal/releases:TestWorkParentSplitShipsInAndAtomicFrozenRejection",
+          "internal/releases:TestWorkParentWalkerKeepsScreenLinksBoundToEachLeaf",
+          "internal/requirements:TestReagreementDoesNotRegenerateWorkThatBecameParent",
+          "internal/requirements:TestWorkParentStatusRequirementGeneration",
+          "internal/statusautopilot:TestAutopilotUndoVisibleToProjectReaderWithUnchangedParent",
+          "internal/ticketbenefits:TestUnifiedWorkLeavesKeepCompletionRequirements",
+          "internal/ticketbenefits:TestMigratedWorkCompletionRequirements",
+          "internal/workorders:TestBufferBodyBoundsAndDecode",
+          "internal/workorders:TestEndpointBodyNetworkDeadline",
+          "internal/workorders:TestEndpointPositionedBodyNetworkDeadline",
+          "scripts/releaseworkflow:TestParallelWebUnitsShareRuntimeAndRunOnce"
+        ],
+        "lanes": {
+          "full": {
+            "before": 3678,
+            "after": 3819,
+            "intendedAdditions": 141,
+            "otherwiseEqual": true
+          },
+          "essential": {
+            "before": 418,
+            "after": 418,
+            "intendedAdditions": 0,
+            "otherwiseEqual": true
+          },
+          "catalogue": {
+            "before": 3967,
+            "after": 3967,
+            "intendedAdditions": 0,
+            "otherwiseEqual": true
+          }
+        },
+        "addedSerialSecondsEstimate": 199.16366912723933,
+        "addedShardSecondsEstimate": {
+          "go": [
+            107.78369272000006,
+            11.221992204118914,
+            21.418988798869588,
+            1.2070672,
+            28.63743076343731,
+            26.523800484817112,
+            2.370696955996549
+          ],
+          "timing": [
+            0
+          ]
+        },
+        "maxAddedShardSecondsEstimate": 107.78369272000006,
+        "estimateBasis": "Hosted owner seconds / selectedTests; Go shard weights or browser tierTiming/file weight/count; unmeasured Go/unit case = 1s. Marginal serial/shard scheduling estimate; setup, DB contention, prior shard critical path and unmeasured bodies are not measured."
+      },
+      {
+        "kind": "web",
+        "discovered": 7283,
+        "unchanged": 7224,
+        "newlyGated": [
+          "vitest:tests/agents-working.unit.test.ts:honest account room (AEON-720) > claims readiness only from confirmed room when unknown and zero room mix",
+          "vitest:tests/agents-working.unit.test.ts:honest account room (AEON-720) > resolves a shared-quota alias measurement from the canonical gauge",
+          "vitest:tests/settings-owner.unit.test.ts:access retains the same child, draft and one-time link on expiry, with writes inert",
+          "vitest:tests/settings-owner.unit.test.ts:personal retains the same child, draft and one-time link on expiry, with writes inert",
+          "vitest:tests/settings-owner.unit.test.ts:a section opened in the same frame also keeps its draft on expiry",
+          "vitest:tests/settings-owner.unit.test.ts:a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-a\"},\"principal\":{\"id\":\"person-b\"}})",
+          "vitest:tests/settings-owner.unit.test.ts:a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-b\"},\"principal\":{\"id\":\"person-a\"}})",
+          "vitest:tests/settings-owner.unit.test.ts:same-owner refresh keeps mounted state, but lost permission closes Access",
+          "vitest:tests/settings-owner.unit.test.ts:a new owner without Access cannot resurrect the previous owner’s shown section on expiry",
+          "vitest:tests/settings-owner.unit.test.ts:an incoming owner clears frozen Access before fresh permissions arrive",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #work-vocabulary entry keeps the query and opens vocabulary",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #ticket-types entry keeps the query and opens vocabulary",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #models entry keeps the query and opens agents",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #model-refresh entry keeps the query and opens agents",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #estimates entry keeps the query and opens agents",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #silent-sessions entry keeps the query and opens agents",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #agent-activity entry keeps the query and opens agents",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #quota-warnings entry keeps the query and opens accounts",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #status-autopilot entry keeps the query and opens autopilot",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #autopilot-projects entry keeps the query and opens autopilot",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #autopilot-suggestions entry keeps the query and opens autopilot",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #autopilot-recent entry keeps the query and opens autopilot",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #autopilot-proposals entry keeps the query and opens autopilot",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #autopilot-changes entry keeps the query and opens autopilot",
+          "vitest:tests/settings-routing.unit.test.ts:direct Workspace #members entry keeps the query and opens access",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #work-vocabulary opens vocabulary",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #ticket-types opens vocabulary",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #models opens agents",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #model-refresh opens agents",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #estimates opens agents",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #silent-sessions opens agents",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #agent-activity opens agents",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #quota-warnings opens accounts",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #status-autopilot opens autopilot",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #autopilot-projects opens autopilot",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #autopilot-suggestions opens autopilot",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #autopilot-recent opens autopilot",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #autopilot-proposals opens autopilot",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #autopilot-changes opens autopilot",
+          "vitest:tests/settings-routing.unit.test.ts:same-record navigation to Workspace #members opens access",
+          "vitest:tests/settings-routing.unit.test.ts:a hash-only change on Workspace redirects and keeps its query",
+          "vitest:tests/settings-routing.unit.test.ts:a trailing slash on a legacy Workspace bookmark still redirects",
+          "vitest:tests/settings-routing.unit.test.ts:Back returns to the previous section after following a legacy bookmark",
+          "vitest:tests/settings-routing.unit.test.ts:current cards and unknown bookmarks keep their section",
+          "node:tests/agent-login.test.ts:CLI login names the instance after the workspace and never passes --instance (AEON-730)",
+          "browser:tests/settings.spec.ts:grouped navigation stays put across section changes and places policy cards in their new homes",
+          "browser:tests/settings.spec.ts:Workspace shows the workspace and role, with Brand and In-app AI",
+          "browser:tests/settings.spec.ts:Vocabulary keeps ticket types and old Projects bookmarks",
+          "browser:tests/settings.spec.ts:phone section picker overlays content, changes sections, and restores keyboard focus",
+          "browser:tests/settings.spec.ts:members read Vocabulary as text and cannot invoke its write actions",
+          "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 390px in light",
+          "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 390px in dark",
+          "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1024px in light",
+          "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1024px in dark",
+          "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1440px in light",
+          "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1440px in dark",
+          "browser:tests/settings.spec.ts:old workspace policy bookmarks open the moved card",
+          "browser:tests/settings.spec.ts:old workspace bookmarks redirect during section and hash changes inside Settings",
+          "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
+        ],
+        "lanes": {
+          "full": {
+            "before": 2946,
+            "after": 3005,
+            "intendedAdditions": 59,
+            "otherwiseEqual": true
+          },
+          "essential": {
+            "before": 287,
+            "after": 287,
+            "intendedAdditions": 0,
+            "otherwiseEqual": true
+          },
+          "catalogue": {
+            "before": 7283,
+            "after": 7283,
+            "intendedAdditions": 0,
+            "otherwiseEqual": true
+          }
+        },
+        "addedSerialSecondsEstimate": 75.99961764285717,
+        "addedShardSecondsEstimate": {
+          "unit": [
+            0.27732764285714284,
+            0,
+            34,
+            8
+          ],
+          "browser": [
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            33.72229,
+            0,
+            0
+          ]
+        },
+        "maxAddedShardSecondsEstimate": 34,
+        "estimateBasis": "Hosted owner seconds / selectedTests; Go shard weights or browser tierTiming/file weight/count; unmeasured Go/unit case = 1s. Marginal serial/shard scheduling estimate; setup, DB contention, prior shard critical path and unmeasured bodies are not measured."
+      }
+    ]
+  },
+  "rowSummary": {
+    "go": {
+      "kept": 722,
+      "tiers": {
+        "ESSENTIAL": 418,
+        "GATED-FULL": 156,
+        "NIGHTLY": 148
+      },
+      "fullMetadata": {
+        "tagged": 152,
+        "timingLane": 4,
+        "occurrence": 0
+      },
+      "allOccurrenceRows": 0
+    },
+    "web": {
+      "kept": 4776,
+      "tiers": {
+        "ESSENTIAL": 287,
+        "GATED-FULL": 211,
+        "NIGHTLY": 4278
+      },
+      "fullMetadata": {
+        "tagged": 209,
+        "timingLane": 0,
+        "occurrence": 4
+      },
+      "allOccurrenceRows": 4
+    }
+  },
+  "checks": [
+    {
+      "name": "requested-node-suite",
+      "command": "node --test --test-concurrency=1 scripts/test-tiers/*.test.mjs scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs web/scripts/ci-web-shard.test.mjs web/scripts/aeon-676-ci.test.mjs web/scripts/aeon-681-ci.test.mjs",
+      "passed": 429,
+      "failed": 0,
+      "logSha256": "2502bb630d96804d4a23c791dec0308ed5d4385b918f889a7d02fa035f756c64"
+    },
+    {
+      "name": "go-static-with-no-web-dependencies",
+      "command": "NODE_OPTIONS=--import=/private/tmp/ops257-no-web-deps.mjs node --test scripts/test-tiers/test-tiers.test.mjs",
+      "passed": 184,
+      "failed": 0,
+      "logSha256": "5120556a2b20abaff5f011b6884c01d1c88d1044e25eba318112c6ac9b988bca"
+    },
+    {
+      "name": "web-failure-reporting-native-node-runner",
+      "command": "node --experimental-strip-types --test web/tests/test-tier-failures.test.ts",
+      "passed": 8,
+      "failed": 0,
+      "logSha256": "4366881b58cd77e2e2ab04ad6986a624d861a71b89c4542c611e4dff9fd47b9a"
+    },
+    {
+      "name": "go-packages",
+      "command": "go test ./scripts/ci-runner-guard ./scripts/releaseworkflow ./scripts/ci-go-shards -count=1",
+      "passedPackages": 3,
+      "output": [
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-runner-guard\t4.420s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/releaseworkflow\t4.579s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-go-shards\t6.141s"
+      ]
+    },
+    {
+      "command": "node scripts/test-tiers/cli.mjs manifests --check",
+      "passed": true
+    },
+    {
+      "command": "git diff --check",
+      "passed": true
+    },
+    {
+      "command": "node scripts/test-tiers/prove-manifests.mjs 601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
+      "passed": true
+    }
+  ],
+  "nodeSuiteFiles": [
+    "scripts/test-tiers/manifests.test.mjs",
+    "scripts/test-tiers/test-tiers.test.mjs",
+    "scripts/test-tiers/tiers-merge-driver.test.mjs",
+    "scripts/ci-pr-plan.test.mjs",
+    "scripts/ci-tree-reuse.test.mjs",
+    "scripts/ci-static.test.mjs",
+    "web/scripts/ci-web-shard.test.mjs",
+    "web/scripts/aeon-676-ci.test.mjs",
+    "web/scripts/aeon-681-ci.test.mjs"
+  ],
+  "environment": {
+    "network": "No network; npm ci --offline --ignore-scripts used the existing cache",
+    "go": "Installed Nix-store Go 1.26.7, GOCACHE=/private/tmp/ops257-go-cache, GOPROXY=off, GOTOOLCHAIN=local",
+    "nixDevelopOffline": "Attempted; sandbox denies Nix daemon access after redirecting cache. Used the existing store toolchain directly.",
+    "web": "Native Node/Vitest/Playwright collection only; no browser launch; VITE_CACHE_DIR=/private/tmp/ops257-vite",
+    "noWebDependencyGuard": "import {registerHooks} from 'node:module'\nregisterHooks({resolve(specifier,context,next){const result=next(specifier,context);if(result.url.includes('/node_modules/'))throw new Error('go-static must not import web dependencies');return result}})\n",
+    "postSuiteEdits": "Only two synthetic test title strings and README/RELEASE prose changed after the final Node suite; no behavior or commands changed."
+  },
+  "consumerAudit": {
+    "searchRoots": [
+      "scripts/",
+      "web/scripts/",
+      "web/tests/",
+      ".github/workflows/",
+      "Go source"
+    ],
+    "queries": [
+      "go-test-tiers.json",
+      "web-test-tiers.json",
+      "defaultNewTier",
+      "GATED-FULL",
+      "NIGHTLY",
+      ".tests",
+      ".tier"
+    ],
+    "updated": [
+      "core.validate/select/goCaseCount/counts/manifestPromotions",
+      "diff.planningGoCases/schedulingDecision",
+      "cli.plan",
+      "manifests.normalize/write/check/classify",
+      "standalone merge driver with mixed-layout parity",
+      "prove-manifests",
+      "replay",
+      "reportCases",
+      "manifest-reader regression tests"
+    ],
+    "unchangedWithReason": {
+      "check-full.mjs": "Checks resolved execution classes, run identity, scope, failure/notRun completeness; no manifest rows. Implicit rows now count in reportCases, and execution-proof tests pass.",
+      "measure.mjs": "Aggregates resolved reports; never writes tier rows.",
+      "collect.saveManifest": "Already uses canonical formatManifest; cannot persist redundant full rows.",
+      "ci-web-shard.mjs": "Reads launch/shard policy, not tier exceptions; tierWeights consumes resolved selected rows.",
+      "static-checks.json/workflow commands/pinned Go command assertions": "Command strings, cwd and step names unchanged; registry and Go contract tests pass."
+    }
+  },
+  "risks": [
+    "Hosted merge-group execution/time remains unmeasured; runtime estimates use historical owner/file timings and one second per unmeasured Go/unit case.",
+    "Trusted lightweight planning widens impacted browser specs without native inventory, and conservative Go source counting can widen fan-out.",
+    "Installed external merge-driver copies need refreshing by the coordinator; no external copy was changed."
+  ],
+  "staleExplicitRowsAfter": {
+    "go": [],
+    "web": []
+  },
+  "staleRowsBefore": {
+    "go": [],
+    "web": [
+      "browser:tests/settings.spec.ts:Projects lists the ticket types with their prefixes",
+      "browser:tests/settings.spec.ts:Workspace shows the workspace and my role; people and keys moved to Access",
+      "browser:tests/settings.spec.ts:at 390 the sections sit in a grid and nothing is cut",
+      "browser:tests/settings.spec.ts:the section nav stays put when switching sections, including wide Access"
+    ]
+  },
+  "notes": [
+    "The four stale legacy web rows were plain GATED-FULL and disappear during compaction. The current native catalogue has no stale explicit exceptions."
+  ]
+}

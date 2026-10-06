@@ -14,8 +14,8 @@ import { proveManifests, proveConversion } from './prove-manifests.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const goFile = manifestPaths[0], webFile = manifestPaths[1], shardsFile = manifestPaths[2]
-const row = (name, tier = 'GATED-FULL', pkg = 'internal/auth') => ({ kind: 'go', package: pkg, name, tier })
-const manifest = tests => ({ version: 1, defaultNewTier: 'NIGHTLY', tests })
+const row = (name, tier = 'GATED-FULL', pkg = 'internal/auth') => ({ kind: 'go', package: pkg, name, tier, metadata: { fixture: true } })
+const manifest = tests => ({ version: 1, implicitTier: 'GATED-FULL', tests })
 const spec = (file, weightSeconds = 10) => ({ file, weightSeconds })
 const group = (id, specs) => ({ id, config: 'playwright.ui.config.ts', project: null, flags: ['--workers=1'], hostedOnly: true, env: {}, specs })
 const shards = groups => ({ version: 1, groups })
@@ -33,6 +33,41 @@ const fixtures = t => {
   }
   return directory
 }
+
+test('OPS-257 exception writer drops only plain full rows and check names redundancy', t => {
+  const plain = { kind: 'go', package: 'internal/auth', name: 'TestImplicit', tier: 'GATED-FULL' }
+  const browser = { kind: 'browser', file: 'tests/a.spec.ts', name: 'route', config: 'playwright.ui.config.ts', project: '', tier: 'GATED-FULL' }
+  const kept = [
+    { ...plain, name: 'TestTagged', tags: ['delete-candidate'] },
+    { ...plain, name: 'TestTiming', lane: 'timing' },
+    { ...browser, name: 'occurrence', occurrence: 1 },
+    { ...browser, name: 'future metadata', note: 'retain' },
+  ]
+  assert.deepEqual(roundtrip(manifest([plain, ...kept]), goFile).tests.map(r => r.name).sort(), kept.map(r => r.name).sort())
+  assert.deepEqual(roundtrip(manifest([browser]), webFile).tests, [])
+  assert.deepEqual(roundtrip(manifest([])).tests, [])
+  const directory = fixtures(t)
+  writeManifests(directory)
+  writeFileSync(resolve(directory, goFile), JSON.stringify(manifest([plain])))
+  assert.throws(() => checkManifests(directory), /Redundant plain GATED-FULL row: internal\/auth:TestImplicit/)
+  assert.throws(() => normalizeManifest({ ...manifest([]), implicitTier: 'NIGHTLY' }, goFile), /implicitTier GATED-FULL/)
+  assert.throws(() => normalizeManifest(manifest([plain, plain]), goFile, { rejectDuplicates: true }), /Duplicate key/)
+})
+
+test('OPS-257 full classification removes matching exceptions and preserves metadata and unmatched rows', () => {
+  const a = { kind: 'go', package: 'internal/auth', name: 'TestA', tier: 'NIGHTLY' }
+  const b = { ...a, name: 'TestB', tags: ['delete-candidate'] }
+  const c = { ...a, name: 'TestC', tier: 'ESSENTIAL' }
+  const source = manifest([a, b, c]), discovered = [a, b, c].map(row => ({ ...row, file: 'auth_test.go', active: true }))
+  const result = classifyManifest(source, discovered, { tier: 'GATED-FULL', only: 'TestA' })
+  assert.deepEqual(result.manifest.tests, [b, c])
+  const all = classifyManifest(source, discovered, { tier: 'GATED-FULL' })
+  assert.deepEqual(all.manifest.tests, [{ ...b, tier: 'GATED-FULL' }])
+  assert.deepEqual(source.tests, [a, b, c])
+  const saves = []
+  assert.equal(classify(['--tier', 'GATED-FULL', '--kind', 'go'], { read: () => source, collect: () => ({ tests: discovered }), save: (_, data) => saves.push(roundtrip(data)) }), 0)
+  assert.deepEqual(saves[0].tests, all.manifest.tests)
+})
 function driver(t, base, ours, theirs, file = goFile) {
   const directory = fixtureDirectory(t, 'ops257-driver-test-')
   const paths = ['base', 'ours', 'theirs'].map(name => resolve(directory, name))
