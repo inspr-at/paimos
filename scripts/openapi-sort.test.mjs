@@ -188,3 +188,33 @@ test('recognizes scalar boundaries in sequence items and tagged nodes', () => {
     assert.equal(sortOpenAPI(sorted), sorted)
   }
 })
+
+test('preserves multiline quoted anchor examples nested in flow collections', () => {
+  for (const quote of ["'", '"']) for (const wrap of [value => `{description: ${value}}`, value => `[{nested: [${value}]}]`]) {
+    const example = anchor => wrap(`${quote}literal example\n        security: ${anchor}\n        end${quote}`)
+    const input = `paths:\n  /z:\n    get:\n      security: &auth [one]\n      description: ${example('&demo [example]')}\n  /a:\n    get:\n      security: *auth\n      description: ${example('*demo')}\ncomponents:\n  schemas: {}\n`
+    const sorted = sortOpenAPI(input)
+    assert.ok(sorted.includes(`  /a:\n    get:\n      security: &auth [one]\n      description: ${example('*demo')}`))
+    assert.ok(sorted.includes(`  /z:\n    get:\n      security: *auth\n      description: ${example('&demo [example]')}`))
+    assert.equal(sortOpenAPI(sorted), sorted)
+  }
+})
+
+test('fails closed before writing when a block scalar moves into or out of unterminated EOF', t => {
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-openapi-sort-')), path = join(directory, 'openapi.yaml')
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  for (const newline of ['\n', '\r\n']) for (const header of ['|', '>', '|+', '>+', '|2', '>2']) {
+    for (const tail of [
+      `    Z: {}\n    A:\n      description: ${header}\n        Text`,
+      `    Z:\n      description: ${header}\n        Text\n    A: {}`,
+    ]) {
+      const input = `paths:\n  /a: {}\ncomponents:\n  schemas:\n${tail}`.replaceAll('\n', newline)
+      writeFileSync(path, input)
+      assert.throws(() => sortOpenAPI(input), /Cannot move a block scalar into or out of unterminated EOF/)
+      assert.throws(() => main(['--write'], path, () => {}), /Cannot move a block scalar into or out of unterminated EOF/)
+      assert.equal(readFileSync(path, 'utf8'), input)
+      const terminated = input + newline
+      assert.equal(sortOpenAPI(sortOpenAPI(terminated)), sortOpenAPI(terminated))
+    }
+  }
+})

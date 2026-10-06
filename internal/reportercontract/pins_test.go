@@ -299,6 +299,14 @@ func TestOpenAPISortPreservesScalarValues(t *testing.T) {
 			"|-\n        security: &undefined\n        other: *undefined",
 			"'quoted text\n        security: &demo [one]\n        other: *demo'",
 			"\"quoted text\n        security: &demo [one]\n        other: *demo\"",
+			"{nested: 'quoted text\n        security: &demo [one]\n        other: *demo\n        end'}",
+			"{nested: \"quoted text\n        security: &demo [one]\n        other: *demo\n        end\"}",
+			"[{nested: ['quoted text\n        security: &demo [one]\n        other: *demo\n        end']}]",
+			"[{nested: [\"quoted text\n        security: &demo [one]\n        other: *demo\n        end\"]}]",
+			"{nested:\n        {description: 'quoted ''text\n        security: &demo [one]\n        other: *demo\n        end'}}",
+			"{nested:\n        {description: \"quoted \\\"text\n        security: &demo [one]\n        other: *demo\n        end\"}}",
+			"{first: 'one', second: 'quoted text\n        security: &demo [one]\n        other: *demo\n        end'}",
+			"{first: \"one\", second: \"quoted text\n        security: &demo [one]\n        other: *demo\n        end\"}",
 		} {
 			t.Run(section+"/"+scalar, func(t *testing.T) {
 				var source string
@@ -316,6 +324,14 @@ func TestOpenAPISortPreservesScalarValues(t *testing.T) {
 						source = strings.Replace(source, "  /a: {}", "  /a:\n    get:\n      description: |-\n        security: *demo", 1)
 					} else {
 						source = strings.Replace(source, "    A: {}", "    A:\n      description: |-\n        security: *demo", 1)
+					}
+				}
+				if strings.HasPrefix(scalar, "{") || strings.HasPrefix(scalar, "[") {
+					alias := strings.Replace(scalar, "&demo [one]", "*demo", 1)
+					if section == "paths" {
+						source = strings.Replace(source, "  /a: {}", "  /a:\n    get:\n      description: "+alias, 1)
+					} else {
+						source = strings.Replace(source, "    A: {}", "    A:\n      description: "+alias, 1)
 					}
 				}
 				var before any
@@ -343,6 +359,52 @@ process.stdout.write(sorted);
 				}
 				if !reflect.DeepEqual(before, after) {
 					t.Fatalf("sort changed parsed YAML values\nbefore: %#v\nafter: %#v\n%s", before, after, sorted)
+				}
+			})
+		}
+	}
+	for _, header := range []string{"|", ">", "|+", ">+", "|2", ">2"} {
+		for _, direction := range []string{"into", "out of"} {
+			t.Run(header+"/"+direction+" unterminated EOF", func(t *testing.T) {
+				tail := "    Z: {}\n    A:\n      description: " + header + "\n        Text"
+				if direction == "into" {
+					tail = "    Z:\n      description: " + header + "\n        Text\n    A: {}"
+				}
+				source := "paths:\n  /a: {}\ncomponents:\n  schemas:\n" + tail
+				var original, before any
+				if err := yaml.Unmarshal([]byte(source), &original); err != nil {
+					t.Fatalf("invalid unterminated fixture: %v", err)
+				}
+				if err := yaml.Unmarshal([]byte(source+"\n"), &before); err != nil {
+					t.Fatalf("invalid terminated fixture: %v", err)
+				}
+				if direction == "out of" && reflect.DeepEqual(original, before) {
+					t.Fatal("fixture must demonstrate that the EOF newline changes the scalar value")
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, "node", "--input-type=module", "-e", `
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { sortOpenAPI } from './scripts/openapi-sort.mjs';
+const source = readFileSync(0, 'utf8');
+assert.throws(() => sortOpenAPI(source), /Cannot move a block scalar into or out of unterminated EOF/);
+const sorted = sortOpenAPI(source + '\n');
+assert.equal(sortOpenAPI(sorted), sorted);
+process.stdout.write(sorted);
+`)
+				cmd.Dir = "../.."
+				cmd.Stdin = strings.NewReader(source)
+				sorted, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("EOF guard or terminated sort failed: %v\n%s", err, sorted)
+				}
+				var after any
+				if err := yaml.Unmarshal(sorted, &after); err != nil {
+					t.Fatalf("sorted terminated fixture is invalid: %v", err)
+				}
+				if !reflect.DeepEqual(before, after) {
+					t.Fatalf("terminated sort changed parsed values\nbefore: %#v\nafter: %#v", before, after)
 				}
 			})
 		}

@@ -21,31 +21,41 @@ function entry(line, depth) {
 // Track scalar spans before interpreting mapping keys or anchor tokens. Infer
 // block indentation from its first nonblank line, or use the explicit digit.
 // Keep trailing blank lines too: the + chomping indicator owns those bytes.
-function scalarLines(lines) {
+function scalarLines(lines, blockContent = new Set()) {
   const content = new Set()
-  let block, quote
-  const quoteContinues = (text, start) => {
-    for (let j = start; j < text.length; j++) {
-      if (quote === '"' && text[j] === '\\') { j++; continue }
-      if (text[j] !== quote) continue
-      if (quote === "'" && text[j + 1] === "'") { j++; continue }
-      return false
+  let block, quote, flowDepth = 0
+  // Flow collections can contain quoted scalars at any nesting depth. Keep
+  // scanning after a closing quote: another scalar may open on the same line.
+  const scanInline = text => {
+    for (let j = 0; j < text.length; j++) {
+      const char = text[j]
+      if (quote) {
+        if (quote === '"' && char === '\\') { j++; continue }
+        if (char !== quote) continue
+        if (quote === "'" && text[j + 1] === "'") { j++; continue }
+        quote = undefined
+      } else {
+        if (char === '#' && (j === 0 || /\s/.test(text[j - 1]))) break
+        if (char === '[' || char === '{') flowDepth++
+        else if (char === ']' || char === '}') flowDepth--
+        else if ((char === '"' || char === "'") && (j === 0 || /[\s[{,:?]/.test(text[j - 1]))) quote = char
+      }
     }
-    return true
   }
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
-    if (quote) {
+    if (quote || flowDepth) {
       content.add(i)
-      if (!quoteContinues(line, 0)) quote = undefined
+      scanInline(line)
       continue
     }
     if (block) {
-      if (!line.trim()) { content.add(i); continue }
+      if (!line.trim()) { content.add(i); blockContent.add(i); continue }
       const depth = indent(line)
       if (depth > block.parent && (block.depth === undefined || depth >= block.depth)) {
         block.depth ??= depth
         content.add(i)
+        blockContent.add(i)
         continue
       }
       block = undefined
@@ -71,9 +81,9 @@ function scalarLines(lines) {
     if (header) {
       const digit = /[1-9]/.exec(header[1])
       block = { parent, depth: digit ? parent + Number(digit[0]) : undefined }
-    } else if (value.startsWith('"') || value.startsWith("'")) {
-      quote = value[0]
-      if (!quoteContinues(value, 1)) quote = undefined
+    } else {
+      const inline = value.replace(/^&[\w-]+\s+/, '')
+      if (/^[\[{'"]/.test(inline)) scanInline(inline)
     }
   }
   return content
@@ -137,6 +147,8 @@ export function sortOpenAPI(source) {
   const finalNewline = source.endsWith('\n')
   const lines = source.split(/\r?\n/)
   if (finalNewline) lines.pop()
+  const originalBlocks = new Set()
+  scalarLines(lines, originalBlocks)
   // Check the original bindings before moving any blocks.
   const original = anchorLines(lines)
   const seen = new Set()
@@ -171,7 +183,18 @@ export function sortOpenAPI(source) {
     definition.alias = use.alias
     declared.add(use.alias)
   }
-  return lines.join(newline) + (finalNewline ? newline : '')
+  const result = lines.join(newline) + (finalNewline ? newline : '')
+  if (!finalNewline && result !== source) {
+    const sortedBlocks = new Set()
+    scalarLines(lines, sortedBlocks)
+    // A block scalar owns its final line break. Moving it across an EOF with
+    // no newline can add or remove that break from its parsed value. Reject
+    // before write mode touches the file, retaining source bytes exactly.
+    if (originalBlocks.has(lines.length - 1) || sortedBlocks.has(lines.length - 1)) {
+      throw new Error('Cannot move a block scalar into or out of unterminated EOF; add a final newline before sorting')
+    }
+  }
+  return result
 }
 
 export function main(args, path = contract, log = console.log) {
