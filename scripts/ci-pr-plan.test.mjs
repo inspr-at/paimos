@@ -64,6 +64,26 @@ test('real rename/delete diff widens specs and includes a rename source outside 
   }
 });
 
+test('instruction-only PRs require full CI while ordinary documentation stays docs-only (AEON-766)', () => {
+  for (const [path, lane] of [['AGENTS.md', 'full'], ['CLAUDE.md', 'full'],
+    ['README.md', 'docs-only'], ['docs/x.md', 'docs-only']]) {
+    const repo = repository();
+    repo.file(path, 'changed\n');
+    const head = repo.commit();
+    assert.equal(classifyPR('pull_request', repo.event(head), { git: repo.git }).lane, lane, path);
+  }
+  const rollout = JSON.parse(readFileSync(new URL('./rules-bootstrap/rollout.json', import.meta.url), 'utf8'));
+  const pinned = rollout.targets.flatMap(({ target, candidate }) => [target, candidate]);
+  for (const path of [...pinned, 'docs/AGENTS.md', 'docs/nested/CLAUDE.md', 'web/AGENTS.md',
+    'internal/auth/CLAUDE.md', 'cmd/aeon/AGENTS.md', 'internal/rulesimport/testdata/pack/AGENTS.md',
+    'scripts/audit/AGENTS.md', 'agents.md', 'docs/claude.MD', 'internal/auth/cLaUdE.mD']) {
+    assert.equal(classifyPaths([path]).lane, 'full', path);
+    assert.equal(classifyPaths(['README.md', path]).lane, 'full', path);
+  }
+  for (const path of ['README.md', 'docs/x.md', 'docs/guide.txt', 'CHANGELOG.md', 'LICENSE'])
+    assert.equal(classifyPaths([path]).lane, 'docs-only', path);
+});
+
 test('Markdown fixtures and implementation documentation require full validation', () => {
   for (const path of ['internal/rulesimport/testdata/pack/AGENTS.md',
     'internal/db/migrations/README.md', 'scripts/audit/rubric.md', 'web/tests/fixture.md',
