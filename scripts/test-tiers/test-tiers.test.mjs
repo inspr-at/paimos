@@ -1079,6 +1079,22 @@ test('job accounting includes setup in minutes and reports missing artifacts rat
   assert.deepEqual(measurement.missingEvidence,['go-test-1'])
 })
 
+test('skipped jobs have no runner duration and cannot hide missing test evidence',()=>{
+  const skipped={name:'tree-reuse',status:'completed',conclusion:'skipped',
+    started_at:'2026-10-05T12:38:25Z',completed_at:'2026-10-05T12:38:24Z'}
+  for(const timestamps of [{},{started_at:skipped.completed_at},{started_at:null,completed_at:null}]) {
+    assert.equal(jobMinutes({...skipped,...timestamps}),null)
+  }
+  const measurement=aggregate([], [skipped,{...skipped,name:'web-unit (1)'}])
+  assert.ok(measurement.jobs.every(job=>job.runnerMinutes===null))
+  assert.equal(measurement.measured.webRunnerMinutes,0)
+  assert.equal(measurement.coverage,'incomplete')
+  assert.deepEqual(measurement.missingEvidence,['web-unit-1'])
+  for(const conclusion of ['success','failure','cancelled']) {
+    assert.throws(()=>jobMinutes({...skipped,conclusion}),/Invalid job timestamps: tree-reuse/)
+  }
+})
+
 test('Actions skipped jobs with zero completed_at never invalidate PR, queue, push or nightly accounting',()=>{
   // Exact shape returned for tree-reuse on the failing PR/merge-group runs.
   const skipped={name:'tree-reuse',status:'completed',conclusion:'skipped',

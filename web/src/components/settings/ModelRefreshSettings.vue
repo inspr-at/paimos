@@ -55,7 +55,7 @@ onMounted(async () => {
 
 <template>
   <SettingsCard title="Models" icon="gear" anchor="models">
-    <template #lead>Agents keep model availability current as they work. Your role order stays under your control.</template>
+    <template #lead>Agents keep model availability current as they work. Your role order stays under your control.<span class="accounts-link">Vendor logins and their quota (Claude, Codex, Cursor) are in <RouterLink to="/settings/accounts">Accounts and computers</RouterLink>.</span></template>
     <p v-if="error" role="alert" class="error-line">{{ error }}</p>
     <p v-if="message" role="status" class="hint">{{ message }}</p>
     <template v-if="status">
@@ -89,6 +89,8 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.accounts-link { display: block; margin-top: 4px; }
+.accounts-link a { color: var(--teal-ink); text-underline-offset: 3px; }
 .controls { display: grid; gap: 10px; margin-top: 18px; }
 label { display: flex; align-items: center; gap: 9px; font-size: 13px; color: var(--ink); }
 input[type="number"], input[type="password"], select { width: 100%; max-width: 440px; min-height: 40px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }

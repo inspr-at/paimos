@@ -122,6 +122,8 @@
     ,
     "internal/features:TestValidationConcurrencyAndAtomicAudit"
     ,
+    "internal/harness:TestAgentWorkSettingsRecordChangesAndReverseWrites"
+    ,
     "internal/harness:TestDeskAnswerReferencesSurviveVerifiedResumeAndLateCorrection"
     ,
     "internal/harness:TestHeartbeatCommitDiffValidationAndStorage"
@@ -5189,6 +5191,8 @@
     {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryRestartQueuesOneBoundContinuation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryRevocationExpiryAndObservationFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAgentWorkSettingsRecordChangesAndReverseWrites","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestArchivedSessionRejectsProvenanceReplayAndNewRevision","tier":"GATED-FULL"}
     ,
