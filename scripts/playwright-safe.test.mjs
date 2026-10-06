@@ -14,6 +14,7 @@ import { recordDetachedChild } from './playwright-owned-groups.mjs'
 import requireSupervisor from './playwright-global-setup.mjs'
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+const block = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
 async function waitReady(path, exited) {
   const deadline = Date.now() + 15000
   while (!existsSync(path)) {
@@ -346,14 +347,24 @@ test('persistent supervisor root verification failure kills the group before rel
 for (const mode of ['transient', 'persistent', 'owner-change']) {
   test(`root preload handles ${mode} ps misses before suite code executes`, async t => {
     const directory = mkdtempSync(join(tmpdir(), 'aeon-pw-root-preload-')), lockPath = join(directory, 'suite.lock')
-    const attempts = join(directory, 'attempts'), ready = join(directory, 'ready')
+    const attempts = join(directory, 'attempts'), ready = join(directory, 'ready'), probed = join(directory, 'probed')
     const preload = new URL('./testdata/playwright/root-start-miss.mjs', import.meta.url).href
-    const script = `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(ready)}, fs.readFileSync(process.env.AEON_PW_GROUP_LOG));`
-    // Isolate preload publication: for the transient case the supervisor
-    // cannot verify the root, so only the preload can record it before work.
+    // Suite code runs only after the supervisor's first root probe. The bound
+    // is a hang guard: a supervisor that never probes still lets the root exit.
+    const script = `const fs = require('node:fs'); const until = Date.now() + 5000; while (!fs.existsSync(${JSON.stringify(probed)}) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5); fs.writeFileSync(${JSON.stringify(ready)}, fs.readFileSync(process.env.AEON_PW_GROUP_LOG));`
+    // Isolate preload publication: for the transient case the supervisor's
+    // root probe misses until suite code has run, so only the preload can
+    // record the root before work. The barrier, not node startup speed,
+    // orders the two; a slow root never exhausts the supervisor's attempts.
     const original = childProcess.spawnSync
     const injected = mode === 'transient' ? t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
-      if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) return { status: 1, stdout: '' }
+      if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) {
+        if (existsSync(ready)) return original(command, args, options)
+        writeFileSync(probed, '')
+        const until = Date.now() + 15000
+        while (!existsSync(ready) && Date.now() < until) block(5)
+        return { status: 1, stdout: '' }
+      }
       return original(command, args, options)
     }) : undefined
     syncBuiltinESMExports()
