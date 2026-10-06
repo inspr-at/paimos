@@ -146,7 +146,7 @@ import re
 import urllib.request
 u = os.environ['SMOKE_BASE']
 base_csp = "default-src 'self'; img-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
-spa_csp = re.compile(re.escape(base_csp) + r"; script-src 'self' 'nonce-([A-Za-z0-9+/_-]+={0,2})'; style-src 'self' 'nonce-\1'")
+spa_csp = re.compile(re.escape(base_csp) + r"; script-src 'self' 'nonce-([A-Za-z0-9+/]{32})'; style-src 'self' 'nonce-\1'")
 nonces = set()
 for _ in range(2):
     with urllib.request.urlopen(u + '/') as response:
