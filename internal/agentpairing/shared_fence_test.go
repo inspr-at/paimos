@@ -25,7 +25,7 @@ func TestSharedFenceCallerInventory(t *testing.T) {
 		"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go"},
 		"agentpairing.LockMutation": {"agentaccounts/module.go", "agentpairing/module.go", "agentruns/queue.go", "auth/owner_workstation.go", "harness/agent_recovery.go", "harness/module.go", "modelprovider/settings.go", "parentbenefits/module.go", "portal/market.go", "portal/moderate.go", "portal/module.go", "portal/products.go"},
 		"authz.LockProjectMutation": {"authz/agent_creation.go", "authz/members.go", "authz/project_members.go", "importer/users_backfill.go", "importer/writer.go"},
-		"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "events/causal_undo.go", "events/module.go", "harness/lead_decisions.go", "nodes/causal_undo.go", "nodes/portal_publish.go", "themes/store.go", "themes/undo.go"},
+		"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "events/causal_undo.go", "events/module.go", "harness/lead_decisions.go", "knowledge/learnings.go", "nodes/causal_undo.go", "nodes/portal_publish.go", "themes/store.go", "themes/undo.go"},
 		"operatoractor.Ensure":      {"auth/store.go", "authz/operator.go", "journey/operator.go", "operatoractor/actor.go"},
 		"rules.PrepareWrite":        {"knowledge/learning_draft.go"},
 	}
@@ -104,6 +104,13 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"../harness/agent_recovery.go", "readAgentRecovery", "agentpairing.LockMutation(", "authz.RequireTx("},
 		{"../harness/agent_recovery.go", "claimAgentRecoveries", "agentpairing.LockMutation(", "recoveryDaemon("},
 		{"../harness/agent_recovery.go", "completeAgentRecovery", "agentpairing.LockMutation(", "recoveryDaemon("},
+		// Learning decisions (AEON-788) enter the project fence and re-authorize
+		// before the learning advisory lock and node rows; the event is appended last.
+		{"../knowledge/learnings.go", "fenceLearningWrite", "authz.LockProjectWrite(", "authz.RequireTx("},
+		{"../knowledge/learnings.go", "acceptLearning", "fenceLearningWrite(", "lockLearning("},
+		{"../knowledge/learnings.go", "acceptLearning", "lockNode(", "events.Append("},
+		{"../knowledge/learnings.go", "dismissLearning", "fenceLearningWrite(", "lockLearning("},
+		{"../knowledge/learnings.go", "dismissLearning", "lockLearning(", "events.Append("},
 	}
 	for _, c := range checks {
 		raw, err := os.ReadFile(c.path)
