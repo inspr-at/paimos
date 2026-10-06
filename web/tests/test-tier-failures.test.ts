@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { goFailures, nodeFailures, vitestFailures, printFailures, outputTail } from '../../scripts/test-tiers/failures.mjs'
 import { goOutcomes, reportCases } from '../../scripts/test-tiers/report.mjs'
@@ -200,4 +201,36 @@ test('Vitest diagnostics name failed assertions and bounded output cannot escape
   printFailures([],{summary,log:(text: string)=>emptyLogs.push(text)})
   assert.deepEqual(emptyLogs,[])
   assert.equal(readFileSync(summary,'utf8'),markdown)
+})
+
+// Count collector invocations instead of asserting a machine-dependent runtime.
+test('native planning regression reuses one collected snapshot for unchanged-tree CLI checks', () => {
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-planning-snapshot-'))
+  const hook=resolve(directory,'fixture.mjs'),calls=resolve(directory,'collections.txt')
+  const collector=new URL('../../scripts/test-tiers/collect.mjs',import.meta.url).href
+  const manifest=JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json',import.meta.url),'utf8'))
+  const policy=JSON.parse(readFileSync(new URL('../ci-web-shards.json',import.meta.url),'utf8'))
+  const optional=new Set(policy.groups.filter(group=>group.gate===false).flatMap(group=>group.specs.map(spec=>spec.file)))
+  const essential=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='ESSENTIAL')
+  const nightly=manifest.tests.find(row=>row.kind==='browser'&&row.tier==='NIGHTLY'&&optional.has(row.file))
+  assert.ok(essential);assert.ok(nightly)
+  const wrapper=`export * from ${JSON.stringify(`${collector}?collection-count-fixture`)};
+import {appendFileSync} from 'node:fs';
+export const collectWeb = () => {
+  appendFileSync(${JSON.stringify(calls)},'collection\\n');
+  return ${JSON.stringify({tests:[essential,nightly]})};
+};`
+  writeFileSync(hook,`import {registerHooks} from 'node:module';
+registerHooks({load(url,context,next) {
+  if(url===${JSON.stringify(collector)}) return {format:'module',source:${JSON.stringify(wrapper)},shortCircuit:true};
+  return next(url,context);
+}});`)
+  const name='native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue'
+  const result=spawnSync(process.execPath,['--import',hook,'--test','--test-concurrency=1',
+    '--test-name-pattern',`^${name}$`,fileURLToPath(new URL('../scripts/aeon-681-ci.test.mjs',import.meta.url))],{
+    env:childEnvironment(resolve(directory,'summary.txt')),encoding:'utf8',timeout:30_000,maxBuffer:8*1024*1024,
+  })
+  assert.equal(result.error,undefined)
+  assert.equal(result.status,0,`${result.stdout}\n${result.stderr}`)
+  assert.equal(readFileSync(calls,'utf8'),'collection\n','All planner assertions must reuse the one unchanged-tree native snapshot')
 })

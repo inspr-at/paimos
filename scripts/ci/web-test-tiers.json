@@ -2444,7 +2444,8 @@
     "node:tests/test-tier-failures.test.ts:Node tier runner logs a real failure once and retains failure accounting and exit code",
     "node:tests/test-tier-failures.test.ts:Vitest diagnostics name failed assertions and bounded output cannot escape summary fences",
     "node:tests/test-tier-failures.test.ts:Vitest diagnostics retain assertion details and captured stdout stderr within bounds in logs and summary",
-    "node:tests/test-tier-failures.test.ts:Go tier runner consumes one failing jsonl execution and preserves the original exit code"
+    "node:tests/test-tier-failures.test.ts:Go tier runner consumes one failing jsonl execution and preserves the original exit code",
+    "node:tests/test-tier-failures.test.ts:native planning regression reuses one collected snapshot for unchanged-tree CLI checks"
   ],
   "tests": [
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired briefing bookmarks open Agents and keep request links","tier":"GATED-FULL"},
@@ -9673,7 +9674,8 @@
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Node tier runner logs a real failure once and retains failure accounting and exit code","tier":"NIGHTLY"},
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Vitest diagnostics name failed assertions and bounded output cannot escape summary fences","tier":"NIGHTLY"},
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Vitest diagnostics retain assertion details and captured stdout stderr within bounds in logs and summary","tier":"NIGHTLY"},
-    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Go tier runner consumes one failing jsonl execution and preserves the original exit code","tier":"NIGHTLY"}
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Go tier runner consumes one failing jsonl execution and preserves the original exit code","tier":"NIGHTLY"},
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"native planning regression reuses one collected snapshot for unchanged-tree CLI checks","tier":"NIGHTLY"}
   ],
   "timingWeights": {
     "runId": "37377299349",
