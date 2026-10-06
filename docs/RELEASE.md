@@ -1700,3 +1700,65 @@ capacity hold through a failed deletion. Migration 1238's retrospective
 AEON-655 ledger entry remains a coordinator action. Linux browser CI and
 OPS-247 remain unverified; local single-file Chromium evidence is not a
 replacement release gate. This fix round neither pushes to origin nor deploys.
+
+## Local static CI pre-filter (OPS-257)
+
+Before pushing, run `node scripts/ci-static.mjs --here` from any directory
+(the script resolves its own worktree). Before enqueueing a committed branch,
+refresh `origin/main` normally, then run `node scripts/ci-static.mjs --merge-main`
+(the default). It merges committed HEAD with the locally cached `origin/main`
+in a detached OS-temporary worktree, reports conflicts, and removes that
+worktree afterwards. It never fetches, changes the caller's branch/files,
+installs dependencies, or pushes. Uncommitted edits are included only by `--here`.
+
+`--list` shows the registry and workflow origins, `--only id,...` selects checks,
+`--json` emits one report with statuses, commands and seconds, and `--jobs N`
+sets the bounded pool (default 4). Each check has a timeout. Failures include
+the last 40 output lines and the exact command to reproduce. Exit codes are
+0 for a complete pass, 1 for check/merge failure, 2 for usage/setup errors,
+and 3 for an incomplete run with optional skips. `--allow-skips` explicitly
+permits exit 0 with skips; the summary still says **INCOMPLETE**, names every
+skipped check, and JSON carries `incomplete: true`. Failures take precedence.
+
+Coverage mirrors the static Go, release, audit/slice ownership, runner guard,
+migration policy/numbering, shard inventory/spec drift, planner and tier tests,
+and OpenAPI property lint checks in `.github/workflows/ci.yml`. Web typecheck,
+lint, native shard tests, browser safety tests and native tier collection are
+optional when installed `web/node_modules` is absent; no browsers are launched.
+When caller and merged `web/package-lock.json` bytes match, merge mode symlinks
+the caller's installed dependencies into the disposable tree and treats them
+as read-only. npm/tool caches and TypeScript build info go to temporary paths;
+typecheck extends the original projects through temporary configs under `web`
+to preserve module resolution. It never installs or shares mismatched locks.
+Checks receive a small fixed environment: caller GOFLAGS and AEON_* settings
+are stripped, CI/full-lane/full-tier values are set, and differing Node major
+or Go major/minor versions from `ci.yml` generate warnings.
+A dependency-free strict shard inventory still catches unregistered specs.
+The migration baseline uses GitHub's **latest published stable release**, exactly
+as CI does, and requires its local tag. Offline operators may explicitly pass
+`--base-ref vYYMMDDhhmmss.0.0` after verifying that published release; there is
+no fallback to the newest tag, which may be unpublished.
+
+This is a pre-filter, never a gate. Hosted CI remains the proof, including DB
+compatibility, full Go/browser suites, builds, Nix vendor hash and release checks.
+The command registry is `scripts/ci/static-checks.json`. It explicitly classifies
+every CI job as static or not-static (with a reason and pinned run-inventory digest).
+Static jobs require a primary mirror or a reasoned exact exclusion for every
+run line/block; supplements cannot satisfy coverage. Unknown jobs, new run
+steps, changed excluded runs, unclassified lines and stale origins fail drift
+validation and require an explicit classification decision. Not-static digests
+are SHA-256 of JSON arrays of `{step, cwd, command}` for every nonempty run in
+workflow order, with commands normalized by the workflow reader; review the
+changed runs before updating a pin.
+`release-check-run` already includes `scripts/ci-static.test.mjs` in its
+**PR classification and exact-SHA reuse regressions** command; the registry
+mirrors it and the historical Go workflow assertion pins that accepted command.
+That workflow is owned by the coordinator. Root `scripts/*.test.mjs` files use these explicit CI commands,
+not the Go or web tier manifests (web collection covers `web/tests/`).
+
+Disposable worktree creation and merging override caller hooks, signing and
+fast-forward settings. Interrupts cancel process groups and clean this run's
+worktree. Cleanup failures are reported without replacing the original result;
+pruning is attempted afterwards. A reported residue path is this run's detached
+worktree: inspect it, then use `git worktree remove --force <reported-path>` and
+`git worktree prune`. Do not remove other workers' worktrees.
