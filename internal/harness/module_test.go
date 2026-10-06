@@ -18,6 +18,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 
+	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/events"
@@ -103,7 +104,7 @@ func fixtureWithKind(t *testing.T, now func() time.Time, kind string) *harnessFi
 	// live-list privacy fixtures still exercise a worker-only caller.
 	f.agent.Scopes = []string{"harness.worker"}
 	if now == nil {
-		harness.New(f.db.App, nodes.CapturePlanningStart).Mount(f.mux)
+		harness.NewWithSessionRecovery(f.db.App, agentruns.PrepareSessionRecovery, nodes.CapturePlanningStart).Mount(f.mux)
 	} else {
 		harness.NewWithOwnershipClock(f.db.App, now).Mount(f.mux)
 	}

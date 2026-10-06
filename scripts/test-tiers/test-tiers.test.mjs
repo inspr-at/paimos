@@ -814,10 +814,35 @@ test('lean tier-plan skips setup, deep checkout and non-premerge checkout work',
   assert.match(planner,/fetch-depth: 1\n/)
   assert.doesNotMatch(planner,/setup-node|setup-go|npm ci|fetch-depth: 0/)
   assert.match(planner,/if: contains\(fromJSON\('\["pull_request","merge_group"\]'\), github.event_name\)/)
-  assert.match(planner,/pull_request\|merge_group\) node scripts\/test-tiers\/diff.mjs/)
+  assert.match(planner,/pull_request\) node scripts\/test-tiers\/diff.mjs/)
+  assert.match(planner,/merge_group\) printf 'mode=full\\nlayout=full\\nlane=full\\n' >> "\$GITHUB_OUTPUT" ;;/)
   assert.match(planner,/printf 'mode=full\\nlayout=full\\nlane=%s\\n'/)
   assert.match(planner,/CI_PLAN_LANE: \$\{\{ needs.ci-plan.outputs.lane \}\}/)
   assert.match(planner,/^      layout: \$\{\{ steps.tiers.outputs.layout \}\}$/m)
+})
+
+test('workflow merge-group planner writes only full outputs without executing candidate code; PR output is unchanged',()=>{
+  const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
+  const planner=ci.slice(ci.indexOf('\n  tier-plan:'),ci.indexOf('\n  runner-route:'))
+  const run=planner.split('        run: |\n')[1].replace(/^          /gm,'')
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-workflow-tier-plan-'))
+  mkdirSync(resolve(directory,'scripts/test-tiers'),{recursive:true})
+  writeFileSync(resolve(directory,'scripts/test-tiers/diff.mjs'),`
+    import {appendFileSync} from 'node:fs';
+    appendFileSync(process.env.GITHUB_OUTPUT,'mode=essential\\nlayout=static\\nlane=full\\n');
+    console.log('candidate planner executed');
+    process.exit(Number(process.env.CANDIDATE_STATUS));
+  `)
+  for(const event of ['merge_group','pull_request']) for(const flag of ['on','off',''])
+    for(const lane of ['full','spec-only','docs-only']) for(const code of ['0','7']) {
+      const output=resolve(directory,`${event}-${flag}-${lane}-${code}`)
+      writeFileSync(output,'')
+      const result=spawnSync('/bin/bash',['-e','-c',run],{cwd:directory,encoding:'utf8',timeout:10_000,
+        env:{PATH:process.env.PATH,GITHUB_EVENT_NAME:event,GITHUB_OUTPUT:output,CI_AFFECTED_LANE:flag,CI_PLAN_LANE:lane,CANDIDATE_STATUS:code}})
+      assert.equal(result.status,event==='merge_group'?0:Number(code),result.stderr)
+      assert.equal(readFileSync(output,'utf8'),event==='merge_group'?'mode=full\nlayout=full\nlane=full\n':'mode=essential\nlayout=static\nlane=full\n')
+      assert.equal(result.stdout,event==='merge_group'?'':'candidate planner executed\n')
+    }
 })
 
 test('static layout accounting expects skipped Go shards, timing and browser shards but still requires unit evidence',()=>{
