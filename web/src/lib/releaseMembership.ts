@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Release membership (AEON-227), as implemented by RM1. A planning release accepts
 // existing tickets through ticket-options and one membership write. A new release
-// takes its tickets on the journey action itself; a rejected ticket leaves no release.
+// creates its node and ticket membership atomically; a rejected ticket leaves no release.
 
 import { api, APIError } from './api.ts'
 import { type Walker } from './releaseData.ts'
