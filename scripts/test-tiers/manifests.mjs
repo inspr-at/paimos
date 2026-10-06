@@ -10,6 +10,12 @@ const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0
 const absent = Symbol('absent')
 class MergeConflictError extends Error {}
 class ManifestInputError extends Error {}
+const filesystemErrors = new Set([
+  'ENOENT', 'EACCES', 'EISDIR', 'ENOSPC', 'EROFS', 'EPERM', 'EMFILE', 'ENFILE',
+  'ENOTDIR', 'ELOOP', 'ENAMETOOLONG', 'EIO', 'EBADF', 'EEXIST', 'EINVAL', 'EBUSY',
+  'EFBIG', 'ENOTEMPTY', 'EXDEV', 'ETXTBSY', 'ENODEV', 'ENXIO', 'EDQUOT', 'ENOSYS',
+  'ENOTSUP', 'EOPNOTSUPP',
+])
 const testOwner = row => row.kind === 'go' ? row.package : row.file
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 const fields = ['kind', 'package', 'file', 'name', 'occurrence']
@@ -278,7 +284,7 @@ export function mergeDriverMain(args) {
     return mergeDriver(...args)
   } catch (error) {
     if (!(error instanceof MergeConflictError) && !(error instanceof ManifestInputError) &&
-        !(error instanceof SyntaxError) && typeof error.code !== 'string') throw error
+        !(error instanceof SyntaxError) && !filesystemErrors.has(error.code)) throw error
     console.error(error.message)
     return error instanceof MergeConflictError ? 1 : 2
   }

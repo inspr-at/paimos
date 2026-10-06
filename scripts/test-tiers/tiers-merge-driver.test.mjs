@@ -166,21 +166,41 @@ registerHooks({ resolve(specifier, context, next) {
 })
 
 
-test('OPS-257 both driver CLIs report unexpected crashes as 3 and preserve OURS', () => {
-  const injected = join(directory, 'crash.mjs')
-  writeFileSync(injected, `import fs from 'node:fs'
+for (const code of [undefined, 'ERR_INVALID_ARG_TYPE', 'ERR_OUT_OF_RANGE', 'UNKNOWN_ERROR']) {
+  test(`OPS-257 both driver CLIs report unexpected ${code ?? 'uncoded'} crashes as 3 and preserve OURS`, () => {
+    const injected = join(directory, `crash-${code ?? 'uncoded'}.mjs`)
+    writeFileSync(injected, `import fs from 'node:fs'
+  import { syncBuiltinESMExports } from 'node:module'
+  fs.statSync = () => { throw Object.assign(new TypeError('injected unexpected crash'), ${code ? `{ code: '${code}' }` : '{}'}) }
+  syncBuiltinESMExports()
+  `)
+    for (const program of [[standalone], [cli, 'manifests', 'merge-driver']]) {
+      const result = run('crash', program, [base, ours, theirs], go, ['--import', injected])
+      assert.equal(result.status, 3, result.stderr)
+      assert.match(result.stderr, /injected unexpected crash/)
+      assert.deepEqual(result.output, result.before)
+      assert.deepEqual(result.remainingFiles.sort(), ['base', 'ours', 'theirs'])
+    }
+  })
+}
+
+for (const code of ['ENOENT', 'EACCES', 'EISDIR', 'ENOSPC', 'EROFS', 'EPERM', 'EMFILE', 'ENFILE', 'ENOTDIR', 'ELOOP', 'ENAMETOOLONG', 'EIO']) {
+  test(`OPS-257 both driver CLIs report filesystem ${code} as 2 and preserve OURS`, () => {
+    const injected = join(directory, `filesystem-${code}.mjs`)
+    writeFileSync(injected, `import fs from 'node:fs'
 import { syncBuiltinESMExports } from 'node:module'
-fs.statSync = () => { throw new TypeError('injected unexpected crash') }
+fs.statSync = () => { throw Object.assign(new Error('injected filesystem ${code}'), { code: '${code}' }) }
 syncBuiltinESMExports()
 `)
-  for (const program of [[standalone], [cli, 'manifests', 'merge-driver']]) {
-    const result = run('crash', program, [base, ours, theirs], go, ['--import', injected])
-    assert.equal(result.status, 3, result.stderr)
-    assert.match(result.stderr, /injected unexpected crash/)
-    assert.deepEqual(result.output, result.before)
-    assert.deepEqual(result.remainingFiles.sort(), ['base', 'ours', 'theirs'])
-  }
-})
+    for (const program of [[standalone], [cli, 'manifests', 'merge-driver']]) {
+      const result = run('filesystem', program, [base, ours, theirs], go, ['--import', injected])
+      assert.equal(result.status, 2, result.stderr)
+      assert.match(result.stderr, new RegExp(`injected filesystem ${code}`))
+      assert.deepEqual(result.output, result.before)
+      assert.deepEqual(result.remainingFiles.sort(), ['base', 'ours', 'theirs'])
+    }
+  })
+}
 
 for (const operation of ['writeFileSync', 'fsyncSync', 'renameSync']) {
   test(`OPS-257 atomic ${operation} failure preserves OURS on clean and conflict paths`, () => {
@@ -233,4 +253,34 @@ test('OPS-257 standalone full-size old/canonical merges retain the union idempot
   const again = run('full-size-idempotent', [standalone], [expected, expected, expected], go)
   assert.equal(again.status, 0, again.stderr)
   assert.equal(again.output.toString(), expected)
+})
+
+test('OPS-257 both drivers merge real pre-L13 data with canonical sides idempotently', t => {
+  const commit = '5b74bc113c0ebc2c124fd7ecd0aa17b09deb9190'
+  const available = spawnSync('git', ['cat-file', '-e', `${commit}^{commit}`], { cwd: root, encoding: 'utf8', timeout: 10_000 })
+  assert.ifError(available.error)
+  if (available.status !== 0) {
+    assert.match(available.stderr, /Not a valid object name|could not get object info|bad object/i)
+    t.skip('historical pre-L13 commit is absent from the local clone')
+    return
+  }
+  const historical = spawnSync('git', ['show', `${commit}:${go}`], { cwd: root, encoding: 'utf8', timeout: 10_000, maxBuffer: 32 * 1024 * 1024 })
+  assert.ifError(historical.error)
+  assert.equal(historical.status, 0, historical.stderr)
+  const base = JSON.parse(historical.stdout)
+  assert.ok(base.tests.length > 3_000, 'fixture uses the full historical inventory')
+  const ours = { ...base, tests: [row('TestOPS257HistoricalAddedOurs', 'ESSENTIAL'), ...base.tests] }
+  const theirs = { ...base, tests: [row('TestOPS257HistoricalAddedTheirs', 'NIGHTLY'), ...base.tests] }
+  const expected = formatManifest({ ...base, tests: [ours.tests[0], theirs.tests[0], ...base.tests] }, go)
+  for (const program of [[standalone], [cli, 'manifests', 'merge-driver']]) {
+    for (const inputs of [[historical.stdout, ours, formatManifest(theirs, go)], [historical.stdout, formatManifest(theirs, go), ours]]) {
+      const result = run('historical', program, inputs, go)
+      assert.equal(result.status, 0, result.stderr)
+      assert.equal(result.output.toString(), expected)
+      assert.equal(JSON.parse(result.output).tests.length, base.tests.length + 2)
+      const again = run('historical-idempotent', program, [expected, expected, expected], go)
+      assert.equal(again.status, 0, again.stderr)
+      assert.equal(again.output.toString(), expected)
+    }
+  }
 })

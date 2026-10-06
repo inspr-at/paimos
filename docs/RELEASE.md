@@ -1949,9 +1949,9 @@ cp <repo>/scripts/test-tiers/tiers-merge-driver.mjs "$HOME/.local/share/aeon-ci/
 git -C <repo> config merge.tiers.driver '"/absolute/path/to/node" "$HOME/.local/share/aeon-ci/tiers-merge-driver.mjs" %O %A %B %P'
 ```
 
-Git runs the driver through a shell, so `$HOME` (or `~`) resolves outside the
-checkout. Use an absolute Node executable path so a different shell PATH cannot
-select another runtime. For another install location, replace only the stable
+Git runs the driver through a shell, so `$HOME` resolves outside the checkout;
+`~` does not expand inside the double-quoted script path. Use an absolute Node
+executable path so a different shell PATH cannot select another runtime. For another install location, replace only the stable
 script path in that configuration. The executable takes `BASE OURS THEIRS PATH`;
 PATH selects one of the three manifest families. The repository's `.gitattributes` provides these attributes.
 Also add the following lines once to `$GIT_COMMON_DIR/info/attributes` so branches
@@ -1993,9 +1993,38 @@ OURS untouched. **Any nonzero driver result means UNRESOLVED: read stderr and
 never `git add` the working file as is.** Git keeps the path unmerged; a valid
 JSON file alone does not prove that THEIRS' classifications survived.
 
-Recreate text conflict markers from the index with
-`git checkout --merge -- <path>`, or start from THEIRS with
-`git show :3:<path> > <path>` and re-apply OURS' missing classification rows using
+`git checkout --merge -- <path>` re-runs the configured `merge=tiers` driver;
+it cannot recover text conflicts independently of a missing or failing driver.
+Instead, merge the three index versions directly with `git merge-file`, which
+does not consult merge attributes. Use three regular temporary input files with
+this POSIX-shell recipe (also bash/zsh): process substitutions such as `<(git show ...)`
+can be read as empty files by `git merge-file` (verified with Git 2.55.0),
+silently producing empty output and exit 0.
+
+```sh
+path=scripts/ci/go-test-tiers.json # Replace with the unmerged manifest path.
+merge_tmp=$(mktemp -d "${TMPDIR:-/tmp}/tiers-reconcile.XXXXXX")
+if git show ":2:$path" > "$merge_tmp/ours" &&
+   git show ":1:$path" > "$merge_tmp/base" &&
+   git show ":3:$path" > "$merge_tmp/theirs"; then
+  merge_status=0
+  git merge-file -p --diff3 -L ours -L base -L theirs \
+    "$merge_tmp/ours" "$merge_tmp/base" "$merge_tmp/theirs" > "$merge_tmp/result" || merge_status=$?
+  if [ "$merge_status" -le 127 ]; then
+    cat "$merge_tmp/result" > "$path"
+  else
+    echo 'Text merge failed; working file left untouched' >&2
+  fi
+fi
+# Inspect the result, then trash this run's temporary directory.
+trash "$merge_tmp"
+```
+
+Confirm stages 1, 2 and 3 exist before using the recipe. `git merge-file` returns
+0 for a clean text merge, a positive conflict count (at most 127) for conflict markers,
+and a negative error code (reported as 255 by the shell) for a failure. Stop on
+an error; conflict markers still require explicit reconciliation. Alternatively,
+start from THEIRS with `git show :3:<path> > <path>` and re-apply OURS' missing classification rows using
 `node scripts/test-tiers/cli.mjs classify --tier <T> ...`. Explicitly reconcile
 conflicting tiers, weights, order and metadata against both index versions.
 Finish with `node scripts/test-tiers/cli.mjs manifests --write` and

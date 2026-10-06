@@ -69,7 +69,7 @@ test('OPS-257 independent equality proof is tied to a local commit and preserves
   assert.throws(() => proveConversion(before, manifest([...after.tests, row('TestA')]), goFile), /conversion changed data/)
   const policy = shards([group('first', [spec('tests/a.spec.ts')])]), changed = structuredClone(policy)
   changed.groups[0].specs[0].weightSeconds++
-  assert.throws(() => proveConversion(policy, changed, shardsFile), /conversion changed data/)
+  assert.throws(() => proveConversion(policy, changed, shardsFile), /per-file spec weights changed/)
   changed.groups[0].specs[0].weightSeconds--
   changed.groups[0].flags = ['--workers=2']
   assert.throws(() => proveConversion(policy, changed, shardsFile), /conversion changed data/)
@@ -343,7 +343,7 @@ test('OPS-257 conversion proof preserves each spec weight rather than only the w
   assert.equal(proveConversion(before, after, shardsFile).perFileWeightsUnchanged, true)
   after.groups[0].specs[0].weightSeconds = 7
   after.groups[0].specs[1].weightSeconds = 13
-  assert.throws(() => proveConversion(before, after, shardsFile), /conversion changed data/)
+  assert.throws(() => proveConversion(before, after, shardsFile), /per-file spec weights changed/)
 })
 
 

@@ -28,13 +28,14 @@ function git(args) {
 export function proveConversion(before, after, file) {
   if (!files.includes(file)) throw new Error(`Unsupported proof manifest: ${file}`)
   const shards = file === files[2]
-  assert.deepEqual(comparable(after, [], shards), comparable(before, [], shards), `${file}: conversion changed data`)
   if (shards) {
-    // Bind weights to their file identity; matching multisets are insufficient.
+    // Check file/weight pairs first so this diagnostic is reachable. The full
+    // comparison below also retains them, along with all other row metadata.
     const weights = data => data.groups.flatMap(group => group.specs.map(spec => [spec.file, spec.weightSeconds]))
       .sort((a, b) => compare(a[0], b[0]))
     assert.deepEqual(weights(after), weights(before), `${file}: per-file spec weights changed`)
   }
+  assert.deepEqual(comparable(after, [], shards), comparable(before, [], shards), `${file}: conversion changed data`)
   return { ...(shards ? { perFileWeightsUnchanged: true } : {}), file, rows: shards ? after.groups.reduce((n, g) => n + g.specs.length, 0) : after.tests.length, deepEqualExceptRowOrder: true, tiersWeightsAndMetadataUnchanged: true }
 }
 export function proveManifests(base = git(['rev-parse', 'HEAD'])) {
