@@ -28,8 +28,8 @@ if(process.argv.includes('run')) {
   const tests=JSON.parse(fs.readFileSync(${JSON.stringify(manifest)},'utf8')).tests.map(row=>({...row,active:true}));
   console.log(JSON.stringify({tests,imports:{}}));
 } else {
-  console.log(JSON.stringify({Action:'output',Package:'github.com/inspr-at/paimos/internal/proof',Output:'enumeration fixture failure\\n'}));
-  console.log(JSON.stringify({Action:'fail',Package:'github.com/inspr-at/paimos/internal/proof'}));
+  console.log(JSON.stringify({Action:'build-output',ImportPath:'github.com/inspr-at/paimos/internal/proof',Output:'enumeration fixture failure\\n'}));
+  console.log(JSON.stringify({Action:'build-fail',ImportPath:'github.com/inspr-at/paimos/internal/proof'}));
   process.exitCode=6;
 }
 `,{mode:0o700})
