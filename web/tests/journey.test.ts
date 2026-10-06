@@ -3,10 +3,74 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   captureJourneyConfirmation, matchesJourneyConfirmation, gateApprovals, gateApprovalState, nextPick, nextPickLabel, offeredApproval, orderedTickets, planWrite, releaseRefs, selectionOf, ticketGroups, walkOrder,
-  type Journey, type JourneyStage, type Walker, type WalkerTicket,
+  listWork, type Journey, type JourneyStage, type Walker, type WalkerTicket,
 } from '../src/lib/journey.ts'
 import type { Approval } from '../src/lib/agents.ts'
-import type { WorkNode } from '../src/lib/api.ts'
+import type { ListItem, WorkNode } from '../src/lib/api.ts'
+
+test('Journey work rejects a continuing twelfth page instead of returning partial totals', async () => {
+  const original = globalThis.fetch
+  const calls: URL[] = []
+  globalThis.fetch = async url => {
+    calls.push(new URL(String(url), 'http://local.test'))
+    return Response.json({ items: Array.from({ length: 500 }, (_, i) => ({ id: `${calls.length}-${i}` })), next_cursor: `page-${calls.length}` })
+  }
+  try {
+    await assert.rejects(listWork('project'), { message: 'The project has more work than Journey can load (6,000 rows). Counts and progress are unavailable.' })
+    assert.equal(calls.length, 12)
+    calls.forEach((url, index) => {
+      assert.equal(url.searchParams.get('within'), 'project')
+      assert.equal(url.searchParams.get('limit'), '500')
+      assert.equal(url.searchParams.get('sort'), 'key')
+      assert.equal(url.searchParams.get('cursor'), index ? `page-${index}` : null)
+    })
+  } finally { globalThis.fetch = original }
+})
+
+test('Journey work accepts a complete twelfth page and retains every row in order', async () => {
+  const original = globalThis.fetch
+  const expected: ListItem[] = []
+  let calls = 0
+  globalThis.fetch = async () => {
+    calls++
+    const items = Array.from({ length: 500 }, (_, i) => ({ id: `${calls}-${i}` } as ListItem))
+    expected.push(...items)
+    return Response.json({ items, next_cursor: calls < 12 ? `page-${calls}` : null })
+  }
+  try {
+    assert.deepEqual(await listWork('project'), expected)
+    assert.equal(expected.length, 6000)
+    assert.equal(calls, 12)
+  } finally { globalThis.fetch = original }
+})
+
+test('Journey work rejects repeated and cycling continuation cursors before another request', async () => {
+  const original = globalThis.fetch
+  try {
+    for (const cursors of [['same', 'same'], ['first', 'second', 'first']]) {
+      let calls = 0
+      globalThis.fetch = async () => Response.json({ items: [{ id: `leaf-${calls}` }], next_cursor: cursors[calls++] ?? null })
+      await assert.rejects(listWork('project'), { message: 'The work list did not advance. Counts and progress are unavailable. Try again.' })
+      assert.equal(calls, cursors.length)
+    }
+  } finally { globalThis.fetch = original }
+})
+
+test('Journey work finishes empty lists and propagates later page failures', async () => {
+  const original = globalThis.fetch
+  let calls = 0
+  try {
+    globalThis.fetch = async () => { calls++; return Response.json({ items: [], next_cursor: null }) }
+    assert.deepEqual(await listWork('project'), [])
+    assert.equal(calls, 1)
+    calls = 0
+    globalThis.fetch = async () => ++calls === 1
+      ? Response.json({ items: [{ id: 'first' }], next_cursor: 'second' })
+      : Response.json({ error: 'work unavailable' }, { status: 503 })
+    await assert.rejects(listWork('project'), { status: 503, message: 'work unavailable' })
+    assert.equal(calls, 2)
+  } finally { globalThis.fetch = original }
+})
 
 const ticket = (id: string, feature: string | null, included: boolean, position: number): WalkerTicket =>
   ({ ticket_node_id: id, key: `K-${id}`, title: id, feature_node_id: feature, included, position, estimated_hours: null, screen_node_ids: [] })
