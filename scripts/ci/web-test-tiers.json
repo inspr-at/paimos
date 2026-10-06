@@ -5554,11 +5554,11 @@
     ,
     {"kind":"browser","file":"tests/agents-harness-status.spec.ts","name":"six blocked accounts of seven stay blocked when the list is truncated","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-head.spec.ts","name":"\"…\" keeps five items; moved actions have their home on the page","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-head.spec.ts","name":"\"…\" keeps five items; moved actions have their home on the page","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-head.spec.ts","name":"one head line; a count filters Sessions, keeps ancestors as context and clears with × or Esc at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-head.spec.ts","name":"one head line; a count filters Sessions, keeps ancestors as context and clears with × or Esc at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-head.spec.ts","name":"one head line; a count filters Sessions, keeps ancestors as context and clears with × or Esc at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/agents-head.spec.ts","name":"one head line; a count filters Sessions, keeps ancestors as context and clears with × or Esc at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-hierarchy.spec.ts","name":"a stopped lead with a live grandchild stays visible and direct worker links open their ancestors","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
