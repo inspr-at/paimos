@@ -8514,6 +8514,8 @@
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"ticket header keeps every action inside a 1024 side panel with a wide system font","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"ticket header steps down at every dock width so Close stays inside with a wide system font","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"ticket: Queue keeps its place through Queue and Queued, and the line shows where it stands","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"ticket: queued without a lead offers Start lead; a parent queues its open leaves; manual start stays expert-only","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}

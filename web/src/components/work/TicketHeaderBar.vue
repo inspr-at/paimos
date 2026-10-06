@@ -101,7 +101,7 @@ void props
     </template>
     <template v-else>
     <slot name="queue" />
-    <button v-if="canWrite" type="button" class="btn sm edit-btn" aria-keyshortcuts="e" data-tip="Edit title, text and properties · e" @click="emit('edit')"><AppIcon name="edit" :size="13" />Edit</button>
+    <button v-if="canWrite" type="button" class="btn sm edit-btn" aria-label="Edit" aria-keyshortcuts="e" data-tip="Edit title, text and properties · e" @click="emit('edit')"><AppIcon name="edit" :size="13" /><span class="edit-word">Edit</span></button>
     <button v-if="mode === 'panel'" type="button" class="icon-btn sm flat wide-only" aria-label="Open as full page" data-tip="Full page · f" @click="emit('expand')"><AppIcon name="expand" :size="14" /></button>
     <button v-else type="button" class="icon-btn sm flat wide-only" aria-label="Show beside the list" data-tip="Side panel · f" @click="emit('collapse')"><AppIcon name="collapse" :size="14" /></button>
     <button type="button" class="icon-btn sm flat wide-only" aria-label="Open in a new tab" data-tip="Open in new tab" @click="emit('newTab')"><AppIcon name="external" :size="14" /></button>
@@ -184,6 +184,20 @@ void props
 /* A narrow dock uses More for these actions, independently of viewport width. */
 @container panel-bar (max-width: 420px) {
   .wide-only, .position { display: none; }
+}
+/* A labelled Queue action (QueueAction, ParentQueueAction) needs about 120px.
+   Step down in order of least loss so Close never leaves the dock, sized for
+   wide system fonts (DejaVu, Verdana): the counter, then the actions More
+   repeats, then Queue's word and keycap (in their components), then Edit's word.
+   Every step keeps the name, tooltip and shortcut. */
+@container panel-bar (max-width: 620px) {
+  .panel-bar:has(.q-action) .position { display: none; }
+}
+@container panel-bar (max-width: 550px) {
+  .panel-bar:has(.q-action) .wide-only { display: none; }
+}
+@container panel-bar (max-width: 420px) {
+  .panel-bar:has(.q-action) .edit-word { display: none; }
 }
 @media (max-width: 720px) {
   .panel-bar { padding: 0 6px 0 12px; }

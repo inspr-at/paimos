@@ -185,6 +185,43 @@ test('ticket header keeps every action inside a 1024 side panel with a wide syst
   }
 })
 
+test('ticket header steps down at every dock width so Close stays inside with a wide system font', async ({ page }) => {
+  // AEON-780: at 1440 on CI's Linux fonts the labelled Queue pushed Close out of
+  // the dock (work-queue.spec.ts:529). The whole page takes the wide font here.
+  const wide = ':root { --font: Verdana, "DejaVu Sans", sans-serif !important; } .panel-bar .btn, .panel-bar .btn *:not(kbd) { font-family: var(--font) !important; }'
+  await mockLeadFlow(page, { lead: 'working', queue: [] })
+  for (const key of ['PHAROS-14', 'PHAROS-12']) {
+    await page.setViewportSize({ width: 1920, height: 1000 })
+    await page.goto(`/p/PHAROS/${key}`)
+    await page.addStyleTag({ content: wide })
+    const drawer = page.getByRole('complementary', { name: 'Ticket details' })
+    const bar = drawer.locator('.panel-bar-main')
+    // A wide dock keeps the full header: the steps never hide what fits.
+    await expect(drawer.locator('.q-action .q-word').first()).toBeVisible()
+    await expect(drawer.locator('.q-action .q-key')).toBeVisible()
+    await expect(drawer.locator('.position')).toBeVisible()
+    await expect(drawer.getByRole('button', { name: 'Open as full page', exact: true })).toBeVisible()
+    for (const width of [1920, 1600, 1440, 1366, 1280, 1180, 1024, 900, 800, 721]) {
+      await page.setViewportSize({ width, height: 1000 })
+      const geometry = await bar.evaluate(el => {
+        const frame = el.getBoundingClientRect()
+        const buttons = [...el.querySelectorAll('button')].map(button => {
+          const rect = button.getBoundingClientRect()
+          return { name: button.getAttribute('aria-label') ?? button.textContent?.trim() ?? '', left: rect.left, right: rect.right, width: rect.width }
+        }).filter(button => button.width > 0)
+        return { left: frame.left, right: frame.right, overflow: el.scrollWidth - el.clientWidth, buttons }
+      })
+      expect(geometry.overflow, `${key} at ${width}: the header does not overflow`).toBeLessThanOrEqual(0)
+      for (const name of ['Close ticket details', 'More actions', 'Edit']) expect(geometry.buttons.map(b => b.name), `${key} at ${width}: ${name} is shown`).toContain(name)
+      for (const button of geometry.buttons) {
+        expect(button.left, `${key} at ${width}: ${button.name} starts inside the header`).toBeGreaterThanOrEqual(geometry.left - 0.5)
+        expect(button.right, `${key} at ${width}: ${button.name} ends inside the header`).toBeLessThanOrEqual(geometry.right + 0.5)
+      }
+      await expect(drawer.getByRole('button', { name: 'Close ticket details' })).toBeInViewport({ ratio: 1 })
+    }
+  }
+})
+
 for (const look of ['light', 'dark'] as const) test(`Agents page: one line per lead; + offers Start lead only while a project has none (${look})`, async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
   await mockLeadFlow(page, { lead: 'working', aeon: 'none', queue: ['n-4', 'n-a1'] })
