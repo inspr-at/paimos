@@ -202,7 +202,12 @@ export function classifyManifest(manifest, discovered, { tier, only } = {}) {
     const { leaf, line, id: nativeId, active, file, ...entry } = row
     added.push({ ...entry, ...(row.kind === 'go' ? {} : { file }), tier })
   }
-  return { manifest: { ...manifest, tests: [...manifest.tests, ...added] }, added }
+  // Newly classified NIGHTLY cases were never part of the legacy full gate.
+  // Keep their inventory with the rows so the gate-preservation check can
+  // distinguish them without exempting or demoting any existing case.
+  const postGateCases = tier === 'NIGHTLY' && added.length
+    ? { postGateCases: [...(manifest.postGateCases ?? []), ...added.map(key)] } : {}
+  return { manifest: { ...manifest, ...postGateCases, tests: [...manifest.tests, ...added] }, added }
 }
 
 export function mergeManifests(base, ours, theirs, file) {

@@ -57,7 +57,7 @@ function stepLabel(stage: Stage, index: number) {
         <span v-if="index < STAGES.length - 1" class="link" aria-hidden="true" />
       </li>
     </ol>
-    <p v-if="phone" class="next-line"><span class="led" :class="{ on: !passive }" aria-hidden="true" />{{ passive ? 'Now' : 'Next' }} · <b>{{ action.label }}</b><span v-if="why" class="why">{{ why }}</span></p>
+    <p v-if="phone" class="next-line"><span class="led" :class="{ on: !passive }" aria-hidden="true" />{{ passive ? 'Now' : 'Next' }} · <b>{{ action.label }}</b></p>
   </nav>
 </template>
 
@@ -116,7 +116,6 @@ li.done .link::after { content: ''; position: absolute; right: -2px; top: -2px; 
   li.here .led { display: none; }
   .next-line { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; font-size: 12.5px; color: var(--ink-2); }
   .next-line b { color: var(--ink); font-weight: 600; }
-  .next-line .why { flex-basis: 100%; padding-left: 13px; font-size: 12px; color: var(--ink-3); }
 }
 /* Phones: the eight stages wrap into two rows of four; none scrolls out of view. */
 @media (max-width: 600px) {

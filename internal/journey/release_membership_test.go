@@ -72,7 +72,7 @@ func TestOpenFirstReleaseWithFiveExistingTicketsAtomic(t *testing.T) {
 }
 
 // Two application connections establish an actual database lock barrier. The
-// direct request holds the pairing lock; the atomic action must wait there before
+// direct request holds tenant/pairing locks; the atomic action must wait there before
 // taking the journey row. NOWAIT detects the old inverse order deterministically
 // instead of relying on a race or waiting for PostgreSQL's deadlock detector.
 func TestAtomicReleaseMembershipLockOrder(t *testing.T) {
@@ -112,8 +112,7 @@ func TestAtomicReleaseMembershipLockOrder(t *testing.T) {
 			defer cancel()
 			err := db.InTransaction(ctx, f.db.App, func(held context.Context) error {
 				if err := db.InTenant(held, f.db.App, f.tenant, func(tx pgx.Tx) error {
-					_, err := tx.Exec(held, `SELECT pg_advisory_xact_lock(hashtextextended('aeon-pairing:'||current_setting('aeon.tenant_id',true),0))`)
-					return err
+					return db.LockWorkTreeTx(held, tx)
 				}); err != nil {
 					return err
 				}
@@ -124,16 +123,18 @@ func TestAtomicReleaseMembershipLockOrder(t *testing.T) {
 					result <- w
 				}()
 				if err := db.InTenant(held, f.db.App, f.tenant, func(tx pgx.Tx) error {
+					var holder int
+					if err := tx.QueryRow(held, `SELECT pg_backend_pid()`).Scan(&holder); err != nil {
+						return err
+					}
 					for {
 						var waiting bool
-						// Match the blocked lock to this connection's granted lock;
+						// Match the blocked tenant fence to this connection;
 						// another tenant or a runner timing delay cannot satisfy it.
-						if err := tx.QueryRow(held, `SELECT EXISTS(
- SELECT 1 FROM pg_locks mine JOIN pg_locks waiter
- ON waiter.locktype=mine.locktype AND waiter.database IS NOT DISTINCT FROM mine.database
- AND waiter.classid=mine.classid AND waiter.objid=mine.objid AND waiter.objsubid=mine.objsubid
- WHERE mine.pid=pg_backend_pid() AND mine.locktype='advisory' AND mine.granted
- AND waiter.pid<>mine.pid AND NOT waiter.granted)`).Scan(&waiting); err != nil {
+						if err := f.db.Admin.QueryRow(held, `SELECT EXISTS(
+ SELECT 1 FROM pg_stat_activity waiter
+ WHERE waiter.wait_event_type='Lock' AND $1::int=ANY(pg_blocking_pids(waiter.pid))
+ AND strpos(waiter.query,'FROM tenants')>0 AND strpos(waiter.query,'FOR NO KEY UPDATE')>0)`, holder).Scan(&waiting); err != nil {
 							return err
 						}
 						if waiting {
@@ -150,7 +151,7 @@ func TestAtomicReleaseMembershipLockOrder(t *testing.T) {
 					var locked string
 					return tx.QueryRow(held, `SELECT project_node_id::text FROM journey_projects WHERE project_node_id=$1 FOR UPDATE NOWAIT`, project).Scan(&locked)
 				}); err != nil {
-					return fmt.Errorf("journey row was taken before pairing advisory lock: %w", err)
+					return fmt.Errorf("journey row was taken before tenant/pairing fence: %w", err)
 				}
 				method := http.MethodPost
 				body := fmt.Sprintf(`{"expected_revision":1,"ticket_node_ids":[%q]}`, ids[0])

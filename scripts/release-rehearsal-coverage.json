@@ -283,6 +283,12 @@
       "step": "Reject an existing image tag"
     },
     {
+      "counterpart": "TestExportsShareSourceEpoch",
+      "mode": "test",
+      "sha256": "17f48ae857528742726aea9e38f6717ae18b52b85b8b70b25628d37bb8bde426",
+      "step": "Pin both exports to the source epoch"
+    },
+    {
       "counterpart": "image-dry-run/Prepare pinned runtime closure",
       "mode": "step",
       "sha256": "ee9224f109b05b42853cd8aea29507100edacce4c74057939e4f2b29c0305d0d",
@@ -347,6 +353,12 @@
       "mode": "step",
       "sha256": "a745edc42147722f2f40f7bd66f176f6bb9bd116c89eccfeb8896858f94f58a7",
       "step": "Require pushed image to equal the smoked build"
+    },
+    {
+      "counterpart": "TestPublishedRuntimeMustMatchSmokedRuntime",
+      "mode": "test",
+      "sha256": "224aa082f579b7186f761b5a97c6e65fcc9b7e5ca0d64dd2e30951682ab33a65",
+      "step": "Verify pushed runtime matches smoke"
     },
     {
       "counterpart": "No OCI or GitHub attestation is published before tagging; local BuildKit provenance export and real gh argument parsing run instead.",
