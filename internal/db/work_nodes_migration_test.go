@@ -505,7 +505,8 @@ func workBackupCommand(ctx context.Context, d *dbtest.DB, tool string, args ...s
 	if container := os.Getenv("AEON_TEST_POSTGRES_CONTAINER"); container != "" {
 		return exec.CommandContext(ctx, "docker", append([]string{"exec", "-i", container, tool, "-U", conn.User, "-d", d.Name}, args...)...)
 	}
-	cmd := exec.CommandContext(ctx, tool, args...)
+	// pg_restore needs an explicit database option to restore rather than emit SQL.
+	cmd := exec.CommandContext(ctx, tool, append([]string{"-d", d.Name}, args...)...)
 	cmd.Env = append(os.Environ(),
 		"PGHOST="+conn.Host, "PGPORT="+strconv.Itoa(int(conn.Port)),
 		"PGUSER="+conn.User, "PGPASSWORD="+conn.Password, "PGDATABASE="+d.Name,
@@ -536,8 +537,8 @@ func TestWorkNodesBackupUsesFixtureConnection(t *testing.T) {
 					}
 					continue
 				}
-				if !reflect.DeepEqual(cmd.Args, []string{tool, "--no-owner"}) {
-					t.Fatalf("%s must use native clients without connection arguments", tool)
+				if !reflect.DeepEqual(cmd.Args, []string{tool, "-d", "fixture", "--no-owner"}) {
+					t.Fatalf("%s must use native clients with an explicit database and no credential arguments", tool)
 				}
 				vars := map[string]string{}
 				for _, entry := range cmd.Env {
