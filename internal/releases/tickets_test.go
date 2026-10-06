@@ -373,3 +373,28 @@ func TestWorkParentStatusReleaseQuickCreate(t *testing.T) {
 		return nil
 	})
 }
+
+// NodeUndoTestFixture exposes the existing fixture only to external integration
+// tests, avoiding a nodes -> workqueue -> statusautopilot -> releases test cycle.
+// Its closures use the same restricted database and assertions as internal tests.
+type NodeUndoTestFixture struct {
+	DB               *dbtest.DB
+	Person           tenant.Principal
+	Project, Feature string
+	Mux              *http.ServeMux
+	Existing         func(string, string, string, string) string
+	AddExisting      func([]string, int, bool) *httptest.ResponseRecorder
+	Tx               func(func(pgx.Tx) error)
+	Request          func(tenant.Principal, string, string, string) *httptest.ResponseRecorder
+}
+
+func NodeUndoFixtureForTest(t *testing.T) NodeUndoTestFixture {
+	t.Helper()
+	f := ticketSetup(t)
+	return NodeUndoTestFixture{DB: f.db, Person: f.person, Project: f.project, Feature: f.feature, Mux: f.mux, Existing: f.existing, AddExisting: f.addExisting, Tx: f.tx, Request: f.request}
+}
+
+func CheckMembershipForTest(t *testing.T, w *httptest.ResponseRecorder) {
+	t.Helper()
+	membershipOK(t, w)
+}

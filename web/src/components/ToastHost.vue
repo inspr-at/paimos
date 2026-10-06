@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { onBeforeUnmount, ref, watch } from 'vue'
-import { dismiss, toasts } from '../lib/toast'
+import { dismiss, toasts, toastBottomClearance } from '../lib/toast'
 import AppIcon from './AppIcon.vue'
 import ReleaseName from './ReleaseName.vue'
 function act(id: number, run: () => void) { dismiss(id); run() }
@@ -26,7 +26,7 @@ onBeforeUnmount(() => dialogs?.disconnect())
 
 <template>
   <Teleport :to="layer ?? 'body'" :disabled="!layer">
-  <div class="toast-host" aria-live="polite">
+  <div class="toast-host" aria-live="polite" :style="{ '--toast-obstacle-bottom': !layer && toastBottomClearance ? `calc(var(--footer-h, 0px) + ${toastBottomClearance + 12}px)` : '0px' }">
     <TransitionGroup name="toast">
       <div v-for="item in toasts" :key="item.id" class="toast" :class="[item.tone, { sticky: item.sticky }]">
         <AppIcon v-if="item.tone === 'error'" name="alert" :size="14" />
@@ -42,7 +42,7 @@ onBeforeUnmount(() => dialogs?.disconnect())
 
 <style scoped>
 /* Toasts rise above the footer bar, never over it. */
-.toast-host { position: fixed; z-index: 60; left: 50%; bottom: calc(var(--footer-h) + 14px); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; width: max-content; max-width: calc(100vw - 32px); }
+.toast-host { position: fixed; z-index: 60; left: 50%; bottom: max(calc(var(--footer-h, 0px) + 14px), var(--toast-obstacle-bottom, 0px)); transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; width: max-content; max-width: calc(100vw - 32px); }
 .toast {
   display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 6px 8px 6px 18px; border-radius: 999px; pointer-events: auto;
   background: var(--tip-bg); color: var(--tip-ink); font-size: 13.5px; box-shadow: 0 0 0 1px var(--glass-rim), 0 18px 36px -14px rgba(0, 0, 0, .45);
@@ -77,5 +77,5 @@ onBeforeUnmount(() => dialogs?.disconnect())
   .toast-close:hover { background: transparent; }
   .toast-close:hover::before { background: rgba(255, 255, 255, .08); }
 }
-@media (max-width: 600px) { .toast-host { bottom: calc(var(--footer-h) + 10px); } .toast { font-size: 13px; } .toast.sticky { flex-wrap: wrap; justify-content: flex-end; border-radius: 20px; padding: 8px 8px 8px 16px; } .toast.sticky span { flex: 1 1 100%; } .toast.sticky:has(> svg) span { flex-basis: calc(100% - 24px); } }
+@media (max-width: 600px) { .toast-host { bottom: max(calc(var(--footer-h, 0px) + 10px), var(--toast-obstacle-bottom, 0px)); } .toast { font-size: 13px; } .toast.sticky { flex-wrap: wrap; justify-content: flex-end; border-radius: 20px; padding: 8px 8px 8px 16px; } .toast.sticky span { flex: 1 1 100%; } .toast.sticky:has(> svg) span { flex-basis: calc(100% - 24px); } }
 </style>
