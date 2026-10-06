@@ -23,11 +23,15 @@ export const useWorkVocabulary = defineStore('workVocabulary', () => {
   // Every screen that names the lead reads LEAD_WORDS; it follows the workspace's agent names.
   watch(() => value.value.lead, lead => setLeadWords(lead), { immediate: true })
 
-  function accept(next: WorkVocabulary) {
-    if (!owner.value) return
+  // Returns the newest vocabulary known: an answer older than the one shown (a
+  // read that was overtaken by a save from the sibling card) never replaces it.
+  function accept(next: WorkVocabulary): WorkVocabulary {
+    if (!owner.value) return next
+    if (loaded.value && next.revision < value.value.revision) return value.value
     generation++; controller?.abort(); pending = undefined
     value.value = { ...next, leaf: { ...next.leaf }, levels: next.levels.map(level => ({ ...level })), ...(next.lead ? { lead: { ...next.lead } } : {}) }
     loaded.value = true; error.value = ''
+    return value.value
   }
   function load(): Promise<void> {
     if (!owner.value || loaded.value) return Promise.resolve()

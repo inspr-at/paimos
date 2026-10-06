@@ -15,8 +15,13 @@ const session = useSession()
 const vocabulary = useWorkVocabulary()
 const editable = computed(() => can('settings.manage'))
 const SUGGESTIONS = ['Supervisor', 'Coordinator', 'Conductor']
+const namesOf = (v: WorkVocabulary): LeadNames => ({ singular: v.lead?.singular ?? '', plural: v.lead?.plural ?? '' })
+const sameNames = (a: LeadNames, b: LeadNames) => a.singular === b.singular && a.plural === b.plural
 const draft = ref<LeadNames>({ singular: '', plural: '' })
-const saved = computed<LeadNames>(() => vocabulary.value.lead ?? { singular: '', plural: '' })
+// The vocabulary the draft was taken from. Saves go back under its revision, so
+// another admin's change to the names conflicts instead of being overwritten.
+const base = ref<WorkVocabulary>(vocabulary.value)
+const saved = computed<LeadNames>(() => namesOf(base.value))
 const busy = ref(false), message = ref(''), error = ref(false)
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 const words = computed(() => leadWords(draft.value.singular, draft.value.plural))
@@ -33,13 +38,17 @@ const feedback = computed(() => message.value
   || (dirty.value ? `Not saved yet: “${words.value.S}” and “${words.value.P}”.` : 'Blank names use “Lead” and “Leads”.'))
 let generation = 0
 onBeforeUnmount(() => { generation++ })
-// The draft follows the saved names until the person edits it; a new identity starts clean.
-watch(saved, (next, prior) => {
-  if (!prior || (draft.value.singular === prior.singular && draft.value.plural === prior.plural)) draft.value = { ...next }
-}, { immediate: true })
+function adopt(next: WorkVocabulary) { base.value = next; draft.value = namesOf(next) }
+// The draft follows the shared names until the person edits it. An edited draft
+// moves to a newer revision only while the names it started from still stand.
+watch(() => vocabulary.value, next => {
+  if (sameNames(draft.value, saved.value)) adopt(next)
+  else if (sameNames(namesOf(next), saved.value)) base.value = next
+})
+// A new identity starts clean.
 watch(() => `${session.identity?.tenant.id}:${session.identity?.principal.id}`, () => {
   generation++; busy.value = false; message.value = ''; error.value = false
-  draft.value = { ...saved.value }
+  adopt(vocabulary.value)
   void vocabulary.load()
 }, { immediate: true })
 async function reload() {
@@ -51,23 +60,23 @@ async function reload() {
     if (!response.ok) throw new Error('Agent names could not be read.')
     const value = await response.json() as WorkVocabulary
     if (run !== generation) return
-    vocabulary.accept(value); draft.value = { ...saved.value }
+    adopt(vocabulary.accept(value))
   } catch (e) { if (run === generation) { error.value = true; message.value = e instanceof Error ? e.message : 'Agent names could not be read.' } }
   finally { if (run === generation) busy.value = false }
 }
 async function save() {
   if (!editable.value || !vocabulary.loaded || busy.value) return
-  const run = ++generation, base = vocabulary.value
-  // Only the names change; levels go back exactly as last read, under the same revision.
+  const run = ++generation, from = base.value
+  // Only the names change; levels go back exactly as in the draft's base, under its revision.
   const lead = { singular: draft.value.singular.trim(), plural: draft.value.plural.trim() }
-  const body = JSON.stringify({ revision: base.revision, leaf: base.leaf, levels: base.levels, lead })
+  const body = JSON.stringify({ revision: from.revision, leaf: from.leaf, levels: from.levels, lead })
   busy.value = true; message.value = ''; error.value = false
   try {
     const response = await api('/settings/work-vocabulary', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body })
     const value = await response.json().catch(() => ({}))
     if (run !== generation) return
     if (!response.ok) throw new Error(typeof value.error === 'string' ? value.error : 'Agent names were not saved.')
-    vocabulary.accept(value as WorkVocabulary); draft.value = { ...saved.value }; message.value = 'Agent names saved.'
+    adopt(vocabulary.accept(value as WorkVocabulary)); message.value = 'Agent names saved.'
   } catch (e) { if (run === generation) { error.value = true; message.value = e instanceof Error ? e.message : 'Agent names were not saved.' } }
   finally { if (run === generation) busy.value = false }
 }

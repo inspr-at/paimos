@@ -13916,6 +13916,12 @@
     ,
     {"kind":"vitest","file":"tests/agent-indicator.unit.test.ts","name":"reads legacy account data without a write, then persists the migrated style on hovering change","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/agent-names-card.unit.test.ts","name":"a Work vocabulary read overtaken by an Agent names save never brings the old word back","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-names-card.unit.test.ts","name":"an edited draft conflicts with names another admin saved instead of overwriting them","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/agent-names-card.unit.test.ts","name":"an edited draft follows a work-level save that left the names alone","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/agent-pause-store.unit.test.ts","name":"Resume all sends only the selected paused generations","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/agent-pause-store.unit.test.ts","name":"Undo cannot revive an earlier request after another cancellation","tier":"NIGHTLY"}

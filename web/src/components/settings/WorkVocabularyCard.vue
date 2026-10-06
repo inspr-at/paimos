@@ -37,10 +37,12 @@ async function load(run = generation) {
   try {
     const response = await api('/settings/work-vocabulary')
     if (!response.ok) throw new Error('Vocabulary could not be read.')
-    const value = await response.json() as WorkVocabulary
+    const read = await response.json() as WorkVocabulary
     if (run !== generation) return
+    // A read overtaken by an Agent names save shows that newer revision instead.
+    const value = vocabulary.accept(read)
     draft.value = { revision: value.revision, leaf: { ...value.leaf }, levels: value.levels.length ? value.levels.map(level => ({ ...level })) : [{ name: '', icon: '' }, { name: '', icon: '' }] }
-    base = value; vocabulary.accept(value)
+    base = value
     loaded.value = true
   } catch (e) { if (run === generation) { error.value = true; message.value = e instanceof Error ? e.message : 'Vocabulary could not be read.' } }
   finally { if (run === generation) busy.value = false }
@@ -55,8 +57,9 @@ async function save() {
     const value = await response.json()
     if (run !== generation) return
     if (!response.ok) throw new Error(typeof value.error === 'string' ? value.error : 'Vocabulary was not saved.')
-    draft.value = { revision: value.revision, leaf: { ...value.leaf }, levels: value.levels.map((level: WorkVocabulary['levels'][number]) => ({ ...level })) }
-    base = value; vocabulary.accept(value); message.value = 'Workspace names saved.'
+    const fresh = vocabulary.accept(value as WorkVocabulary)
+    draft.value = { revision: fresh.revision, leaf: { ...fresh.leaf }, levels: fresh.levels.map(level => ({ ...level })) }
+    base = fresh; message.value = 'Workspace names saved.'
   } catch (e) { if (run === generation) { error.value = true; message.value = e instanceof Error ? e.message : 'Vocabulary was not saved.' } }
   finally { if (run === generation) busy.value = false }
 }
