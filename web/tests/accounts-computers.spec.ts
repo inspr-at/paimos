@@ -219,6 +219,36 @@ test('loading, a failed read with Try again, and an empty workspace each say so 
   await expect(status(page).getByRole('link', { name: 'Connect a computer' })).toHaveAttribute('href', '/agents/register-agent')
 })
 
+// Verify again leaves the head when the section unfolds. If the head wrapped only while it was
+// there, the toggle jumped half a row gap on unfold (the CI Linux fonts at 1024). Scanning the widths
+// above the phone layout makes that independent of the font the machine happens to have.
+test('the head stays one row, and the toggle stays put, whether or not Verify again is shown', async ({ page }) => {
+  // Tall enough that the section stays in view at every width, so nothing scrolls under the measurement.
+  await page.setViewportSize({ width: 1100, height: 3000 })
+  const { capacity } = await setup(page, { thresholds: { early_percent: 10, urgent_percent: 3 } })
+  expireClaude(capacity)
+  await open(page)
+  const head = section(page).locator('.fs-head')
+  const toggle = section(page).locator('.fs-tog')
+  const verify = section(page).locator('.fs-act')
+  const measure = async () => ({ head: (await head.boundingBox())!, toggle: (await toggle.boundingBox())! })
+  let scanned = 0
+  for (let width = 1100; width >= 700; width -= 20) {
+    await page.setViewportSize({ width, height: 3000 })
+    await expect(verify).toBeVisible()
+    const folded = await measure()
+    await title(page).click()
+    await expect(verify).toHaveCount(0)
+    const unfolded = await measure()
+    await title(page).click()
+    await expect(verify).toBeVisible()
+    expect(Math.abs(unfolded.toggle.y - folded.toggle.y), `toggle.y at ${width}`).toBeLessThanOrEqual(0.5)
+    expect(Math.abs(unfolded.head.height - folded.head.height), `head height at ${width}`).toBeLessThanOrEqual(0.5)
+    scanned++
+  }
+  expect(scanned).toBeGreaterThan(10)
+})
+
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
   test(`the head and the body keep their controls put through fold, verify and refresh at ${width} ${theme}`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 1100 })

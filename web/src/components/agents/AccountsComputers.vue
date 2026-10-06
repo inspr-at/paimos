@@ -220,7 +220,7 @@ const grid = computed(() => accounts.value.map(a => ({
         </section>
         <p class="acc-foot">
           <span v-if="props.showAccounts"><b>Pacing:</b> {{ pacingLine }} · <RouterLink :to="`${SETTINGS}#capacity-and-load`">Change in Settings</RouterLink></span>
-          <span>Lists, capacity and low-quota warnings live in Settings › <RouterLink :to="SETTINGS">Accounts and computers</RouterLink>.</span>
+          <span>Lists, capacity and low-quota warnings live in <RouterLink :to="SETTINGS">Settings, under Accounts and computers</RouterLink>.</span>
         </p>
       </template>
     </div>
@@ -230,8 +230,8 @@ const grid = computed(() => accounts.value.map(a => ({
 <style scoped>
 .acc-section { container: acc / inline-size; border-radius: 20px; min-width: 0; }
 .acc-ico { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 8px; background: var(--surface-sunken); color: var(--ink-2); }
-/* The head: title, then the state; Verify again and Manage sit at the line end, so a part that appears moves nothing before it. */
-.acc-section :deep(.fs-head) { flex-wrap: wrap; gap: 6px 12px; }
+/* The head: title, then the state; Verify again and Manage sit at the line end, so a part that appears moves nothing before it. One row above the phone layout: the state shortens with an ellipsis instead of wrapping, so Verify again leaving never changes the head's height. */
+.acc-section :deep(.fs-head) { flex-wrap: nowrap; gap: 6px 12px; }
 .fs-sum { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink-2); font-size: 13px; }
 .fs-sum .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .st { display: inline-flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink-2); font-size: 13px; }
@@ -289,7 +289,7 @@ const grid = computed(() => accounts.value.map(a => ({
 
 /* Phone: line 1 chevron, title, Manage (44 px); line 2 the status, wrapping; line 3 Verify again. */
 @container acc (max-width: 640px) {
-  .acc-section :deep(.fs-head) { gap: 6px 8px; padding: 6px 10px 6px 4px; }
+  .acc-section :deep(.fs-head) { flex-wrap: wrap; gap: 6px 8px; padding: 6px 10px 6px 4px; }
   .fs-sum { order: 3; flex: 1 1 100%; padding-left: 40px; }
   .fs-sum .t { white-space: normal; overflow: visible; }
   .fs-sum .st { align-items: flex-start; }

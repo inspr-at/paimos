@@ -4980,6 +4980,8 @@
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head and the body keep their controls put through fold, verify and refresh at 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the head stays one row, and the toggle stays put, whether or not Verify again is shown","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"the row menu carries Sprint, Hold and Remove; the computer menu its own actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"warning pills and fixes clear 4.5:1 in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
