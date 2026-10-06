@@ -259,13 +259,13 @@ func TestExportsShareSourceEpoch(t *testing.T) {
 	epochIndex, epoch := named(t, j, "Pin both exports to the source epoch")
 	buildIndex, build := named(t, j, "Build cached smoke image")
 	_, push := named(t, j, "Build and push")
-	if epochIndex >= buildIndex || epoch.ID != "source-epoch" || epoch.If != "" || epoch.ContinueOnError || build.With["build-args"] != push.With["build-args"] {
+	if epochIndex >= buildIndex || epoch.ID != "source-epoch" || epoch.If != "" || epoch.ContinueOnError || epoch.Env["FROZEN_SOURCE_EPOCH"] != "${{ steps.inputs.outputs.epoch }}" || build.With["build-args"] != push.With["build-args"] {
 		t.Fatal("exports do not share an unconditional source epoch")
 	}
 	if strings.Count(build.With["build-args"], "SOURCE_DATE_EPOCH=${{ steps.inputs.outputs.epoch }}\n") != 1 {
 		t.Fatal("exports must share the frozen build-input epoch")
 	}
-	for _, value := range []string{"1700000000", "", "bad", "1700000000\n1700000100"} {
+	for _, value := range []string{"1700000000", "1700000100", "", "bad", "1700000000\n1700000100"} {
 		dir := t.TempDir()
 		stub := "#!/bin/bash\n[[ $1 == show && $2 == -s && $3 == --format=%ct && $4 == HEAD ]] || exit 1\nprintf '%s\\n' \"$FIXTURE_EPOCH\"\n"
 		if err := os.WriteFile(filepath.Join(dir, "git"), []byte(stub), 0700); err != nil {
@@ -273,7 +273,7 @@ func TestExportsShareSourceEpoch(t *testing.T) {
 		}
 		output := filepath.Join(dir, "output")
 		cmd := exec.Command("bash", "-c", epoch.Run)
-		cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "FIXTURE_EPOCH="+value, "GITHUB_OUTPUT="+output)
+		cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "FIXTURE_EPOCH="+value, "FROZEN_SOURCE_EPOCH=1700000000", "GITHUB_OUTPUT="+output)
 		if err := cmd.Run(); (err == nil) != (value == "1700000000") {
 			t.Fatalf("source epoch %q: %v", value, err)
 		}

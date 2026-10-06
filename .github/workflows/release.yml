@@ -292,10 +292,12 @@ jobs:
 
       - name: Pin both exports to the source epoch
         id: source-epoch
+        env:
+          FROZEN_SOURCE_EPOCH: ${{ steps.inputs.outputs.epoch }}
         run: |
           set -euo pipefail
           epoch="$(git show -s --format=%ct HEAD)"
-          [[ "$epoch" =~ ^[0-9]+$ ]]
+          [[ "$epoch" =~ ^[0-9]+$ && "$epoch" == "$FROZEN_SOURCE_EPOCH" ]]
           echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
       # Prepared cold in every tag build and rehearsal, from the digest-pinned
       # Alpine base and the pinned chromium/tini. No registry cache is read or

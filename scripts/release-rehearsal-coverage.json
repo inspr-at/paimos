@@ -273,7 +273,7 @@
     {
       "counterpart": "TestExportsShareSourceEpoch",
       "mode": "test",
-      "sha256": "765f083bd777c5d136e36599a10281d28987f0c9933b12ab5d3fb9254f05bafd",
+      "sha256": "7e287fe835101e8d469e90d21f9d439e4f652dc97ea1b73d817220889c21887a",
       "step": "Pin both exports to the source epoch"
     },
     {
