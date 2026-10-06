@@ -1291,8 +1291,10 @@ watch(() => selected.value.size > 0, on => {
 onBeforeUnmount(() => { frameObserver?.disconnect(); window.removeEventListener('resize', measureFrame) })
 const bulkBusy = ref(false)
 const bulkMenu = ref<{ kind: 'status' | 'assignee' | 'priority' | 'labels' | 'move' | 'release'; anchor: HTMLElement } | null>(null)
+let bulkMenuGeneration = 0
 const releaseIds = ref<string[]>([])
 async function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
+  const opening = ++bulkMenuGeneration
   const at = anchor ?? document.querySelector<HTMLElement>(`.bulk-bar [aria-keyshortcuts="${{ status: 's', assignee: 'a', priority: 'p', labels: 'l', move: 'm', release: 'g' }[kind]}"]`)
   if (!at) return
   if (kind === 'release') { openRelease(at, liveSelection()); return }
@@ -1302,12 +1304,13 @@ async function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor
     const selection = () => JSON.stringify(selectedRows.value.map(row => [row.id, row.updated_at]))
     const shown = selection()
     await loadProjectPeople()
-    if (request !== peopleGeneration || !at.isConnected || selection() !== shown) return
+    if (opening !== bulkMenuGeneration || request !== peopleGeneration || !at.isConnected || selection() !== shown) return
   }
   if (kind === 'move') void list.loadEpics()
   bulkMenu.value = { kind, anchor: at }
 }
 function closeBulk(restore: boolean) {
+  bulkMenuGeneration++
   const anchor = bulkMenu.value?.anchor
   bulkMenu.value = null
   if (restore) anchor?.focus()
@@ -1341,7 +1344,7 @@ async function runBulk(change: Omit<BulkChange, 'ids'>, done: (count: number) =>
   const gone = new Set(selectedDeleted.value)
   ids = ids.filter(id => !gone.has(id))
   if (!ids.length || bulkBusy.value) return
-  bulkMenu.value = null
+  closeBulk(false)
   bulkBusy.value = true
   try {
     const bulkRows = selectionRows.value
@@ -1428,7 +1431,7 @@ async function undoBulk(eventId: number) {
 const count = (n: number) => plural(n, 'ticket')
 async function bulkStatus(state: string) {
   if (bulkBusy.value) return
-  bulkMenu.value = null
+  closeBulk(false)
   const gated = selectedRows.value.filter(row => needsBenefitPrompt(row, state))
   const gatedIds = new Set(gated.map(row => row.id))
   const ready = [...selected.value].filter(id => !gatedIds.has(id))
@@ -1458,6 +1461,7 @@ function bulkMove(epic: { id: string; key: string; title: string } | null) {
   void runBulk({ parent_id: target }, n => epic ? `Moved ${count(n)} to ${epic.title}` : `Took ${count(n)} out of their epic`)
 }
 function openRelease(anchor: HTMLElement, ids: string[]) {
+  bulkMenuGeneration++
   if (!ids.length || !can('releases.write', project.value?.id)) return
   releaseIds.value = ids
   bulkMenu.value = { kind: 'release', anchor }
@@ -1472,7 +1476,7 @@ async function chooseRelease(target: ReleaseTarget) {
     const row = rows.find(item => item.id === id)
     return { id, key: row?.key ?? id, title: row?.title ?? '', state: row?.state, kind: row?.kind_slug, isParent: releaseViewIsParent(nativeReleases.value.get(id)) }
   })
-  bulkMenu.value = null
+  closeBulk(false)
   const attempt = ++releaseAttempt
   bulkBusy.value = true
   const here = () => attempt === releaseAttempt && project.value?.id === projectId
