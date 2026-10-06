@@ -8008,6 +8008,8 @@
     ,
     {"kind":"go","package":"internal/themes","name":"TestConcurrentCASAndRevocationFence","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/themes","name":"TestCustomAgentStates","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/themes","name":"TestExistingTenantsAndBootstrapGetAuditedPorcelain","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/themes","name":"TestInitialExplicitDefaultPersistsAndWinsAfterLink","tier":"GATED-FULL"}
