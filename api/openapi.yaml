@@ -1536,6 +1536,73 @@ paths:
         '403': {description: Person with workspace settings.manage required}
         '404': {description: Project not visible}
         '409': {description: Override changed since it was read}
+  /status-autopilot/attention:
+    get:
+      operationId: listAutopilotAttention
+      summary: Needs attention across visible projects, 50 rows per keyset page
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: after, in: query, schema: {type: string, maxLength: 120}}
+        - {name: kind, in: query, schema: {type: string, enum: [proposed, triage, cancel, blocked, missed]}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: assignee, in: query, schema: {type: string, maxLength: 36, description: 'Principal UUID, or none for unassigned'}}
+        - {name: q, in: query, schema: {type: string, maxLength: 200}}
+      responses:
+        '200':
+          description: Visible items and counts, with bounded project and assignee facets
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AutopilotAttentionPage'}
+        '400': {description: Invalid filter or cursor}
+  /status-autopilot/attention/actions:
+    post:
+      operationId: resolveAutopilotAttention
+      summary: Apply, dismiss or undo up to 100 suggestions with individual results
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, items]
+              properties:
+                action: {type: string, enum: [apply, dismiss, undo]}
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: {$ref: '#/components/schemas/AutopilotAttentionAction'}
+      responses:
+        '200':
+          description: Each item commits independently; failures remain explicit
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [event_id, ok]
+                      properties:
+                        event_id: {type: integer, format: int64}
+                        ok: {type: boolean}
+                        resolution_event_id: {type: integer, format: int64}
+                        revision: {type: string, format: date-time}
+                        release_id: {type: string, format: uuid}
+                        release_revision: {type: integer, format: int64}
+                        release_project_revision: {type: integer, format: int64}
+                        previous_release_project_revision: {type: integer, format: int64}
+                        previous_release_revision:
+                          type: integer
+                          format: int64
+                          description: Release revision verified before this committed change; refresh only identities matching it
+                        error: {type: string}
+        '400': {description: Invalid action or batch}
   /status-autopilot/changes:
     get:
       operationId: listStatusAutopilotChanges
@@ -3935,6 +4002,8 @@ paths:
               schema:
                 oneOf:
                   - {$ref: '#/components/schemas/AttachView'}
+                  - {$ref: '#/components/schemas/AttachedMessageCapability'}
+                  - {$ref: '#/components/schemas/AttachedMessageExchange'}
                   - type: object
                     required: [state]
                     additionalProperties: false
@@ -4054,6 +4123,47 @@ paths:
       responses:
         '200': {description: Detached; conversation access ends}
         '403': {description: Same-origin paired owner required}
+  /agent-pairing/attach/{requestId}/messages:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: attachedMessageCapability
+      summary: Owner-only content-free messaging grant and specific readiness blocker
+      responses:
+        '200': {description: Messaging capability, content: {application/json: {schema: {$ref: '#/components/schemas/AttachedMessageCapability'}}}}
+        '403': {description: Authenticated computer owner required}
+  /agent-pairing/attach/{requestId}/messages/approve:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: approveAttachedMessages
+      summary: Allow my messages at the next step for this attachment and generation
+      description: Separate single-use approval; watch consent never grants messaging. Requires an interactive same-origin owner session and the exact digest prepared by the independent local helper. Vendor context retention and the live watch audience remain outside Aeon's text-not-retained promise. Processes running as your OS user are not isolated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [message_generation, consent_digest]
+              properties:
+                message_generation: {type: string, format: uuid}
+                consent_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+      responses:
+        '200': {description: Approved; policy B still requires a messaging-specific signed local confirmation, content: {application/json: {schema: {$ref: '#/components/schemas/AttachedMessageCapability'}}}}
+        '403': {description: Same-origin interactive owner required}
+        '409': {description: 'Stale generation, replay, digest mismatch, disabled feature or hook blocker'}
+  /agent-pairing/attach/{requestId}/messages/revoke:
+    parameters:
+      - {name: requestId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: revokeAttachedMessages
+      summary: Turn messages off; keep watching
+      description: Stops later offers and purges queued payloads. An already released note cannot be recalled. Re-enabling needs a new generation and explicit approval.
+      responses:
+        '200': {description: Messages off; watch lease unchanged}
+        '403': {description: Same-origin interactive owner required}
   /projects/{projectId}/harness-sessions/{sessionId}/watch:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -6807,7 +6917,8 @@ paths:
       security: *auth
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/InboxSend'}}}}
       responses:
-        '201': {description: Sent message, content: {application/json: {schema: {$ref: '#/components/schemas/InboxMessage'}}}}
+        '201': {description: Sent message or content-free attached note metadata, content: {application/json: {schema: {$ref: '#/components/schemas/InboxSendResponse'}}}}
+        '429': {description: Attached note quota exceeded, headers: {Retry-After: {schema: {type: integer}, description: Seconds before retry}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -6896,6 +7007,19 @@ paths:
                   name: {type: string}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /inbox/messages/{messageId}/cancel:
+    post:
+      operationId: cancelAttachedNote
+      tags: [inbox]
+      summary: Cancel an owner note only while queued
+      description: Interactive same-origin computer owner only. Serialized with the first offer; cancellation cannot recall an offered note. Works offline and with messaging disabled.
+      parameters:
+        - {name: messageId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Cancelled without releasing text}
+        '403': {description: Interactive computer owner required}
+        '404': {description: No matching attached note}
+        '409': {description: Offer or terminal outcome already won}
   /inbox/messages/{messageId}/receipt:
     get:
       operationId: getInboxReceipt
@@ -6904,7 +7028,7 @@ paths:
       security: *auth
       parameters: [{name: messageId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
-        '200': {description: Hand-off receipt, content: {application/json: {schema: {$ref: '#/components/schemas/InboxReceipt'}}}}
+        '200': {description: Hand-off receipt or separate attached note evidence, content: {application/json: {schema: {$ref: '#/components/schemas/InboxReceiptResponse'}}}}
         '401': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
   /inbox/messages/{messageId}/ack:
@@ -8007,7 +8131,7 @@ paths:
                   interval_minutes: {type: integer, minimum: 1, maximum: 240}
     put:
       operationId: putEtaInterval
-      description: Sets how often working agents must refresh an estimate. Requires settings.manage. One through 240 minutes.
+      description: Sets how often working agents must refresh an estimate. Requires settings.manage. One through 240 minutes. Changed values append tenant.agent_work_settings_changed with before and after values.
       requestBody:
         required: true
         content:
@@ -8017,6 +8141,7 @@ paths:
               required: [interval_minutes]
               properties:
                 interval_minutes: {type: integer, minimum: 1, maximum: 240}
+                expected_interval_minutes: {type: integer, minimum: 1, maximum: 240, description: Optional current value required for a conditional save or reverse write}
       responses:
         '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
@@ -8029,6 +8154,7 @@ paths:
                 properties:
                   interval_minutes: {type: integer, minimum: 1, maximum: 240}
         '400': {description: Interval outside 1 to 240 minutes}
+        '409': {description: Current interval differs from the expected value}
   /settings/brand:
     get:
       operationId: getBrandSettings
@@ -8118,17 +8244,24 @@ paths:
         '200': {description: Current policy, content: {application/json: {schema: {$ref: '#/components/schemas/AgentActivitySetting'}}}}
     put:
       operationId: putAgentActivityMode
-      description: Change the workspace policy. Off collects no summaries, tool activity or legacy notes and hides stored activity; tool_activity collects automatic activity only. Requires settings.manage.
+      description: Change the workspace policy. Off collects no summaries, tool activity or legacy notes and hides stored activity; tool_activity collects automatic activity only. Requires settings.manage. Changed values append tenant.agent_work_settings_changed with before and after values.
       requestBody:
         required: true
         content:
           application/json:
-            schema: {$ref: '#/components/schemas/AgentActivitySetting'}
+            schema:
+              type: object
+              additionalProperties: false
+              required: [mode]
+              properties:
+                mode: {type: string, enum: [off, tool_activity, agent_summary]}
+                expected_mode: {type: string, enum: [off, tool_activity, agent_summary], description: Optional current value required for a conditional save or reverse write}
       responses:
         '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Saved policy, content: {application/json: {schema: {$ref: '#/components/schemas/AgentActivitySetting'}}}}
         '400': {description: Unknown mode}
         '403': {description: Settings permission required}
+        '409': {description: Current policy differs from the expected value}
   /settings/heartbeat-lost:
     get:
       operationId: getHeartbeatLost
@@ -8145,7 +8278,7 @@ paths:
                   heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
     put:
       operationId: putHeartbeatLost
-      description: Sets the lost-contact threshold for unmanaged sessions. Requires settings.manage. Five through 1440 minutes. The server sweeps once a minute; no process is signalled.
+      description: Sets the lost-contact threshold for unmanaged sessions. Requires settings.manage. Five through 1440 minutes. The server sweeps once a minute; no process is signalled. Changed values append tenant.agent_work_settings_changed with before and after values.
       requestBody:
         required: true
         content:
@@ -8155,6 +8288,7 @@ paths:
               required: [heartbeat_lost_minutes]
               properties:
                 heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
+                expected_heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440, description: Optional current value required for a conditional save or reverse write}
       responses:
         '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200':
@@ -8167,6 +8301,7 @@ paths:
                 properties:
                   heartbeat_lost_minutes: {type: integer, minimum: 5, maximum: 1440}
         '400': {description: Threshold outside 5 to 1440 minutes}
+        '409': {description: Current threshold differs from the expected value}
   /nodes/{nodeId}/live-eta:
     parameters:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -12832,6 +12967,60 @@ components:
         mode: {type: string, enum: [inherit, on, off], default: inherit}
         effective_enabled: {type: boolean}
         revision: {type: integer, minimum: 0}
+    AutopilotAttentionAction:
+      type: object
+      additionalProperties: false
+      required: [event_id, node_id, revision]
+      properties:
+        event_id: {type: integer, format: int64, minimum: 1}
+        node_id: {type: string, format: uuid}
+        revision: {type: string, format: date-time}
+        resolution_event_id: {type: integer, format: int64}
+        release_id: {type: string, format: uuid}
+        release_revision: {type: integer, format: int64}
+        release_project_revision: {type: integer, format: int64}
+    AutopilotAttentionItem:
+      type: object
+      required: [event_id, node_id, revision, key, title, project_id, kind, from, to, reason, at, editable, applicable]
+      properties:
+        event_id: {type: integer, format: int64}
+        node_id: {type: string, format: uuid}
+        revision: {type: string, format: date-time}
+        key: {type: string}
+        title: {type: string}
+        project_id: {type: string, format: uuid}
+        kind: {type: string, enum: [proposed, triage, cancel, blocked, missed]}
+        from: {type: string}
+        to: {type: string}
+        reason: {type: string}
+        at: {type: string, format: date-time}
+        editable: {type: boolean}
+        applicable: {type: boolean}
+        unavailable_reason: {type: string}
+        release_id: {type: string, format: uuid}
+        release_revision: {type: integer, format: int64}
+        release_project_revision: {type: integer, format: int64}
+        release_title: {type: string}
+    AutopilotAttentionPage:
+      type: object
+      required: [items, total, counts, facets, facets_truncated, next_cursor]
+      properties:
+        items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/AutopilotAttentionItem'}}
+        total: {type: integer}
+        counts: {type: object, additionalProperties: {type: integer}}
+        next_cursor: {type: [string, 'null']}
+        facets_truncated: {type: boolean}
+        facets:
+          type: object
+          properties:
+            projects: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AutopilotAttentionFacet'}}
+            assignees: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AutopilotAttentionFacet'}}
+    AutopilotAttentionFacet:
+      type: object
+      required: [id, label]
+      properties:
+        id: {type: string}
+        label: {type: string}
     StatusAutopilotChange:
       type: object
       required: [event_id, node_id, key, title, actor, rule, reason, from, to, at, undone, undoable]
@@ -13139,10 +13328,10 @@ components:
             operation: {const: register}
           required: [device_proof]
         - properties:
-            operation: {enum: [request, poll, detach, exited]}
+            operation: {enum: [request, poll, detach, exited, message_request, message_activate, message_observed, message_offer, message_receipt, message_validate]}
           required: [request_id, snapshot, request_digest]
       properties:
-        operation: {type: string, enum: [register, request, poll, detach, exited]}
+        operation: {type: string, enum: [register, request, poll, detach, exited, message_request, message_activate, message_observed, message_offer, message_receipt, message_validate]}
         request_id: {type: string, format: uuid}
         computer_id: {type: string, format: uuid}
         attach_protocol: {type: integer, enum: [1, 2], description: 'Registration only. Omission registers protocol 1; all later attach operations return 409 update_agentd. Protocol 2 declares paired-origin pinning, redirect refusal and kernel checks in both modes. A later request cannot upgrade a registered key.'}
@@ -13159,10 +13348,94 @@ components:
           type: string
           enum: [available, unsupported, unsigned, no_gui, policy]
           description: Registration only. An omitted registration is stored as unreported. A later poll cannot change it. This value never satisfies local confirmation.
+        message_epoch: {type: string, minLength: 1, maxLength: 128, description: Daemon per-binding epoch; first offer binds it atomically to the grant}
+        message_binding: {$ref: '#/components/schemas/AttachedMessageBinding'}
+        message_receipt: {$ref: '#/components/schemas/AttachedMessageReceipt'}
+        message_protocol: {type: string, enum: [attached_messages_v1], description: Negotiated at registration; mandatory for message operations}
+        message_generation: {type: string, format: uuid}
+        hook_release_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        hook_config_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        qualified_harness_version: {type: string, maxLength: 80}
+        message_consent_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        message_local_auth_nonce: {type: string, pattern: '^[a-f0-9]{64}$', description: Messaging-specific single-use challenge; never the watch challenge}
+        message_local_auth_signature: {type: string, maxLength: 144, description: 'P-256 DER signature in base64 over the messaging consent digest, nonce and canonical prompt; verified against the pairing-pinned key'}
         sequence: {type: integer, minimum: 1}
         text: {type: string, maxLength: 16384, description: Default conversation watch only; rejected for mode=lease}
         doing: {type: string, maxLength: 60, description: Public summary on an active poll only; collected only in agent_summary mode.}
         tool_activity: {$ref: '#/components/schemas/CurrentAgentActivity'}
+    AttachedMessageCapability:
+      type: object
+      required: [ready, blocker]
+      properties:
+        ready: {type: boolean}
+        blocker: {type: string, description: 'Specific disabled, consent, owner, hook, lease, generation or qualification blocker.'}
+        grant: {$ref: '#/components/schemas/AttachedMessageGrant'}
+    AttachedMessageGrant:
+      type: object
+      required: [id, binding, state, consent_digest, expires_at, snapshot, notice]
+      properties:
+        id: {type: string, format: uuid}
+        binding: {$ref: '#/components/schemas/AttachedMessageBinding'}
+        snapshot: {$ref: '#/components/schemas/AttachSnapshot'}
+        notice: {type: string, description: 'Server-authored vendor retention, live-watch audience and same-user isolation limits'}
+        state: {type: string, enum: [pending, approved, active, revoked]}
+        consent_digest: {type: string}
+        expires_at: {type: string, format: date-time}
+        message_local_auth_nonce: {type: string, description: Present after policy B approval; consumed atomically by activation}
+    AttachedMessageBinding:
+      type: object
+      description: Immutable consent tuple. Each operation rechecks every field and the live attachment lease; message operations never renew it.
+      required: [tenant_id, project_id, attach_request_id, session_id, computer_id, owner_id, message_generation, daemon_epoch, hook_release_digest, hook_config_digest, qualified_harness_version, scope, consent_policy, snapshot_digest, service_epoch]
+      properties:
+        tenant_id: {type: string, format: uuid}
+        project_id: {type: string, format: uuid}
+        attach_request_id: {type: string, format: uuid}
+        session_id: {type: string, format: uuid}
+        computer_id: {type: string, format: uuid}
+        owner_id: {type: string, format: uuid}
+        message_generation: {type: string, format: uuid}
+        daemon_epoch: {type: string, pattern: '^[a-f0-9]{64}$'}
+        hook_release_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        hook_config_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        qualified_harness_version: {type: string, maxLength: 80}
+        scope: {type: string, const: owner_messages}
+        consent_policy: {type: string, enum: [aeon, local_auth]}
+        snapshot_digest: {type: string, pattern: '^[a-f0-9]{64}$'}
+        service_epoch: {type: string, format: uuid}
+    AttachedMessageOffer:
+      type: object
+      description: Single attempt committed before releasing body, never replayed. Offered only at a fresh hook invocation through the paired attach exchange; a lost response is uncertain. No lease renewal.
+      required: [binding, grant_id, delivery_id, message_id, deadline, nonce, body, owner, created_at, epoch]
+      properties:
+        binding: {$ref: '#/components/schemas/AttachedMessageBinding'}
+        grant_id: {type: string, format: uuid}
+        delivery_id: {type: string, format: uuid}
+        message_id: {type: string, format: uuid}
+        deadline: {type: string, format: date-time}
+        nonce: {type: string, pattern: '^[a-f0-9]{64}$'}
+        epoch: {type: string}
+        owner: {type: string, description: Server-authenticated owner label}
+        created_at: {type: string, format: date-time}
+        body: {type: string, maxLength: 4096, description: 'Volatile UTF-8, 4096 bytes maximum; full escaped frame at most 8000 characters and complete encoded hook output at most 10000 characters for every supported event, checked before acceptance. Never logged or persisted.'}
+    AttachedMessageReceipt:
+      type: object
+      additionalProperties: false
+      required: [delivery_id, message_id, nonce, outcome, epoch]
+      properties:
+        delivery_id: {type: string, format: uuid}
+        message_id: {type: string, format: uuid}
+        nonce: {type: string, pattern: '^[a-f0-9]{64}$'}
+        outcome: {type: string, enum: [shown, uncertain]}
+        epoch: {type: string, description: Exact daemon binding epoch captured at claim; compared atomically with the current grant and attempt at settlement}
+    AttachedMessageExchange:
+      type: object
+      required: [state]
+      description: Content-free except for the first successful offer. Empty/replayed calls never return a previous body. message_validate rechecks current consent and the released attempt without text, immediately before local disclosure. Receipt retries return only committed metadata; they cannot reopen a terminal outcome.
+      properties:
+        state: {type: string, enum: [empty, offered, completed, uncertain, revoked, expired, not_delivered, cancelled]}
+        offer: {$ref: '#/components/schemas/AttachedMessageOffer'}
+        shown_at: {type: string, format: date-time, description: Hook reported full stdout handoff; does not prove model consumption}
+        completed_at: {type: string, format: date-time, description: Transport settlement only; never task completion}
     AttachView:
       type: object
       required: [request_id, request_digest, snapshot, state, expires_at]
@@ -14033,6 +14306,7 @@ components:
         commit: {type: string, pattern: "^[0-9a-f]{40}$"}
         paths: {type: array, maxItems: 20, items: {type: string, maxLength: 200}}
         credential_ref: {type: string, pattern: "^[a-z0-9][a-z0-9-]{0,62}$", description: "Required for a private repository. Names a token file in the server's AEON_DOCTRINE_CREDENTIALS_DIR, with an operator-owned credential_ref.allowlist.json granting this tenant/repository pair"}
+    PairingHookCapability: {"type": "object", "additionalProperties": false, "required": ["harness", "version", "os", "verified", "blocker"], "properties": {"harness": {"type": "string", "enum": ["claude", "codex", "cursor", "grok", "pi"]}, "version": {"type": "string", "maxLength": 80, "pattern": "^[A-Za-z0-9._+-]{0,80}$"}, "os": {"type": "string", "enum": ["darwin", "linux"]}, "verified": {"type": "boolean"}, "blocker": {"type": "string", "enum": ["", "feature_disabled", "qualification_pending", "unsupported_harness", "unsupported_version", "unsupported_platform", "artifact_untrusted", "artifact_changed", "config_environment", "project_override", "config_provenance", "project_scope", "settings_changed", "ownership_unknown", "repair_required"]}}}
     PairingVerificationCapabilities:
       type: object
       description: Server-owned qualification of its matching helper release; a client cannot widen this map. Unsupported choices require explicit connect_only or exclusion.
@@ -14148,7 +14422,7 @@ components:
     PairingHarnessStatuses: {"type": "object", "description": "Latest daemon-reported readiness by enrolled harness, independent of setup and process ownership. Missing entries are unreported; connectivity determines freshness. Contains status codes only, never local diagnostics. The computer stays ready while any harness is ready. Unknown, unenrolled or revoked harnesses are ignored during reconciliation so lifecycle fences and cleanup still succeed; a newer state token appears only in harness_details.", "additionalProperties": {"type": "string", "enum": ["ready", "blocked", "login_required", "checking", "draining"]}}
     PairingHarnessFix: {"type": "object", "required": ["kind", "command"], "properties": {"kind": {"type": "string", "enum": ["repin", "add_harness", "login", "restart", "permissions"]}, "command": {"type": "string", "description": "Exact CLI line, for example `aeon-agentd repin --harness claude` or `aeon-agentd add-harness --harness codex`."}}, "description": "One fix form for harness_details and local blocked_accounts: the repair kind and the exact CLI line, derived by the server from the harness and reason code, never taken from daemon text. repin: Claude pin or dependency problems (replaces the shared Node/SDK pins). add_harness: the same problems for other harnesses; for a connected account it renews only that account's blocked interpreter pin. login: the vendor's normal sign-in. restart: resume setup after restoring the approved launcher, executable or profile permissions. permissions: make the default Claude profile private; only offered for that fixed diagnostic."}
     PairingHarnessDetails: {"type": "object", "description": "Per-harness state, reason code and fix. The reason vocabulary is shared with the daemon's per-account blocked_accounts: repin_pending, dependency_invalid, pin_missing, pin_partial, pin_drifted, pin_invalid, pin_unsafe, login_required, starting, harness_failed, cli_unavailable, profile_permissions, binding_missing, probe_pending, probe_timeout, probe_failed, capacity_capture, capacity_timeout, pairing_sync_failed. pairing_sync_failed means lifecycle reconciliation or runtime refresh prevented polling; reason_detail carries only an allowlisted short cause, never a probe timeout. binding_missing means an approved enrollment has no local binding. probe_pending is bounded to 60 seconds after daemon startup; capacity_capture is expected to finish within 10 seconds. Expired waits become blocked probe_timeout or capacity_timeout reports. Gemini and OpenCode version-only probes report blocked with sign_in_unverified; this proves launcher availability only, never sign-in or readiness, and carries no guessed repair command. Newer bounded code tokens (state or reason) are retained and shown as needing attention with the raw code and no fix. Unsupported or unenrolled harnesses, malformed codes and reports that disagree with harness_statuses are ignored without interrupting fence sync or cleanup. Only allowlisted reason_detail sentences cross the host boundary; no raw diagnostics or paths. A ready, blocked or login_required harness may include attention_accounts naming enrolled accounts that need a fix. A ready harness requires a proper subset; blocked and login_required may name every enrollment. Diagnostics are scoped by account id, never copied from a harness summary to multiple accounts. attention_count is the full size of that set. attention_truncated is true when the account list is shorter than the count, or when an older report stopped at five names without a count; an omitted account is not ready. Omission clears earlier details.", "additionalProperties": {"type": "object", "required": ["state"], "properties": {"state": {"type": "string", "description": "Known states: ready, blocked, login_required, checking, draining. Other tokens come from newer daemons; harness_statuses omits them.", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$", "description": "Shared reason code; absent for ready and draining. A ready harness may still list attention_accounts for accounts that need a fix."}, "fix": {"$ref": "#/components/schemas/PairingHarnessFix"}, "attention_accounts": {"type": "array", "maxItems": 32, "description": "Enrolled accounts that need a fix, including when every account is blocked. A ready harness requires a proper subset; blocked and login_required reports may include every enrollment. At most 32 entries are kept, sorted by account id. The server drops unknown account ids, empty or malformed reasons, and any client-supplied command; the repair command is derived from the reason. A shorter list is not a claim that every omitted account is ready.", "items": {"type": "object", "additionalProperties": false, "required": ["account_id", "reason"], "properties": {"account_id": {"type": "string", "format": "uuid"}, "reason": {"type": "string", "maxLength": 64, "pattern": "^[a-z][a-z0-9_]{0,63}$"}, "reason_detail": {"type": "string", "maxLength": 160, "description": "Fixed allowlisted explanation of a failed sign-in check, confirmed sign-out, or pairing synchronization failure in the daemon view. Never vendor output, paths, identities or arbitrary error text. Omitted when ready or unknown. The server validates the phrase before storing it."}}}}, "attention_count": {"type": "integer", "minimum": 1, "maximum": 10000, "description": "Full number of enrolled accounts that still need a fix. Present with attention_accounts. Larger than that list when the list was capped. Equal to the list length when attention_truncated is true and an older report stopped at five names, so the count is only a lower bound."}, "attention_truncated": {"type": "boolean", "description": "True when attention_accounts omits accounts included in attention_count, or when a report stopped at the legacy five-name cap without proving the list is complete. An omitted account is not ready."}, "reason_detail": {"type": "string", "maxLength": 160, "description": "Fixed allowlisted explanation of a failed sign-in check, confirmed sign-out, or pairing synchronization failure in the daemon view. Never vendor output, paths, identities or arbitrary error text. Omitted when ready or unknown. The server validates the phrase before storing it."}}}}
-    PairingReconcileRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "lifecycle_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "cleanup_confirmed_account_ids": {"type": "array", "maxItems": 256, "items": {"type": "string", "format": "uuid"}}, "computer_cleanup_confirmed": {"type": "boolean"}, "progress": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string", "enum": ["provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "error_code": {"type": "string", "enum": ["", "login_required", "service_conflict", "unsupported_platform", "managed_installation", "connectivity_failed", "private_storage_failed", "installation_failed", "verification_unavailable"]}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}}}}}
+    PairingReconcileRequest: {"type": "object", "additionalProperties": false, "required": ["tenant_id", "request_id", "lifecycle_secret"], "properties": {"tenant_id": {"type": "string", "format": "uuid"}, "request_id": {"type": "string", "format": "uuid"}, "lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "cleanup_confirmed_account_ids": {"type": "array", "maxItems": 256, "items": {"type": "string", "format": "uuid"}}, "computer_cleanup_confirmed": {"type": "boolean"}, "progress": {"type": "object", "additionalProperties": false, "required": ["state"], "properties": {"state": {"type": "string", "enum": ["provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "error_code": {"type": "string", "enum": ["", "login_required", "service_conflict", "unsupported_platform", "managed_installation", "connectivity_failed", "private_storage_failed", "installation_failed", "verification_unavailable"]}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}}}, "hook_capabilities": {"type": "array", "maxItems": 5, "items": {"$ref": "#/components/schemas/PairingHookCapability"}, "description": "Content-free local hook evidence, capped by the server qualification catalog. Never a messaging grant; absent means repair required."}}}
     PairingLookup: {"type": "object", "additionalProperties": false, "required": ["user_code"], "properties": {"user_code": {"type": "string"}}}
     PairingApproval: {"type": "object", "description": "Connect only never creates verification. Repeating the same selection may withdraw queued verification by changing one_per_harness to connect_only; it never replenishes verification. A new approval for an existing computer cancels older unclaimed queued verifications.", "additionalProperties": false, "required": ["request_digest", "verification", "selected_account_keys"], "properties": {"request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verification": {"type": "string", "enum": ["one_per_harness", "connect_only"]}, "selected_account_keys": {"type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}}}}
     PairingSelfDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "account_id": {"type": "string", "format": "uuid"}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
@@ -14200,7 +14474,7 @@ components:
               at: {type: string, format: date-time}
               load: {type: number, minimum: 0}
 
-    PairingView: {"type": "object", "description": "Immutable request review and current lifecycle. Runtime prefix is returned only to initiating proof on successful redemption; never a token. Each verification has exactly one immutable run. Disconnect never asserts process termination.", "properties": {"local_auth_pinned": {"type": "boolean", "description": "A Secure Enclave confirmation key is pinned to this computer; this is a pairing prerequisite, not a live Touch ID capability report."}, "request_id": {"type": "string"}, "tenant_id": {"type": "string"}, "tenant_name": {"type": "string"}, "state": {"type": "string", "enum": ["pending", "approved", "denied", "expired", "redeemed", "revoked"]}, "request_digest": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "computer_name": {"type": "string"}, "platform": {"type": "string"}, "arch": {"type": "string"}, "workspace_path": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "requested_accounts": {"type": "array", "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "verification": {"type": "object", "properties": {"mode": {"type": ["string", "null"], "enum": ["one_per_harness", "connect_only", null]}, "policy": {"const": "read_only"}, "runs_per_account": {"const": 1}, "max_parallel_runs": {"const": 1}, "allowance": {"const": 1}, "unit": {"const": "requests"}, "max_duration_seconds": {"const": 60}, "expires_at": {"type": "string", "format": "date-time"}, "task": {"const": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."}}}, "computer_id": {"type": ["string", "null"]}, "computer_state": {"type": ["string", "null"], "enum": ["connected", "draining", "revoked", null]}, "principal_id": {"type": ["string", "null"]}, "daemon_id": {"type": ["string", "null"]}, "runtime_prefix": {"type": "string"}, "local_cleanup": {"type": "string"}, "local_processes": {"type": "string"}, "enrollments": {"type": "array", "items": {"type": "object", "properties": {"account_id": {"type": "string"}, "account_key": {"type": "string"}, "harness": {"type": "string"}, "label": {"type": "string"}, "model_profile_id": {"type": "string"}, "state": {"type": "string"}, "local_cleanup": {"type": "string"}, "verification_run_id": {"type": ["string", "null"]}, "active_run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}}, "verified_at": {"type":"string","format":"date-time"}, "verification_expires_at": {"type":"string","format":"date-time"}, "last_used_at": {"type":"string","format":"date-time"}, "can_verify": {"type": "boolean", "description": "This signed-in person owns the enrollment; account.manage is separately required at the final write."}, "verification_stalled": {"type": "boolean", "description": "A claimed verification exceeded its 60 second runtime plus 60 second settlement grace. Diagnostic only; process exit and accounting remain unconfirmed until the daemon reports them."}, "verification_expired_ready": {"type": "boolean", "description": "Expired verification is informational only when this enrollment has a fresh successful live probe. It does not grant ongoing use."}, "verification_state": {"type": "string"}, "verification_error": {"type": "string"}, "verification_reason": {"type": "string", "description": "Bounded no-launch cause: adapter_unsupported, binding_incomplete or local_binding_missing. Empty when no refusal was reported."}, "local_processes": {"type": "string", "enum": ["unconfirmed", "drained"]}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}}}}, "setup_state": {"type": "string", "enum": ["not_started", "approved", "provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "setup_error": {"type": "string"}, "last_seen_at": {"type": ["string", "null"], "format": "date-time"}, "archived_at": {"type": "string", "format": "date-time", "description": "Set once a person removed the computer (AEON-402); removed computers leave the list"}, "connectivity": {"type": "string", "enum": ["online", "offline", "unknown"]}, "revision": {"type": "integer"}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}, "existing_computer_id": {"type": "string", "format": "uuid"}, "verification_capabilities": {"$ref": "#/components/schemas/PairingVerificationCapabilities"}, "verification_helper_version": {"type": "string"}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}, "agent_compatibility": {"$ref": "#/components/schemas/AgentCompatibility"}, "host_capacity": {"$ref": "#/components/schemas/HostCapacityView", "description": "Present on every paired computer view from servers that offer host capacity. A daemon negotiates the capacity report and claim fence from this field on GET /api/agent-pairing/self; without it, starts follow the unchanged legacy path."}}, "required": ["request_id", "tenant_id", "tenant_name", "state", "request_digest", "expires_at", "computer_name", "platform", "arch", "workspace_path", "capabilities", "requested_accounts", "verification", "computer_id", "computer_state", "principal_id", "daemon_id", "local_cleanup", "local_processes", "enrollments", "setup_state", "setup_error", "last_seen_at", "connectivity", "revision", "accounting_state"]}
+    PairingView: {"type": "object", "description": "Immutable request review and current lifecycle. Runtime prefix is returned only to initiating proof on successful redemption; never a token. Each verification has exactly one immutable run. Disconnect never asserts process termination.", "properties": {"local_auth_pinned": {"type": "boolean", "description": "A Secure Enclave confirmation key is pinned to this computer; this is a pairing prerequisite, not a live Touch ID capability report."}, "request_id": {"type": "string"}, "tenant_id": {"type": "string"}, "tenant_name": {"type": "string"}, "state": {"type": "string", "enum": ["pending", "approved", "denied", "expired", "redeemed", "revoked"]}, "request_digest": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "computer_name": {"type": "string"}, "platform": {"type": "string"}, "arch": {"type": "string"}, "workspace_path": {"type": "string"}, "capabilities": {"type": "array", "items": {"type": "string"}}, "requested_accounts": {"type": "array", "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "verification": {"type": "object", "properties": {"mode": {"type": ["string", "null"], "enum": ["one_per_harness", "connect_only", null]}, "policy": {"const": "read_only"}, "runs_per_account": {"const": 1}, "max_parallel_runs": {"const": 1}, "allowance": {"const": 1}, "unit": {"const": "requests"}, "max_duration_seconds": {"const": 60}, "expires_at": {"type": "string", "format": "date-time"}, "task": {"const": "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."}}}, "computer_id": {"type": ["string", "null"]}, "computer_state": {"type": ["string", "null"], "enum": ["connected", "draining", "revoked", null]}, "principal_id": {"type": ["string", "null"]}, "daemon_id": {"type": ["string", "null"]}, "runtime_prefix": {"type": "string"}, "local_cleanup": {"type": "string"}, "local_processes": {"type": "string"}, "enrollments": {"type": "array", "items": {"type": "object", "properties": {"account_id": {"type": "string"}, "account_key": {"type": "string"}, "harness": {"type": "string"}, "label": {"type": "string"}, "model_profile_id": {"type": "string"}, "state": {"type": "string"}, "local_cleanup": {"type": "string"}, "verification_run_id": {"type": ["string", "null"]}, "active_run_ids": {"type": "array", "items": {"type": "string", "format": "uuid"}}, "verified_at": {"type":"string","format":"date-time"}, "verification_expires_at": {"type":"string","format":"date-time"}, "last_used_at": {"type":"string","format":"date-time"}, "can_verify": {"type": "boolean", "description": "This signed-in person owns the enrollment; account.manage is separately required at the final write."}, "verification_stalled": {"type": "boolean", "description": "A claimed verification exceeded its 60 second runtime plus 60 second settlement grace. Diagnostic only; process exit and accounting remain unconfirmed until the daemon reports them."}, "verification_expired_ready": {"type": "boolean", "description": "Expired verification is informational only when this enrollment has a fresh successful live probe. It does not grant ongoing use."}, "verification_state": {"type": "string"}, "verification_error": {"type": "string"}, "verification_reason": {"type": "string", "description": "Bounded no-launch cause: adapter_unsupported, binding_incomplete or local_binding_missing. Empty when no refusal was reported."}, "local_processes": {"type": "string", "enum": ["unconfirmed", "drained"]}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}}}}, "setup_state": {"type": "string", "enum": ["not_started", "approved", "provisioning", "login_required", "service_conflict", "connected", "setup_failed"]}, "setup_error": {"type": "string"}, "last_seen_at": {"type": ["string", "null"], "format": "date-time"}, "archived_at": {"type": "string", "format": "date-time", "description": "Set once a person removed the computer (AEON-402); removed computers leave the list"}, "connectivity": {"type": "string", "enum": ["online", "offline", "unknown"]}, "revision": {"type": "integer"}, "accounting_state": {"type": "string", "enum": ["settled", "unconfirmed"]}, "existing_computer_id": {"type": "string", "format": "uuid"}, "verification_capabilities": {"$ref": "#/components/schemas/PairingVerificationCapabilities"}, "verification_helper_version": {"type": "string"}, "harness_statuses": {"$ref": "#/components/schemas/PairingHarnessStatuses"}, "harness_details": {"$ref": "#/components/schemas/PairingHarnessDetails"}, "agent_release": {"$ref": "#/components/schemas/AgentRelease"}, "agent_compatibility": {"$ref": "#/components/schemas/AgentCompatibility"}, "host_capacity": {"$ref": "#/components/schemas/HostCapacityView", "description": "Present on every paired computer view from servers that offer host capacity. A daemon negotiates the capacity report and claim fence from this field on GET /api/agent-pairing/self; without it, starts follow the unchanged legacy path."}, "hook_capabilities": {"type": "array", "maxItems": 5, "items": {"$ref": "#/components/schemas/PairingHookCapability"}, "description": "Content-free local hook evidence, capped by the server qualification catalog. Never a messaging grant; absent means repair required."}}, "required": ["request_id", "tenant_id", "tenant_name", "state", "request_digest", "expires_at", "computer_name", "platform", "arch", "workspace_path", "capabilities", "requested_accounts", "verification", "computer_id", "computer_state", "principal_id", "daemon_id", "local_cleanup", "local_processes", "enrollments", "setup_state", "setup_error", "last_seen_at", "connectivity", "revision", "accounting_state"]}
     PairingDeviceResponse: {"type": "object", "additionalProperties": false, "required": ["request_id", "tenant_id", "user_code", "state", "expires_at", "interval_seconds", "verification_uri", "request_digest"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "user_code": {"type": "string"}, "state": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "interval_seconds": {"const": 5}, "verification_uri": {"type": "string"}, "request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
     ClassicBatchAliasResponse:
       type: object
@@ -16643,6 +16917,7 @@ components:
       properties:
         recipient_principal_id: {type: string, format: uuid}
         recipient_session_id: {type: string, format: uuid, description: 'Optional exact active recipient generation; stopped or archived sessions return 409.'}
+        recipient_message_generation: {type: string, format: uuid, description: 'Required for attached owner notes. Explicit generations are refused when messaging is disabled; requests without a generation retain ordinary inbox routing in that mode. Cannot be inherited by a new grant. Attached sends use 5-minute volatile payloads and may return 429 with Retry-After.'}
         sender_session_id: {type: string, format: uuid, description: 'Optional active session owned by the authenticated sender; freezes its label.'}
         body: {type: string, minLength: 1, maxLength: 65536}
         idempotency_key: {type: string, minLength: 1, maxLength: 128}
@@ -16666,11 +16941,75 @@ components:
         state: {type: string, enum: [queued, handed_off, failed]}
         handed_off_at: {type: [string, 'null'], format: date-time, description: 'RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms'}
         failure_reason: {type: string}
+    InboxReceiptResponse:
+      oneOf:
+        - {$ref: '#/components/schemas/InboxReceipt'}
+        - {$ref: '#/components/schemas/AttachedInboxReceipt'}
+    InboxSendResponse:
+      oneOf:
+        - allOf:
+            - {$ref: '#/components/schemas/InboxMessage'}
+            - not: {required: [content_mode]}
+        - {$ref: '#/components/schemas/AttachedInboxMessage'}
+    AttachedInboxMessage:
+      description: Content-free attached note acceptance metadata. Text is volatile and never returned by this response or ordinary inbox reads.
+      type: object
+      additionalProperties: false
+      required: [id, sender_principal_id, recipient_principal_id, recipient_session_id, body, idempotency_key, sent_event_id, created_at, acked_at, content_mode, message_deadline]
+      properties:
+        id: {type: string, format: uuid}
+        sender_principal_id: {type: string, format: uuid}
+        recipient_principal_id: {type: string, format: uuid}
+        recipient_session_id: {type: string, format: uuid}
+        sender_label: {type: string, description: Frozen owner or agent label}
+        body: {type: string, const: 'Attached-session note; text not retained', description: Fixed stored placeholder; never the note text}
+        idempotency_key: {type: string}
+        expires_at: {type: string, format: date-time}
+        sent_event_id: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+        acked_at: {type: 'null'}
+        content_mode: {type: string, enum: [attached_volatile, attached_notification]}
+        message_grant_id: {type: string, format: uuid}
+        recipient_message_generation: {type: string, format: uuid}
+        message_deadline: {type: string, format: date-time}
+    AttachedInboxReceipt:
+      description: Attached note receipt; separate from the pinned durable receipt. Acceptance and uncertainty never imply a hand-off.
+      type: object
+      additionalProperties: false
+      required: [message_id, idempotency_key, tenant, sender_principal_id, recipient_principal_id, target_id, target_version, adapter, address, effective_level, state, handed_off_at, failure_reason, attached]
+      properties:
+        attached: {$ref: '#/components/schemas/AttachedMessageStatus'}
+        message_id: {type: string, format: uuid}
+        idempotency_key: {type: string}
+        tenant: {type: string, description: Tenant slug}
+        sender_principal_id: {type: string, format: uuid}
+        recipient_principal_id: {type: string, format: uuid}
+        target_id: {type: [string, 'null'], format: uuid, description: 'Receiver target, null for direct inbox messages'}
+        target_version: {type: [integer, 'null'], minimum: 1}
+        adapter: {type: string, description: 'Receiver adapter, for example grok_bot_routine'}
+        address: {type: string}
+        effective_level: {type: string, description: Empty for a direct inbox acknowledgement; simple or steer for a managed adapter hand-off}
+        state: {type: string, enum: [queued, handed_off, failed]}
+        handed_off_at: {type: [string, 'null'], format: date-time, description: 'RFC3339, set once when the direct recipient acknowledges or the managed adapter confirms'}
+        failure_reason: {type: string}
+    AttachedMessageStatus:
+      type: object
+      required: [protocol, outcome, content_mode]
+      properties:
+        protocol: {type: string, const: attached_messages_v1}
+        outcome: {type: string, enum: [queued, notification_only, offered, shown, completed, not_delivered, cancelled, expired, uncertain, revoked]}
+        offered_at: {type: [string, 'null'], format: date-time}
+        shown_at: {type: [string, 'null'], format: date-time, description: Hook-reported stdout handoff only}
+        completed_at: {type: [string, 'null'], format: date-time, description: Transport settled; not task completion}
+        offer_deadline: {type: [string, 'null'], format: date-time}
+        content_mode: {type: string, enum: [attached_volatile, attached_notification]}
+        message_generation: {type: string, format: uuid}
     InboxMessageStatus:
       type: object
       additionalProperties: false
       required: [message_id, status, delivered_at, read_at, deliver_by]
       properties:
+        attached: {$ref: '#/components/schemas/AttachedMessageStatus'}
         message_id: {type: string, format: uuid}
         status: {type: string, enum: [sent, delivered, read, not_delivered]}
         reason: {type: string, description: 'Present only for not_delivered: deadline, attempts, session_ended, no_listener or an adapter reason.'}

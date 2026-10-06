@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentcompat"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
@@ -27,6 +28,7 @@ import (
 )
 
 type Module struct {
+	messages              *attachedmsg.Service
 	ignoredHarnessReport  sync.Once
 	pool                  *pgxpool.Pool
 	origin, defaultTenant string
@@ -59,6 +61,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/agent-pairing/self/capacity", m.reportHostCapacity)
 	m.mountAccountLink(mux)
 	mux.HandleFunc("POST /api/agent-pairing/computers/{computerId}/enrollments/{accountId}/verify", m.person("account.manage", m.verifyAgain))
+	m.mountAttachedMessages(mux)
 	mux.HandleFunc("GET /api/agent-pairing/guide", m.guide)
 	mux.HandleFunc("POST /api/agent-pairing/device", m.device)
 	mux.HandleFunc("POST /api/agent-pairing/redeem", m.redeem)

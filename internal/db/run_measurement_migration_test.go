@@ -23,23 +23,29 @@ func TestRunMeasurementUpgradeFromRelease122PreservesEvidence(t *testing.T) {
 	type legacy struct{ tenant, run, baseline, outcome string }
 	var before []legacy
 	release123Reached := false
+	waitingMigrationReached := false
 	err = db.MigrateWithHook(t.Context(), d.App, func(name string) error {
-		if name == "1243_run_waiting_measurement.sql" {
+		// Check the exact release boundary before the first later migration.
+		// Other additive upgrades (including attention events) precede 1243.
+		if !release123Reached && name > "1240_work_account_pins.sql" {
 			var latest string
-			var waitingExists bool
 			if err := d.App.QueryRow(t.Context(), `SELECT max(version) FROM schema_migrations`).Scan(&latest); err != nil {
 				return err
 			}
 			if latest != "1240_work_account_pins.sql" {
 				return fmt.Errorf("expected release-123 schema before waiting measurement, got %s", latest)
 			}
+			release123Reached = true
+		}
+		if name == "1243_run_waiting_measurement.sql" {
+			var waitingExists bool
 			if err := d.App.QueryRow(t.Context(), `SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='agent_runs' AND column_name='waiting_ms')`).Scan(&waitingExists); err != nil {
 				return err
 			}
 			if waitingExists {
 				return fmt.Errorf("waiting measurement applied before the release-123 schema")
 			}
-			release123Reached = true
+			waitingMigrationReached = true
 			return nil
 		}
 		// Seed the release-122 evidence before main's one-work-kind upgrade;
@@ -100,7 +106,10 @@ func TestRunMeasurementUpgradeFromRelease122PreservesEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !release123Reached {
-		t.Fatal("release-123 waiting measurement upgrade hook not reached")
+		t.Fatal("release-123 schema boundary not reached")
+	}
+	if !waitingMigrationReached {
+		t.Fatal("waiting measurement upgrade hook not reached")
 	}
 	if len(before) != 2 {
 		t.Fatal("upgrade hook not reached")

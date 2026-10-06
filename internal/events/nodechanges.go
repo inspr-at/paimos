@@ -33,6 +33,7 @@ type NodeChange struct {
 // Event types whose snapshots are nodes (node.project_moved wraps it in
 // "node", node.bulk_changed lists them in "items").
 var nodeChangeTypes = map[string]bool{
+	"status_autopilot.attention_apply": true, "status_autopilot.attention_dismiss": true, "status_autopilot.attention_undone": true,
 	"status_autopilot.derived": true, "import.node_updated": true, "import.node_created": true,
 	"status_autopilot.changed": true, "status_autopilot.undone": true, "import.parent_changed": true,
 	"node.benefits_generated": true, "node.created": true, "node.updated": true, "node.moved": true, "node.kind_changed": true,

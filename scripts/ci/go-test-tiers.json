@@ -122,6 +122,8 @@
     ,
     "internal/features:TestValidationConcurrencyAndAtomicAudit"
     ,
+    "internal/harness:TestAgentWorkSettingsRecordChangesAndReverseWrites"
+    ,
     "internal/harness:TestDeskAnswerReferencesSurviveVerifiedResumeAndLateCorrection"
     ,
     "internal/harness:TestHeartbeatCommitDiffValidationAndStorage"
@@ -414,6 +416,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestConfirmationStatusPrintsReadinessAndUpgradeCommand","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestDerivedPairedEndpointRejectsUnqualifiedDaemon","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestDisconnectPollStopsForOnceTerminalErrorAndCancellation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestDisconnectPollsReconciliationUntilDrained","tier":"GATED-FULL"}
@@ -467,6 +471,8 @@
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPinProblemIsolatesAccount","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPrivateRegistryFileModes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestPublishHookPeerWritesAUsablePin","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestReleaseBuildsSplitDarwinCGO","tier":"GATED-FULL"}
     ,
@@ -1080,6 +1086,14 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestAttachedHookSocketAndReconnectPreserveExternalOwnership","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestAttachedMessageExchangePinsOriginAndRejectsRedirect","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestAttachedNoteSourceEmptySentinel","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestAttachedNoteSourcePortAndEpoch","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestAttachedNoteSourceRejectsForeignExpiredAndOversize","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestBlockedClaudeAccountsKeepDistinctDiagnostics","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestBlockedEnrollmentStartsWithoutAdapters","tier":"GATED-FULL"}
@@ -1369,6 +1383,12 @@
     {"kind":"go","package":"internal/agentd","name":"TestHarnessHoldReleaseRestartsProbeClockOnlyOnce","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestHeartbeatAndChildDeadline","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestHookNotePortRechecksRemoteAuthorityBeforeDisclosure","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestHookPeerIgnoresSocketToken","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestHookPeerRouteStaysOff","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestHostCapacityNegotiationRenegotiatesAndFailsClosed","tier":"ESSENTIAL"}
     ,
@@ -1954,6 +1974,78 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestAttachTransportRecoversAfterFullServerRestart","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedAPIIdentityAndLegacyConsumers","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedConcurrentQuotas","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedConsentAndTupleNegatives","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedConsentDowngradeAndDefaultCapability","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDaemonAuthorityRecheckedInEveryTransaction","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDeliveryCancellationAndRevocationRace","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDeliveryConcurrentClaims","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDeliveryCrashAndLoss","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDeliveryExpiryWithoutSweepAndFrozenEpoch","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDeliveryFiveMinuteWaitAndReplayExpiry","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDeliveryLegacyStreamAndDatabaseFences","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDeliveryNonceAndTupleFences","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDeliveryOnlyOneInflightFIFOAndQueuedExpiry","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDeliveryReleaseCommitAndRevocationFence","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDeliverySettlementCommitIsAtomic","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDeliverySingleAttemptAndHonestReceipt","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDeliverySweepSendOfferLockOrder","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDeliveryTwoSessionsOnePrincipal","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDisabledExplicitNotesNeverPersist","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedDisclosureRechecksConsentAfterRelease","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedEventPrivacyMalformedSender","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedFinalWriteSeesRevokedOwner","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedInactiveRoutingPreservesInbox","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedMultiTabIdempotency","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedNoteCanariesAndIdempotency","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedNotificationFloodPreservesOwnerBudget","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedOversizeHookOutputRejectedBeforeAcceptance","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedReplyCannotBypassVolatilePolicyThroughDeskBridge","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedRestartRLSAndQuotaCounters","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedSQLTraceCanary","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedSendResponsesMatchContract","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedSenderAndTenantPolicy","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedSessionValidityLockedThroughCommit","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedSessionValidityRecheckedAfterConcurrentMutation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedStrictLocalConsentAndNoLeaseRenewal","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestAttachedTakeRequiresLiveRowInTransaction","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestComputerCompatibilityUsesItsReportedAgent","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestComputerReadinessProjectsActualConfirmationPin","tier":"GATED-FULL"}
@@ -1998,6 +2090,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestHarnessDetailsAreCanonicalAndRevokedReportsDoNotBlockCleanup","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestHookCapabilityReconcileProjectsConservatively","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestHostCapacityBoundsHeldByWritersWithoutDatabaseChecks","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestHostCapacityOwnerRevisionRuntimeAndClaimFence","tier":"ESSENTIAL"}
@@ -2011,6 +2105,8 @@
     {"kind":"go","package":"internal/agentpairing","name":"TestLocalAuthCapabilityFollowsDaemonRegistration","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestLocalPiSetupWithServerSelectedProfile","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestLocalSetupHTTPHookReportsSurviveSameHarnessReenrollmentAndFences","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestLocalSetupHTTPPairingAddHarnessAndSelectiveDrain","tier":"GATED-FULL"}
     ,
@@ -2502,6 +2598,16 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestHomebrewRepositoryAllowlistAndMetadata","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestHookAuthenticationRequiresSignerAndReleaseCeiling","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestHookManifestMustMatchReviewedReleaseMetadata","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestHookPublicEvidencePinPreservesExactBytes","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestHookReleaseCeilingRequiresExactReviewedArtifact","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestHookReportsDoNotBlockNewHarnessEnrollments","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentsetup","name":"TestInitialPairReportsReadinessWithoutUnconfirmedFallback","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestLaunchdPrivateDiagnosticPaths","tier":"GATED-FULL"}
@@ -2527,6 +2633,36 @@
     {"kind":"go","package":"internal/agentsetup","name":"TestOwnedPathPermissions","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestPairCompletesWithNamedVerificationRefusal","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHookProofCannotPromoteConflictingReports","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHookProofRepairsPersistedDuplicateReports","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHookReportsAggregateDifferentActiveVersionsConservatively","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHookReportsMatchActiveAccountIdentity","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHookUninstallConflictsPreserveReceipt","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHookUninstallRetiresReceiptForNewComputer","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHooksConcurrentEditAndSymlinkPreserved","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHooksDuplicateEntriesAndUninstallPreservation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHooksEnvironmentScopeAndOverrides","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHooksEscapedOverrideAndMissingReceipt","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHooksPinIgnoresPATHAndMovingProfile","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHooksPostApprovalSourceSwap","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHooksQualificationCannotBeClaimed","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHooksRejectChecksumOnlyAndWrongSigner","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestPairedHooksSetupAndExistingComputerRepairStayOff","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestPairingFailureSurvivesStatusAndReconcileWithoutRawErrors","tier":"GATED-FULL"}
     ,
@@ -2580,7 +2716,15 @@
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestRevokedActiveWorkDrainsThenCleansWithUnsettledAudit","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestRuntimeHookChangesDuringVerification","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestRuntimeHookReauthenticatesReceiptAndLoadedImage","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestRuntimeHookReceiptCannotAuthenticateUnsignedImage","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentsetup","name":"TestRuntimeNodeCheckUsesHomeWhenWorkspaceMissing","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentsetup","name":"TestSelectiveDisconnectKeepsSharedHookUntilLastAccountCleanup","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentsetup","name":"TestSelectiveOfflineDisconnectPreservesSharedDaemonAndOtherAccount","tier":"GATED-FULL"}
     ,
@@ -2851,6 +2995,18 @@
     {"kind":"go","package":"internal/approvals","name":"TestProjectScopedApprovalNames","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/approvals","name":"TestScopeWithinKey","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/attachedmsg","name":"TestFrameLimitsAndEscaping","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/attachedmsg","name":"TestMemoryQuotasBoundPayloadAndMetadata","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/attachedmsg","name":"TestMessagingConsentHasIndependentDomainAndTuple","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/attachedmsg","name":"TestNotificationMemoryBudgetReservesOwnerCapacity","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/attachedmsg","name":"TestSwitchDefaultsAndEpochs","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/attachedmsg","name":"TestVolatileReservationCommitRollbackAndTuple","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/attachments","name":"TestAttachmentMutationRechecksLiveAuthority","tier":"ESSENTIAL"}
     ,
@@ -3572,6 +3728,8 @@
     ,
     {"kind":"go","package":"internal/capacity","name":"TestWorkHoursRequireEvidenceAndAreOnlySuggestions","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/chat","name":"TestAttachedResponsesUseSeparateSchemas","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/chat","name":"TestBindingRejectsForeignWrongRoleManagedAndStaleRegistration","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/chat","name":"TestBindingVersusRevocationUsesFinalAccessFence","tier":"GATED-FULL"}
@@ -3724,6 +3882,10 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestAskStatusDistinguishesQueuedFailedAndReceived","tier":"NIGHTLY"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestAttachedAcceptanceAndHookOutputBoundaries","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestAttachedAcceptanceRejectsUndeliverableHookOutput","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestAuthLoginDoesNotEchoKey","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestAuthLoginRejectsKey","tier":"GATED-FULL"}
@@ -3861,6 +4023,8 @@
     {"kind":"go","package":"internal/cli","name":"TestFinalUsageTimeoutStillStops","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestFinishHeartbeatStopIntentIsRetried","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestFinishPairedRefusesSubagentWithoutOffer","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestFitUsageReport","tier":"GATED-FULL"}
     ,
@@ -4102,6 +4266,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestLegacyCodexStateDoesNotRecount","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestLegacyInstallerCannotAddConsumerBesidePairedHook","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestListenFollowLongPoll","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestListenFollowRetriesReadsWakeAndAck","tier":"GATED-FULL"}
@@ -4167,6 +4333,28 @@
     {"kind":"go","package":"internal/cli","name":"TestOwnerStampUintRejectsOverflow","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestOwnerWorkstationKeyCommands","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPairedHookCanaryIsNeverOpenedOrForwarded","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPairedHookContextLimitIsIndependentOfTheOutputCeiling","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPairedHookDerivesEndpointFromStateRoot","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPairedHookDoesNotFallBackOrDialWhenDisabled","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPairedHookFrameNoticeLimitsAndAgentSilence","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPairedHookInstallRefusesProjectBeforeReadingState","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPairedHookNeverFallsBackToLegacyAPI","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPairedHookQualificationReadsNoStdin","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPairedHookSettleUsesARealTimeout","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPairedHookSettlesOnlyAfterFullWrite","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPairedHookSubagentGuardSkipsDial","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestPairedInboxHookAcknowledgesOnlyForegroundHandoff","tier":"ESSENTIAL"}
     ,
@@ -4664,6 +4852,8 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestAithemaContentMigrationLockReleaseAndUniqueRecovery","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestAttentionEventsMigrationUpgradeAndReapply","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/db","name":"TestBillingSnapshotMigrationBoundsLockWaitAndRetries","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestBriefingMigrationDoesNotBlockLogWritersRegression","tier":"GATED-FULL"}
@@ -5003,6 +5193,8 @@
     {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryRestartQueuesOneBoundContinuation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryRevocationExpiryAndObservationFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAgentWorkSettingsRecordChangesAndReverseWrites","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestArchivedSessionRejectsProvenanceReplayAndNewRevision","tier":"GATED-FULL"}
     ,
@@ -5448,6 +5640,8 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestTierUsagePersistsFrozenCostAcrossChanges","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestUnmanagedCannotDrainOrCompleteManagedDelivery","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestUnmanagedCodexTierInstructions","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestUnmanagedStopRequestSurvivesHeartbeatUntilWorkerReportsStop","tier":"ESSENTIAL"}
@@ -5507,6 +5701,82 @@
     {"kind":"go","package":"internal/harnesslaunch","name":"TestMissingLauncherAndNodeErrorsPreservePaths","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harnesslaunch","name":"TestModelFamilyUsesProviderBinding","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestAdoptReplacesTheLocalProposal","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestBindingCurrentRejectsRevocationAndHarnessDrift","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestCommitDowngradesADeadEpochAndRefusesZero","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestComparingSourcePreservesTerminalReceipts","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestConfirmedServerAnswerReplacesTheLocalReceipt","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestConflictingGrantRetiresTheOfferedEpoch","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestConsentWithdrawalAfterFetchPreventsDisclosure","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestExpiredOfferProducesNoOutput","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestFakeDaemonSocketIsNotRead","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestFreshExchangeRejectsReplayAndChangedGeneration","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestHookPeerDisabledAndTokenAndMalformed","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestKernelPeerMatchesProcess","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestKnownLimitSameRecipientInsideApprovedTree","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestLargeNotesDeliverThroughChunkedResponses","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestLiveBadNonceAfterOffer","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestLiveHookPeerExchange","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestLiveInheritedSocketAndExec","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestLiveSiblingAndAmbiguousAndAgentOrigin","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestLoadedImageIgnoresPathnameReplacement","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestObservePinIsUsable","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestOtherHarnessCannotDialTheApprovedHelper","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestReadHTTPSupportsChunkedAndBoundedBodies","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestRecheckRejectsExecImageChange","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestRevocationDuringObservationFailsClosed","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestRevocationDuringSettlementObservationIsUncertain","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestRevokeDoesNotRetireAnotherGeneration","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestRevokedGenerationBetweenOfferAndReceipt","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestSameGenerationOnAnotherHarnessStaysShown","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestSecondGrantForTheSameHarnessIsUncertain","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestSelectAmbiguousSameDirectoryAndForgedClaims","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestSelectDirectChildAndRejectsSpoofedTree","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestSelectRejectsIdentityDrift","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestSelectRevokedGenerationAndPendingRef","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestSettlementAgreesWhenTheSourceSettles","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestSettlementOfAChangedBindingIsUncertain","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestSnapshotRejectsForeignUID","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestSubstitutedDaemonMetadataCannotGrantTrust","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/hooknote","name":"TestUnavailableReleasesNothing","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/hostcapacity","name":"TestHostCapacityAdmission","tier":"ESSENTIAL"}
     ,
@@ -7994,6 +8264,34 @@
     ,
     {"kind":"go","package":"internal/stagehandoff","name":"TestRetiredHandoffsNeverTouchStorageOrAdmitLaunch","tags":[],"tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAdditionalAttentionFencePreservesAuthenticationGuard","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionApplyAndUndoDeriveParentStatuses","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionApplyDismissUndoAndSuppression","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkMissedReleaseSharesCapturedRevision","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkReturnsPartialResultsAndGuardsUndo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionChecksRevocationUnderFinalWriteFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionMissedReleaseApplyUndoApplyRefreshesIdentity","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionMissedReleaseUsesPlanningMembershipAndUndo","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionPaginationFiltersAndProjectVisibility","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionProposalsReappearAndApplyAfterUndo","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionReleaseUndoRejectsExternalProjectAndReleaseChanges","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionResolutionVisibilityPreservesHiddenReferences","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionSharedReleaseBulkUndoUsesRefreshedFences","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionUndoRequiresPermissionAndActorOwnership","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAutopilotHumanCheckObjectionAndStaleUndo","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAutopilotTenantIsolation","tier":"ESSENTIAL"}
@@ -8413,6 +8711,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestComposeDocumentsParse","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestComposePostgresHealthRequiresDatabaseAndVector","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestDarwinHookCLIIsSignedAndRehearsedBeforeAssembly","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestDirectPushCannotSkipWithoutQueueProof","tier":"GATED-FULL"}
     ,

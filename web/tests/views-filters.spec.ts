@@ -530,3 +530,77 @@ test('AEON-718 Graph offers saved views, persists mode and applies their filters
     await page.screenshot({ path: `test-results/aeon-718/graph-${width}-${colorScheme}.png`, fullPage: true })
   }
 })
+
+for (const width of [390, 1024, 1440]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`project attention navigation fits and stays still at ${width}px in ${colorScheme}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.emulateMedia({ colorScheme })
+      const data = world()
+      data.views.push(
+        mockView({ id: MINE, name: 'Meine offenen Aufgaben vor der nächsten Veröffentlichung', filters: { assignee: me.id } }),
+        mockView({ id: SHARED, name: 'Gemeinsame Aufgaben für die nächste Veröffentlichung', owner_principal_id: mira, shared: true }),
+        mockView({ id: '11111111-aaaa-4aaa-8aaa-000000000003', name: 'Veröffentlichung v4.8.0', shared: true }),
+      )
+      await mockWork(page, data)
+      await page.goto(`/p/PHAROS?assignee=${me.id}&status=!done&v=${MINE}`)
+      await expect(rows(page).first()).toBeVisible()
+      await page.evaluate(() => document.fonts.ready)
+      expect(await page.locator('#main').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+      const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
+      await expect(attention).toHaveAttribute('href', '/tickets?view=needs-attention&project_id=p-pharos')
+      const bounds = await attention.boundingBox()
+      expect(bounds!.height).toBeGreaterThanOrEqual(width === 390 ? 44 : 20)
+      expect(bounds!.x).toBeGreaterThanOrEqual(0)
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width)
+      const options = bar(page).getByRole('button', { name: /^Options for view/ })
+      const guard = await controlStability(page, {
+        attention,
+        sections: page.getByRole('tablist', { name: 'Project sections' }),
+        tickets: page.getByRole('tab', { name: 'Tickets', exact: true }),
+        views: bar(page),
+        options,
+      })
+      await guard.check(async () => { await attention.focus(); await attention.hover() })
+      await guard.check(async () => { await options.click(); await expect(page.getByRole('menuitem', { name: 'Rename' })).toBeVisible() })
+      await guard.check(async () => { await page.keyboard.press('Escape'); await expect(options).toBeFocused() })
+      guard.done()
+      await page.screenshot({ path: testInfo.outputPath(`project-attention-${width}-${colorScheme}.png`), fullPage: true })
+    })
+  }
+}
+
+test.describe('coarse-pointer project attention link', () => {
+  test.use({ hasTouch: true })
+  for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
+    test(`expanded project attention target activates without moving controls at ${width}px in ${colorScheme}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 900 })
+      const data = world()
+      data.preferences.theme = { choice: colorScheme }
+      data.projects.find(project => project.id === 'p-pharos')!.title = 'Betriebsübersicht für sämtliche angeschlossenen Arbeitsbereiche'
+      await mockWork(page, data)
+      await page.goto('/p/PHAROS')
+      await expect(rows(page).first()).toBeVisible()
+      await page.evaluate(() => document.fonts.ready)
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+      const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
+      const bounds = await attention.evaluate(el => {
+        const rect = el.getBoundingClientRect(), hit = getComputedStyle(el, '::before')
+        const width = parseFloat(hit.width) || rect.width, height = parseFloat(hit.height) || rect.height
+        const x = rect.x + (rect.width - width) / 2, y = rect.y + (rect.height - height) / 2
+        return { x, y, width, height, visualHeight: rect.height,
+          edgesHit: [[x + 1, y + height / 2], [x + width - 1, y + height / 2], [x + width / 2, y + 1], [x + width / 2, y + height - 1]].every(([px, py]) => el.contains(document.elementFromPoint(px!, py!))) }
+      })
+      expect(bounds.height, 'attention hit height').toBeGreaterThanOrEqual(44)
+      expect(bounds.width, 'attention hit width').toBeGreaterThanOrEqual(44)
+      expect(bounds.visualHeight, 'visible link retains its size').toBe(width === 390 ? 44 : 36)
+      expect(bounds.edgesHit, 'all target edges activate the link').toBe(true)
+      const guard = await controlStability(page, { attention, sections: page.getByRole('tablist', { name: 'Project sections' }), tickets: page.getByRole('tab', { name: 'Tickets', exact: true }), views: bar(page) })
+      await guard.check(async () => { await attention.focus(); await attention.hover() })
+      guard.done()
+      await page.screenshot({ path: testInfo.outputPath(`project-attention-touch-${width}-${colorScheme}.png`), fullPage: true })
+      await page.touchscreen.tap(bounds.x + bounds.width / 2, bounds.y + 1)
+      await expect(page).toHaveURL('/tickets?view=needs-attention&project_id=p-pharos')
+    })
+  }
+})

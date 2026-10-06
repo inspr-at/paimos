@@ -13,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/hookcap"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/version"
 	"github.com/jackc/pgx/v5"
@@ -392,6 +393,12 @@ func view(ctx context.Context, tx pgx.Tx, rec record, prefix bool) (View, error)
 	}
 	if err := finalizeDrain(ctx, tx, *rec.ComputerID); err != nil {
 		return v, err
+	}
+	if err := tx.QueryRow(ctx, `SELECT hook_capabilities FROM agent_pairing_computers WHERE id=$1`, *rec.ComputerID).Scan(&v.HookCapabilities); err != nil {
+		return v, err
+	}
+	for i, c := range v.HookCapabilities {
+		v.HookCapabilities[i] = hookcap.Project(c)
 	}
 	var keyPrefix string
 	err := tx.QueryRow(ctx, `SELECT c.state,c.principal_id::text,c.daemon_id,c.local_cleanup,c.local_processes,c.revision,k.prefix,c.setup_state,c.setup_error,c.harness_statuses,c.harness_details,c.last_seen_at,
