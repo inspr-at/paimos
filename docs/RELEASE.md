@@ -233,15 +233,29 @@ not live GitHub enforcement. This worker changes no permissions, settings,
 rulesets, watcher deployment, merges or queues. Acceptance remains with the
 lead; the process runbook is PPM AEON `runbook/flywheel`, §2.5–§2.7.
 
-### Test runner routing (AEON-438, AEON-459)
+### Test runner routing (AEON-438, AEON-459, AEON-777)
 
 CI's hosted `runner-route` job calls `test-runner-route.yml`, requests four idle
 slots, and selects the entire Go batch behind independent event, ref and
 rerun-attempt guards. The manual smoke workflow calls its own router for one
-slot. Only `push` and `workflow_dispatch` on `refs/heads/main` may use the pool:
+slot. By default, only `push` and `workflow_dispatch` on `refs/heads/main` may use the pool:
 
 - A verified main push: `runs-on: [self-hosted, Linux, ARM64, mbp2606, mbp2606-push]`.
 - A verified main dispatch: `runs-on: [self-hosted, Linux, ARM64, mbp2606, mbp2606-dispatch]`.
+
+**AEON-777 event switch:** set the repository variable `AEON_POOL_EVENTS` to
+`push,workflow_dispatch,pull_request,merge_group` to allow all four CI events
+onto the pool. A nonempty comma list replaces the default event list. PRs use
+`mbp2606-pr` only when their head repository equals `github.repository`; even
+approved fork PRs stay hosted. Merge groups use `mbp2606-mq` and retain full
+coverage. Pushes and dispatches still require `refs/heads/main`. Every route
+still requires a fresh 30-second availability lease and enough idle capacity;
+CI requests four slots and uses four Go shards on the pool. Runner selection
+and shard count retain the run-attempt guard. Revert by unsetting
+`AEON_POOL_EVENTS` (or setting it to the empty string): this restores the
+original main push/dispatch routing and hosted PR/merge-group routing. The
+controller must supply the corresponding event-class labels; the controller
+details below describe the pinned AEON-438 deployment, not an AEON-777 rollout.
 
 The controller mints the base labels `self-hosted, Linux, ARM64, mbp2606` plus
 **exactly one** class label matching the verified run's event; the configured
@@ -250,7 +264,7 @@ sets contain neither both classes on one runner nor hosted-looking labels
 `could_take` is a case-insensitive **subset** check against the complete minted
 label set, so a competing job need not request a class label to match
 ([aeon_builder.py:93–100](https://github.com/markus-barta/nixcfg/blob/5e304365cad08794fc839487c8a4512928d738cd/modules/aeon-builder/aeon_builder.py#L93-L100)).
-The reviewed workflows route PRs to `ubuntu-latest`;
+Without the event opt-in, the reviewed workflows route PRs to `ubuntu-latest`;
 a PR can modify those workflows or the guard, so runner-side admission is the
 enforcement boundary. The manual `Test runner smoke` workflow exercises the same
 router and small Go/Node checks. Go tests use four pool shards when routing

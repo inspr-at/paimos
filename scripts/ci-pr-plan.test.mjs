@@ -378,6 +378,7 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
       // the full layout; narrowed modes in this matrix use their wider layout.
       const layout = flag === 'on' && event === 'pull_request' && mode === 'static' ? 'static' : 'full';
       const context = {'github.event_name': event, 'github.ref': 'refs/heads/main', 'github.run_attempt': '1',
+        'github.repository': 'inspr-at/paimos', 'github.event.pull_request.head.repo.full_name': 'inspr-at/paimos',
         'needs.ci-plan.outputs.lane': raw, 'needs.ci-plan.result': 'success',
         'needs.tier-plan.outputs.lane': lane, 'needs.tier-plan.outputs.mode': mode,
         'needs.tier-plan.outputs.layout': layout, 'needs.tier-plan.result': 'success',
@@ -432,6 +433,7 @@ test('merge-group workflow retains full matrices, job gates and execution proofs
     for (const mode of ['essential', 'full']) for (const layout of ['static', 'full']) {
       const label = `${event}/${mode}/${layout}`;
       const context = {'github.event_name': event, 'github.ref': 'refs/heads/main', 'github.run_attempt': '1',
+        'github.repository': 'inspr-at/paimos', 'github.event.pull_request.head.repo.full_name': 'inspr-at/paimos',
         'needs.ci-plan.result': 'success', 'needs.tier-plan.result': 'success',
         'needs.tier-plan.outputs.lane': 'full', 'needs.tier-plan.outputs.mode': mode,
         'needs.tier-plan.outputs.layout': layout, 'needs.tree-reuse.outputs.reuse': 'none',
