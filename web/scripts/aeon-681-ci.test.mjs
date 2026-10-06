@@ -31,6 +31,41 @@ const inventory=()=>{
   return collected
 }
 
+test('AEON-698 batched Node registration retains isolated modules, native identities and registration failures', () => {
+  const directory = mkdtempSync(resolve(tmpdir(), 'aeon-698-node-batch-'))
+  const fixtures = resolve(directory, 'web/tests')
+  mkdirSync(fixtures, { recursive: true })
+  writeFileSync(resolve(fixtures, 'shared.mjs'), 'export const state = { count: 0 };\n')
+  const files = ['first.test.ts', 'second.test.ts'].map(name => resolve(fixtures, name))
+  for (const file of files) writeFileSync(file, `import { test, describe, before } from 'node:test';
+import { state } from './shared.mjs';
+before(() => { throw new Error('lifecycle must never run'); });
+describe('native suite', () => {
+  test('fresh module ' + state.count++, () => { throw new Error('test body must never run'); });
+  for (const value of [NaN, undefined]) test('duplicate ' + Boolean(value), () => { throw new Error('test body must never run'); });
+});\n`)
+  files.push(resolve(web, 'tests/agent-login.test.ts'))
+  const prefix = ['--import', resolve(root, 'scripts/test-tiers/node-collect-hook.mjs'), resolve(root, 'scripts/test-tiers/node-collect.mjs')]
+  const singles = files.map(file => ({ file, tests: JSON.parse(command(process.execPath, [...prefix, file], { cwd: web })) }))
+  const batch = JSON.parse(command(process.execPath, [...prefix, '--batch', ...files], { cwd: web }))
+  assert.deepEqual(batch, singles, 'names, nested suites, duplicates, order and source lines stay native')
+  assert.ok(batch.every(entry => entry.tests.length > 0))
+  assert.equal(batch[0].tests[0].name, 'native suite fresh module 0')
+  assert.equal(batch[1].tests[0].name, 'native suite fresh module 0', 'shared helper modules must be fresh per file')
+  assert.equal(batch[0].tests[1].name, batch[0].tests[2].name, 'duplicate registrations must survive collection')
+  const bad = resolve(fixtures, 'bad.test.ts')
+  writeFileSync(bad, "throw new Error('AEON-698 registration failure sentinel');\n")
+  const env = { ...process.env }
+  delete env.NODE_TEST_CONTEXT
+  const failure = spawnSync(process.execPath, [...prefix, '--batch', files[0], bad, files[1]], {
+    cwd: web, env, encoding: 'utf8', timeout: 30_000, maxBuffer: 1024 * 1024,
+  })
+  assert.ifError(failure.error)
+  assert.notEqual(failure.status, 0)
+  assert.match(failure.stderr, /AEON-698 registration failure sentinel/)
+  assert.equal(failure.stdout.trim(), '', 'a partial batch must never report a successful catalogue')
+})
+
 test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async t=>{
   // Exercise every unchanged planner/CLI path against the same native snapshot.
   // Recollecting the entire catalogue for each mode made this one regression
@@ -231,6 +266,30 @@ test('AEON-648 work Node registrations have explicit tiers and remain in changed
     const row=manifest.tests.find(row=>row.file===file&&row.name===name)
     assert.equal(row?.tier,'NIGHTLY',`${file}: ${name}`)
     assert.equal(select([row],{event:'pull_request',paths:['README.md']}).tests.length,0)
+  }
+})
+
+test('Settings routing and workspace login registrations have explicit tiers and remain selected when changed', () => {
+  mkdirSync(evidence, { recursive: true })
+  const manifest = JSON.parse(readFileSync(resolve(root, 'scripts/ci/web-test-tiers.json'), 'utf8'))
+  const file = 'tests/settings-routing.unit.test.ts'
+  const listing = resolve(evidence, 'aeon-698-settings-routing.json')
+  command(process.execPath, ['node_modules/vitest/vitest.mjs', 'list', file, `--json=${listing}`,
+    '--no-staticParse', '--maxWorkers=1', '--no-fileParallelism',
+    ...(process.env.VITE_CACHE_DIR ? ['--configLoader=runner'] : [])], { cwd: web })
+  const routing = JSON.parse(readFileSync(listing, 'utf8')).map(row => ({ kind: 'vitest', file, name: row.name }))
+  const loginFile = 'tests/agent-login.test.ts'
+  const login = JSON.parse(command(process.execPath, ['--import', resolve(root, 'scripts/test-tiers/node-collect-hook.mjs'),
+    resolve(root, 'scripts/test-tiers/node-collect.mjs'), resolve(web, loginFile)], { cwd: web }))
+    .map(row => ({ ...row, kind: 'node', file: loginFile }))
+  for (const [owner, native] of [[file, routing], [loginFile, login]]) {
+    assert.ok(native.length > 0, owner)
+    const declared = { version: 1, tests: manifest.tests.filter(row => row.file === owner) }
+    const rows = validate(declared, native, undefined, { strict: true })
+    for (const options of [{ event: 'pull_request', paths: [`web/${owner}`], webImports: { [owner]: [] } },
+      { event: 'schedule', paths: [] }]) {
+      assert.deepEqual(select(rows, options).tests.map(key).sort(), native.map(key).sort(), `${options.event}: ${owner}`)
+    }
   }
 })
 
