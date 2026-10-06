@@ -6568,6 +6568,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkStatusEntryFencesTenantBeforeTree","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestWorkVocabularyLeadNamesSurviveLeadlessWrites","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkVocabularyRoundTripAndShape","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestWorkingAgentConfirmsEstimate","tier":"GATED-FULL"}
