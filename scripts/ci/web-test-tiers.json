@@ -2437,7 +2437,14 @@
     "node:tests/work-surfaces-fix4.test.ts:migrated work prompts for benefits on every successful completion transition",
     "node:tests/work-surfaces-fix4.test.ts:iterative Outline keeps create rows first and pagination after all descendants",
     "node:tests/work-vocabulary.test.ts:workspace names depend on leaf shape first, then project-relative depth",
-    "node:tests/work-vocabulary.test.ts:Parents / Leaves and depth survive links, saved views and API translation"
+    "node:tests/work-vocabulary.test.ts:Parents / Leaves and depth survive links, saved views and API translation",
+    "node:tests/test-tier-failures.test.ts:failed Go jsonl names the package and test with the last 40 lines in logs and summary",
+    "node:tests/test-tier-failures.test.ts:Go subtest diagnostics retain ancestry and package-only failures keep their output",
+    "node:tests/test-tier-failures.test.ts:Node reporter preserves assertion details and console output without changing terminal events",
+    "node:tests/test-tier-failures.test.ts:Node tier runner logs a real failure once and retains failure accounting and exit code",
+    "node:tests/test-tier-failures.test.ts:Vitest diagnostics name failed assertions and bounded output cannot escape summary fences",
+    "node:tests/test-tier-failures.test.ts:Vitest diagnostics retain assertion details and captured stdout stderr within bounds in logs and summary",
+    "node:tests/test-tier-failures.test.ts:Go tier runner consumes one failing jsonl execution and preserves the original exit code"
   ],
   "tests": [
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired briefing bookmarks open Agents and keep request links","tier":"GATED-FULL"},
