@@ -17,23 +17,87 @@ function entry(line, depth) {
   return { key, value: line.slice(match[0].length).trim() }
 }
 
+// A hash or blank line inside a scalar is data, not movable map trivia.
+// Track scalar spans before interpreting mapping keys or anchor tokens. Infer
+// block indentation from its first nonblank line, or use the explicit digit.
+// Keep trailing blank lines too: the + chomping indicator owns those bytes.
+function scalarLines(lines) {
+  const content = new Set()
+  let block, quote
+  const quoteContinues = (text, start) => {
+    for (let j = start; j < text.length; j++) {
+      if (quote === '"' && text[j] === '\\') { j++; continue }
+      if (text[j] !== quote) continue
+      if (quote === "'" && text[j + 1] === "'") { j++; continue }
+      return false
+    }
+    return true
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]
+    if (quote) {
+      content.add(i)
+      if (!quoteContinues(line, 0)) quote = undefined
+      continue
+    }
+    if (block) {
+      if (!line.trim()) { content.add(i); continue }
+      const depth = indent(line)
+      if (depth > block.parent && (block.depth === undefined || depth >= block.depth)) {
+        block.depth ??= depth
+        content.add(i)
+        continue
+      }
+      block = undefined
+    }
+    if (trivia(line)) continue
+    // Sequence scalars use the dash's indentation. A mapping inside a
+    // sequence instead uses the key's column as its indentation base.
+    let node = line, parent = indent(line), sequence = false
+    while (node.slice(indent(node)).startsWith('- ')) {
+      parent = indent(node)
+      node = node.slice(0, parent) + '  ' + node.slice(parent + 2)
+      sequence = true
+    }
+    let value
+    try { ({ value } = entry(node, indent(node))); parent = indent(node) }
+    catch {
+      if (!sequence) continue
+      value = node.trim()
+    }
+    // Tags modify a scalar's type, not its source boundaries.
+    value = value.replace(/^(?:!\S+\s+)+/, '')
+    const header = /^[|>]([1-9][+-]?|[+-][1-9]?|)(?:\s+#.*)?$/.exec(value)
+    if (header) {
+      const digit = /[1-9]/.exec(header[1])
+      block = { parent, depth: digit ? parent + Number(digit[0]) : undefined }
+    } else if (value.startsWith('"') || value.startsWith("'")) {
+      quote = value[0]
+      if (!quoteContinues(value, 1)) quote = undefined
+    }
+  }
+  return content
+}
+
 function endOfMap(lines, start, depth) {
+  const content = scalarLines(lines)
   let end = start + 1
   while (end < lines.length && (trivia(lines[end]) || indent(lines[end]) > depth)) end++
   // Whitespace and parent-level comments belong to the surrounding section.
-  while (end > start + 1 && trivia(lines[end - 1])) end--
+  while (end > start + 1 && !content.has(end - 1) && trivia(lines[end - 1])) end--
   return end
 }
 
 function sortMap(lines, start, end, depth, label) {
+  const content = scalarLines(lines)
   const entries = [], names = new Set()
   for (let i = start + 1; i < end; i++) {
-    if (trivia(lines[i]) || indent(lines[i]) !== depth) continue
+    if (content.has(i) || trivia(lines[i]) || indent(lines[i]) !== depth) continue
     const { key } = entry(lines[i], depth)
     if (names.has(key)) throw new Error(`Duplicate key in ${label}: ${key}`)
     names.add(key)
     let begin = i
-    while (begin > start + 1 && trivia(lines[begin - 1]) &&
+    while (begin > start + 1 && !content.has(begin - 1) && trivia(lines[begin - 1]) &&
       (!lines[begin - 1].trim() || indent(lines[begin - 1]) >= depth)) begin--
     entries.push({ key, begin })
   }
@@ -49,8 +113,10 @@ function sortMap(lines, start, end, depth, label) {
 // the first alias, retaining every anchor/alias and its exact value. Different
 // definitions of the same name are unsafe to reorder and must fail closed.
 function anchorLines(lines) {
+  const content = scalarLines(lines)
   const definitions = new Map(), uses = []
   for (let i = 0; i < lines.length; i++) {
+    if (content.has(i)) continue
     const match = /^(\s*[^#\s][^:]*:\s+)(?:&([\w-]+)\s+(\[.*\]|\{.*\})|\*([\w-]+))(\s*(?:#.*)?)$/.exec(lines[i])
     if (!match) {
       if (/^\s*[^#\s][^:]*:\s+[&*][\w-]+/.test(lines[i])) throw new Error(`Unsupported anchor form: ${lines[i].trim()}`)

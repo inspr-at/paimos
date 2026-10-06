@@ -117,3 +117,74 @@ test('canonical contract passes the executable lint and stays byte-identical aft
   const result = spawnSync(process.execPath, [new URL('./openapi-sort.mjs', import.meta.url).pathname, '--check'], { encoding: 'utf8' })
   assert.equal(result.status, 0, result.stderr + result.stdout)
 })
+
+test('keeps scalar hash lines and trailing blank lines with their owning entries', () => {
+  for (const header of ['|+', '>+', '|2+', '>+2']) {
+    // The last entry moves first: endOfMap must not trim its scalar's tail.
+    const input = `paths:
+  /z: {}
+  /a:
+    get:
+      description: ${header}
+
+        Text
+        # literal hash
+
+
+components:
+  schemas:
+    Z: {}
+    A:
+      description: ${header}
+
+        Text
+        # literal hash
+
+
+`
+    const sorted = sortOpenAPI(input)
+    const scalar = `description: ${header}\n\n        Text\n        # literal hash\n\n\n`
+    assert.equal(sorted.split(scalar).length, 3)
+    assert.ok(sorted.indexOf('  /a:') < sorted.indexOf('  /z:'))
+    assert.ok(sorted.indexOf('    A:') < sorted.indexOf('    Z:'))
+    assert.deepEqual(sorted.split('\n').sort(), input.split('\n').sort())
+    assert.equal(sortOpenAPI(sorted), sorted)
+  }
+})
+
+test('preserves literal anchor examples while promoting real YAML anchors', () => {
+  const input = `paths:
+  /z:
+    get:
+      security: &auth [one]
+      description: |-
+        security: &demo [example]
+  /a:
+    get:
+      security: *auth
+      description: |-
+        security: *demo
+components:
+  schemas: {}
+`
+  const sorted = sortOpenAPI(input)
+  assert.match(sorted, /\/a:\n    get:\n      security: &auth \[one\]\n      description: \|-\n        security: \*demo/)
+  assert.match(sorted, /\/z:\n    get:\n      security: \*auth\n      description: \|-\n        security: &demo \[example\]/)
+  assert.equal(sortOpenAPI(sorted), sorted)
+})
+
+test('recognizes scalar boundaries in sequence items and tagged nodes', () => {
+  for (const value of [
+    'examples:\n        - |2+\n          # literal hash\n\n',
+    'examples:\n        - description: |2+\n            # literal hash\n\n',
+    'description: !!str |+\n        # literal hash\n\n',
+    'examples:\n        - "quoted example\n          security: &demo [one]\n          other: *demo"',
+  ]) {
+    const input = `paths:\n  /z:\n    get:\n      ${value}\n  /a: {}\ncomponents:\n  schemas: {}\n`
+    const sorted = sortOpenAPI(input)
+    assert.ok(sorted.includes(`      ${value}\ncomponents:`))
+    assert.ok(sorted.indexOf('  /a:') < sorted.indexOf('  /z:'))
+    assert.deepEqual(sorted.split('\n').sort(), input.split('\n').sort())
+    assert.equal(sortOpenAPI(sorted), sorted)
+  }
+})
