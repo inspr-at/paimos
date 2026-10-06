@@ -114,6 +114,32 @@
     ,
     "browser:tests/agent-pause.spec.ts:without control permission pause actions and wind-down are hidden"
     ,
+    "browser:tests/agents-cleanup.spec.ts:Queued folds per person, says what waits, and a run link opens it without changing the preference"
+    ,
+    "browser:tests/agents-cleanup.spec.ts:a section preference that lands after a run link keeps Queued open until the person folds it"
+    ,
+    "browser:tests/agents-dial.spec.ts:AEON-781: a dial folded before the fold sections stays folded"
+    ,
+    "browser:tests/agents-dial.spec.ts:AEON-781: a held + speeds up, pauses before a mode boundary and saves only the final value once"
+    ,
+    "browser:tests/agents-dial.spec.ts:AEON-781: a save conflict ends a hold; the next step needs a fresh press"
+    ,
+    "browser:tests/agents-dial.spec.ts:AEON-781: an arrow key keeps its own pace; leaving, blur and a disabled end stop a hold"
+    ,
+    "browser:tests/agents-dial.spec.ts:AEON-781: the chevron comes first, folding moves nothing above the body, and the fold follows the person"
+    ,
+    "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 1600px"
+    ,
+    "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 1600px with reported metadata"
+    ,
+    "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 390px"
+    ,
+    "browser:tests/agents-mission.spec.ts:tree guide joins the parent's fold button to the child at 390px with reported metadata"
+    ,
+    "browser:tests/agents-worker-tree.spec.ts:a live-line count and the menu History open a folded Sessions section without a preference write"
+    ,
+    "browser:tests/agents-worker-tree.spec.ts:a live-line count keeps Sessions open when the section preference lands after the jump"
+    ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1024"
     ,
     "browser:tests/attach-discoverable.spec.ts:New menu preserves authorized attach and header controls dark 1440"
@@ -5360,11 +5386,15 @@
     ,
     {"kind":"browser","file":"tests/agent-rules.spec.ts","name":"rule details stay behind the row disclosure","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"Queued folds per person, says what waits, and a run link opens it without changing the preference","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a list read that started before Remove does not bring the computer back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a queued run can be cancelled from /agents","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a runs read that started before account Remove does not bring its cancelled run back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a section preference that lands after a run link keeps Queued open until the person folds it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-cleanup.spec.ts","name":"a stored folded choice opens folded, without a flash of the cards","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5393,6 +5423,16 @@
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-720: accounts owned by another person never become dial room or a false full","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-720: idle dial reports real account room and explains unknown readings without inventing waiting agents","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: a dial folded before the fold sections stays folded","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: a held + speeds up, pauses before a mode boundary and saves only the final value once","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: a save conflict ends a hold; the next step needs a fresh press","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: an arrow key keeps its own pace; leaving, blur and a disabled end stop a hold","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"AEON-781: the chevron comes first, folding moves nothing above the body, and the fold follows the person","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-dial.spec.ts","name":"a changed plan revision discards a typed draft even when its value is unchanged","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5570,13 +5610,13 @@
     ,
     {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"live tiles show current steps and rows nest workers with stopped history collapsed","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide meets the child glyph at 1600px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide joins the parent's fold button to the child at 1600px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide meets the child glyph at 1600px with reported metadata","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide joins the parent's fold button to the child at 1600px with reported metadata","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide meets the child glyph at 390px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide joins the parent's fold button to the child at 390px","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide meets the child glyph at 390px with reported metadata","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/agents-mission.spec.ts","name":"tree guide joins the parent's fold button to the child at 390px with reported metadata","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-order.spec.ts","name":"at 390 px the compact sort control orders by Ticket, reverses, and restores the default","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5670,7 +5710,13 @@
     ,
     {"kind":"browser","file":"tests/agents-top.spec.ts","name":"work week editor: a custom week with its own hours, live preview, Save","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a deep problem marks every ancestor, folded parents name it, and arrow keys fold and walk the tree","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a lead with only stopped workers opens history only through its stopped count","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a live-line count and the menu History open a folded Sessions section without a preference write","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a live-line count keeps Sessions open when the section preference lands after the jump","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agents-worker-tree.spec.ts","name":"a stopped lead links its successor instead of claiming live workers","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -8493,6 +8539,12 @@
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Keep for you uses a natural vendor disclosure and stable actions at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Keep for you uses a natural vendor disclosure and stable actions at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Sessions tree and section folds keep their controls put at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Sessions tree and section folds keep their controls put at 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Sessions tree and section folds keep their controls put at 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/no-shift.spec.ts","name":"Stop now menu and Pause dialog stay put through the session series at 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -13504,7 +13556,19 @@
     ,
     {"kind":"vitest","file":"tests/agents-live.unit.test.ts","name":"tier and completion events wake consumers while heartbeats remain quiet","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a conflict ends the hold it interrupts: later steps are dropped until a fresh press","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a hold saves only its final value, once, after release","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a hold that starts during an in-flight write never saves its intermediate steps","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a late read cannot erase a newer dial edit","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a page hidden within the settle time sends the released value with keepalive","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a released edit is dropped, never written, when the viewer changes before it settles","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > a viewer change after leaving the view still cancels the released value","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > does not choose a total when the canonical read is forbidden","tier":"GATED-FULL"}
     ,
@@ -13514,7 +13578,9 @@
     ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > failure is visible and restores the last confirmed ceiling without touching running work","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > fold memory is private to the viewer and independent of the start ceiling","tier":"GATED-FULL"}
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > leaving the page within the settle time still sends the released value","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > leaving the view during an outstanding write still sends the released value after it","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/agents-plan-save.unit.test.ts","name":"canonical plan persistence > loads the canonical owner count and saves only total and limits, never session controls","tier":"GATED-FULL"}
     ,
@@ -14602,6 +14668,14 @@
     ,
     {"kind":"vitest","file":"tests/preferences-owner.unit.test.ts","name":"S9-001: delayed A reads and queued writes cannot be adopted or sent as B","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/press-hold.unit.test.ts","name":"press and hold on − and + > a smart stop ends the hold before the step that would cross, and needs a fresh press","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/press-hold.unit.test.ts","name":"press and hold on − and + > a stop requested from inside a step schedules nothing more","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/press-hold.unit.test.ts","name":"press and hold on − and + > release ends the hold at once, runs onStop exactly once and leaves no timer behind","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/press-hold.unit.test.ts","name":"press and hold on − and + > steps once at once, waits 450 ms, then speeds up by about 0.8 to a 90 ms floor","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/profile-form.unit.test.ts","name":"colours > measures WCAG contrast","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/profile-form.unit.test.ts","name":"colours > warns when small print loses AA on the paper, and never for the paper itself","tier":"GATED-FULL"}
@@ -15018,6 +15092,20 @@
     ,
     {"kind":"vitest","file":"tests/run-kinds.unit.test.ts","name":"renders the registered host by default, an owner override, and an ellipsis-ready long label","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a failed read is retried before a write; failures are reported, not hidden","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a new viewer starts from their own state; the old viewer’s queued write is dropped","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a reveal holds against a later preference read, ends on fold, and resets for a new viewer","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > a toggle during the first read keeps the choice and never writes defaults over other sections","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > first visit: dial open, Accounts folded, Sessions and Queued open","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > serial toggles each send the whole current object, so the last one wins","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/section-prefs.unit.test.ts","name":"per-person section folds > the server is the truth; the cache paints the first frame; the old dial fold is honoured once","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/service-tier-store.unit.test.ts","name":"Undo refuses another switch instead of overwriting it","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/service-tier-store.unit.test.ts","name":"a completion live event reports a late rejection without needing a tier revision bump","tier":"GATED-FULL"}
@@ -15109,6 +15197,12 @@
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a slow poll cannot overwrite the reply loaded after a send","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"filters before limiting and keeps two sessions of one principal separate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > keeps a deep match with its ancestors as unfolded context, even where a person folded them","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > lays out any depth with levels, sibling positions and guides, and a fold hides the whole subtree","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > rolls a deep problem up to every ancestor and counts asks separately","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-owner.unit.test.ts","name":"a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-a\"},\"principal\":{\"id\":\"person-b\"}})","tags":[],"tier":"GATED-FULL"}
     ,
