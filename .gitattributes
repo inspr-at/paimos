@@ -1,0 +1,3 @@
+scripts/ci/go-test-tiers.json merge=tiers
+scripts/ci/web-test-tiers.json merge=tiers
+web/ci-web-shards.json merge=tiers
