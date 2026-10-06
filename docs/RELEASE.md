@@ -1703,6 +1703,90 @@ replacement release gate. This fix round neither pushes to origin nor deploys.
 
 ## Local static CI pre-filter (OPS-257)
 
+### Merge-friendly CI manifests (OPS-257 L13, stage 1)
+
+Maintain `scripts/ci/{go,web}-test-tiers.json` and `web/ci-web-shards.json`
+with `node scripts/test-tiers/cli.mjs manifests --write`; verify with
+`node scripts/test-tiers/cli.mjs manifests --check`. The existing fixed
+`go-static`/nightly script-test command checks canonical form; these root script
+tests are outside the dynamically collected Go and `web/tests/` inventories.
+No workflow command or static-check registry changes are needed.
+`node scripts/test-tiers/prove-manifests.mjs [FULL_BASE_SHA]` independently
+compares against the local pre-conversion commit (default: HEAD), allowing only
+row-list order changes. It checks every tier, timing weight and metadata value,
+retains duplicate multiplicity, and emits the base SHA and row counts as JSON.
+
+Tests sort by `(kind, package or file, name, occurrence)` using ordinal comparison,
+with occurrence preserving distinct native registrations with identical titles.
+Post-gate identities, deletion candidate rows and other keyed row lists sort by
+identity. Timing owner maps sort by owner, with one complete timing value per line.
+Shard specs sort by file within their group; group order, flags, tiers and weights
+stay intact. Row fields use `kind, package, file, name, occurrence` first and
+ordinal key order afterwards, including nested objects. Exact duplicate rows can
+be deduplicated by `--write`; differing values under one identity are errors.
+
+Each row occupies one line, with JSON commas on separate lines. Inserting or
+removing a row changes its line and one separator line, never a neighboring row,
+even at a list boundary. Strict JSON cannot support a one-line edit at every
+boundary without introducing a sentinel or changing the data model. Empty lists
+retain separate opening and closing lines. Sorted edits spread additions through
+the file; concurrent additions into the same gap can still conflict in GitHub's
+text merge. GitHub's merge queue ignores local custom merge drivers.
+
+Classify discovered, currently unclassified tests without hand-editing JSON:
+
+```sh
+node scripts/test-tiers/cli.mjs classify --tier GATED-FULL --kind go --only internal/auth:
+node scripts/test-tiers/cli.mjs classify --tier NIGHTLY --kind web
+```
+
+`--kind` omitted covers both inventories. `--only` is a literal substring of
+the existing discovery identity (package/file/name), not a regular expression.
+Known rows retain their classifications; unmatched and stale rows retain the
+existing runtime warning/default policy. Known-flaky ESSENTIAL restrictions still
+apply. Legacy `classify go|web` keeps its NIGHTLY default and strict stale check,
+and now writes canonical form. Web discovery lists cases without launching browsers.
+
+Once per clone, install the self-contained driver at a stable absolute path
+outside the repository, then configure local merge-main rounds. This copy uses
+only Node built-ins and works while an old PR branch without the new tooling (or
+with a different `core.mjs`) is checked out. Refresh the copy when the driver is
+updated; its parity tests enforce the same behavior as the in-repo command.
+
+```sh
+mkdir -p /Users/markus/.local/share/ops-qa/ci
+cp <repo>/scripts/test-tiers/tiers-merge-driver.mjs /Users/markus/.local/share/ops-qa/ci/tiers-merge-driver.mjs
+git -C <repo> config merge.tiers.driver "node /Users/markus/.local/share/ops-qa/ci/tiers-merge-driver.mjs %O %A %B %P"
+```
+
+For another install location, the exact configuration is
+`git -C <repo> config merge.tiers.driver "node /abs/path/tiers-merge-driver.mjs %O %A %B %P"`.
+The executable takes `BASE OURS THEIRS PATH`; PATH selects one of the three
+manifest families. The repository's `.gitattributes` provides these attributes.
+Also add the following lines once to `$GIT_COMMON_DIR/info/attributes` so branches
+that predate `.gitattributes` use the driver. Resolve that directory with
+`git -C <repo> rev-parse --path-format=absolute --git-common-dir`; preserve any
+existing attributes rather than replacing the file.
+
+```gitattributes
+scripts/ci/go-test-tiers.json merge=tiers
+scripts/ci/web-test-tiers.json merge=tiers
+web/ci-web-shards.json merge=tiers
+```
+
+The driver accepts both old and canonical layouts. It merges keyed row sets:
+independent additions survive; deletion wins over an unchanged row; deletion
+versus change and divergent edits to one row (including tiers/weights) conflict.
+Group specs merge independently while group order and launch policy are retained;
+unrelated metadata changes merge by field. Timing-owner records merge atomically.
+A clean exit 0 means the canonical merged result has been written to OURS,
+even when the inputs were unchanged old-layout manifests. Exit 1 means a real
+disagreement: handle it in a fix round. Usage/parse errors (including malformed
+JSON, duplicate identities in an input and unsupported paths) exit 2. Every nonzero result
+leaves OURS untouched and names the offending path/key on stderr. Git then keeps
+the path unmerged for explicit resolution. The driver never selects a tier or
+weight to resolve contradictory edits. It is a local convenience, not a GitHub queue fix.
+
 Before pushing, run `node scripts/ci-static.mjs --here` from any directory
 (the script resolves its own worktree). Before enqueueing a committed branch,
 refresh `origin/main` normally, then run `node scripts/ci-static.mjs --merge-main`

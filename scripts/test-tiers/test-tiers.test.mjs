@@ -12,6 +12,8 @@ import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
 import { changedPaths, schedulingMode } from './diff.mjs'
 import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
+import './manifests.test.mjs'
+import './tiers-merge-driver.test.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
 const w=(file,name,tier='NIGHTLY')=>({kind:'node',file,name,tier})
