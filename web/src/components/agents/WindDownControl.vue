@@ -362,6 +362,12 @@ defineExpose({ open: openForm, openStatus: () => { panel.value = 'status' } })
 .wd-plan li small { color: var(--ink-3); text-align: right; font-size: 12px; }
 .wd-un { margin-top: 4px !important; }
 .link-btn { padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; text-decoration: underline; }
+/* Beside the docked session panel the head is narrow: the button keeps its icon and the chip its
+   progress, so the counts never wrap the head and push the rows down (CI #355). */
+@container agents-head (max-width: 960px) {
+  .wd-btn .wl, .wd-main .wd-rest { display: none; }
+  .wd-btn { width: 32px; padding: 0; }
+}
 @media (max-width: 720px) {
   .wd-btn .wl { display: none; }
   .wd-btn { width: 44px; height: 44px; padding: 0; }

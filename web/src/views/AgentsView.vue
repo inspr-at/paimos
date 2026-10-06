@@ -473,7 +473,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 <style scoped>
 .agents-page { width: 100%; margin: 0; padding: 22px var(--gutter) 24px; }
 /* One 48 px line: title, counts, then the controls at the right (AEON-780). */
-.page-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 22px; min-height: 48px; margin-bottom: 14px; }
+.page-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 22px; min-height: 48px; margin-bottom: 14px; container: agents-head / inline-size; }
 .page-head h1 { margin: 0; font-size: 30px; white-space: nowrap; }
 .page-head .head-counts { flex: 0 1 auto; }
 .head-side { display: flex; align-items: center; flex-wrap: nowrap; gap: 6px; margin-left: auto; flex: none; }

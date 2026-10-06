@@ -453,3 +453,48 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     expect(errors).toEqual([])
   })
 }
+
+// AEON-783 (CI #355): beside the docked session panel the head is only ~820 px wide. The Wind down
+// button then gives up its label, so wider text (Linux fonts) or a longer count never wraps the head and
+// pushes the rows down. The extra letter-spacing stands in for those wider fonts.
+for (const theme of ['light', 'dark'] as const) {
+  test(`1440 ${theme}: the head stays on one line beside the session panel while a stop is requested`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1000 })
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
+    const errors = watchErrors(page)
+    const mock = await setup(page, false, data => {
+      data.sessions = [data.sessions[0]!]
+      Object.assign(data.sessions[0]!, { management_mode: 'unmanaged', run_id: null, ticket_node_id: null, ticket: null, activity: 'busy', heartbeat_at: new Date(NOW).toISOString() })
+    })
+    const session = mock.data.sessions[0]!
+    await page.goto(`/agents/${session.id}`)
+    await page.addStyleTag({ content: '.agents-page .page-head { letter-spacing: .06em }' })
+    const row = page.locator(`[data-row="s:${session.id}"]`)
+    await expect(row.locator('.c-state .state-word')).toHaveText('Working')
+    const open = windButton(page)
+    await expect(open).toBeVisible()
+    await expect(open.locator('.wl')).toBeHidden()
+    const lines = () => page.evaluate(() => {
+      const h = document.querySelector('.agents-page .page-head')!, box = h.getBoundingClientRect()
+      return { height: Math.round(box.height), tops: [...h.children].map(c => Math.round(c.getBoundingClientRect().top - box.top)) }
+    })
+    const before = await lines()
+    const guard = await controlStability(page, { row, open })
+    await guard.check(async () => {
+      await page.getByRole('complementary', { name: 'Session details' }).getByRole('button', { name: 'Stop now…', exact: true }).click()
+      await page.getByRole('dialog', { name: /^Stop now / }).locator('[data-submit]').click()
+      await expect(row.locator('.c-state .state-word')).toHaveText('Stop requested')
+    })
+    await guard.check(async () => {
+      Object.assign(session, { row_version: Number(session.row_version) + 1, phase: 'stopped', stopped_at: new Date(NOW).toISOString(), stop_reason: 'stopped' })
+      await page.evaluate(() => window.dispatchEvent(new Event('online')))
+      await expect(row.locator('.c-state .state-word')).toHaveText('Stopped')
+    })
+    guard.done()
+    const after = await lines()
+    expect(after.height, 'head wrapped to a second line').toBe(before.height)
+    expect(Math.max(...after.tops) - Math.min(...after.tops), 'head children share one line').toBeLessThan(before.height)
+    await expect(open).toHaveAccessibleName('Wind down')
+    expect(errors).toEqual([])
+  })
+}
