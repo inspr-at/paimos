@@ -218,6 +218,18 @@ type projectRunAPI struct {
 	projectID string
 }
 
+// ClaimHandoff preserves the optional assignment capability through the
+// project queue wrapper. Never fall back to a claim without pickup evidence.
+func (api *projectRunAPI) ClaimHandoff(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup agentd.WorkerPickup) error {
+	claim, ok := api.API.(interface {
+		ClaimHandoff(context.Context, string, string, string, []string, agentd.WorkerPickup) error
+	})
+	if !ok {
+		return agentd.ErrUnsupported
+	}
+	return claim.ClaimHandoff(ctx, runID, daemonID, generation, reservations, pickup)
+}
+
 func (api *projectRunAPI) Queued(ctx context.Context) ([]agentd.Run, error) {
 	runs, err := api.API.Queued(ctx)
 	if err != nil {

@@ -1387,6 +1387,16 @@ then request a new deployment. Journey contract `journey/1.2` adds the optional
 `next_action.renewal_action`; clients must use it when present. Existing action
 keys and reporter major versions remain unchanged.
 
+Journey contract `journey/1.4` adds the optional
+`next_action.access_renewal_action` without extending the existing renewal enum.
+An expired or revoked Access permit can be replaced with `renew_permit`, using
+its fresh approval, current release ID and journey revision. The original
+approval and evidence remain in history; stale Access handoffs cannot report
+new results. The completed deployment remains valid. Both terminal handoff
+paths (verification without Access, and Access apply) use the same transactional
+settlement as journey actions: pin the deployment version, supersede prior live
+releases, and trigger ticket publication once.
+
 Native intake drafts accept an optional Aithema `extensions` map and the
 original review snapshot as `document_bytes` alongside the required native
 projection fields. Aeon extracts extensions from the single confirmed,
@@ -4093,6 +4103,19 @@ Vocabulary writes require a person with `settings.manage`, check the current per
 AEON-655 Outline roots load incrementally with one unified cursor. Page sizes remain fixed even when inserted or expanded work consumes retention capacity. The browser retains at most 5000 lazy work items and reports an incomplete Outline at that limit; filtered paths resolve at most 2000 ancestor reads in batches of eight, with cycle detection and explicit incomplete-result messages for unreadable ancestors, resource limits or interrupted reads. Drag nested work onto the Project root destination above the rows to return it to the project level. Reload and Save vocabulary are serialized, and person/tenant changes discard old responses. Detail-panel completion uses canonical descendant-leaf state facets, excluding cancelled leaves; failed aggregate reads show unavailable progress instead of direct-child counts. CLI/MCP type aliases resolve kinds only and never inject provenance into strict user field schemas.
 
 AEON-655 completion validation covers migrated `work` and legacy `ticket` records. Creating or moving a work item into Done, Accepted or Delivered requires both pill and benefit texts in English and German, including when hidden from release notes. Already completed history remains editable; reopening restores the next-completion requirement. The workspace offers the same benefit reading section, editor and completion prompt for work items. Outline rendering traverses explicit frames rather than the JavaScript call stack; a 3600-row path (1800 ancestors plus 1800 matches) has regression coverage.
+
+Release image publication runs two gates before attestation and release index
+publication. First, the pushed digest is walked to its platform manifest, whose
+image config digest must equal the smoked build's config digest exactly; that
+config includes `created` and history, so both exports share `SOURCE_DATE_EPOCH`
+from `git show -s --format=%ct HEAD` and use `rewrite-timestamp`. Second, the
+runtime comparison reads architecture, OS, variant, ordered rootfs diff IDs and
+runtime configuration from `docker image inspect` for the pushed image and the
+image that passed smoke. Only this runtime comparison excludes image IDs,
+`created`, history and provenance index digests; a build that differs only in
+its clock passes the runtime comparison but fails the config digest gate.
+The PDF visual diff gate returns
+exit 2 for any missing page, including blank pages, independently of pixel tolerance.
 
 ### Ticket work measurement (AEON-503)
 

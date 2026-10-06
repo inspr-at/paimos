@@ -42,6 +42,7 @@ func bindLeadKey(t *testing.T, f *fixture, project, token string) string {
 func leadQueueFixture(t *testing.T) (*fixture, tenant.Principal, string, string, string, qEntry) {
 	t.Helper()
 	f := setup(t)
+	f.agent.Scopes = []string{"run.claim", "run.telemetry", "run.read"}
 	f.queueAccount(t, 1000000)
 	project, session := uuid(), uuid()
 	lease := "fixture-lead-lease-private-0000000000000"
@@ -170,7 +171,11 @@ func TestLeadQueueDispatchAndWorkerGenerationFence(t *testing.T) {
 		_, err := tx.Exec(t.Context(), `UPDATE project_leads SET generation=1 WHERE project_id=$1`, project)
 		return err
 	})
-	f.call(t, f.agent, "POST", "/api/runs/"+e.Run.ID+"/claim", claimBody(ids), 200, nil)
+	var h agentruns.WorkerHandoff
+	f.call(t, f.person, "GET", "/api/runs/"+e.Run.ID+"/handoff", nil, 200, &h)
+	pickup := claimBody(ids)
+	pickup["handoff"] = agentruns.WorkerPickup{TicketRevision: h.TicketRevision, WorkOrderRevision: h.WorkOrderRevision, BriefSHA256: h.BriefSHA256, WorktreeID: strings.Repeat("a", 64)}
+	f.call(t, f.agent, "POST", "/api/runs/"+e.Run.ID+"/claim", pickup, 200, nil)
 }
 
 func TestLegacyQueueSkipsOtherProjectDispatchAuthorities(t *testing.T) {

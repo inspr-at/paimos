@@ -79,6 +79,17 @@ test('drift guard rejects deleted origins, changed commands/cwd, duplicate ids a
   assert.throws(() => validateRegistry({ ...registry, checks: registry.checks.slice(1) }, jobs), /Unregistered static CI command/)
   const copy = structuredClone(registry); copy.checks[1].command = 'true'
   assert.throws(() => validateRegistry(copy, jobs), /Mirror differs/)
+  const budget = structuredClone(registry)
+  const nativeShard = budget.checks.find(c => c.id === 'web-shard-tests')
+  nativeShard.timeout_seconds = 300
+  assert.equal(validateRegistry(budget, jobs), budget.checks)
+  nativeShard.timeout_seconds = 600
+  assert.equal(validateRegistry(budget, jobs), budget.checks)
+  nativeShard.timeout_seconds = 601
+  assert.throws(() => validateRegistry(budget, jobs), /Invalid check: web-shard-tests/)
+  nativeShard.timeout_seconds = 600
+  budget.checks.find(c => c.id === 'go-vet').timeout_seconds = 181
+  assert.throws(() => validateRegistry(budget, jobs), /Invalid check: go-vet/)
   const changed = workflow.replace('        run: npm run typecheck', '        run: npm run typecheck --changed')
   assert.throws(() => validateRegistry(registry, parseWorkflow(changed)), /Stale CI reference/)
   const moved = workflow.replace('      - working-directory: web\n        run: npm run typecheck', '      - working-directory: .\n        run: npm run typecheck')
@@ -183,11 +194,14 @@ test('skips report INCOMPLETE and code 3; allow-skips remains explicitly incompl
 })
 
 test('fixed check environment removes caller flags and identity but supplies CI values', async t => {
-  const cwd = temporary(t), source = { ...process.env, GOFLAGS: '-skip', AEON_TEST_TIER_MODE: 'essential', AEON_TEST_DATABASE_URL: 'fixture', RANDOM_EXTRA: 'fixture' }
+  const cwd = temporary(t), source = { ...process.env, GOFLAGS: '-skip', AEON_TEST_TIER_MODE: 'essential', AEON_TEST_DATABASE_URL: 'fixture', RANDOM_EXTRA: 'fixture',
+    NIX_CFLAGS_COMPILE: '-isystem /fixture/sdk/usr/include', NIX_LDFLAGS: '-L/fixture/sdk/usr/lib' }
   await runChecks([{ id: 'env', command: 'true', cwd: '.', needs: [], timeout_seconds: 5 }], cwd, { env: source, run: async (_command, { env }) => {
     assert.equal(env.GOFLAGS, undefined); assert.equal(env.AEON_TEST_DATABASE_URL, undefined)
     assert.equal(env.RANDOM_EXTRA, undefined); assert.equal(env.AEON_TEST_TIER_MODE, 'full')
     assert.equal(env.CI, 'true'); assert.equal(env.CI_LANE, 'full')
+    assert.equal(env.NIX_CFLAGS_COMPILE, source.NIX_CFLAGS_COMPILE)
+    assert.equal(env.NIX_LDFLAGS, source.NIX_LDFLAGS)
     assert.ok(env.npm_config_cache.startsWith(tmpdir()))
     return { status: 'passed', seconds: 0 }
   } })

@@ -214,8 +214,9 @@ func TestPushedImageMatchesSmokedBuild(t *testing.T) {
 	_, smoke := named(t, j, "Build cached smoke image")
 	pushAt, push := named(t, j, "Build and push")
 	checkAt, check := named(t, j, "Require pushed image to equal the smoked build")
+	runtimeAt, _ := named(t, j, "Verify pushed runtime matches smoke")
 	attestAt, _ := named(t, j, "Attest pushed image")
-	if checkAt != pushAt+1 || attestAt != checkAt+1 {
+	if checkAt != pushAt+1 || runtimeAt != checkAt+1 || attestAt != runtimeAt+1 {
 		t.Fatal("the pushed image must be compared directly after the push and before attestation")
 	}
 	if smoke.ID != "build" || push.ID != "push" || check.If != "" || check.ContinueOnError || check.Uses != "" ||
