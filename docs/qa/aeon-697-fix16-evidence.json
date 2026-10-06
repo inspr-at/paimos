@@ -34,11 +34,15 @@
     "new_regression_required": "No behaviour change in this round; the gated classification and its existing tier regression from round 15 are retained."
   },
   "source_commit": "91b11eee2196370e219a1780d2a108ad69356e9e",
-  "main": "f5c5a1bd829a22ae896d6103f380bd501e63a9ba",
+  "main": "70babd810dc23fa7bcdfe4fe11c578c25caf76d1",
   "merge": {
+    "main_contained_in_head": "70babd810dc23fa7bcdfe4fe11c578c25caf76d1",
+    "newest_origin_main": "f5c5a1bd829a22ae896d6103f380bd501e63a9ba",
+    "newest_origin_main_landed_during_this_round": true,
     "command": "git merge-tree --write-tree --name-only HEAD origin/main",
     "exit_code": 0,
-    "origin_main_is_ancestor_of_head": true,
+    "merged": false,
+    "merge_reason": "Clean merge-tree with the newest main; the brief merges main only on conflict, and the two new main commits (AEON-767 ci-static timeout noise) touch nothing in this round's scope.",
     "pr_278_remote_head": "4cea83790ac72d0816c27b590da344659f9124e7",
     "pr_278_remote_state": "CONFLICTING until the coordinator pushes this branch; the local branch merges cleanly with origin/main."
   },
@@ -98,5 +102,5 @@
     }
   ],
   "status": "Complete locally; the ap251 Medium was already resolved by c8840bc7a and is verified at HEAD. No origin push or deployment.",
-  "updated_at": "2026-10-06T13:36:55Z"
+  "updated_at": "2026-10-06T13:37:29Z"
 }
