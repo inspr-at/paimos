@@ -137,6 +137,34 @@ test('ticket: queued without a lead offers Start lead; a parent queues its open 
   expect(state.calls.find(c => c.path === '/api/queue/n-2/snapshots')?.body).toEqual({ expected_revision: expect.any(String) })
 })
 
+test('a ticket preview over any page offers Start lead and the sheet opens there', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await mockLeadFlow(page, { lead: 'none', queue: ['n-4'] })
+  // The Projects page has no lead views of its own: only the shell can host the sheet.
+  await page.goto('/?peek=PHAROS-14')
+  const preview = page.locator('.ticket-peek-host')
+  await expect(preview.locator('.tline')).toContainText('Queued, waiting for a lead.')
+  const start = preview.locator('.tline').getByRole('button', { name: 'Start lead' })
+  await start.click()
+  const sheet = page.getByRole('dialog', { name: 'Start lead for PHAROS' })
+  await expect(sheet).toBeVisible()
+  await expect(sheet.getByRole('button', { name: /Start lead/ })).toBeFocused()
+  await page.keyboard.press('Escape')
+  await expect(sheet).toHaveCount(0)
+  await expect(start).toBeFocused()
+})
+
+test('leaving the page that opened the docked lead panel closes it', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await mockLeadFlow(page, { lead: 'working', aeon: 'none' })
+  await page.goto('/agents')
+  await page.locator('section.zone[aria-labelledby="leads-title"] [data-project="PHAROS"]').click()
+  await expect(panel(page)).toBeVisible()
+  await page.getByRole('navigation', { name: 'Places' }).getByRole('link', { name: 'Projects' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await expect(panel(page)).toHaveCount(0)
+})
+
 test('ticket header keeps every action inside a 1024 side panel with a wide system font', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 1000 })
   await mockLeadFlow(page, { lead: 'working', queue: [] })

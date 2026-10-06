@@ -31,7 +31,6 @@ import { openModelPrefs } from '../lib/modelPrefsCommand'
 import AgentsWorking from '../components/agents/AgentsWorking.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
 import LeadsList from '../components/lead/LeadsList.vue'
-import LeadOverlays from '../components/lead/LeadOverlays.vue'
 import { openStartLead } from '../lib/leadOverlay'
 import { LEAD_WORDS } from '../lib/lead'
 import { useDeveloperSettings } from '../lib/developerSettings'
@@ -456,7 +455,6 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
     <ChangeTierPopover v-if="serviceTiers.dialog" :key="serviceTiers.dialog.instance" />
     <TierToast />
     <StartAgentDialog ref="startDialog" />
-    <LeadOverlays />
     <p class="sr-only" aria-live="polite" aria-atomic="true">{{ announcement }}</p>
   </section>
 </template>
