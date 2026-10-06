@@ -4274,11 +4274,15 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatDeadOwnerStopForbiddenStaysOpen","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatDoesNotStopForScheduledOrForeignResponse","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatDropsIndexWhenStopFails","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatFinalUsageFlush","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatFollowsSessionModel","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatHonoursServerStop","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatInitFailureClosesGeneration","tier":"GATED-FULL"}
     ,
@@ -4311,6 +4315,8 @@
     {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatSkipsImportedCommits","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatStateDirIsPrivate","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatStopRequestFailureKeepsRetryIntent","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestRunHeartbeatTerminalStatusExits","tier":"GATED-FULL"}
     ,
@@ -5357,6 +5363,8 @@
     {"kind":"go","package":"internal/harness","name":"TestTierUsagePersistsFrozenCostAcrossChanges","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestUnmanagedCodexTierInstructions","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestUnmanagedStopRequestSurvivesHeartbeatUntilWorkerReportsStop","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestUnpublishedTierUsageHasNoEstimatedCost","tier":"GATED-FULL"}
     ,
