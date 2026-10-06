@@ -59,7 +59,7 @@ func fairWorking(t *testing.T, f *harnessFixture) (string, string, map[string]an
 }
 
 func TestLeadIdleYieldCountsUntilConfirmedExit(t *testing.T) {
-	f := leadFixture(t, readyLeadChecks)
+	f := projectLeadFixture(t, readyLeadChecks)
 	session, lease, l := fairWorking(t, f)
 	views.New(f.db.App).Mount(f.mux)
 	base := "/api/projects/" + f.project
@@ -94,7 +94,7 @@ func TestLeadIdleYieldCountsUntilConfirmedExit(t *testing.T) {
 }
 
 func TestLeadYieldRefusesUsefulTurnAndRevokedOwner(t *testing.T) {
-	f := leadFixture(t, readyLeadChecks)
+	f := projectLeadFixture(t, readyLeadChecks)
 	_, lease, l := fairWorking(t, f)
 	fairQueue(t, f, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	path := "/api/projects/" + f.project + "/lead/yield"
@@ -112,7 +112,7 @@ func TestLeadYieldRefusesUsefulTurnAndRevokedOwner(t *testing.T) {
 }
 
 func TestLeadWorkerPriorityYieldRetainsExactAssignment(t *testing.T) {
-	f := leadFixture(t, readyLeadChecks)
+	f := projectLeadFixture(t, readyLeadChecks)
 	session, lease, l := fairWorking(t, f)
 	run := fairQueue(t, f, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	binding, _ := json.Marshal(map[string]any{"session_id": session, "generation": 1})
@@ -191,7 +191,7 @@ func TestLeadFairTurnsAndUnavailableContender(t *testing.T) {
 		}
 		return checks, err
 	}
-	f := leadFixture(t, admission)
+	f := projectLeadFixture(t, admission)
 	fairWorkerRoute(t, f)
 	_, _, _ = fairWorking(t, f)
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -262,7 +262,7 @@ func TestLeadFairTurnsAndUnavailableContender(t *testing.T) {
 }
 
 func TestLeadSchedulingBoundAndDependencies(t *testing.T) {
-	f := leadFixture(t, readyLeadChecks)
+	f := projectLeadFixture(t, readyLeadChecks)
 	_, _, _ = fairWorking(t, f)
 	run := fairQueue(t, f, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	blocked := uid()
@@ -336,7 +336,7 @@ func TestLeadSingleDialProgressAfterWorkerYield(t *testing.T) {
 		}
 		return checks, nil
 	}
-	f := leadFixture(t, admission)
+	f := projectLeadFixture(t, admission)
 	session, lease, l := fairWorking(t, f)
 	run := fairQueue(t, f, time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
 	other, otherSession, profile := uid(), uid(), uid()
@@ -396,7 +396,7 @@ func TestLeadSingleDialProgressAfterWorkerYield(t *testing.T) {
 }
 
 func TestLeadYieldRechecksAgentPermissionAfterFence(t *testing.T) {
-	f := leadFixture(t, readyLeadChecks)
+	f := projectLeadFixture(t, readyLeadChecks)
 	// Built-in grants are computed, so use a custom role to revoke precisely
 	// one permission while retaining the same visibility and other authorities.
 	f.tx(t, f.person, func(tx pgx.Tx) error {
