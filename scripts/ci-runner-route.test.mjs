@@ -111,7 +111,7 @@ test("router outputs bind each attempt and refuse a missing or invalid attempt",
   }
 });
 
-test("CI expressions keep PRs on two hosted tier shards and stale main attempts on seven", () => {
+test("CI expressions keep essential PRs on two hosted shards and merge groups and stale main attempts on seven", () => {
   const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const shardJob = workflow.split("  go-test:\n")[1].split("\n  go-timing:")[0];
   const runnerExpression = shardJob.match(/^    runs-on: (.+)$/m)[1];
@@ -134,7 +134,7 @@ test("CI expressions keep PRs on two hosted tier shards and stale main attempts 
         const admitted = trustedEvents.includes(event) && ref === "refs/heads/main" && run_attempt === 1;
         assert.deepEqual(evaluate(runnerExpression, github, outputs), admitted ? selected.runs_on : ["ubuntu-latest"]);
         assert.deepEqual(evaluate(shardExpression, github, outputs), admitted ? [1, 2, 3, 4] :
-          ["pull_request", "merge_group"].includes(event) ? [1, 2] : [1, 2, 3, 4, 5, 6, 7]);
+          event === "pull_request" ? [1, 2] : [1, 2, 3, 4, 5, 6, 7]);
         assert.deepEqual(evaluate(shardExpression, github, outputs,"full"), admitted ? [1, 2, 3, 4] : [1, 2, 3, 4, 5, 6, 7]);
       }
     }
