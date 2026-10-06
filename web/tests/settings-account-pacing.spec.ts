@@ -140,6 +140,35 @@ test('Remove account… says what stays untouched, and only Remove account remov
   expect(errors).toEqual([])
 })
 
+test('Remove account… confirmed after the account was regrouped removes nothing and says so', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  const { capacity } = await setup(page)
+  // Main and Spare share one quota, so they are one account with two logins.
+  const fingerprint = 'cd'.repeat(32)
+  for (const a of capacity.accounts.filter(a => a.id === ACCOUNTS.main || a.id === ACCOUNTS.spare)) Object.assign(a, { quota_fingerprint: fingerprint, quota_pool_fingerprint: fingerprint })
+  const archived: string[] = []
+  await page.route('**/api/agent-accounts/*/archive', async route => {
+    archived.push(new URL(route.request().url()).pathname.split('/').at(-2)!)
+    await route.fulfill({ json: { state: 'archived' } })
+  })
+  await open(page)
+  await expect(listRow(page, ACCOUNTS.spare)).toHaveAttribute('data-accounts', `${ACCOUNTS.spare} ${ACCOUNTS.main}`)
+  const menu = await accountMenu(page, ACCOUNTS.main)
+  await menu.getByRole('menuitem', { name: /Remove account/ }).click()
+  const confirm = page.getByRole('dialog', { name: /^Remove Codex · / })
+  await expect(confirm).toContainText('All 2 logins that share this quota are removed.')
+  // Another tab stops the sharing: Spare is now an account of its own, and the
+  // account still shown here holds only Main.
+  capacity.accounts.find(a => a.id === ACCOUNTS.spare)!.quota_pool_fingerprint = ''
+  const reread = page.waitForResponse(response => response.url().endsWith('/api/agent-accounts/capacity/schedule') && response.request().method() === 'GET')
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')))
+  await reread
+  await expect(listRow(page, ACCOUNTS.spare)).toHaveAttribute('data-accounts', ACCOUNTS.spare)
+  await confirm.getByRole('button', { name: 'Remove account' }).click()
+  await expect(page.getByText('This record changed. Reopen its menu.')).toBeVisible()
+  expect(archived).toEqual([])
+})
+
 test('people without account management get no account menu and read-only pacing', async ({ page }) => {
   await setup(page, { manage: false, planCard: 'first' })
   await open(page)
@@ -223,6 +252,34 @@ test('Capacity and load: work days, nights and the editors, with controls that s
   await zone(page).getByRole('button', { name: /Keep for you/ }).click()
   await expect(page.getByRole('dialog').filter({ has: page.locator('#keep-title') })).toBeVisible()
   expect(errors).toEqual([])
+})
+
+test('Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  const { capacity } = await setup(page)
+  // Mon–Thu: no preset matches, so the custom-week radio is shown.
+  const user = capacity.schedules.find(e => e.scope === 'user')!.schedule
+  user.week = user.week.map((d, i) => ({ ...d, on: i < 4 }))
+  await open(page, '/settings/accounts#capacity-and-load')
+  await expect(zone(page).locator('.days [data-v="custom"]')).toHaveAttribute('aria-checked', 'true')
+  const guard = await controlStability(page, {
+    five: zone(page).getByRole('radio', { name: '5' }),
+    six: zone(page).getByRole('radio', { name: '6' }),
+    seven: zone(page).getByRole('radio', { name: '7' }),
+    weekGear: zone(page).getByRole('button', { name: 'Customize work week' }),
+  })
+  await guard.check(async () => {
+    await zone(page).getByRole('radio', { name: '6' }).click()
+    await expect.poll(() => capacity.puts.length).toBe(1)
+    await expect(zone(page).getByRole('radio', { name: '6' })).toHaveAttribute('aria-checked', 'true')
+    await expect(zone(page).locator('.days [data-v="custom"]')).toHaveCount(0)
+  })
+  await guard.check(async () => {
+    await zone(page).getByRole('radio', { name: '5' }).click()
+    await expect.poll(() => capacity.puts.length).toBe(2)
+    await expect(zone(page).getByRole('radio', { name: '5' })).toHaveAttribute('aria-checked', 'true')
+  })
+  guard.done()
 })
 
 test('phone: the editor is a full-height sheet and nothing scrolls sideways', async ({ page }, info) => {

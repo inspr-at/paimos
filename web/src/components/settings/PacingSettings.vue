@@ -14,8 +14,8 @@ import ScheduleEditor from '../agents/ScheduleEditor.vue'
 // pacing, moved here from the Agents page popover with the same behaviour. Work
 // days, Keep for you and nights are three rows; the gears and Keep for you open
 // the existing editors, a popover on wide screens and a full-height sheet on
-// phones. Controls sit right-aligned on each row, so a custom week or a longer
-// hint never moves them.
+// phones. Controls sit right-aligned on each row and the custom-week radio comes
+// before 5, 6 and 7, so a custom week or a longer hint never moves them.
 const props = defineProps<{ manage: boolean; ownerKey: string }>()
 const capacity = useCapacity(), agents = useAgents()
 const manageTip = 'Changing pacing needs permission to manage accounts'
@@ -45,7 +45,10 @@ const toggleNights = () => void run(() => capacity.setNights(!schedule.value.nig
 function daysKey(event: KeyboardEvent) {
   if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
   event.preventDefault()
-  const next = Math.max(5, Math.min(7, (days.value.preset ?? 5) + (event.key === 'ArrowRight' ? 1 : -1))) as 5 | 6 | 7
+  // A custom week sits left of 5: ArrowRight steps onto 5, ArrowLeft stays.
+  const from = days.value.preset
+  if (from === null && event.key === 'ArrowLeft') return
+  const next = (from === null ? 5 : Math.max(5, Math.min(7, from + (event.key === 'ArrowRight' ? 1 : -1)))) as 5 | 6 | 7
   setPreset(next)
   void nextTick(() => root.value?.querySelector<HTMLElement>(`.days [data-v="${next}"]`)?.focus())
 }
@@ -175,11 +178,12 @@ defineExpose({ reveal })
         <span class="lbl"><b id="days-lbl">Work days a week</b><small :class="{ custom: days.preset === null }">{{ days.hint }}</small></span>
         <span class="ctl">
           <span class="seg" role="radiogroup" aria-labelledby="days-lbl" @keydown="daysKey">
+            <!-- First, so it grows leftward: 5, 6 and 7 keep their place when a custom week comes or goes. -->
+            <button v-if="days.preset === null" type="button" role="radio" data-v="custom" aria-checked="true" tabindex="0" :disabled="!manage" @click="openEditor('week', $event)">{{ days.custom }}</button>
             <button
               v-for="n in ([5, 6, 7] as const)" :key="n" type="button" role="radio" :data-v="n" :aria-checked="days.preset === n" :tabindex="(days.preset ?? 5) === n && days.preset !== null ? 0 : -1"
               :disabled="!manage" :aria-disabled="busy" :data-tip="manage ? undefined : manageTip" @click="setPreset(n)"
             >{{ n }}</button>
-            <button v-if="days.preset === null" type="button" role="radio" data-v="custom" aria-checked="true" tabindex="0" :disabled="!manage" @click="openEditor('week', $event)">{{ days.custom }}</button>
           </span>
           <button class="gear" type="button" aria-haspopup="dialog" :aria-expanded="editor?.kind === 'week'" aria-label="Customize work week" :data-tip="manage ? 'Customize work week' : manageTip" :disabled="!manage" @click="openEditor('week', $event)"><AppIcon name="gear" :size="15" /></button>
         </span>
@@ -241,7 +245,7 @@ defineExpose({ reveal })
 .lbl small { display: block; margin-top: 2px; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .lbl small.custom { color: var(--ink-2); }
 .lbl small.off { opacity: .55; text-decoration: line-through; text-decoration-color: var(--line-2); }
-/* Right-aligned: the last control (gear or Keep for you) never moves; a custom-week radio grows leftward. */
+/* Right-aligned: the gear, Keep for you and 5, 6, 7 never move; a custom-week radio sits before 5 and grows leftward. */
 .ctl { display: inline-flex; align-items: center; justify-content: flex-end; gap: 10px; flex: none; }
 .seg button { min-width: 32px; padding: 0 10px; font-variant-numeric: tabular-nums; }
 .seg button[data-v="custom"] { padding: 0 12px; white-space: nowrap; }

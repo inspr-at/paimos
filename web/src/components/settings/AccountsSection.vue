@@ -146,7 +146,15 @@ function cleanupRemoval(c: PairingView) {
 }
 const renameOpen = ref(false), renameName = ref('')
 const menuOpen = ref(false), menuAnchor = ref<HTMLElement | null>(null), menuTarget = ref<MenuTarget | null>(null), menuItems = ref<SettingsMenuItem[]>([]), menuContext = ref(''), menuError = ref('')
-function menuKey(t: MenuTarget) { return `${selectedKey.value}/${t.kind}/${t.kind === 'account' ? `${t.account.records.map(r => r.id).join(',')}|${paceKey(poolOf(t.account))}|${t.account.signins.map(s => `${s.computer.computer_id}:${s.computer.revision}:${s.enrollment.account_id}`).join(',')}` : t.kind === 'signin' ? `${t.signin.computer.computer_id}:${t.signin.computer.revision}:${t.signin.enrollment.account_id}` : `${t.computer.computer_id}:${t.computer.revision}`}` }
+function currentTarget(t: MenuTarget): MenuTarget | undefined {
+  if (t.kind === 'account') { const account = accounts.value.find(a => a.id === t.account.id); return account && { kind: 'account', account } }
+  const computer = computers.value.find(c => c.computer_id === (t.kind === 'signin' ? t.signin.computer.computer_id : t.computer.computer_id))
+  if (!computer) return undefined
+  if (t.kind !== 'signin') return { kind: t.kind, computer }
+  const enrollment = computer.enrollments.find(e => e.account_id === t.signin.enrollment.account_id)
+  return enrollment && { kind: 'signin', signin: { computer, enrollment } }
+}
+function menuKey(t: MenuTarget) { return `${selectedKey.value}/${t.kind}/${t.kind === 'account' ? `${t.account.records.map(r => `${r.id}:${r.link_revision ?? ''}`).join(',')}|${paceKey(poolOf(t.account))}|${t.account.signins.map(s => `${s.computer.computer_id}:${s.computer.revision}:${s.enrollment.account_id}`).join(',')}` : t.kind === 'signin' ? `${t.signin.computer.computer_id}:${t.signin.computer.revision}:${t.signin.enrollment.account_id}` : `${t.computer.computer_id}:${t.computer.revision}`}` }
 async function openMenu(t: MenuTarget, event: Event) {
   if (!manage.value) return
   menuTarget.value = t; menuAnchor.value = event.currentTarget as HTMLElement; menuContext.value = menuKey(t); menuError.value = ''
@@ -188,8 +196,10 @@ async function menuAction(id: string, context: string | undefined) {
   if (!t || busy.value || !manage.value) return
   // A record that changed since its menu opened (a poll, another tab) is said, never acted on.
   if (context !== menuContext.value || context !== menuKey(t)) { fail('This record changed. Reopen its menu.'); return }
-  const current = t.kind === 'account' ? accounts.value.find(a => a.id === t.account.id) : computers.value.find(c => c.computer_id === (t.kind === 'signin' ? t.signin.computer.computer_id : t.computer.computer_id))
-  if (!current || (t.kind !== 'account' && 'revision' in current && current.revision !== (t.kind === 'signin' ? t.signin.computer.revision : t.computer.revision))) { fail('This record changed. Reopen its menu.'); return }
+  // The key of the record as it is now, not as captured: a regrouped account
+  // (other logins), a newer computer revision or a gone sign-in all differ.
+  const current = currentTarget(t)
+  if (!current || menuKey(current) !== context) { fail('This record changed. Reopen its menu.'); return }
   if (t.kind === 'account' && (id === 'plan' || id === 'sprint' || id.startsWith('hold:'))) { await pace(t.account, id); return }
   if (t.kind === 'account' && id === 'remove-account') { await removeAccount(t.account); return }
   if (id === 'rename' && t.kind === 'computer') { renameName.value = t.computer.computer_name; await nextTick(); renameOpen.value = true; return }
