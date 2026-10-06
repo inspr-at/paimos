@@ -112,7 +112,7 @@ func TestPlacementSecurityReviewRetainsOwnerRequiredExplanation(t *testing.T) {
 				if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
 					return tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title,fields)
 					 SELECT $1,id,'SECURITY-1','Security review', '{"route_role":"review-gate-security","area":"backend"}'
-					 FROM node_kinds WHERE slug='ticket' RETURNING id::text`, p.TenantID).Scan(&ticket)
+					 FROM node_kinds WHERE slug='work' RETURNING id::text`, p.TenantID).Scan(&ticket)
 				}); err != nil {
 					t.Fatal(err)
 				}

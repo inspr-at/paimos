@@ -34,7 +34,11 @@ export async function mockPolicyEditors(page:Page,theme:'light'|'dark'='light') 
  const state={document:preferenceDocument(),ladders:new Map<PolicyRole,EditableLadder>(),writes:[] as {path:string;method:string;body:Record<string,unknown>|ModelRoute[]|null;headers:Record<string,string>}[],refusal:null as null|{status:number;code:string},failReads:false,malformed:false,unknown:false}
  let next:{started:ReturnType<typeof barrier>;until:ReturnType<typeof barrier>;settled:ReturnType<typeof barrier>}|null=null
  let nextRead:{started:ReturnType<typeof barrier>;until:ReturnType<typeof barrier>}|null=null
- await page.route('**/api/models',route=>route.fulfill({json:catalog}))
+ let nextCatalog:{started:ReturnType<typeof barrier>;until:ReturnType<typeof barrier>}|null=null
+ await page.route('**/api/models',async route=>{
+  const held=nextCatalog;nextCatalog=null;held?.started.release();if(held)await held.until.promise
+  return route.fulfill({json:catalog})
+ })
  await page.route(/\/api\/models\/routes(\?|$)/,async route=>{
   const req=route.request(),url=new URL(req.url()),role=url.searchParams.get('role') as PolicyRole
   if(!state.ladders.has(role)){const ladder=policyLadder(role) as EditableLadder;ladder.edit_token=token(ladder.routes);state.ladders.set(role,ladder)}
@@ -74,5 +78,5 @@ export async function mockPolicyEditors(page:Page,theme:'light'|'dark'='light') 
   if(state.unknown)return route.abort('connectionreset')
   return route.fulfill({json:state.malformed?{person_id:'wrong-person'}:{person_id:state.document.person_id,revision:value.revision,level:value,running_outside:[],residency:state.document.views[name]!.residency}})
  })
- return {state,base,holdRead(){const held={started:barrier(),until:barrier()};nextRead=held;return {started:held.started.promise,release:held.until.release}},holdNext(){const held={started:barrier(),until:barrier(),settled:barrier()};next=held;return {started:held.started.promise,settled:held.settled.promise,release:held.until.release}}}
+ return {state,base,holdCatalog(){const held={started:barrier(),until:barrier()};nextCatalog=held;return {started:held.started.promise,release:held.until.release}},holdRead(){const held={started:barrier(),until:barrier()};nextRead=held;return {started:held.started.promise,release:held.until.release}},holdNext(){const held={started:barrier(),until:barrier(),settled:barrier()};next=held;return {started:held.started.promise,settled:held.settled.promise,release:held.until.release}}}
 }

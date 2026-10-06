@@ -96,12 +96,25 @@ for(const platform of ['MacIntel','Linux x86_64'])for(const width of [390,1440])
  await page.goto('/settings/policies')
  const frame=editor==='preferences'?await preferences(page):page.locator('.editor-frame')
  const edit=frame.getByTestId('policy-edit'),save=frame.getByTestId('policy-save')
+ const catalog=editor==='ladder'?mock.holdCatalog():null
  await expect(edit).toHaveAttribute('aria-disabled','false');await edit.click()
  const field=page.getByLabel(editor==='ladder'?'Ladder position':'normal preference mode')
  const modifier=platform==='MacIntel'?'Meta':'Control'
  await expect(save.locator('.keys')).toHaveAttribute('aria-label',platform==='MacIntel'?'Command+Enter':'Ctrl+Enter')
  const before=structuredClone(editor==='ladder'?mock.state.ladders.get('review-gate')!.routes:mock.state.document.levels.person!.rows)
- if(editor==='ladder'){await field.fill('2');await field.press('Tab')}else await field.selectOption('auto')
+ if(editor==='ladder'){
+  try{
+   await catalog!.started
+   await field.fill('2')
+   // The pending catalog causes a render before blur. It must not replace
+   // the position the user just typed with the old selected index.
+   catalog!.release()
+   await expect(page.getByLabel('Add ladder model').locator('option[value="profile-2"]')).toHaveCount(1)
+   await expect(field).toHaveValue('2')
+   await field.press('Tab')
+   await expect(page.getByLabel('Selected ladder step')).toHaveValue('1')
+  }finally{catalog!.release()}
+ }else await field.selectOption('auto')
  await field.focus()
  const held=mock.holdNext()
  try{

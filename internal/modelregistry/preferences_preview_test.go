@@ -131,10 +131,21 @@ func TestPreferenceGETBoundedLargeCatalog(t *testing.T) {
 			// Exercise the real middleware/GET and verify the measured document is
 			// exactly what the editor receives, not an isolated resolver result.
 			doc := h.prefs(t, p, project)
-			if !reflect.DeepEqual(doc, measured) {
+			measuredRaw, err := json.Marshal(measured)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// pgx timestamps retain time.Local even on UTC hosts, while JSON
+			// decodes Z as time.UTC. Apply the same wire conversion to both
+			// documents; retain every field and the exact JSON comparison below.
+			var measuredWire preferenceDocument
+			if err := json.Unmarshal(measuredRaw, &measuredWire); err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(doc, measuredWire) {
 				t.Fatal("GET differs from measured preview snapshot")
 			}
-			gotJSON, measuredJSON := editorJSON(doc), editorJSON(measured)
+			gotJSON, measuredJSON := editorJSON(doc), string(measuredRaw)
 			if gotJSON != measuredJSON {
 				at := 0
 				for at < len(gotJSON) && at < len(measuredJSON) && gotJSON[at] == measuredJSON[at] {
