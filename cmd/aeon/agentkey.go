@@ -20,14 +20,14 @@ import (
 
 // agentKeyCommand runs the operator-only agent key commands:
 //
-//	paimos agent-key create --tenant SLUG --name AGENT --out-file PATH [--scopes a,b] [--expires 720h] [--workspace-role ROLEKEY]
-//	paimos agent-key create --tenant SLUG --principal-id UUID --out-file PATH [--name LABEL] [--scopes a,b]
+//	paimos agent-key create --tenant SLUG --name AGENT --creator-id UUID --out-file PATH [--scopes a,b] [--expires 720h] [--workspace-role ROLEKEY]
+//	paimos agent-key create --tenant SLUG --principal-id UUID --creator-id UUID --out-file PATH [--name LABEL] [--scopes a,b]
 //	paimos agent-key revoke --tenant SLUG --id KEY_ID
 //
 // The token is written only to --out-file (created with mode 0600, never
 // overwritten) and is never printed.
 func agentKeyCommand(args []string, stdout io.Writer) error {
-	const usage = "usage: paimos agent-key create --tenant SLUG (--name AGENT | --principal-id UUID) --out-file PATH [--scopes a,b] [--expires DURATION] [--workspace-role ROLEKEY] [--project KEY --project-role ROLEKEY]... | paimos agent-key revoke --tenant SLUG --id KEY_ID"
+	const usage = "usage: paimos agent-key create --tenant SLUG (--name AGENT | --principal-id UUID) --creator-id UUID --out-file PATH [--scopes a,b] [--expires DURATION] [--workspace-role ROLEKEY] [--project KEY --project-role ROLEKEY]... | paimos agent-key revoke --tenant SLUG --id KEY_ID"
 	if len(args) == 0 || (args[0] != "create" && args[0] != "revoke") {
 		return errors.New(usage)
 	}
@@ -36,6 +36,7 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 	tenantSlug := flags.String("tenant", "", "tenant slug")
 	name := flags.String("name", "", "agent or key name")
 	principalID := flags.String("principal-id", "", "existing agent principal")
+	creatorID := flags.String("creator-id", "", "person creator UUID (required for create)")
 	outFile := flags.String("out-file", "", "file to write the key to (0600, must not exist)")
 	scopes := flags.String("scopes", "", "comma-separated scopes")
 	expires := flags.Duration("expires", 0, "lifetime, e.g. 720h (default: no expiry)")
@@ -47,7 +48,7 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || *tenantSlug == "" {
 		return errors.New(usage)
 	}
-	if args[0] == "create" && (*outFile == "" || (*name == "" && *principalID == "") || *id != "") ||
+	if args[0] == "create" && (*creatorID == "" || *outFile == "" || (*name == "" && *principalID == "") || *id != "") ||
 		args[0] == "revoke" && (*id == "" || *name != "" || *principalID != "" || *outFile != "" || *scopes != "" || *expires != 0) {
 		return errors.New(usage)
 	}
@@ -93,7 +94,7 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 			os.Remove(*outFile)
 			return err
 		}
-		keyID, agentID, token, err := auth.OperatorCreateAgentKey(ctx, pool, tenantID, *name, *principalID, list, exp)
+		keyID, agentID, token, err := auth.OperatorCreateAgentKey(ctx, pool, tenantID, *name, *principalID, list, exp, *creatorID)
 		if err != nil {
 			f.Close()
 			os.Remove(*outFile)

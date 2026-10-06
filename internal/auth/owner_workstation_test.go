@@ -487,9 +487,15 @@ func TestWorkstationCreatesAndRotatesOrdinaryKeys(t *testing.T) {
 	body := `{"name":"New synthetic worker","scopes":["nodes.read"]}`
 	c := f.challenge(t, "POST", "/api/agent-keys", body)
 	key := decodeKey(t, f.call(f.key.Token, "POST", "/api/agent-keys", body, workstationProof(t, f.signer, c)))
+	if *key.CreatedByPrincipalID != f.owner.ID {
+		t.Fatal("workstation creation omitted its person owner")
+	}
 	body = `{"rotate_key_id":"` + key.ID + `"}`
 	c = f.challenge(t, "POST", "/api/agent-keys", body)
 	rotated := decodeKey(t, f.call(f.key.Token, "POST", "/api/agent-keys", body, workstationProof(t, f.signer, c)))
+	if *rotated.CreatedByPrincipalID != f.owner.ID {
+		t.Fatal("workstation rotation omitted its person owner")
+	}
 	if rotated.OwnerWorkstation || rotated.PrincipalID != key.PrincipalID {
 		t.Fatal("rotation changed authority")
 	}

@@ -13,7 +13,7 @@ import (
 func TestNativeReleaseCreationAtomicReplayAndIsolation(t *testing.T) {
 	f := ticketSetup(t)
 	f.tx(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released' WHERE release_node_id=$1`, f.release)
+		_, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released',released_at=now() WHERE release_node_id=$1`, f.release)
 		return err
 	})
 	ticket := f.existing("ticket", f.project, "Independent planning", "open")
@@ -74,7 +74,7 @@ func TestNativeReleaseCreationAtomicReplayAndIsolation(t *testing.T) {
 		t.Fatalf("key conflict: %d %s", conflict.Code, conflict.Body.String())
 	}
 	f.tx(func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released' WHERE release_node_id=$1`, first.Walker.ReleaseID)
+		_, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released',released_at=now() WHERE release_node_id=$1`, first.Walker.ReleaseID)
 		return err
 	})
 	nextTicket := f.existing("ticket", f.project, "Next planning work", "open")

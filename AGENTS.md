@@ -24,18 +24,21 @@ scripts/             release checks
 
 ## How you work
 
-1. **Your package is your scope.** Only change files your package needs. If you must touch a shared file (`api/openapi.yaml`, `go.mod`, `web/package.json`, a migration number), keep the change minimal and additive.
-2. **Contract first.** Endpoints are added to `api/openapi.yaml` in the same change as their handler.
-3. **Migrations** are numbered `NNNN_name.sql` in `internal/db/migrations/`; take the next free number within your package's range (P0.2: 0001–0019, P0.3: 0020–0039).
-4. **Tests are part of done.** `just test` must pass (Go tests use the Postgres from `just db-up`; web: `just web-check`). Add tests for what you build.
+1. **Your ticket is your scope.** Change only the paths in your brief's write set. If you must touch a shared file (`api/openapi.yaml`, `go.mod`, `web/package.json`, a migration, `AGENTS.md`), keep the change minimal and additive and say so in your summary.
+2. **Contract first.** Endpoints are added to `api/openapi.yaml` in the same change as their handler. Keep contract changes additive and backward compatible (PHAROS and JANUS parse strictly; never rename or remove fields or routes). Quote OpenAPI descriptions and run `go test ./internal/reportercontract/`. For new routes, update the strict route tables in tests deliberately, and bump the Aeon-Contract version when a pinned response schema changes.
+3. **Migrations** are `NNNN_name.sql` in `internal/db/migrations/` and **expand-only**: add tables, nullable columns or indexes. NOT NULL, CHECK or FK constraints that older writers could violate, DROP, RENAME and destructive UPDATEs need `-- aeon:contract-phase …` after a released expansion. Use the number your brief names (reserved by the coordinator, above the latest released maximum); on a collision with main, stop and report, never renumber yourself. Run `node scripts/check-migrations.mjs`. Classify new tables and columns in `internal/dsar/inventory.json` in the same change.
+4. **Tests are part of done** and follow the agent test policy (PAIMOS Knowledge AEON `agent-test-policy`): name the risk; usually one behaviour test per ticket; barriers and injected clocks instead of sleeps; never loosen or skip a test without a person-approved note on the ticket. Register new tests in the tier manifests (`node scripts/test-tiers/cli.mjs`). Tests never write to absolute local paths (use Playwright `testInfo.outputPath()`). Before hand-over, `node scripts/ci-static.mjs --merge-main` exits 0 (exit 3 means incomplete, not green).
 5. **Progress file.** After every meaningful step overwrite `.agent-status.json` in your worktree root (it is git-ignored):
-   `{"package":"P0.2","worker":"grok-1","pct":40,"remaining_min":25,"note":"migrations and RLS done"}`
-6. **Commits** on your branch only, message `P0.x: what changed` plus the ticket key (e.g. `AEON-7`). Never commit secrets, `.env` files or generated build output. Do not push; the coordinator merges.
+   `{"package":"AEON-123","worker":"<model>","pct":40,"remaining_min":25,"note":"migrations and RLS done"}`
+6. **Commits** on your branch only: `AEON-NNN: what changed`. Never commit secrets, `.env` files or generated build output. Do not push unless your brief allows it; the coordinator pushes, opens the PR and merges.
 7. **Never** read or print secrets, never touch other worktrees, never run destructive git (`reset --hard`, `clean -f`, `push --force`).
 8. When done: `pct` 100, a one-paragraph summary in `note`, and a final commit.
-9. **No reviews by other models.** Do not run cross-family or any other review gates per package, and never call other model CLIs (claude, codex, grok, cursor-agent) yourself. QA is consolidated per release by the coordinator (Markus, 2026-09-23).
-10. **Classic Paimos is retired.** The cutover is done (2026-09-26, AEON-43); its removal is tracked in AEON-261. Never build on classic or bring it back; old pm.barta.cm links resolve through `/from-classic`. pm.augmentoring.com (business trust context) follows each live-verified Aeon release via the documented PMA bump flow only (agm-nixcfg pin, backup first, tickets in the pma tracker, never PPM); no other changes there (Markus, 2026-09-30).
+9. **No model calls of your own.** Never call other model CLIs (claude, codex, grok, cursor-agent, pi) and never run review gates yourself. The coordinator runs a read-only gate from another model family on every PR; only High and Medium findings block, and they come back to you as a fix-round brief (Markus, 2026-10-06).
+10. **Classic Paimos is retired.** The cutover is done (2026-09-26, AEON-43); its removal is tracked in AEON-261. Never build on classic or bring it back; old pm.barta.cm links resolve through `/from-classic`. pm.augmentoring.com is the business-context instance: only the PMA bump flow run by OPS touches it; never carry credentials or tickets across (Markus, 2026-09-30).
 11. **No colored edge accents in the UI.** Never mark selection, emphasis or state with a colored bar or thick border on the left or top edge of a row, card, callout, toast or panel; it is the classic AI-generated UI tell. Use a subtle full tint, a hairline outline or ring, elevation, or type weight instead (Markus, 2026-09-24).
+12. **INSPR Flow / Journey is retired** (Markus, 2026-10-05, AEON-723): don't build on, extend or fix journey or stage features; route such tickets to retirement.
+13. **Shared files.** New source files get a slice in `scripts/audit/slices.json`. When merging main, the tier manifests merge through the merge driver; on a real conflict take main's version and re-apply your rows with `node scripts/test-tiers/cli.mjs manifests --write`; never commit conflict markers. A change to this file updates `existing_agents_sha256` in `scripts/rules-bootstrap/rollout.json` in the same commit.
+14. **Design and release copy.** The design source is the HTML attached to the ticket. Release-note copy (pills, benefits) must be true for the code that ships; use marketing release names; German in impersonal form.
 
 ## Code health (AEON-574)
 
@@ -51,7 +54,7 @@ Rules 1–6 prevent recurring AEON-545 audit findings; rule 7 is the companion l
 
 ### Coordinator review checklist
 
-Use these seven checks in the consolidated cross-family gate; package workers do not run model reviews themselves (rule 9).
+Use these checks in every PR gate; workers do not run model reviews themselves (rule 9).
 
 - [ ] Authorization is re-checked with `RequireTx` against the current target under the access-change lock in the final write transaction.
 - [ ] Locks follow tenant → tree → rows → sorted blob batch → event counter last, with no later lock acquisition and FK-compatible fences.
@@ -60,12 +63,15 @@ Use these seven checks in the consolidated cross-family gate; package workers do
 - [ ] Failed and partial writes, searches, syncs and deliveries surface errors; truncation and partial results are explicit.
 - [ ] Barriers/clocks prove the claimed interleaving/time; fixtures preserve asserted data; assertions cannot pass for a different failure.
 - [ ] Bounding-box checks keep actions and selectors still through options/series; downward growth keeps short frames short, without padded fixed heights.
+- [ ] UI follows `docs/ui-conventions.md`: shared tokens/components, designed light and dark themes, no coloured edge accents, decorative side frames/glows, gradient blobs or grey-pill soup; controls measured stable (±0.5 px).
 
 ## Style
 
 - Go: standard library first, small packages, explicit errors, context everywhere, no global state except in `main`.
 - SQL: every table has `tenant_id` (except `tenants`), RLS policy on `current_setting('aeon.tenant_id')`.
-- Web: Vue 3 `<script setup lang="ts">`, design tokens from `web/src/styles/tokens.css`, SVG icons only (never text glyphs), icons centred in their controls.
+- Web: Vue 3 `<script setup lang="ts">`, shared tokens and styles from `web/src/styles/tokens.css` and `web/src/styles/base.css`, SVG icons only (never text glyphs), icons centred in their controls. Reuse existing PAIMOS components before creating new ones; design both light and dark themes. Use hairlines, full tints, whitespace and type weight; no coloured edge accents, decorative side frames/glows, gradient blobs or grey-pill soup.
+  Implement the approved Opus design named in the brief; without one, build only the specified UI with existing components and note "needs Opus design" in the summary.
+  UI work must also satisfy docs/ui-conventions.md
 - UI stability (AEON-541): **The control stays put; content grows away from controls or moves inside a scroll area.** Selecting, hovering, typing or toggling never changes a control's size or position, or its neighbours in the same group. Feedback appears in place, never by pushing controls. Rule 7 governs the choice of layout; fixed heights are not the goal.
   1. For long content, Accept, Decide & next, Skip and Cancel live in a fixed footer; content above uses a scrolling body. Longer content means scrolling, never a moved button.
   2. One control layout and position for a whole series (1 of N). After next/previous, action buttons stay identical and focus stays on the same button. Top-anchored frames may grow downward; a series with an already scrolling body retains the same dialog size.
@@ -75,4 +81,5 @@ Use these seven checks in the consolidated cross-family gate; package workers do
   6. Important dialogs must use the reusable Playwright stability guard: measure named actions, selectors, selector groups and the clicked row before/after every option interaction and series step (±0.5 px). Assert frame height only for pattern B (phone sheets or an already scrolling body); pattern A frames may grow downward. Require at least one interaction and positive-size samples; user scrolling is measured in scroll-container coordinates, and horizontal overflow fails.
   7. Refinement (Markus, 2026-10-02): controls never moving is the goal, not fixed heights. Prefer a dialog anchored at a fixed top position with navigation, choices and actions above content that grows downward. Short content stays short; never pad it to a fixed height just to hold a button still. Use the pinned footer with a scrolling body for long content and phone sheets. Use hairlines, whitespace, typography and a fitting metaphor; do not surround every element with grey rounded rectangles or forced pills.
 - Keyboard convention (AEON-541): single-letter shortcuts work only outside text fields. Submit from a field with ⌘↵ on macOS or Ctrl+↵ elsewhere; detect the platform and match the labels. Esc leaves a field, then closes on the next press. Preserve browser and OS shortcuts (⌘S/⌘R/⌘D/⌘P/⌘A and Ctrl+A stay native). Show keycaps on the buttons they trigger.
+- Space and text: no fixed px widths for variable text; buttons fit long German labels and stack when needed; no `…` without a way to read the rest; rows are clickable as a whole; phone sheets respect safe areas; touch targets ≥ 44 px.
 - Licence: AGPL-3.0-only. SPDX header in new source files.

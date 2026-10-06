@@ -9,6 +9,9 @@ const full = reason => ({ lane: 'full', specs: [], nixVendor: true, reason });
 const nixVendorPaths = new Set(['go.mod', 'go.sum', 'flake.nix', 'flake.lock',
   '.github/workflows/ci.yml', 'scripts/ci-pr-plan.mjs', 'scripts/check-nix-vendor-hash.sh']);
 // The documentation allowlist lives here, including root licence notices.
+// AEON-766: web/tests/no-shift-rules.test.ts pins AGENTS.md via the rules
+// rollout manifest. Instruction files (including CLAUDE.md) need full CI.
+const instructionPattern = /(?:^|\/)(?:AGENTS|CLAUDE)\.md$/i;
 export const docsPaths = [/^[^/]+\.md$/i, /^docs\//, /^(?:LICENSE|LICENCE|COPYING|NOTICE)(?:\.(?:txt|md|rst))?$/i];
 
 export function validatePath(file) {
@@ -23,6 +26,8 @@ export function classifyPaths(files, deleted = []) {
   files.forEach(validatePath);
   deleted.forEach(validatePath);
   const nixVendor = [...files, ...deleted].some(file => nixVendorPaths.has(file));
+  const instruction = [...files, ...deleted].find(file => instructionPattern.test(file));
+  if (instruction) return { ...full(`test-pinned instruction input: ${instruction}`), nixVendor };
   if (files.every(file => !file.split('/').includes('testdata') && docsPaths.some(pattern => pattern.test(file)))) {
     return { lane: 'docs-only', specs: [], nixVendor, reason: 'documentation allowlist' };
   }

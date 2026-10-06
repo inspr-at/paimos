@@ -71,9 +71,13 @@ func Require(ctx context.Context, permission string, scope Scope) error {
 	if !ok || pool == nil {
 		return ErrNoStore
 	}
-	return db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(ctx, pool, p.TenantID, func(tx pgx.Tx) error {
 		return requireTx(ctx, tx, p, permission, scope)
 	})
+	if errors.Is(err, db.ErrKeyAuthorityChanged) {
+		return ErrForbidden
+	}
+	return err
 }
 
 func requireTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string, scope Scope) error {
@@ -177,6 +181,9 @@ func Load(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal, projectID
 // self-service permissions (own profile, own access) of a project role count
 // too, so a project-only Guest can load their own profile.
 func loadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, projectID string) (Effective, error) {
+	if err := validateKeyCreatorTx(ctx, tx, p); err != nil {
+		return Effective{}, err
+	}
 	g, err := readGrants(ctx, tx, p)
 	if err != nil {
 		return Effective{}, err
@@ -347,6 +354,12 @@ func GrantedProjectIDsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, per
 // many projects at once. An inactive caller or creator is denied everything.
 func ProjectsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (ProjectCheck, error) {
 	deny := func(string, string) bool { return false }
+	if err := validateKeyCreatorTx(ctx, tx, p); err != nil {
+		if errors.Is(err, ErrForbidden) {
+			return deny, nil
+		}
+		return nil, err
+	}
 	own, err := readGrants(ctx, tx, p)
 	if errors.Is(err, ErrForbidden) {
 		return deny, nil

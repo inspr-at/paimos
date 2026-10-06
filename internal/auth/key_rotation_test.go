@@ -69,6 +69,9 @@ func decodeKey(t *testing.T, w *httptest.ResponseRecorder) agentKeyCreatedJSON {
 	if err := json.Unmarshal(w.Body.Bytes(), &key); err != nil {
 		t.Fatal("invalid key response")
 	}
+	if key.CreatedByPrincipalID == nil {
+		t.Fatal("HTTP creation/rotation omitted person creator")
+	}
 	if key.Token == "" {
 		t.Fatal("missing one-time token")
 	}

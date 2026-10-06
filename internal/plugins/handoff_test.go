@@ -87,7 +87,7 @@ func testStagePlugin(id string) func() (Plugin, error) {
 		steps := []WorkflowStep{}
 		perms := []string{fence.PermStepsEvaluate, fence.PermStepsRequest, fence.PermStepsApply}
 		for operation, permission := range bindings {
-			steps = append(steps, WorkflowStep{Key: operation})
+			steps = append(steps, WorkflowStep{Key: operation, Gates: []string{fence.GateReadiness}})
 			perms = append(perms, permission)
 		}
 		p := Plugin{Manifest: Manifest{ID: id, Version: "1", Owner: "test", Permissions: perms, WorkflowSteps: steps}, StepPermissions: bindings, Steps: testSteps{}}
