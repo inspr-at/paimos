@@ -299,6 +299,8 @@ jobs:
           fi
       - name: Test this shard (essential plus changed area, or full on main)
         env:
+          # Matching clients in this exact service, never a named local container.
+          AEON_TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
           AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
           AEON_TEST_TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
           GOFLAGS: -count=1
