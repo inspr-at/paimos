@@ -20,9 +20,9 @@
     }
   },
   "tierTimingSource": {
-    "runId": "37341114152",
-    "sha": "ee0c4ecf1554aa86d9a40c91ff55cb37bd5514fb",
-    "basis": "Serial per-case result.duration seconds plus each group stats.duration residual divided equally across collected cases. Only 9 of 12 shard artifacts supplied; missing specs keep historical serial estimates. weightSeconds preserves the historical exact-spec allocation; tierTiming schedules the measured tier lane."
+    "runId": "37377299349",
+    "sha": "b2f9935a4264e932eae0fa2acd07c71e8d1fc417",
+    "basis": "Serial per-case result.duration seconds plus group stats.duration residual and apportioned tier execution residual, divided equally across collected cases. All 12 shard artifacts supplied; unmeasured specs keep historical serial estimates. Each clip half conservatively retains the full original launch overhead. weightSeconds preserves the historical exact-spec allocation, divided proportionally between the clip halves; tierTiming schedules the measured tier lane."
   },
   "integrationNotes": [
     "AEON-676: OPS-257 runner/workflow and coverage guard integrated from dc61efd76ad7263749c3b70a515aad5e40df60ba. The clipped-names-and-preferences group gates clip-tip, aeon-632b-clip, key-trim and model-prefs once, with no clip-tip exclusion. The touch layout fix passed six variants x20 locally; hosted execution of this integrated revision still needs coordinator CI. Weights for these 247 tests remain scheduling estimates: clip-tip uses the complete local serial run plus a 20 percent margin; the other three use native test counts. Hosted runtimes remain unmeasured.",

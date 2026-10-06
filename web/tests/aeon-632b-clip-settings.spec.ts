@@ -97,5 +97,4 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await disclosure(page, dialog.locator('.outcomes .set-name').first(), { close: dialog.getByRole('button', { name: 'Close', exact: true }) })
     await capture(page, 'rules-import-results', width, theme)
   })
-
 }

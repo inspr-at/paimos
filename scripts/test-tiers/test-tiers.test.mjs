@@ -277,8 +277,8 @@ test('two tier shards contain every selected identity exactly once, including eq
   assert.ok(pattern.test('test [1]'));assert.ok(!pattern.test('test 1'));assert.ok(!pattern.test('other ends.$'))
 })
 
-for(const [kind,maxShards] of [['go',7],['browser',12],['node',4]]) {
-  test(`${kind} zero-weight owners fill shards before reusing tied bins for counts 1..${maxShards}`,()=>{
+for(const [kind,maxShards,options] of [['go',7,{}],['browser',12,{}],['node',4,{}],['node',4,{firstShardLast:true}]]) {
+  test(`${kind}${options.firstShardLast?' (first shard last)':''} zero-weight owners fill shards before reusing tied bins for counts 1..${maxShards}`,()=>{
     for(let count=1;count<=maxShards;count++) {
       for(const ownerCount of new Set([0,1,Math.max(0,count-1),count,count+1,2*count+1])) {
         for(const distribution of ['mixed','all-zero','equal-positive']) {
@@ -292,18 +292,18 @@ for(const [kind,maxShards] of [['go',7],['browser',12],['node',4]]) {
           const weights=Object.fromEntries(owners.map((owner,i)=>[owner,
             distribution==='all-zero'?0:distribution==='mixed'?(i===0?1:0):1]))
           const before={rows:structuredClone(rows),weights:{...weights}}
-          const bins=Array.from({length:count},(_,i)=>shard(rows,i+1,count,weights))
+          const bins=Array.from({length:count},(_,i)=>shard(rows,i+1,count,weights,options))
           const ownerOf=row=>kind==='go'?row.package:row.file
           const ownerBins=bins.map(bin=>[...new Set(bin.map(ownerOf))])
-          const context=`${kind}: ${count} shards, ${ownerCount} owners, ${distribution}`
+          const context=`${kind}${options.firstShardLast?' (first shard last)':''}: ${count} shards, ${ownerCount} owners, ${distribution}`
           assert.deepEqual(bins.flat().map(key).sort(),rows.map(key).sort(),context)
           assert.equal(new Set(bins.flat().map(key)).size,rows.length,context)
           assert.deepEqual(ownerBins.flat().sort(),owners,`${context}: owners stay whole`)
           assert.equal(ownerBins.filter(bin=>bin.length).length,Math.min(count,ownerCount),`${context}: empty shards only when owners are fewer`)
           for(let i=0;i<count;i++) {
-            assert.deepEqual(shard([...rows].reverse(),i+1,count,weights).map(key).sort(),bins[i].map(key).sort(),`${context}: input order cannot change assignment`)
+            assert.deepEqual(shard([...rows].reverse(),i+1,count,weights,options).map(key).sort(),bins[i].map(key).sort(),`${context}: input order cannot change assignment`)
           }
-          if(distribution==='all-zero') {
+          if(distribution==='all-zero'&&!options.firstShardLast) {
             // Equal weights and owner counts resolve by path then shard index.
             assert.deepEqual(ownerBins,Array.from({length:count},(_,i)=>owners.filter((_,j)=>j%count===i)),context)
           }
