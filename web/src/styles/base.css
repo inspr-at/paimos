@@ -79,6 +79,11 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
 .btn.ghost { border-color: transparent; background: transparent; box-shadow: none; color: var(--teal-ink); }
 .btn.ghost:hover { background: var(--row-selected); }
 .btn.sm { height: 28px; padding: 0 11px; font-size: 12.5px; }
+/* A label that changes (Create → Creating…) reserves its widest form, so the
+   button keeps its label's width and its neighbours never move (AEON-730). */
+.btn-label { display: inline-grid; justify-items: center; }
+.btn-label > * { grid-area: 1 / 1; }
+.btn-label > [aria-hidden="true"] { visibility: hidden; }
 .btn.danger { color: var(--danger); }
 .btn[aria-pressed="true"], .btn.on { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 0 0 1px var(--chip-teal-line); }
 

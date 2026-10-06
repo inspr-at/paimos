@@ -99,7 +99,7 @@ onMounted(() => { void projects.load() })
 </script>
 
 <template>
-  <AccessSheet :title="result ? 'Invite ready' : 'Invite people'" size="center" wide @close="saving || emit('close')">
+  <AccessSheet :title="result ? 'Invite ready' : 'Invite people'" size="center" @close="saving || emit('close')">
     <form v-if="!result" class="invite-form" novalidate @submit.prevent="submit">
       <p class="intro"><BizIcon name="mail" :size="14" /><span>{{ brand.short_name }} never sends email. You get a link to send yourself. If you create a sign-in account, the provider sends a separate setup email.</span></p>
       <div class="field-row">
@@ -166,13 +166,13 @@ onMounted(() => { void projects.load() })
     </div>
     <template #foot>
       <template v-if="!result">
+        <button type="button" class="btn primary" :disabled="saving || !allowed" @click="submit"><AppIcon name="send" :size="13" /><span class="btn-label"><span>{{ saving ? 'Creating…' : 'Create invite link' }}</span><span aria-hidden="true">Create invite link</span></span></button>
         <button type="button" class="btn" :disabled="saving" @click="emit('close')">Cancel</button>
         <p v-if="!allowed" class="lost" role="alert">{{ lostPermission('members.manage') }}</p>
-        <button type="button" class="btn primary" :disabled="saving || !allowed" @click="submit"><AppIcon name="send" :size="13" />{{ saving ? 'Creating…' : 'Create invite link' }}</button>
       </template>
       <template v-else>
-        <button type="button" class="btn" @click="another">Invite someone else</button>
         <button type="button" class="btn primary" data-session-keep @click="emit('close')">Done</button>
+        <button type="button" class="btn" @click="another">Invite someone else</button>
       </template>
     </template>
   </AccessSheet>

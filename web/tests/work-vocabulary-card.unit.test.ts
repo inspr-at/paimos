@@ -17,7 +17,8 @@ it('serializes a deferred Reload with Save and leaves the saved revision visible
   const api = vi.fn().mockResolvedValueOnce(response(1)).mockImplementationOnce(() => reload.promise).mockResolvedValueOnce(response(2))
   const session = Vue.reactive({ identity: { tenant: { id: 'tenant' }, principal: { id: 'person' } } })
   const accept = vi.fn()
-  const modules: Record<string, unknown> = { vue: Vue, '../../lib/api': { api }, '../../stores/session': { useSession: () => session }, '../../stores/workVocabulary': { useWorkVocabulary: () => ({ accept }) }, '../../lib/workVocabulary': vocabulary, '../AppIcon.vue': {}, '../KeyCap.vue': {}, './SettingsCard.vue': {} }
+  const can = vi.fn((permission: string) => permission === 'settings.manage')
+  const modules: Record<string, unknown> = { vue: Vue, '../../lib/api': { api }, '../../lib/authz': { can }, '../../stores/session': { useSession: () => session }, '../../stores/workVocabulary': { useWorkVocabulary: () => ({ accept }) }, '../../lib/workVocabulary': vocabulary, '../AppIcon.vue': {}, '../KeyCap.vue': {}, './SettingsCard.vue': {} }
   const { descriptor } = parse(readFileSync(new URL('../src/components/settings/WorkVocabularyCard.vue', import.meta.url), 'utf8'))
   const { content } = compileScript(descriptor, { id: 'vocabulary-test' })
   const exports: { default?: { setup: (props: object, ctx: object) => unknown } } = {}
@@ -36,4 +37,5 @@ it('serializes a deferred Reload with Save and leaves the saved revision visible
   expect(card.message.value).toBe('Workspace names saved.')
   expect(accept).toHaveBeenCalledTimes(3)
   expect(accept).toHaveBeenLastCalledWith(value(2))
+  expect(can).toHaveBeenCalledWith('settings.manage')
 })

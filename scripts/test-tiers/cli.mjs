@@ -4,10 +4,10 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectGo, collectWeb, command, root, web, evidence, saveJSON, saveManifest } from './collect.mjs'
-import { validate, select, shard, key, counts, exactPattern, webGraph } from './core.mjs'
+import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { runPlaywright } from '../playwright-safe.mjs'
-import { loadManifest as loadBrowserPolicy } from '../../web/scripts/ci-web-shard.mjs'
+import { loadManifest as loadBrowserPolicy, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import { changedPaths, schedulingMode } from './diff.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
@@ -16,22 +16,24 @@ const target = kind => kind==='go' ? collectGo() : collectWeb()
 
 export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false}={}) {
   const inventory=target(kind)
-  const all=validate(load(kind),inventory.tests)
+  const manifest=load(kind)
+  const all=validate(manifest,inventory.tests)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
   const selection=select(all,{event,paths,imports:inventory.imports,
     forceFull:full||schedulingMode(event,paths)==='full',forceAll:catalogue,
     webImports:kind==='web'?webGraph(web):{}})
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}
-  if(kind==='web') for(const group of browserPolicy.groups) for(const spec of group.specs) weights[spec.file]=spec.weightSeconds
+  if(kind==='web'&&!unit) Object.assign(weights,tierWeights(browserPolicy,filtered))
   if(kind==='go') {
     for(const line of readFileSync(resolve(root,'scripts/ci/go-shards.txt'),'utf8').split('\n')) {
       const match=/^\d+ (\d+) github\.com\/inspr-at\/paimos\/(\S+)/.exec(line)
-      if(match) weights[match[2]]=(weights[match[2]]??0)+Number(match[1])
+      if(match) weights[match[2]]=(weights[match[2]]??0)+Number(match[1])/1000
     }
     for(const pkg of Object.keys(weights)) weights[pkg]*=filtered.filter(row=>row.package===pkg).length/all.filter(row=>row.package===pkg).length
   }
-  return {...selection,all,tests:shard(filtered,index,count,weights)}
+  if(kind==='go'||unit) Object.assign(weights,measuredWeights(manifest,filtered))
+  return {...selection,all,tests:shard(filtered,index,count,weights,{firstShardLast:unit})}
 }
 
 export function browserList(rows,all) {

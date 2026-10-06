@@ -67,7 +67,7 @@ const session = useSession()
 const route = useRoute()
 const router = useRouter()
 const cursor = ref('')
-// Briefing links focus the existing request card; decisions stay on that card.
+// Decision Desk and notification links focus the existing request card.
 watch([() => route.query.needs, () => agents.loaded], async ([id, loaded]) => {
   if (!loaded || typeof id !== 'string' || !/^[am]:[0-9a-f-]{36}$/i.test(id)) return
   await nextTick()

@@ -133,7 +133,7 @@ onBeforeUnmount(reset)
 </template>
 
 <style scoped>
-.work-lifecycle { position: fixed; inset: 8vh auto auto 50%; transform: translateX(-50%); margin: 0; width: min(42rem, calc(100vw - 2rem)); max-height: 84dvh; padding: 1.5rem; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); color: var(--ink); box-shadow: var(--shadow-lg); overflow: hidden; }
+.work-lifecycle { position: fixed; inset: 8vh auto auto 50%; transform: translateX(-50%); margin: 0; width: min(var(--dialog-m), calc(100vw - 2rem)); max-height: 84dvh; padding: 1.5rem; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); color: var(--ink); box-shadow: var(--shadow-lg); overflow: hidden; }
 .work-lifecycle[open] { display: flex; flex-direction: column; }
 .work-lifecycle::backdrop { background: rgb(0 0 0 / .4); }
 header h2 { margin: .25rem 0 1.2rem; font-size: 1.25rem; }
@@ -143,14 +143,13 @@ header h2 { margin: .25rem 0 1.2rem; font-size: 1.25rem; }
 .choices button[aria-checked="true"] { background: var(--surface-2); font-weight: 600; }
 .choices button:disabled { opacity: .55; }
 .actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0; }
-.actions .btn { min-height: 44px; }
+@media (pointer: coarse), (max-width: 720px) { .actions .btn, .follow-up .btn { min-height: 44px; } }
 .body { min-width: 0; min-height: 0; overflow: auto; }
 header,.choices,.actions,.follow-up { flex-shrink: 0; }
 .action-label { display: grid; }
 .action-label span { grid-area: 1 / 1; }
 .action-label .inactive { visibility: hidden; }
 .follow-up { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
-.follow-up .btn { min-height: 44px; }
 .message { line-height: 1.55; }
 .message p { margin: 0 0 .75rem; }
 .error { color: var(--danger); }
