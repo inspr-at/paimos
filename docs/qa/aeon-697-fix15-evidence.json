@@ -1,7 +1,7 @@
 {
   "ticket": "AEON-697",
   "fix_round": 15,
-  "scope": "Resolve static merge conflict against refreshed main while preserving all behavior assertions.",
+  "scope": "Resolve the main merge conflicts and the mandatory static CI failures while preserving all application behavior assertions.",
   "review": {
     "brief_path_missing": true,
     "located_filename": "review-static278.out",
@@ -73,7 +73,9 @@
       "red_log": "tmp/aeon-697-fix15-sdk-red-baseline.log",
       "green_log": "tmp/aeon-697-fix15-sdk-green.log",
       "registration": "Existing ci-plan-tests registry command runs scripts/ci-static.test.mjs without a case filter; no new Go/web test file added."
-    }
+    },
+    "full_static_source_tree": "644db0cf522512672998aab505f16cb60b06231c",
+    "actual_branch_source_identical_to_validated_merge": true
   },
   "validation": {
     "static": {
@@ -120,7 +122,7 @@
         "internal/reportercontract",
         "internal/views"
       ],
-      "final_go_sources_unchanged_since_run": true
+      "six_affected_package_sources_unchanged": true
     },
     "remote_web": {
       "status": "passed",
@@ -147,8 +149,7 @@
         "peak": 5,
         "after": 0,
         "remaining_processes": 0
-      },
-      "final_application_sources_unchanged_since_run": true
+      }
     },
     "remote_migrations": {
       "status": "passed",
@@ -165,14 +166,14 @@
       "failed_packages": 0,
       "database_environment": "explicitly absent to match static checker",
       "log": "tmp/aeon-697-fix15-native-go.log",
-      "initial_failure_reason": "The static collector suppressed Go stdout on failure; standalone identical native listing produced no package failure. Full static repeat remains required."
+      "initial_failure_reason": "Initial standalone native listing with the full Nix environment passed. The later restricted-environment reproduction identified the missing compiler context; the final full static repeat passed after correcting that filter."
     },
     "native_go_restricted_diagnostic": {
       "status": "failed",
       "exit_code": 1,
       "failed_build_packages": 8,
       "log": "tmp/aeon-697-fix15-native-fixed-env.log",
-      "investigation": "Standalone native listing passed with the Nix shell environment; reproducing static fixedEnvironment causes eight daemon-dependent build failures. Checking the omitted compiler configuration on one package next; first attempt refused due load 21 >18.",
+      "investigation": "Reproduced eight daemon-dependent build failures using the exact static fixedEnvironment. The approved one-package role-marker probe confirmed the missing compiler configuration. An initial probe was refused at load 21 >18 and retried within the same limit.",
       "root_cause": "The environment filter dropped NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin and NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin. Nix wrappers ignore inherited SDK flags without these role markers; Darwin cgo links then fail to find libresolv."
     },
     "compiler_context_probe": {
@@ -181,6 +182,36 @@
       "role_markers_retained": 2,
       "additional_compiler_settings": 0,
       "log": "tmp/aeon-697-fix15-linker-roles-retry1.log"
+    },
+    "new_main_recheck": {
+      "status": "passed",
+      "go_package": "internal/httpapi",
+      "new_global_theme_build_and_units": true,
+      "browser_specs": [
+        "needs-attention.spec.ts",
+        "shell.spec.ts",
+        "views-filters.spec.ts"
+      ],
+      "source_commit": "a90d2b1cb8507b606664b378dbc79c7f61463d65",
+      "log": "tmp/aeon-697-fix15-main-proof.log",
+      "exit_code": 0,
+      "go_package_status": "passed",
+      "build": "passed",
+      "node_test_cases_passed": 19,
+      "vitest_cases_passed": 1718,
+      "vitest_files_passed": 3,
+      "browser_cases_passed": 99,
+      "browser_cases_failed": 0,
+      "browser_cases_skipped": 0,
+      "browser_workers": 1,
+      "browser_retries": 0,
+      "platform": "macOS bundled Chromium",
+      "supervision": {
+        "before": 0,
+        "peak": 5,
+        "after": 0,
+        "remaining_processes": 0
+      }
     }
   },
   "preserved_preexisting_local_change": {
@@ -194,9 +225,11 @@
       "reason": "Approved offload host is macOS. All 99 serial bundled Chromium cases passed there; Linux hosted validation and release review remain coordinator-owned."
     }
   ],
-  "updated_at": "2026-10-06T13:16:18.688321+00:00",
-  "classification_commit": "21c3830eda8267f1f6f3ed8f44c1b7e4a904e5e4",
+  "updated_at": "2026-10-06T13:21:05.247966+00:00",
   "final_code_commit": "c8840bc7a3fa3814540e990d1d2fe7368c422040",
-  "status": "completed locally; no origin push or deployment",
-  "summary": "Merged current main and resolved all five conflicts additively, retaining both branches tests and migration exception bytes. Reconciled a stale nightly-only annotation while keeping the attention projection regression gated. Corrected static runner environment filtering to retain target-qualified Nix compiler role markers and SDK flags; otherwise Darwin native Go collection ignored SDK linker paths and failed to find libresolv. Existing assertions remain intact, and both configuration regressions fail for the intended reason against 9ceccbe1. All affected application and mandatory static checks passed remotely."
+  "status": "Complete locally; mandatory static and affected runtime checks passed. No origin push or deployment.",
+  "summary": "Merged main through 70babd810 and resolved the conflicts additively, retaining both branches test coverage and migration exception bytes. Reconciled a stale nightly-only annotation while keeping the attention projection regression gated. Corrected static runner environment filtering to retain target-qualified Nix compiler role markers and SDK flags. Existing assertions remain intact, and both configuration regressions fail for the intended reason against 9ceccbe1. All 36 mandatory static checks passed with zero skips on the exact final source tree. Seven affected Go packages, migration regressions, the web build and units, and all 99 browser cases passed remotely, including a fresh theme and SPA recheck after the final main merge. Hosted Linux Chromium proof remains coordinator-owned. The pre-existing fix14 evidence change is untouched and unstaged; nothing was pushed to origin or deployed.",
+  "latest_main": "70babd810dc23fa7bcdfe4fe11c578c25caf76d1",
+  "final_merge_commit": "a90d2b1cb8507b606664b378dbc79c7f61463d65",
+  "temporary_classification_commit": "21c3830eda8267f1f6f3ed8f44c1b7e4a904e5e4"
 }
