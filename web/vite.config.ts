@@ -4,6 +4,8 @@ import vue from '@vitejs/plugin-vue'
 import { resolve } from 'node:path'
 
 export default defineConfig({
+  // The static pre-filter shares dependencies read-only with a disposable tree.
+  cacheDir: process.env.VITE_CACHE_DIR,
   plugins: [vue()],
   // Never inline assets as data: URLs; the server CSP (default-src 'self') blocks them.
   build: { assetsInlineLimit: 0, rollupOptions: { input: { index: resolve(import.meta.dirname, 'index.html'), 'quote-print': resolve(import.meta.dirname, 'quote-print.html') } } },
