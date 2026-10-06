@@ -33,7 +33,7 @@ button { display: inline-flex; align-items: center; justify-content: center; gap
 @media (hover: hover) { button:hover { color: var(--ink); background: var(--row-hover); } }
 button[aria-selected="true"] { background: var(--seg-on); color: var(--ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--glass-edge); }
 button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--teal); color: var(--canvas); font: 650 11px/1 var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
+.count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--primary); color: var(--primary-on); font: 650 11px/1 var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
 @media (max-width: 720px) {
   .session-tabs { width: auto; margin-right: 8px; }
   button { flex: 1 1 0; min-height: 38px; }

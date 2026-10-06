@@ -3,6 +3,9 @@
 package httpapi
 
 import (
+	"bytes"
+	"crypto/rand"
+	"encoding/base64"
 	"html"
 	"io/fs"
 	"net/http"
@@ -45,7 +48,7 @@ func spaHandler(fsys fs.FS, b brand.Brand) http.Handler {
 		if !allowRead(w, r) {
 			return
 		}
-		if name, ok := staticName(r.URL.Path); ok {
+		if name, ok := staticName(r.URL.Path); ok && name != "index.html" {
 			if f, err := fsys.Open(name); err == nil {
 				st, statErr := f.Stat()
 				f.Close()
@@ -93,6 +96,19 @@ func staticName(urlPath string) (string, bool) {
 }
 
 func writeHTML(w http.ResponseWriter, r *http.Request, body []byte) {
+	// Only the application bootstrap receives a nonce. API responses, public
+	// documents and attachments retain their original restrictive policy.
+	if bytes.Contains(body, []byte("__AEON_THEME_NONCE__")) {
+		var random [24]byte
+		if _, err := rand.Read(random[:]); err != nil {
+			http.Error(w, "could not prepare application", http.StatusInternalServerError)
+			return
+		}
+		nonce := base64.RawStdEncoding.EncodeToString(random[:])
+		body = bytes.ReplaceAll(body, []byte("__AEON_THEME_NONCE__"), []byte(nonce))
+		policy := w.Header().Get("Content-Security-Policy")
+		w.Header().Set("Content-Security-Policy", policy+"; script-src 'self' 'nonce-"+nonce+"'; style-src 'self' 'nonce-"+nonce+"'")
+	}
 	// index.html names the fingerprinted bundles of this release: a stale copy
 	// points a new tab at bundles a deploy removed (2026-09-25).
 	w.Header().Set("Cache-Control", "no-cache")
