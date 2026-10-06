@@ -395,5 +395,45 @@
       },
       "checked_source": "d439c9668; uncommitted evidence report excluded"
     }
+  },
+  "merge_main_round_3": {
+    "reviewed_head": "82b370ab4",
+    "main_commit": "d0b149c305b95580a41a4fabeade44eb26f6d7f2",
+    "merge_commit": "a8f06b86c0a269f96410719331ffe2362f685689",
+    "scope": "Normal merge of newest fetched origin/main on work/aeon-716-verify; no feature changes, no origin push, no PR merge or deployment.",
+    "preservation": [
+      "All 26 incoming files inspected; merge had no conflicts.",
+      "All non-overlapping files equal their owning parent byte-for-byte.",
+      "OpenAPI retains every added line from both parents; Go tier registrations equal the exact duplicate-free union.",
+      "No migration number collisions."
+    ],
+    "passed": [
+      "Full internal/reportercontract package (2.395s).",
+      "33 scripts/check-migrations.test.mjs cases; migration guard against published v261005070923.0.0: 266 unique numbers.",
+      "Targeted internal/agentpairing verification/retry/stalled/null-trace tests (11.686s).",
+      "Targeted internal/agentd telemetry/recovery/SDK confinement tests (7.871s).",
+      "Targeted internal/outcomes escalation and moved-escalation regressions (9.275s).",
+      "Targeted internal/modelregistry escalation regressions (3.174s).",
+      "Both internal/escalation detector tests (0.205s).",
+      "git diff --check."
+    ],
+    "failed": [
+      "Targeted internal/agentruns selection: TestEscalatedClaimRequiresFreshMeasuredRoom rejects its fresh fixture with HTTP 409 at escalation_test.go:46. Test, claim handler and account code equal origin/main byte-for-byte. Postgres clock measured at least 23.77\u201324.43 ms ahead of host across three probes; EscalationRoomIDs explicitly rejects future readings. No clock or code changes made."
+    ],
+    "limitations": [
+      "remote-test.sh returned exit 3: remote Colima not running; its probe script is also missing. Remote heavy package suites remain unproven; no full local suite substituted.",
+      "No conflicts touched web specs; no browser suite run. Hosted CI must prove the heavy suites after coordinator push.",
+      "Pre-existing untracked scripts/audit/__pycache__/ preserved.",
+      "The approved remote-test runner creates its temporary test ref before checking Colima, and its exit-3 Colima branch skips cleanup. Temporary remote ref refs/runs/a8f06b86c0 and its test worktree may remain. Direct SSH cleanup is outside worker-common authorization; coordinator must handle runner residue.",
+      "Required complete static exit-0 gate remains open. Coordinator must rerun through the shared wrapper; this worker does not grant merge/release approval."
+    ],
+    "safety": "Selected GitHub account markus-barta verified; coordinator attribution supplied in worker-common. Only assigned branch/worktree changed. No secrets read or displayed, model CLI reviews, production access, origin push, deployment or ticket status changes.",
+    "static_prefilter": {
+      "status": "incomplete",
+      "command": "ci-static-locked.sh --merge-main --jobs 1",
+      "exit_code": 143,
+      "reason": "Mandatory shared lock was not acquired after approximately 30 minutes; own invocation process tree remained bash -> sleep across multiple lock handoffs. Stopped only that queued invocation. No static check result was emitted; no lock bypass, --allow-skips or green claim.",
+      "checked_source": "a8f06b86c; uncommitted evidence report excluded"
+    }
   }
 }
