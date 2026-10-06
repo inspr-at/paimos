@@ -325,11 +325,12 @@ exit 0
   }
   for (const lane of ['spec-only', 'full']) {
     for (const code of ['0', '7']) {
-      for (const [id, name] of [['web-unit', 'Run selected web units without retries'], ['web-shard', 'Run selected UI cases without retries']]) {
-        const target = lane === 'spec-only'
+      for (const [id, name, guard] of [['web-unit', 'Run selected web units without retries'], ['web-shard', 'Run selected UI cases without retries'],
+        ...(lane === 'spec-only' ? [['web-unit', 'Run selected web units without retries', 'node ../scripts/test-tiers/cli.mjs collect web']] : [])]) {
+        const target = guard ?? (lane === 'spec-only'
           ? id === 'web-unit' ? 'npm run test:unit:core' : 'npm --prefix web run ci:web:shard -- 1/1 --reporter=line,json'
           : id === 'web-unit' ? 'node ../scripts/test-tiers/cli.mjs run web --unit --shard 1/2 --job web-unit-1'
-            : 'node scripts/test-tiers/cli.mjs run web --shard 1/2 --job web-shard-1';
+            : 'node scripts/test-tiers/cli.mjs run web --shard 1/2 --job web-shard-1');
         const log = join(home, `${id}-${lane}-${code}`);
         writeFileSync(log, '');
         const result = spawnSync('/bin/bash', ['-e', '-c', script(id, name)], { encoding: 'utf8', cwd: home,
@@ -339,8 +340,10 @@ exit 0
         const calls = readFileSync(log, 'utf8');
         assert.ok(calls.split('\n').includes(target), `${id}/${lane} must reach the target command before returning ${code}: ${calls}`);
         if (lane === 'spec-only') {
-          assert.doesNotMatch(calls, /test-tiers|aeon-681-ci/);
+          assert.doesNotMatch(calls, /cli\.mjs run|aeon-681-ci/);
+          if (id === 'web-unit') assert.match(calls, /node \.\.\/scripts\/test-tiers\/cli\.mjs collect web/);
           if (id === 'web-shard') assert.match(calls, /npm --prefix web run ci:web:shard -- 1\/1 --reporter=line,json/);
+          else if (guard && code !== '0') assert.doesNotMatch(calls, /npm run test:unit:core|node --test/);
           else assert.match(calls, /npm run test:unit:core/);
         } else {
           assert.match(calls, /test-tiers\/cli\.mjs run web/);

@@ -156,7 +156,8 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
     if(webChanges.some(file=>file.startsWith('src/'))&&![...impacted].some(file=>/^tests\/.*\.(?:spec|test)\.ts$/.test(file)))return full('web module has no mapped test importer')
     // Large mapped fan-outs use the old full layout too. The tier selector
     // still records the exact essential/changed union within those runners.
-    const specs = [...impacted].filter(file => file.startsWith('tests/'))
+    const specs = [...impacted].filter(file => file.startsWith('tests/') &&
+      (file.endsWith('.spec.ts') || [...reverseDependants(new Set([file]), graph)].some(importer => /^tests\/.*\.spec\.ts$/.test(importer))))
     if (specs.length) {
       const browser = tests.filter(row => row.kind === 'browser')
       // A native runner inventory is complete. The lightweight planner reads

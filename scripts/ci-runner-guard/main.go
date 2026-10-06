@@ -486,6 +486,18 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 	if mapping(mapping(unit["strategy"])["matrix"])["shard"] != `${{ fromJSON(needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4]') }}` || mapping(unit["strategy"])["fail-fast"] != false || unit["continue-on-error"] != nil {
 		return fmt.Errorf("web units must retain four blocking shards and one spec-only row")
 	}
+	guardedSpecLane := false
+	steps, _ := unit["steps"].([]any)
+	for _, value := range steps {
+		step := mapping(value)
+		if step["name"] == "Run selected web units without retries" {
+			run, _ := step["run"].(string)
+			guardedSpecLane = strings.Contains(run, "if [ \"$CI_LANE\" = spec-only ]; then\n  # New specs need no tier entry for this lane's exact-spec run.\n  node ../scripts/test-tiers/cli.mjs collect web\n")
+		}
+	}
+	if !guardedSpecLane {
+		return fmt.Errorf("spec-only units must collect native browser planner bounds")
+	}
 	for _, context := range []string{"go", "web", "release-check", "e2e"} {
 		job := mapping(jobs[context])
 		if job == nil {

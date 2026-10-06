@@ -344,6 +344,15 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	add("web-units-omitted-from-aggregate", "ci.yml", "web must gate setup, every unit shard", func(w map[string]any) {
 		mapping(mapping(w["jobs"])["web"])["needs"] = []any{"ci-plan", "web-setup", "web-shard", "tree-reuse", "cache-prime", "tier-plan"}
 	})
+	add("spec-only-native-bound-guard-omitted", "ci.yml", "collect native browser planner bounds", func(w map[string]any) {
+		steps, _ := mapping(mapping(w["jobs"])["web-unit"])["steps"].([]any)
+		for _, value := range steps {
+			step := mapping(value)
+			if step["name"] == "Run selected web units without retries" {
+				step["run"] = strings.ReplaceAll(step["run"].(string), "  node ../scripts/test-tiers/cli.mjs collect web\n", "")
+			}
+		}
+	})
 	for _, mutate := range []string{"matrix", "fail-fast", "continue-on-error"} {
 		add("web-unit-weakened/"+mutate, "ci.yml", "four blocking shards", func(w map[string]any) {
 			unit := mapping(mapping(w["jobs"])["web-unit"])

@@ -1913,7 +1913,14 @@ its trusted source snapshot, including literal parameter loops and every impacte
 byte/token caps or estimates over 300 widen to full. Native runners select from
 actual registrations and widen when their counts exceed 300. The existing web-unit
 and web-shard tier collection checks each collected file's estimate against the
-native count; a known under-count fails with the file and both counts.
+native count; a known under-count fails with the file and both counts. The
+spec-only web-unit lane also collects this inventory without launching browsers.
+Non-spec files under `web/tests/` contribute browser uncertainty only when a
+browser spec imports them transitively. The current 246-spec native sweep has
+zero under-counts and 85 unsupported/over-limit source bounds. The 80-PR mode
+replay against `601dbaa4f` matches 76 modes; PRs 246, 253, 263 and 294 widen from
+essential to full because of unsupported browser specs, with the exact files
+and parser conditions recorded in the stage-2 evidence.
 Removing a NIGHTLY exception promotes that registration to full and must execute
 it in the affected lane; exception removal never narrows the gate.
 

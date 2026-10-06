@@ -6,6 +6,8 @@ export const browserCaseLimit = 300
 export const planningTokenLimit = 20_000
 const unknown = browserCaseLimit + 1
 const cap = n => Math.min(unknown, n)
+const identifier = token => /^[\p{L}_$][\p{L}\p{N}_$]*$/u.test(token ?? '')
+const keywords = new Set('await break case catch class const continue debugger default delete do else enum export extends false finally for function if implements import in instanceof interface let new null of package private protected public return static super switch this throw true try typeof var void while with yield'.split(' '))
 
 // A dependency-free upper bound, never a native inventory. Recognise direct
 // Playwright registrations, describe blocks and finite literal-array loops.
@@ -17,7 +19,8 @@ export function planningWebCases(text) {
     text = stripTypeScriptTypes(text)
     const tokens = [], starts = [], ends = []
     const lex = /\s+|\/\/[^\n]*|\/\*[\s\S]*?\*\/|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*"|`(?:\\[\s\S]|[^`\\])*`|[\p{L}_$][\p{L}\p{N}_$]*|\d+(?:\.\d+)?|=>|\.\.\.|\?\.|[^\s]/uy
-    let position = 0
+    let position = 0, closedExpression = false
+    const parens = []
     while (position < text.length) {
       lex.lastIndex = position
       const match = lex.exec(text)
@@ -35,10 +38,16 @@ export function planningWebCases(text) {
         if (!literal) return unknown
         token += literal[0]; position = regex.lastIndex
       }
-      // Slash outside a proven regex context is ambiguous (division or regex).
-      if (token === '/') return unknown
+      // A slash after an expression is division. Control-statement closing
+      // parentheses can instead precede a regex expression, so stay unknown.
+      const previous = tokens.at(-1)
+      if (token === '/' && !((identifier(previous) && !keywords.has(previous)) ||
+          /^\d+(?:\.\d+)?$/.test(previous ?? '') || previous === ']' || previous === ')' && closedExpression)) return unknown
+      if (token.startsWith('`') && (token.match(/\$\{/g)?.length ?? 0) > (token.match(/\}/g)?.length ?? 0)) return unknown
       if (token.startsWith('`') && token.includes('${') && /\btest\b/.test(token)) return unknown
       if (tokens.length >= planningTokenLimit) return unknown
+      if (token === '(') parens.push(!['if', 'for', 'while', 'switch', 'catch', 'with'].includes(previous))
+      closedExpression = token === ')' && parens.pop() === true
       starts.push(match.index); ends.push(position); tokens.push(token)
     }
     const pairs = new Map(), stack = []
@@ -120,7 +129,26 @@ export function planningWebCases(text) {
       }
       return undefined
     }
-    const scan = (start, end) => {
+    // Binding patterns record identifiers, never their punctuation. Defaults
+    // and computed keys remain unsupported rather than hiding execution.
+    const bindingNames = (start, end) => {
+      const names = []
+      for (let i = start; i < end; i++) {
+        if (['=', '('].includes(tokens[i])) return undefined
+        if (identifier(tokens[i]) && tokens[i + 1] !== ':') names.push(tokens[i])
+      }
+      return names
+    }
+    const scan = (start, end, shadows = []) => {
+      const locals = new Map()
+      const declare = (name, bound = unknown) => {
+        if (declarations.has(name)) return false
+        locals.set(name, { existed: arrays.has(name), bound: arrays.get(name) })
+        declarations.add(name); arrays.set(name, bound)
+        return true
+      }
+      try {
+      for (const name of shadows) if (!declare(name)) return unknown
       let count = 0
       for (let i = start; i < end; i++) {
         const token = tokens[i]
@@ -128,7 +156,9 @@ export function planningWebCases(text) {
           // Static imports bind the fixture; aliased/computed test access is
           // rejected when used below. Dynamic imports are unsupported.
           if (tokens[i + 1] === '(') return unknown
-          while (++i < end && !/^['"]/.test(tokens[i])) {}
+          while (++i < end && !/^['"]/.test(tokens[i])) {
+            if (identifier(tokens[i]) && !['from', 'as', 'type'].includes(tokens[i]) && !declare(tokens[i])) return unknown
+          }
           continue
         }
         if (token === 'for') {
@@ -141,7 +171,9 @@ export function planningWebCases(text) {
           }
           if (of < 0 || bodyEnd === undefined) return unknown
           if (scan(of + 1, close) !== 0) return unknown
-          count = cap(count + arrayBound(of + 1, close) * scan(close + 1, bodyEnd))
+          const names = bindingNames(i + 2 + Number(['const','let','var'].includes(tokens[i + 2])), of)
+          if (!names || tokens[i + 2] === 'var') return unknown
+          count = cap(count + arrayBound(of + 1, close) * scan(close + 1, bodyEnd, names))
           i = bodyEnd - 1; continue
         }
         if (['while', 'do'].includes(token)) return unknown
@@ -159,7 +191,9 @@ export function planningWebCases(text) {
           if (scan(open + 1, argsEnd) !== 0) return unknown
           if (method.startsWith('describe') && !['describe.configure'].includes(method)) {
             if (arrow < 0 || arrow >= close || tokens[arrow + 1] !== '{' || pairs.get(arrow + 1) !== close - 1) return unknown
-            count = cap(count + scan(arrow + 2, pairs.get(arrow + 1)))
+            const names = bindingNames(callbackStart + Number(tokens[callbackStart] === '('), arrow - Number(tokens[arrow - 1] === ')'))
+            if (!names) return unknown
+            count = cap(count + scan(arrow + 2, pairs.get(arrow + 1), names))
           } else if (['', 'only', 'skip', 'fixme', 'fail'].includes(method)) count = cap(count + 1)
           else if (!['beforeEach', 'afterEach', 'beforeAll', 'afterAll', 'use', 'setTimeout', 'describe.configure'].includes(method)) return unknown
           i = close; continue
@@ -177,10 +211,12 @@ export function planningWebCases(text) {
           i = close; continue
         }
         if (token === 'const' || token === 'let' || token === 'var') {
-          const name = tokens[i + 1]
-          if (declarations.has(name)) return unknown
-          declarations.add(name)
-          let equal = i + 2
+          const pattern = ['{','['].includes(tokens[i + 1])
+          const bindingEnd = pattern ? pairs.get(i + 1) + 1 : i + 2
+          const names = bindingNames(i + 1, bindingEnd)
+          if (!names || token === 'var') return unknown
+          for (const name of names) if (!declare(name)) return unknown
+          let equal = bindingEnd
           while (equal < end && !['=', ';', 'const', 'let', 'test', 'for', 'function'].includes(tokens[equal])) equal++
           if (tokens[equal] !== '=') continue
           let finish = equal + 1
@@ -201,7 +237,7 @@ export function planningWebCases(text) {
           }
           const alias=arrays.has(tokens[equal + 1]) && finish === equal + 2
           if (alias) arrays.set(tokens[equal + 1], unknown)
-          arrays.set(name, token === 'const' && !alias ? bound : unknown)
+          if (!pattern) arrays.set(names[0], token === 'const' && !alias ? bound : unknown)
           if (hasTest(equal + 1, finish)) return unknown
           i = finish - 1; continue
         }
@@ -223,8 +259,19 @@ export function planningWebCases(text) {
             i = bodyEnd - 1
           }
         }
+        if (token === '{') {
+          count = cap(count + scan(i + 1, pairs.get(i)))
+          i = pairs.get(i)
+        }
       }
       return count
+      } finally {
+        for (const [name, prior] of locals) {
+          declarations.delete(name)
+          if (prior.existed) arrays.set(name, prior.bound)
+          else arrays.delete(name)
+        }
+      }
     }
     return scan(0, tokens.length)
   } catch { return unknown }

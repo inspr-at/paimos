@@ -588,6 +588,7 @@ jobs:
         run: |
           if [ "$CI_LANE" = spec-only ]; then
             # New specs need no tier entry for this lane's exact-spec run.
+            node ../scripts/test-tiers/cli.mjs collect web
             node --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs
             npm run test:unit:core
           else

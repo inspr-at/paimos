@@ -613,9 +613,9 @@ test('offline replay CLI policy fixture prints every real PR with selected count
   const report=JSON.parse(result.stdout)
   assert.equal(report.replay.length,80)
   // Measured on the current tree (consumers, migrations); deleted files replay as full.
-  assert.deepEqual(report.transitions,{'full->full':44,'full->essential':27,'essential->essential':9})
+  assert.deepEqual(report.transitions,{'full->full':44,'full->essential':24,'essential->essential':12})
   assert.equal(report.summary.newNarrowed,36)
-  assert.equal(report.summary.oldEssential,9)
+  assert.equal(report.summary.oldEssential,12)
   assert.equal(report.browserBounds.unsupportedSpecs.length,report.browserBounds.overLimitOrUnsupported)
   assert.deepEqual(report.browserBounds.undercounts,[])
   assert.match(report.sourceBoundComparison.unsupportedCostMethod,/cost only/)
@@ -1482,6 +1482,11 @@ for (const [scenario, source] of [
   ['describe function callback with nested hook arrow', "test.describe('x', function(){ test.beforeEach(async()=>{}); test('a',()=>{}); test('b',()=>{}) })"],
   ['describe callback is not the last argument', "test.describe('x', ()=>{test('a',()=>{})}, other)"],
   ['redeclared array name across describe scope', "const roles=[1,2,3,4]; test.describe('x',()=>{const roles=[1];for(const r of roles)test('inner',()=>{})});for(const r of roles)test('outer',()=>{})"],
+  ['import shadowed inside describe', "import {roles} from './d'; test.describe('x',()=>{const roles=[1];for(const r of roles)test('i'+r,()=>{})}); for(const r of roles)test('o'+r,()=>{})"],
+  ['for-of variable shadows a known array', "const roles=[1]; for(const roles of [[1,2,3,4,5]]){for(const r of roles)test('x'+r,()=>{})}"],
+  ['describe parameter shadows a known array', "const roles=[1]; test.describe('x',(roles)=>{for(const r of roles)test('x'+r,()=>{})})"],
+  ['nested template hides a registration', "const s=`${``+test('a',()=>{})}`"],
+  ['control parenthesis followed by slash', "if (ready) /it's/.test(s); test('a',()=>{})"],
   ['optional registration factory call', "fn?.(); test('a',()=>{})"],
   ['indirect registration factory call', "(0,fn)(); test('a',()=>{})"],
   ['tagged registration factory call', "fn`cases`; test('a',()=>{})"],
@@ -1500,14 +1505,34 @@ for (const [scenario, source] of [
   ...['&&','||','?',';','}'].map(operator=>[`ambiguous slash after ${operator}`, `a ${operator} /it's/.test(s); test('a',()=>{}); test('b',()=>{})`]),
 ]) test(`browser planner rejects ${scenario}`, () => assert.ok(planningWebCases(source) > 300))
 
-test('browser planner bounds every impacted tests file and rejects non-spec registrations', () => {
+test('browser planner bounds non-spec registrations only when a spec imports them transitively', () => {
   for (const file of ['tests/helper.ts','tests/helper.js','tests/helper.mjs','tests/a.unit.test.ts']) {
-    const tree={complete:true,webTests:new Map([[file,"test('case',()=>{})"]])}
+    const tree={complete:true,webTests:new Map([[file,"test('case',()=>{})"],['tests/importer.spec.ts',"test('spec',()=>{})"],['tests/bridge.ts','export {}']])}
     for (const affectedLane of [undefined,'on']) {
       const result=schedulingDecision('pull_request',[`web/${file}`],()=>true,{affectedLane,graph:{[file]:[]},tree,tests:[g('internal/auth','TestCore','ESSENTIAL')]})
-      assert.equal(result.mode,'full',file)
-      assert.match(result.reason,/source bound unavailable/)
+      assert.equal(result.mode,'essential',file)
+      for (const imports of [[file],['tests/bridge.ts']]) {
+        const graph={[file]:[],'tests/bridge.ts':[file],'tests/importer.spec.ts':imports}
+        const imported=schedulingDecision('pull_request',[`web/${file}`],()=>true,{affectedLane,graph,tree,tests:[g('internal/auth','TestCore','ESSENTIAL')]})
+        assert.equal(imported.mode,'full',file)
+        assert.match(imported.reason,/source bound unavailable/)
+      }
     }
+  }
+})
+
+test('browser planner drops bindings from returned nested scans', () => {
+  assert.ok(planningWebCases("test.describe('x',()=>{const roles=[1];for(const r of roles)test('i'+r,()=>{})}); for(const r of roles)test('o'+r,()=>{})")>300)
+  assert.equal(planningWebCases("test.describe('x',()=>{const roles=[1];for(const r of roles)test('i'+r,()=>{})}); const roles=[1,2];for(const r of roles)test('o'+r,()=>{})"),3)
+  assert.ok(planningWebCases("{const roles=[1];} for(const r of roles)test('x'+r,()=>{})")>300)
+})
+
+test('browser planner records destructured bindings and accepts proven division', () => {
+  assert.equal(planningWebCases("const {a}=data; const {b:renamed}=other; const [c,...rest]=items; test('a',()=>{})"),1)
+  assert.ok(planningWebCases("const roles=[1]; const {roles}=other; for(const r of roles)test('x'+r,()=>{})")>300)
+  assert.ok(planningWebCases("const {roles}=other; for(const r of roles)test('x'+r,()=>{})")>300)
+  for (const expression of ['width / 2','4 / 2','(width + 1) / 2','items[0] / 2','[1,2][0] / 2']) {
+    assert.equal(planningWebCases(`const ratio=${expression}; test('case',()=>{})`),1,expression)
   }
 })
 
@@ -1519,6 +1544,8 @@ test('native web collection guard rejects undercounts with file and both counts'
   // Existing web-unit/shard tier runners use this collector, without another job.
   assert.match(readFileSync(new URL('./collect.mjs',import.meta.url),'utf8'), /assertPlanningWebBounds\(tests, file => boundedText\(web, file\)\)/)
   assert.match(readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8'), /cli\.mjs run web --unit/)
+  const workflow=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
+  assert.match(workflow, /if \[ "\$CI_LANE" = spec-only \]; then\n\s*#[^\n]*\n\s*node \.\.\/scripts\/test-tiers\/cli\.mjs collect web\n\s*node --test/)
 })
 
 test('browser planner token cap rejects a near-2 MB input before scanning registrations', () => {

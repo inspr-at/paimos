@@ -360,45 +360,44 @@
     {
       "name": "requested-node-suite",
       "command": "node --test --test-concurrency=1 scripts/test-tiers/*.test.mjs scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs web/scripts/ci-web-shard.test.mjs web/scripts/aeon-676-ci.test.mjs web/scripts/aeon-681-ci.test.mjs",
-      "passed": 463,
+      "passed": 470,
       "failed": 0,
-      "logSha256": "f04c0cc471ac64da22ba095cab0eb7f887120fb9f200f62db2cebbadf3acdfbe"
+      "logSha256": "4538facd4d156338f3d1140df126e63a5ab4d094cff981762fd68830540b9c5c"
     },
     {
       "name": "go-static-with-no-web-dependencies",
       "command": "NODE_OPTIONS=--import=/private/tmp/ops257-fix1-no-web-deps.mjs node --test scripts/test-tiers/test-tiers.test.mjs",
-      "passed": 215,
+      "passed": 222,
       "failed": 0,
-      "logSha256": "97e9967a54809ee24ebfb7a8913447eeea334eee9399f277a539f9e70d1e876c"
+      "logSha256": "6872a21ec200a7577f86506b316187e9b2f28fcdd7097a9d3911d49759b6b9c8"
     },
     {
       "name": "web-failure-reporting-native-node-runner",
       "command": "node --experimental-strip-types --test web/tests/test-tier-failures.test.ts",
       "passed": 8,
       "failed": 0,
-      "logSha256": "c3b7eddaf70be128df24bfbe63de31543d118e079f91b63b724e8f120ceb26b3"
+      "logSha256": "b8c89ddca0dc901608bb54690cf54932e733bad5eac4b4356f1d5a44f11ef1a6"
     },
     {
-      "name": "go-packages-offline-nix-shell",
-      "command": "XDG_CACHE_HOME=/private/tmp/ops257-fix2-nixcache nix develop --offline --no-write-lock-file -c bash -c 'GOCACHE=/private/tmp/ops257-fix2-gocache GOPROXY=off GOTOOLCHAIN=local go test ./scripts/ci-runner-guard ./scripts/releaseworkflow ./scripts/ci-go-shards -count=1'",
-      "passed": false,
-      "blocked": "Sandbox denies Nix daemon socket: Operation not permitted",
-      "logSha256": "1530c443e9bd68a768ae38d6ed826ccb330649f80ecad6aedf43f351a5c9ca67"
-    },
-    {
-      "name": "go-packages-installed-nix-store-toolchain-fallback",
-      "command": "GOCACHE=/private/tmp/ops257-fix2-gocache GOPROXY=off GOTOOLCHAIN=local /nix/store/5k3v90pgx77ibb4xzabk5hghnaqklmy1-go-1.26.7/bin/go test ./scripts/ci-runner-guard ./scripts/releaseworkflow ./scripts/ci-go-shards -count=1",
+      "name": "go-packages-installed-nix-store-toolchain",
+      "command": "PATH=/nix/store/5k3v90pgx77ibb4xzabk5hghnaqklmy1-go-1.26.7/bin:$PATH GOCACHE=/private/tmp/ops257-fix2-gocache GOPROXY=off GOTOOLCHAIN=local go test ./scripts/ci-runner-guard ./scripts/releaseworkflow ./scripts/ci-go-shards -count=1",
       "passedPackages": 3,
       "output": [
-        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-runner-guard\t4.340s",
-        "ok  \tgithub.com/inspr-at/paimos/scripts/releaseworkflow\t4.501s",
-        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-go-shards\t6.041s"
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-runner-guard\t4.442s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/releaseworkflow\t4.417s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-go-shards\t6.291s"
       ],
-      "logSha256": "e09a88548b019af7fe9e7f43553445fdc7504300bf381b8f6c7f38ae38eecca5"
+      "logSha256": "0eae92c902c8e521e18eb31f41eb9a7eae7d673adc8a812da7745f827742e479"
     },
     {
       "command": "node scripts/test-tiers/cli.mjs manifests --check",
-      "passed": true
+      "passed": true,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": "node scripts/ci-static.mjs --list --json",
+      "passed": true,
+      "outputSha256": "37da9b98be9927473a2efaaf7779be13e18b6b4742c133a14b1cd7219a5f05fe"
     },
     {
       "command": "git diff --check",
@@ -414,10 +413,11 @@
       "command": "node scripts/test-tiers/replay.mjs --json --compare-base 601dbaa4f",
       "passed": true,
       "prs": 80,
-      "matchingModes": 73,
-      "modeChanges": 7,
+      "matchingModes": 76,
+      "modeChanges": 4,
       "undercounts": 0,
-      "outputSha256": "fdf4ea80bf4d26b118afed7db8165355046a3142456a3cf53ac0b1fed0691aec"
+      "unsupported": 85,
+      "outputSha256": "36f46beb5233340821f7cf168ba78093ac61a6b5cfa35e666f7d2ca70b971f64"
     }
   ],
   "nodeSuiteFiles": [
@@ -433,11 +433,11 @@
   ],
   "environment": {
     "network": "No network; existing dependencies reused; no browser launch, Docker, secrets, push or deployment.",
-    "go": "Installed Nix-store Go 1.26.7 darwin/arm64; GOCACHE=/private/tmp/ops257-fix2-gocache, GOPROXY=off, GOTOOLCHAIN=local",
+    "go": "Installed Nix-store Go 1.26.7 darwin/arm64; GOCACHE=/private/tmp/ops257-fix2-gocache reused, GOPROXY=off, GOTOOLCHAIN=local",
     "nixDevelopOffline": "Attempted with cache in writable /private/tmp; sandbox denies Nix daemon socket. Used installed store Go directly with downloads disabled.",
-    "web": "Native Node/Vitest/Playwright collection only; no browser launch; VITE_CACHE_DIR=/private/tmp/ops257-fix2-vite",
+    "web": "Native Node/Vitest/Playwright collection only; no browser launch; VITE_CACHE_DIR=/private/tmp/ops257-fix3-vite",
     "noWebDependencyGuard": "import {registerHooks} from 'node:module'\nregisterHooks({resolve(specifier,context,next){const result=next(specifier,context);if(result.url.includes('/node_modules/'))throw new Error('go-static must not import web dependencies');return result}})\n",
-    "postSuiteEdits": "Only this evidence and git-ignored progress metadata changed after the final passing requested suite."
+    "postSuiteEdits": "Only evidence and git-ignored progress metadata will be written after final passing suites."
   },
   "consumerAudit": {
     "searchRoots": [
@@ -543,33 +543,12 @@
       "base": "601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
       "affectedLane": "unset",
       "prs": 80,
-      "matching": 73,
+      "matching": 76,
       "scope": "Mode only on recorded file lists with current tree/common graph; unset effectiveLane comparison is tautological. L4 new uses native rows.",
       "essentialAtBase": 16,
       "differences": [
         {
-          "number": 236,
-          "baseMode": "essential",
-          "currentMode": "full",
-          "baseLane": "full",
-          "currentLane": "full"
-        },
-        {
-          "number": 244,
-          "baseMode": "essential",
-          "currentMode": "full",
-          "baseLane": "full",
-          "currentLane": "full"
-        },
-        {
           "number": 246,
-          "baseMode": "essential",
-          "currentMode": "full",
-          "baseLane": "full",
-          "currentLane": "full"
-        },
-        {
-          "number": 252,
           "baseMode": "essential",
           "currentMode": "full",
           "baseLane": "full",
@@ -600,36 +579,35 @@
     },
     "browserBounds": {
       "specs": 246,
-      "boundedSpecs": 152,
-      "overLimitOrUnsupported": 94,
+      "boundedSpecs": 161,
+      "overLimitOrUnsupported": 85,
       "unsupportedSpecs": [
         "tests/a11y.spec.ts",
         "tests/access.spec.ts",
         "tests/account-link.spec.ts",
         "tests/accounts-card-fit.spec.ts",
         "tests/accounts-computers.spec.ts",
-        "tests/aeon-632b-clip.spec.ts",
         "tests/agent-done-state.spec.ts",
         "tests/agent-indicator.spec.ts",
         "tests/agent-pairing.spec.ts",
         "tests/agent-rules-doctrine.spec.ts",
+        "tests/agent-rules-flow.spec.ts",
         "tests/agent-rules-shots.spec.ts",
         "tests/agent-rules-ticks.spec.ts",
+        "tests/agent-rules.spec.ts",
         "tests/agents-dial.spec.ts",
-        "tests/agents-mission.spec.ts",
         "tests/agents-phone-rows.spec.ts",
         "tests/agents-top.spec.ts",
         "tests/agents-worker-tree.spec.ts",
         "tests/agents.spec.ts",
         "tests/attach-security.spec.ts",
-        "tests/attachments.spec.ts",
         "tests/clip-tip.spec.ts",
+        "tests/crm.spec.ts",
         "tests/decision-text.spec.ts",
         "tests/deploy-target.spec.ts",
         "tests/doctrine-inbox.spec.ts",
         "tests/estimates.spec.ts",
         "tests/first-impression.spec.ts",
-        "tests/footer-flow-pill.spec.ts",
         "tests/footer-release-pill.spec.ts",
         "tests/graph-hit.spec.ts",
         "tests/header-glimpse.spec.ts",
@@ -638,57 +616,49 @@
         "tests/indicator-controls.spec.ts",
         "tests/indicator-creative-gallery.spec.ts",
         "tests/journey-confirmation.spec.ts",
+        "tests/journey-imported.spec.ts",
         "tests/journey-overflow.spec.ts",
-        "tests/key-expiry.spec.ts",
-        "tests/knowledge-graph.spec.ts",
         "tests/knowledge-shots.spec.ts",
         "tests/live-agents-layout.spec.ts",
         "tests/live-agents.spec.ts",
         "tests/live-list-sessions.spec.ts",
-        "tests/outline.spec.ts",
+        "tests/nav.spec.ts",
         "tests/parent-benefits.spec.ts",
         "tests/planning-columns.spec.ts",
         "tests/profile-editor.spec.ts",
         "tests/profile.spec.ts",
         "tests/project-groups.spec.ts",
         "tests/project-header.spec.ts",
-        "tests/project-list.spec.ts",
-        "tests/project-sort.spec.ts",
+        "tests/project-sections.spec.ts",
         "tests/quote-dock-layout.spec.ts",
         "tests/quote-inspector.spec.ts",
-        "tests/quote-parity-gaps.spec.ts",
+        "tests/quote-public-page.spec.ts",
         "tests/quote-save-state.spec.ts",
         "tests/quote-showcase.spec.ts",
         "tests/quote-workspace.spec.ts",
         "tests/quotes-tab.spec.ts",
-        "tests/recurrences.spec.ts",
         "tests/release-codenames.spec.ts",
-        "tests/release-header.spec.ts",
         "tests/release-picker.spec.ts",
         "tests/release-switches.spec.ts",
         "tests/release-tenant-notes.spec.ts",
-        "tests/role-picker-layout.spec.ts",
+        "tests/release-ticket-links.spec.ts",
         "tests/row-actions.spec.ts",
-        "tests/service-tier.spec.ts",
         "tests/session-messages.spec.ts",
         "tests/session-rows.spec.ts",
         "tests/settings-shared.spec.ts",
         "tests/settings.spec.ts",
-        "tests/tap-targets.spec.ts",
         "tests/tenant-brand.spec.ts",
         "tests/theme-agents.spec.ts",
         "tests/theme-settings.spec.ts",
         "tests/ticket-graph-view.spec.ts",
         "tests/ticket-outcomes.spec.ts",
         "tests/ticket-panel.spec.ts",
-        "tests/title-divider.spec.ts",
         "tests/ui-audit.spec.ts",
         "tests/usage-accounts.spec.ts",
         "tests/usage-dashboard.spec.ts",
         "tests/version-reveal.spec.ts",
         "tests/views-filters.spec.ts",
         "tests/webcore-recovery.spec.ts",
-        "tests/wide.spec.ts",
         "tests/work-aggregates.spec.ts",
         "tests/work-history-fix5.spec.ts",
         "tests/work-integration.spec.ts",
@@ -702,11 +672,11 @@
     },
     "affectedLaneReplaySummary": {
       "prs": 80,
-      "oldEssential": 9,
+      "oldEssential": 12,
       "newNarrowed": 36,
       "newStatic": 0,
       "percentNarrowed": 45,
-      "oldJobs": 2815,
+      "oldJobs": 2770,
       "newJobs": 2420,
       "fullReasons": {
         "CI machinery": 18,
@@ -722,22 +692,7 @@
       "scope": "Current source-bound planner vs base mode (unset) and vs current native L4 mode; no historical tree or source-bound selection equivalence claim.",
       "unsetModeChanges": [
         {
-          "number": 236,
-          "base": "essential",
-          "current": "full"
-        },
-        {
-          "number": 244,
-          "base": "essential",
-          "current": "full"
-        },
-        {
           "number": 246,
-          "base": "essential",
-          "current": "full"
-        },
-        {
-          "number": 252,
           "base": "essential",
           "current": "full"
         },
@@ -758,63 +713,24 @@
         }
       ],
       "unsupportedUnsetModeChanges": [
-        246
+        246,
+        253,
+        263,
+        294
       ],
       "l4UnsupportedSpecModeChanges": [
-        246
+        245,
+        246,
+        249,
+        253,
+        263,
+        268,
+        294
       ],
       "unsupportedCostMethod": "Counterfactual omits the listed unsupported specs from source estimates; all other planner inputs stay unchanged. This measures cost only and is never a runnable fallback.",
       "l4NativeDifferences": [
         {
-          "number": 200,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
           "number": 208,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
-          "number": 214,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
-          "number": 217,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
-          "number": 222,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
-          "number": 225,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
-          "number": 226,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
-          "number": 236,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
-          "number": 244,
           "native": "essential",
           "planner": "full",
           "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
@@ -844,12 +760,6 @@
           "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
         },
         {
-          "number": 252,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
           "number": 253,
           "native": "essential",
           "planner": "full",
@@ -868,25 +778,7 @@
           "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
         },
         {
-          "number": 273,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
-          "number": 289,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
           "number": 294,
-          "native": "essential",
-          "planner": "full",
-          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
-        },
-        {
-          "number": 297,
           "native": "essential",
           "planner": "full",
           "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
@@ -908,7 +800,7 @@
         "mode": "full",
         "matches": true,
         "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "full"
+        "sourceBoundL4Mode": "essential"
       },
       {
         "pr": 201,
@@ -996,7 +888,7 @@
         "mode": "full",
         "matches": true,
         "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "full"
+        "sourceBoundL4Mode": "essential"
       },
       {
         "pr": 216,
@@ -1012,7 +904,7 @@
         "mode": "full",
         "matches": true,
         "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "full"
+        "sourceBoundL4Mode": "essential"
       },
       {
         "pr": 219,
@@ -1044,7 +936,7 @@
         "mode": "full",
         "matches": true,
         "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "full"
+        "sourceBoundL4Mode": "essential"
       },
       {
         "pr": 223,
@@ -1068,7 +960,7 @@
         "mode": "full",
         "matches": true,
         "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "full"
+        "sourceBoundL4Mode": "essential"
       },
       {
         "pr": 226,
@@ -1076,7 +968,7 @@
         "mode": "full",
         "matches": true,
         "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "full"
+        "sourceBoundL4Mode": "essential"
       },
       {
         "pr": 227,
@@ -1153,10 +1045,10 @@
       {
         "pr": 236,
         "baseMode": "essential",
-        "mode": "full",
-        "matches": false,
+        "mode": "essential",
+        "matches": true,
         "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "full"
+        "sourceBoundL4Mode": "essential"
       },
       {
         "pr": 237,
@@ -1209,10 +1101,10 @@
       {
         "pr": 244,
         "baseMode": "essential",
-        "mode": "full",
-        "matches": false,
+        "mode": "essential",
+        "matches": true,
         "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "full"
+        "sourceBoundL4Mode": "essential"
       },
       {
         "pr": 245,
@@ -1273,10 +1165,10 @@
       {
         "pr": 252,
         "baseMode": "essential",
-        "mode": "full",
-        "matches": false,
+        "mode": "essential",
+        "matches": true,
         "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "full"
+        "sourceBoundL4Mode": "essential"
       },
       {
         "pr": 253,
@@ -1428,7 +1320,7 @@
         "mode": "full",
         "matches": true,
         "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "full"
+        "sourceBoundL4Mode": "essential"
       },
       {
         "pr": 275,
@@ -1484,7 +1376,7 @@
         "mode": "full",
         "matches": true,
         "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "full"
+        "sourceBoundL4Mode": "essential"
       },
       {
         "pr": 290,
@@ -1532,36 +1424,142 @@
         "mode": "full",
         "matches": true,
         "nativeL4Mode": "essential",
-        "sourceBoundL4Mode": "full"
+        "sourceBoundL4Mode": "essential"
       }
     ],
     "scope": "Recorded file lists evaluated against current source tree and common dependency graph; no historical per-PR tree reconstruction. Mode is compared; effectiveLane with the flag unset is the same classified value by definition. Native L4 after rows do not prove source-bound planner equivalence.",
-    "unsupportedCost": "94/246 specs are unsupported/over-limit. Seven of 80 PRs widen essential->full vs base. Omitting only the unsupported specs changes one of those modes (PR246); six remain full due to other conservative tests-file uncertainty or combined fan-out. Native-vs-source L4 differs on 21 PRs; unsupported-spec-only counterfactual changes one L4 mode (PR246).",
-    "cheapGenericRuleAssessment": "No safe generic fallback applied: raising token cap 20000->50000->100000 leaves all 94 unsupported specs; ambiguous slash/factory syntax and non-spec registration checks intentionally fail closed. More parsing or a stale manifest-count fallback would weaken the requested guarantee."
+    "unsupportedCost": "85/246 specs are unsupported/over-limit, with zero native undercounts. Modes match base on 76/80 PRs. PR246 (headings), PR253 (decision-text), PR263 (ticket-panel), and PR294 (settings, webcore-recovery, work-surfaces-fix2, work-vocabulary) widen essential->full solely due to unsupported browser specs: omitting those specs restores essential for all four. Native-vs-source L4 differs on 9 PRs; unsupported-spec omission changes 7 L4 modes. PR236, PR244 and PR252 recover their base essential mode after these fixes.",
+    "cheapGenericRuleAssessment": "Applied browser-spec import reachability to non-spec tests files, tracked destructured bindings, and accepted division only after proven expression tokens. Unsupported bounds dropped from 94 to 85. A per-file count artifact checked against native counts could retain the same guarantee, but would add regeneration; no artifact fallback was added.",
+    "remainingEssentialToFullCauses": [
+      {
+        "number": 246,
+        "baseMode": "essential",
+        "currentMode": "full",
+        "baseLane": "full",
+        "currentLane": "full",
+        "cause": "Imported or directly changed browser specs have unsupported source bounds; removing those bounds restores the base essential mode.",
+        "unsupportedSpecs": [
+          "tests/headings.spec.ts"
+        ],
+        "supportedSpecCases": 28,
+        "nonSpecRegistrations": [],
+        "unsupportedReasons": [
+          {
+            "file": "tests/headings.spec.ts",
+            "parserLine": 173,
+            "condition": "if (scan(of + 1, close) !== 0) return unknown"
+          }
+        ]
+      },
+      {
+        "number": 253,
+        "baseMode": "essential",
+        "currentMode": "full",
+        "baseLane": "full",
+        "currentLane": "full",
+        "cause": "Imported or directly changed browser specs have unsupported source bounds; removing those bounds restores the base essential mode.",
+        "unsupportedSpecs": [
+          "tests/decision-text.spec.ts"
+        ],
+        "supportedSpecCases": 0,
+        "nonSpecRegistrations": [],
+        "unsupportedReasons": [
+          {
+            "file": "tests/decision-text.spec.ts",
+            "parserLine": 191,
+            "condition": "if (scan(open + 1, argsEnd) !== 0) return unknown"
+          }
+        ]
+      },
+      {
+        "number": 263,
+        "baseMode": "essential",
+        "currentMode": "full",
+        "baseLane": "full",
+        "currentLane": "full",
+        "cause": "Imported or directly changed browser specs have unsupported source bounds; removing those bounds restores the base essential mode.",
+        "unsupportedSpecs": [
+          "tests/ticket-panel.spec.ts"
+        ],
+        "supportedSpecCases": 6,
+        "nonSpecRegistrations": [],
+        "unsupportedReasons": [
+          {
+            "file": "tests/ticket-panel.spec.ts",
+            "parserLine": 45,
+            "condition": "/^\\d+(?:\\.\\d+)?$/.test(previous ?? '') || previous === ']' || previous === ')' && closedExpression)) return unknown"
+          }
+        ]
+      },
+      {
+        "number": 294,
+        "baseMode": "essential",
+        "currentMode": "full",
+        "baseLane": "full",
+        "currentLane": "full",
+        "cause": "Imported or directly changed browser specs have unsupported source bounds; removing those bounds restores the base essential mode.",
+        "unsupportedSpecs": [
+          "tests/settings.spec.ts",
+          "tests/webcore-recovery.spec.ts",
+          "tests/work-surfaces-fix2.spec.ts",
+          "tests/work-vocabulary.spec.ts"
+        ],
+        "supportedSpecCases": 194,
+        "nonSpecRegistrations": [],
+        "unsupportedReasons": [
+          {
+            "file": "tests/settings.spec.ts",
+            "parserLine": 47,
+            "condition": "if (token.startsWith('`') && token.includes('${') && /\\btest\\b/.test(token)) return unknown"
+          },
+          {
+            "file": "tests/webcore-recovery.spec.ts",
+            "parserLine": 47,
+            "condition": "if (token.startsWith('`') && token.includes('${') && /\\btest\\b/.test(token)) return unknown"
+          },
+          {
+            "file": "tests/work-surfaces-fix2.spec.ts",
+            "parserLine": 47,
+            "condition": "if (token.startsWith('`') && token.includes('${') && /\\btest\\b/.test(token)) return unknown"
+          },
+          {
+            "file": "tests/work-vocabulary.spec.ts",
+            "parserLine": 47,
+            "condition": "if (token.startsWith('`') && token.includes('${') && /\\btest\\b/.test(token)) return unknown"
+          }
+        ]
+      }
+    ]
   },
   "changedSourceFileSha256": {
+    ".github/workflows/ci.yml": "c9b720ac06ff008c9b4c2800e5fc8a1b50cf8943292b085b97ca89055d20f2c6",
     "README.md": "226cda2166c3e41755875a6625a9fbb86c4085a0e39757fc23e943b76488d01a",
-    "docs/RELEASE.md": "25814b81f3f3b7893f40369637d7700633eb02f9fbab0fd0150594d4c4b56d4a",
+    "docs/RELEASE.md": "621bfb9562664d9cc0dd7ca98588e36af10e3994aab6ba8bee0b1d27b9845565",
+    "scripts/ci-pr-plan.test.mjs": "18c6f20483a5d7c43518ba77d40f4fd6ba9ea53b50e70e57e6b628e4cf114869",
+    "scripts/ci-runner-guard/main.go": "90c33fad6645e4ac0c3d5005ae6c4e91eb42b00ba48a8a9bfe174688cf996cc0",
+    "scripts/ci-runner-guard/workflow_policy_test.go": "3a8b68ad7f07f0b3ba747d883855b8076516b0bc2e3414e9be557e823243572e",
     "scripts/ci/go-test-tiers.json": "cced66abd43558aaca46688d1dc90a766ee0f71d2fcb16c80e45a6b7b4713402",
+    "scripts/ci/static-checks.json": "44b04fcc0d57b755c74055de676b5996b4ef3263f872b7f256f30029ff2a2893",
     "scripts/ci/web-test-tiers.json": "a8eff91ef87f137942b3f33f37c16cf2e05f73a11688a73a9f6517df69a8d96b",
+    "scripts/releaseworkflow/tree_reuse_test.go": "db9ca9f42039569f5e7eba2ddc66a480506376c66a712ae7a3977b25ba67faa7",
     "scripts/test-tiers/cli.mjs": "131c4c3ba0fea27a0f6618f7e385b546987c6aa929a00bacc0279c3c3a0ba600",
     "scripts/test-tiers/collect.mjs": "ec04b744eb32efce3c076ddbfee37c43ca01a4fe21214100bca71f88c3d82cdf",
     "scripts/test-tiers/core.mjs": "14559a34a5813954b9559579902ba867c60a15eabb2ff019bc44cf1af60145a7",
-    "scripts/test-tiers/diff.mjs": "1b15bc7cd5c6b2ef46cff03e1526074eec51fa0df0f959ada41e3c4829f6d79f",
+    "scripts/test-tiers/diff.mjs": "20873b87065c187a91b216b90565c7be7c315783c75d86909f06579ff24807f6",
     "scripts/test-tiers/manifests.mjs": "b8decc22f2248c451da75d5a5c2c9ae836c89ebfdd8470bdf8c34686fe7177c4",
     "scripts/test-tiers/manifests.test.mjs": "75f4558c668aff21eef3af822c56b484ea657a863a6de2a3026d098167d563bd",
-    "scripts/test-tiers/planning-web.mjs": "370c71221f108f7a5c9dd3418e3071b8a86e54fc9bf5d5f1457bccde33e597b1",
+    "scripts/test-tiers/planning-web.mjs": "738e27763f41fc75041fe1e2719c6992adce702b864cb494b29f8b7e42d0beb7",
     "scripts/test-tiers/prove-manifests.mjs": "0043efefb881a4682f7ca861f134e442c371ecae3cde57d9b3ad29ddb07fa6bb",
     "scripts/test-tiers/replay.mjs": "ae7b64bd76ad1a3dc5acd3db2e8f320c44d35a55754b53e05223b553fe456034",
     "scripts/test-tiers/report.mjs": "9c4adb9a2242e060584340df69458eed8fc83d9cfc6ebd44eb4c08bd44116e8c",
-    "scripts/test-tiers/test-tiers.test.mjs": "966f12b0edcee2b5e146e146d95e997a4847f03d1913d8b841dcf79def5e004d",
+    "scripts/test-tiers/test-tiers.test.mjs": "643746958e28af705ee6391c49b0976b63faaef314f1ffb76d45d2e8420eef1a",
     "scripts/test-tiers/tiers-merge-driver.mjs": "a068eb5410389309a1f7b9c8a278dc271b3b5ef1dc57b98796bcdfb53e1d339d",
     "scripts/test-tiers/tiers-merge-driver.test.mjs": "03a7dca1903e879ad51232c90407cb667e39affbb121ae3cdd7ee242aa416195",
     "web/scripts/aeon-676-ci.test.mjs": "0b9551e932ed3a0a9144f16e1d810fb636940e3777978c5966e7efee887bce61",
     "web/scripts/aeon-681-ci.test.mjs": "ddb22cf9c3c02086f2115e223a4491a5dd1a7723e2593bfe4befc76cdb9e9fb4",
     "web/scripts/ci-web-shard.test.mjs": "0f796bd94b5fa905154c087e7b0ea888496be54c154df4e6d5e99a031c89677e"
   },
-  "changedSourceClosureSha256": "39b6751ccf70cd30489efea2e145565eb24c090b39147bf5657b680ebc1184d4",
+  "changedSourceClosureSha256": "83bcaaeae991617a780d90cb51aee89c5ecf97646b9e5a2c41495fb12e1081c1",
   "changedSourceClosureScope": "SHA256 of compact JSON (UTF-8, no spaces, sorted file keys) mapping final-byte SHA256 for tracked files changed since immutable proof base, excluding this self-referential evidence file. Independent of whether those bytes are committed.",
   "fix2WorkerAttribution": "I work on this — session: codex-sol-ops257-l13s2-fix2 (90704f80-a65e-4385-8b4f-f8149be65e13); role: builder; started: 2026-10-06T07:35:54Z",
   "historicalFix1Checks": [
@@ -1652,7 +1650,97 @@
     }
   ],
   "historicalFix1Note": "Retained attribution, checks and findings describe the earlier round only; fix2 results supersede its planner counts and 80/80 replay claim.",
-  "fix2Findings": [
+  "provedInputs": {
+    "base": "601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
+    "fileCount": 4014,
+    "roots": [
+      "scripts/",
+      "internal/",
+      "cmd/",
+      "api/",
+      "web/"
+    ],
+    "namedFiles": [
+      "README.md",
+      "docs/RELEASE.md",
+      ".github/workflows/ci.yml",
+      "go.mod",
+      "go.sum",
+      "flake.nix",
+      "flake.lock",
+      "version.json",
+      "justfile"
+    ],
+    "sha256": "b6425eda9e6a6198a6a8a763281820931a26247f47fb77fffaa0fe297c7ac5b6",
+    "algorithm": "SHA256 of compact UTF-8 JSON mapping sorted tracked input paths to final-byte SHA256, with symlinks hashed as their target text; excludes .env* and encrypted inputs, generated local outputs and installed dependency files. This evidence is outside the selected roots.",
+    "limits": "Current checkout source/data plus dependency lock/config inputs are hashed; installed dependency tree is reused, not independently attested. Immutable base names baseline Git objects; historical PR trees and hosted execution are not proved."
+  },
+  "fix3WorkerAttribution": "I work on this — session: codex-sol-ops257-l13s2-fix3 (23bfcf12-8cfe-486f-927f-ea46b1b39c8a); role: builder; started: 2026-10-06T07:58:46Z",
+  "historicalFix2Checks": [
+    {
+      "name": "requested-node-suite",
+      "command": "node --test --test-concurrency=1 scripts/test-tiers/*.test.mjs scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs web/scripts/ci-web-shard.test.mjs web/scripts/aeon-676-ci.test.mjs web/scripts/aeon-681-ci.test.mjs",
+      "passed": 463,
+      "failed": 0,
+      "logSha256": "f04c0cc471ac64da22ba095cab0eb7f887120fb9f200f62db2cebbadf3acdfbe"
+    },
+    {
+      "name": "go-static-with-no-web-dependencies",
+      "command": "NODE_OPTIONS=--import=/private/tmp/ops257-fix1-no-web-deps.mjs node --test scripts/test-tiers/test-tiers.test.mjs",
+      "passed": 215,
+      "failed": 0,
+      "logSha256": "97e9967a54809ee24ebfb7a8913447eeea334eee9399f277a539f9e70d1e876c"
+    },
+    {
+      "name": "web-failure-reporting-native-node-runner",
+      "command": "node --experimental-strip-types --test web/tests/test-tier-failures.test.ts",
+      "passed": 8,
+      "failed": 0,
+      "logSha256": "c3b7eddaf70be128df24bfbe63de31543d118e079f91b63b724e8f120ceb26b3"
+    },
+    {
+      "name": "go-packages-offline-nix-shell",
+      "command": "XDG_CACHE_HOME=/private/tmp/ops257-fix2-nixcache nix develop --offline --no-write-lock-file -c bash -c 'GOCACHE=/private/tmp/ops257-fix2-gocache GOPROXY=off GOTOOLCHAIN=local go test ./scripts/ci-runner-guard ./scripts/releaseworkflow ./scripts/ci-go-shards -count=1'",
+      "passed": false,
+      "blocked": "Sandbox denies Nix daemon socket: Operation not permitted",
+      "logSha256": "1530c443e9bd68a768ae38d6ed826ccb330649f80ecad6aedf43f351a5c9ca67"
+    },
+    {
+      "name": "go-packages-installed-nix-store-toolchain-fallback",
+      "command": "GOCACHE=/private/tmp/ops257-fix2-gocache GOPROXY=off GOTOOLCHAIN=local /nix/store/5k3v90pgx77ibb4xzabk5hghnaqklmy1-go-1.26.7/bin/go test ./scripts/ci-runner-guard ./scripts/releaseworkflow ./scripts/ci-go-shards -count=1",
+      "passedPackages": 3,
+      "output": [
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-runner-guard\t4.340s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/releaseworkflow\t4.501s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-go-shards\t6.041s"
+      ],
+      "logSha256": "e09a88548b019af7fe9e7f43553445fdc7504300bf381b8f6c7f38ae38eecca5"
+    },
+    {
+      "command": "node scripts/test-tiers/cli.mjs manifests --check",
+      "passed": true
+    },
+    {
+      "command": "git diff --check",
+      "passed": true
+    },
+    {
+      "command": "node scripts/test-tiers/prove-manifests.mjs 601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
+      "passed": true,
+      "outputSha256": "efb8b88d7fc2ff4e192d3eca00a45151cd57796c1e711546ed7ab1ea3856fa27"
+    },
+    {
+      "name": "planner-base-replay-and-native-undercount-sweep",
+      "command": "node scripts/test-tiers/replay.mjs --json --compare-base 601dbaa4f",
+      "passed": true,
+      "prs": 80,
+      "matchingModes": 73,
+      "modeChanges": 7,
+      "undercounts": 0,
+      "outputSha256": "fdf4ea80bf4d26b118afed7db8165355046a3142456a3cf53ac0b1fed0691aec"
+    }
+  ],
+  "historicalFix2Findings": [
     {
       "finding": "MEDIUM 1(a-d)",
       "fix": "Require final describe arrow body; redeclared names fail closed; scan titles/options and iterable expressions; optional/indirect/tagged calls fail closed at collection and in initializers; reject raw quoted newlines and ambiguous slash. Each listed scenario has a named regression."
@@ -1686,29 +1774,31 @@
       "fix": "Dropped commit-volatile state/head/uncommitted-patch/untracked-file fields; kept immutable proof base and final-byte input hashes independent of commit status."
     }
   ],
-  "provedInputs": {
-    "base": "601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
-    "fileCount": 4014,
-    "roots": [
-      "scripts/",
-      "internal/",
-      "cmd/",
-      "api/",
-      "web/"
-    ],
-    "namedFiles": [
-      "README.md",
-      "docs/RELEASE.md",
-      ".github/workflows/ci.yml",
-      "go.mod",
-      "go.sum",
-      "flake.nix",
-      "flake.lock",
-      "version.json",
-      "justfile"
-    ],
-    "sha256": "0c22eedb484c8cc9fd8be756879f135bbe1bdd86dd2e2a35d8a124c0b9ed4294",
-    "algorithm": "SHA256 of compact UTF-8 JSON mapping sorted tracked input paths to final-byte SHA256, with symlinks hashed as their target text; excludes .env* and encrypted inputs, generated local outputs and installed dependency files. This evidence is outside the selected roots.",
-    "limits": "Current checkout source/data plus dependency lock/config inputs are hashed; installed dependency tree is reused, not independently attested. Immutable base names baseline Git objects; historical PR trees and hosted execution are not proved."
-  }
+  "historicalFix2Note": "Historical round-2 checks and findings; current results are in checks, fix3Findings and plannerReplay. Worker history and the coordinator merge gate remain unchanged.",
+  "fix3Findings": [
+    {
+      "finding": "guard lane",
+      "fix": "Spec-only web-unit collects native web registrations before tests; workflow regression checks failure propagation. Runner guard and its omission test pin the branch; static registry classifies collection; historical CI fixture stays intact."
+    },
+    {
+      "finding": "shadowing",
+      "fix": "Nested scans remove their local declarations in finally. Loop bindings, imports and describe parameters are unknown; existing-name shadowing remains fail-closed. Tests include both gate scenarios, parameter shadowing, nested/block scope leakage, and nonleaking reused names."
+    },
+    {
+      "finding": "nested templates",
+      "fix": "Reject template pieces with more interpolation openings than closing braces; gate example has a regression."
+    },
+    {
+      "finding": "browser-only cost",
+      "fix": "Non-spec tests files enter the source browser bound only when a spec imports them transitively. Imported files with registrations stay unknown; direct and transitive cases tested for helper TS/JS/MJS and unit test files."
+    },
+    {
+      "finding": "cheap safe rules",
+      "fix": "Binding patterns record identifiers rather than punctuation; destructured iterators stay unknown. Slash after an identifier outside the keyword set, number, closing expression parenthesis or bracket is division; control parentheses and ambiguous positions stay unknown. Named regression tests cover these cases."
+    },
+    {
+      "finding": "native sweep and replay",
+      "fix": "85/246 specs are unsupported/over-limit, with zero native undercounts. Modes match base on 76/80 PRs. PR246 (headings), PR253 (decision-text), PR263 (ticket-panel), and PR294 (settings, webcore-recovery, work-surfaces-fix2, work-vocabulary) widen essential->full solely due to unsupported browser specs: omitting those specs restores essential for all four. Native-vs-source L4 differs on 9 PRs; unsupported-spec omission changes 7 L4 modes. PR236, PR244 and PR252 recover their base essential mode after these fixes."
+    }
+  ]
 }

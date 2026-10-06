@@ -154,6 +154,13 @@
       "job": "web-unit",
       "step": "Run selected web units without retries",
       "cwd": "web",
+      "command": "node ../scripts/test-tiers/cli.mjs collect web",
+      "reason": "The web-tiers supplement collects the same browser-free inventory and checks planner bounds."
+    },
+    {
+      "job": "web-unit",
+      "step": "Run selected web units without retries",
+      "cwd": "web",
       "command": "else",
       "reason": "Shell branch scaffold; both static branches are mirrored."
     },

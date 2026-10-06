@@ -403,6 +403,13 @@ func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any
 			moved = cloneStep(t, reuseStep(t, unit, name))
 		case "Web unit checks (once)":
 			moved = cloneStep(t, reuseStep(t, unit, "Run selected web units without retries"))
+			// Pin the added spec-only collection before projecting onto the
+			// historical command. Keep the immutable historical fixture intact.
+			guard := "  node ../scripts/test-tiers/cli.mjs collect web\n"
+			if strings.Count(moved["run"].(string), guard) != 1 || !strings.Contains(moved["run"].(string), "# New specs need no tier entry for this lane's exact-spec run.\n"+guard) {
+				t.Fatal("Spec-only units must collect native bounds before checks")
+			}
+			moved["run"] = strings.Replace(moved["run"].(string), guard, "", 1)
 			moved["name"] = name
 			moved["run"] = strings.Replace(moved["run"].(string), `if [ "${{ matrix.shard }}" = 1 ]; then npm run ci:web:shard:test; fi`, "npm run ci:web:shard:test", 1)
 			moved["run"] = strings.Replace(moved["run"].(string), "--unit --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-unit-${{ matrix.shard }}", "--unit --job web-unit", 1)
@@ -507,7 +514,7 @@ func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
 		}
 	}
 	run := reuseStep(t, unit, "Run selected web units without retries")["run"].(string)
-	if strings.Count(run, "npm run test:unit:core") != 1 || !strings.Contains(run, `if [ "${{ matrix.shard }}" = 1 ]; then npm run ci:web:shard:test; fi`) {
+	if strings.Count(run, "node ../scripts/test-tiers/cli.mjs collect web") != 1 || strings.Count(run, "npm run test:unit:core") != 1 || !strings.Contains(run, `if [ "${{ matrix.shard }}" = 1 ]; then npm run ci:web:shard:test; fi`) {
 		t.Fatal("Spec-only units and full-lane shard regressions must each run once")
 	}
 	measure := treeMap(jobs["tier-measurements"])
