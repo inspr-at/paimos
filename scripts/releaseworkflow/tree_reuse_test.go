@@ -602,6 +602,22 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 			}
 			j = cloneStep(t, j)
 			if id == "go-test" {
+				// AEON-777 broadens routing through the router's event switch.
+				// Pin the exact new event/ref/head boundary before normalizing to
+				// the historical main-only expressions; all other fields stay pinned.
+				const oldRoute = `contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && `
+				const poolRoute = `((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && `
+				matrix := treeMap(treeMap(j["strategy"])["matrix"])
+				for _, field := range []struct {
+					owner map[string]any
+					key   string
+				}{{j, "runs-on"}, {matrix, "shard"}} {
+					expression, _ := field.owner[field.key].(string)
+					if strings.Count(expression, poolRoute) != 1 {
+						t.Fatalf("%s must retain the reviewed pool event/ref/head guards", field.key)
+					}
+					field.owner[field.key] = strings.Replace(expression, poolRoute, oldRoute, 1)
+				}
 				// AEON-707 binds backup clients to this job's actual service.
 				// Assert the exact addition before comparing every older field
 				// against the unchanged accepted-CI hash.

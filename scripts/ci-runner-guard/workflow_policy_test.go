@@ -289,6 +289,40 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 		add("smoke-route/"+name, "test-runner-smoke.yml", want, func(w map[string]any) { edit(mapping(mapping(w["jobs"])["smoke"])) })
 	}
 
+	for _, key := range []string{"AEON_POOL_EVENTS", "AEON_PR_HEAD_REPOSITORY", "AEON_MBP2606_AVAILABILITY", "AEON_REQUIRED_IDLE_RUNNERS"} {
+		for _, wrong := range []any{nil, "", "pull_request", "${{ github.event.pull_request.base.repo.full_name }}"} {
+			add(fmt.Sprintf("router-input/%s/%v", key, wrong), "test-runner-route.yml", "pool router must bind "+key, func(w map[string]any) {
+				for _, value := range mapping(mapping(w["jobs"])["route"])["steps"].([]any) {
+					step := mapping(value)
+					if step["id"] == "route" {
+						mapping(step["env"])[key] = wrong
+					}
+				}
+			})
+		}
+	}
+	add("router-step-missing", "test-runner-route.yml", "pool router policy step is missing", func(w map[string]any) {
+		mapping(mapping(w["jobs"])["route"])["steps"] = nil
+	})
+	add("router-command-bypassed", "test-runner-route.yml", "pool router must execute", func(w map[string]any) {
+		for _, value := range mapping(mapping(w["jobs"])["route"])["steps"].([]any) {
+			step := mapping(value)
+			if step["id"] == "route" {
+				step["run"] = "echo bypass"
+			}
+		}
+	})
+	for name, old := range map[string]string{
+		"same-repo-head": "github.event.pull_request.head.repo.full_name == github.repository",
+		"main-ref":       "github.ref == 'refs/heads/main'",
+		"attempt":        "needs.runner-route.outputs.run_attempt == github.run_attempt",
+	} {
+		add("ci-pool/"+name, "ci.yml", "runner selection is not proven", func(w map[string]any) {
+			job := mapping(mapping(w["jobs"])["go-test"])
+			job["runs-on"] = strings.Replace(job["runs-on"].(string), old, "true", 1)
+		})
+	}
+
 	// The original review's CI trigger, gate, dependency and runner mutations.
 	for name, push := range map[string]any{
 		"unfiltered-push": nil,

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -22,7 +23,7 @@ func TestOperatorAgentKeyAuditAttribution(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	keyID, agentID, _, err := OperatorCreateAgentKey(ctx, d.App, tenantID, "worker", "", []string{"nodes.read"}, nil)
+	keyID, agentID, _, err := OperatorCreateAgentKey(ctx, d.App, tenantID, "worker", "", []string{"nodes.read"}, nil, keyTestPerson(t, d.App, tenantID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +53,7 @@ func TestOperatorAgentKeyAuditAttribution(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if creator != nil || principals != 1 || created != 1 || bindings != 0 || keys != 0 {
+	if creator == nil || principals != 1 || created != 1 || bindings != 0 || keys != 0 {
 		t.Fatalf("operator safety: creator=%v operator=%s principals=%d created=%d bindings=%d keys=%d", creator, operatorID, principals, created, bindings, keys)
 	}
 	for _, typ := range []string{"authz.agent_binding_created", "agent_key.created", "agent_key.scopes_extended", "agent_key.revoked"} {
@@ -86,7 +87,7 @@ func TestOperatorJourneyGateScopes(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	keyID, _, _, err := OperatorCreateAgentKey(ctx, d.App, tenantID, "worker", "", []string{"approvals.request"}, nil)
+	keyID, _, _, err := OperatorCreateAgentKey(ctx, d.App, tenantID, "worker", "", []string{"approvals.request"}, nil, keyTestPerson(t, d.App, tenantID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,4 +139,8 @@ func TestOperatorJourneyGateScopes(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func keyTestPerson(t *testing.T, pool *pgxpool.Pool, tenantID string) string {
+	return dbtest.KeyPerson(t, pool, tenantID)
 }

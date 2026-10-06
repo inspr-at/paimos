@@ -223,7 +223,7 @@ func fixture(t *testing.T) (*Module, tenant.Principal, string, string, string) {
 		secret := "fixture-secret"
 		sum := sha256.Sum256([]byte(secret))
 		prefix := "fixture"
-		if _, err := tx.Exec(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1::uuid,$2::uuid,'test',$3,$4,ARRAY['stage.prepare','stage.deploy','stage.verify','stage.apply'])`, tenantID, p.ID, prefix, hex.EncodeToString(sum[:])); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1::uuid,$2::uuid,'test',$3,$4,ARRAY['stage.prepare','stage.deploy','stage.verify','stage.apply'],(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, tenantID, p.ID, prefix, hex.EncodeToString(sum[:])); err != nil {
 			return err
 		}
 		var approval string
