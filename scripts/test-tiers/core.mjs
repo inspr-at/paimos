@@ -79,7 +79,11 @@ export const tierManifestPattern = /^scripts\/ci\/(?:go|web)-test-tiers\.json$/
 // R9: regression tests of the unconditional migration-compat job.
 const alwaysOnTestPattern = /^scripts\/(?:check-migrations\.test\.mjs|migration_compat_probe_test\.py)$/
 const docsPattern = /^(?:docs\/|README(?:\.|$)|LICENSE(?:\.|$)|CHANGELOG(?:\.|$))/
-export const isDocsLike = path => docsPattern.test(path) || (/\.md$/i.test(path) && !/(?:^|\/)testdata\//.test(path) && !/^(?:internal|cmd)\//.test(path))
+// AEON-766: instruction files are test inputs (web/tests/no-shift-rules.test.ts
+// pins AGENTS.md through the rules rollout manifest), never docs-like.
+const instructionPattern = /(?:^|\/)(?:AGENTS|CLAUDE)\.md$/i
+export const isDocsLike = path => !instructionPattern.test(path) &&
+  (docsPattern.test(path) || (/\.md$/i.test(path) && !/(?:^|\/)testdata\//.test(path) && !/^(?:internal|cmd)\//.test(path)))
 export const tierRank = { NIGHTLY: 0, 'GATED-FULL': 1, ESSENTIAL: 2 }
 // Two essential Go shards carry about one full hosted shard each; wider
 // consumer sets are cheaper in the seven-shard full layout.
@@ -118,6 +122,7 @@ export function consumers(tree, { substrings = [], words = [] } = {}) {
 // Per-path rule for the opt-in affected PR lane. Rules whose execution or
 // mapping cannot be shown retain the full gate, with a plan reason.
 export function affectedRisk(path, webImports = {}) {
+  if (instructionPattern.test(path)) return { full: true, reason: `test-pinned instruction input: ${path}` }
   if (generatedPattern.test(path)) return { full: true, reason: `unnarrowed generated/configuration risk: ${path}` }
   if (machineryPattern.test(path)) return { full: true, reason: `CI machinery stays full: ${path}` }
   if (isDocsLike(path)) return { full: false, rule: 'docs', layout: 'static', skip: true, reason: `docs-like: ${path}` }

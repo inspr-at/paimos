@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { spawnSync, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound } from './core.mjs'
+import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk, impactRisk, machineryPattern, manifestPromotions, migrationObjects, consumers, consumerCaseBound, isDocsLike } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
@@ -373,6 +373,20 @@ test('R5 audit tooling and R9 always-on migration tests take the static layout; 
   assert.ok(realPaths.includes('scripts/audit/test_audit.py')&&realPaths.includes('scripts/check-migrations.test.mjs'))
 })
 
+test('test-pinned instruction files are never docs-like or static in the affected lane (AEON-766)',()=>{
+  const rollout=JSON.parse(readFileSync(new URL('../rules-bootstrap/rollout.json',import.meta.url),'utf8'))
+  const pinned=rollout.targets.flatMap(({target,candidate})=>[target,candidate])
+  for(const path of [...pinned,'docs/AGENTS.md','docs/nested/CLAUDE.md','web/AGENTS.md','internal/auth/CLAUDE.md','scripts/audit/AGENTS.md','agents.md','docs/claude.MD']) {
+    assert.equal(isDocsLike(path),false,path)
+    for(const paths of [[path],['README.md',path]]) {
+      assert.equal(on(paths).full,true,paths.join())
+      assert.deepEqual([decide(paths).mode,decide(paths).layout],['full','full'],paths.join())
+    }
+  }
+  for(const path of ['README.md','docs/x.md','web/README.md','CHANGELOG.md','LICENSE'])
+    assert.equal(isDocsLike(path),true,path)
+})
+
 test('R6 release data, R7 test data and R8 harness pages select their readers; docs-like files are static',()=>{
   const release=on(['version.json','internal/releasehistory/data/product-notes.json'])
   assert.equal(release.full,false)
@@ -388,7 +402,7 @@ test('R6 release data, R7 test data and R8 harness pages select their readers; d
   const page=on(['web/tests/settings-shared-harness.html'])
   assert.equal(page.full,false);assert.ok(webFiles(page).has('tests/settings-shared.spec.ts'))
   assert.equal(decide(['web/tests/settings-shared-harness.html']).mode,'essential')
-  for(const paths of [['AGENTS.md'],['docs/RELEASE.md'],['web/README.md'],['scripts/audit/rubric.md'],['README.md','LICENSE','CHANGELOG.md']]) {
+  for(const paths of [['docs/RELEASE.md'],['web/README.md'],['scripts/audit/rubric.md'],['README.md','LICENSE','CHANGELOG.md']]) {
     const selected=on(paths)
     assert.equal(selected.full,false,paths.join());assert.ok(essentialOnly(selected))
     assert.deepEqual([decide(paths).mode,decide(paths).layout],['essential','static'],paths.join())
