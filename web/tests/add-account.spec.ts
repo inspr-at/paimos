@@ -149,18 +149,18 @@ test('the steps name the machine, the known sign-in, and a path-proof add-harnes
   expect(errors).toEqual([])
 })
 
-test('Add an account on the agents card opens the steps; Manage accounts does not', async ({ page }) => {
+test('the Agents page links to Settings; Add an account lives there and opens the steps', async ({ page }) => {
   const errors = watchErrors(page)
   await setup(page, { desk: true })
   await page.goto('/agents')
-  const cap = page.getByRole('region', { name: 'Accounts' })
+  const cap = page.getByRole('region', { name: 'Accounts and computers' })
   await expect(cap.getByRole('link', { name: /Manage/ })).toHaveAttribute('href', '/settings/accounts')
-  const add = cap.getByRole('link', { name: 'Add an account' })
-  await expect(add).toHaveAttribute('href', '/settings/accounts#add-account')
-  await shoot(page, 'agents', cap.locator('.ac-head'))
-  await add.click()
-  await expect(page.getByRole('region', { name: 'Add an account' })).toBeVisible()
+  // AEON-782: the section is a status line; adding an account is a Settings action.
+  await expect(cap.getByRole('link', { name: 'Add an account' })).toHaveCount(0)
+  await cap.getByRole('link', { name: /Manage/ }).click()
   await expect(page).toHaveURL(/\/settings\/accounts$/)
+  await page.getByRole('button', { name: 'Add an account' }).click()
+  await expect(page.getByRole('region', { name: 'Add an account' })).toBeVisible()
   await expect(page.getByLabel('Sign-in step')).toHaveValue('For pi, use /login and /model in pi first.')
   expect(errors).toEqual([])
 })
@@ -176,7 +176,7 @@ test('without account.manage the action is gone and the hint stays', async ({ pa
   await expect(page.getByRole('link', { name: 'Add an account' })).toHaveCount(0)
   await shoot(page, 'hint', page.locator('#agent-accounts'))
   await page.goto('/agents')
-  await expect(page.getByRole('region', { name: 'Accounts' }).getByRole('link', { name: 'Add an account' })).toHaveCount(0)
+  await expect(page.getByRole('region', { name: 'Accounts and computers' }).getByRole('link', { name: 'Add an account' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: /Manage/ })).toBeVisible()
 })
 

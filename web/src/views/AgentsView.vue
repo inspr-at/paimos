@@ -37,7 +37,6 @@ import { openStartLead } from '../lib/leadOverlay'
 import { LEAD_WORDS } from '../lib/lead'
 import { useDeveloperSettings } from '../lib/developerSettings'
 import RunQueue from '../components/agents/RunQueue.vue'
-import QuotaWarnings from '../components/agents/QuotaWarnings.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
 import AttachPending from '../components/agents/AttachPending.vue'
 import WindDownPanel from '../components/agents/WindDownPanel.vue'
@@ -444,7 +443,6 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           :pending="[]" :held="[]" :history="history" :now="agents.now" :loaded="agents.loaded" cursor="" :can-decide="false" :can-decide-approval="() => false" :can-resolve="false"
           :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="agents.decide" :revoke="agents.revoke" :resolve="resolveHeld"
         />
-        <QuotaWarnings v-if="agents.loaded && showCapacity" :sessions="agents.views" />
         <RunQueue v-if="agents.loaded" ref="runQueue" @emptied="pageTitle?.focus()" />
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
           <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <KeyCap k="left" /><KeyCap k="right" /> fold · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny

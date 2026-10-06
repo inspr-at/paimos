@@ -10,6 +10,7 @@ import { can, myPermissions } from '../../lib/authz'
 import { overviewAccounts, type OverviewAccount, type SignInReference } from '../../lib/accountsOverview'
 import { computerRemoval, describeEnrollmentStatus, describeComputerStatus, disconnectComputer, disconnectEnrollment, pairingPermissions, platformCaption, removeComputer, type PairingView } from '../../lib/agentPairing'
 import { machinesForAdd } from '../../lib/addAccount'
+import { isProblemSignin } from '../../lib/accountsGlance'
 import { hostCapacityReason } from '../../lib/hostCapacity'
 import { daysSummary, holdOptions, ownOverride, overrideDone, poolOfRow, reserveLevel, timeLabel, when, type CapacityWindow, type HoldOption, type Override, type PoolView } from '../../lib/capacity'
 import { toast } from '../../lib/toast'
@@ -67,7 +68,8 @@ function references(a: OverviewAccount, c: PairingView) { return a.signins.filte
 function mayVerify(s: SignInReference) { return manage.value && s.enrollment.can_verify === true && s.computer.computer_state === 'connected' && s.enrollment.state === 'connected' && s.computer.verification_capabilities?.[s.enrollment.harness]?.supported === true }
 function verificationBusy(s: SignInReference) { return ['queued', 'starting', 'running', 'waiting', 'ownership_lost'].includes(s.enrollment.verification_state ?? '') }
 const expired = (s: SignInReference) => s.enrollment.verification_state === 'expired' && !s.enrollment.verification_expired_ready
-const problemSignins = computed(() => accounts.value.flatMap(a => a.signins.filter(s => s.computer.computer_state === 'connected' && s.enrollment.state === 'connected' && (expired(s) || /failed|sign in|unavailable/i.test(status(s.computer, s.enrollment.account_id)))).map(s => ({ account: a, signin: s }))))
+// One definition of what blocks a sign-in, shared with the Agents page's status line (AEON-782).
+const problemSignins = computed(() => accounts.value.flatMap(a => a.signins.filter(isProblemSignin).map(s => ({ account: a, signin: s }))))
 const attention = computed<NeedsYouItem[]>(() => {
   const items: NeedsYouItem[] = problemSignins.value.map(({ account: a, signin: s }) => ({ id: `verify:${s.enrollment.account_id}`, name: `${a.vendor} needs verifying on ${s.computer.computer_name}`, detail: expired(s) ? 'Verification expired. New agents wait until the sign-in passes again.' : status(s.computer, s.enrollment.account_id), count: 1, icon: 'alert', action: { label: manage.value && mayVerify(s) ? 'Verify again' : 'Details', fixesProblem: manage.value && mayVerify(s), disabled: verificationBusy(s) || busy.value } }))
   for (const c of computers.value.filter(c => c.computer_state === 'revoked' && c.local_cleanup === 'pending')) items.push({ id: `cleanup:${c.computer_id}`, name: `${c.computer_name} removed · cleanup pending`, detail: 'New work is blocked. Local sign-ins are deleted when the computer comes back online.', count: 1, icon: 'shield', tone: 'waiting', action: { label: manage.value ? 'Finish cleanup…' : 'Details' } })
@@ -120,6 +122,22 @@ watch(() => route.query.verify_account, id => {
   if (s) void show('computer', s.computer.computer_id!, undefined, id)
 }, { immediate: true })
 watch(accounts, () => { const id = route.query.verify_account; if (!open.value && typeof id === 'string') { const s = accounts.value.flatMap(a => a.signins).find(s => s.enrollment.account_id === id); if (s) void show('computer', s.computer.computer_id!, undefined, id) } })
+// The Agents page's status line, Needs you rows and grid open a panel here (AEON-782):
+// ?computer=<id>[&signin=<account id>] or ?account=<id>. The link is spent once it opened.
+function openFromLink() {
+  const { computer: c, account: a, signin: sg, ...rest } = route.query
+  const computerId = typeof c === 'string' ? c : '', accountId = typeof a === 'string' ? a : ''
+  if (!computerId && !accountId) return
+  const found = computerId ? computers.value.some(x => x.computer_id === computerId) : !!accountOf(accountId)
+  if (!found && !(capacity.loaded && capacity.computersLoaded)) return
+  void router.replace({ path: route.path, query: rest, hash: route.hash })
+  if (!found) return
+  if (computerId) void show('computer', computerId, undefined, typeof sg === 'string' ? sg : undefined)
+  else void show('account', accountOf(accountId)!.id)
+}
+watch([() => route.query.computer, () => route.query.account, accounts, computers, () => capacity.loaded, () => capacity.computersLoaded], openFromLink, { immediate: true })
+/** "I'm away…" from a learned suggestion: the panel closes and the pacing editors take focus. */
+async function goPacing() { open.value = false; await nextTick(); pacing.value?.reveal() }
 async function verify(s: SignInReference) {
   if (!mayVerify(s) || verificationBusy(s) || busy.value) return
   const identity = owner.value, turn = generation, screen = selectedKey.value, c = s.computer, e = s.enrollment, revision = c.revision, prior = e.verification_run_id
@@ -385,7 +403,7 @@ function quotaSource(a: OverviewAccount, w: CapacityWindow) { const row = a.rows
           <div v-if="primarySignin" class="needs"><AppIcon name="alert" /><strong>Needs verifying on {{ primarySignin.computer.computer_name }}</strong><p>New starts with this sign-in wait until verification passes.</p></div>
           <section class="p-sec"><div class="p-head"><h3>Shared quota</h3><span>Shared by {{ new Set(account.signins.map(s => s.computer.computer_id)).size }} computers</span></div><div class="quota"><div v-for="w in account.windows" :key="w.reading.window_kind + w.reading.bucket" class="q-row"><span>{{ windowLabel(w) }}</span><b>{{ Math.round(w.remaining_percent) }}% left</b><div class="gauge" role="meter" :aria-label="`${account.vendor} ${windowLabel(w)} remaining`" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="w.remaining_percent"><i :style="{ width: `${w.remaining_percent}%` }"></i></div><small>Resets {{ when(w.reading.resets_at, agents.now) }}</small><small :class="{ stale: w.freshness !== 'fresh' }">Read {{ when(w.reading.read_at, agents.now) }} on {{ quotaSource(account, w) }}<template v-if="w.freshness !== 'fresh'"> · may be out of date</template></small></div><p v-if="!account.windows.length">Quota has not been reported. No remaining allowance is inferred.</p></div><p class="q-note">Every computer signed in with this account draws from the same quota.</p></section>
           <section class="p-sec"><div class="p-head"><h3>Signed in on</h3><span>Details and actions live with each computer</span></div><button v-for="s in account.signins" :key="`${s.computer.computer_id}:${s.enrollment.account_id}`" type="button" class="ref-row" @click="show('computer', s.computer.computer_id!, undefined, s.enrollment.account_id)"><AppIcon name="monitor" /><span><b>{{ s.computer.computer_name }}</b><small>{{ computerState(s.computer) }}</small></span><span class="st">{{ status(s.computer, s.enrollment.account_id) }}</span><AppIcon name="chevron-right" /></button><p v-if="!account.signins.length">No paired computer is associated with this account.</p></section>
-          <section class="p-sec use-sec"><div class="p-head"><h3>Use and limits</h3><span>{{ account.records.length === 1 ? 'One login' : `${account.records.length} logins share this quota` }}</span></div><AccountsCard :accounts="account.records" :all="agents.accounts" state="ready" :now="agents.now" :admin="manage" :set="setAccount" /></section>
+          <section class="p-sec use-sec"><div class="p-head"><h3>Use and limits</h3><span>{{ account.records.length === 1 ? 'One login' : `${account.records.length} logins share this quota` }}</span></div><AccountsCard :accounts="account.records" :all="agents.accounts" state="ready" :now="agents.now" :admin="manage" :set="setAccount" @away="goPacing" /></section>
           <RouterLink class="models-link" to="/agents/models" aria-label="Agents, Models">Agents<AppIcon name="chevron-right" :size="12" />Models</RouterLink>
         </template>
       </template>

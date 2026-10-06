@@ -28,7 +28,7 @@ const title = computed(() => count.value === 0 ? 'Nothing needs you' : props.hea
     <ul v-if="count" class="attention">
       <li v-for="item in items" :key="item.id" class="att-row" :class="{ calm: item.count === 0 }">
         <span class="att-icon" :class="item.count > 0 && item.tone !== 'waiting' ? 'warn' : 'mute'"><AppIcon :name="item.count === 0 ? 'check' : item.icon ?? 'alert'" /></span>
-        <a v-if="item.count > 0 && item.href" :href="item.href" class="att-name">{{ item.name }}</a><span v-else class="att-name">{{ item.name }}</span>
+        <RouterLink v-if="item.count > 0 && item.href" :to="item.href" class="att-name">{{ item.name }}<AppIcon name="chevron-right" :size="12" /></RouterLink><span v-else class="att-name">{{ item.name }}</span>
         <p>{{ item.detail }}</p>
         <button v-if="item.count > 0 && item.action" type="button" class="btn sm" :class="{ primary: item.action.fixesProblem }" :disabled="item.action.disabled" @click="emit('action', item.id)">{{ item.action.label }}</button>
       </li>
@@ -47,6 +47,10 @@ const title = computed(() => count.value === 0 ? 'Nothing needs you' : props.hea
 .warn { background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); color: var(--queue-wait-ink); }
 .mute { background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink-2); }
 .att-name { color: var(--ink); font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+a.att-name { display: inline-flex; align-items: center; gap: 4px; justify-self: start; text-decoration: none; }
+a.att-name > svg { flex: none; color: var(--ink-3); }
+a.att-name:hover { color: var(--teal-ink); }
+a.att-name:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 6px; }
 .att-row p { grid-column: 2; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
 .att-row > .btn { grid-column: 3; grid-row: 1 / span 2; justify-self: end; }
 .calm .att-name { color: var(--ink-2); font-weight: 600; }.calm p { color: var(--ink-3); }
