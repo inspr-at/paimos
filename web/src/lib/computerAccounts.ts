@@ -6,7 +6,7 @@
 // that do not report a limit, and the legend
 // appears only where a bar is drawn. Everything here is a pure mapping of the
 // capacity projection, the pairing list and the person's schedule.
-import { agentUpdateAdvice, describeEnrollmentDiagnostic, describeEnrollmentStatus, describeHarnessFix, describeHarnessHint, platformCaption, type PairingEnrollment, type PairingView } from './agentPairing.ts'
+import { agentUpdateAdvice, describeEnrollmentDiagnostic, describeEnrollmentStatus, describeHarnessFix, describeHarnessHint, platformCaption, verificationFailureText, type PairingEnrollment, type PairingView } from './agentPairing.ts'
 import {
   HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, estimateLabel, gauge as gaugeOf, hidesCapacityLimit, hourLabel, pct, unreportedCapacity, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
 } from './capacity.ts'
@@ -130,7 +130,7 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
       const command = /^Verif/.test(label) ? '' : diagnostic?.command ?? (soleAccount ? describeHarnessFix(computer, row.harness) : '')
       const signin = /sign in/i.test(label)
       const waiting = /^(Verification queued|Verifying account)/.test(label)
-      return { kind: waiting ? 'waiting' : signin ? 'signin' : 'attention', text: signin ? 'Signed out' : label, tone: waiting ? 'mute' : 'warn', ...(command ? { command } : {}), tip: `${HARNESS_NAME[row.harness] ?? row.harness} on ${computer.computer_name}: ${label}.` }
+      return { kind: waiting ? 'waiting' : signin ? 'signin' : 'attention', text: signin ? 'Signed out' : label, tone: waiting ? 'mute' : 'warn', ...(command ? { command } : {}), tip: label === 'Verification failed' || label === 'Verification stalled' ? verificationFailureText(enrollment) : `${HARNESS_NAME[row.harness] ?? row.harness} on ${computer.computer_name}: ${label}.` }
     }
   }
   if (row.state === 'paused') return { kind: 'paused', text: 'Paused in Settings', tone: 'mute', tip: 'Turn “Agents may use it” back on in Settings / Accounts to resume.' }
