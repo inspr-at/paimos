@@ -2331,6 +2331,16 @@
       "kind": "vitest",
       "file": "tests/agent-indicator.unit.test.ts",
       "name": "keeps Calm and hovering off for missing or malformed data: undefined",
+      "occurrence": 1,
+      "tier": "GATED-FULL",
+      "tags": [
+        "delete-candidate"
+      ]
+    },
+    {
+      "kind": "vitest",
+      "file": "tests/agent-indicator.unit.test.ts",
+      "name": "keeps Calm and hovering off for missing or malformed data: undefined",
       "occurrence": 2,
       "tier": "GATED-FULL",
       "tags": [
@@ -3125,6 +3135,7 @@
     {"kind":"vitest","file":"tests/graph-focus.unit.test.ts","name":"exits a late fullscreen grant after Escape, navigation or unmount","tier":"GATED-FULL"},
     {"kind":"vitest","file":"tests/graph-focus.unit.test.ts","name":"contains a rejected exit and tolerates a missing exit API","tier":"GATED-FULL"},
     {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"keeps Default for missing or malformed data: null","tier":"GATED-FULL"},
+    {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"keeps Default for missing or malformed data: undefined","occurrence":1,"tier":"GATED-FULL"},
     {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"keeps Default for missing or malformed data: undefined","occurrence":2,"tier":"GATED-FULL"},
     {"kind":"vitest","file":"tests/graph-motion.unit.test.ts","name":"keeps Default for missing or malformed data: {}","tier":"GATED-FULL"},
     {
