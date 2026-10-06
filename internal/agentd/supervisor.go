@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
@@ -62,6 +63,7 @@ type replay struct {
 // Record contains only local process provenance and bounded control digests.
 // The journal is AEON v2; classic journals are never opened implicitly.
 type Record struct {
+	WorkerPickup          *WorkerPickup    `json:"worker_pickup,omitempty"`
 	RecoveryReports       []RecoveryReport `json:"recovery_reports,omitempty"`
 	AutomaticReview       bool             `json:"automatic_review,omitempty"`
 	VerificationReason    string           `json:"verification_reason,omitempty"`
@@ -166,6 +168,7 @@ type Supervisor struct {
 	profilePermissions     map[string]bool
 	harnessFailed          map[string]bool
 	dispatchMu             contextMutex
+	checkout               *agentsetup.Store
 	state                  *agentsetup.Store
 	closing                bool
 	blockedAccounts        map[string]bool
@@ -225,6 +228,25 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("workspace %s is not a directory", physical)
+	}
+	// Git directories below one checkout share files and Git state. Require
+	// its root so pickup digests, durable fences and recovery all use the
+	// same physical directory. A linked worktree's .git file is also a root;
+	// standalone non-Git workspaces retain their directory-scoped identity.
+	for directory := physical; ; directory = filepath.Dir(directory) {
+		_, err := os.Lstat(filepath.Join(directory, ".git"))
+		if err == nil {
+			if directory != physical {
+				return nil, errors.New("workspace must be the Git checkout root")
+			}
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect workspace checkout root: %w", err)
+		}
+		if directory == filepath.Dir(directory) {
+			break
+		}
 	}
 	tenantID, principalID, err := c.API.Identity(ctx)
 	if err != nil {
@@ -500,6 +522,13 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 		diagnostic = "dispatch_not_allowed"
 		return nil
 	}
+	if reporter, ok := s.api.(interface {
+		HostCapacity(context.Context) (hostcapacity.View, error)
+	}); ok {
+		if _, err := reporter.HostCapacity(ctx); err != nil && !errors.Is(err, ErrHostCapacityUnsupported) {
+			return err
+		}
+	}
 	if dispatch {
 		var err error
 		runs, err = s.api.Queued(ctx)
@@ -721,7 +750,7 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			failures = append(failures, ErrScope)
 			continue
 		}
-		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) {
+		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) && !errors.Is(err, ErrHostCapacity) {
 			failures = append(failures, err)
 		}
 	}
@@ -824,6 +853,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			run.AccountID = ""
 		}
 	}
+	if err := s.checkHostCapacity(ctx); err != nil {
+		return err
+	}
 	profiles, err := s.api.Profiles(ctx)
 	if err != nil {
 		return err
@@ -917,6 +949,24 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	if review != (order.Kind == "review") {
 		return errors.New("review execution mode does not match its work order")
+	}
+	pickup, err := s.workerPickup(run, node, order)
+	if err != nil {
+		return err
+	}
+	if entry != nil {
+		entry.mu.Lock()
+		previous := entry.record.WorkerPickup
+		same := (previous == nil) == (pickup == nil) && (previous == nil || *previous == *pickup)
+		entry.mu.Unlock()
+		if !same {
+			return errors.New("journaled assignment pickup changed")
+		}
+	}
+	if !review && !verification {
+		if err := s.acquireCheckout(run.ID); err != nil {
+			return err
+		}
 	}
 	duration := s.maxRunDuration
 	if order.MaxDurationSeconds != nil {
@@ -1020,7 +1070,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	if entry == nil {
-		rec := Record{LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "claim_pending", Controls: map[string]replay{}}
+		rec := Record{WorkerPickup: pickup, LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "claim_pending", Controls: map[string]replay{}}
 		if err := s.journal.Put(rec); err != nil {
 			return err
 		}
@@ -1039,7 +1089,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		entry.record = next
 		entry.mu.Unlock()
 	}
-	if err := s.api.Claim(ctx, run.ID, s.daemonID, s.generation, ids); err != nil {
+	if err := s.claimWorker(ctx, run, ids, pickup); err != nil {
 		return errors.Join(err, s.reconcileUnlaunched(ctx, entry))
 	}
 	// Every error before launch intent must settle this claimed, never-launched
@@ -1875,6 +1925,14 @@ func inboxMessageText(item HarnessDelivery) string {
 func (s *Supervisor) update(ctx context.Context, entry *owned, t Telemetry) error {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+	if entry.record.WorkerPickup != nil && t.Kind == "finished" {
+		t.ProcessState = "unconfirmed"
+		if entry.record.ExitObserved {
+			t.ProcessState = "exited"
+		} else if entry.record.LaunchState == launchPrepared {
+			t.ProcessState = "not_attempted"
+		}
+	}
 	t.ServiceTier = entry.harness.ServiceTier
 	if entry.record.Generation != s.generation && entry.record.LaunchState != launchPrepared {
 		return ErrGeneration
@@ -2136,6 +2194,9 @@ func (s *Supervisor) Close(ctx context.Context) error {
 				return ctx.Err()
 			}
 		}
+	}
+	if err := s.releaseCheckout(); err != nil {
+		return err
 	}
 	if s.lock != nil {
 		if err := s.lock.Close(); err != nil {

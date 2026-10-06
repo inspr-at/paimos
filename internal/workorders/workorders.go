@@ -4,7 +4,9 @@ package workorders
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"strings"
@@ -481,4 +483,29 @@ func (m *module) evidence(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, 
 		return nil, err
 	}
 	return e, Record(ctx, tx, p, o.NodeID, "work_order.evidence_added", nil, e)
+}
+
+// BriefDigest binds the content used for launch, without persisting the prompt.
+// Callers pass ordered criterion descriptions from the same order revision.
+func BriefDigest(title, body string, criteria []string) (string, error) {
+	size := len(title) + len(body)
+	if len(criteria) > 200 {
+		return "", Fail(400, "work brief exceeds bound")
+	}
+	for _, c := range criteria {
+		size += len(c)
+	}
+	if size > 256<<10 {
+		return "", Fail(400, "work brief exceeds bound")
+	}
+	raw, err := json.Marshal(struct {
+		Title    string   `json:"title"`
+		Body     string   `json:"body"`
+		Criteria []string `json:"criteria"`
+	}{title, body, criteria})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(append([]byte("aeon.worker.brief.v1\x00"), raw...))
+	return fmt.Sprintf("%x", sum), nil
 }

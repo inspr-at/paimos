@@ -317,7 +317,7 @@ func TestKeyTrimProjectionRequiresManageRightsAndKeepsNativeSource(t *testing.T)
 	var id string
 	if err := db.InTenant(ctx, f.d.App, f.person.TenantID, func(tx pgx.Tx) error {
 		var key string
-		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'Desk worker','desk-trim-fixture',decode(repeat('00',32),'hex'),ARRAY['nodes.read','nodes.write']) RETURNING id::text`, f.person.TenantID, f.agent.ID).Scan(&key); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'Desk worker','desk-trim-fixture',decode(repeat('00',32),'hex'),ARRAY['nodes.read','nodes.write'],(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1)) RETURNING id::text`, f.person.TenantID, f.agent.ID).Scan(&key); err != nil {
 			return err
 		}
 		return tx.QueryRow(ctx, `INSERT INTO key_trim_proposals(tenant_id,key_id,created_by,request_id,request_digest,previous_scopes,snapshot_digest,candidate_scopes,candidate_digest,evidence,usage,created_at,expires_at)

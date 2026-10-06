@@ -131,6 +131,7 @@ test('timeouts and cancellation terminate descendants before returning', async t
   const command = `node -e 'require("node:fs").writeFileSync(${JSON.stringify(marker)}, String(process.pid)); setInterval(()=>{},1000)'`
   const result = await runCommand(command, { cwd, timeout_seconds: 1 })
   assert.equal(result.status, 'timeout'); assert.ok(existsSync(marker))
+  assert.equal(result.output.split('\n').at(-1), `ci-static: command exceeded timeout_seconds=1 after ${result.seconds}s (process group termination requested)`)
   const pid = Number(readFileSync(marker, 'utf8'))
   assert.ok(pid > 0)
   assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
@@ -145,9 +146,36 @@ test('timeouts and cancellation terminate descendants before returning', async t
   const cancelled = await runCommand(`node -e 'require("node:fs").writeFileSync(${JSON.stringify(cancelledMarker)}, String(process.pid)); setInterval(()=>{},1000)'`, { cwd, timeout_seconds: 5, signal: controller.signal })
   unwatchFile(cancelledMarker, ready)
   assert.equal(cancelled.status, 'interrupted')
+  assert.equal(cancelled.output.split('\n').at(-1), `ci-static: command interrupted after ${cancelled.seconds}s (process group termination requested)`)
   const cancelledPid = Number(readFileSync(cancelledMarker, 'utf8'))
   assert.ok(cancelledPid > 0)
   assert.throws(() => process.kill(cancelledPid, 0), { code: 'ESRCH' })
+})
+
+test('timeout cleanup tolerates exited-group EPERM and ESRCH but preserves real signal failures', { skip: process.platform === 'win32' }, async t => {
+  for (const [code, phase, visible] of [
+    ['EPERM', 'close', false], ['ESRCH', 'close', false],
+    ['EPERM', 'stop', true], ['ESRCH', 'stop', false], ['EACCES', 'close', true]
+  ]) await t.test(`${code} during ${phase}`, async t => {
+    const cwd = temporary(t), signals = []
+    const killProcess = (pid, signal) => {
+      assert.ok(pid < 0, 'signals target the detached process group')
+      signals.push(signal)
+      if (signal === 'SIGTERM') process.kill(pid, signal)
+      if (signal === (phase === 'stop' ? 'SIGTERM' : 'SIGKILL')) throw Object.assign(new Error(`kill ${code}`), { code })
+    }
+    const [result] = await runChecks([{
+      id: 'timeout-fixture', command: `exec node -e 'for(let i=0;i<80;i++) console.log(i); setInterval(()=>{},1000)'`,
+      cwd: '.', needs: [], timeout_seconds: 1
+    }], cwd, { jobs: 1, run: (command, options) => runCommand(command, { ...options, killProcess }) })
+    assert.equal(result.status, 'timeout')
+    // SIGTERM really terminates the leader. A single subsequent SIGKILL proves
+    // cleanup runs from close, not the escalation timer as well.
+    assert.deepEqual(signals, ['SIGTERM', 'SIGKILL'])
+    assert.equal(result.output.includes(`kill ${code}`), visible)
+    assert.equal(result.output.split('\n').length, 40)
+    assert.equal(result.output.split('\n').at(-1), `ci-static: timeout-fixture exceeded timeout_seconds=1 after ${result.seconds}s (process group termination requested)`)
+  })
 })
 
 test('bounded pool overlaps independent checks and optional skips retain reasons', async t => {
@@ -193,13 +221,28 @@ test('skips report INCOMPLETE and code 3; allow-skips remains explicitly incompl
 
 test('fixed check environment removes caller flags and identity but supplies CI values', async t => {
   const cwd = temporary(t), source = { ...process.env, GOFLAGS: '-skip', AEON_TEST_TIER_MODE: 'essential', AEON_TEST_DATABASE_URL: 'fixture', RANDOM_EXTRA: 'fixture',
-    NIX_CFLAGS_COMPILE: '-isystem /fixture/sdk/usr/include', NIX_LDFLAGS: '-L/fixture/sdk/usr/lib' }
+    NIX_CFLAGS_COMPILE: '-isystem /fixture/sdk/usr/include', NIX_LDFLAGS: '-L/fixture/sdk/usr/lib',
+    DEVELOPER_DIR: '/fixture/apple-sdk', SDKROOT: '/fixture/apple-sdk/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk',
+    NIX_LDFLAGS_FOR_BUILD: '-L/fixture/build-sdk/usr/lib', NIX_CFLAGS_COMPILE_FOR_TARGET: '-isystem /fixture/target-sdk/usr/include',
+    NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1', NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
+    NIX_CC_WRAPPER_TARGET_BUILD_arm64_apple_darwin: '1', NIX_BINTOOLS_WRAPPER_TARGET_TARGET_arm64_apple_darwin: '1',
+    NIX_CC_WRAPPER_FLAGS_SET_arm64_apple_darwin: '1', NIX_DEBUG: '7' }
   await runChecks([{ id: 'env', command: 'true', cwd: '.', needs: [], timeout_seconds: 5 }], cwd, { env: source, run: async (_command, { env }) => {
     assert.equal(env.GOFLAGS, undefined); assert.equal(env.AEON_TEST_DATABASE_URL, undefined)
     assert.equal(env.RANDOM_EXTRA, undefined); assert.equal(env.AEON_TEST_TIER_MODE, 'full')
     assert.equal(env.CI, 'true'); assert.equal(env.CI_LANE, 'full')
     assert.equal(env.NIX_CFLAGS_COMPILE, source.NIX_CFLAGS_COMPILE)
     assert.equal(env.NIX_LDFLAGS, source.NIX_LDFLAGS)
+    assert.equal(env.DEVELOPER_DIR, source.DEVELOPER_DIR)
+    assert.equal(env.SDKROOT, source.SDKROOT)
+    assert.equal(env.NIX_LDFLAGS_FOR_BUILD, source.NIX_LDFLAGS_FOR_BUILD)
+    assert.equal(env.NIX_CFLAGS_COMPILE_FOR_TARGET, source.NIX_CFLAGS_COMPILE_FOR_TARGET)
+    assert.equal(env.NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin, '1')
+    assert.equal(env.NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin, '1')
+    assert.equal(env.NIX_CC_WRAPPER_TARGET_BUILD_arm64_apple_darwin, '1')
+    assert.equal(env.NIX_BINTOOLS_WRAPPER_TARGET_TARGET_arm64_apple_darwin, '1')
+    assert.equal(env.NIX_CC_WRAPPER_FLAGS_SET_arm64_apple_darwin, undefined)
+    assert.equal(env.NIX_DEBUG, undefined)
     assert.ok(env.npm_config_cache.startsWith(tmpdir()))
     return { status: 'passed', seconds: 0 }
   } })

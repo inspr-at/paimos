@@ -163,7 +163,12 @@ watch(projectId, id => { queueAnchor.value = null; assigneeMenu.value = null; if
 onMounted(() => queuePoller.start())
 onBeforeUnmount(() => queuePoller.stop())
 function closeQueue(restore: boolean) { const anchor = queueAnchor.value; queueAnchor.value = null; if (restore) anchor?.focus() }
-function openAssignee(row: ListItem, anchor: HTMLElement) { assigneeMenu.value = { row, anchor } }
+async function openAssignee(row: ListItem, anchor: HTMLElement) {
+  const request = peopleGeneration, revision = row.updated_at
+  await loadProjectPeople()
+  if (request !== peopleGeneration || !anchor.isConnected || row.updated_at !== revision) return
+  assigneeMenu.value = { row, anchor }
+}
 function closeAssignee(restore: boolean) { const anchor = assigneeMenu.value?.anchor; assigneeMenu.value = null; if (restore) anchor?.focus() }
 async function assignPerson(value: string) {
   const row = assigneeMenu.value?.row
@@ -222,7 +227,7 @@ const toolbarColumns = computed(() => {
 // In a saved view the columns belong to the view (they become part of the list's
 // state); on the plain list they are the person's own for this project.
 function saveColumns(order: ColumnId[], visible: ColumnId[]) {
-  if (filters.value.view) { update({ cols: order.filter(id => visible.includes(id) && !PINNED.includes(id)) }); return }
+  if (filters.value.view || filters.value.cols) { update({ cols: order.filter(id => visible.includes(id) && !PINNED.includes(id)) }); return }
   listPref.value?.save({ ...(listPrefs.value ?? {}), order, visible }, 0)
 }
 function resetColumns() {
@@ -597,30 +602,38 @@ function toggleGroup(key: string) {
 const views = computed(() => viewsOf(projectId.value))
 const activeView = computed(() => filters.value.view ? views.value.items.find(view => view.id === filters.value.view) ?? null : null)
 const viewFilters = computed(() => activeView.value ? filtersFromView(activeView.value) : null)
-const customised = computed(() => hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed || !!filters.value.hideStates)
-const viewDirty = computed(() => !!viewFilters.value && !sameListState(filters.value, viewFilters.value))
+const savedFilters = computed(() => ({ ...filters.value, mode: activeTicketView.value.id as ListFilters['mode'], cols: toolbarColumns.value.order.filter(id => toolbarColumns.value.visible.includes(id) && !PINNED.includes(id)) }))
+const customised = computed(() => !!listPrefs.value?.visible || filters.value.mode !== 'list' || hasFilters(filters.value) || filters.value.sort.length > 0 || filters.value.group !== 'none' || !!filters.value.cols || filters.value.showClosed || !!filters.value.hideStates)
+const viewDirty = computed(() => !!viewFilters.value && !sameListState(savedFilters.value, viewFilters.value))
 const canSaveView = computed(() => !journeyActive.value && !knowledgeActive.value && !settingsActive.value && (activeView.value ? viewDirty.value : customised.value))
 // The saved-view strip shows once there is a view to pick or a list worth keeping; the plain list alone needs no strip.
-const showViewBar = computed(() => !journeyActive.value && !knowledgeActive.value && !settingsActive.value && !graphActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
+const showViewBar = computed(() => !journeyActive.value && !knowledgeActive.value && !settingsActive.value && (views.value.items.length > 0 || !!activeView.value || canSaveView.value))
 const defaultViewId = computed(() => listPrefs.value?.defaultView ?? null)
 function viewQuery(view: SavedView | null): Record<string, string> {
   return view ? filtersToQuery(filtersFromView(view)) : {}
 }
 function hrefFor(id: string | null) {
   const view = id ? views.value.items.find(item => item.id === id) ?? null : null
-  const query = new URLSearchParams({ ...viewQuery(view), ...(outlineActive.value ? { view: 'outline' } : {}) }).toString()
+  const query = new URLSearchParams(view ? viewQuery(view) : { ...(activeTicketView.value.id !== 'list' ? { view: activeTicketView.value.id } : {}) }).toString()
   return `${sectionPath('tickets')}${query ? `?${query}` : ''}`
 }
 function openView(id: string | null, replace = false) {
   const view = id ? views.value.items.find(item => item.id === id) ?? null : null
   collapsed.value = new Set()
-  const query = { ...viewQuery(view), ...(outlineActive.value ? { view: 'outline' } : {}) }
+  const query = view ? viewQuery(view) : { ...(activeTicketView.value.id !== 'list' ? { view: activeTicketView.value.id } : {}) }
   const location = { path: sectionPath('tickets'), query }
   if (replace) void router.replace(location); else void router.push(location)
 }
 // A link to a view someone cannot see (private, or deleted) keeps its filters.
 watch([() => filters.value.view, () => views.value.loaded], ([id, loaded]) => {
-  if (id && loaded && !views.value.items.some(view => view.id === id)) update({ view: null })
+  if (!id || !loaded) return
+  const view = views.value.items.find(view => view.id === id)
+  if (!view) { update({ view: null }); return }
+  // Bare view links adopt the stored presentation; explicit URL edits stay dirty.
+  const query = { ...route.query }
+  if (query.view === undefined) query.view = view.mode
+  if (query.cols === undefined && view.columns.length) query.cols = view.columns.join(',')
+  if (query.view !== route.query.view || query.cols !== route.query.cols) void router.replace({ path: route.path, query })
 })
 // The project opens with the person's default view when nothing else was asked for.
 // The list waits for that answer, so it never shows the plain list first.
@@ -638,7 +651,7 @@ watch(projectId, async id => {
   if (projectId.value !== id) return
   const target = pref.value.value?.defaultView
   const view = target ? viewsOf(id).items.find(item => item.id === target) : null
-  if (view && plain()) await router.replace({ path: route.path, query: { ...viewQuery(view), ...modeQuery() } })
+  if (view && plain()) await router.replace({ path: route.path, query: viewQuery(view) })
   entryResolved.value = true
 }, { immediate: true })
 
@@ -793,19 +806,44 @@ function showUpdates() {
   if (!fullView.value && !panel.value?.el?.contains(document.activeElement)) table.value?.focusGrid()
 }
 
-// People who can be assigned: everyone assigned somewhere in this project, and you.
+// Discover everyone assigned in the project only when an assignment menu needs
+// them. Cold ticket navigation must not scan assignees and fetch each name.
 const projectPeople = ref<string[]>([])
-watch(projectId, async id => {
+let peopleGeneration = 0
+let projectPeopleLoad: Promise<void> | null = null
+watch([projectId, () => scopeOwner(session.identity)], () => {
+  peopleGeneration++
   projectPeople.value = []
-  if (!id) return
-  try {
-    const page = await listNodes({ within: id, kind: WORK_KINDS, facets: ['assignee'], limit: 1 })
-    const ids = Object.keys(page.facets?.assignee ?? {}).filter(value => value !== 'none')
-    await list.resolveNames(ids)
-    if (projectId.value === id) projectPeople.value = ids
-  } catch { /* the menu still offers you and Unassigned */ }
-}, { immediate: true })
-const people = computed(() => projectPeople.value.map(id => ({ id, name: list.names.get(id) ?? 'Someone' })))
+  projectPeopleLoad = null
+}, { flush: 'sync' })
+onBeforeUnmount(() => { peopleGeneration++ })
+function loadProjectPeople(): Promise<void> {
+  const id = projectId.value
+  if (!id) return Promise.resolve()
+  if (projectPeopleLoad) return projectPeopleLoad
+  const request = peopleGeneration
+  projectPeopleLoad = (async () => {
+    try {
+      const page = await listNodes({ within: id, kind: WORK_KINDS, facets: ['assignee'], limit: 1 })
+      if (request !== peopleGeneration) return
+      const ids = Object.keys(page.facets?.assignee ?? {}).filter(value => value !== 'none')
+      await list.resolveNames(ids)
+      if (request === peopleGeneration) projectPeople.value = ids
+    } catch {
+      // A later opening retries; already loaded people remain available.
+      if (request === peopleGeneration) projectPeopleLoad = null
+    }
+  })()
+  return projectPeopleLoad
+}
+const people = computed(() => {
+  const known = new Map<string, string>()
+  for (const row of [...list.rows.value, panelItem.value]) {
+    if (row?.project?.id === projectId.value && row.assignee) known.set(row.assignee.id, row.assignee.name)
+  }
+  for (const id of projectPeople.value) known.set(id, list.names.get(id) ?? 'Someone')
+  return [...known].map(([id, name]) => ({ id, name }))
+})
 
 let openedFromList = false
 let openedQuery = ''
@@ -1114,6 +1152,7 @@ const savePanel = ref<{ mode: 'create' | 'rename'; anchor: HTMLElement; view?: S
 const saveBusy = ref(false)
 const saveError = ref('')
 const viewBar = ref<InstanceType<typeof ViewBar>>()
+watch([projectId, () => me.value?.id], () => { savePanel.value = null; saveError.value = ''; saveBusy.value = false })
 function startSave(anchor: HTMLElement) {
   saveError.value = ''
   const base = activeView.value ? copyName(activeView.value.name, views.value.items.map(v => v.name)) : suggestName(filters.value, chipLabel)
@@ -1127,31 +1166,35 @@ function closeSave(restore: boolean) {
 }
 function problem(e: unknown) { return e instanceof Error ? e.message : 'Something went wrong' }
 async function submitSave(value: { name: string; shared: boolean; makeDefault: boolean }) {
-  const panel = savePanel.value, id = projectId.value
+  const panel = savePanel.value, id = projectId.value, person = me.value?.id, state = { ...savedFilters.value, view: null }
   if (!panel || !id) return
   saveBusy.value = true; saveError.value = ''
   try {
     if (panel.mode === 'rename' && panel.view) {
       const saved = await renameView(id, panel.view, value.name)
+      if (projectId.value !== id || me.value?.id !== person || savePanel.value !== panel) return
       toast(`Renamed the view to “${saved.name}”`)
     } else {
-      const saved = await saveNewView(id, value.name, { ...filters.value, view: null }, value.shared)
+      const saved = await saveNewView(id, value.name, state, value.shared)
+      if (projectId.value !== id || me.value?.id !== person || savePanel.value !== panel) return
       if (value.makeDefault) listPref.value?.save({ ...(listPrefs.value ?? {}), defaultView: saved.id }, 0)
-      update({ view: saved.id })
+      if (sameListState(savedFilters.value, state)) update({ view: saved.id, cols: filtersFromView(saved).cols })
       toast(`Saved the view “${saved.name}”${saved.shared ? ', shared with the project' : ''}`)
     }
     closeSave(false)
   } catch (e) {
-    saveError.value = problem(e)
+    if (projectId.value === id && savePanel.value === panel) saveError.value = problem(e)
   } finally {
     saveBusy.value = false
   }
 }
 async function saveActive(view: SavedView) {
-  const id = projectId.value
+  const id = projectId.value, person = me.value?.id, state = { ...savedFilters.value, view: null }
   if (!id) return
   try {
-    await saveViewState(id, view, { ...filters.value, view: null })
+    const saved = await saveViewState(id, view, state)
+    if (projectId.value !== id || me.value?.id !== person || filters.value.view !== view.id) return
+    if (sameListState(savedFilters.value, state)) update({ cols: filtersFromView(saved).cols })
     toast(`Saved the changes to “${view.name}”`)
   } catch (e) { toast(`The view was not saved: ${problem(e)}`, { tone: 'error' }) }
 }
@@ -1261,16 +1304,26 @@ watch(() => selected.value.size > 0, on => {
 onBeforeUnmount(() => { frameObserver?.disconnect(); window.removeEventListener('resize', measureFrame) })
 const bulkBusy = ref(false)
 const bulkMenu = ref<{ kind: 'status' | 'assignee' | 'priority' | 'labels' | 'move' | 'release'; anchor: HTMLElement } | null>(null)
+let bulkMenuGeneration = 0
 const releaseIds = ref<string[]>([])
-function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
+async function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
+  const opening = ++bulkMenuGeneration
   const at = anchor ?? document.querySelector<HTMLElement>(`.bulk-bar [aria-keyshortcuts="${{ status: 's', assignee: 'a', priority: 'p', labels: 'l', move: 'm', release: 'g' }[kind]}"]`)
   if (!at) return
   if (kind === 'release') { openRelease(at, liveSelection()); return }
   if (kind === 'labels') void list.requestFacet('tag')
+  if (kind === 'assignee') {
+    const request = peopleGeneration
+    const selection = () => JSON.stringify(selectedRows.value.map(row => [row.id, row.updated_at]))
+    const shown = selection()
+    await loadProjectPeople()
+    if (opening !== bulkMenuGeneration || request !== peopleGeneration || !at.isConnected || selection() !== shown) return
+  }
   if (kind === 'move') void list.loadEpics()
   bulkMenu.value = { kind, anchor: at }
 }
 function closeBulk(restore: boolean) {
+  bulkMenuGeneration++
   const anchor = bulkMenu.value?.anchor
   bulkMenu.value = null
   if (restore) anchor?.focus()
@@ -1304,7 +1357,7 @@ async function runBulk(change: Omit<BulkChange, 'ids'>, done: (count: number) =>
   const gone = new Set(selectedDeleted.value)
   ids = ids.filter(id => !gone.has(id))
   if (!ids.length || bulkBusy.value) return
-  bulkMenu.value = null
+  closeBulk(false)
   bulkBusy.value = true
   try {
     const bulkRows = selectionRows.value
@@ -1391,7 +1444,7 @@ async function undoBulk(eventId: number) {
 const count = (n: number) => plural(n, 'ticket')
 async function bulkStatus(state: string) {
   if (bulkBusy.value) return
-  bulkMenu.value = null
+  closeBulk(false)
   const gated = selectedRows.value.filter(row => needsBenefitPrompt(row, state))
   const gatedIds = new Set(gated.map(row => row.id))
   const ready = [...selected.value].filter(id => !gatedIds.has(id))
@@ -1421,6 +1474,7 @@ function bulkMove(epic: { id: string; key: string; title: string } | null) {
   void runBulk({ parent_id: target }, n => epic ? `Moved ${count(n)} to ${epic.title}` : `Took ${count(n)} out of their epic`)
 }
 function openRelease(anchor: HTMLElement, ids: string[]) {
+  bulkMenuGeneration++
   if (!ids.length || !can('releases.write', project.value?.id)) return
   releaseIds.value = ids
   bulkMenu.value = { kind: 'release', anchor }
@@ -1435,7 +1489,7 @@ async function chooseRelease(target: ReleaseTarget) {
     const row = rows.find(item => item.id === id)
     return { id, key: row?.key ?? id, title: row?.title ?? '', state: row?.state, kind: row?.kind_slug, isParent: releaseViewIsParent(nativeReleases.value.get(id)) }
   })
-  bulkMenu.value = null
+  closeBulk(false)
   const attempt = ++releaseAttempt
   bulkBusy.value = true
   const here = () => attempt === releaseAttempt && project.value?.id === projectId
@@ -1745,7 +1799,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         <ProjectTabs :items="projectSections" :selected="section" label="Project sections" sections tips @select="setSection" />
         <span v-if="ticketsHeader" class="nav-divider" aria-hidden="true" />
       <ViewBar
-        v-if="(ticketsHeader && !graphActive) || showViewBar" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
+        v-if="ticketsHeader || showViewBar" ref="viewBar" :views="views.items" :active-id="activeView?.id ?? null" :dirty="viewDirty" :default-id="defaultViewId" :can-save-new="canSaveView && !activeView"
         :me="me?.id ?? null" :href-for="hrefFor" @open="id => openView(id)" @save="saveActive" @save-as="startSave" @reset="openView(activeView?.id ?? null, true)"
         @rename="startRename" @duplicate="duplicate" @set-default="setDefaultView" @share="share" @copy-link="copyViewLink" @remove="remove"
       />
@@ -1842,7 +1896,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         v-if="ticketKey" :key="`${project.id}/${me?.id ?? ''}/${ticketKey.toUpperCase()}`" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
         :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
-        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :native-releases="nativeReleases"
+        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :ensure-people="loadProjectPeople" :native-releases="nativeReleases"
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />

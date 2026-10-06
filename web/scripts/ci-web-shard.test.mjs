@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { select, validate, key } from '../../scripts/test-tiers/core.mjs'
-import { flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
+import { command, flattenBrowser, root } from '../../scripts/test-tiers/collect.mjs'
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
@@ -62,6 +62,16 @@ test('LPT balancing distributes a known fixture optimally and covers it exactly 
   const manifest = fixture(), shards = balanceShards(manifest, 3)
   assert.deepEqual(shards.map(s => s.weightSeconds), [13, 13, 13])
   assert.deepEqual(checkCoverage(manifest, shards, files(manifest)), { specs: 6, shards: 3 })
+  // Greedy placement alone gives 17/13. Swapping the 8- and 6-second specs
+  // reaches 15/15 without dropping coverage or understating a timing weight.
+  const uneven = { version: 1, groups: [group('a', [8, 7]), group('b', [6, 5, 4])] }
+  const before = structuredClone(uneven), balanced = balanceShards(uneven, 2)
+  assert.deepEqual(balanced.map(s => s.weightSeconds), [15, 15])
+  assert.deepEqual(checkCoverage(uneven, balanced, files(uneven)), { specs: 5, shards: 2 })
+  assert.deepEqual(uneven, before, 'Balancing must retain source weights and policies')
+  for (const shard of balanced) assert.equal(shard.weightSeconds, shard.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0))
+  uneven.groups.reverse().forEach(g => g.specs.reverse())
+  assert.deepEqual(balanceShards(uneven, 2), balanced, 'Swap selection must not depend on source order')
 })
 
 test('one-worker tier weights convert measured parallel steps but retain serial and unmeasured estimates', async () => {
@@ -515,4 +525,34 @@ test('Settings cases stay classified: strict validation rejects stale and unclas
   assert.equal(evidence.length, 1)
   assert.equal(evidence[0].tier, 'NIGHTLY', 'screenshot evidence stays nightly')
   for (const row of rows) if (row !== evidence[0]) assert.ok(['ESSENTIAL', 'GATED-FULL'].includes(row.tier), `${key(row)} needs an explicit gate tier`)
+})
+
+// Native expansion catches parameterized routing cases; strict reconciliation
+// prevents new cases from silently becoming nightly-only after a merge.
+for (const [kind, file, minimum] of [
+  ['vitest', 'tests/settings-routing.unit.test.ts', 35],
+  ['node', 'tests/agent-login.test.ts', 3],
+]) test(`${file} native registrations stay explicitly gated`, () => {
+  const directory = mkdtempSync(resolve(tmpdir(), 'aeon-706-native-tiers-'))
+  try {
+    let collected
+    if (kind === 'vitest') {
+      const output = resolve(directory, 'vitest-list.json')
+      command(process.execPath, ['node_modules/vitest/vitest.mjs', 'list', file, `--json=${output}`,
+        '--no-staticParse', '--maxWorkers=1', '--no-fileParallelism', '--configLoader=runner'], { cwd: webRoot, timeout: 30_000 })
+      collected = JSON.parse(readFileSync(output, 'utf8')).map(row => ({ kind, file, name: row.name }))
+    } else {
+      collected = JSON.parse(command(process.execPath, ['--import', resolve(root, 'scripts/test-tiers/node-collect-hook.mjs'),
+        resolve(root, 'scripts/test-tiers/node-collect.mjs'), resolve(webRoot, file)], { cwd: webRoot, timeout: 30_000 }))
+        .map(row => ({ ...row, kind, file }))
+    }
+    assert.ok(collected.length >= minimum, `${file}: native collection must retain parameterized cases`)
+    const stored = JSON.parse(readFileSync(resolve(root, 'scripts/ci/web-test-tiers.json'), 'utf8'))
+    const manifest = { version: stored.version, tests: stored.tests.filter(row => row.file === file) }
+    const rows = validate(manifest, collected, undefined, { strict: true })
+    for (const event of ['pull_request', 'merge_group']) {
+      const selected = select(rows, { event, paths: ['.github/workflows/ci.yml'] }).tests
+      assert.deepEqual(selected.map(key).sort(), collected.map(key).sort(), `${event}: every registration must gate`)
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })

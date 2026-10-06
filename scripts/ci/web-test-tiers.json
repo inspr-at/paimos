@@ -638,6 +638,20 @@
     ,
     "browser:tests/theme-agents.spec.ts:visible screenshots and Personal agent behaviour controls stay stable in all viewport modes"
     ,
+    "browser:tests/theme-settings.spec.ts:Theme settings 1024 dark: preview, derived colours, marker and overlay stay still"
+    ,
+    "browser:tests/theme-settings.spec.ts:Theme settings 1024 light: preview, derived colours, marker and overlay stay still"
+    ,
+    "browser:tests/theme-settings.spec.ts:Theme settings 1440 dark: preview, derived colours, marker and overlay stay still"
+    ,
+    "browser:tests/theme-settings.spec.ts:Theme settings 1440 light: preview, derived colours, marker and overlay stay still"
+    ,
+    "browser:tests/theme-settings.spec.ts:Theme settings 390 dark: preview, derived colours, marker and overlay stay still"
+    ,
+    "browser:tests/theme-settings.spec.ts:Theme settings 390 light: preview, derived colours, marker and overlay stay still"
+    ,
+    "browser:tests/theme-settings.spec.ts:derived contrast preserves chosen colours and staged edits apply only after Save"
+    ,
     "browser:tests/webcore-recovery.spec.ts:a 2051-event access history shows its newest revocation and accurately reports the bounded window"
     ,
     "browser:tests/webcore-recovery.spec.ts:knowledge keeps a failed second query visibly stale, with retry and the previous query named"
@@ -745,12 +759,6 @@
     "node:tests/test-tier-failures.test.ts:failed Go jsonl names the package and test with the last 40 lines in logs and summary"
     ,
     "node:tests/test-tier-failures.test.ts:native planning regression reuses one collected snapshot for unchanged-tree CLI checks"
-    ,
-    "node:tests/theme-colours.test.ts:Suggest changes failing shades, keeps readable shades, hue and saturation"
-    ,
-    "node:tests/theme-colours.test.ts:contrast uses WCAG luminance and both actual preview card surfaces"
-    ,
-    "node:tests/theme-colours.test.ts:derived dark retains the hue and produces a legible shade"
     ,
     "node:tests/work-aggregates.test.ts:fractional progress rounded by the formatter to 100% retains ETA and staleness in every mode"
     ,
@@ -8080,6 +8088,8 @@
     ,
     {"kind":"browser","file":"tests/journey.spec.ts","name":"Inspire shows the sources, the transcript and cited drafts; accepting the brief moves the next action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/journey.spec.ts","name":"Journey hides partial work totals on pagination failure and retries the complete list","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/journey.spec.ts","name":"Journey is a third view of the project, with the stage and next action in the footer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/journey.spec.ts","name":"Plan adds a ticket to the release, under a feature","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -8263,6 +8273,20 @@
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-layout.spec.ts","name":"new, edit and rotate scopes stay in their columns at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption preserves the key and controls at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"adoption refusal reports failure and owned keys have no takeover action","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/key-scopes.spec.ts","name":"cancel or untick a role extension writes nothing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -9840,6 +9864,8 @@
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"editable metadata cannot invent ticket provenance or a source-edit action","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"extreme primary accents keep recurrence glyphs readable without moving controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"moved ticket provenance and source editing use the receipt source project despite spoofed metadata","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/recurrence-marker.spec.ts","name":"option B has a stable 22 px slot and header at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10920,6 +10946,8 @@
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"an unpooled account joins every existing member and can leave them sharing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"dock: drain and pool confirmations keep Tab and Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"names that clash ask to be named, and a rename changes only the name","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"old limits set by hand show as Set by you, with Make this repeat and Remove","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10946,9 +10974,37 @@
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"screenshots › shot read-only","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"sheet: drain and pool confirmations keep Tab and Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"side: drain and pool confirmations keep Tab and Escape","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"the Advanced sentence round-trips and caps on top of the plan","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"without account.manage the list is read-only","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"Needs you verifies the expired sign-in once and reports a failed request honestly","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"a matching login joins the shared quota from the account panel and Sign out everywhere covers it","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"failed capacity apply stays unsaved and reports the actual failure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"host settings keep controls stable through all modes at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"members see account and computer details without mutation controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"quota warning popover submits with platform modifier and Undo restores its snapshot","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/settings-host-capacity.spec.ts","name":"sign-out confirmation names its scope and a failed write keeps the reviewed account open","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-shared.spec.ts","name":"Settings primary actions have no glow and retain keyboard focus in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -11352,19 +11408,17 @@
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"New theme duplicates the default even on a later list page; managers may edit it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Suggest touches only a failing mode and warnings never block Save","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1024 dark: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1024 dark: preview, Suggest, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1024 light: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1024 light: preview, Suggest, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1440 dark: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1440 dark: preview, Suggest, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1440 light: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1440 light: preview, Suggest, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 390 dark: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 390 dark: preview, Suggest, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
-    ,
-    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 390 light: preview, Suggest, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 390 light: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"consecutive record conflicts retain active recovery through pagination (1024 dark)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11390,7 +11444,17 @@
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"delete confirmation stays still through a conflict and needs reconfirming after Reload (390 light)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"derived contrast preserves chosen colours and staged edits apply only after Save","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"duplication conflict keeps its banner and Reload through pagination","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"extreme primary accents keep open ticket chip readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"extreme primary accents keep public quote action readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"extreme primary accents keep setup progress readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"extreme primary accents keep unread badge readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"failed Save (409) retains edits and does not report success","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11415,6 +11479,16 @@
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"platform submit shortcut closes the picker and saves an in-place name","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"save preserves Agents, manual dark and derived reset; invalid hex never writes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents keep Decision Desk action readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents keep Decision Desk pagination readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents keep Decision Desk text readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents keep ordinary and Markdown links readable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"saved extreme primary accents retain visible keyboard focus without moving controls","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"selection after a deletion conflict restores editable Colours and Save","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11669,6 +11743,12 @@
     {"kind":"browser","file":"tests/version-reveal.spec.ts","name":"unnamed footer release: hover and keyboard focus show seconds in the card; a click opens history","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/version-reveal.spec.ts","name":"unnamed release rows: only the version copy control reveals; the row still selects","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 Graph offers saved views, persists mode and applies their filters","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 plain columns save and reopen in list despite personal changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/views-filters.spec.ts","name":"AEON-718 plain columns save and reopen in outline despite personal changes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/views-filters.spec.ts","name":"Shift F opens every filter: labels, parent, cost unit and release by name, and a relative date","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -12122,6 +12202,10 @@
     ,
     {"kind":"node","file":"tests/account-link.test.ts","name":"account code accepts the one-line format without URL or command parsing","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/accounts-overview.test.ts","name":"accounts overview merges only a canonical shared quota identity within one harness","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/accounts-overview.test.ts","name":"host capacity parsing retains off defaults and rejects oversized history","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/activity.test.ts","name":"an automatic change keeps the job that wrote it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/activity.test.ts","name":"changes read in product words","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -12165,6 +12249,8 @@
     {"kind":"node","file":"tests/agent-activity.test.ts","name":"shared privacy rules screen current text, legacy fallback and both histories","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agent-activity.test.ts","name":"summary policy preserves the existing heartbeat note for older reporters","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/agent-login.test.ts","name":"CLI login names the instance after the workspace and never passes --instance (AEON-730)","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/agent-login.test.ts","name":"CLI login uses the current origin, excluding credentials, paths and query strings","tier":"ESSENTIAL"}
     ,
@@ -12846,11 +12932,21 @@
     ,
     {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey grouping bounds cycles and retains legacy epic projection","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey groups retain leaves through all 1000 supported ancestors","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey parent groups count nested leaves once and exclude non-work children","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/journey-work.test.ts","name":"canonical journey parent totals include every leaf beyond 64 ancestors","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/journey-work.test.ts","name":"journey legacy ticket counts retain subdivisions until the canonical migration","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work accepts a complete twelfth page and retains every row in order","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work finishes empty lists and propagates later page failures","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work rejects a continuing twelfth page instead of returning partial totals","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/journey.test.ts","name":"Journey work rejects repeated and cycling continuation cursors before another request","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/journey.test.ts","name":"confirmation binds journey, requirements, release, action and request identities by value","tier":"GATED-FULL"}
     ,
@@ -12909,6 +13005,8 @@
     {"kind":"node","file":"tests/list-views.test.ts","name":"groups by assignee (you first), priority, type and label, with totals from the counts","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/list-views.test.ts","name":"options and chip words for labels, epics and people","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/list-views.test.ts","name":"saved views retain each mode and an explicit pinned-only column choice","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/list-views.test.ts","name":"the list API gets exclusions with their spellings, kinds without the excluded ones, and day bounds","tier":"GATED-FULL"}
     ,
@@ -13476,11 +13574,23 @@
     ,
     {"kind":"node","file":"tests/text-glyphs.test.ts","name":"the guard catches what it is meant to catch","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/theme-colours.test.ts","name":"Suggest changes failing shades, keeps readable shades, hue and saturation","tier":"NIGHTLY"}
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"5000 deterministic colours satisfy ink, line and fill-label contrast in both modes","tier":"ESSENTIAL"}
     ,
-    {"kind":"node","file":"tests/theme-colours.test.ts","name":"contrast uses WCAG luminance and both actual preview card surfaces","tier":"NIGHTLY"}
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"OKLCH round trips sRGB and maps excessive chroma without changing hue","tier":"ESSENTIAL"}
     ,
-    {"kind":"node","file":"tests/theme-colours.test.ts","name":"derived dark retains the hue and produces a legible shade","tier":"NIGHTLY"}
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"Porcelain generated accent blocks cannot drift from the engine in CI","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"WCAG contrast measures the rounded hex and actual card surfaces","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"automatic dark mirrors lightness and fixes the unchanged green regression","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"first-paint bootstrap restores derived CSS before app startup with its CSP nonce","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"first-paint bootstrap tolerates unavailable storage and rejects corrupt, oversized or unsafe CSS","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"keyboard focus is a solid contrast-safe ring for extreme primary accents","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-colours.test.ts","name":"token aliases follow both accents and every marker source without theming semantic colours","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"a numeric cost in the payload is unknown, not displayed","tier":"GATED-FULL"}
     ,
@@ -14170,7 +14280,11 @@
     ,
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Release Walker description scrolling > retains membership and screen shortcuts outside the description and Escape inside it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"adoption confirmation is bound to the acting person and key","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"keeps an explicit custom-role recurrence grant and names the creator ceiling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"late adoption results cannot restore another person or a departed key","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"names the built-in Admin agent role as the recurrence ceiling","tier":"ESSENTIAL"}
     ,
@@ -15532,7 +15646,75 @@
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"filters before limiting and keeps two sessions of one principal separate","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"Back returns to the previous section after following a legacy bookmark","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"a hash-only change on Workspace redirects and keeps its query","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"a trailing slash on a legacy Workspace bookmark still redirects","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"current cards and unknown bookmarks keep their section","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #agent-activity entry keeps the query and opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #autopilot-changes entry keeps the query and opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #autopilot-projects entry keeps the query and opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #autopilot-proposals entry keeps the query and opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #autopilot-recent entry keeps the query and opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #autopilot-suggestions entry keeps the query and opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #estimates entry keeps the query and opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #members entry keeps the query and opens access","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #model-refresh entry keeps the query and opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #models entry keeps the query and opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #quota-warnings entry keeps the query and opens accounts","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #silent-sessions entry keeps the query and opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #status-autopilot entry keeps the query and opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #ticket-types entry keeps the query and opens vocabulary","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #work-vocabulary entry keeps the query and opens vocabulary","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired briefing bookmarks open Agents and keep request links","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #agent-activity opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #autopilot-changes opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #autopilot-projects opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #autopilot-proposals opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #autopilot-recent opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #autopilot-suggestions opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #estimates opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #members opens access","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #model-refresh opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #models opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #quota-warnings opens accounts","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #silent-sessions opens agents","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #status-autopilot opens autopilot","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #ticket-types opens vocabulary","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #work-vocabulary opens vocabulary","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/start-agent.unit.test.ts","name":"Start Agent leaf selection > queries canonical leaves on every page and excludes parents and unknown shapes from mixed results","tier":"ESSENTIAL"}
     ,
@@ -19007,6 +19189,16 @@
     {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"a newer restoration owns runtime and editor in both response orders: editor first","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/theme-restoration.unit.test.ts","name":"a newer restoration owns runtime and editor in both response orders: restoration first","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/theme-runtime.unit.test.ts","name":"another authenticated person and sign-out clear boot CSS and cache synchronously","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/theme-runtime.unit.test.ts","name":"blocked browser storage never stops application or identity resets","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/theme-runtime.unit.test.ts","name":"first authenticated restore keeps matching first-paint CSS until the server answers","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/theme-runtime.unit.test.ts","name":"late answers from a previous tenant or person cannot change CSS, cache or agent appearance","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/theme-runtime.unit.test.ts","name":"one runtime writer updates CSS and agent appearance and caches only owner plus derived CSS","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/themes-api.unit.test.ts","name":"client sends complete values, nullable derivation and captured CAS without altering Agents","tier":"NIGHTLY"}
     ,

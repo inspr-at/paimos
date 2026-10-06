@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/auth"
+	"github.com/inspr-at/paimos/internal/escalation"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/inbox"
 	"gopkg.in/yaml.v3"
@@ -23,25 +24,32 @@ import (
 )
 
 type recoveryAgentFixture struct {
-	f                                           *harnessFixture
-	path, session, run, lease, profile, account string
-	identity                                    ownedprocess.Identity
+	f                                                     *harnessFixture
+	path, session, run, lease, profile, account, keyOwner string
+	identity                                              ownedprocess.Identity
 }
 
 func recoveryAgent(t *testing.T) recoveryAgentFixture {
 	t.Helper()
 	f := fixture(t)
+	// Requester revocation must not also revoke the daemon's key authority.
+	// Keep the person owning the paired key separate from the recovery requester.
+	keyOwner := uid()
 	// The shared handler fixture does not encode its tenant in the key prefix.
 	// Use its synthetic secret with a routable prefix for real auth middleware.
 	parts := strings.SplitN(strings.TrimPrefix(f.key, "aeon_"), "_", 2)
 	prefix := strings.ReplaceAll(f.agent.TenantID, "-", "") + strings.Repeat("7", 16)
 	f.tx(t, f.agent, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET prefix=$1 WHERE principal_id=$2`, prefix, f.agent.ID)
+		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Recovery key owner')`, f.agent.TenantID, keyOwner); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET prefix=$1,created_by_principal_id=$3 WHERE id=$2`, prefix, f.agent.AuthKeyID, keyOwner)
 		return err
 	})
+	dbtest.BindRole(t, f.db, f.agent.TenantID, keyOwner, "admin")
 	f.key = "aeon_" + prefix + "_" + parts[1]
 	order, run := stateRun(t, f, f.project, "running", "REC-10")
-	v := recoveryAgentFixture{f: f, run: run, lease: "fixture-recovery-lease-000000000000001", profile: uid(), account: uid(), identity: ownedprocess.Identity{DaemonID: "fixture", Generation: strings.Repeat("a", 32), ProcessID: strings.Repeat("b", 32), RootPID: 1234, GroupID: 1234, StartedAt: time.Now().UTC().Truncate(time.Second)}}
+	v := recoveryAgentFixture{f: f, run: run, lease: "fixture-recovery-lease-000000000000001", profile: uid(), account: uid(), keyOwner: keyOwner, identity: ownedprocess.Identity{DaemonID: "fixture", Generation: strings.Repeat("a", 32), ProcessID: strings.Repeat("b", 32), RootPID: 1234, GroupID: 1234, StartedAt: time.Now().UTC().Truncate(time.Second)}}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'recovery-model','1','claude','anthropic','fixture-model','high','standard')`, f.person.TenantID, v.profile); err != nil {
 			return err
@@ -56,7 +64,7 @@ func recoveryAgent(t *testing.T) recoveryAgentFixture {
 			return err
 		}
 		req, computer := uid(), uid()
-		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,'731000001',$3,$4,$5,'{}','fixture','redeemed',$6)`, f.person.TenantID, req, strings.Repeat("1", 64), strings.Repeat("2", 64), strings.Repeat("3", 64), f.person.ID); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by) VALUES($1,$2,'731000001',$3,$4,$5,'{}','fixture','redeemed',$6)`, f.person.TenantID, req, strings.Repeat("1", 64), strings.Repeat("2", 64), strings.Repeat("3", 64), keyOwner); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,last_seen_at) SELECT $1,$2,$3,$4,id,'fixture',$5,clock_timestamp() FROM agent_keys WHERE principal_id=$4 LIMIT 1`, f.person.TenantID, computer, req, f.agent.ID, strings.Repeat("3", 64))
@@ -113,6 +121,34 @@ func (v recoveryAgentFixture) claim(t *testing.T) []map[string]any {
 		t.Fatal(err)
 	}
 	return out
+}
+
+func (v recoveryAgentFixture) refuseRevokedKeyOwner(t *testing.T, path string, body any) {
+	t.Helper()
+	dbtest.BindRole(t, v.f.db, v.f.person.TenantID, v.keyOwner, "viewer")
+	w := v.runtimeCall(t, path, body)
+	expect(t, w, 403)
+	if decode(t, w)["reason_code"] != "missing_role_permission" {
+		t.Fatal("key owner revocation failed for a different reason")
+	}
+	dbtest.BindRole(t, v.f.db, v.f.person.TenantID, v.keyOwner, "admin")
+}
+
+func (v recoveryAgentFixture) expectRejectedRecovery(t *testing.T, id, reason string) {
+	t.Helper()
+	v.f.tx(t, v.f.person, func(tx pgx.Tx) error {
+		var state, outcome, auditReason string
+		if err := tx.QueryRow(t.Context(), `SELECT q.state,coalesce(q.outcome,''),
+		 coalesce((SELECT e.after->>'reason' FROM events e
+		 WHERE e.type='harness.agent_recovery_rejected' AND e.after->>'id'=q.id::text
+		 ORDER BY e.id DESC LIMIT 1),'') FROM harness_recoveries q WHERE q.id=$1`, id).Scan(&state, &outcome, &auditReason); err != nil {
+			return err
+		}
+		if state != "completed" || outcome != "rejected" || auditReason != reason {
+			t.Fatalf("recovery state=%q outcome=%q reason=%q, want completed/rejected/%s", state, outcome, auditReason, reason)
+		}
+		return nil
+	})
 }
 
 func TestAgentRecoveryRequestAuthorityAndSingleClaim(t *testing.T) {
@@ -213,10 +249,12 @@ func TestAgentRecoveryRevocationExpiryAndObservationFence(t *testing.T) {
 	f := v.f
 	body := v.request(t)
 	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	v.refuseRevokedKeyOwner(t, "/api/harness-recoveries/claim", map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation})
 	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
 	if got := v.claim(t); len(got) != 0 {
 		t.Fatal("revoked requester reached daemon")
 	}
+	v.expectRejectedRecovery(t, body["request_id"].(string), "authorization_revoked")
 	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
 	body = v.request(t)
 	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
@@ -227,13 +265,19 @@ func TestAgentRecoveryRevocationExpiryAndObservationFence(t *testing.T) {
 	if got := v.claim(t); len(got) != 0 {
 		t.Fatal("changed observation reached daemon")
 	}
+	v.expectRejectedRecovery(t, body["request_id"].(string), "observation_changed")
 	body = v.request(t)
 	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
 	v.claim(t)
-	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
 	endpoint := "/api/harness-recoveries/" + body["request_id"].(string) + "/complete"
 	completion := map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation, "outcome": "rejected"}
-	expect(t, v.runtimeCall(t, endpoint, completion), 403)
+	v.refuseRevokedKeyOwner(t, endpoint, completion)
+	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
+	denied := v.runtimeCall(t, endpoint, completion)
+	expect(t, denied, 403)
+	if decode(t, denied)["reason_code"] != "missing_role_permission" {
+		t.Fatal("requester revocation failed for a different reason")
+	}
 	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `UPDATE harness_recoveries SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1`, body["request_id"])
@@ -306,10 +350,12 @@ func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T
 	expect(t, f.call(f.agent, "POST", v.path+"/recover-agent", body, v.lease), 403)
 	expect(t, f.call(f.foreign, "POST", v.path+"/recover-agent", body, ""), 404)
 	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	v.refuseRevokedKeyOwner(t, "/api/harness-recoveries/claim", map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation})
 	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
 	if len(v.claim(t)) != 0 {
 		t.Fatal("revoked attached recovery reached daemon")
 	}
+	v.expectRejectedRecovery(t, body["request_id"].(string), "authorization_revoked")
 	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
 	body["request_id"] = uid()
 	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
@@ -361,8 +407,13 @@ func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T
 		}
 		return nil
 	})
+	v.refuseRevokedKeyOwner(t, endpoint, completion)
 	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "viewer")
-	expect(t, v.runtimeCall(t, endpoint, completion), 403)
+	denied := v.runtimeCall(t, endpoint, completion)
+	expect(t, denied, 403)
+	if decode(t, denied)["reason_code"] != "missing_role_permission" {
+		t.Fatal("requester revocation failed for a different reason")
+	}
 	dbtest.BindRole(t, f.db, f.person.TenantID, f.person.ID, "admin")
 	w := v.runtimeCall(t, endpoint, completion)
 	expect(t, w, 200)
@@ -370,4 +421,87 @@ func TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority(t *testing.T
 		t.Fatalf("attached completion=%v", got)
 	}
 	expect(t, v.runtimeCall(t, endpoint, completion), 200)
+}
+
+func TestAgentRecoveryBudgetRejectionCommitsDecisionWithoutContinuation(t *testing.T) {
+	v := recoveryAgent(t)
+	f := v.f
+	body := v.request(t)
+	expect(t, f.call(f.person, "POST", v.path+"/recover-agent", body, ""), 201)
+	v.claim(t)
+	expect(t, f.call(f.agent, "POST", v.path+"/stop", map[string]any{"reason": "stopped"}, v.lease), 200)
+	var order string
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_runs SET status='cancelled',started_at=clock_timestamp()-interval '1 minute',ended_at=clock_timestamp() WHERE id=$1`, v.run); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `SELECT work_order_id::text FROM harness_sessions WHERE id=$1`, v.session).Scan(&order); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, order, f.ticket); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE work_orders SET max_cost_micros=1000000 WHERE node_id=$1`, order); err != nil {
+			return err
+		}
+		state, err := json.Marshal(escalation.State{EpisodeID: f.ticket, Status: "stuck", Reason: "failed_fix_rounds", Revision: 1, Attempts: escalation.MaxAttempts, HeldCost: 100, MaxAttempts: escalation.MaxAttempts, MaxCost: escalation.MaxCostMicros, OriginalProfile: v.profile})
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO work_escalations(tenant_id,ticket_node_id,project_id,state) VALUES($1,$2,$3,$4)`, f.person.TenantID, f.ticket, f.project, state)
+		return err
+	})
+	endpoint := "/api/harness-recoveries/" + body["request_id"].(string) + "/complete"
+	completion := map[string]any{"daemon_id": v.identity.DaemonID, "generation": v.identity.Generation, "outcome": "exited"}
+	w := v.runtimeCall(t, endpoint, completion)
+	expect(t, w, 409)
+	var failure struct{ Error string }
+	if err := json.Unmarshal(w.Body.Bytes(), &failure); err != nil {
+		t.Fatal(err)
+	}
+	const want = "finite escalation cost and attempt budget required; work awaits a Decision Desk decision"
+	if failure.Error != want {
+		t.Fatalf("rejection=%s", w.Body.String())
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var status, reason, question string
+		var pending bool
+		if err := tx.QueryRow(t.Context(), `SELECT state->>'status',state->>'reason',coalesce(state->>'question_id',''),coalesce((state->>'question_pending')::boolean,false) FROM work_escalations WHERE ticket_node_id=$1`, f.ticket).Scan(&status, &reason, &question, &pending); err != nil {
+			return err
+		}
+		if status != "awaiting_decision" || reason != "escalation_budget_unavailable" || question == "" || pending {
+			t.Fatalf("decision status=%s reason=%s question=%s pending=%t", status, reason, question, pending)
+		}
+		var runs int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM agent_runs WHERE retry_of_run_id=$1`, v.run).Scan(&runs); err != nil {
+			return err
+		}
+		if runs != 0 {
+			t.Fatalf("budget refusal created %d continuations", runs)
+		}
+		var state, outcome, completionText string
+		var noNext bool
+		if err := tx.QueryRow(t.Context(), `SELECT state,outcome,completion,next_run_id IS NULL FROM harness_recoveries WHERE id=$1`, body["request_id"]).Scan(&state, &outcome, &completionText, &noNext); err != nil {
+			return err
+		}
+		if state != "completed" || outcome != "rejected" || completionText != "exited" || !noNext {
+			t.Fatalf("recovery state=%s outcome=%s completion=%s noNext=%t", state, outcome, completionText, noNext)
+		}
+		return nil
+	})
+	w = v.runtimeCall(t, endpoint, completion)
+	expect(t, w, 200)
+	if got := decode(t, w); got["outcome"] != "rejected" || got["next_run_id"] != nil {
+		t.Fatalf("retry=%v", got)
+	}
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		var runs int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM agent_runs WHERE retry_of_run_id=$1`, v.run).Scan(&runs); err != nil {
+			return err
+		}
+		if runs != 0 {
+			t.Fatalf("completion retry created %d continuations", runs)
+		}
+		return nil
+	})
 }
