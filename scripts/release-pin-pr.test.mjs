@@ -255,10 +255,10 @@ test("real CLI verifier binds the image and provenance; its output never enters 
 test("tag and rehearsal keep every Buildx setup pinned and immediately checked", () => {
   const release = readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8");
   const rehearsal = readFileSync(new URL("../.github/workflows/release-image-check.yml", import.meta.url), "utf8");
-  const pins = (workflow) => workflow.match(/^  AEON_BUILD(?:X_VERSION|KIT_VERSION|KIT_IMAGE): .+$/gm);
-  assert.equal(pins(release)?.length, 3);
+  const pins = (workflow) => workflow.match(/^  AEON_BUILD(?:X_VERSION|X_SHA256_AMD64|X_SHA256_ARM64|KIT_VERSION|KIT_IMAGE): .+$/gm);
+  assert.equal(pins(release)?.length, 5);
   assert.deepEqual(pins(release), pins(rehearsal));
-  const setup = /^      - uses: docker\/setup-buildx-action@[a-f0-9]{40} # v4\n        with:\n          version: \$\{\{ env\.AEON_BUILDX_VERSION \}\}\n          driver: docker-container\n          driver-opts: image=\$\{\{ env\.AEON_BUILDKIT_IMAGE \}\}\n      - name: Assert pinned Buildx and BuildKit versions\n/gm;
+  const setup = /^      - uses: docker\/setup-buildx-action@[a-f0-9]{40} # v4\n        with:\n          version: \$\{\{ env\.AEON_BUILDX_VERSION \}\}\n          cache-binary: false\n          driver: docker-container\n          driver-opts: image=\$\{\{ env\.AEON_BUILDKIT_IMAGE \}\}\n      - name: Assert pinned Buildx and BuildKit versions\n/gm;
   for (const [workflow, count] of [[release, 2], [rehearsal, 1]]) {
     assert.equal([...workflow.matchAll(setup)].length, count);
     assert.equal([...workflow.matchAll(/uses: docker\/setup-buildx-action@/g)].length, count);

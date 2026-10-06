@@ -115,13 +115,13 @@
     {
       "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
       "mode": "action",
-      "sha256": "0298b54837964a703589dc54434a5b9305ab7d975261760c345aedfc6f40efb4",
+      "sha256": "c057a4ddcd696718546000b53fed5781fdc051d6105c113d2967c74df25940f5",
       "step": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069"
     },
     {
       "counterpart": "image-dry-run/Assert pinned Buildx and BuildKit versions",
       "mode": "step",
-      "sha256": "4af7a23bb382737f5178d948227cdde8d4c5461d49aa5ce3296454ce39b0dffd",
+      "sha256": "d43d0ce0cb603960656ef917b15c9f9bbad7159d2a10dc5d98adbfd09d9f8934",
       "step": "Assert pinned Buildx and BuildKit versions"
     },
     {
@@ -261,13 +261,13 @@
     {
       "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
       "mode": "action",
-      "sha256": "0298b54837964a703589dc54434a5b9305ab7d975261760c345aedfc6f40efb4",
+      "sha256": "c057a4ddcd696718546000b53fed5781fdc051d6105c113d2967c74df25940f5",
       "step": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069"
     },
     {
       "counterpart": "image-dry-run/Assert pinned Buildx and BuildKit versions",
       "mode": "step",
-      "sha256": "4af7a23bb382737f5178d948227cdde8d4c5461d49aa5ce3296454ce39b0dffd",
+      "sha256": "d43d0ce0cb603960656ef917b15c9f9bbad7159d2a10dc5d98adbfd09d9f8934",
       "step": "Assert pinned Buildx and BuildKit versions"
     },
     {
