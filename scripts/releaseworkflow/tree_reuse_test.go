@@ -601,6 +601,17 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 				j = normalizeParallelWebSetup(t, jobs)
 			}
 			j = cloneStep(t, j)
+			if id == "go-test" {
+				// AEON-707 binds backup clients to this job's actual service.
+				// Assert the exact addition before comparing every older field
+				// against the unchanged accepted-CI hash.
+				step := reuseStep(t, j, "Test this shard (essential plus changed area, or full on main)")
+				stepEnv := treeMap(step["env"])
+				if stepEnv["AEON_TEST_POSTGRES_CONTAINER"] != "${{ job.services.postgres.id }}" {
+					t.Fatal("backup drill clients must target this shard's PostgreSQL service")
+				}
+				delete(stepEnv, "AEON_TEST_POSTGRES_CONTAINER")
+			}
 			normalizeEffectiveLane(t, id, j)
 			value = j
 			normalizeNixVendorAdditions(t, id, j)
