@@ -1967,24 +1967,38 @@ web/ci-web-shards.json merge=tiers
 
 The driver accepts both old and canonical layouts. It merges keyed row sets:
 independent additions survive; deletion wins over an unchanged row; deletion
-versus change and divergent edits to one row (including tiers/weights) conflict.
+versus change conflicts. Within keyed records, independent field edits merge;
+only different changes to the same field (including tiers/weights) conflict.
+Added fields survive, removed fields disappear when unchanged on the other
+side, and objects merge recursively; arrays compare by deep equality.
 Group specs merge independently. A unilateral reorder of surviving groups is
 taken alongside the other side's content edits; matching reorders are taken,
 divergent reorders conflict. New groups append in identity order. The same order
 rule applies to integration notes. Launch policy and unrelated metadata changes
-merge by field. Timing-owner records merge atomically.
+merge by field, including timing-owner records.
 A clean exit 0 means the canonical merged result has been written to OURS,
 even when the inputs were unchanged old-layout manifests. Exit 1 means a real
 disagreement: OURS contains deliberately invalid JSON with git-style diff3
-conflict markers and the complete OURS, BASE and THEIRS versions. Unresolved
-markers fail JSON parsing and the canonical check. Usage/parse/IO errors
+conflict markers at each conflicting record, containing its OURS, BASE and
+THEIRS rows (a deletion has an empty side). Clean merged rows remain in place.
+A group policy conflict marks that group; an order or top-level metadata
+conflict marks its list or value. Unresolved markers fail JSON parsing and the canonical check. Usage/parse/IO errors
 (including malformed JSON, duplicate input identities, Go occurrence and
 unsupported paths) exit 2; unexpected crashes exit 3. Those failures leave OURS
 byte-for-byte untouched, so it may still be valid JSON. Every replacement,
 including conflict output, writes a sibling temporary file, fsyncs it, then
 renames it atomically. Failure before rename leaves OURS unchanged. Stderr names
-the offending path/key. The driver never selects a tier or weight to resolve
-contradictory edits. It is a local convenience, not a GitHub queue fix.
+every conflicting key and field path with all three values. The driver never
+selects a tier or weight to resolve contradictory edits. It is a local convenience, not a GitHub queue fix.
+
+Resolve each marker block in place, keeping the intended row or combining its
+fields; remove all marker lines and check separators when choosing a deletion.
+Then canonicalize and verify before staging:
+
+```sh
+node scripts/test-tiers/cli.mjs manifests --write
+node scripts/test-tiers/cli.mjs manifests --check
+```
 
 If `merge=tiers` is set but `merge.tiers.driver` is not configured, Git falls back
 to its built-in text merge. A configured but missing driver script makes Node
