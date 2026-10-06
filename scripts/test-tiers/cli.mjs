@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { collectGo, collectWeb, command, root, web, evidence, saveJSON, saveManifest } from './collect.mjs'
 import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights, tierManifestPattern } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
+import { goFailures, nodeFailures, vitestFailures, outputTail, printFailures } from './failures.mjs'
 import { runPlaywright } from '../playwright-safe.mjs'
 import { loadManifest as loadBrowserPolicy, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import { changedPaths, schedulingDecision, eventBase, sourceTree, promotionsBetween } from './diff.mjs'
@@ -88,7 +89,13 @@ function execute(bin,args,path,{cwd=root,env=process.env}={}) {
   writeFileSync(path,result.stdout??'')
   writeFileSync(`${path}.stderr`,result.stderr??'')
   if(result.error) console.error(`${bin}: ${result.error.code}`)
-  return {code:result.status??1,output:result.stdout??''}
+  return {code:result.status??1,output:result.stdout??'',stderr:result.stderr??''}
+}
+
+function diagnostics(kind,owner,result,failures,env) {
+  if(result.code&&!failures.length)failures.push({kind,owner,name:'(runner)',
+    output:outputTail(`${result.output}\n${result.stderr}`)||`Runner exited with code ${result.code}`})
+  printFailures(failures.map(failure=>({...failure,output:failure.output||outputTail(result.stderr)})),{summary:env.GITHUB_STEP_SUMMARY})
 }
 
 export async function run(kind,selection,{unit=false,job='local',env=process.env}={}) {
@@ -111,14 +118,16 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
       const result=execute('go',['test','-p','2','-count=1','-timeout=25m','-json','-run',exactPattern(rows.map(row=>row.name)),`./${owner}`],`${stem}.jsonl`,{env:{...env,GOMAXPROCS:'2'}})
       code ||= result.code
       outcomes.push(...goOutcomes(result.output))
+      diagnostics('go',owner,result,goFailures(result.output),env)
     } else if(rows[0].kind==='node') {
       const result=execute(process.execPath,['--test','--test-concurrency=1',`--test-reporter=${resolve(root,'scripts/test-tiers/node-reporter.mjs')}`,
         '--test-name-pattern',exactPattern(rows.map(row=>row.name)),owner],`${stem}.jsonl`,{cwd:web,env})
       code ||= result.code
+      diagnostics('node',owner,result,nodeFailures(result.output,owner,result.stderr),env)
       const consumed=new Set()
       for(const line of result.output.split('\n').filter(Boolean)) {
         const event=JSON.parse(line)
-        if(event.type==='test:start')continue
+        if(!['test:pass','test:fail'].includes(event.type))continue
         const row=rows.find(row=>row.name===event.fullName&&!consumed.has(key(row)))
         if(!row) continue
         consumed.add(key(row))
@@ -130,8 +139,10 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
       const result=execute(process.execPath,['node_modules/vitest/vitest.mjs','run',owner,'--maxWorkers=1','--no-fileParallelism','--retry=0',
         '--testNamePattern',exactPattern(rows.map(row=>row.name)),'--reporter=json',`--outputFile=${reportPath}`],`${stem}.log`,{cwd:web,env})
       code ||= result.code
+      let failures=[]
       try {
         const report=JSON.parse(readFileSync(reportPath,'utf8'))
+        failures=vitestFailures(report,owner,`${result.output}\n${result.stderr}`)
         const consumed=new Set()
         for(const file of report.testResults) for(const result of file.assertionResults) {
           const nativeName=[...result.ancestorTitles,result.title].join(' > ')
@@ -141,6 +152,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
           outcomes.push({key:key(row),status:['pending','skipped','todo','disabled'].includes(result.status)?'skipped':result.status==='passed'?'passed':'failed',started:result.status==='passed'||result.status==='failed'})
         }
       } catch { code ||= 1 }
+      diagnostics('vitest',owner,result,failures,env)
     }
   }
   if(kind==='web'&&!unit) {
