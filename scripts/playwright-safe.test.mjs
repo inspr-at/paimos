@@ -29,6 +29,23 @@ async function waitFor(check) {
     await sleep(25)
   }
 }
+// A root slower than the supervisor's whole attempt budget. The budget is
+// counted in attempts, so a load-dependent start must never decide these tests.
+const SLOW_ROOT_MS = 1000
+const slowRoot = `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${SLOW_ROOT_MS})`
+// Tests that keep the supervisor blind to its root (every ps answer a miss) hold
+// each blind answer until the root has really finished (zombie or reaped). The
+// retry loop then observes the exit itself instead of racing the root's
+// start-up under load. The deadline only guards against a hung root.
+function holdUntilRootExit(spawnSyncReal, pid) {
+  const guard = Date.now() + 60_000
+  for (;;) {
+    const state = spawnSyncReal('ps', ['-p', String(pid), '-o', 'stat='], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } })
+    if (state.status !== 0 || /^Z/.test(state.stdout.trim())) return
+    assert.ok(Date.now() < guard, 'root did not exit (hang guard)')
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10)
+  }
+}
 function fixture(mode, directory, env = process.env) {
   const lock = join(directory, 'suite.lock'), ready = join(directory, `${mode}.ready`)
   const pid = join(directory, `${mode}.pid`), output = join(directory, `${mode}.json`)
@@ -310,12 +327,12 @@ test('supervisor leaves an already-exited root exit code alone after repeated ps
   const original = childProcess.spawnSync
   let calls = 0
   const injected = t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
-    if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) { calls++; return { status: 1, stdout: '' } }
+    if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) { calls++; holdUntilRootExit(original, args[1]); return { status: 1, stdout: '' } }
     return original(command, args, options)
   })
   syncBuiltinESMExports()
   try {
-    const result = await runOwnedCommand(process.execPath, ['-e', 'process.exit(7)'], { lockPath: path, graceMs: 50 })
+    const result = await runOwnedCommand(process.execPath, ['-e', `${slowRoot}; process.exit(7)`], { lockPath: path, graceMs: 50 })
     assert.equal(result.code, 7)
     assert.ok(calls > 0)
     assert.equal(result.metrics.remaining_processes, 0)
@@ -351,9 +368,10 @@ for (const mode of ['transient', 'persistent', 'owner-change']) {
     const script = `const fs = require('node:fs'); fs.writeFileSync(${JSON.stringify(ready)}, fs.readFileSync(process.env.AEON_PW_GROUP_LOG));`
     // Isolate preload publication: for the transient case the supervisor
     // cannot verify the root, so only the preload can record it before work.
+    // That root also starts slowly, which the blind supervisor must outwait.
     const original = childProcess.spawnSync
     const injected = mode === 'transient' ? t.mock.method(childProcess, 'spawnSync', (command, args, options) => {
-      if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) return { status: 1, stdout: '' }
+      if (command === 'ps' && args[0] === '-p' && args[1] !== String(process.pid)) { holdUntilRootExit(original, args[1]); return { status: 1, stdout: '' } }
       return original(command, args, options)
     }) : undefined
     syncBuiltinESMExports()
@@ -361,7 +379,8 @@ for (const mode of ['transient', 'persistent', 'owner-change']) {
     try {
       result = await runOwnedCommand(process.execPath, ['-e', script], {
         lockPath, graceMs: 50,
-        env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}` },
+        env: { ...process.env, AEON_PW_TEST_ATTEMPTS: attempts, AEON_PW_TEST_MISS: mode, NODE_OPTIONS: `${process.env.NODE_OPTIONS ?? ''} --import=${preload}`,
+          ...(mode === 'transient' ? { AEON_PW_TEST_START_DELAY_MS: String(SLOW_ROOT_MS) } : {}) },
       })
     } finally { injected?.mock.restore(); syncBuiltinESMExports() }
     const calls = readFileSync(attempts, 'utf8').trim().split('\n').length

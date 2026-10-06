@@ -60,7 +60,7 @@ func TestQueuePushReuseRetainsMainStructureAndFallback(t *testing.T) {
 			}
 		}
 	}
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
 		j := treeMap(jobs[id])
 		condition, _ := j["if"].(string)
 		if !strings.Contains(condition, "always()") || !strings.Contains(condition, "needs.ci-plan.result == 'success'") || !strings.Contains(condition, fullQueueFallback) || !containsNeed(j["needs"], "tree-reuse") {
@@ -133,7 +133,7 @@ func TestDirectPushCannotSkipWithoutQueueProof(t *testing.T) {
 		t.Fatalf("direct push proof: %v\n%s", err, out)
 	}
 	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
-	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-shard", "release-check-run", "e2e-run"} {
+	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
 		condition, _ := treeMap(jobs[id])["if"].(string)
 		if !strings.Contains(condition, fullQueueFallback) || !strings.Contains(condition, "always()") {
 			t.Fatalf("%s must run full work after absent proof", id)
@@ -218,6 +218,9 @@ func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
 		if treeMap(s["env"])["TIER_PLAN"] != nil {
 			values["TIER_PLAN"] = "success"
 		}
+		if treeMap(s["env"])["TIER_LAYOUT"] != nil {
+			values["TIER_LAYOUT"] = "full" // planner output, not a job result
+		}
 		for key := range treeMap(s["env"]) {
 			if _, exists := values[key]; !exists {
 				values[key] = "skipped"
@@ -243,7 +246,7 @@ func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
 			t.Fatalf("%s rejects verified reuse: %v", id, err)
 		}
 		for key, expected := range values {
-			if key == "REUSE" {
+			if key == "REUSE" || key == "TIER_LAYOUT" {
 				continue
 			} // no reuse falls back to the classified gate, covered separately
 			wrong := "success"
@@ -363,6 +366,7 @@ func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
 	}
 	reuseStep(t, treeMap(jobs["go-test"]), "Test this shard (essential plus changed area, or full on main)")
 	reuseStep(t, treeMap(jobs["web-shard"]), "Run selected UI cases without retries")
+	reuseStep(t, treeMap(jobs["web-unit"]), "Run selected web units without retries")
 	// A new job or matrix row must invalidate the proof inventory.
 	jobs["new-required-job"] = map[string]any{"runs-on": "ubuntu-latest"}
 	if reflect.DeepEqual(proof.RequiredJobs, mergeGroupInventory(t, w)) {
@@ -375,10 +379,175 @@ func TestQueueReuseFixturesCoverCurrentWorkflowJobs(t *testing.T) {
 	}
 }
 
+// Restore the historical setup for its immutable hash check only after proving
+// the new setup and parallel unit job preserve every moved check byte for byte.
+func normalizeParallelWebSetup(t *testing.T, jobs map[string]any) map[string]any {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(root(t), "scripts/releaseworkflow/testdata/ci-web-setup-before-parallel.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var historical map[string]any
+	if err := yaml.Unmarshal(body, &historical); err != nil {
+		t.Fatal(err)
+	}
+	before := treeMap(historical["web-setup"])
+	setup, unit := treeMap(jobs["web-setup"]), treeMap(jobs["web-unit"])
+	wantSteps := []any{}
+	for _, value := range reuseSteps(before) {
+		old := treeMap(value)
+		name, _ := old["name"].(string)
+		var moved map[string]any
+		switch name {
+		case "Install shells used by command round-trip unit tests":
+			moved = cloneStep(t, reuseStep(t, unit, name))
+		case "Web unit checks (once)":
+			moved = cloneStep(t, reuseStep(t, unit, "Run selected web units without retries"))
+			moved["name"] = name
+			moved["run"] = strings.Replace(moved["run"].(string), `if [ "${{ matrix.shard }}" = 1 ]; then npm run ci:web:shard:test; fi`, "npm run ci:web:shard:test", 1)
+			moved["run"] = strings.Replace(moved["run"].(string), "--unit --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-unit-${{ matrix.shard }}", "--unit --job web-unit", 1)
+		case "Confirm full tier execution":
+			moved = cloneStep(t, reuseStep(t, unit, name))
+			treeMap(moved["env"])["TIER_REPORT"] = strings.Replace(treeMap(moved["env"])["TIER_REPORT"].(string), "web-unit-${{ matrix.shard }}", "web-unit", 1)
+		case "Preserve unit tier measurements":
+			moved = cloneStep(t, reuseStep(t, unit, name))
+			treeMap(moved["with"])["name"] = strings.Replace(treeMap(moved["with"])["name"].(string), "web-unit-${{ matrix.shard }}", "web-unit", 1)
+		case "Browser runner safety (no browsers)":
+			moved = cloneStep(t, reuseStep(t, unit, name))
+			if moved["if"] != "matrix.shard == 1" {
+				t.Fatal("Browser safety must run once")
+			}
+			delete(moved, "if")
+		default:
+			wantSteps = append(wantSteps, value)
+			continue
+		}
+		normalizeEffectiveLane(t, "web-unit", moved)
+		if !reflect.DeepEqual(moved, old) {
+			t.Fatalf("Moved check %s changed: got %v want %v", name, moved, old)
+		}
+	}
+	want := cloneStep(t, before)
+	want["steps"] = wantSteps
+	setup = cloneStep(t, setup)
+	normalizeEffectiveLane(t, "web-setup", setup)
+	if !reflect.DeepEqual(setup, want) {
+		t.Fatal("Parallel setup changed beyond moving units and their prerequisites/proofs")
+	}
+	return before
+}
+
+// Project the reviewed effective-lane wiring back onto immutable historical
+// pins. Commands and historical fixtures remain byte-for-byte checked.
+func normalizeEffectiveLane(t *testing.T, id string, value map[string]any) {
+	t.Helper()
+	var visit func(map[string]any)
+	visit = func(m map[string]any) {
+		for key, raw := range m {
+			switch v := raw.(type) {
+			case string:
+				// Preserve historical pins after checking the added workflow-level
+				// merge-group guards; never rewrite the immutable fixtures.
+				if key == "if" && m["name"] == "Confirm full tier execution" && id != "web-setup" {
+					old := "needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential'"
+					if id == "go-test" {
+						old = "needs.tier-plan.outputs.mode != 'essential'"
+					}
+					want := "github.event_name != 'pull_request' || (" + old + ")"
+					if id == "go-test" {
+						want = "github.event_name != 'pull_request' || " + old
+					}
+					if v != want {
+						t.Fatalf("%s must prove full execution on every merge-group shard", id)
+					}
+					v = old
+				}
+				if key == "if" && strings.Contains(v, "needs.tier-plan.outputs.layout != 'static'") {
+					guard := "(github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')"
+					if !strings.Contains(v, guard) {
+						t.Fatalf("%s must restrict static skips to PRs", id)
+					}
+					v = strings.Replace(v, guard, "needs.tier-plan.outputs.layout != 'static'", 1)
+				}
+				if key == "shard" {
+					v = strings.Replace(v, "github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential'", `contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential'`, 1)
+					v = strings.Replace(v, "github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only'", "needs.tier-plan.outputs.lane == 'spec-only'", 1)
+				}
+				m[key] = strings.ReplaceAll(v, "needs.tier-plan.outputs.lane", "needs.ci-plan.outputs.lane")
+			case map[string]any:
+				if layout, exists := v["AEON_TEST_TIER_LAYOUT"]; exists {
+					if layout != "${{ needs.tier-plan.outputs.layout }}" {
+						t.Fatal("unreviewed tier runner layout input")
+					}
+					delete(v, "AEON_TEST_TIER_LAYOUT")
+				}
+				visit(v)
+			case []any:
+				for _, child := range v {
+					if nested, ok := child.(map[string]any); ok {
+						visit(nested)
+					}
+				}
+			}
+		}
+	}
+	visit(value)
+	if id == "go-static" || id == "release-check-run" {
+		condition, _ := value["if"].(string)
+		if !strings.Contains(condition, "needs.tier-plan.result == 'success' && ") || !containsNeed(value["needs"], "tier-plan") {
+			t.Fatal("effective lane consumer must gate its publisher")
+		}
+		value["if"] = strings.Replace(condition, "needs.tier-plan.result == 'success' && ", "", 1)
+		var needs []any
+		for _, need := range anySlice(value["needs"]) {
+			if need != "tier-plan" {
+				needs = append(needs, need)
+			}
+		}
+		value["needs"] = needs
+	}
+}
+
+func cloneStep(t *testing.T, value map[string]any) map[string]any {
+	t.Helper()
+	body, err := yaml.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var copy map[string]any
+	if err := yaml.Unmarshal(body, &copy); err != nil {
+		t.Fatal(err)
+	}
+	return copy
+}
+
+func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
+	jobs := treeMap(treeWorkflow(t, "ci.yml")["jobs"])
+	normalizeParallelWebSetup(t, jobs)
+	unit, browser := treeMap(jobs["web-unit"]), treeMap(jobs["web-shard"])
+	for _, j := range []map[string]any{unit, browser} {
+		if !reflect.DeepEqual(j["needs"], []any{"ci-plan", "web-setup", "tree-reuse", "tier-plan"}) {
+			t.Fatal("Unit and browser shards must start together from setup, without depending on each other")
+		}
+		if treeMap(reuseStep(t, j, "Download shared web runtime")["with"])["name"] != "web-runtime" || reuseStep(t, j, "Restore web runtime")["run"] != `tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"` {
+			t.Fatal("Unit and browser shards must restore the same prepared runtime")
+		}
+	}
+	run := reuseStep(t, unit, "Run selected web units without retries")["run"].(string)
+	if strings.Count(run, "npm run test:unit:core") != 1 || !strings.Contains(run, `if [ "${{ matrix.shard }}" = 1 ]; then npm run ci:web:shard:test; fi`) {
+		t.Fatal("Spec-only units and full-lane shard regressions must each run once")
+	}
+	measure := treeMap(jobs["tier-measurements"])
+	if !containsNeed(measure["needs"], "ci-plan") || treeMap(reuseStep(t, measure, "Report cases and complete job runner minutes")["env"])["CI_LANE"] != "${{ needs.tier-plan.outputs.lane }}" {
+		t.Fatal("Tier measurements must report spec-only's untiered scope")
+	}
+}
+
 func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 	// Pin the accepted c72eb506 classification/full-execution configuration.
 	// Keep that historical fixture and the original AEON-681 tier fixture.
-	// Only six tier-adapted execution jobs use the additive merge-main pins;
+	// Seven tier-adapted execution jobs use the additive merge-main pins (e2e-run
+	// joined with the OPS-257 L4 static layout gate);
 	// lane classification, unaffected jobs and unconditional migrations stay pinned.
 	body, err := os.ReadFile(filepath.Join(root(t), "scripts/releaseworkflow/testdata/ci-main-before-reuse.json"))
 	if err != nil {
@@ -410,7 +579,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 	if err := json.Unmarshal(tierBody, &tierBaseline); err != nil {
 		t.Fatal(err)
 	}
-	if len(tierBaseline.MergeMain.Source) != 40 || len(tierBaseline.MergeMain.Hashes) != 6 {
+	if len(tierBaseline.MergeMain.Source) != 40 || len(tierBaseline.MergeMain.Hashes) != 7 {
 		t.Fatal("incomplete merge-main tier fixture")
 	}
 	for id, expected := range baseline.Hashes {
@@ -428,7 +597,13 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 		value := w["concurrency"]
 		if id != "concurrency" {
 			j := treeMap(jobs[id])
+			if id == "web-setup" {
+				j = normalizeParallelWebSetup(t, jobs)
+			}
+			j = cloneStep(t, j)
+			normalizeEffectiveLane(t, id, j)
 			value = j
+			normalizeNixVendorAdditions(t, id, j)
 			if condition, ok := j["if"].(string); ok && strings.Contains(condition, "tree-reuse") {
 				match := guard.FindStringSubmatch(condition)
 				if len(match) != 2 {
@@ -450,7 +625,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 			for _, v := range reuseSteps(j) {
 				s := treeMap(v)
 				if s["name"] == "PR classification and exact-SHA reuse regressions" {
-					if s["run"] != "node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs" {
+					if s["run"] != "node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs" {
 						t.Fatal("unreviewed verifier regression command")
 					}
 					s["name"] = "PR classification regressions"

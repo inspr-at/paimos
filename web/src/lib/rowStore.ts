@@ -117,14 +117,14 @@ export function fromNode(previous: ListItem | null, node: WorkNode, name: (id: s
     assignee: assigneeId ? (previous?.assignee?.id === assigneeId ? previous.assignee : { id: assigneeId, name: name(assigneeId) ?? 'Someone' }) : null,
   }
 }
-// The parent chip and the epic under a parent: the project, or a parent the
-// store has seen as one (an epic's are its own). Unknown: left to a list read.
+// The parent chip and nearest Work/Epic under the new parent. Clear stale
+// ancestry when it cannot be resolved here; a list read supplies the rest.
 function placed(parentId: string | null, project: ListItem['project'], parentOf: (id: string) => ListParent | undefined): Partial<Pick<ListItem, 'parent' | 'epic'>> {
   if (!parentId) return { parent: null, epic: null }
   if (project?.id === parentId) return { parent: { id: project.id, key: project.key, title: project.title, kind_slug: 'project' }, epic: null }
   const parent = parentOf(parentId)
-  if (!parent) return {}
-  return parent.kind_slug === 'epic' ? { parent, epic: { id: parent.id, key: parent.key, title: parent.title } } : { parent }
+  if (!parent) return { parent: null, epic: undefined }
+  return ['work', 'epic'].includes(parent.kind_slug) ? { parent, epic: { id: parent.id, key: parent.key, title: parent.title } } : { parent, epic: undefined }
 }
 
 // An open editor on one node. Its base is one server copy: the revision a

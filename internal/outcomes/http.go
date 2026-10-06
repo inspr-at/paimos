@@ -19,6 +19,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/escalation"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
 )
@@ -34,7 +35,9 @@ func New(pool *pgxpool.Pool) *Module { return &Module{pool: pool} }
 // Mount registers GET and POST /api/outcomes.
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/outcomes", m.list)
+	mux.HandleFunc("GET /api/outcomes/measurement", m.measurement)
 	mux.HandleFunc("POST /api/outcomes", m.record)
+	mux.HandleFunc("GET /api/nodes/{nodeId}/escalation", m.escalationState)
 }
 
 type outcome struct {
@@ -285,10 +288,16 @@ func (m *Module) record(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
+	bounded, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	defer cancel()
+	r = r.WithContext(bounded)
 	ctx := authz.BindPool(r.Context(), m.pool)
 	var item outcome
 	created := false
 	err = db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+		if err := db.LockWorkTreeTx(r.Context(), tx); err != nil {
+			return err
+		}
 		node, err := resolveTicket(r.Context(), tx, ticket)
 		if err != nil {
 			return err
@@ -340,7 +349,13 @@ func (m *Module) record(w http.ResponseWriter, r *http.Request) {
 			created = true
 		}
 		item, err = scanOutcome(tx.QueryRow(r.Context(), outcomeSelect+`WHERE o.id=$1::uuid`, id))
-		return err
+		if err != nil {
+			return err
+		}
+		if created {
+			return escalation.ObserveTx(r.Context(), tx, p, node.id, node.projectID, id, kind, payload)
+		}
+		return nil
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -534,3 +549,42 @@ func limitOf(raw string, present bool) (int, error) {
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }
+
+func (m *Module) escalationState(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
+	p, ok := principal(w, r)
+	if !ok {
+		return
+	}
+	id := r.PathValue("nodeId")
+	if !validUUID(id) {
+		writeErr(w, invalid("nodeId must be a UUID"))
+		return
+	}
+	var out any
+	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		node, err := resolveTicket(r.Context(), tx, id)
+		if err != nil {
+			return err
+		}
+		if err := authz.RequireTx(r.Context(), tx, p, "outcome.read", authz.Scope{ProjectID: node.projectID}); err != nil {
+			return err
+		}
+		state, err := escalation.LoadTx(r.Context(), tx, id)
+		if err != nil {
+			return err
+		}
+		if state != nil {
+			out = state.Public()
+		}
+		return nil
+	})
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	httpapi.WriteJSON(w, 200, map[string]any{"escalation": out})
+}

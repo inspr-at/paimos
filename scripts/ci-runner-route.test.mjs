@@ -111,7 +111,7 @@ test("router outputs bind each attempt and refuse a missing or invalid attempt",
   }
 });
 
-test("CI expressions keep PRs on two hosted tier shards and stale main attempts on seven", () => {
+test("CI expressions keep essential PRs on two hosted shards and merge groups and stale main attempts on seven", () => {
   const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const shardJob = workflow.split("  go-test:\n")[1].split("\n  go-timing:")[0];
   const runnerExpression = shardJob.match(/^    runs-on: (.+)$/m)[1];
@@ -134,7 +134,7 @@ test("CI expressions keep PRs on two hosted tier shards and stale main attempts 
         const admitted = trustedEvents.includes(event) && ref === "refs/heads/main" && run_attempt === 1;
         assert.deepEqual(evaluate(runnerExpression, github, outputs), admitted ? selected.runs_on : ["ubuntu-latest"]);
         assert.deepEqual(evaluate(shardExpression, github, outputs), admitted ? [1, 2, 3, 4] :
-          ["pull_request", "merge_group"].includes(event) ? [1, 2] : [1, 2, 3, 4, 5, 6, 7]);
+          event === "pull_request" ? [1, 2] : [1, 2, 3, 4, 5, 6, 7]);
         assert.deepEqual(evaluate(shardExpression, github, outputs,"full"), admitted ? [1, 2, 3, 4] : [1, 2, 3, 4, 5, 6, 7]);
       }
     }
@@ -150,10 +150,12 @@ test("CI expressions keep PRs on two hosted tier shards and stale main attempts 
 
 test("key dialog CI uses the hosted shards and covers the shared access markup", () => {
   const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
-  const setup = workflow.split("  web-setup:\n")[1].split("\n  web-shard:")[0];
-  assert.match(setup, /sudo apt-get install -y -qq fish zsh/);
-  assert.ok(setup.indexOf("Install shells used by command round-trip unit tests") < setup.indexOf("Web unit checks (once)"));
-  assert.match(setup, /cli\.mjs run web --unit/);
+  const units = workflow.split("  web-unit:\n")[1].split("\n  web-shard:")[0];
+  assert.match(units, /sudo apt-get install -y -qq fish zsh/);
+  const install = units.indexOf("Install shells used by command round-trip unit tests");
+  const execute = units.indexOf("Run selected web units without retries");
+  assert.ok(install >= 0 && execute > install, 'Unit runners must install shells before running tests');
+  assert.match(units, /cli\.mjs run web --unit/);
   assert.doesNotMatch(workflow, /Key dialog layout regression|playwright .*tests\/key-layout\.spec\.ts/);
   const shardJob = workflow.split("  web-shard:\n")[1].split("\n  web:")[0];
   assert.match(shardJob, /runs-on: ubuntu-latest/);

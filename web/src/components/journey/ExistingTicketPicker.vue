@@ -5,9 +5,10 @@ import { APIError } from '../../lib/api'
 import { confirmAction } from '../../lib/confirm'
 import { confirmOptionMoves } from '../../lib/releaseAssign'
 import {
-  addReleaseMembership, availabilityMark, canSelectTicket, isMoveConflict, listReleaseTicketOptions,
+  addReleaseMembership, availabilityMark, canSelectTicket, isMoveConflict, isStaleRevision, listReleaseTicketOptions,
   type MembershipResult, type MembershipTicket,
 } from '../../lib/releaseMembership'
+import type { PlanOwner } from '../../lib/useJourneyData'
 import { highlight, kindLabel, statusMeta, statusOptions } from '../../lib/work'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
@@ -16,8 +17,8 @@ import StatusIcon from '../work/StatusIcon.vue'
 // Add tickets that already exist into this planning release. Search is by key or
 // title; status, epic and type narrow it. Closed and already released tickets
 // are shown and cannot be picked. A ticket in another open release asks first.
-const props = defineProps<{ projectId: string; releaseId: string; releaseTitle: string; epics: { id: string; key: string; title: string }[] }>()
-const emit = defineEmits<{ added: [payload: { count: number | null; result: MembershipResult }]; close: [] }>()
+const props = defineProps<{ projectId: string; releaseId: string; releaseTitle: string; epics: { id: string; key: string; title: string }[]; captureOwner: () => PlanOwner | null; isOwnerCurrent: (owner: PlanOwner) => boolean }>()
+const emit = defineEmits<{ added: [payload: { count: number | null; result: MembershipResult; owner: PlanOwner }]; close: [] }>()
 
 const dialog = ref<HTMLDialogElement>()
 const searchEl = ref<HTMLInputElement>()
@@ -35,6 +36,7 @@ const busy = ref(false)
 const note = ref('')
 let timer: ReturnType<typeof setTimeout> | undefined
 let generation = 0
+let optionsOwner: PlanOwner | null = null
 
 const statuses = statusOptions()
 const types = [{ value: 'ticket', label: 'Ticket' }, { value: 'task', label: 'Task' }]
@@ -43,21 +45,29 @@ const addableCount = computed(() => tickets.value.filter(canSelectTicket).length
 
 async function load() {
   const request = ++generation
+  const owner = props.captureOwner()
+  optionsOwner = null
   loading.value = true
   failed.value = ''
+  if (!owner || owner.projectId !== props.projectId || owner.releaseId !== props.releaseId) return
   try {
-    const page = await listReleaseTicketOptions(props.projectId, props.releaseId, {
+    const page = await listReleaseTicketOptions(owner.projectId, owner.releaseId, {
       q: term.value, status: status.value, epic: epic.value, type: type.value, limit: 50,
     })
-    if (request !== generation) return
+    if (request !== generation || !props.isOwnerCurrent(owner)) return
     tickets.value = page.tickets
     revision.value = page.expected_revision
     const next = new Map(selected.value)
-    for (const ticket of page.tickets) if (next.has(ticket.ticket_node_id) && !canSelectTicket(ticket)) next.delete(ticket.ticket_node_id)
+    for (const ticket of page.tickets) {
+      if (!next.has(ticket.ticket_node_id)) continue
+      if (canSelectTicket(ticket)) next.set(ticket.ticket_node_id, ticket)
+      else next.delete(ticket.ticket_node_id)
+    }
     selected.value = next
+    optionsOwner = owner
     active.value = Math.min(active.value, Math.max(0, page.tickets.length - 1))
   } catch (error) {
-    if (request !== generation) return
+    if (request !== generation || !props.isOwnerCurrent(owner)) return
     tickets.value = []
     const missing = error instanceof APIError && (error.status === 404 || error.status === 405)
     failed.value = missing ? 'This server cannot list existing tickets yet.' : error instanceof Error ? error.message : 'Tickets could not be loaded.'
@@ -65,6 +75,9 @@ async function load() {
     if (request === generation) loading.value = false
   }
 }
+// captureOwner becomes null during a walker refresh, then supplies its new
+// generation when ready. Retain the choices, but never reuse their old revision.
+watch(() => props.captureOwner(), () => { clearTimeout(timer); void load() }, { flush: 'sync' })
 watch([term, status, epic, type], () => { clearTimeout(timer); timer = setTimeout(load, 160) })
 onMounted(async () => { dialog.value?.showModal(); await nextTick(); searchEl.value?.focus(); void load() })
 onBeforeUnmount(() => { clearTimeout(timer); generation++ })
@@ -113,44 +126,53 @@ function keydown(event: KeyboardEvent) {
 }
 async function add() {
   const chosen = picked.value
-  if (!chosen.length || busy.value) return
+  const owner = props.captureOwner()
+  if (!chosen.length || busy.value || loading.value || failed.value || !owner || !optionsOwner || !props.isOwnerCurrent(optionsOwner) || owner.projectId !== props.projectId || owner.releaseId !== props.releaseId) return
+  const expectedRevision = revision.value, releaseTitle = props.releaseTitle
   note.value = ''
-  if (!await confirmOptionMoves(chosen, props.releaseTitle)) return
   busy.value = true
   try {
-    let confirmMove = chosen.some(ticket => ticket.availability === 'other_release')
+    if (!await confirmOptionMoves(chosen, releaseTitle) || !props.isOwnerCurrent(owner)) return
+    const confirmMove = chosen.some(ticket => ticket.availability === 'other_release')
     try {
-      const result = await addReleaseMembership(props.projectId, props.releaseId, {
-        expected_revision: revision.value, ticket_node_ids: chosen.map(ticket => ticket.ticket_node_id), confirm_move: confirmMove,
+      const result = await addReleaseMembership(owner.projectId, owner.releaseId, {
+        expected_revision: expectedRevision, ticket_node_ids: chosen.map(ticket => ticket.ticket_node_id), confirm_move: confirmMove,
       })
-      added(result)
+      added(result, owner)
     } catch (error) {
+      if (!props.isOwnerCurrent(owner)) return
       if (!confirmMove && isMoveConflict(error)) {
         const ok = await confirmAction({
           title: 'Move into this release?',
-          body: `At least one selected ticket is already in another open release. Moving it puts it in ${props.releaseTitle}.`,
+          body: `At least one selected ticket is already in another open release. Moving it puts it in ${releaseTitle}.`,
           points: chosen.map(ticket => `${ticket.key} · ${ticket.title}`),
-          confirmLabel: `Move into ${props.releaseTitle}`,
+          confirmLabel: `Move into ${releaseTitle}`,
           cancelLabel: 'Leave them',
         })
-        if (!ok) return
-        const result = await addReleaseMembership(props.projectId, props.releaseId, {
-          expected_revision: revision.value, ticket_node_ids: chosen.map(ticket => ticket.ticket_node_id), confirm_move: true,
+        if (!ok || !props.isOwnerCurrent(owner)) return
+        const result = await addReleaseMembership(owner.projectId, owner.releaseId, {
+          expected_revision: expectedRevision, ticket_node_ids: chosen.map(ticket => ticket.ticket_node_id), confirm_move: true,
         })
-        added(result)
+        added(result, owner)
         return
       }
       throw error
     }
   } catch (error) {
+    if (!props.isOwnerCurrent(owner)) return
     const missing = error instanceof APIError && (error.status === 404 || error.status === 405)
     note.value = missing ? 'This server cannot add tickets to a release yet.' : error instanceof Error ? error.message : 'The tickets were not added.'
+    if (isStaleRevision(error)) {
+      await load()
+      if (props.isOwnerCurrent(owner) && optionsOwner && !failed.value) note.value = 'The release changed. Review the refreshed selection and try again.'
+    }
   } finally { busy.value = false }
 }
-function added(result: MembershipResult) {
+function added(result: MembershipResult, owner: PlanOwner) {
+  if (!props.isOwnerCurrent(owner)) return
   // Parents and overlapping selections expand on the server. Older servers may
   // omit the leaf set; the selected root count cannot stand in for that result.
-  emit('added', { count: result.leaf_node_ids ? new Set(result.leaf_node_ids).size : null, result })
+  emit('added', { count: result.leaf_node_ids ? new Set(result.leaf_node_ids).size : null, result, owner })
 }
 function close() { dialog.value?.close(); emit('close') }
 function backdrop(event: MouseEvent) { if (event.target === dialog.value) close() }
@@ -208,7 +230,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
         </p>
         <div class="actions">
           <button type="button" class="btn" @click="close">Cancel</button>
-          <button type="button" class="btn primary" :disabled="!picked.length || busy" :aria-busy="busy" @click="add"><AppIcon name="plus" :size="14" />Add selected</button>
+          <button type="button" class="btn primary" :disabled="!picked.length || busy || loading || !!failed" :aria-busy="busy || loading" @click="add"><AppIcon name="plus" :size="14" />Add selected</button>
         </div>
       </footer>
     </div>
@@ -216,7 +238,7 @@ function backdrop(event: MouseEvent) { if (event.target === dialog.value) close(
 </template>
 
 <style scoped>
-.picker { width: min(clamp(640px, 52vw, 1120px), calc(100vw - 24px)); max-height: min(760px, calc(100dvh - 24px)); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.picker { width: min(var(--dialog-l), calc(100vw - 24px)); max-height: min(760px, calc(100dvh - 24px)); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .picker::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 .card { display: flex; flex-direction: column; gap: 10px; max-height: min(760px, calc(100dvh - 24px)); padding: 18px 18px 14px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
@@ -250,6 +272,7 @@ footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: s
 .actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .btn { height: 36px; }
 @media (max-width: 600px) {
+  .picker { max-width: calc(100vw - 16px); }
   .picker, .card { width: calc(100vw - 16px); max-height: calc(100dvh - 16px); }
   .filters { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .filters .field { padding: 0 4px 0 8px; font-size: 13px; text-overflow: ellipsis; }

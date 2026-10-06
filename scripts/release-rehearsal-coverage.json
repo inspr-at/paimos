@@ -9,7 +9,7 @@
     {
       "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
       "mode": "action",
-      "sha256": "97de3d412db28700923f9679ef3303455aadc97cdeb4a315617ff4c31ec0a629",
+      "sha256": "5b339059aa562d791cec4176ce4e5f792af97de8ac805e0bf4d5ca3217d89d61",
       "step": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
     },
     {
@@ -27,7 +27,7 @@
     {
       "counterpart": "agentd-rehearsal/Build darwin paimos-agentd with LocalAuthentication",
       "mode": "step",
-      "sha256": "e4228f5fed4a2391d05bf550c22ddbddde8dcac46b9066c1a51fb96a9c695332",
+      "sha256": "cc449f2777d35d41d22be5c39729bec7dab18aa60018e206744284df010f0789",
       "step": "Build darwin paimos-agentd with LocalAuthentication"
     },
     {
@@ -65,7 +65,7 @@
     {
       "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
       "mode": "action",
-      "sha256": "97de3d412db28700923f9679ef3303455aadc97cdeb4a315617ff4c31ec0a629",
+      "sha256": "5b339059aa562d791cec4176ce4e5f792af97de8ac805e0bf4d5ca3217d89d61",
       "step": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
     },
     {
@@ -77,7 +77,7 @@
     {
       "counterpart": "assets-rehearsal/Exact production assets assembly",
       "mode": "step",
-      "sha256": "3f23684a69da046128765efa604f225488fd248a14e7a909d6f59abe50627066",
+      "sha256": "05036f7d4f60b0de015ba955dddc31c7607617a29d3ef9739b02ca40a7332272",
       "step": "Build linux paimos-agentd and aeon-cli"
     },
     {
@@ -89,7 +89,7 @@
     {
       "counterpart": "assets-rehearsal/Exact production index, attestation and gh draft invocations",
       "mode": "step",
-      "sha256": "d4a19ddd98d6c0ecd94e4496c500ec52fdcdbc4fda2d18657c28d747d9c31e45",
+      "sha256": "dd2becd66cb6a0682151720fa22ab3ac4e5ee14deefe3d0ca1641ae1982b69c7",
       "step": "Create draft GitHub release with signed assets"
     }
   ],
@@ -115,8 +115,14 @@
     {
       "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
       "mode": "action",
-      "sha256": "f1c421c866796120658fcc5886fcd38c9490f8f0c7b5c946c0fdb465fa72940e",
+      "sha256": "c057a4ddcd696718546000b53fed5781fdc051d6105c113d2967c74df25940f5",
       "step": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069"
+    },
+    {
+      "counterpart": "image-dry-run/Assert pinned Buildx and BuildKit versions",
+      "mode": "step",
+      "sha256": "d43d0ce0cb603960656ef917b15c9f9bbad7159d2a10dc5d98adbfd09d9f8934",
+      "step": "Assert pinned Buildx and BuildKit versions"
     },
     {
       "counterpart": "Registry login is tag-only; rehearsal reads the public build cache without credentials.",
@@ -183,7 +189,7 @@
     {
       "counterpart": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
       "mode": "action",
-      "sha256": "5736aa6690610fcc8c3329192c3e2207f9af5d25a72534844f912187f6057b3b",
+      "sha256": "d1612e89f849a699f2684c05aa6f64a7f1dec30a9e98efe9b56380ad1b933ab6",
       "step": "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020"
     },
     {
@@ -225,20 +231,44 @@
     {
       "counterpart": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e",
       "mode": "action",
-      "sha256": "97de3d412db28700923f9679ef3303455aadc97cdeb4a315617ff4c31ec0a629",
+      "sha256": "5b339059aa562d791cec4176ce4e5f792af97de8ac805e0bf4d5ca3217d89d61",
       "step": "actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e"
     },
     {
       "counterpart": "image-dry-run/Release history fixture",
       "mode": "step",
-      "sha256": "75c43f99ed77eb48ea35cbdf2bae16182a4695aa7c4917eeb9bf7abda7673aa1",
+      "sha256": "b404c9d20a515f932dcb076863d7297cdad1645b7e9c5cd5a3ff17071fca6f1e",
       "step": "Release history"
+    },
+    {
+      "counterpart": "image-dry-run/Require native platform",
+      "mode": "step",
+      "sha256": "a05091bb2f4940b1af0af9fab542ac710c420478deb185a7d01b07e40b5f75e9",
+      "step": "Require native platform"
+    },
+    {
+      "counterpart": "image-dry-run/Freeze external build inputs",
+      "mode": "step",
+      "sha256": "7ee7b6ce05af216b24eadc697fc620f79fe3333819856c6c20aff2cffd3b50fe",
+      "step": "Freeze external build inputs"
+    },
+    {
+      "counterpart": "image-dry-run/Compile web and Go outside Docker",
+      "mode": "step",
+      "sha256": "0f7df7356637070a1370277c7f687dd2fd1fac96f778b753589d6d83495c29fa",
+      "step": "Compile web and Go outside Docker"
     },
     {
       "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
       "mode": "action",
-      "sha256": "f1c421c866796120658fcc5886fcd38c9490f8f0c7b5c946c0fdb465fa72940e",
+      "sha256": "c057a4ddcd696718546000b53fed5781fdc051d6105c113d2967c74df25940f5",
       "step": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069"
+    },
+    {
+      "counterpart": "image-dry-run/Assert pinned Buildx and BuildKit versions",
+      "mode": "step",
+      "sha256": "d43d0ce0cb603960656ef917b15c9f9bbad7159d2a10dc5d98adbfd09d9f8934",
+      "step": "Assert pinned Buildx and BuildKit versions"
     },
     {
       "counterpart": "Registry login is tag-only; rehearsal reads the public build cache without credentials.",
@@ -253,15 +283,27 @@
       "step": "Reject an existing image tag"
     },
     {
-      "counterpart": "image-dry-run/Require native platform",
+      "counterpart": "image-dry-run/Prepare pinned runtime closure",
       "mode": "step",
-      "sha256": "a05091bb2f4940b1af0af9fab542ac710c420478deb185a7d01b07e40b5f75e9",
-      "step": "Require native platform"
+      "sha256": "ee9224f109b05b42853cd8aea29507100edacce4c74057939e4f2b29c0305d0d",
+      "step": "Prepare pinned runtime closure"
+    },
+    {
+      "counterpart": "image-dry-run/Bind runtime closure digest",
+      "mode": "step",
+      "sha256": "7fe5746782093069dd07b82e1619240099e608f880d8e30cc552b81741500cf6",
+      "step": "Bind runtime closure digest"
+    },
+    {
+      "counterpart": "image-dry-run/Start assembly and smoke timing",
+      "mode": "step",
+      "sha256": "d40f9764accb3b753a1ef9757a3c7f10bd2634d56e6e56d4a15fb252a96eba8c",
+      "step": "Start assembly and smoke timing"
     },
     {
       "counterpart": "image-dry-run/Build cached smoke image",
       "mode": "step",
-      "sha256": "0fe7948bf008d90249262025082b512df3cc41535d08168278e97c21a752c334",
+      "sha256": "e095dcae367f3416e706dde3a2e6c8c1fe4717e5f2a275fb83de825c2cffe41d",
       "step": "Build cached smoke image"
     },
     {
@@ -273,14 +315,38 @@
     {
       "counterpart": "image-dry-run/Smoke production image",
       "mode": "step",
-      "sha256": "3cf21fda6c4b7c037aa39e03d4a3fb5a8d0d2aea56db6172eaf02229b289a117",
+      "sha256": "07df291287f9a33403263d1d3047bf2668177a3867afcd5173716ff60ee5b709",
       "step": "Smoke production image"
+    },
+    {
+      "counterpart": "image-dry-run/Record assembly and smoke timing",
+      "mode": "step",
+      "sha256": "6fecce4e6d2f832dbb50a132fffe469c7e199b6ef80cf11a86fbe2247e9de7cb",
+      "step": "Record assembly and smoke timing"
+    },
+    {
+      "counterpart": "image-dry-run/Prove two clean image rebuilds",
+      "mode": "step",
+      "sha256": "76c7dfe732b5baf8b80310db5ad0c28b27d23bf055111cb979cbf32ad9dace6b",
+      "step": "Prove two clean image rebuilds"
+    },
+    {
+      "counterpart": "image-dry-run/Upload image assembly evidence",
+      "mode": "step",
+      "sha256": "4c075411d3ad3ea66f98832cb44d10f8524d21fd2fd94594f63a1ae3fce6483f",
+      "step": "Upload image assembly evidence"
     },
     {
       "counterpart": "image-dry-run/Export production image with provenance locally",
       "mode": "step",
-      "sha256": "4863a035ebf9ff4b1bb2e76ca0d587068d403624778f11ca2d2e9279839aeedd",
+      "sha256": "9399716ab107ecc2e0b7dfc212a1d3816b134ae89506de65dc8e6b2fca25a344",
       "step": "Build and push"
+    },
+    {
+      "counterpart": "image-dry-run/Require exported image to equal the smoked build",
+      "mode": "step",
+      "sha256": "a745edc42147722f2f40f7bd66f176f6bb9bd116c89eccfeb8896858f94f58a7",
+      "step": "Require pushed image to equal the smoked build"
     },
     {
       "counterpart": "No OCI or GitHub attestation is published before tagging; local BuildKit provenance export and real gh argument parsing run instead.",

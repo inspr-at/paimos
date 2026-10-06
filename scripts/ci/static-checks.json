@@ -1,0 +1,762 @@
+{
+  "jobs": {
+    "tree-reuse": {
+      "kind": "not-static",
+      "reason": "Remote exact-SHA reuse proof; requires GitHub context.",
+      "runs_sha256": "6172ff645c8278b5b06debc2a1af05f91bcdb727f752144827bec09b173bfb5e"
+    },
+    "cache-prime": {
+      "kind": "not-static",
+      "reason": "Dependency, browser and toolchain cache preparation.",
+      "runs_sha256": "0206c4b90710308df77450bfa6e758269e97aae7d487228d6f5432be59734841"
+    },
+    "ci-plan": {
+      "kind": "not-static",
+      "reason": "Hosted event classification and GitHub output wiring.",
+      "runs_sha256": "96970e7553db0fcff6ca67811bc56ec35fc1e92d4b2c3429ae8e1d5ee1cdcdae"
+    },
+    "tier-plan": {
+      "kind": "not-static",
+      "reason": "Hosted tier scheduling and output wiring.",
+      "runs_sha256": "56ee0df4b79df17e54da6861167896084752f6cf81e5ff7b45af3dc7ca8c1fbe"
+    },
+    "runner-route": {
+      "kind": "not-static",
+      "reason": "Reusable hosted runner routing workflow.",
+      "runs_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    },
+    "go-test": {
+      "kind": "not-static",
+      "reason": "Database-backed tier execution; property lint is a supplement.",
+      "runs_sha256": "8d2ee7a5280e716a86adb19100a477ab41b0c81be95db2421db3004f1fb928d1"
+    },
+    "go-timing": {
+      "kind": "not-static",
+      "reason": "Database-backed timing measurement.",
+      "runs_sha256": "e0cf021280c5a2fd89fcfe44922e8e575a0606f76c621abc8309399ae94b3add"
+    },
+    "go-static": {
+      "kind": "static"
+    },
+    "go": {
+      "kind": "not-static",
+      "reason": "Hosted aggregate status gate.",
+      "runs_sha256": "a14dd718fde807a0eaa604ad4ba50db65880d5c3c6e2544efc456e9cdb872003"
+    },
+    "web-setup": {
+      "kind": "static"
+    },
+    "web-unit": {
+      "kind": "static"
+    },
+    "web-shard": {
+      "kind": "not-static",
+      "reason": "Browser tier execution and infrastructure preparation.",
+      "runs_sha256": "bbe9bd9c51a7b4a1d8665eda611fdb1334c895c648ca2ac8a807359199774f81"
+    },
+    "web": {
+      "kind": "not-static",
+      "reason": "Hosted aggregate status gate.",
+      "runs_sha256": "aa426035e3ec87ec44c164ded9b4af17645384876ee472dc87f6d96bc6442852"
+    },
+    "release-check": {
+      "kind": "not-static",
+      "reason": "Hosted aggregate status gate.",
+      "runs_sha256": "de7190f359ffbc46154e54f23987f3042b891ff87347fb80397d5b567a5f80d1"
+    },
+    "release-check-run": {
+      "kind": "static"
+    },
+    "e2e": {
+      "kind": "not-static",
+      "reason": "Hosted aggregate status gate.",
+      "runs_sha256": "88e16593a23854e7f1a2a8ee88032dc680b86d2abe6145d5feb82118cd3c083a"
+    },
+    "e2e-run": {
+      "kind": "not-static",
+      "reason": "Build, database and browser end-to-end execution.",
+      "runs_sha256": "62ae1990fe28604e8325a5dee018268fc2b1064b8eb8eac1c13c117ec5e13648"
+    },
+    "migration-compat": {
+      "kind": "static"
+    },
+    "tier-measurements": {
+      "kind": "not-static",
+      "reason": "Hosted artifact aggregation and reporting.",
+      "runs_sha256": "1d0fd9b32ba61807e7e552be08524b3202312c0ffea75fb167726d20b902406c"
+    }
+  },
+  "exclusions": [
+    {
+      "job": "web-setup",
+      "step": "Resolve lockfile and Playwright cache keys",
+      "cwd": ".",
+      "command": "set -euo pipefail\npw_version=\"$(node -p \"require('./web/package-lock.json').packages['node_modules/@playwright/test'].version\")\"\necho \"dependencies=web-deps-v1-${RUNNER_OS}-${RUNNER_ARCH}-node24-${LOCKFILE_HASH}-pw${pw_version}\" >> \"$GITHUB_OUTPUT\"\necho \"browsers=web-playwright-v1-${RUNNER_OS}-${RUNNER_ARCH}-${LOCKFILE_HASH}-pw${pw_version}\" >> \"$GITHUB_OUTPUT\"",
+      "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
+    {
+      "job": "web-setup",
+      "step": "Install web dependencies",
+      "cwd": "web",
+      "command": "npm ci",
+      "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
+    {
+      "job": "web-setup",
+      "step": "Build web",
+      "cwd": "web",
+      "command": "npm run build",
+      "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
+    {
+      "job": "web-setup",
+      "step": "Install Playwright browsers",
+      "cwd": "web",
+      "command": "npx playwright install chromium",
+      "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
+    {
+      "job": "web-setup",
+      "step": "Pack web runtime for shards",
+      "cwd": ".",
+      "command": "tar -cf \"$RUNNER_TEMP/web-runtime.tar\" web/node_modules web/dist",
+      "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
+    {
+      "job": "web-unit",
+      "step": "Restore web runtime",
+      "cwd": ".",
+      "command": "tar -xf \"$RUNNER_TEMP/web-runtime/web-runtime.tar\"",
+      "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
+    {
+      "job": "web-unit",
+      "step": "Install shells used by command round-trip unit tests",
+      "cwd": ".",
+      "command": "sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh",
+      "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
+    {
+      "job": "web-unit",
+      "step": "Run selected web units without retries",
+      "cwd": "web",
+      "command": "if [ \"$CI_LANE\" = spec-only ]; then",
+      "reason": "Shell branch scaffold; both static branches are mirrored."
+    },
+    {
+      "job": "web-unit",
+      "step": "Run selected web units without retries",
+      "cwd": "web",
+      "command": "npm run test:unit:core",
+      "reason": "Full unit execution is outside this pre-filter; inventory is a supplement."
+    },
+    {
+      "job": "web-unit",
+      "step": "Run selected web units without retries",
+      "cwd": "web",
+      "command": "else",
+      "reason": "Shell branch scaffold; both static branches are mirrored."
+    },
+    {
+      "job": "web-unit",
+      "step": "Run selected web units without retries",
+      "cwd": "web",
+      "command": "node ../scripts/test-tiers/cli.mjs run web --unit --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-unit-${{ matrix.shard }}",
+      "reason": "Full unit execution is outside this pre-filter; inventory is a supplement."
+    },
+    {
+      "job": "web-unit",
+      "step": "Run selected web units without retries",
+      "cwd": "web",
+      "command": "fi",
+      "reason": "Shell branch scaffold; both static branches are mirrored."
+    },
+    {
+      "job": "web-unit",
+      "step": "Confirm full tier execution",
+      "cwd": ".",
+      "command": "node scripts/test-tiers/check-full.mjs",
+      "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
+    {
+      "job": "release-check-run",
+      "step": "Verify the Go vendor hash",
+      "cwd": ".",
+      "command": "bash scripts/check-nix-vendor-hash.sh",
+      "reason": "Expensive Nix build; hosted gate."
+    },
+    {
+      "job": "migration-compat",
+      "step": "Resolve the latest published stable release",
+      "cwd": ".",
+      "command": "set -euo pipefail\nrelease=\"$(gh api \"repos/$GITHUB_REPOSITORY/releases/latest\")\"\ntag=\"$(jq -r '.tag_name' <<< \"$release\")\"\n[[ \"$tag\" =~ ^v[0-9]{12}\\.0\\.0$ ]] || { echo 'Expected a published calendar release' >&2; exit 1; }\ndigest=\"$(jq -r '.body' <<< \"$release\" | sed -nE 's/^Digest: (sha256:[a-f0-9]{64})\\r?$/\\1/p')\"\n[[ \"$digest\" =~ ^sha256:[a-f0-9]{64}$ ]] || { echo 'Expected one published image digest' >&2; exit 1; }\ngit show-ref --verify \"refs/tags/$tag\" >/dev/null\necho \"Previous published release: $tag; image: ghcr.io/inspr-at/aeon@$digest\"\necho \"tag=$tag\" >> \"$GITHUB_OUTPUT\"\necho \"digest=$digest\" >> \"$GITHUB_OUTPUT\"",
+      "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
+    },
+    {
+      "job": "migration-compat",
+      "step": "Previous binary on the candidate schema",
+      "cwd": ".",
+      "command": "bash scripts/migration-compat.sh \"$PREVIOUS_TAG\" \"$PREVIOUS_DIGEST\"",
+      "reason": "Runtime compatibility probe requires Docker and published image."
+    }
+  ],
+  "checks": [
+    {
+      "id": "volatile-identity",
+      "command": "python3 - <<'PY'\nimport pathlib, re, sys\n# Include multiline calls and indirect reads via named constants.\nvolatile = re.compile(r'\\bGITHUB_(?:SHA|RUN_ID|RUN_NUMBER|RUN_ATTEMPT)\\b')\nallowed = '--source-digest \\\\\"$GITHUB_SHA\\\\\"'\nfailures = []\nfor path in sorted(pathlib.Path('.').rglob('*_test.go')):\n    source = path.read_text()\n    # This existing release-contract assertion checks a workflow's\n    # literal binding; it does not read the process environment.\n    if path.as_posix() == 'scripts/releaseworkflow/workflow_test.go':\n        source = source.replace(allowed, '')\n    for match in volatile.finditer(source):\n        line = source.count('\\n', 0, match.start()) + 1\n        failures.append(f'{path}:{line}: volatile CI identity in test source')\nif failures:\n    print('\\n'.join(failures), file=sys.stderr)\n    sys.exit(1)\nprint('Go tests do not depend on volatile CI identity')\nPY",
+      "cwd": ".",
+      "ci": {
+        "job": "go-static",
+        "step": "Forbid volatile CI identity reads in Go tests",
+        "command": "python3 - <<'PY'\nimport pathlib, re, sys\n# Include multiline calls and indirect reads via named constants.\nvolatile = re.compile(r'\\bGITHUB_(?:SHA|RUN_ID|RUN_NUMBER|RUN_ATTEMPT)\\b')\nallowed = '--source-digest \\\\\"$GITHUB_SHA\\\\\"'\nfailures = []\nfor path in sorted(pathlib.Path('.').rglob('*_test.go')):\n    source = path.read_text()\n    # This existing release-contract assertion checks a workflow's\n    # literal binding; it does not read the process environment.\n    if path.as_posix() == 'scripts/releaseworkflow/workflow_test.go':\n        source = source.replace(allowed, '')\n    for match in volatile.finditer(source):\n        line = source.count('\\n', 0, match.start()) + 1\n        failures.append(f'{path}:{line}: volatile CI identity in test source')\nif failures:\n    print('\\n'.join(failures), file=sys.stderr)\n    sys.exit(1)\nprint('Go tests do not depend on volatile CI identity')\nPY",
+        "cwd": "."
+      },
+      "needs": [
+        "python3"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "go-vet",
+      "command": "go vet ./...",
+      "cwd": ".",
+      "ci": {
+        "job": "go-static",
+        "step": null,
+        "command": "go vet ./...",
+        "cwd": "."
+      },
+      "needs": [
+        "go"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "rules-bootstrap",
+      "command": "go run ./scripts/rules-bootstrap check",
+      "cwd": ".",
+      "ci": {
+        "job": "go-static",
+        "step": "Check prepared rules bootstrap drift",
+        "command": "go run ./scripts/rules-bootstrap check",
+        "cwd": "."
+      },
+      "needs": [
+        "go"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "test-tiers",
+      "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "go-static",
+        "step": "Test tier selector regressions",
+        "command": "node --test scripts/test-tiers/test-tiers.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node",
+        "go"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "go-tiers",
+      "command": "node scripts/test-tiers/cli.mjs check go",
+      "cwd": ".",
+      "ci": {
+        "job": "go-static",
+        "step": "Validate every Go tier against native collection",
+        "command": "node scripts/test-tiers/cli.mjs check go",
+        "cwd": "."
+      },
+      "needs": [
+        "node",
+        "go"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "go-shards-7",
+      "command": "go run ./scripts/ci-go-shards check -count 7",
+      "cwd": ".",
+      "ci": {
+        "job": "go-static",
+        "step": "Check the shard list covers go test ./...",
+        "command": "go run ./scripts/ci-go-shards check -count 7",
+        "cwd": "."
+      },
+      "needs": [
+        "go"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "go-shards-4",
+      "command": "go run ./scripts/ci-go-shards check -count 4",
+      "cwd": ".",
+      "ci": {
+        "job": "go-static",
+        "step": "Check the shard list covers go test ./...",
+        "command": "go run ./scripts/ci-go-shards check -count 4",
+        "cwd": "."
+      },
+      "needs": [
+        "go"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "release-metadata",
+      "command": "node scripts/verify-release.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": null,
+        "command": "node scripts/verify-release.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "release-rehearsal-tests",
+      "command": "node --test scripts/check-release-rehearsal.test.mjs scripts/release-rehearsal-gh.test.mjs scripts/create-release-tag.test.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Release rehearsal and tag gate regressions",
+        "command": "node --test scripts/check-release-rehearsal.test.mjs scripts/release-rehearsal-gh.test.mjs scripts/create-release-tag.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "own-release-notes-tests",
+      "command": "node --test scripts/check-own-release-notes.test.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Require this release's own frozen product notes",
+        "command": "node --test scripts/check-own-release-notes.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "own-release-notes",
+      "command": "node scripts/check-own-release-notes.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Require this release's own frozen product notes",
+        "command": "node scripts/check-own-release-notes.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "release-tool-tests",
+      "command": "node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs scripts/release-timing.test.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": null,
+        "command": "node --test scripts/homebrew-formula.test.mjs scripts/homebrew-tap-pr.test.mjs scripts/release-timing.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "live-policy-tests",
+      "command": "node --test scripts/verify-live.test.mjs scripts/verify-live-policy.test.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": null,
+        "command": "node --test scripts/verify-live.test.mjs scripts/verify-live-policy.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "cross-family-tests",
+      "command": "node --test scripts/cross-family-gate.test.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": null,
+        "command": "node --test scripts/cross-family-gate.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "release-pin-tests",
+      "command": "node --test scripts/release-pin-pr.test.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": null,
+        "command": "node --test scripts/release-pin-pr.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "audit-tests",
+      "command": "python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Offline code-health audit toolkit and slice ownership",
+        "command": "python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'",
+        "cwd": "."
+      },
+      "needs": [
+        "python3"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "audit-coverage",
+      "command": "python3 -B scripts/audit/covcheck.py --summary",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Offline code-health audit toolkit and slice ownership",
+        "command": "python3 -B scripts/audit/covcheck.py --summary",
+        "cwd": "."
+      },
+      "needs": [
+        "python3"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "ci-plan-tests",
+      "command": "node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "PR classification and exact-SHA reuse regressions",
+        "command": "node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "full-ui-qa-tests",
+      "command": "node --test scripts/full-ui-qa.test.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Full UI QA workflow regressions",
+        "command": "node --test scripts/full-ui-qa.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "releaseworkflow-tests",
+      "command": "go test ./scripts/releaseworkflow -count=1",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Tier integration and workflow regressions",
+        "command": "go test ./scripts/releaseworkflow -count=1",
+        "cwd": "."
+      },
+      "needs": [
+        "go"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "runner-route-tests",
+      "command": "node --test scripts/ci-runner-route.test.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Enforce test runner trust boundary",
+        "command": "node --test scripts/ci-runner-route.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "runner-guard-tests",
+      "command": "go test ./scripts/ci-runner-guard -count=1",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Enforce test runner trust boundary",
+        "command": "go test ./scripts/ci-runner-guard -count=1",
+        "cwd": "."
+      },
+      "needs": [
+        "go"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "runner-guard",
+      "command": "go run ./scripts/ci-runner-guard",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Enforce test runner trust boundary",
+        "command": "go run ./scripts/ci-runner-guard",
+        "cwd": "."
+      },
+      "needs": [
+        "go"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "docker-web-inputs",
+      "command": "node --test scripts/docker-web-inputs.test.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "web-setup",
+        "step": "Check Docker web inputs without Docker",
+        "command": "node --test scripts/docker-web-inputs.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "web-typecheck",
+      "command": "npm run typecheck",
+      "cwd": "web",
+      "ci": {
+        "job": "web-setup",
+        "step": null,
+        "command": "npm run typecheck",
+        "cwd": "web"
+      },
+      "needs": [
+        "node",
+        "npm-installed"
+      ],
+      "optional": true,
+      "timeout_seconds": 120
+    },
+    {
+      "id": "web-lint",
+      "command": "npm run lint",
+      "cwd": "web",
+      "ci": {
+        "job": "web-setup",
+        "step": null,
+        "command": "npm run lint",
+        "cwd": "web"
+      },
+      "needs": [
+        "node",
+        "npm-installed"
+      ],
+      "optional": true,
+      "timeout_seconds": 120
+    },
+    {
+      "id": "migration-tests",
+      "command": "node --test scripts/check-migrations.test.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "migration-compat",
+        "step": "Static migration policy",
+        "command": "node --test scripts/check-migrations.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "migrations",
+      "command": "node scripts/check-migrations.mjs --base-ref \"$PREVIOUS_TAG\"",
+      "cwd": ".",
+      "ci": {
+        "job": "migration-compat",
+        "step": "Static migration policy",
+        "command": "node scripts/check-migrations.mjs --base-ref \"$PREVIOUS_TAG\"",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "migration-splitter",
+      "command": "GOMAXPROCS=2 go test -p 2 ./internal/db -run '^TestMigrationCheckerSplitParity$' -count=1",
+      "cwd": ".",
+      "ci": {
+        "job": "migration-compat",
+        "step": "Checker and migration runner SQL splitter parity",
+        "command": "GOMAXPROCS=2 go test -p 2 ./internal/db -run '^TestMigrationCheckerSplitParity$' -count=1",
+        "cwd": "."
+      },
+      "needs": [
+        "go"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "migration-probe-tests",
+      "command": "python3 -B -m unittest discover -s scripts -p migration_compat_probe_test.py",
+      "cwd": ".",
+      "ci": {
+        "job": "migration-compat",
+        "step": "Previous binary on the candidate schema",
+        "command": "python3 -B -m unittest discover -s scripts -p migration_compat_probe_test.py",
+        "cwd": "."
+      },
+      "needs": [
+        "python3"
+      ],
+      "timeout_seconds": 120
+    },
+    {
+      "id": "web-shard-spec-tests",
+      "command": "node --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs",
+      "cwd": "web",
+      "ci": {
+        "job": "web-unit",
+        "step": "Run selected web units without retries",
+        "command": "node --test --test-concurrency=1 scripts/ci-web-shard.test.mjs scripts/aeon-676-ci.test.mjs",
+        "cwd": "web"
+      },
+      "needs": [
+        "node",
+        "npm-installed"
+      ],
+      "timeout_seconds": 120,
+      "optional": true
+    },
+    {
+      "id": "web-shard-tests",
+      "command": "npm run ci:web:shard:test",
+      "cwd": "web",
+      "ci": {
+        "job": "web-unit",
+        "step": "Run selected web units without retries",
+        "command": "npm run ci:web:shard:test",
+        "cwd": "web"
+      },
+      "needs": [
+        "node",
+        "npm-installed"
+      ],
+      "timeout_seconds": 600,
+      "optional": true
+    },
+    {
+      "id": "openapi-properties",
+      "command": "go test ./internal/reportercontract -run '^TestOpenAPIPropertyNamesHaveNoSpace$' -count=1",
+      "cwd": ".",
+      "ci": {
+        "job": "go-test",
+        "step": "Test this shard (essential plus changed area, or full on main)",
+        "command": "node scripts/test-tiers/cli.mjs run go --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job go-test-${{ matrix.shard }}",
+        "cwd": "."
+      },
+      "needs": [
+        "go"
+      ],
+      "timeout_seconds": 90,
+      "supplement": "The tier Go job owns this ESSENTIAL property-lint package test; run it directly without a database."
+    },
+    {
+      "id": "web-tiers",
+      "command": "node scripts/test-tiers/cli.mjs check web",
+      "cwd": ".",
+      "ci": {
+        "job": "web-unit",
+        "step": "Run selected web units without retries",
+        "command": "node ../scripts/test-tiers/cli.mjs run web --unit --shard ${{ matrix.shard }}/${{ strategy.job-total }} --job web-unit-${{ matrix.shard }}",
+        "cwd": "web"
+      },
+      "needs": [
+        "node",
+        "npm-installed"
+      ],
+      "optional": true,
+      "timeout_seconds": 120,
+      "supplement": "Collect and validate the same tier inventory without running cases or launching browsers."
+    },
+    {
+      "id": "web-spec-inventory",
+      "command": "node scripts/ci-web-shard.mjs --check --strict",
+      "cwd": "web",
+      "ci": {
+        "job": "web-unit",
+        "step": "Run selected web units without retries",
+        "command": "npm run ci:web:shard:test",
+        "cwd": "web"
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30,
+      "supplement": "Browser/dependency-free strict source inventory for the shard check nested in npm ci:web:shard:test; source drift must fail even when native collection tests are optional."
+    },
+    {
+      "id": "web-browser-safety",
+      "command": "npm run test:browser-safety",
+      "cwd": "web",
+      "ci": {
+        "job": "web-unit",
+        "step": "Browser runner safety (no browsers)",
+        "command": "npm run test:browser-safety",
+        "cwd": "web"
+      },
+      "needs": [
+        "node",
+        "npm-installed"
+      ],
+      "optional": true,
+      "timeout_seconds": 120
+    }
+  ]
+}

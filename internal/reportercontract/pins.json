@@ -699,8 +699,8 @@
     }
   },
   "harness-session": {
-    "version": "harness-session/2.7",
-    "sha256": "3b340a60b30b40dce0636b2a7dc7aef67f9b16bf84c2f50414063b8577d0f9f1",
+    "version": "harness-session/2.9",
+    "sha256": "7168e041b7c237c6fffa17d8552bb40a7a4c2496453338f9105fe3b19550a919",
     "shape": {
       "GET /projects/{projectId}/harness-sessions/{sessionId} 200": {
         "properties": {
@@ -768,6 +768,41 @@
           "agent_principal_id": {
             "format": "uuid",
             "type": "string"
+          },
+          "agent_recovery": {
+            "properties": {
+              "action": {
+                "enum": [
+                  "",
+                  "restart",
+                  "reconnect"
+                ],
+                "type": "string"
+              },
+              "cause": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "observed_revision": {
+                "maxLength": 64,
+                "minLength": 64,
+                "type": "string"
+              },
+              "session_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "session_id",
+              "observed_revision",
+              "cause",
+              "detail",
+              "action"
+            ],
+            "type": "object"
           },
           "archived_at": {
             "format": "date-time",
@@ -856,6 +891,24 @@
           "commits": {
             "items": {
               "properties": {
+                "files_changed": {
+                  "format": "int64",
+                  "maximum": 1000000000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "lines_added": {
+                  "format": "int64",
+                  "maximum": 1000000000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "lines_deleted": {
+                  "format": "int64",
+                  "maximum": 1000000000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
                 "sha": {
                   "pattern": "^[0-9a-fA-F]{7,40}$",
                   "type": "string"
@@ -2050,6 +2103,41 @@
             "format": "uuid",
             "type": "string"
           },
+          "agent_recovery": {
+            "properties": {
+              "action": {
+                "enum": [
+                  "",
+                  "restart",
+                  "reconnect"
+                ],
+                "type": "string"
+              },
+              "cause": {
+                "type": "string"
+              },
+              "detail": {
+                "type": "string"
+              },
+              "observed_revision": {
+                "maxLength": 64,
+                "minLength": 64,
+                "type": "string"
+              },
+              "session_id": {
+                "format": "uuid",
+                "type": "string"
+              }
+            },
+            "required": [
+              "session_id",
+              "observed_revision",
+              "cause",
+              "detail",
+              "action"
+            ],
+            "type": "object"
+          },
           "archived_at": {
             "format": "date-time",
             "type": [
@@ -2137,6 +2225,24 @@
           "commits": {
             "items": {
               "properties": {
+                "files_changed": {
+                  "format": "int64",
+                  "maximum": 1000000000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "lines_added": {
+                  "format": "int64",
+                  "maximum": 1000000000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "lines_deleted": {
+                  "format": "int64",
+                  "maximum": 1000000000,
+                  "minimum": 0,
+                  "type": "integer"
+                },
                 "sha": {
                   "pattern": "^[0-9a-fA-F]{7,40}$",
                   "type": "string"

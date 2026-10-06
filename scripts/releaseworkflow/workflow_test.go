@@ -25,9 +25,11 @@ type step struct {
 }
 
 type job struct {
-	RunsOn   string `yaml:"runs-on"`
-	If       string
-	Strategy struct {
+	TimeoutMinutes int `yaml:"timeout-minutes"`
+	Env            map[string]string
+	RunsOn         string `yaml:"runs-on"`
+	If             string
+	Strategy       struct {
 		FailFast bool `yaml:"fail-fast"`
 		Matrix   struct {
 			Include []struct {
@@ -45,6 +47,7 @@ type job struct {
 }
 
 type workflow struct {
+	Env         map[string]string
 	On          map[string]any
 	Permissions map[string]string
 	Jobs        map[string]job
@@ -151,7 +154,7 @@ func TestSmokeBeforePushAndAttest(t *testing.T) {
 	if smoke.Env["AEON_SMOKE_IMAGE"] != "${{ steps.smoke-image.outputs.image }}" || smoke.Run != "bash scripts/smoke-image.sh" {
 		t.Fatal("smoke must exercise the loaded immutable image ID")
 	}
-	for _, key := range []string{"context", "platforms", "build-args", "cache-from"} {
+	for _, key := range []string{"context", "platforms", "build-args", "cache-from", "build-contexts"} {
 		if build.With[key] != push.With[key] || build.With[key] == "" {
 			t.Fatalf("smoked and pushed build inputs differ: %s", key)
 		}
@@ -159,7 +162,7 @@ func TestSmokeBeforePushAndAttest(t *testing.T) {
 	if push.With["context"] != "." || push.With["push"] != "true" || push.With["provenance"] != "mode=max" || !strings.Contains(push.With["cache-to"], "type=registry,") || !strings.HasSuffix(push.With["cache-to"], ",mode=max") {
 		t.Fatal("pushed image requires generated history, registry cache and provenance")
 	}
-	if push.With["tags"] != "" || push.With["outputs"] != "type=image,name=ghcr.io/inspr-at/aeon,push-by-digest=true,name-canonical=true,push=true" {
+	if push.With["tags"] != "" || push.With["outputs"] != "type=image,name=ghcr.io/inspr-at/aeon,push-by-digest=true,name-canonical=true,push=true,rewrite-timestamp=true,oci-mediatypes=true" {
 		t.Fatal("platform jobs must publish by digest without tagging the release")
 	}
 	if !strings.HasPrefix(attest.Uses, "actions/attest-build-provenance@") || attest.With["subject-name"] != "ghcr.io/inspr-at/aeon" || attest.With["subject-digest"] != "${{ steps.push.outputs.digest }}" || attest.With["push-to-registry"] != "true" || attest.With["create-storage-record"] != "false" {
@@ -378,6 +381,7 @@ case "$*" in
 esac`,
 				"openssl": "echo fixture",
 				"trash":   "exit 0",
+				"node":    `printf '%s\n' "$*" >> "$DOCKER_LOG"`,
 			}
 			for name, script := range stubs {
 				if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/bash\n"+script+"\n"), 0700); err != nil {
@@ -402,7 +406,7 @@ esac`,
 				if strings.Contains(calls, "build ") || strings.Contains(calls, "image rm ") || !strings.Contains(calls, "--entrypoint /bin/sh "+image) {
 					t.Fatalf("prebuilt image rebuilt, removed or not exercised: %s", calls)
 				}
-			} else if !strings.Contains(calls, "build --build-arg VERSION=260930120000.0.0") || !strings.Contains(calls, "image rm aeon-smoke:fixture") {
+			} else if !strings.Contains(calls, "scripts/assemble-image.mjs aeon-smoke:fixture") || !strings.Contains(calls, "image rm aeon-smoke:fixture") {
 				t.Fatalf("standalone build/cleanup behavior changed: %s", calls)
 			}
 		})
@@ -569,8 +573,8 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 		t.Fatal("pin regression tests must run in full draft PR CI")
 	}
 	worker, gate := ci.Jobs["release-check-run"], ci.Jobs["release-check"]
-	if worker.If != "always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'" || gate.If != "always()" ||
-		!reflect.DeepEqual(gate.Needs, []any{"ci-plan", "release-check-run", "tree-reuse", "cache-prime"}) {
+	if worker.If != "always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'" || gate.If != "always()" ||
+		!reflect.DeepEqual(gate.Needs, []any{"ci-plan", "release-check-run", "tree-reuse", "cache-prime", "tier-plan"}) {
 		t.Fatal("pin regressions must retain classified validation and the required aggregate")
 	}
 }

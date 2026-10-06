@@ -39,6 +39,12 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 			return deny
 		}
 		switch parts[1] {
+		case "status":
+			// A live paired computer may read the same tenant status metadata;
+			// this does not admit other paths or bypass pairing revocation.
+			if len(parts) == 3 && parts[2] == "help" && (r.Method == http.MethodGet || r.Method == http.MethodHead) {
+				return nil
+			}
 		case "me":
 			if r.Method == "GET" && len(parts) == 2 {
 				return nil
@@ -46,6 +52,19 @@ func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 		case "agentd":
 			if r.Pattern == "GET /api/agentd/step-ups/{challenge_id}" {
 				return nil // Handler requires the runtime key plus the computer lifecycle proof.
+			}
+		case "harness-recoveries":
+			if r.Method == "POST" && len(parts) == 3 && parts[2] == "claim" {
+				return nil // The claim handler selects only this principal's exact daemon generation.
+			}
+			if r.Method == "POST" && len(parts) == 4 && validRouteUUID(parts[2]) && parts[3] == "complete" {
+				var own bool
+				if err = tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM harness_recoveries q JOIN harness_sessions s ON s.tenant_id=q.tenant_id AND s.id=q.session_id WHERE q.id=$1 AND s.agent_principal_id=$2)`, parts[2], p.ID).Scan(&own); err != nil {
+					return err
+				}
+				if own {
+					return nil
+				}
 			}
 		case "agent-pairing":
 			if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/account-link" {

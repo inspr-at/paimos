@@ -21,7 +21,7 @@ const api = vi.hoisted(() => ({
 }))
 vi.mock('../src/lib/api', async original => ({ ...(await original<typeof import('../src/lib/api')>()), ...api }))
 vi.mock('../src/lib/toast', () => ({ toast: vi.fn() }))
-const { useTicket } = await import('../src/lib/useTicket')
+const { guardedMove, useTicket } = await import('../src/lib/useTicket')
 const { useTicketList } = await import('../src/lib/useTicketList')
 
 const PROJECT = { id: 'p-1', key: 'PRJ', title: 'Project' }
@@ -69,6 +69,30 @@ function setup(fetchNode = vi.fn<(id: string) => Promise<WorkNode | null>>(), st
 
 beforeEach(() => { rowStore.clear(); for (const fn of Object.values(api)) fn.mockClear(); api.getNode.mockReset(); api.updateNode.mockReset() })
 afterEach(() => { scope?.stop(); scope = undefined })
+
+describe('guardedMove: canonical work ancestry conflicts', () => {
+  it.each(['inline node', 'fallback GET'])('%s conflict adopts remote work B without keeping ancestor A', async response => {
+    const A = { id: 'work-a', key: 'PRJ-A', title: 'Work A', kind_slug: 'work' }
+    const B = { id: 'work-b', key: 'PRJ-B', title: 'Work B', kind_slug: 'work' }
+    const C = { id: 'work-c', key: 'PRJ-C', title: 'Work C', kind_slug: 'work' }
+    const row = rowStore.adopt({ ...item(), kind_slug: 'work', kind_label: 'Work', parent_id: A.id, parent: A, epic: { id: A.id, key: A.key, title: A.title } }, rowStore.mark(), { show: true })!
+    rowStore.learnParent(B)
+    const remote = node({ parent_id: B.id, updated_at: at(5) })
+    api.moveNode.mockRejectedValueOnce(new APIError(412, 'changed', response === 'inline node' ? { node: remote } : {}))
+    if (response === 'fallback GET') api.getNode.mockResolvedValueOnce(remote)
+    const after = vi.fn()
+
+    expect(await guardedMove(row, C, after, rowStore)).toBe('conflict')
+    expect(api.moveNode).toHaveBeenLastCalledWith(row.id, C.id, null, { ifUnmodifiedSince: at(1) })
+    expect(api.getNode).toHaveBeenCalledTimes(response === 'fallback GET' ? 1 : 0)
+    expect(after).not.toHaveBeenCalled()
+    expect(row.updated_at).toBe(at(5))
+    expect(row.parent_id).toBe(B.id)
+    expect(row.parent).toEqual(B)
+    expect(row.epic).toEqual({ id: B.id, key: B.key, title: B.title })
+    expect(rowStore.latest(row.id)?.epic).toEqual(row.epic)
+  })
+})
 
 describe('useTicket: human-check action permissions', () => {
   it.each(['only a person can mark a human check checked', 'only a person can undo a human check'])('keeps ticket write access after %s', async reason => {

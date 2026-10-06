@@ -5,47 +5,90 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { run, browserList, plan, main } from '../../scripts/test-tiers/cli.mjs'
-import { command, root, web, evidence, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
+import { command, root, web, evidence, flattenBrowser, collectWeb } from '../../scripts/test-tiers/collect.mjs'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { registerHooks } from 'node:module'
 import { validate, key, select } from '../../scripts/test-tiers/core.mjs'
 
+// One native collection serves every plan in this file: the web-unit shard
+// budget is 120 seconds and each recollection costs tens of seconds.
+let collected
+const inventory=()=>collected??=collectWeb()
+
 test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async()=>{
-  const policy=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8'))
-  const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
-  const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
-  const selection=plan('web',options)
-  const browser=selection.all.filter(row=>row.kind==='browser')
-  const declared=new Map(JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8')).tests.map(row=>[key(row),row]))
-  const expected=browser.filter(row=>row.tier==='ESSENTIAL'||(gated.has(row.file)&&declared.get(key(row))?.tier==='GATED-FULL'))
-  assert.ok(browser.length>expected.length,'Fixture must include optional nonessential registrations')
-  assert.deepEqual(selection.tests.map(key).sort(),expected.map(key).sort())
-  assert.equal(selection.full,true)
-  assert.equal(selection.scope,'gated-full')
-  assert.equal(selection.deferredBrowserCases,browser.length-expected.length)
-  // Workflow fan-out and explicit --full both retain the established gate.
-  const original=process.env.AEON_TEST_TIER_MODE,log=console.log,output=[]
+  // Every planner call sees the same unchanged tree. Collect it natively once,
+  // then reuse that snapshot while exercising the unchanged planner and CLI.
+  // The selector tests below still run their requested native lists separately.
+  const snapshot=inventory()
+  const collector=pathToFileURL(resolve(root,'scripts/test-tiers/collect.mjs')).href
+  const wrapper=`export * from ${JSON.stringify(`${collector}?native-planning-snapshot`)};
+export const collectWeb = () => (${JSON.stringify(snapshot)});`
+  const hooks=registerHooks({resolve(specifier,context,next) {
+    const result=next(specifier,context)
+    if(result.url===collector)return {url:`data:text/javascript,${encodeURIComponent(wrapper)}`,shortCircuit:true}
+    return result
+  }})
   try {
-    process.env.AEON_TEST_TIER_MODE='full'
+    const {plan,main}=await import('../../scripts/test-tiers/cli.mjs?native-planning-snapshot')
+    const policy=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8'))
+    const gated=new Set(policy.groups.filter(group=>group.gate!==false).flatMap(group=>group.specs.map(spec=>spec.file)))
+    const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
+    const selection=plan('web',options)
+    const browser=selection.all.filter(row=>row.kind==='browser')
+    const declared=new Map(JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8')).tests.map(row=>[key(row),row]))
+    const expected=browser.filter(row=>row.tier==='ESSENTIAL'||(gated.has(row.file)&&declared.get(key(row))?.tier==='GATED-FULL'))
+    assert.ok(browser.length>expected.length,'Fixture must include optional nonessential registrations')
+    assert.deepEqual(selection.tests.map(key).sort(),expected.map(key).sort())
+    assert.equal(selection.full,true)
+    assert.equal(selection.scope,'gated-full')
+    assert.equal(selection.deferredBrowserCases,browser.length-expected.length)
+    // Workflow fan-out and explicit --full both retain the established gate.
+    const original=process.env.AEON_TEST_TIER_MODE,log=console.log,output=[]
+    try {
+      process.env.AEON_TEST_TIER_MODE='full'
+      console.log=value=>output.push(JSON.parse(value))
+      assert.equal(await main(['plan','web','--event','pull_request','--paths',JSON.stringify(options.paths)]),0)
+      assert.equal(output.at(-1).kinds.browser,expected.length)
+      assert.equal(output.at(-1).deferredBrowserCases,browser.length-expected.length)
+      assert.equal(await main(['plan','web','--full','--event','pull_request','--paths',JSON.stringify(options.paths)]),0)
+      assert.equal(output.at(-1).kinds.browser,expected.length)
+      assert.equal(output.at(-1).scope,'gated-full')
+      assert.equal(await main(['plan','web','--all','--event','workflow_dispatch','--paths','[]']),0)
+      assert.equal(output.at(-1).kinds.browser,browser.length)
+      assert.equal(output.at(-1).scope,'catalogue')
+    } finally {
+      console.log=log
+      if(original===undefined) delete process.env.AEON_TEST_TIER_MODE
+      else process.env.AEON_TEST_TIER_MODE=original
+    }
+    const nightly=plan('web',{...options,event:'schedule'})
+    assert.deepEqual(nightly.tests.map(key).sort(),browser.map(key).sort())
+    assert.equal(nightly.scope,'catalogue')
+    assert.equal(nightly.deferredBrowserCases,0)
+  } finally { hooks.deregister() }
+})
+
+test('plan and the CLI reuse a supplied inventory instead of recollecting the catalogue',async()=>{
+  const sentinel={kind:'vitest',file:'tests/plan-owner.unit.test.ts',name:'AEON-706 supplied inventory sentinel (never registered on disk)'}
+  const supplied={tests:[...inventory().tests,sentinel]}
+  assert.ok(!inventory().tests.some(row=>key(row)===key(sentinel)))
+  const warnings=[],warn=console.warn
+  console.warn=message=>warnings.push(String(message))
+  let selection,output=[]
+  const log=console.log
+  try {
+    selection=plan('web',{event:'pull_request',paths:['.github/workflows/ci.yml'],inventory:supplied})
     console.log=value=>output.push(JSON.parse(value))
-    assert.equal(await main(['plan','web','--event','pull_request','--paths',JSON.stringify(options.paths)]),0)
-    assert.equal(output.at(-1).kinds.browser,expected.length)
-    assert.equal(output.at(-1).deferredBrowserCases,browser.length-expected.length)
-    assert.equal(await main(['plan','web','--full','--event','pull_request','--paths',JSON.stringify(options.paths)]),0)
-    assert.equal(output.at(-1).kinds.browser,expected.length)
-    assert.equal(output.at(-1).scope,'gated-full')
-    assert.equal(await main(['plan','web','--all','--event','workflow_dispatch','--paths','[]']),0)
-    assert.equal(output.at(-1).kinds.browser,browser.length)
-    assert.equal(output.at(-1).scope,'catalogue')
-  } finally {
-    console.log=log
-    if(original===undefined) delete process.env.AEON_TEST_TIER_MODE
-    else process.env.AEON_TEST_TIER_MODE=original
-  }
-  const nightly=plan('web',{...options,event:'schedule'})
-  assert.deepEqual(nightly.tests.map(key).sort(),browser.map(key).sort())
-  assert.equal(nightly.scope,'catalogue')
-  assert.equal(nightly.deferredBrowserCases,0)
+    assert.equal(await main(['plan','web','--unit','--event','pull_request','--paths','[]'],{inventory:supplied}),0)
+  } finally { console.warn=warn;console.log=log }
+  // The sentinel only exists in the supplied inventory: a recollection drops it.
+  const planned=selection.all.find(row=>key(row)===key(sentinel))
+  assert.equal(planned?.tier,'NIGHTLY')
+  assert.equal(selection.all.length,supplied.tests.length)
+  assert.equal(Object.values(output.at(-1).inventory).reduce((sum,n)=>sum+n,0),supplied.tests.length)
+  assert.ok(warnings.some(line=>line.includes(key(sentinel))),warnings.join('\n'))
+  assert.throws(()=>plan('web',{event:'pull_request',paths:[],inventory:{tests:'not a list'}}),/Supplied inventory needs a tests array/)
 })
 
 test('native Node and Vitest selectors execute the requested registrations, rather than skip them', async () => {
@@ -122,7 +165,9 @@ test('AEON-648 work Node registrations have explicit tiers and remain in changed
     const rows=validate(declared,collected,undefined,{strict:true})
     for(const event of ['pull_request','merge_group']) {
       const changed=select(rows,{event,paths:[`web/${file}`],webImports:{[file]:[]}})
-      assert.deepEqual(changed.tests.map(key).sort(),collected.map(key).sort(),`${event}: ${file}`)
+      const expected=event==='merge_group'?rows.filter(row=>row.tier==='ESSENTIAL'||row.tier==='GATED-FULL'):collected
+      assert.equal(changed.full,event==='merge_group')
+      assert.deepEqual(changed.tests.map(key).sort(),expected.map(key).sort(),`${event}: ${file}`)
     }
     assert.deepEqual(select(rows,{event:'schedule',paths:[]}).tests.map(key).sort(),collected.map(key).sort(),file)
   }
@@ -184,4 +229,51 @@ registerHooks({ resolve(specifier, context, next) {
   const summary = JSON.parse(result.stdout)
   assert.equal(summary.inventory.NIGHTLY, cases.length + (known.tier === 'NIGHTLY' ? 1 : 0))
   assert.equal(Object.values(summary.inventory).reduce((sum, n) => sum + n, 0), cases.length + 1)
+})
+
+// Collection spawns the Vitest, Node and Playwright listers; repeating it per
+// plan made the static pre-filter exceed its budget on a loaded workstation.
+test('one process collects the web inventory once across repeated plans', () => {
+  const manifest = JSON.parse(readFileSync(resolve(root, 'scripts/ci/web-test-tiers.json'), 'utf8'))
+  const known = manifest.tests.find(row => row.file === 'tests/planning.test.ts')
+  assert.ok(known)
+  const directory = mkdtempSync(resolve(tmpdir(), 'aeon-734-collect-once-'))
+  const hook = resolve(directory, 'fixture.mjs'), script = resolve(directory, 'plans.mjs')
+  const collector = pathToFileURL(resolve(root, 'scripts/test-tiers/collect.mjs')).href
+  // The real module stays loaded under a query so only collectWeb is counted.
+  const wrapper = `export * from ${JSON.stringify(`${collector}?aeon734-fixture`)};
+export let collections = 0;
+export const collectWeb = () => { collections += 1; return (${JSON.stringify({ tests: [known] })}); };`
+  writeFileSync(hook, `import fs from 'node:fs';
+import { registerHooks, syncBuiltinESMExports } from 'node:module';
+const read = fs.readFileSync;
+fs.readFileSync = function(path, ...args) {
+  if (String(path) === ${JSON.stringify(resolve(root, 'scripts/ci/web-test-tiers.json'))}) return ${JSON.stringify(JSON.stringify({ version: 1, tests: [known] }))};
+  return read.call(this, path, ...args);
+};
+syncBuiltinESMExports();
+registerHooks({ resolve(specifier, context, next) {
+  const result = next(specifier, context);
+  if (result.url === ${JSON.stringify(collector)}) return { url: ${JSON.stringify(`data:text/javascript,${encodeURIComponent(wrapper)}`)}, shortCircuit: true };
+  return result;
+}});
+`)
+  writeFileSync(script, `import { plan, main } from ${JSON.stringify(pathToFileURL(resolve(root, 'scripts/test-tiers/cli.mjs')).href)};
+import { collections } from ${JSON.stringify(collector)};
+const options = { event: 'pull_request', paths: ['README.md'] };
+const first = plan('web', options), second = plan('web', { ...options, event: 'schedule' });
+const log = console.log; console.log = () => {};
+let code;
+try { code = await main(['plan', 'web', '--event', 'pull_request', '--paths', '["README.md"]']); } finally { console.log = log; }
+console.log(JSON.stringify({ collections, code, plans: [first.all.length, second.all.length] }));
+`)
+  const env = { ...process.env }
+  delete env.NODE_TEST_CONTEXT
+  const result = spawnSync(process.execPath, ['--import', hook, script], { cwd: web, env, encoding: 'utf8', timeout: 60_000, maxBuffer: 4 * 1024 * 1024 })
+  assert.ifError(result.error)
+  assert.equal(result.status, 0, result.stderr)
+  const summary = JSON.parse(result.stdout.trim().split('\n').at(-1))
+  assert.equal(summary.code, 0)
+  assert.deepEqual(summary.plans, [1, 1], 'every plan still sees the collected inventory')
+  assert.equal(summary.collections, 1, 'three plans in one process must collect once')
 })

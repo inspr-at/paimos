@@ -380,24 +380,38 @@ func (rt *runtime) readText(inline, file, name string) (string, error) {
 	if file == "" {
 		return inline, nil
 	}
+	var raw []byte
+	var err error
 	if file == "-" {
-		raw, err := io.ReadAll(io.LimitReader(rt.stdin, 1<<20))
+		raw, err = readBounded(rt.stdin, 1<<20)
 		if err != nil {
 			return "", fmt.Errorf("read stdin: %w", err)
 		}
-		if len(raw) == 1<<20 {
-			return "", usagef("--%s-file is too long", name)
+	} else {
+		raw, err = readBoundedFile(file, 1<<20)
+		if err != nil {
+			return "", fmt.Errorf("%s: %w", file, err)
 		}
-		return string(raw), nil
-	}
-	raw, err := os.ReadFile(file)
-	if err != nil {
-		return "", fmt.Errorf("%s: %w", file, err)
 	}
 	if len(raw) > 1<<20 {
 		return "", usagef("--%s-file is too long", name)
 	}
 	return string(raw), nil
+}
+
+// readBounded reads one overflow byte so callers can accept the exact limit
+// and reject larger inputs before converting or decoding them.
+func readBounded(r io.Reader, max int64) ([]byte, error) {
+	return io.ReadAll(io.LimitReader(r, max+1))
+}
+
+func readBoundedFile(path string, max int64) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return readBounded(f, max)
 }
 
 func newUUIDv4() (string, error) {

@@ -4,34 +4,79 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectGo, collectWeb, command, root, web, evidence, saveJSON, saveManifest } from './collect.mjs'
-import { validate, select, shard, key, counts, exactPattern, webGraph } from './core.mjs'
+import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights, tierManifestPattern } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
+import { goFailures, nodeFailures, vitestFailures, outputTail, printFailures } from './failures.mjs'
 import { runPlaywright } from '../playwright-safe.mjs'
-import { loadManifest as loadBrowserPolicy } from '../../web/scripts/ci-web-shard.mjs'
-import { changedPaths, schedulingMode } from './diff.mjs'
+import { loadManifest as loadBrowserPolicy, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
+import { changedPaths, schedulingDecision, eventBase, sourceTree, promotionsBetween } from './diff.mjs'
+import { boundedText } from './inputs.mjs'
+import { manifestsMain, classifyManifest } from './manifests.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
-const target = kind => kind==='go' ? collectGo() : collectWeb()
+// Collection spawns the Vitest, Node and Playwright listers. One process may
+// plan repeatedly (tests, multi-step runs), so collect each inventory once.
+const inventories = new Map()
+const target = kind => {
+  if (!inventories.has(kind)) inventories.set(kind, kind==='go' ? collectGo() : collectWeb())
+  return inventories.get(kind)
+}
 
-export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false}={}) {
-  const inventory=target(kind)
-  const all=validate(load(kind),inventory.tests)
+// Planner input is authoritative. Candidate uncertainty can widen it to full,
+// but candidate graph additions can never narrow the base planner's full gate.
+export function runnerDecision(candidate,{mode,layout}={}) {
+  if (mode === undefined) return candidate
+  if (!['full','essential','static','spec-only'].includes(mode) ||
+      layout !== undefined && !['full','static'].includes(layout))
+    return {mode:'full',layout:'full',reason:'invalid supplied planner decision'}
+  if (mode === 'full' || candidate.mode === 'full')
+    return {mode:'full',layout:'full',reason:mode === 'full'?'trusted planner requires full':candidate.reason}
+  const plannedLayout=layout ?? (mode === 'static'?'static':undefined)
+  if (plannedLayout !== undefined && plannedLayout !== candidate.layout)
+    return {mode:'full',layout:'full',reason:'candidate and planner layouts disagree'}
+  return {...candidate,layout:plannedLayout??candidate.layout}
+}
+
+export function runnerSelection(tests,options,candidate,planner) {
+  const decision=runnerDecision(candidate,planner)
+  const selection=select(tests,{...options,forceFull:options.forceFull||decision.mode==='full'})
+  selection.layout=selection.full?'full':decision.layout
+  return selection
+}
+
+// A caller that already holds a native collection passes it as `inventory`;
+// otherwise every plan recollects the catalogue (minutes of Playwright and
+// Vitest listing when several plans run in one process).
+export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,plannerMode=process.env.AEON_TEST_TIER_MODE,plannerLayout=process.env.AEON_TEST_TIER_LAYOUT,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false,inventory:supplied}={}) {
+  if(supplied!==undefined&&!Array.isArray(supplied?.tests)) throw new Error('Supplied inventory needs a tests array')
+  const inventory=supplied??target(kind)
+  const manifest=load(kind)
+  const all=validate(manifest,inventory.tests)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
-  const selection=select(all,{event,paths,imports:inventory.imports,
-    forceFull:full||schedulingMode(event,paths)==='full',forceAll:catalogue,
-    webImports:kind==='web'?webGraph(web):{}})
+  const graph=kind==='web'||affectedLane==='on'?webGraph(web):{}
+  // Consumer rules read the candidate tree; manifest promotions compare the
+  // fetched event base with the checkout. Both are unused unless the switch is on.
+  const on=affectedLane==='on'&&event==='pull_request'&&Array.isArray(paths)
+  const tree=on?sourceTree(root):undefined
+  const promotions=on&&paths.some(path=>tierManifestPattern.test(path))?promotionsBetween(eventBase(),{cwd:root}):undefined
+  const readFile=path=>boundedText(root,path)
+  const candidate=schedulingDecision(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined,tree,promotions})
+  const selection=runnerSelection(all,{event,paths,imports:inventory.imports,affectedLane,
+    forceFull:full,forceAll:catalogue,webImports:graph,tree,promotions,readFile},candidate,
+    {mode:plannerMode,layout:plannerLayout})
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}
-  if(kind==='web') for(const group of browserPolicy.groups) for(const spec of group.specs) weights[spec.file]=spec.weightSeconds
+  if(kind==='web'&&!unit) Object.assign(weights,tierWeights(browserPolicy,filtered))
   if(kind==='go') {
     for(const line of readFileSync(resolve(root,'scripts/ci/go-shards.txt'),'utf8').split('\n')) {
       const match=/^\d+ (\d+) github\.com\/inspr-at\/paimos\/(\S+)/.exec(line)
-      if(match) weights[match[2]]=(weights[match[2]]??0)+Number(match[1])
+      if(match) weights[match[2]]=(weights[match[2]]??0)+Number(match[1])/1000
     }
     for(const pkg of Object.keys(weights)) weights[pkg]*=filtered.filter(row=>row.package===pkg).length/all.filter(row=>row.package===pkg).length
   }
-  return {...selection,all,tests:shard(filtered,index,count,weights)}
+  if(kind==='go'||unit) Object.assign(weights,measuredWeights(manifest,filtered))
+  return {...selection,all,tests:shard(filtered,index,count,weights,{firstShardLast:unit})}
 }
 
 export function browserList(rows,all) {
@@ -48,7 +93,13 @@ function execute(bin,args,path,{cwd=root,env=process.env}={}) {
   writeFileSync(path,result.stdout??'')
   writeFileSync(`${path}.stderr`,result.stderr??'')
   if(result.error) console.error(`${bin}: ${result.error.code}`)
-  return {code:result.status??1,output:result.stdout??''}
+  return {code:result.status??1,output:result.stdout??'',stderr:result.stderr??''}
+}
+
+function diagnostics(kind,owner,result,failures,env) {
+  if(result.code&&!failures.length)failures.push({kind,owner,name:'(runner)',
+    output:outputTail(`${result.output}\n${result.stderr}`)||`Runner exited with code ${result.code}`})
+  printFailures(failures.map(failure=>({...failure,output:failure.output||outputTail(result.stderr)})),{summary:env.GITHUB_STEP_SUMMARY})
 }
 
 export async function run(kind,selection,{unit=false,job='local',env=process.env}={}) {
@@ -71,14 +122,16 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
       const result=execute('go',['test','-p','2','-count=1','-timeout=25m','-json','-run',exactPattern(rows.map(row=>row.name)),`./${owner}`],`${stem}.jsonl`,{env:{...env,GOMAXPROCS:'2'}})
       code ||= result.code
       outcomes.push(...goOutcomes(result.output))
+      diagnostics('go',owner,result,goFailures(result.output),env)
     } else if(rows[0].kind==='node') {
       const result=execute(process.execPath,['--test','--test-concurrency=1',`--test-reporter=${resolve(root,'scripts/test-tiers/node-reporter.mjs')}`,
         '--test-name-pattern',exactPattern(rows.map(row=>row.name)),owner],`${stem}.jsonl`,{cwd:web,env})
       code ||= result.code
+      diagnostics('node',owner,result,nodeFailures(result.output,owner,result.stderr),env)
       const consumed=new Set()
       for(const line of result.output.split('\n').filter(Boolean)) {
         const event=JSON.parse(line)
-        if(event.type==='test:start')continue
+        if(!['test:pass','test:fail'].includes(event.type))continue
         const row=rows.find(row=>row.name===event.fullName&&!consumed.has(key(row)))
         if(!row) continue
         consumed.add(key(row))
@@ -90,8 +143,10 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
       const result=execute(process.execPath,['node_modules/vitest/vitest.mjs','run',owner,'--maxWorkers=1','--no-fileParallelism','--retry=0',
         '--testNamePattern',exactPattern(rows.map(row=>row.name)),'--reporter=json',`--outputFile=${reportPath}`],`${stem}.log`,{cwd:web,env})
       code ||= result.code
+      let failures=[]
       try {
         const report=JSON.parse(readFileSync(reportPath,'utf8'))
+        failures=vitestFailures(report,owner,`${result.output}\n${result.stderr}`)
         const consumed=new Set()
         for(const file of report.testResults) for(const result of file.assertionResults) {
           const nativeName=[...result.ancestorTitles,result.title].join(' > ')
@@ -101,6 +156,7 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
           outcomes.push({key:key(row),status:['pending','skipped','todo','disabled'].includes(result.status)?'skipped':result.status==='passed'?'passed':'failed',started:result.status==='passed'||result.status==='failed'})
         }
       } catch { code ||= 1 }
+      diagnostics('vitest',owner,result,failures,env)
     }
   }
   if(kind==='web'&&!unit) {
@@ -144,7 +200,43 @@ export async function run(kind,selection,{unit=false,job='local',env=process.env
   return report.exitCode
 }
 
-export async function main(args) {
+export function classifyArgs(flags) {
+  const options = {}, legacy = ['go', 'web'].includes(flags[0])
+  let rest = flags
+  if (legacy) { options.kind = flags[0]; rest = flags.slice(1) }
+  for (let i = 0; i < rest.length; i++) {
+    const flag = rest[i]
+    if (!['--tier', '--kind', '--only'].includes(flag) || Object.hasOwn(options, flag.slice(2))) throw new Error(`Unknown or repeated classify flag: ${flag}`)
+    const value = rest[++i]
+    if (!value || value.startsWith('--')) throw new Error(`Missing value: ${flag}`)
+    options[flag.slice(2)] = value
+  }
+  if (options.kind !== undefined && !['go', 'web'].includes(options.kind)) throw new Error('Expected --kind go|web')
+  if (options.only !== undefined && options.only.length > 1024) throw new Error('Expected --only pattern of at most 1024 characters')
+  if (legacy && options.tier === undefined) options.tier = 'NIGHTLY'
+  if (!['ESSENTIAL', 'GATED-FULL', 'NIGHTLY'].includes(options.tier)) throw new Error('classify requires --tier ESSENTIAL|GATED-FULL|NIGHTLY')
+  return { ...options, strict: legacy && options.only === undefined }
+}
+
+export function classify(flags, { collect = target, read = load, save = saveManifest } = {}) {
+  const options = classifyArgs(flags), outputs = []
+  for (const kind of options.kind ? [options.kind] : ['go', 'web']) {
+    const inventory = collect(kind), manifest = read(kind)
+    validate(manifest, inventory.tests, undefined, { warn: () => {} })
+    const result = classifyManifest(manifest, inventory.tests, options)
+    validate(result.manifest, inventory.tests, undefined, { strict: options.strict, warn: () => {} })
+    outputs.push({ kind, ...result })
+  }
+  for (const { kind, manifest, added } of outputs) {
+    save(manifestFile(kind), manifest)
+    console.log(JSON.stringify({ kind, classified: added.length, tier: options.tier }))
+  }
+  return 0
+}
+
+export async function main(args,{inventory}={}) {
+  if (args[0] === 'manifests') return manifestsMain(args.slice(1), root)
+  if (args[0] === 'classify') return classify(args.slice(1))
   const [mode,kind,...flags]=args
   if(!['go','web'].includes(kind)||!['collect','check','classify','plan','run'].includes(mode)) throw new Error('Usage: cli.mjs collect|check|classify|plan|run go|web [--full | --all] [--unit] [--shard i/N] [--paths JSON] [check: --strict]')
   const options={unit:false,full:false,all:false,job:`${kind}-tiers`}
@@ -165,6 +257,7 @@ export async function main(args) {
   if(mode==='collect') { saveJSON(resolve(evidence,`${kind}-inventory.json`),target(kind));return 0 }
   if(mode==='check') {
     const all=validate(load(kind),target(kind).tests,undefined,{strict:options.strict})
+    measuredWeights(load(kind),all) // malformed timing weights fail the manifest check, not a later plan
     if(kind==='web') { console.log(JSON.stringify({inventory:counts(all)}));return 0 }
     const output=command('go',['test','-p','2','-json','-list','^(Test|Fuzz)','./...'],{env:{...process.env,GOMAXPROCS:'2'},timeout:15*60*1000})
     const listed=[]
@@ -176,22 +269,16 @@ export async function main(args) {
     if(JSON.stringify(listed.sort())!==JSON.stringify(expected))throw new Error('Native Go -list inventory differs from classified source')
     console.log(JSON.stringify({nativeGoCases:listed.length,inventory:counts(all)}));return 0
   }
-  if(mode==='classify') {
-    const inventory=target(kind),manifest=load(kind),known=new Set(manifest.tests.map(key))
-    for(const row of inventory.tests) if(!known.has(key(row))) {
-      const {leaf,line,id,active,file,...entry}=row
-      manifest.tests.push({...entry,...(kind==='web'?{file}:{}),tier:'NIGHTLY'})
-    }
-    validate(manifest,inventory.tests,undefined,{strict:true}) // stale entries require an explicit edit
-    saveManifest(manifestFile(kind),manifest);return 0
-  }
   if(options.paths===undefined) options.paths=changedPaths(options.event??process.env.GITHUB_EVENT_NAME,process.env,{fetchBase:true})
-  const selection=plan(kind,options)
-  console.log(JSON.stringify({kind,full:selection.full,reason:selection.reason,scope:selection.scope??'changed-area',deferredBrowserCases:selection.deferredBrowserCases??0,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
+  const selection=plan(kind,{...options,inventory})
+  console.log(JSON.stringify({kind,full:selection.full,layout:selection.layout??'full',reason:selection.reason,scope:selection.scope??'changed-area',deferredBrowserCases:selection.deferredBrowserCases??0,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
   if(mode==='run') return run(kind,selection,options)
   return 0
 }
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try { process.exitCode=await main(process.argv.slice(2)) }
-  catch(error) { console.error(error.message);process.exitCode=1 }
+  catch(error) {
+    console.error(error.message)
+    process.exitCode=process.argv[2]==='manifests'&&process.argv[3]==='merge-driver'?3:1
+  }
 }

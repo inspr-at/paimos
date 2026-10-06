@@ -102,6 +102,15 @@ func TestAgentScopeSeparatesProjectSubpathsAndUnknownRoutes(t *testing.T) {
 		{"PUT", "/api/plugins/foo/installation", ""},
 		{"GET", "/api/unlisted", ""},
 		{"GET", "/api/me", selfScope},
+		{"GET", "/api/status/help", authz.AuthenticatedRoute},
+		{"HEAD", "/api/status/help", authz.AuthenticatedRoute},
+		{"GET", "/api/status/help?project_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", authz.AuthenticatedRoute},
+		{"POST", "/api/status/help", ""},
+		{"PUT", "/api/status/help", ""},
+		{"PATCH", "/api/status/help", ""},
+		{"DELETE", "/api/status/help", ""},
+		{"GET", "/api/status/help/extra", ""},
+		{"GET", "/api/status/other", ""},
 		{"GET", "/api/me/profile", ""},
 		{"GET", "/api/tags", "nodes.read"},
 		{"PATCH", "/api/tags/bug", "nodes.configure"},
@@ -186,14 +195,13 @@ func TestEmptyAgentKeyDeniedAcrossRegisteredAPIRoutes(t *testing.T) {
 		path = routeValue.ReplaceAllString(path, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 		req := httptest.NewRequest(method, path, bytes.NewReader(nil))
 		setPolicyPattern(req)
-		if scope, _ := coreAgentScope(req); scope == selfScope {
-			// Reading its own identity is the one route every key may call.
-			continue
-		}
 		req.Header.Set("Authorization", "Bearer "+key.Token)
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, req)
 		want := http.StatusForbidden
+		if pattern == "GET /api/me" || pattern == "GET /api/status/help" {
+			want = http.StatusNoContent // Only these two reads need no key scope.
+		}
 		if pattern == "GET /api/inbox/messages/{messageId}/receipt" {
 			want = http.StatusNotFound // Sender-only receipts conceal permission denial.
 		}

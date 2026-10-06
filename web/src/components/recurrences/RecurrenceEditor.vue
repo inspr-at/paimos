@@ -129,7 +129,7 @@ onBeforeUnmount(() => { clearTimeout(timer); dialog.value?.close() })
 </template>
 
 <style scoped>
-.recurrence-editor { position: fixed; inset: auto; top: 64px; left: 50%; transform: translateX(-50%); margin: 0; padding: 0; width: min(680px, calc(100vw - 32px)); max-height: calc(100dvh - 80px); color: var(--ink); border: 1px solid var(--glass-edge); border-radius: 16px; background: var(--surface-raised); box-shadow: var(--shadow-pop); overflow: hidden; }
+.recurrence-editor { position: fixed; inset: auto; top: 64px; left: 50%; transform: translateX(-50%); margin: 0; padding: 0; width: min(var(--dialog-l), calc(100vw - 32px)); max-height: calc(100dvh - 80px); color: var(--ink); border: 1px solid var(--glass-edge); border-radius: 16px; background: var(--surface-raised); box-shadow: var(--shadow-pop); overflow: hidden; }
 .recurrence-editor[open] { display: flex; flex-direction: column; }
 .recurrence-editor::backdrop { background: var(--scrim); }
 .editor-head { display: flex; align-items: center; gap: 10px; flex: none; height: 60px; padding: 10px 14px 10px 20px; border-bottom: 1px solid var(--line); }
