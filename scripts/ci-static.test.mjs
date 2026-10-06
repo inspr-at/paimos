@@ -70,6 +70,15 @@ test('drift guard rejects deleted origins, changed commands/cwd, duplicate ids a
   assert.throws(() => validateRegistry({ ...registry, checks: registry.checks.slice(1) }, jobs), /Unregistered static CI command/)
   const copy = structuredClone(registry); copy.checks[1].command = 'true'
   assert.throws(() => validateRegistry(copy, jobs), /Mirror differs/)
+  const budget = structuredClone(registry)
+  const nativeShard = budget.checks.find(c => c.id === 'web-shard-tests')
+  nativeShard.timeout_seconds = 300
+  assert.equal(validateRegistry(budget, jobs), budget.checks)
+  nativeShard.timeout_seconds = 301
+  assert.throws(() => validateRegistry(budget, jobs), /Invalid check: web-shard-tests/)
+  nativeShard.timeout_seconds = 300
+  budget.checks.find(c => c.id === 'go-vet').timeout_seconds = 181
+  assert.throws(() => validateRegistry(budget, jobs), /Invalid check: go-vet/)
   const changed = workflow.replace('        run: npm run typecheck', '        run: npm run typecheck --changed')
   assert.throws(() => validateRegistry(registry, parseWorkflow(changed)), /Stale CI reference/)
   const moved = workflow.replace('      - working-directory: web\n        run: npm run typecheck', '      - working-directory: .\n        run: npm run typecheck')
