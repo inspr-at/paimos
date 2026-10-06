@@ -652,6 +652,46 @@ session resets discard it. Server code uses
 `features.Service.Enabled`, which reads the database each time and returns
 false on error. **Flags never grant permissions or bypass approval gates.**
 
+## Project lead settings (backend groundwork)
+
+`aeon project lead-settings get PROJECT` reads the lead policy. Use `set
+PROJECT --revision N --from FILE` with a sparse override JSON object, or `reset
+PROJECT --revision N` to inherit again. `--workspace` selects execution defaults
+instead of a project. Pass `--session-cookie-file FILE` to use an existing
+person session through the
+CLI's bounded session transport, without bearer authentication or storing the
+session. Otherwise these commands use the configured agent caller, and the
+server refuses its edits. Edits require an active person with
+`model_prefs.manage`. A project's first edit records that
+person as owner; subsequent edits require that same canonical person. Reset
+retains the owner and advances the revision, preventing stale saves and takeover.
+
+The additive API is `/api/projects/{projectId}/lead-settings` and
+`/api/settings/lead-policy` (GET/PUT/DELETE). PUT replaces the sparse `overrides`
+object with an expected `revision`; DELETE takes the revision as a query value.
+Null/omitted selectors inherit; empty host/account arrays allow no targets.
+Project host/account filters intersect workspace filters. Selected IDs must
+belong to the editing person; filtering never supplies pairing, spending or
+execution consent. Project readers see redacted explanations; private selectors
+are visible only to the owning person (workspace selectors to their editor),
+and audit events store revisions without account/host identifiers.
+
+Model settings reference the existing work kind and normal/complex bucket;
+Default → You → Project model preferences and locks continue to resolve live,
+with their revision vector returned to the owner. Recovery limits share a finite
+attempt and agent-hour budget across build/review/fix; zero disables recovery
+by default, and a project cannot increase workspace ceilings. The existing dial
+remains `/api/agents/plan`; there is no new concurrency control.
+
+This policy does not launch work. `automatic_launch_enabled` remains false
+pending AEON-603 acceptance. The lead lifecycle/claim/start consumers must
+recheck current owner authority and policy revisions, then dial, harness,
+account room and host load under their final transaction fences. Unreadable
+mandatory gates mean wait. No model route, saved setting or queued work grants
+merge, deploy, credential rotation, force-stop or attached-session consent.
+AEON-734 owns lifecycle/ownership succession, AEON-598–600 execution, AEON-731
+recovery and AEON-741 the approved UI.
+
 ## Model preferences
 
 `aeon model resolve --ticket AEON-123` resolves the ticket's work kind,
@@ -1888,7 +1928,7 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.8`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. 2.8 adds optional commit diff counts. 2.7 adds optional response-only `owner_principal_id` for the reviewed pause and wind-down ownership projection and optional `desk_answers` references for durable Decision Desk handovers. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.8`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. 2.8 adds optional commit diff counts. 2.9 adds the optional response-only `agent_recovery` diagnosis (AEON-731): the reporting-loss cause and the recovery action a paired daemon can carry out; request requirements stay unchanged. 2.7 adds optional response-only `owner_principal_id` for the reviewed pause and wind-down ownership projection and optional `desk_answers` references for durable Decision Desk handovers. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
 
 Pause levels (AEON-524 part A2) add `--level stop_now|pause_quickly|pause|wrap_up`
 and an optional `--note` to pause one or all sessions. Omitted levels use the

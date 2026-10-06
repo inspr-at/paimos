@@ -391,7 +391,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			// R2: agents
 			inbox.New(pool),
 			chat.New(pool),
-			harness.New(pool, nodes.CapturePlanningStart),
+			harness.NewWithSessionRecovery(pool, agentruns.PrepareSessionRecovery, nodes.CapturePlanningStart),
 			rules.New(pool),
 			doctrineMod,
 			ticketwork.New(pool),

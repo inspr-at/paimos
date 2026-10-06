@@ -48,6 +48,9 @@ var (
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
 	Trace                     json.RawMessage `json:"trace,omitempty"`
+	RecoveryBrief             string          `json:"recovery_brief,omitempty"`
+	RecoveryTier              string          `json:"recovery_service_tier,omitempty"`
+	RecoveryLabel             *string         `json:"recovery_display_label,omitempty"`
 	ReadOnlyReview            bool            `json:"read_only_review,omitempty"`
 	RetryOfRunID              string          `json:"retry_of_run_id"`
 	CapacityHandoff           bool            `json:"capacity_handoff,omitempty"`
@@ -92,6 +95,8 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
+	AttachedHook     bool                    `json:"-"`
+	DisplayLabel     *string                 `json:"display_label,omitempty"`
 	ServiceTier      string                  `json:"service_tier,omitempty"`
 	Doing            string                  `json:"-"`
 	DoingAt          time.Time               `json:"-"`

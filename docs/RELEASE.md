@@ -410,7 +410,10 @@ planner modes force the `full` aggregate lane, with the trusted layout deciding
 which jobs execute. `spec-only` is retained only when both classifiers say
 `spec-only`; `docs-only` only when the trusted planner says `docs`. A raw `full`
 lane never narrows. Missing or invalid planner data fails closed to full; merge
-queue, main and manual events stay full. With the flag off (including unset or
+queue, main and manual events stay full. The workflow itself forces full mode,
+layout and lane for merge groups without executing the candidate planner,
+restricts essential/static shortcuts to PRs, and checks full execution on every
+merge-group shard. With the flag off (including unset or
 any value other than exact `on`), the raw `ci-plan` lane is preserved unchanged.
 Every execution condition, shard matrix, runner tier selection, full-execution
 check, required aggregate and tier measurement uses this effective output.

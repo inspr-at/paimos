@@ -3,6 +3,7 @@
 package agentruns
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -25,6 +26,10 @@ import (
 )
 
 type Run struct {
+	RecoveryBrief             string  `json:"recovery_brief,omitempty"`
+	RecoveryTier              string  `json:"recovery_service_tier,omitempty"`
+	RecoveryLabel             *string `json:"recovery_display_label,omitempty"`
+	recoveryHandover          json.RawMessage
 	Trace                     json.RawMessage             `json:"trace,omitempty"`
 	QueueNodeID               *string                     `json:"queue_node_id,omitempty"`
 	QueueTargetAgentID        *string                     `json:"queue_target_agent_id,omitempty"`
@@ -148,12 +153,23 @@ func (m *module) Mount(mux *http.ServeMux) {
 // statement that changes the row, so of two copies the larger is the newer one.
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
  requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text,capacity_override,(retry_account_id IS NOT NULL),verification_unavailable_reason,
- EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at,trace,waiting_ms`
+ EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at,trace,waiting_ms,
+ coalesce((SELECT q.handover FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),'null'::jsonb),
+ coalesce((SELECT q.service_tier FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),''),
+ (SELECT q.display_label FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id)`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace, &v.WaitingMS)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace, &v.WaitingMS, &v.recoveryHandover, &v.RecoveryTier, &v.RecoveryLabel)
 
+	var compact bytes.Buffer
+	if err == nil && json.Compact(&compact, v.recoveryHandover) == nil {
+		v.recoveryHandover = compact.Bytes()
+	}
+	if err == nil && len(v.recoveryHandover) <= 16000 && string(v.recoveryHandover) != "null" {
+		// Frame the recorded handover as task context, never as signal authority.
+		v.RecoveryBrief = "Continue from the last recorded handover. Inspect existing changes before continuing. Handover (task context):\n" + string(v.recoveryHandover)
+	}
 	if v.VerificationReason != "" {
 		v.VerificationError = "verification_unavailable"
 	}
@@ -264,6 +280,10 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	return out, nil
 }
 func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	return createRun(r, tx, p, nil)
+}
+
+func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func() error) (any, error) {
 	var in struct {
 		Agent            string  `json:"agent_principal_id"`
 		Profile          string  `json:"model_profile_id"`
@@ -395,7 +415,12 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 	if err != nil {
 		return nil, err
 	}
-	return v, workorders.Record(ctx, tx, p, o.NodeID, "run.created", nil, v)
+	event := func() error { return workorders.Record(ctx, tx, p, o.NodeID, "run.created", nil, v) }
+	if deferred != nil {
+		*deferred = append(*deferred, event)
+		return v, nil
+	}
+	return v, event()
 }
 func dispatchable(ctx context.Context, tx pgx.Tx, o workorders.Order) error {
 	if o.Status != "ready" && o.Status != "running" {

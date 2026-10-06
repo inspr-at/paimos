@@ -17,7 +17,7 @@ import (
 )
 
 const routedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
-const routedGoShards = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
+const routedGoShards = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
 
 const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.ref || github.event.pull_request.number || github.run_id }}`
 
@@ -461,7 +461,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		// checks, web setup/units, release checks and migrations always run.
 		switch id {
 		case "go-test", "go-timing", "web-shard", "e2e-run":
-			condition += " && needs.tier-plan.outputs.layout != 'static'"
+			condition += " && (github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')"
 		}
 		tierGuard := "needs.tier-plan.result == 'success' && "
 		if !hasNeed(job["needs"], "tier-plan") {
@@ -479,12 +479,33 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		}
 	}
 	webMatrix := mapping(mapping(mapping(jobs["web-shard"])["strategy"])["matrix"])["shard"]
-	if webMatrix != `${{ fromJSON(needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}` {
+	if webMatrix != `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}` {
 		return fmt.Errorf("web shard matrix must retain 12 full rows and one changed-spec row")
 	}
 	unit := mapping(jobs["web-unit"])
-	if mapping(mapping(unit["strategy"])["matrix"])["shard"] != `${{ fromJSON(needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4]') }}` || mapping(unit["strategy"])["fail-fast"] != false || unit["continue-on-error"] != nil {
+	if mapping(mapping(unit["strategy"])["matrix"])["shard"] != `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4]') }}` || mapping(unit["strategy"])["fail-fast"] != false || unit["continue-on-error"] != nil {
 		return fmt.Errorf("web units must retain four blocking shards and one spec-only row")
+	}
+	for _, id := range []string{"go-test", "web-unit", "web-shard"} {
+		condition := "github.event_name != 'pull_request' || (needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential')"
+		if id == "go-test" {
+			condition = "github.event_name != 'pull_request' || needs.tier-plan.outputs.mode != 'essential'"
+		}
+		var proofs int
+		steps, _ := mapping(jobs[id])["steps"].([]any)
+		for _, value := range steps {
+			step := mapping(value)
+			if step["name"] != "Confirm full tier execution" {
+				continue
+			}
+			proofs++
+			if step["if"] != condition || step["run"] != "node scripts/test-tiers/check-full.mjs" || mapping(step["env"])["TIER_REPORT"] != "tmp/test-tiers/"+id+"-${{ matrix.shard }}-measurement.json" {
+				return fmt.Errorf("%s must prove full tier execution on every merge-group shard", id)
+			}
+		}
+		if proofs != 1 {
+			return fmt.Errorf("%s must prove full tier execution on every merge-group shard", id)
+		}
 	}
 	for _, context := range []string{"go", "web", "release-check", "e2e"} {
 		job := mapping(jobs[context])
