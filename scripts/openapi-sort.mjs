@@ -42,7 +42,7 @@ function properties(text, lines, i, column, tokens) {
 // Tokens collects every anchor and alias outside scalar content, in order.
 function scalarLines(lines, blockContent = new Set(), tokens = []) {
   const content = new Set()
-  let block, quote, flowDepth = 0, prev
+  let block, quote, flowDepth = 0, prev, inlineParent
   // Flow collections can contain quoted scalars at any nesting depth. Keep
   // scanning after a closing quote: another scalar may open on the same line.
   // Delimiters must balance: a stray closer, or anything but a comment after a
@@ -96,8 +96,17 @@ function scalarLines(lines, blockContent = new Set(), tokens = []) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (quote || flowDepth) {
+      const kind = quote ? 'quoted scalar' : 'flow collection'
       content.add(i)
       scanInline(line, i, 0)
+      // An indented mapping key at or above the opening node's level is
+      // ambiguous with a sibling. Reject it instead of hiding sortable keys
+      // inside an unfinished node. Column-zero continuations remain content.
+      if ((quote || flowDepth) && indent(line) > 0 && indent(line) <= inlineParent && !trivia(line)) {
+        let sibling
+        try { sibling = entry(line, indent(line)) } catch {}
+        if (sibling) throw new Error(`Unterminated ${kind} before mapping key: ${line.trim()}`)
+      }
       continue
     }
     if (block) {
@@ -145,16 +154,18 @@ function scalarLines(lines, blockContent = new Set(), tokens = []) {
       block = { parent, depth: digit ? parent + Number(digit[0]) : undefined }
     } else if (/^[\[{'"]/.test(value)) {
       prev = undefined
+      inlineParent = parent
       scanInline(value, i, column)
     }
   }
+  if (quote || flowDepth) throw new Error(`Unterminated ${quote ? 'quoted scalar' : 'flow collection'} at EOF`)
   return content
 }
 
 function endOfMap(lines, start, depth) {
   const content = scalarLines(lines)
   let end = start + 1
-  while (end < lines.length && (trivia(lines[end]) || indent(lines[end]) > depth)) end++
+  while (end < lines.length && (content.has(end) || trivia(lines[end]) || indent(lines[end]) > depth)) end++
   // Whitespace and parent-level comments belong to the surrounding section.
   while (end > start + 1 && !content.has(end - 1) && trivia(lines[end - 1])) end--
   return end
@@ -220,13 +231,14 @@ export function sortOpenAPI(source) {
   const lines = source.split(/\r?\n/)
   if (finalNewline) lines.pop()
   const originalBlocks = new Set()
-  scalarLines(lines, originalBlocks)
+  let content = scalarLines(lines, originalBlocks)
   // Check the original bindings before moving any blocks.
   checkAnchors(anchorTokens(lines), '')
-  const paths = lines.indexOf('paths:')
+  const paths = lines.findIndex((line, i) => line === 'paths:' && !content.has(i))
   if (paths < 0) throw new Error('Expected block mapping paths:')
   sortMap(lines, paths, endOfMap(lines, paths, 0), 2, 'paths')
-  const components = lines.indexOf('components:')
+  content = scalarLines(lines)
+  const components = lines.findIndex((line, i) => line === 'components:' && !content.has(i))
   if (components < 0) throw new Error('Expected block mapping components:')
   const end = endOfMap(lines, components, 0)
   for (let i = components + 1; i < end; i++) {

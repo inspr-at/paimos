@@ -284,6 +284,47 @@ test('fails closed on unbalanced flow delimiters and content after a flow node',
   assert.throws(() => sortOpenAPI(fixture.replace('Alpha: {type: string}', 'Alpha:\n      - "one\n        two" three')), /Unsupported content after a flow or quoted node/)
 })
 
+test('checks maps past column-zero scalar continuations and ignores interior section headers', async t => {
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-openapi-sort-')), path = join(directory, 'openapi.yaml')
+  t.after(() => rmSync(directory, { recursive: true, force: true }))
+  for (const scalar of ["'first\npaths:\ncomponents:\nlast'", '"first\npaths:\ncomponents:\nlast"', '[first,\nlast]', '{first:\nlast}']) {
+    for (const section of ['paths', 'schemas', 'headers']) {
+      await t.test(`${section}: ${scalar}`, () => {
+        const prefix = `openapi: 3.1.0\nx-example: ${scalar}\n`
+        const input = prefix + (section === 'paths'
+          ? `paths:\n  /z:\n    get:\n      x-example: ${scalar}\n  /a: {}\ncomponents:\n  schemas: {}\n`
+          : `paths:\n  /a: {}\ncomponents:\n  ${section}:\n    Z:\n      x-example: ${scalar}\n    A: {}\n  responses: {}\n`)
+        const expected = prefix + (section === 'paths'
+          ? `paths:\n  /a: {}\n  /z:\n    get:\n      x-example: ${scalar}\ncomponents:\n  schemas: {}\n`
+          : `paths:\n  /a: {}\ncomponents:\n  ${section}:\n    A: {}\n    Z:\n      x-example: ${scalar}\n  responses: {}\n`)
+        writeFileSync(path, input)
+        assert.equal(main(['--check'], path, () => {}), 1)
+        assert.equal(readFileSync(path, 'utf8'), input)
+        assert.equal(sortOpenAPI(input), expected)
+        assert.equal(main(['--write'], path, () => {}), 0)
+        assert.equal(readFileSync(path, 'utf8'), expected)
+        assert.equal(main(['--check'], path, () => {}), 0)
+        assert.equal(sortOpenAPI(expected), expected)
+      })
+    }
+  }
+  for (const [opening, closing] of [["'unfinished", "last'"], ['"unfinished', 'last"'], ['[first,', 'last]'], ['{first:', 'last}']]) {
+    for (const tail of ['', '\n', `\n  /a: {}\ncomponents:\n  schemas: {}\nx-after: ${closing}\n`]) {
+      await t.test(`unfinished ${opening}: ${JSON.stringify(tail)}`, () => {
+        const input = `paths:\n  /z:\n    get:\n      x-example: ${opening}${tail}`
+        writeFileSync(path, input)
+        const kind = ['[', '{'].includes(opening[0]) ? 'flow collection' : 'quoted scalar'
+        const failure = { message: `Unterminated ${kind} ${tail.includes('/a:') ? 'before mapping key: /a: {}' : 'at EOF'}` }
+        assert.throws(() => sortOpenAPI(input), failure)
+        for (const mode of ['--check', '--write']) {
+          assert.throws(() => main([mode], path, () => {}), failure)
+          assert.equal(readFileSync(path, 'utf8'), input)
+        }
+      })
+    }
+  }
+})
+
 // Reverse the entries of one block mapping, moving each entry's leading
 // comment and blank lines with it. Resorting must restore every byte, which
 // proves the sorter reaches every path and component in the real contract.
