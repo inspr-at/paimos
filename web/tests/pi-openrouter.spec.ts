@@ -24,7 +24,9 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', manage = tru
     await route.fulfill({ json: account })
   })
   await page.goto('/settings/accounts')
-  const row = page.locator('.account').filter({ hasText: 'OpenRouter on this Mac' })
+  // AEON-686: an account's logins and their settings live in its docked panel.
+  await page.locator(`.list-row[data-accounts~="${account.id}"]`).click()
+  const row = page.locator('section.pane .account').filter({ hasText: 'OpenRouter on this Mac' })
   await row.getByRole('button', { name: 'Details for OpenRouter on this Mac' }).click()
   await expect(row.getByLabel('Model OpenRouter')).toBeVisible()
   return { row, writes }

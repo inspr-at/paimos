@@ -1256,6 +1256,34 @@ test('committed allowlists preserve classifications, helpers and reviewed AEON-5
   assert.ok([...go.tests,...web.tests].filter(row=>row.tags?.includes('delete-candidate')).every(row=>row.tier==='GATED-FULL'||row.tier==='NIGHTLY'))
 })
 
+// These exact registrations were missing in the AEON-706 static report.
+// Main's post-gate policy classifies new cases explicitly without widening CI.
+for(const [label,pkg,names] of [
+  ['work-order body guards','internal/workorders',[
+    'TestBufferBodyBoundsAndDecode','TestEndpointBodyNetworkDeadline','TestEndpointPositionedBodyNetworkDeadline',
+  ]],
+  ['builder and shared-runtime guards','scripts/releaseworkflow',[
+    'TestBuilderChecksumAndPluginPathFailClosed','TestBuilderVersionAssertionFailsClosed',
+    'TestRehearsedBuilderPins','TestParallelWebUnitsShareRuntimeAndRunOnce',
+  ]],
+]) test(`AEON-706 ${label} retain explicit classifications and nightly execution`,()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
+  const discovered=names.map(name=>g(pkg,name))
+  const ids=discovered.map(key).sort(), required=new Set(ids)
+  const stored=manifest.tests.filter(row=>required.has(key(row)))
+  assert.deepEqual(stored.map(key).sort(),ids,'Every reported registration needs exactly one explicit classification')
+  const rows=validate({...manifest,tests:stored},discovered,noFlaky,{strict:true})
+  for(const row of rows) {
+    assert.equal(row.tier,'NIGHTLY',key(row))
+    assert.ok(manifest.postGateCases.includes(key(row)),`${key(row)} must retain main's post-gate policy`)
+  }
+  for(const event of ['pull_request','merge_group','push','schedule']) {
+    const selected=select(rows,{event,forceFull:true}).tests.map(key).sort()
+    assert.deepEqual(selected,event==='schedule'?ids:[],`${event}: preserve explicit nightly scope`)
+  }
+  assert.deepEqual(select(rows,{event:'pull_request',forceAll:true}).tests.map(key).sort(),ids)
+})
+
 test('strict classification maintenance is scheduled separately and never a required PR or nightly test dependency',()=>{
   const nightly=readFileSync(new URL('../../.github/workflows/nightly-full.yml',import.meta.url),'utf8')
   const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
@@ -1342,6 +1370,23 @@ test('three-tier validation and reports retain GATED-FULL results and deletion c
   assert.deepEqual(validate(manifest,rows,known),rows)
   const promoted=rows.map(row=>({...row,tier:'ESSENTIAL',tags:[]}))
   assert.throws(()=>validate({version:1,tests:promoted},rows,known),/Known-flaky case cannot be ESSENTIAL/)
+})
+
+test('AEON-686 host-capacity bound and fence cases run in every PR gate',()=>{
+  // Unlisted cases default to NIGHTLY, so new Go tests in these files would
+  // silently leave the PR gate; derive the list from source, not by hand.
+  const go=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
+  const sources=[['internal/hostcapacity','policy_test.go'],['internal/agentpairing','host_capacity_test.go']]
+  const rows=sources.flatMap(([pkg,file])=>[...readFileSync(new URL(`../../${pkg}/${file}`,import.meta.url),'utf8')
+    .matchAll(/^func (Test\w+)\(t \*testing\.T\)/gm)].map(match=>`${pkg}:${match[1]}`))
+  for(const required of ['internal/hostcapacity:TestHostCapacityLargestEncodingsStayBounded',
+    'internal/agentpairing:TestHostCapacityBoundsHeldByWritersWithoutDatabaseChecks'])assert.ok(rows.includes(required),required)
+  for(const id of rows) {
+    const row=go.tests.find(row=>key(row)===id)
+    assert.equal(row?.tier,'ESSENTIAL',id)
+    for(const event of ['pull_request','merge_group'])
+      assert.ok(select(go.tests,{event,paths:['README.md']}).tests.some(selected=>key(selected)===id),`${event}: ${id}`)
+  }
 })
 
 test('three-tier manifests allow new NIGHTLY cases and never promote ungated browser cases',()=>{

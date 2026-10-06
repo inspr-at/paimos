@@ -82,7 +82,10 @@ type Module struct {
 
 // SessionRecovery prepares a continuation under the caller's transaction and
 // returns its ID and deferred event flush without coupling harness to runs.
-type SessionRecovery func(context.Context, pgx.Tx, tenant.Principal, string, string, string, string) (string, func() error, error)
+// A non-nil rejection is already written in this transaction. The caller records
+// recovery without a continuation and returns that rejection as the HTTP result
+// so the Decision Desk transition commits.
+type SessionRecovery func(context.Context, pgx.Tx, tenant.Principal, string, string, string, string) (string, func() error, *workorders.Error, error)
 
 // NewWithSessionRecovery connects the existing run admission writer.
 func NewWithSessionRecovery(pool *pgxpool.Pool, recovery SessionRecovery, planningStart ...func(context.Context, pgx.Tx, string, string) error) httpapi.Module {

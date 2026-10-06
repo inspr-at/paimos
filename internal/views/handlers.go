@@ -55,6 +55,7 @@ type savedView struct {
 	Sort           viewSort        `json:"sort"`
 	SortKeys       []string        `json:"sort_keys"`
 	GroupBy        string          `json:"group_by"`
+	Mode           string          `json:"mode"`
 	Columns        []string        `json:"columns"`
 	Shared         bool            `json:"shared"`
 	CreatedAt      time.Time       `json:"created_at"`
@@ -69,6 +70,7 @@ type viewWrite struct {
 	Sort      *viewSort       `json:"sort"`
 	SortKeys  []string        `json:"sort_keys"`
 	GroupBy   string          `json:"group_by"`
+	Mode      string          `json:"mode"`
 	Columns   []string        `json:"columns"`
 	Shared    bool            `json:"shared"`
 }
@@ -79,6 +81,7 @@ type viewPatch struct {
 	Sort     *viewSort        `json:"sort"`
 	SortKeys *[]string        `json:"sort_keys"`
 	GroupBy  *string          `json:"group_by"`
+	Mode     *string          `json:"mode"`
 	Columns  *[]string        `json:"columns"`
 	Shared   *bool            `json:"shared"`
 }
@@ -308,7 +311,7 @@ func scanView(row rowScanner) (savedView, error) {
 	var v savedView
 	var filters []byte
 	err := row.Scan(&v.ID, &v.OwnerPrincipal, &v.ProjectID, &v.Name, &filters, &v.Sort.Field,
-		&v.Sort.Direction, &v.SortKeys, &v.GroupBy, &v.Columns, &v.Shared, &v.CreatedAt, &v.UpdatedAt, &v.DeletedAt)
+		&v.Sort.Direction, &v.SortKeys, &v.GroupBy, &v.Mode, &v.Columns, &v.Shared, &v.CreatedAt, &v.UpdatedAt, &v.DeletedAt)
 	if err != nil {
 		return savedView{}, err
 	}
@@ -323,7 +326,7 @@ func scanView(row rowScanner) (savedView, error) {
 }
 
 const viewColumns = `id::text, owner_principal_id::text, project_id::text, name, filters, sort_field, sort_direction,
-                     sort_keys, group_by, columns, shared, created_at, updated_at, deleted_at`
+                     sort_keys, group_by, mode, columns, shared, created_at, updated_at, deleted_at`
 
 func selectView(ctx context.Context, tx pgx.Tx, where string, args ...any) (savedView, error) {
 	v, err := scanView(tx.QueryRow(ctx, `SELECT `+viewColumns+` FROM saved_views WHERE `+where, args...))
@@ -344,11 +347,11 @@ func isProject(ctx context.Context, tx pgx.Tx, id string) (bool, error) {
 func insertView(ctx context.Context, tx pgx.Tx, tenantID, ownerID string, in viewWrite) (savedView, error) {
 	return scanView(tx.QueryRow(ctx, `
 		INSERT INTO saved_views (tenant_id, owner_principal_id, project_id, name, filters, sort_field, sort_direction,
-		                         sort_keys, group_by, columns, shared)
-		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::jsonb, $6, $7, $8, $9, $10, $11)
+		                         sort_keys, group_by, mode, columns, shared)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::jsonb, $6, $7, $8, $9, $10, $11, $12)
 		RETURNING `+viewColumns,
 		tenantID, ownerID, in.ProjectID, in.Name, []byte(in.Filters), in.Sort.Field, in.Sort.Direction,
-		in.SortKeys, in.GroupBy, in.Columns, in.Shared))
+		in.SortKeys, in.GroupBy, in.Mode, in.Columns, in.Shared))
 }
 
 func updateView(ctx context.Context, tx pgx.Tx, before savedView, in viewPatch) (savedView, error) {
@@ -368,6 +371,9 @@ func updateView(ctx context.Context, tx pgx.Tx, before savedView, in viewPatch) 
 	if in.GroupBy != nil {
 		after.GroupBy = *in.GroupBy
 	}
+	if in.Mode != nil {
+		after.Mode = *in.Mode
+	}
 	if in.Columns != nil {
 		after.Columns = *in.Columns
 	}
@@ -381,11 +387,11 @@ func updateView(ctx context.Context, tx pgx.Tx, before savedView, in viewPatch) 
 func writeView(ctx context.Context, tx pgx.Tx, v savedView) (savedView, error) {
 	return scanView(tx.QueryRow(ctx, `
 		UPDATE saved_views SET name = $2, filters = $3::jsonb, sort_field = $4, sort_direction = $5,
-		       sort_keys = $6, group_by = $7, columns = $8, shared = $9,
+		       sort_keys = $6, group_by = $7, columns = $8, shared = $9, mode = $10,
 		       updated_at = greatest(clock_timestamp(), updated_at + interval '1 microsecond')
 		WHERE id = $1::uuid
 		RETURNING `+viewColumns,
-		v.ID, v.Name, []byte(v.Filters), v.Sort.Field, v.Sort.Direction, v.SortKeys, v.GroupBy, v.Columns, v.Shared))
+		v.ID, v.Name, []byte(v.Filters), v.Sort.Field, v.Sort.Direction, v.SortKeys, v.GroupBy, v.Columns, v.Shared, v.Mode))
 }
 
 func setDeleted(ctx context.Context, tx pgx.Tx, id string, deleted bool) (savedView, error) {
@@ -429,6 +435,12 @@ func normaliseWrite(in *viewWrite) error {
 	if !wordPattern.MatchString(in.GroupBy) {
 		return errors.New("group_by is invalid")
 	}
+	if in.Mode == "" {
+		in.Mode = "list"
+	}
+	if err := validateMode(in.Mode); err != nil {
+		return err
+	}
 	if in.Columns == nil {
 		return errors.New("columns is required")
 	}
@@ -436,7 +448,7 @@ func normaliseWrite(in *viewWrite) error {
 }
 
 func normalisePatch(in *viewPatch) error {
-	if in.Name == nil && in.Filters == nil && in.Sort == nil && in.SortKeys == nil && in.GroupBy == nil && in.Columns == nil && in.Shared == nil {
+	if in.Name == nil && in.Filters == nil && in.Sort == nil && in.SortKeys == nil && in.GroupBy == nil && in.Columns == nil && in.Mode == nil && in.Shared == nil {
 		return errors.New("at least one property is required")
 	}
 	if in.Name != nil {
@@ -469,6 +481,11 @@ func normalisePatch(in *viewPatch) error {
 	}
 	if in.GroupBy != nil && !wordPattern.MatchString(*in.GroupBy) {
 		return errors.New("group_by is invalid")
+	}
+	if in.Mode != nil {
+		if err := validateMode(*in.Mode); err != nil {
+			return err
+		}
 	}
 	if in.Columns != nil {
 		if *in.Columns == nil {
@@ -525,6 +542,13 @@ func validateSortKeys(keys []string) error {
 			return errors.New("sort_keys is invalid")
 		}
 		seen[field] = true
+	}
+	return nil
+}
+
+func validateMode(mode string) error {
+	if mode != "list" && mode != "outline" && mode != "graph" {
+		return errors.New("mode is invalid")
 	}
 	return nil
 }
