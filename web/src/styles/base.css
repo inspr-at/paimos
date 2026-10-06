@@ -135,19 +135,20 @@ code, kbd, pre, samp, .mono, .eyebrow, .chip, .keycap, .key, .mono-label { font-
 .switch input {
   appearance: none; position: relative; flex-shrink: 0; width: 34px; height: 20px; margin: 0; border-radius: 999px; cursor: pointer;
   background: var(--track); box-shadow: inset 0 1px 3px color-mix(in srgb, var(--shadow-color) 20%, transparent);
+  container-type: inline-size;
 }
 .switch input::after {
-  content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  content: ''; position: absolute; top: 2px; left: 2px; height: calc(100% - 4px); aspect-ratio: 1; border-radius: 50%;
   background: radial-gradient(circle at 35% 30%, var(--surface-highlight), var(--switch-knob-low)); box-shadow: 0 1px 3px color-mix(in srgb, var(--shadow-color) 30%, transparent);
 }
 .switch input:checked { background: linear-gradient(90deg, var(--primary), var(--primary-hi)); box-shadow: none; }
-.switch input:checked::after { background: var(--primary-on); transform: translateX(14px); }
+.switch input:checked::after { background: var(--primary-on); transform: translateX(calc(100cqw - 100% - 4px)); }
 /* Mixed: half the track and a centred knob. A full tint read as on in dark mode. */
 .switch input:indeterminate {
   background: linear-gradient(90deg, var(--primary-hi) 0 50%, var(--track) 50% 100%);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--primary-line) 85%, transparent);
 }
-.switch input:indeterminate::after { transform: translateX(7px); }
+.switch input:indeterminate::after { transform: translateX(calc((100cqw - 100% - 4px) / 2)); }
 .switch input:disabled { cursor: not-allowed; opacity: .45; }
 .switch:has(input:disabled) { cursor: not-allowed; }
 .switch input:focus-visible { box-shadow: var(--focus-ring); }

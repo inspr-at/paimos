@@ -338,7 +338,7 @@ const transform = computed(() => `translate(${offset.value.x}px, ${offset.value.
 .lightbox {
   --lb-ink: var(--ink); --lb-ink-2: var(--ink-2); --lb-glass: var(--glass); --lb-edge: var(--line-2);
   width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; color: var(--lb-ink);
-  background: radial-gradient(120% 90% at 50% 40%, var(--surface) 0%, var(--canvas) 60%, var(--canvas-lo) 100%);
+  background: radial-gradient(120% 90% at 50% 40%, var(--surface) 0%, var(--canvas) 60%, var(--canvas-lo, var(--canvas)) 100%);
   display: none; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden;
 }
 .lightbox[open] { display: grid; }

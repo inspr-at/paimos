@@ -1070,6 +1070,8 @@
       ,
       "specs": [
         {"file":"tests/theme-agents.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/theme-control-geometry.spec.ts","listedTests":2,"weightSeconds":8,"weightSource":"estimate"}
       ]
     }
     ,

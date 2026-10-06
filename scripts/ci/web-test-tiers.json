@@ -11394,6 +11394,10 @@
     ,
     {"kind":"browser","file":"tests/theme-agents.spec.ts","name":"visible screenshots and Personal agent behaviour controls stay stable in all viewport modes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/theme-control-geometry.spec.ts","name":"the attachment stage keeps a radial wash in every theme even if canvas-lo is missing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/theme-control-geometry.spec.ts","name":"the shared switch centres its knob on any track and the agents label keeps a 44px hit target","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"New theme duplicates the default even on a later list page; managers may edit it","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/theme-settings.spec.ts","name":"Theme settings 1024 dark: preview, derived colours, marker and overlay stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13581,6 +13585,10 @@
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"keyboard focus is a solid contrast-safe ring for extreme primary accents","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/theme-colours.test.ts","name":"token aliases follow both accents and every marker source without theming semantic colours","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-control-geometry.test.ts","name":"every canvas token has a darker canvas-lo beside it and the stage gradient falls back to canvas","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/theme-control-geometry.test.ts","name":"the shared switch sizes its knob from the track and the agents label keeps the 44px hit target","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"a numeric cost in the payload is unknown, not displayed","tier":"GATED-FULL"}
     ,

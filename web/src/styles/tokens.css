@@ -6,6 +6,8 @@
 :root, :root[data-theme="light"], .agent-theme-preview, .agent-theme-preview.light {
   /* Palette */
   --canvas: #f7f6f2;
+  /* Stage vignette. Darker than this canvas; a missing token must not blank the wash. */
+  --canvas-lo: color-mix(in srgb, var(--canvas) 88%, var(--ink));
   --ink: #203c3d;
   --ink-2: #4c6163;
   --ink-3: #5f7274;
@@ -168,6 +170,7 @@
 
 :root[data-theme="dark"], .agent-theme-preview.dark {
   --canvas: #102327;
+  --canvas-lo: color-mix(in srgb, var(--canvas) 55%, black);
   --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #94aead; --mark-measured: rgba(237, 244, 240, 0.5);
     --eff-line: rgba(237, 244, 240, 0.42); --eff-plan: rgba(237, 244, 240, 0.42);
     --eff-1: #8fa8a7; --eff-2: #6cc4bb; --eff-3: #a4e5df; --eff-4: #e2b45a; --eff-5: #ef8f5a;
@@ -248,6 +251,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --canvas: #102327;
+    --canvas-lo: color-mix(in srgb, var(--canvas) 55%, black);
     --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #94aead; --mark-measured: rgba(237, 244, 240, 0.5);
     --eff-line: rgba(237, 244, 240, 0.42); --eff-plan: rgba(237, 244, 240, 0.42);
     --eff-1: #8fa8a7; --eff-2: #6cc4bb; --eff-3: #a4e5df; --eff-4: #e2b45a; --eff-5: #ef8f5a;
