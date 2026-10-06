@@ -112,7 +112,7 @@ func TestHarnessSessionLookup(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'agent','quiet')`, quiet.TenantID, quiet.ID); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'quiet',$3,$4,$5)`, quiet.TenantID, quiet.ID, prefix, hex.EncodeToString(sum[:]), []string{"harness.write"})
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'quiet',$3,$4,$5,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, quiet.TenantID, quiet.ID, prefix, hex.EncodeToString(sum[:]), []string{"harness.write"})
 		return err
 	})
 	denied := httptest.NewRequest(http.MethodGet, path, nil).WithContext(tenant.WithPrincipal(context.Background(), quiet))

@@ -60,7 +60,7 @@ func testJourneyTargetRoundtrip(t *testing.T, named bool) {
 	}
 	dbtest.BindRoleWith(t, f.db.Admin, f.tenant, f.agent.ID, "owner")
 	dbtest.BindRoleWith(t, f.db.Admin, f.tenant, f.person.ID, "owner")
-	keyID, agentID, token, err := auth.OperatorCreateAgentKey(ctx, f.db.App, f.tenant, "gate proposer", f.agent.ID, []string{"approvals.request", "journey.read", "stage_handoffs.write"}, nil)
+	keyID, agentID, token, err := auth.OperatorCreateAgentKey(ctx, f.db.App, f.tenant, "gate proposer", f.agent.ID, []string{"approvals.request", "journey.read", "stage_handoffs.write"}, nil, f.person.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
