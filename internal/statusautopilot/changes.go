@@ -4,6 +4,7 @@ package statusautopilot
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -111,10 +112,21 @@ func (m *Module) changes(w http.ResponseWriter, r *http.Request) {
 		httpapi.WriteError(w, 400, "invalid node id")
 		return
 	}
-	var out []Change
-	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
 		var err error
-		out, err = ChangesTx(r.Context(), tx, p, id, r.URL.Query().Get("suggestions") == "true", 50)
+		limit, err = strconv.Atoi(raw)
+		if err != nil || limit < 1 || limit > 50 {
+			httpapi.WriteError(w, 400, "limit must be 1 to 50")
+			return
+		}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+	var out []Change
+	err := db.InTenant(db.WithReadStatementTimeout(ctx, 8*time.Second), m.pool, p.TenantID, func(tx pgx.Tx) error {
+		var err error
+		out, err = ChangesTx(ctx, tx, p, id, r.URL.Query().Get("suggestions") == "true", limit)
 		return err
 	})
 	respond(w, struct {

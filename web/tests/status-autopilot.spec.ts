@@ -18,7 +18,9 @@ async function setup(page: Page, role: 'admin' | 'member' = 'admin') {
   const settings: AutopilotSettings = { enabled: true, revision: 0, rules: { new: { enabled: true, days: 7 }, backlog: { enabled: true, days: 90 }, blocked: { enabled: true, days: 14 }, progress: { enabled: true, days: 3 }, done: { enabled: true, days: 14 }, publish: { enabled: true }, accept: { enabled: true, days: 30 } } }
   const changes: AutomaticChange[] = [{ event_id: 41, node_id: 'ticket-1', key: 'ORB-142', title: 'Touch ID sign-in for the desktop app', actor: 'Status autopilot', rule: 'progress', reason: 'No session, branch or PR activity for 3 days.', from: 'in_progress', to: 'open', at: '2026-10-01T17:00:00Z', undone: false, undoable: true }]
   const suggestions: AutomaticChange[] = ['triage_list', 'cancel_suggested', 'blocked_reminder', 'missed_release'].map((flag, i) => ({ ...changes[0]!, event_id: 100 + i, key: `ORB-${i + 1}`, rule: (['new', 'backlog', 'blocked', 'done'] as const)[i]!, from: ['new', 'backlog', 'blocked', 'done'][i]!, to: flag, reason: `Current ${flag}`, at: '2026-01-01T00:00:00Z', undoable: false, changed_since: true }))
-  const overrides: Record<string, ProjectOverride> = {}
+  const overrides: Record<string, ProjectOverride> = { 'p-own': { mode: 'off', effective_enabled: false, revision: 2 } }
+  const projectWrites: { id: string; mode: string; expected_revision: number }[] = []
+  const projectRows = [ { id: 'p-own', key: 'OWN', title: 'Die langfristige Koordination aller Arbeitsbereiche und Freigabeverfahren' }, { id: 'p-follow', key: 'FOLLOW', title: 'Die langfristige Koordination aller Arbeitsbereiche und Freigabeverfahren' }, { id: 'p-search', key: 'SEARCH', title: 'Hidden beyond the first picker page' } ]
   const proposals: AutopilotProposal[] = []
   const resolutions: unknown[] = []
   const writes: unknown[] = []; let conflict = false; let undo = 0
@@ -34,9 +36,20 @@ async function setup(page: Page, role: 'admin' | 'member' = 'admin') {
   await page.route('**/api/projects/*/status-autopilot', async route => {
     const id = route.request().url().split('/').at(-2)!
     const o = overrides[id] ??= { mode: 'inherit', effective_enabled: true, revision: 0 }
-    if (route.request().method() === 'PUT') { const body = route.request().postDataJSON(); o.mode = body.mode; o.revision++ }
+    if (route.request().method() === 'PUT') { const body = route.request().postDataJSON(); projectWrites.push({ id, ...body }); if (body.expected_revision !== o.revision) return route.fulfill({ status: 409, json: { error: 'changed' } }); o.mode = body.mode; o.revision++ }
     o.effective_enabled = o.mode === 'on' || o.mode === 'inherit' && settings.enabled
     return route.fulfill({ json: o })
+  })
+  // Keyset pages by id like the server: 50 overrides per page; the picker gets one per page so paging is exercised.
+  await page.route('**/api/status-autopilot/projects*', route => {
+    const q = new URL(route.request().url()).searchParams, term = q.get('q')?.toLowerCase() ?? '', after = q.get('after') ?? '', size = q.get('mode') === 'inherit' ? 1 : 50
+    const rows = projectRows.map(p => ({ ...p, override: overrides[p.id] ?? { mode: 'inherit', effective_enabled: settings.enabled, revision: 0 } })).filter(p => (q.get('mode') === 'inherit' ? p.override.mode === 'inherit' : p.override.mode !== 'inherit') && `${p.key} ${p.title}`.toLowerCase().includes(term) && p.id > after).sort((a, b) => a.id < b.id ? -1 : 1)
+    const items = rows.slice(0, size)
+    return route.fulfill({ json: { items, inherited_count: projectRows.filter(p => !overrides[p.id] || overrides[p.id]!.mode === 'inherit').length, next_cursor: rows.length > size ? items.at(-1)!.id : null } })
+  })
+  await page.route('**/api/status-autopilot/attention*', route => {
+    const counts = { proposed: proposals.length, triage: suggestions.filter(i => i.to === 'triage_list').length, cancel: suggestions.filter(i => i.to === 'cancel_suggested').length, blocked: suggestions.filter(i => i.to === 'blocked_reminder').length, missed: suggestions.filter(i => i.to === 'missed_release').length }
+    return route.fulfill({ json: { counts, total: Object.values(counts).reduce((a,b) => a+b,0), items: [], next_cursor: null, facets: { projects: [], assignees: [] } } })
   })
   await page.route('**/api/status-autopilot/changes*', route => route.fulfill({ json: { items: route.request().url().includes('suggestions=true') ? suggestions : changes } }))
   await page.route('**/api/status-autopilot/proposals', route => route.fulfill({ json: { items: proposals } }))
@@ -48,88 +61,134 @@ async function setup(page: Page, role: 'admin' | 'member' = 'admin') {
     return route.fulfill({ json: {} })
   })
   await page.route('**/api/events/41/undo', route => { undo++; changes[0]!.undone = true; changes[0]!.undoable = false; return route.fulfill({ status: 201, json: { id: 42 } }) })
-  return { settings, suggestions, proposals, resolutions, writes, conflict: () => { conflict = true }, undos: () => undo }
+  return { settings, suggestions, proposals, resolutions, writes, changes, projectWrites, projectRows, overrides, conflict: () => { conflict = true }, undos: () => undo }
 }
 
-test('250 attention ticket pills stay steady for 3 seconds with bounded lookups', async ({ page }, testInfo) => {
-  await page.setViewportSize({ width: 1440, height: 900 })
+test('large queues become five exact counts and filtered links, with only five latest changes', async ({ page }, testInfo) => {
   const world = await setup(page)
   const base = world.suggestions[0]!
-  world.suggestions.splice(0, world.suggestions.length, ...Array.from({ length: 250 }, (_, i) => ({
-    ...base, event_id: 1000 + i, node_id: `pill-${i}`, key: `AEON-${1001 + i}`,
-    title: `Langfristige Überprüfung der Zugriffsberechtigungen und nachvollziehbare Freigabe ${i + 1}`,
-  })))
-  const lookups: string[][] = []
-  await page.route('**/api/nodes/lookup**', route => {
-    const keys = (new URL(route.request().url()).searchParams.get('keys') ?? '').split(',').filter(Boolean)
-    if (!keys.length) return route.fallback()
-    lookups.push(keys)
-    return route.fulfill({ json: { items: keys.map(key => ({ requested_key: key, key, id: `pill-${key}`, title: key, state: 'new', project_id: 'p-aeon' })) } })
-  })
+  world.suggestions.splice(0, world.suggestions.length, ...Array.from({ length: 250 }, (_, i) => ({ ...base, event_id: 1000 + i, key: `AEON-${1001+i}` })))
+  world.changes.push(...Array.from({ length: 49 }, (_, i) => ({ ...world.changes[0]!, event_id: i+200, key: `ORB-${i+200}` })))
   await page.goto('/settings/autopilot')
-  const attention = page.getByRole('region', { name: 'Tickets needing attention', exact: true })
-  await expect(attention.locator('a.ticket-link')).toHaveCount(250)
-  await expect(attention.locator('.ticket-plain')).toHaveCount(0)
-  const before = lookups.length
-  // Observe replacements as well as class mutations: a flickering link may be
-  // removed and recreated rather than have its class changed in place.
-  const observation = await attention.evaluate(async region => {
-    const snapshot = () => [...region.querySelectorAll('.key-badge')].map(el => `${el.tagName}:${el.textContent}:${el.className}`)
-    const baseline = snapshot()
-    let mutations = 0
-    const observer = new MutationObserver(records => {
-      mutations += records.filter(record => record.type === 'attributes' || [...record.addedNodes, ...record.removedNodes].some(node => node instanceof Element && (node.matches('.key-badge') || node.querySelector('.key-badge')))).length
-    })
-    observer.observe(region, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] })
-    await new Promise(resolve => setTimeout(resolve, 3000))
-    observer.disconnect()
-    return { baseline, after: snapshot(), mutations }
-  })
-  expect(observation.baseline).toHaveLength(250)
-  expect(observation.after).toEqual(observation.baseline)
-  expect(observation.mutations).toBe(0)
-  expect(lookups.length).toBe(before)
-  expect(lookups.length).toBeLessThanOrEqual(4) // 250 suggestions plus the recent-change key.
-  expect(lookups.every(keys => keys.length <= 100)).toBe(true)
-  expect(world.suggestions.every(item => lookups.flat().filter(key => key === item.key).length === 1)).toBe(true)
-
-  const first = attention.locator('a.ticket-link').first()
-  await first.scrollIntoViewIfNeeded()
-  await expectStableControls({
-    controls: { ticket: first, row: attention.locator('.change').first() }, scrollAreas: { attention },
-    interactions: [{ name: 'hover ticket', run: () => first.hover() }, { name: 'focus ticket', run: () => first.focus() }],
-  })
-  const folder = testInfo.outputPath('aeon-668-pills')
-  await mkdir(folder, { recursive: true })
+  const needs = page.getByRole('region', { name: '250 tickets need a person', exact: true })
+  await expect(needs.locator('.att-row')).toHaveCount(5)
+  await expect(needs.locator('.att-row.calm')).toHaveCount(4)
+  await expect(needs.getByText('250 tickets on the triage list')).toBeVisible()
+  await expect(needs.locator('a.ticket-link')).toHaveCount(0)
+  const latest = page.getByRole('region', { name: 'Latest automatic changes' })
+  await expect(latest.locator('.change')).toHaveCount(5)
+  await expect(latest.getByRole('link', { name: 'Show all' })).toHaveAttribute('href', '/activity?view=automatic')
+  await needs.getByRole('button', { name: 'Open', exact: true }).click()
+  await expect(page).toHaveURL('/tickets?kind=triage')
+  await page.goto('/settings/autopilot'); await page.getByRole('button', { name: 'Open all', exact: true }).click()
+  await expect(page).toHaveURL('/tickets')
+  const folder = process.env.STATUS_AUTOPILOT_SHOTS ?? testInfo.outputPath('aeon-696'); await mkdir(folder, { recursive: true })
   for (const width of [390, 1024, 1440]) {
-    await page.setViewportSize({ width, height: 900 })
-    await first.scrollIntoViewIfNeeded()
-    for (const theme of ['light', 'dark']) {
-      await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
-      const path = `${folder}/attention-${width}-${theme}.png`
-      await page.screenshot({ path })
-      await testInfo.attach(`attention-${width}-${theme}`, { path, contentType: 'image/png' })
+    await page.setViewportSize({ width, height: 900 }); await page.goto('/settings/autopilot')
+    await expect(latest.locator('.change')).toHaveCount(5)
+    if (width === 390) expect(await latest.getByRole('button', { name: /^Undo:/ }).first().evaluate(button => button.getBoundingClientRect().height)).toBeGreaterThanOrEqual(44)
+    for (const theme of ['light','dark']) {
+      await page.evaluate(t => { document.documentElement.dataset.theme = t }, theme)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
+      const path = `${folder}/autopilot-${width}-${theme}.png`
+      await page.screenshot({ path, fullPage: true }); await testInfo.attach(`autopilot-${width}-${theme}`, { path, contentType: 'image/png' })
+      await latest.scrollIntoViewIfNeeded()
+      await expect(latest).toBeInViewport({ ratio: .25 })
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+      const lower = `${folder}/overrides-latest-${width}-${theme}.png`
+      await page.screenshot({ path: lower }); await testInfo.attach(`overrides-latest-${width}-${theme}`, { path: lower, contentType: 'image/png' })
+      await page.getByRole('heading', { name: '250 tickets need a person' }).scrollIntoViewIfNeeded()
     }
   }
 })
 
-test('upgrade proposals offer Apply and Dismiss while stale proposals stay guarded', async ({ page }) => {
+test('project picker searches inheriting projects, adds the opposite value and restores a removed override with Undo', async ({ page }) => {
   const world = await setup(page)
-  Object.assign(world.settings, { server_mode: 'on', effective_mode: 'suggest', suggest_until: '2026-10-02T18:00:00Z' })
-  const base: AutopilotProposal = { event_id: 200, node_id: 'ticket-1', key: 'ORB-142', title: 'Review before moving', rule: 'progress', reason: 'No session, branch or PR activity for 3 days.', from: 'in_progress', to: 'open', at: '2026-10-01T17:00:00Z', changed_since: false, applicable: true }
-  world.proposals.push(base, { ...base, event_id: 201, key: 'ORB-143', changed_since: true, applicable: false })
   await page.goto('/settings/autopilot')
-  const card = page.getByRole('region', { name: 'Status autopilot', exact: true })
-  await expect(card.getByText('Suggest', { exact: true })).toBeVisible()
-  await expect(card.getByText(/After this upgrade/)).toBeVisible()
-  expect(world.writes).toHaveLength(0)
-  const changes = page.getByRole('region', { name: 'Changes', exact: true })
-  await expect(changes.getByRole('button', { name: 'Apply proposal for ORB-143', exact: true })).toBeDisabled()
-  await changes.getByRole('button', { name: 'Apply proposal for ORB-142', exact: true }).click()
-  await expect(changes.getByText('ORB-142', { exact: true })).toHaveCount(0)
-  await changes.getByRole('button', { name: 'Dismiss proposal for ORB-143', exact: true }).click()
-  await expect(changes.getByText('No proposed changes.')).toBeVisible()
-  expect(world.resolutions).toEqual([{ action: 'apply' }, { action: 'dismiss' }])
+  const card = page.getByRole('region', { name: 'Project overrides' })
+  const add = card.getByRole('button', { name: 'Add an override' })
+  await expect(card.getByRole('radiogroup')).toHaveCount(1)
+  await add.click()
+  const search = page.getByRole('searchbox', { name: 'Search choose a project' })
+  await expect(search).toBeVisible()
+  const pick = page.getByRole('option', { name: /Hidden beyond/ })
+  await expect(page.getByRole('option').first()).toBeVisible()
+  await expectStableControls({ controls: { search, add, selector: page.getByRole('listbox', { name: 'Choose a project' }), row: page.getByRole('option').first() }, interactions: [{ name: 'search another project', run: async () => { await search.fill('SEARCH'); await expect(pick).toBeVisible() } }] })
+  await pick.click()
+  const group = card.getByRole('radiogroup', { name: 'Status autopilot in Hidden beyond the first picker page' })
+  await expect(group.getByRole('radio', { name: 'Off', exact: true })).toHaveAttribute('aria-checked','true')
+  await expect(group.getByRole('radio', { name: 'Off', exact: true })).toBeFocused()
+  expect(world.projectWrites[0]).toMatchObject({ id: 'p-search', mode: 'off', expected_revision: 0 })
+  await card.getByRole('button', { name: 'Remove the override: Hidden beyond the first picker page follows the workspace again' }).click()
+  await expect(group).toHaveCount(0)
+  await page.locator('.toast').filter({ hasText: 'Hidden beyond the first picker page follows' }).getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(group).toBeVisible()
+  expect(world.projectWrites.at(-1)).toMatchObject({ id: 'p-search', mode: 'off', expected_revision: 2 })
+  await add.click(); await search.press('Escape'); await expect(search).not.toBeFocused()
+  await page.keyboard.press('Escape'); await expect(search).toHaveCount(0); await expect(add).toBeFocused()
+})
+
+test('Show all opens the automatic changes in workspace Activity', async ({ page }) => {
+  const world = await setup(page)
+  const change = world.changes[0]!, views: string[] = []
+  await page.route('**/api/events/activity?*', route => {
+    const view = new URL(route.request().url()).searchParams.get('view') ?? ''; views.push(view)
+    return route.fulfill({ json: { items: view === 'automatic' ? [{ ...change, project_id: 'p-own', type: 'status_autopilot.changed', revision: change.at, automatic: true, changed_since: false, requires_preview: false }] : [], next_cursor: null } })
+  })
+  await page.goto('/settings/autopilot')
+  await page.getByRole('region', { name: 'Latest automatic changes' }).getByRole('link', { name: 'Show all' }).click()
+  await expect(page).toHaveURL('/activity?view=automatic')
+  await expect(page.getByRole('heading', { name: 'Activity', level: 1, exact: true })).toBeVisible()
+  await expect(page.getByRole('navigation', { name: 'Activity views' }).getByRole('button', { name: 'Automatic changes', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(page.locator('[data-event-id="41"]')).toContainText(change.reason)
+  expect(views).toContain('automatic'); expect(views.filter(view => view !== 'automatic')).toEqual([])
+})
+
+test('adding overrides to a full page keeps every override reachable through the pages', async ({ page }) => {
+  const world = await setup(page)
+  for (let i = 0; i < 49; i++) { const id = `p-o${String(i).padStart(2, '0')}`; world.projectRows.push({ id, key: `O${i}`, title: `Override ${i}` }); world.overrides[id] = { mode: 'on', effective_enabled: true, revision: 1 } }
+  await page.goto('/settings/autopilot')
+  const card = page.getByRole('region', { name: 'Project overrides' })
+  const add = card.getByRole('button', { name: 'Add an override' }), search = page.getByRole('searchbox', { name: 'Search choose a project' })
+  const ids = () => card.locator('[data-project]').evaluateAll(rows => rows.map(row => (row as HTMLElement).dataset.project!))
+  await expect(card.getByRole('radiogroup')).toHaveCount(50)
+  await expect(card.getByRole('button', { name: 'Next overrides' })).toHaveCount(0)
+  // p-search sorts after the full first page; p-follow sorts onto it.
+  await add.click(); await search.fill('SEARCH'); await page.getByRole('option', { name: /Hidden beyond/ }).click()
+  await expect(card.getByRole('button', { name: 'Next overrides' })).toBeEnabled()
+  await expect(add).toBeFocused()
+  await add.click(); await search.fill('FOLLOW'); await page.getByRole('option').filter({ hasText: 'FOLLOW' }).click()
+  await expect(card.locator('[data-project="p-follow"]').getByRole('radio', { name: 'Off', exact: true })).toBeFocused()
+  expect(world.projectWrites.map(w => w.id)).toEqual(['p-search', 'p-follow'])
+  await expect(card.getByRole('radiogroup')).toHaveCount(50)
+  await expect(card.getByText('0 other projects follow the workspace (On).')).toBeVisible()
+  const first = await ids()
+  await card.getByRole('button', { name: 'Next overrides' }).click()
+  await expect(card.locator('[data-project="p-search"]')).toBeVisible()
+  const second = await ids()
+  await expect(card.getByRole('button', { name: 'Next overrides' })).toBeDisabled()
+  const expected = world.projectRows.map(p => p.id).filter(id => world.overrides[id]?.mode !== 'inherit').sort()
+  expect(expected).toHaveLength(52)
+  expect([...first, ...second]).toEqual(expected)
+})
+
+test('picker pages are reachable with arrow keys alone', async ({ page }) => {
+  const world = await setup(page)
+  await page.goto('/settings/autopilot')
+  const add = page.getByRole('region', { name: 'Project overrides' }).getByRole('button', { name: 'Add an override' })
+  await add.focus(); await page.keyboard.press('Enter')
+  const search = page.getByRole('searchbox', { name: 'Search choose a project' }), next = page.getByRole('button', { name: 'Next projects', exact: true })
+  await expect(search).toBeFocused()
+  await expect(page.getByRole('option')).toHaveCount(1); await expect(next).toBeEnabled()
+  await page.keyboard.press('ArrowDown'); await expect(page.getByRole('option').first()).toBeFocused()
+  await page.keyboard.press('ArrowDown'); await expect(next).toBeFocused()
+  await page.keyboard.press('ArrowUp'); await expect(page.getByRole('option').first()).toBeFocused()
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter')
+  const hidden = page.getByRole('option', { name: /Hidden beyond/ })
+  await expect(hidden).toBeFocused(); await expect(next).toBeHidden()
+  await page.keyboard.press('ArrowDown'); await expect(hidden).toBeFocused()
+  await page.keyboard.press('Enter')
+  await expect.poll(() => world.projectWrites.map(w => w.id)).toEqual(['p-search'])
 })
 
 test('owner explicitly confirms upgrade while server Suggest remains the cap', async ({ page }) => {
@@ -148,14 +207,11 @@ test('owner explicitly confirms upgrade while server Suggest remains the cap', a
   await expect(page.getByText('The server operator requires Suggest mode. Proposed changes wait for Apply or Dismiss.')).toBeVisible()
 })
 
-test('approved rules, master switch, validation, inheritance and audited Undo', async ({ page }) => {
+test('rules validate and save, master off disables all seven, and latest Undo stays audited', async ({ page }) => {
   const world = await setup(page)
   await page.goto('/settings/autopilot')
   const card = page.getByRole('region', { name: 'Status autopilot', exact: true })
   await expect(card.getByRole('switch', { name: 'Status autopilot', exact: true })).toBeChecked()
-  await expect(card.locator('.rules')).toHaveCSS('margin-top', '14px')
-  await expect(card.locator('.rule').first()).toHaveCSS('border-top-width', '1px')
-  await expect(card.locator('.rule').first()).toHaveCSS('border-top-style', 'solid')
   expect(await card.locator('input[type=number]').evaluateAll(inputs => inputs.map(input => (input as HTMLInputElement).value))).toEqual(['7', '90', '14', '3', '14', '30'])
   await expect(card.getByText('On publish', { exact: true })).toBeVisible()
   const accept = card.getByLabel('Days delivered without objection before Accepted')
@@ -167,19 +223,17 @@ test('approved rules, master switch, validation, inheritance and audited Undo', 
   await expect(accept).toBeDisabled()
   await card.getByRole('switch', { name: 'Delivered to Accepted' }).check()
   await expect(accept).toBeEnabled()
-  await card.getByRole('switch', { name: 'Status autopilot', exact: true }).uncheck()
+  const master = card.getByRole('switch', { name: 'Status autopilot', exact: true })
+  for (const width of [390, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 })
+    const add = page.getByRole('button', { name: 'Add an override' })
+    const all = page.getByRole('link', { name: 'Show all' })
+    await expectStableControls({ controls: { master: master.locator('..'), accept, rules: card.locator('.rules'), row: card.locator('.rule').last(), add, all }, scrollAreas: { card }, interactions: [{ name: 'master off', run: async () => { await master.uncheck(); await expect(accept).toBeDisabled() } }, { name: 'master on', run: async () => { await master.check(); await expect(accept).toBeEnabled() } }] })
+  }
+  await master.uncheck()
   await expect(accept).toBeDisabled()
   await expect(card.getByText('Off: nothing moves on its own. Suggestions are still listed.')).toBeVisible()
-  const attention = page.getByRole('region', { name: 'Tickets needing attention', exact: true })
-  for (const [i, label] of ['Triage list', 'Cancel suggested', 'Blocked reminders', 'Missed releases'].entries()) {
-    await expect(attention.getByRole('region', { name: label, exact: true }).getByText(`ORB-${i + 1}`, { exact: true })).toBeVisible()
-  }
-  const group = page.getByRole('radiogroup', { name: /Status autopilot in/ }).first()
-  await group.getByRole('radio', { name: 'On', exact: true }).click()
-  await expect(group.getByRole('radio', { name: 'On', exact: true })).toHaveAttribute('aria-checked', 'true')
-  await group.getByRole('radio', { name: 'On', exact: true }).press('ArrowRight')
-  await expect(group.getByRole('radio', { name: 'Off', exact: true })).toHaveAttribute('aria-checked', 'true')
-  const recent = page.getByRole('region', { name: 'Recent automatic changes' })
+  const recent = page.getByRole('region', { name: 'Latest automatic changes' })
   await expect(recent.getByText('Status autopilot', { exact: true })).toBeVisible()
   await expect(recent.getByText('No session, branch or PR activity for 3 days.')).toBeVisible()
   await recent.getByRole('button', { name: /Undo: put ORB-142 back/ }).click()
@@ -191,7 +245,7 @@ test('stale setting writes explain recovery and keep the saved limits', async ({
   const card = page.getByRole('region', { name: 'Status autopilot', exact: true })
   await card.getByLabel('Days delivered without objection before Accepted').fill('60')
   await card.getByLabel('Days delivered without objection before Accepted').blur()
-  await expect(page.locator('.autopilot').getByRole('alert')).toContainText('Another admin changed these settings')
+  await expect(page.locator('.toast.error')).toContainText('Another admin changed these settings')
   await page.locator('.autopilot').getByRole('button', { name: 'Reload', exact: true }).click()
   await expect(card.getByLabel('Days delivered without objection before Accepted')).toHaveValue('30')
 })
@@ -199,21 +253,6 @@ test('stale setting writes explain recovery and keep the saved limits', async ({
 test('members have no workspace autopilot controls', async ({ page }) => {
   await setup(page, 'member'); await page.goto('/settings/autopilot')
   await expect(page.getByRole('region', { name: 'Status autopilot', exact: true })).toHaveCount(0)
-})
-
-test('light, dark and narrow settings evidence beside the approved fragment', async ({ page }, testInfo) => {
-  await setup(page); await page.goto('/settings/autopilot')
-  const folder = process.env.STATUS_AUTOPILOT_SHOTS ?? testInfo.outputPath('shots'); await mkdir(folder, { recursive: true })
-  for (const theme of ['light', 'dark']) {
-    await page.setViewportSize({ width: 1440, height: 2400 })
-    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
-    await expect(page.getByRole('region', { name: 'Recent automatic changes' })).toBeVisible()
-    const path = `${folder}/status-autopilot-${theme}.png`
-    await page.locator('.autopilot').screenshot({ path }); await testInfo.attach(`status-autopilot-${theme}`, { path, contentType: 'image/png' })
-  }
-  await page.setViewportSize({ width: 390, height: 844 })
-  await expect(page.getByRole('region', { name: 'Status autopilot', exact: true })).toBeVisible()
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy()
 })
 
 test('ticket Activity shows the autopilot reason, automatic filter and guarded Undo', async ({ page }) => {
@@ -232,4 +271,40 @@ test('ticket Activity shows the autopilot reason, automatic filter and guarded U
   await activity.getByRole('button', { name: /Undo: put PHR-12 back/ }).click()
   await expect.poll(() => undoCalls).toBe(1)
   await expect(activity.getByText('Undone · back to In progress')).toBeVisible()
+})
+
+test('a save finishing after session expiry cannot update controls or offer Undo', async ({ page }) => {
+  const world = await setup(page)
+  await page.goto('/settings/autopilot')
+  const master = page.getByRole('switch', { name: 'Status autopilot', exact: true })
+  await expect(master).toBeChecked()
+  const identity = await page.evaluate(async () => (await import('/src/stores/session.ts')).useSession().identity)
+  const accept = page.getByLabel('Days delivered without objection before Accepted')
+  await accept.fill('366')
+  let release!: () => void, received!: () => void, finished!: () => void
+  const completed = new Promise<void>(resolve => { finished = resolve })
+  const held = new Promise<void>(resolve => { release = resolve }), started = new Promise<void>(resolve => { received = resolve })
+  await page.route('**/api/settings/status-autopilot', async route => {
+    if (route.request().method() !== 'PUT') return route.fallback()
+    received(); await held
+    await route.fulfill({ json: { ...world.settings, enabled: false, revision: 1 } }).catch(() => {}); finished()
+  })
+  await master.uncheck(); await started
+  await page.evaluate(async () => {
+    const [{ useSession }, { revokePermissions }] = await Promise.all([import('/src/stores/session.ts'), import('/src/lib/authz.ts')])
+    useSession().identity = null; revokePermissions()
+  })
+  release(); await completed
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => resolve())))
+  await expect(master).toBeChecked(); await expect(master).toBeDisabled()
+  await expect(page.locator('.toast').filter({ hasText: 'Status autopilot saved.' })).toHaveCount(0)
+  world.settings.enabled = false; world.settings.rules.accept.days = 60
+  await page.evaluate(async who => {
+    const [{ useSession }, { clearPermissions, refreshPermissions }] = await Promise.all([import('/src/stores/session.ts'), import('/src/lib/authz.ts')])
+    clearPermissions()
+    useSession().identity = { ...who!, principal: { ...who!.principal, id: 'another-person' } }
+    await refreshPermissions()
+  }, identity)
+  await expect(master).toBeEnabled(); await expect(master).not.toBeChecked()
+  await expect(accept).toHaveValue('60'); await expect(accept).toHaveAttribute('aria-invalid', 'false')
 })
