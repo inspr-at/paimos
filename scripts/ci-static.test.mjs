@@ -221,13 +221,16 @@ test('skips report INCOMPLETE and code 3; allow-skips remains explicitly incompl
 
 test('fixed check environment removes caller flags and identity but supplies CI values', async t => {
   const cwd = temporary(t), source = { ...process.env, GOFLAGS: '-skip', AEON_TEST_TIER_MODE: 'essential', AEON_TEST_DATABASE_URL: 'fixture', RANDOM_EXTRA: 'fixture',
-    NIX_CFLAGS_COMPILE: '-isystem /fixture/sdk/usr/include', NIX_LDFLAGS: '-L/fixture/sdk/usr/lib' }
+    NIX_CFLAGS_COMPILE: '-isystem /fixture/sdk/usr/include', NIX_LDFLAGS: '-L/fixture/sdk/usr/lib',
+    NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin: 'fixture-sdk', NIX_STORE: '/fixture/store' }
   await runChecks([{ id: 'env', command: 'true', cwd: '.', needs: [], timeout_seconds: 5 }], cwd, { env: source, run: async (_command, { env }) => {
     assert.equal(env.GOFLAGS, undefined); assert.equal(env.AEON_TEST_DATABASE_URL, undefined)
     assert.equal(env.RANDOM_EXTRA, undefined); assert.equal(env.AEON_TEST_TIER_MODE, 'full')
     assert.equal(env.CI, 'true'); assert.equal(env.CI_LANE, 'full')
     assert.equal(env.NIX_CFLAGS_COMPILE, source.NIX_CFLAGS_COMPILE)
     assert.equal(env.NIX_LDFLAGS, source.NIX_LDFLAGS)
+    assert.equal(env.NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin, 'fixture-sdk')
+    assert.equal(env.NIX_STORE, undefined)
     assert.ok(env.npm_config_cache.startsWith(tmpdir()))
     return { status: 'passed', seconds: 0 }
   } })
