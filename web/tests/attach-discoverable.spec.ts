@@ -72,7 +72,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     await list(page, [])
     await page.setViewportSize({ width, height: 900 })
     await page.goto('/agents')
-    const add = page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })
+    const add = page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })
     await expectStableControls({
       controls: { add, more: page.getByRole('button', { name: 'More agent actions' }) },
       scrollAreas: { header: page.locator('.agents-page .page-head') },
@@ -215,7 +215,7 @@ test('attach approvals share the queue count and expiry ordering, never a code o
   await expect(queue.locator('.attach-item').getByRole('button', { name: /Allow/ })).toHaveCount(0)
   await expect(queue).not.toContainText('123456789')
   await expect(queue.locator('.attach-item').first()).toContainText('Status only')
-  await page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true }).click()
+  await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
   await expect(page.getByRole('menuitem', { name: /Attach a running session/ }).locator('.count-badge')).toHaveCount(0)
   await page.keyboard.press('Escape')
 })
@@ -350,7 +350,7 @@ test('an empty list shows nothing, and people who cannot attach never ask', asyn
   await expect(page.getByRole('heading', { name: 'Agents', level: 1 })).toBeVisible()
   await page.waitForTimeout(700)
   await expect(strip(page)).toHaveCount(0)
-  await page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true }).click()
+  await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
   await expect(page.getByRole('menuitem', { name: /Attach a running session/ })).toHaveCount(0)
   await page.keyboard.press('Escape')
   expect(asked).toEqual([])
@@ -360,7 +360,7 @@ test('an unavailable list stays quiet', async ({ page }) => {
   await setup(page)
   await page.route(PENDING, route => route.fulfill({ status: 503, json: { error: 'unavailable' } }))
   await page.goto('/agents')
-  await expect(page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })).toBeVisible()
   await page.waitForTimeout(700)
   await expect(strip(page)).toHaveCount(0)
   await expect(page.getByRole('alert')).toHaveCount(0)
@@ -399,7 +399,7 @@ test('the terminal link fills the code in, is removed from the address bar, and 
 test('a link with anything but nine digits opens nothing', async ({ page }) => {
   await setup(page)
   await page.goto('/agents#attach=12345')
-  await expect(page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })).toBeVisible()
   await page.waitForTimeout(400)
   await expect(page.getByRole('dialog')).toHaveCount(0)
 })
@@ -484,7 +484,7 @@ test('the attach code never reaches a sign-in address, even when the session has
   const urls: string[] = []
   page.on('request', r => urls.push(r.url()))
   await page.goto('/agents')
-  await expect(page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })).toBeVisible()
   await page.route('**/api/me', route => route.fulfill({ status: 401, json: { error: 'unauthorized' } }))
   await page.evaluate(() => { location.hash = '#attach=123456789' })
   await expect(page).toHaveURL(/\/signin\?error=expired&return=(\/|%2F)agents$/)
@@ -521,7 +521,7 @@ test('a reset queued between the scope check and continuation cannot open A’s 
     await route.fulfill({ response, body: source.replace(checked, '$&\nglobalThis.__attachPermissionProbe?.(value);') })
   })
   await page.goto('/agents')
-  await expect(page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })).toBeVisible()
   await page.evaluate(async ola => {
     // @ts-expect-error Vite serves this module in the browser execution context.
     const { useSession } = await import('/src/stores/session.ts')
@@ -571,7 +571,7 @@ test('signing in as another person in a second tab invalidates the old tab befor
   await expect(strip(other)).toContainText('Ola’s Mac')
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect(strip(page)).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })).toHaveCount(0)
   await expect(page.getByText('Your session has ended.', { exact: false })).toBeVisible()
   const stopped = reads
   await page.clock.fastForward(15_000)
@@ -596,7 +596,7 @@ test('signing out and back in as A in a second tab never revives A’s old link 
   await other.route('**/api/auth/logout', route => route.fulfill({ status: 204 }))
   await other.route('**/api/auth/dev-login', route => route.fulfill({ status: 204 }))
   await other.goto('/agents')
-  await expect(other.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })).toBeVisible()
+  await expect(other.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })).toBeVisible()
   await other.evaluate(async () => {
     // @ts-expect-error Vite serves this module in the browser execution context.
     const { useSession } = await import('/src/stores/session.ts')
@@ -610,7 +610,7 @@ test('signing out and back in as A in a second tab never revives A’s old link 
   await expect(page.getByText('Your session has ended.', { exact: false })).toBeVisible()
   await page.clock.fastForward(10_000)
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })).toHaveCount(0)
   await other.close()
 })
 
@@ -628,7 +628,7 @@ test('an OIDC round trip in another tab invalidates the old review and records t
   await other.getByRole('link', { name: 'Sign in', exact: true }).click()
   await expect(strip(other)).toContainText('Ola’s Mac')
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })).toHaveCount(0)
   expect(await other.evaluate(() => sessionStorage.getItem('aeon.auth.pending'))).toBeNull()
   await other.close()
 })
@@ -651,7 +651,7 @@ test('a link code waiting for slow permissions never opens for the next person',
   // Ola's permissions answer at once; the previous person's are still on their way.
   switched = true
   await signInAsOla(page)
-  await expect(page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })).toBeVisible()
   slow.open()
   await page.waitForTimeout(400)
   // The code was the previous person's: it opens nothing for Ola.
@@ -824,7 +824,7 @@ for (const action of ['approve', 'revoke'] as const) {
 test('a link followed inside the open Agents page fills the code in again', async ({ page }) => {
   await setup(page)
   await page.goto('/agents')
-  await expect(page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })).toBeVisible()
   for (const code of ['123456789', '987654321']) {
     await page.evaluate(hash => { location.hash = hash }, `#attach=${code}`)
     await expect(page.getByLabel('Attach code')).toHaveValue(`${code.slice(0, 3)} ${code.slice(3, 6)} ${code.slice(6)}`)

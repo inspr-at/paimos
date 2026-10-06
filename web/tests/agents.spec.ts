@@ -19,8 +19,11 @@ const world: AgentWorld = {
 const session = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
 const camy = session(1), nova = session(2), kite = session(4)
 
-async function setup(page: Page, options: AgentMockOptions & { empty?: boolean; readOnly?: boolean; member?: boolean } = {}) {
-  await mockWork(page, fixtures(), { readOnly: options.readOnly, admin: !options.member })
+async function setup(page: Page, options: AgentMockOptions & { empty?: boolean; readOnly?: boolean; member?: boolean; expert?: boolean } = {}) {
+  const work = fixtures()
+  // AEON-741: manual Start agent is an expert opt-in.
+  if (options.expert) work.preferences['developer-ui'] = { show_expert_start: true }
+  await mockWork(page, work, { readOnly: options.readOnly, admin: !options.member })
   const data = agentData({ ...world, empty: options.empty })
   const calls = await mockAgents(page, data, options)
   return { data, calls }
@@ -466,7 +469,7 @@ test('accounts explain themselves when the person may not see them', async ({ pa
 })
 
 test('an empty workspace explains how an agent connects', async ({ page }) => {
-  await setup(page, { empty: true })
+  await setup(page, { empty: true, expert: true })
   await page.route('**/api/me/permissions*', route => {
     const effective = mockEffectivePermissions('admin')
     effective.workspace.permissions.push('run.create')
