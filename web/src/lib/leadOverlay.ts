@@ -2,7 +2,7 @@
 import { reactive } from 'vue'
 
 // One lead panel and one lead sheet at a time, opened from the band, the line,
-// a ticket or the Agents page. Each view that can open them mounts LeadOverlays.
+// a ticket (also a preview over any page) or the Agents page. The app shell mounts LeadOverlays once.
 // Closing hands focus back to whatever opened that overlay.
 export interface LeadOverlayState {
   panel: string | null

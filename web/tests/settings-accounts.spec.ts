@@ -338,7 +338,7 @@ test('an API key shows money, and a dollar limit reads back', async ({ page }) =
   await open(page)
   const pi = await details(page, ACCOUNTS.pi)
   await expect(pi).toContainText('Spend$12.40 this month · no limit · list prices')
-  await expect(pi).toContainText("Pi doesn't show its limit to AEON. One run at a time by day, freely tonight.")
+  await expect(pi).toContainText('Usage unknown · reserve not enforceable')
   await pi.getByRole('button', { name: 'Set a limit by hand' }).click()
   await expect(pi.getByLabel('At most')).toBeFocused()
   await pi.getByLabel('Counted in').selectOption('dollars')

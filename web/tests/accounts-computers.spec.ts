@@ -92,7 +92,7 @@ test('no reading yet is said once, with Check now; unsupported limits and offlin
   await expect(codex.getByRole('meter')).toHaveCount(0)
   // AEON-623: Pi has no quota reader; a refresh or a run cannot produce its limit.
   const pi = computer(page, 'mbp2607').getByRole('row').filter({ hasText: 'Pi on hsb1' })
-  await expect(pi.getByText("Pi doesn't show its limit · one run at a time by day", { exact: true })).toHaveCount(1)
+  await expect(pi.getByText('Usage unknown · reserve not enforceable', { exact: true })).toHaveCount(1)
   await expect(pi).not.toContainText('No reading yet')
   await expect(pi).not.toContainText('usage limit')
   await expect(pi.getByRole('button', { name: 'Check now' })).toHaveCount(0)
