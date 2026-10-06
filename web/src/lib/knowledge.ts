@@ -70,6 +70,7 @@ export function plainError(status: number, code: string, message: string): strin
   if (code === 'learning_sensitive') return 'This looks like a credential — remove it, or confirm it is not one.'
   if (code === 'learning_closed') return 'This learning is no longer open.'
   if (code === 'already_decided') return 'This learning was already accepted or dismissed.'
+  if (code === 'learning_changed') return 'This learning changed since you reviewed it. Review it again.'
   if (code === 'rule_unavailable') return 'That rule set is not available.'
   if (code === 'rule_forbidden') return 'You cannot draft rules in that set.'
   if (code === 'already_in_set') return 'This learning is already a rule in that set.'
@@ -139,15 +140,22 @@ export interface MethodLearningDecision {
 export const listLearnings = (projectId: string, signal?: AbortSignal, cursor?: string) =>
   send<MethodLearningPage>(`/learnings${query({ project_id: projectId, cursor })}`, { signal })
 // confirmNotSensitive: a person confirms that text flagged as a credential is not one.
-// lesson replaces the learning's own text in the changelog line.
-export const acceptLearning = (id: string, knowledgeId: string, ifUnmodifiedSince?: string, confirmNotSensitive = false, lesson?: string) =>
+// lesson replaces the learning's own text in the changelog line. learningText
+// is the learning's text as the person reviewed it; when it reads differently
+// now, the server answers 409 learning_changed and writes nothing.
+export const acceptLearning = (id: string, knowledgeId: string, ifUnmodifiedSince?: string, confirmNotSensitive = false, lesson?: string, learningText?: string) =>
   send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/accept`, {
     method: 'POST',
-    body: { knowledge_id: knowledgeId, ...(lesson ? { lesson } : {}), ...(confirmNotSensitive ? { confirm_not_sensitive: true } : {}) },
+    body: {
+      knowledge_id: knowledgeId, ...(lesson ? { lesson } : {}), ...(learningText !== undefined ? { learning_text: learningText } : {}),
+      ...(confirmNotSensitive ? { confirm_not_sensitive: true } : {}),
+    },
     headers: ifUnmodifiedSince ? { 'If-Unmodified-Since': ifUnmodifiedSince } : {},
   })
-export const dismissLearning = (id: string, reason?: string) =>
-  send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/dismiss`, { method: 'POST', body: reason ? { reason } : {} })
+export const dismissLearning = (id: string, reason?: string, learningText?: string) =>
+  send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/dismiss`, {
+    method: 'POST', body: { ...(reason ? { reason } : {}), ...(learningText !== undefined ? { learning_text: learningText } : {}) },
+  })
 export const draftLearning = (id: string, body: { layer_id: string; set_id: string; confirm_not_sensitive?: true }) =>
   send<MethodLearningDecision>(`/learnings/${encodeURIComponent(id)}/draft`, { method: 'POST', body })
 // ---------- Apply recommendations (AEON-788) ----------
@@ -161,7 +169,8 @@ export interface RecommendedStep {
   // chosen. target: the entry is gone; it cannot be applied.
   blocked: '' | 'stale' | 'target'
 }
-export interface StepResult { id: string; ok: boolean; message: string; decision?: MethodLearningDecision }
+// changed: the learning reads differently now than on screen; it needs a new review.
+export interface StepResult { id: string; ok: boolean; message: string; decision?: MethodLearningDecision; changed?: boolean }
 
 export function recommendedSteps(items: readonly MethodLearning[]): RecommendedStep[] {
   const steps = items.flatMap((item): RecommendedStep[] => {
@@ -180,13 +189,16 @@ export function recommendedSteps(items: readonly MethodLearning[]): RecommendedS
 // Chosen by default: every step that is neither stale nor missing its entry.
 export const defaultChosen = (steps: readonly RecommendedStep[]) => new Set(steps.filter(step => !step.blocked).map(step => step.id))
 
+// text is the learning as the person reviewed it; the server refuses the
+// step when the learning reads differently now.
 export interface StepCalls {
-  accept: (id: string, knowledgeId: string, lesson: string) => Promise<MethodLearningDecision>
-  dismiss: (id: string, reason: string) => Promise<MethodLearningDecision>
+  accept: (id: string, knowledgeId: string, lesson: string, text: string) => Promise<MethodLearningDecision>
+  dismiss: (id: string, reason: string, text: string) => Promise<MethodLearningDecision>
 }
 // Applies the chosen steps one by one through the person-only accept and
-// dismiss routes. A failure is reported for its row and the rest continue;
-// nothing outside chosen is sent. stop() ends the run before the next step.
+// dismiss routes, each with exactly the lesson it showed. A failure is
+// reported for its row and the rest continue; nothing outside chosen is
+// sent. stop() ends the run before the next step.
 export async function applySteps(steps: readonly RecommendedStep[], chosen: ReadonlySet<string>, calls: StepCalls,
   onResult: (result: StepResult) => void = () => {}, stop: () => boolean = () => false): Promise<StepResult[]> {
   const results: StepResult[] = []
@@ -196,12 +208,13 @@ export async function applySteps(steps: readonly RecommendedStep[], chosen: Read
     let result: StepResult
     try {
       const decision = step.decision === 'accept'
-        ? await calls.accept(step.id, step.knowledgeId, step.lesson === step.text ? '' : step.lesson)
-        : await calls.dismiss(step.id, step.reason)
+        ? await calls.accept(step.id, step.knowledgeId, step.lesson, step.text)
+        : await calls.dismiss(step.id, step.reason, step.text)
       result = { id: step.id, ok: true, message: step.decision === 'accept' ? 'Added to the changelog' : 'Dismissed', decision }
     } catch (e) {
       const sensitive = e instanceof KnowledgeError && e.code === 'learning_sensitive'
-      result = { id: step.id, ok: false, message: sensitive ? 'Looks like a credential — accept it on its own to confirm.' : e instanceof Error ? e.message : 'That did not work.' }
+      const changed = e instanceof KnowledgeError && e.code === 'learning_changed'
+      result = { id: step.id, ok: false, message: sensitive ? 'Looks like a credential — accept it on its own to confirm.' : e instanceof Error ? e.message : 'That did not work.', ...(changed ? { changed } : {}) }
     }
     results.push(result)
     onResult(result)

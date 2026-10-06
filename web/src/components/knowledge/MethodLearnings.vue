@@ -296,7 +296,7 @@ async function accept() {
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const decision = await acceptLearning(item.id, entry.id, since, confirming.value)
+        const decision = await acceptLearning(item.id, entry.id, since, confirming.value, undefined, item.text)
         const before = items.value.slice()
         items.value = items.value.filter(row => row.id !== item.id)
         if (decision.entry) emit('accepted', decision.entry)
@@ -315,10 +315,28 @@ async function accept() {
       }
     }
   } catch (e) {
-    if (!flagged(e)) dialogError.value = e instanceof Error ? e.message : 'That could not be added.'
+    if (changed(e)) await reviewAgain(item, e)
+    else if (!flagged(e)) dialogError.value = e instanceof Error ? e.message : 'That could not be added.'
   } finally {
     busy.value = false
   }
+}
+function changed(e: unknown): e is KnowledgeError { return e instanceof KnowledgeError && e.code === 'learning_changed' }
+// The learning reads differently now than on screen: reload it and show the
+// current text in the open dialog, so the person reviews it again.
+async function reviewAgain(item: MethodLearning, e: KnowledgeError) {
+  await load()
+  if (accepting.value?.id !== item.id) return
+  const fresh = items.value.find(row => row.id === item.id)
+  if (!fresh) {
+    close()
+    toast('This learning is no longer open.', { tone: 'error' })
+    return
+  }
+  accepting.value = fresh
+  suspect.value = null
+  notCredential.value = false
+  dialogError.value = e.message
 }
 
 async function dismiss(item: MethodLearning) {
@@ -331,7 +349,7 @@ async function dismiss(item: MethodLearning) {
   if (!ok) return
   busy.value = true
   try {
-    const decision = await dismissLearning(item.id)
+    const decision = await dismissLearning(item.id, undefined, item.text)
     const before = items.value.slice()
     items.value = items.value.filter(row => row.id !== item.id)
     busy.value = false
@@ -339,6 +357,7 @@ async function dismiss(item: MethodLearning) {
     await settleFocus(item.id, before)
   } catch (e) {
     toast(e instanceof Error ? e.message : 'Dismiss did not work.', { tone: 'error' })
+    if (changed(e)) await load()
   } finally {
     busy.value = false
   }
@@ -366,6 +385,13 @@ const results = ref<Map<string, StepResult>>(new Map())
 const applying = ref(false)
 const finished = ref(false)
 let reviewOpener: HTMLElement | null = null
+// A run belongs to this component, this project and this person. Unmounting,
+// switching project or signing in as someone else ends it: no further step is
+// sent and late results are dropped.
+let applyRun = 0
+// A step was refused because its learning changed: the inbox reloads when the
+// review closes, so the person reviews the current text.
+let reloadOnClose = false
 // Applied rows leave the inbox when the review closes, so the dialog (inside
 // the inbox) keeps showing every result until then.
 let appliedIds = new Set<string>()
@@ -378,6 +404,10 @@ const reviewSummary = computed(() => {
   const dismiss = dismissSteps.value.filter(step => chosenSteps.value.has(step.id)).length
   return `${accept} to accept · ${dismiss} to dismiss · ${steps.value.length - accept - dismiss} left out`
 })
+const failures = computed(() => steps.value.flatMap(step => {
+  const result = results.value.get(step.id)
+  return result && !result.ok ? [{ id: step.id, key: step.key, message: result.message }] : []
+}))
 const reviewStatus = computed(() => {
   const all = [...results.value.values()]
   const failed = all.filter(result => !result.ok).length
@@ -393,6 +423,7 @@ function openReview(event: MouseEvent) {
   chosenSteps.value = defaultChosen(steps.value)
   results.value = new Map()
   finished.value = false
+  reloadOnClose = false
   reviewOpen.value = true
   void nextTick(() => review.value?.showModal())
 }
@@ -417,27 +448,42 @@ function closeReview(restore: boolean | Event = true) {
       return
     }
   }
+  if (reloadOnClose) {
+    reloadOnClose = false
+    void load()
+  }
   if (restoreFocus) void nextTick(() => (reviewOpener?.isConnected ? reviewOpener : heading.value)?.focus())
 }
-watch(() => props.project.id, () => closeReview(false))
+watch(() => props.project.id, () => { applyRun++; closeReview(false) })
+watch(() => session.identity?.principal.id, (id, before) => {
+  if (!before || id === before) return
+  applyRun++
+  closeReview(false)
+  close(false)
+  void load()
+})
+onBeforeUnmount(() => { applyRun++ })
 function reviewBackdrop(event: MouseEvent) { if (event.target === review.value && !applying.value) closeReview() }
 async function applyChosen() {
   if (applying.value || finished.value || !chosenCount.value || !canDecide.value) return
   const project = reviewProject.value
+  const run = ++applyRun
+  const current = () => run === applyRun && project === props.project.id
   const frozen = steps.value.slice()
   const chosen = new Set(chosenSteps.value)
   applying.value = true
   results.value = new Map()
   const done = await applySteps(frozen, chosen, {
-    accept: (id, knowledgeId, lesson) => acceptLearning(id, knowledgeId, undefined, false, lesson || undefined),
-    dismiss: (id, reason) => dismissLearning(id, reason || undefined),
+    accept: (id, knowledgeId, lesson, text) => acceptLearning(id, knowledgeId, undefined, false, lesson || undefined, text),
+    dismiss: (id, reason, text) => dismissLearning(id, reason || undefined, text),
   }, result => {
-    if (project !== props.project.id) return
+    if (!current()) return
     results.value = new Map(results.value).set(result.id, result)
+    if (result.changed) reloadOnClose = true
     if (result.ok && result.decision?.entry) emit('accepted', result.decision.entry)
-  }, () => !reviewOpen.value || project !== props.project.id)
+  }, () => !reviewOpen.value || !current())
   applying.value = false
-  if (project !== props.project.id) return
+  if (!current()) return
   finished.value = true
   const applied = done.filter(result => result.ok).map(result => result.id)
   applied.forEach(id => appliedIds.add(id))
@@ -513,6 +559,17 @@ async function undo(eventId: number) {
             <p class="wait">{{ reviewSummary }}</p>
           </div>
         </div>
+        <!-- Controls sit above the list (below it in the phone sheet); results
+             only fill each row's fixed mark and the slot after the lists. -->
+        <div class="review-foot">
+          <p class="review-status" role="status">{{ reviewStatus }}</p>
+          <div class="review-actions">
+            <button type="button" class="btn" @click="closeReview">Close</button>
+            <button type="submit" class="btn primary" :disabled="applying || finished || !chosenCount">
+              <span class="btn-label"><span :aria-hidden="applying ? 'true' : undefined">Apply chosen</span><span :aria-hidden="applying ? undefined : 'true'">Applying…</span></span>
+            </button>
+          </div>
+        </div>
         <div class="review-body" tabindex="-1">
           <section v-for="group in [{ name: 'Accept into a changelog', id: 'accept', list: acceptSteps }, { name: 'Dismiss', id: 'dismiss', list: dismissSteps }]" v-show="group.list.length" :key="group.id" class="group" :aria-labelledby="`learn-review-${group.id}`">
             <h3 :id="`learn-review-${group.id}`">{{ group.name }} <span class="count">{{ group.list.length }}</span></h3>
@@ -530,22 +587,20 @@ async function undo(eventId: number) {
                   </span>
                   <span v-if="step.blocked === 'stale'" class="step-note">The learning changed after this was recommended. Left out unless you choose it.</span>
                   <span v-else-if="step.blocked === 'target'" class="step-note">Its entry no longer exists here; accept it on its own.</span>
-                  <span v-if="stepResult(step.id)" class="step-result" :class="{ bad: !stepResult(step.id)?.ok }">
-                    <AppIcon :name="stepResult(step.id)?.ok ? 'check' : 'alert'" :size="13" />{{ stepResult(step.id)?.message }}
-                  </span>
+                  <span v-if="stepResult(step.id)" class="sr-only">{{ stepResult(step.id)?.message }}</span>
                 </label>
+                <span class="step-mark" :class="{ bad: stepResult(step.id) && !stepResult(step.id)?.ok }" :data-result="stepResult(step.id) ? (stepResult(step.id)?.ok ? 'applied' : 'failed') : undefined" aria-hidden="true">
+                  <AppIcon v-if="stepResult(step.id)" :name="stepResult(step.id)?.ok ? 'check' : 'alert'" :size="14" />
+                </span>
               </li>
             </ul>
           </section>
-        </div>
-        <div class="review-foot">
-          <p class="review-status" role="status">{{ reviewStatus }}</p>
-          <div class="review-actions">
-            <button type="button" class="btn" @click="closeReview">Close</button>
-            <button type="submit" class="btn primary" :disabled="applying || finished || !chosenCount">
-              <span class="btn-label"><span :aria-hidden="applying ? 'true' : undefined">Apply chosen</span><span :aria-hidden="applying ? undefined : 'true'">Applying…</span></span>
-            </button>
-          </div>
+          <section v-if="failures.length" class="group failures" aria-labelledby="learn-review-failed">
+            <h3 id="learn-review-failed">Not applied <span class="count">{{ failures.length }}</span></h3>
+            <ul class="steps">
+              <li v-for="failure in failures" :key="failure.id" class="failure"><span class="failure-key">{{ failure.key }}</span>{{ failure.message }}</li>
+            </ul>
+          </section>
         </div>
       </form>
     </dialog>
@@ -631,16 +686,17 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .rec.off { color: var(--ink-2); }
 .rec em { font-style: normal; color: var(--ink-2); }
 .rec-icon { flex: none; align-self: center; color: var(--teal-ink); }
-.review-dialog { width: min(var(--dialog-l), calc(100vw - 24px)); max-height: calc(100dvh - 24px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+/* Anchored at a fixed top: the list grows downward, away from the controls above it. */
+.review-dialog { --review-top: min(10dvh, 80px); width: min(var(--dialog-l), calc(100vw - 24px)); max-height: calc(100dvh - var(--review-top) - 12px); margin: var(--review-top) auto auto; padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .review-dialog::backdrop { background: var(--scrim); backdrop-filter: blur(2px); }
 /* A long list of text: the glass gradient sits on an opaque base so the inbox behind never shows through. */
-.review-card { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; max-height: calc(100dvh - 24px); border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)), var(--surface-raised); box-shadow: var(--shadow-pop), var(--shadow); }
-.review-head { display: flex; align-items: flex-start; gap: 10px; padding: 18px 18px 12px; border-bottom: 1px solid var(--line); }
-.review-body { overflow: auto; overscroll-behavior: contain; padding: 4px 18px 12px; outline: none; }
+.review-card { display: grid; grid-template-rows: auto auto minmax(0, 1fr); grid-template-areas: "head" "foot" "body"; max-height: calc(100dvh - var(--review-top) - 12px); border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)), var(--surface-raised); box-shadow: var(--shadow-pop), var(--shadow); }
+.review-head { grid-area: head; display: flex; align-items: flex-start; gap: 10px; padding: 18px 18px 6px; }
+.review-body { grid-area: body; overflow: auto; overscroll-behavior: contain; padding: 4px 18px 14px; outline: none; }
 .group h3 { margin: 14px 0 4px; font-size: 12.5px; font-weight: 600; color: var(--ink-2); }
 .group .count { font-weight: 500; color: var(--ink-3); }
 .steps { list-style: none; margin: 0; padding: 0; }
-.step { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.step { display: grid; grid-template-columns: auto minmax(0, 1fr) 16px; gap: 10px; align-items: start; padding: 10px 0; border-bottom: 1px solid var(--line); }
 .step:last-child { border-bottom: 0; }
 .tick { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--teal); }
 .step-copy { display: grid; gap: 3px; min-width: 0; cursor: pointer; }
@@ -648,10 +704,13 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
 .step-line { font-size: 14px; line-height: 1.45; overflow-wrap: anywhere; }
 .step-meta { display: flex; flex-wrap: wrap; gap: 2px 10px; color: var(--ink-2); font-size: 12.5px; overflow-wrap: anywhere; }
 .step-note { color: var(--ink-2); font-size: 12.5px; }
-.step-result { display: inline-flex; align-items: center; gap: 6px; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
-.step-result.bad { color: var(--danger); }
-.review-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 12px 18px 16px; border-top: 1px solid var(--line); }
-.review-status { flex: 1 1 14rem; margin: 0; min-height: 1.45em; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
+.step-mark { display: grid; place-items: center; width: 16px; height: 20px; color: var(--teal-ink); }
+.step-mark.bad { color: var(--danger); }
+.failure { padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--ink); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.failure:last-child { border-bottom: 0; }
+.failure-key { margin-right: 8px; color: var(--ink-2); font-weight: 600; }
+.review-foot { grid-area: foot; display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 16px; padding: 8px 18px 12px; border-bottom: 1px solid var(--line); }
+.review-status { flex: 1 1 14rem; margin: 0; padding-top: 8px; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
 .review-actions { display: flex; gap: 8px; margin-left: auto; }
 .review-actions .btn { min-height: 36px; }
 .actions .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; }
@@ -683,9 +742,12 @@ h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
   .actions .btn { flex: none; width: auto; min-height: 40px; }
 }
 @media (max-width: 600px) {
+  /* Phone: a full-height sheet with the actions pinned at the bottom. */
   .review-dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; }
-  .review-card { height: 100dvh; max-height: 100dvh; border-radius: 0; border: 0; padding-bottom: env(safe-area-inset-bottom); }
-  .review-head { padding-top: max(16px, env(safe-area-inset-top)); }
+  .review-card { grid-template-rows: auto minmax(0, 1fr) auto; grid-template-areas: "head" "body" "foot"; height: 100dvh; max-height: 100dvh; border-radius: 0; border: 0; padding-bottom: env(safe-area-inset-bottom); }
+  .review-head { padding: max(16px, env(safe-area-inset-top)) 18px 12px; border-bottom: 1px solid var(--line); }
+  .review-foot { align-items: center; padding: 10px 18px 16px; border-top: 1px solid var(--line); border-bottom: 0; }
+  .review-status { padding-top: 0; }
   .review-actions { flex: 1 1 100%; }
   .review-actions .btn { flex: 1 1 0; min-height: 44px; }
 }

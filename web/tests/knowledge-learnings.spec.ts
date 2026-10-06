@@ -120,7 +120,7 @@ test('a person accepts a learning into the changelog and can dismiss another', a
   await expect(page.getByRole('button', { name: /^Accept PHAROS-12:/ })).toBeFocused()
   await expect(page.getByText('Added to the changelog.')).toBeVisible()
   const post = calls.find(call => call.method === 'POST' && call.path.endsWith('/accept'))
-  expect(post?.body).toEqual({ knowledge_id: 'k-deploy' })
+  expect(post?.body).toEqual({ knowledge_id: 'k-deploy', learning_text: 'Write the release note in the same turn' })
   expect(post?.headers['if-unmodified-since']).toBe(before)
   const deploy = world.entries.find(entry => entry.id === 'k-deploy')
   expect(deploy?.body).toContain('Write the release note in the same turn')
@@ -259,7 +259,7 @@ test('a person can save a learning as a rule draft', async ({ page }) => {
     await expect(changelog.getByRole('button', { name: 'Add to changelog' })).toBeVisible()
     await expect(changelog.locator('.btn.primary')).toHaveCount(1)
     await changelog.getByRole('button', { name: 'Add to changelog' }).click()
-    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/accept')).at(-1)?.body).toEqual({ knowledge_id: 'k-deploy' })
+    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/accept')).at(-1)?.body).toEqual({ knowledge_id: 'k-deploy', learning_text: 'Write the release note in the same turn' })
 
     await card(page, 'Renumber at integration').getByRole('button', { name: /^Accept PHAROS-12:/ }).click()
     await page.getByRole('dialog', { name: 'Add to a changelog' }).getByRole('radio', { name: 'Rule draft' }).click()
@@ -293,8 +293,9 @@ test('the draft dialog offers only layers the person can write', async ({ page }
   await expect(dialog.getByLabel('Layer').locator('option')).toHaveText(['Your rules'])
 })
 
+const suspectText = `Sign in with password=${'x'.repeat(5)} on staging`
 function suspected(now = Date.now()): MockLearning[] {
-  const text = `Sign in with password=${'x'.repeat(5)} on staging`
+  const text = suspectText
   const start = text.indexOf('x')
   return [
     {
@@ -328,7 +329,7 @@ test('a suspected credential needs a person to confirm it is not one', async ({ 
     await expect(dialog.locator('mark.suspect')).toHaveText('xxxxx')
     const add = dialog.getByRole('button', { name: 'Add to changelog' })
     await expect(add).toBeDisabled()
-    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/accept')).at(-1)?.body).toEqual({ knowledge_id: 'k-deploy' })
+    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/accept')).at(-1)?.body).toEqual({ knowledge_id: 'k-deploy', learning_text: suspectText })
     expect(await overflow(page)).toBeLessThanOrEqual(1)
     if (width === 1280) {
       const result = await new AxeBuilder({ page }).include('dialog').withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']).analyze()
@@ -337,7 +338,7 @@ test('a suspected credential needs a person to confirm it is not one', async ({ 
     await note.getByRole('checkbox', { name: 'It is not a credential' }).check()
     await add.click()
     await expect(page.getByText('Added to the changelog.')).toBeVisible()
-    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/accept')).at(-1)?.body).toEqual({ knowledge_id: 'k-deploy', confirm_not_sensitive: true })
+    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/accept')).at(-1)?.body).toEqual({ knowledge_id: 'k-deploy', learning_text: suspectText, confirm_not_sensitive: true })
 
     await card(page, 'Sign in with').getByRole('button', { name: /^Accept PHAROS-16:/ }).click()
     await page.getByRole('dialog', { name: 'Add to a changelog' }).getByRole('radio', { name: 'Rule draft' }).click()
@@ -387,15 +388,21 @@ test('a person applies agent recommendations in one confirm, with one row left o
   await expect(dialog.getByText('2 to accept · 1 to dismiss · 2 left out')).toBeVisible()
   await guard.check(() => tick('A one-off typo in a heading').check())
   await guard.check(() => tick('A one-off typo in a heading').uncheck())
+  // Two rows apply and one fails: the controls and every row stay put.
+  await guard.check(async () => {
+    await dialog.getByRole('button', { name: 'Apply chosen' }).click()
+    await expect(dialog.getByRole('status')).toHaveText('2 applied, 1 failed. The failed learnings stay open.')
+  })
   guard.done()
 
-  await dialog.getByRole('button', { name: 'Apply chosen' }).click()
-  await expect(dialog.getByRole('status')).toHaveText('2 applied, 1 failed. The failed learnings stay open.')
   await expect(dialog.locator('[data-step-id]').filter({ hasText: 'Never retry a refusal' })).toContainText('This entry no longer exists.')
+  await expect(dialog.locator('[data-step-id]').filter({ hasText: 'Never retry a refusal' }).locator('[data-result]')).toHaveAttribute('data-result', 'failed')
+  await expect(dialog.locator('[data-step-id]').filter({ hasText: 'Write the release note in the same turn' }).locator('[data-result]')).toHaveAttribute('data-result', 'applied')
+  await expect(dialog.getByRole('region', { name: /Not applied/ })).toContainText('PHAROS-25This entry no longer exists.')
   const posts = calls.filter(call => call.method === 'POST' && call.path.includes('/learnings/'))
   expect(posts.map(call => call.path.split('/').at(-1))).toEqual(['accept', 'accept', 'dismiss'])
-  expect(posts[0].body).toEqual({ knowledge_id: 'k-deploy', lesson: 'Write the release note in the same turn as the change' })
-  expect(posts[2].body).toEqual({ reason: 'Already covered by the stage runbook' })
+  expect(posts[0].body).toEqual({ knowledge_id: 'k-deploy', lesson: 'Write the release note in the same turn as the change', learning_text: 'Release notes were late again' })
+  expect(posts[2].body).toEqual({ reason: 'Already covered by the stage runbook', learning_text: 'Renumbered stages twice' })
   expect(world.decisions.map(decision => decision.item.text).sort()).toEqual(['Release notes were late again', 'Renumbered stages twice'])
   expect(world.entries.find(entry => entry.id === 'k-deploy')?.body).toContain('Write the release note in the same turn as the change. Source: [PHAROS-21]')
 
@@ -423,6 +430,89 @@ test('older learnings load after the newest 50', async ({ page }) => {
   await expect(rows(page)).toHaveCount(55)
   await expect(card(page, 'Learning number 54')).toBeVisible()
   expect(calls.some(call => call.method === 'GET' && call.query.get('cursor') === '50')).toBe(true)
+})
+
+test('on a phone the review sheet keeps its actions pinned through apply', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  const errors = watchErrors(page)
+  await open(page, { learnings: recommended() })
+  await page.getByRole('button', { name: 'Apply recommendations' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Apply recommendations' })
+  const tick = (text: string) => dialog.getByRole('checkbox', { name: new RegExp(text) })
+  const guard = await controlStability(page, {
+    frame: dialog.locator('.review-card'),
+    close: dialog.getByRole('button', { name: 'Close' }),
+    apply: dialog.getByRole('button', { name: 'Apply chosen' }),
+    firstRow: tick('Write the release note in the same turn'),
+  })
+  await guard.check(() => tick('A one-off typo in a heading').uncheck())
+  await guard.check(async () => {
+    await dialog.getByRole('button', { name: 'Apply chosen' }).click()
+    await expect(dialog.getByRole('status')).toHaveText('2 applied, 1 failed. The failed learnings stay open.')
+  })
+  guard.done()
+  expect(errors).toEqual([])
+})
+
+test('a learning that changed after review is refused and shown again', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const { calls, world } = await open(page, { learnings: recommended() })
+  await page.getByRole('button', { name: 'Apply recommendations' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Apply recommendations' })
+  await expect(dialog).toBeVisible()
+  // Someone edits a learning while the person reviews it.
+  const edited = world.learnings.find(item => item.text === 'Renumbered stages twice')!
+  edited.text = edited.title = 'Renumbered stages three times'
+  await dialog.getByRole('button', { name: 'Apply chosen' }).click()
+  await expect(dialog.getByRole('status')).toHaveText('2 applied, 2 failed. The failed learnings stay open.')
+  await expect(dialog.getByRole('region', { name: /Not applied/ })).toContainText('PHAROS-22This learning changed since you reviewed it. Review it again.')
+  expect(world.decisions.map(decision => decision.item.key)).toEqual(['PHAROS-21', 'PHAROS-24'])
+  const lists = calls.filter(call => call.method === 'GET' && call.path.endsWith('/learnings')).length
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  // The inbox reloads and shows the current text for a new review.
+  await expect(card(page, 'Renumbered stages three times')).toBeVisible()
+  expect(calls.filter(call => call.method === 'GET' && call.path.endsWith('/learnings')).length).toBe(lists + 1)
+})
+
+test('leaving the knowledge view during a run sends no further step', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const errors = watchErrors(page)
+  const { calls, world } = await open(page, { learnings: recommended() })
+  // Hold the first write until the view is gone.
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  let first = true
+  await page.route('**/api/knowledge/learnings/*/accept', async route => {
+    if (first) { first = false; await held }
+    await route.fallback()
+  })
+  // Arrive in-app from Tickets, so Back stays inside the app.
+  const sections = page.getByRole('tablist', { name: 'Project sections' })
+  await sections.getByRole('tab', { name: 'Tickets' }).click()
+  await expect(page.locator('section.learnings')).toHaveCount(0)
+  await sections.getByRole('tab', { name: 'Knowledge' }).click()
+  await expect(page.locator('section.learnings')).toBeVisible()
+  await page.getByRole('button', { name: 'Apply recommendations' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Apply recommendations' })
+  await dialog.getByRole('button', { name: 'Apply chosen' }).click()
+  await expect(dialog.getByRole('status')).toHaveText('Applying 1 of 4…')
+  // The person presses Back; the inbox unmounts with its dialog.
+  await page.goBack()
+  await expect(page.locator('section.learnings')).toHaveCount(0)
+  const answered = page.waitForResponse(response => response.url().includes('/accept') && response.request().method() === 'POST')
+  release()
+  await answered
+  // Coming back loads the inbox again; a step sent after the first would be
+  // recorded before this list request.
+  const listed = calls.length
+  await sections.getByRole('tab', { name: 'Knowledge' }).click()
+  await expect(page.locator('section.learnings')).toBeVisible()
+  const after = calls.slice(listed)
+  expect(after.some(call => call.method === 'GET' && call.path.endsWith('/learnings'))).toBe(true)
+  const writes = calls.filter(call => call.method === 'POST' && call.path.includes('/learnings/'))
+  expect(writes).toHaveLength(1)
+  expect(world.decisions).toHaveLength(1)
+  expect(errors).toEqual([])
 })
 
 test('screenshots at 1600 and 390, light and dark', async ({ browser }) => {

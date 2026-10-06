@@ -79,14 +79,14 @@ test('applying recommendations sends only the chosen rows, and a failed row does
   const sent: string[] = []
   const decision = (id: string): MethodLearningDecision => ({ id, decision: 'accepted', event_id: 1 })
   const results = await applySteps(steps, chosen, {
-    accept: async (id, knowledgeId, lesson) => {
-      sent.push(`accept ${id} ${knowledgeId} ${lesson}`)
+    accept: async (id, knowledgeId, lesson, text) => {
+      sent.push(`accept ${id} ${knowledgeId} ${lesson} | ${text}`)
       if (id === 'n-6') throw new KnowledgeError(404, 'not_found', plainError(404, 'not_found', 'gone'))
       return decision(id)
     },
-    dismiss: async (id, reason) => { sent.push(`dismiss ${id} ${reason}`); return decision(id) },
+    dismiss: async (id, reason, text) => { sent.push(`dismiss ${id} ${reason} | ${text}`); return decision(id) },
   })
-  assert.deepEqual(sent, ['accept n-1 k1 A sharper lesson', 'accept n-6 k1 ', 'dismiss n-2 Already recorded'])
+  assert.deepEqual(sent, ['accept n-1 k1 A sharper lesson | Plain text', 'accept n-6 k1 Will fail | Will fail', 'dismiss n-2 Already recorded | Duplicate'])
   assert.deepEqual(results.map(result => [result.id, result.ok]), [['n-1', true], ['n-6', false], ['n-2', true]])
   assert.equal(results[1].message, 'This entry no longer exists.')
 })
@@ -103,4 +103,27 @@ test('a stopped run sends nothing after the stop', async () => {
     dismiss: async id => { sent.push(id); stop = true; return { id, decision: 'dismissed', event_id: 1 } },
   }, () => {}, () => stop)
   assert.deepEqual(sent, ['n-1'])
+})
+
+test('each step sends the lesson and the learning text that were on screen, and a changed learning asks for a new review', async () => {
+  const at = '2026-10-06T10:00:00Z'
+  const steps = recommendedSteps([
+    { id: 'n-1', source: 'ticket', node_id: 'n', key: 'X-1', title: 't', text: 'Rotate the keys', at, author: null, href: '/',
+      recommendation: { decision: 'accept', knowledge_id: 'k1', by: null, at, event_id: 1, stale: false, target_missing: false } },
+    { id: 'n-2', source: 'ticket', node_id: 'n', key: 'X-2', title: 't', text: 'Edited meanwhile', at, author: null, href: '/',
+      recommendation: { decision: 'dismiss', reason: 'Noise', by: null, at, event_id: 1, stale: false, target_missing: false } },
+  ])
+  const sent: unknown[][] = []
+  const results = await applySteps(steps, defaultChosen(steps), {
+    // No lesson was recommended: the row showed the learning's own text, and
+    // exactly that is sent, never an empty lesson the server would fill in.
+    accept: async (...args) => { sent.push(['accept', ...args]); return { id: 'n-1', decision: 'accepted', event_id: 1 } },
+    dismiss: async (...args) => {
+      sent.push(['dismiss', ...args])
+      throw new KnowledgeError(409, 'learning_changed', plainError(409, 'learning_changed', ''))
+    },
+  })
+  assert.deepEqual(sent, [['accept', 'n-1', 'k1', 'Rotate the keys', 'Rotate the keys'], ['dismiss', 'n-2', 'Noise', 'Edited meanwhile']])
+  assert.deepEqual(results.map(result => [result.id, result.ok, result.changed ?? false]), [['n-1', true, false], ['n-2', false, true]])
+  assert.equal(results[1].message, 'This learning changed since you reviewed it. Review it again.')
 })

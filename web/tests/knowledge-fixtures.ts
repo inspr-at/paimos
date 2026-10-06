@@ -208,6 +208,11 @@ export async function mockKnowledge(page: Page, world: KnowledgeWorld, options: 
       const found = world.learnings.find(item => item.id === id)
       if (!found) return json(route, 404, { error: 'This learning is no longer open.', code: 'learning_closed' })
       if (options.readOnly) return json(route, 403, { error: 'you can read knowledge but not change it', code: 'forbidden' })
+      // Like the server: a decision on text that changed since the person reviewed it is refused.
+      const reviewed = (body as { learning_text?: string } | null)?.learning_text
+      if ((parts[2] === 'accept' || parts[2] === 'dismiss') && method === 'POST' && reviewed !== undefined && reviewed !== found.text) {
+        return json(route, 409, { error: 'This learning changed since you reviewed it. Review it again.', code: 'learning_changed' })
+      }
       if (parts[2] === 'dismiss' && method === 'POST') {
         const eventId = ++world.counter.event
         world.decisions.push({ event_id: eventId, item: found, reason: (body as { reason?: string } | null)?.reason })
