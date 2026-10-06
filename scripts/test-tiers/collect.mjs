@@ -3,6 +3,8 @@ import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { assertPlanningWebBounds } from './planning-web.mjs'
+import { boundedText } from './inputs.mjs'
 import { formatManifest } from './manifests.mjs'
 export const root = fileURLToPath(new URL('../../', import.meta.url))
 export const web = resolve(root, 'web')
@@ -74,6 +76,7 @@ export function collectWeb() {
     row.occurrence=(seen.get(id(row))??0)+1
     seen.set(id(row),row.occurrence)
   }
+  assertPlanningWebBounds(tests, file => boundedText(web, file))
   return { tests }
 }
 export function saveJSON(path,data) { mkdirSync(resolve(path,'..'),{recursive:true});writeFileSync(path,JSON.stringify(data,null,2)+'\n') }

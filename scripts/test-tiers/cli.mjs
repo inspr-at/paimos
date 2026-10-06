@@ -11,7 +11,7 @@ import { runPlaywright } from '../playwright-safe.mjs'
 import { loadManifest as loadBrowserPolicy, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import { changedPaths, schedulingDecision, eventBase, sourceTree, promotionsBetween } from './diff.mjs'
 import { boundedText } from './inputs.mjs'
-import { manifestsMain, classifyManifest } from './manifests.mjs'
+import { manifestsMain, classifyManifest, confirmClassifyCount } from './manifests.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
@@ -195,10 +195,16 @@ export function classifyArgs(flags) {
   const options = {}, rest = flags
   for (let i = 0; i < rest.length; i++) {
     const flag = rest[i]
-    if (!['--tier', '--kind', '--only'].includes(flag) || Object.hasOwn(options, flag.slice(2))) throw new Error(`Unknown or repeated classify flag: ${flag}`)
+    if (!['--tier', '--kind', '--only', '--expect-count'].includes(flag) || Object.hasOwn(options, flag.slice(2))) throw new Error(`Unknown or repeated classify flag: ${flag}`)
     const value = rest[++i]
     if (!value || value.startsWith('--')) throw new Error(`Missing value: ${flag}`)
     options[flag.slice(2)] = value
+  }
+  if (options['expect-count'] !== undefined) {
+    if (!/^(?:0|[1-9][0-9]*)$/.test(options['expect-count'])) throw new Error('Expected --expect-count nonnegative integer')
+    options.expectCount = Number(options['expect-count'])
+    delete options['expect-count']
+    if (!Number.isSafeInteger(options.expectCount) || !options.only) throw new Error('--expect-count requires --only and a safe integer')
   }
   if (options.kind !== undefined && !['go', 'web'].includes(options.kind)) throw new Error('Expected --kind go|web')
   if (options.only !== undefined && options.only.length > 1024) throw new Error('Expected --only pattern of at most 1024 characters')
@@ -209,10 +215,12 @@ export function classifyArgs(flags) {
 
 export function classify(flags, { collect = target, read = load, save = saveManifest } = {}) {
   const options = classifyArgs(flags), outputs = []
-  for (const kind of options.kind ? [options.kind] : ['go', 'web']) {
-    const inventory = collect(kind), manifest = read(kind)
+  const inputs = (options.kind ? [options.kind] : ['go', 'web']).map(kind => ({ kind, inventory: collect(kind), manifest: read(kind) }))
+  const matches = inventory => inventory.tests.filter(row => options.only === undefined || key(row).includes(options.only)).length
+  confirmClassifyCount(inputs.reduce((sum, { inventory }) => sum + matches(inventory), 0), options)
+  for (const { kind, inventory, manifest } of inputs) {
     validate(manifest, inventory.tests, undefined, { warn: () => {} })
-    const result = classifyManifest(manifest, inventory.tests, options)
+    const result = classifyManifest(manifest, inventory.tests, { ...options, expectCount: options.expectCount === undefined ? undefined : matches(inventory) })
     validate(result.manifest, inventory.tests, undefined, { strict: options.strict, warn: () => {} })
     outputs.push({ kind, ...result })
   }

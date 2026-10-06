@@ -156,14 +156,18 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
     if(webChanges.some(file=>file.startsWith('src/'))&&![...impacted].some(file=>/^tests\/.*\.(?:spec|test)\.ts$/.test(file)))return full('web module has no mapped test importer')
     // Large mapped fan-outs use the old full layout too. The tier selector
     // still records the exact essential/changed union within those runners.
-    const specs = [...impacted].filter(file => file.endsWith('.spec.ts'))
+    const specs = [...impacted].filter(file => file.startsWith('tests/'))
     if (specs.length) {
       const browser = tests.filter(row => row.kind === 'browser')
       // A native runner inventory is complete. The lightweight planner reads
       // bounded source bytes from its own (trusted, for L4) tree snapshot.
       webTree ??= tree ?? sourceTree(checkout)
       const bound = browser.length ? browser.filter(row => impacted.has(row.file)).length
-        : specs.reduce((sum, file) => sum + planningWebCases(webTree.complete ? webTree.webTests.get(file) : undefined), 0)
+        : specs.reduce((sum, file) => {
+          const source = webTree.complete ? webTree.webTests.get(file) : undefined
+          const estimate = planningWebCases(source)
+          return sum + (!file.endsWith('.spec.ts') && estimate > 0 ? browserCaseLimit + 1 : estimate)
+        }, 0)
       if (bound > browserCaseLimit) return full('browser fan-out exceeds 300 cases (or source bound unavailable)')
     }
   }

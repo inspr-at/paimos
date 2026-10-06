@@ -39,7 +39,12 @@ const bounds=[...nativeBrowserCounts].map(([file,native])=>({file,native,bound:p
 const undercounts=bounds.filter(row=>row.bound<=browserCaseLimit&&row.bound<row.native)
 if(undercounts.length)throw new Error(`Browser source bound undercounts native inventory: ${JSON.stringify(undercounts)}`)
 const browserBounds={specs:bounds.length,boundedSpecs:bounds.filter(row=>row.bound<=browserCaseLimit).length,
-  overLimitOrUnsupported:bounds.filter(row=>row.bound>browserCaseLimit).length,undercounts}
+  overLimitOrUnsupported:bounds.filter(row=>row.bound>browserCaseLimit).length,
+  unsupportedSpecs:bounds.filter(row=>row.bound>browserCaseLimit).map(row=>row.file).sort(),undercounts}
+// Cost-only counterfactual: omit unsupported spec registrations to identify
+// which mode differences they cause. Never used for real planning/selection.
+const supportedOnlyTree={...tree,webTests:new Map(tree.webTests)}
+for(const file of browserBounds.unsupportedSpecs) supportedOnlyTree.webTests.set(file,'')
 const promotions={keys:new Set(),kinds:new Set(),count:0}
 const readFile=path=>boundedText(root,path)
 const exists=path=>readFile(path)!==undefined
@@ -48,6 +53,9 @@ const replay=fixture.prs.map(({number,paths})=>{
   const classifiedLane=classifyPaths(paths).lane
   const before=schedulingDecision('pull_request',paths,undefined,{graph,tree})
   const after=schedulingDecision('pull_request',paths,exists,{affectedLane:'on',graph,tree,promotions,tests:rows})
+  const unsupportedOmitted=schedulingDecision('pull_request',paths,exists,{graph,tree:supportedOnlyTree})
+  const l4UnsupportedOmitted=schedulingDecision('pull_request',paths,exists,{affectedLane:'on',graph,tree:supportedOnlyTree,promotions})
+  const plannerAfter=schedulingDecision('pull_request',paths,exists,{affectedLane:'on',graph,tree,promotions})
   const oldLane=effectiveLane(classifiedLane,{...before,event:'pull_request',affectedLane:'off'})
   const lane=effectiveLane(classifiedLane,{...after,event:'pull_request',affectedLane:'on'})
   const old=legacy.select(rows,{...options,forceFull:before.mode==='full'})
@@ -60,7 +68,7 @@ const replay=fixture.prs.map(({number,paths})=>{
   const jobs=(lane,mode,layout)=>lane==='docs-only'?9:lane==='spec-only'?12:mode!=='essential'?37:layout==='static'?16:22
   const label=decision=>decision.mode==='essential'&&decision.layout==='static'?'static':decision.mode
   const baseDecision=baseline?.('pull_request',paths,exists,{graph})
-  return {number,classifiedLane,oldLane,lane,old:before.mode,new:label(after),oldCases:old.tests.length,newCases:next.tests.length,
+  return {number,classifiedLane,oldLane,lane,old:before.mode,unsetReason:before.reason,unsupportedOmittedMode:unsupportedOmitted.mode,l4UnsupportedOmittedMode:l4UnsupportedOmitted.mode,new:label(after),sourceBoundL4Mode:plannerAfter.mode,sourceBoundL4Reason:plannerAfter.reason,oldCases:old.tests.length,newCases:next.tests.length,
     ...(baseDecision?{baselineMode:baseDecision.mode,baselineLane:effectiveLane(classifiedLane,{...baseDecision,event:'pull_request'})}:{}),
     oldKinds:kinds(old),newKinds:kinds(next),oldJobs:jobs(oldLane,before.mode,'full'),newJobs:jobs(lane,after.mode,after.layout),
     reason:risk.full?risk.reason:after.reason}
@@ -78,10 +86,22 @@ const summary={prs:replay.length,oldEssential:replay.filter(row=>row.old==='esse
   newStatic:replay.filter(row=>row.new==='static').length,percentNarrowed:Math.round(100*narrowed/replay.length),
   oldJobs:replay.reduce((sum,row)=>sum+row.oldJobs,0),newJobs:replay.reduce((sum,row)=>sum+row.newJobs,0),fullReasons}
 const laneComparison=baseline?{base:comparisonBase,affectedLane:'unset',prs:replay.length,
-  matching:replay.filter(row=>row.old===row.baselineMode&&row.oldLane===row.baselineLane).length,
-  differences:replay.filter(row=>row.old!==row.baselineMode||row.oldLane!==row.baselineLane)
+  matching:replay.filter(row=>row.old===row.baselineMode).length,
+  scope:'Mode only on recorded file lists with current tree/common graph; unset effectiveLane comparison is tautological. L4 new uses native rows.',
+  essentialAtBase:replay.filter(row=>row.baselineMode==='essential').length,
+  differences:replay.filter(row=>row.old!==row.baselineMode)
     .map(row=>({number:row.number,baseMode:row.baselineMode,currentMode:row.old,baseLane:row.baselineLane,currentLane:row.oldLane}))}:undefined
-if(process.argv.includes('--json'))console.log(JSON.stringify({base:fixture.base,transitions,summary,browserBounds,...(laneComparison?{laneComparison}:{}),replay},null,2))
+const sourceBoundComparison={
+  scope:'Current source-bound planner vs base mode (unset) and vs current native L4 mode; no historical tree or source-bound selection equivalence claim.',
+  unsetModeChanges:replay.filter(row=>row.baselineMode&&row.old!==row.baselineMode).map(row=>({number:row.number,base:row.baselineMode,current:row.old})),
+  unsupportedUnsetModeChanges:replay.filter(row=>row.baselineMode&&row.old!==row.baselineMode&&row.old==='full'&&row.unsupportedOmittedMode===row.baselineMode)
+    .map(row=>row.number),
+  l4UnsupportedSpecModeChanges:replay.filter(row=>row.sourceBoundL4Mode==='full'&&row.l4UnsupportedOmittedMode!=='full').map(row=>row.number),
+  unsupportedCostMethod:'Counterfactual omits the listed unsupported specs from source estimates; all other planner inputs stay unchanged. This measures cost only and is never a runnable fallback.',
+  l4NativeDifferences:replay.filter(row=>row.sourceBoundL4Mode!==(row.new==='static'?'essential':row.new))
+    .map(row=>({number:row.number,native:row.new,planner:row.sourceBoundL4Mode,reason:row.sourceBoundL4Reason})),
+}
+if(process.argv.includes('--json'))console.log(JSON.stringify({base:fixture.base,transitions,summary,browserBounds,sourceBoundComparison,...(laneComparison?{laneComparison}:{}),replay},null,2))
 else {
   console.table(replay.map(row=>({PR:row.number,lane:row.lane,old:row.old,new:row.new,
     cases:`${row.oldCases}->${row.newCases}`,jobs:`${row.oldJobs}->${row.newJobs}`,reason:row.reason.slice(0,110)})))

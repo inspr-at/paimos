@@ -417,3 +417,24 @@ test('tier policy tests load without Go; collection-dependent tests fail individ
   assert.equal(needsGo.status,1,needsGo.stderr+needsGo.stdout)
   assert.match(needsGo.stdout+needsGo.stderr,/This test requires native Go collection/)
 })
+
+
+test('OPS-257 broad classify selections require the exact existing match count', () => {
+  const source=manifest([]), discovered=Array.from({length:26},(_,i)=>row(`TestImplicit${i}`)), saves=[]
+  const deps={read:()=>source,collect:()=>({tests:discovered}),save:(_,data)=>saves.push(data)}
+  assert.throws(()=>classifyManifest(source,discovered,{tier:'NIGHTLY',only:'Test'}),/matches 26 tests; requires --expect-count 26/)
+  assert.throws(()=>classifyManifest(source,discovered,{tier:'NIGHTLY',only:'Test',expectCount:25}),/differs from match count 26/)
+  assert.equal(classifyManifest(source,discovered,{tier:'NIGHTLY',only:'Test',expectCount:26}).added.length,26)
+  assert.equal(classifyManifest(source,discovered.slice(0,25),{tier:'NIGHTLY',only:'Test'}).added.length,25)
+  assert.throws(()=>classify(['--tier','NIGHTLY','--only','Test','--kind','go'],deps),/requires --expect-count 26/)
+  assert.throws(()=>classify(['--tier','NIGHTLY','--only','Test','--kind','go','--expect-count','27'],deps),/differs from match count 26/)
+  assert.deepEqual(saves,[])
+  assert.equal(classify(['--tier','NIGHTLY','--only','Test','--kind','go','--expect-count','26'],deps),0)
+  // Across both kinds, each match counts even when already explicitly classified.
+  saves.length=0
+  const combined={...deps,collect:()=>({tests:discovered.slice(0,13)})}
+  assert.throws(()=>classify(['--tier','NIGHTLY','--only','Test'],combined),/requires --expect-count 26/)
+  assert.equal(classify(['--tier','NIGHTLY','--only','Test','--expect-count','26'],combined),0)
+  for(const value of ['-1','26.5','NaN','9007199254740992']) assert.throws(()=>classifyArgs(['--tier','NIGHTLY','--only','Test','--expect-count',value]),/integer/)
+  assert.throws(()=>classifyArgs(['--tier','GATED-FULL','--expect-count','26']),/requires --only/)
+})

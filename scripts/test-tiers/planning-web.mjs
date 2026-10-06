@@ -3,6 +3,7 @@ import { stripTypeScriptTypes } from 'node:module'
 import { inputBounds } from './inputs.mjs'
 
 export const browserCaseLimit = 300
+export const planningTokenLimit = 20_000
 const unknown = browserCaseLimit + 1
 const cap = n => Math.min(unknown, n)
 
@@ -23,6 +24,8 @@ export function planningWebCases(text) {
       if (!match) return unknown
       let token = match[0]
       position = lex.lastIndex
+      if ((token.startsWith("'") || token.startsWith('"')) && /[\r\n]/.test(token)) return unknown
+      if (token === "'" || token === '"' || token === '`') return unknown
       if (/^\s|^\/\//.test(token) || token.startsWith('/*')) continue
       // Skip regex literals so their character classes/braces are not syntax.
       if (token === '/' && (!tokens.length || ['(', '=', ':', ',', '=>', 'return', '[', '!'].includes(tokens.at(-1)))) {
@@ -32,7 +35,10 @@ export function planningWebCases(text) {
         if (!literal) return unknown
         token += literal[0]; position = regex.lastIndex
       }
-      if (token.startsWith('`') && /\$\{[\s\S]*\btest\b/.test(token)) return unknown
+      // Slash outside a proven regex context is ambiguous (division or regex).
+      if (token === '/') return unknown
+      if (token.startsWith('`') && token.includes('${') && /\btest\b/.test(token)) return unknown
+      if (tokens.length >= planningTokenLimit) return unknown
       starts.push(match.index); ends.push(position); tokens.push(token)
     }
     const pairs = new Map(), stack = []
@@ -46,7 +52,23 @@ export function planningWebCases(text) {
       }
     }
     if (stack.length) return unknown
-    const arrays = new Map()
+    const arrays = new Map(), declarations = new Set()
+    // Constant-time range queries keep repeated scans from copying token slices.
+    const testPrefix = [0], nextArrow = new Array(tokens.length + 1).fill(-1)
+    for (const token of tokens) testPrefix.push(testPrefix.at(-1) + Number(token === 'test'))
+    for (let i = tokens.length - 1; i >= 0; i--) nextArrow[i] = tokens[i] === '=>' ? i : nextArrow[i + 1]
+    const hasTest = (start, end) => testPrefix[end] > testPrefix[start]
+    const indirectCall = i => (tokens[i] === '?.' && tokens[i + 1] === '(') ||
+      (tokens[i] === ')' && tokens[i + 1] === '(') ||
+      (/^[\p{L}_$]/u.test(tokens[i]) && tokens[i + 1]?.startsWith('`'))
+    const lastArgument = (open, close) => {
+      let last = open + 1
+      for (let i = last; i < close; i++) {
+        if (tokens[i] === ',') last = i + 1
+        if (pairs.has(i)) i = pairs.get(i)
+      }
+      return last
+    }
     // Count a literal array including nested objects/tuples as single entries.
     const literalCount = start => {
       const end = pairs.get(start)
@@ -80,7 +102,7 @@ export function planningWebCases(text) {
         if (close === undefined || close >= end) return unknown
         if (method === 'flatMap') {
           // Only a literal array returned directly by the arrow is bounded.
-          const arrow = tokens.indexOf('=>', start + 3)
+          const arrow = nextArrow[start + 3]
           if (arrow < 0 || arrow >= close) return unknown
           n = cap(n * arrayBound(arrow + 1, close))
         }
@@ -118,6 +140,7 @@ export function planningWebCases(text) {
             if (pairs.has(j)) j = pairs.get(j)
           }
           if (of < 0 || bodyEnd === undefined) return unknown
+          if (scan(of + 1, close) !== 0) return unknown
           count = cap(count + arrayBound(of + 1, close) * scan(close + 1, bodyEnd))
           i = bodyEnd - 1; continue
         }
@@ -126,10 +149,16 @@ export function planningWebCases(text) {
           let open = i + 1, method = ''
           while (tokens[open] === '.') { method += `${method ? '.' : ''}${tokens[open + 1]}`; open += 2 }
           if (tokens[open] !== '(') return unknown // alias/computed access
-          const close = pairs.get(open)
+          const close = pairs.get(open), callback = lastArgument(open, close)
+          // Titles/options and iterators run during collection too.
+          const arrow = nextArrow[callback]
+          const callbackStart = tokens[callback] === 'async' ? callback + 1 : callback
+          const isCallback = arrow >= callback && arrow < close &&
+            (arrow === callbackStart + 1 || (tokens[callbackStart] === '(' && pairs.get(callbackStart) === arrow - 1))
+          const argsEnd = isCallback ? callback - (callback > open + 1 ? 1 : 0) : close
+          if (scan(open + 1, argsEnd) !== 0) return unknown
           if (method.startsWith('describe') && !['describe.configure'].includes(method)) {
-            const arrow = tokens.indexOf('=>', open + 1)
-            if (arrow < 0 || arrow >= close || tokens[arrow + 1] !== '{') return unknown
+            if (arrow < 0 || arrow >= close || tokens[arrow + 1] !== '{' || pairs.get(arrow + 1) !== close - 1) return unknown
             count = cap(count + scan(arrow + 2, pairs.get(arrow + 1)))
           } else if (['', 'only', 'skip', 'fixme', 'fail'].includes(method)) count = cap(count + 1)
           else if (!['beforeEach', 'afterEach', 'beforeAll', 'afterAll', 'use', 'setTimeout', 'describe.configure'].includes(method)) return unknown
@@ -144,11 +173,13 @@ export function planningWebCases(text) {
           }
           if (body >= end) return unknown
           const close = pairs.get(body)
-          if (tokens.slice(body + 1, close).includes('test')) return unknown
+          if (hasTest(body + 1, close)) return unknown
           i = close; continue
         }
         if (token === 'const' || token === 'let' || token === 'var') {
           const name = tokens[i + 1]
+          if (declarations.has(name)) return unknown
+          declarations.add(name)
           let equal = i + 2
           while (equal < end && !['=', ';', 'const', 'let', 'test', 'for', 'function'].includes(tokens[equal])) equal++
           if (tokens[equal] !== '=') continue
@@ -162,6 +193,7 @@ export function planningWebCases(text) {
           const inertArrow=tokens[init + 1]==='=>' || (first==='(' && tokens[pairs.get(init) + 1]==='=>')
           const bound=arrayBound(init,finish)
           if (!inertArrow) for (let j=init;j<finish;j++) {
+            if (indirectCall(j)) return unknown
             if (tokens[j]==='=>' && pairs.has(j+1)) { j=pairs.get(j+1); continue }
             if (tokens[j]==='(' && tokens[pairs.get(j)+1]==='=>') { j=pairs.get(j); continue }
             if (tokens[j]==='(' && /^[\p{L}_$]/u.test(tokens[j-1]??'') &&
@@ -170,7 +202,7 @@ export function planningWebCases(text) {
           const alias=arrays.has(tokens[equal + 1]) && finish === equal + 2
           if (alias) arrays.set(tokens[equal + 1], unknown)
           arrays.set(name, token === 'const' && !alias ? bound : unknown)
-          if (tokens.slice(equal + 1, finish).includes('test')) return unknown
+          if (hasTest(equal + 1, finish)) return unknown
           i = finish - 1; continue
         }
         if (arrays.has(token) && tokens[i + 1] === '.' && tokens[i + 2] === 'push' && tokens[i + 3] === '(') {
@@ -179,6 +211,7 @@ export function planningWebCases(text) {
           arrays.set(token, cap(arrays.get(token) + extra)); i = close; continue
         }
         if (arrays.has(token) && ['.', '[', '='].includes(tokens[i + 1])) return unknown
+        if (indirectCall(i)) return unknown
         // Calling a registration factory or mutating an iterator cannot be
         // inferred. Calls inside test/hook/helper bodies were handled above.
         if (tokens[i + 1] === '(' && /^[\p{L}_$]/u.test(token) && !['if', 'switch', 'catch', 'import'].includes(token)) return unknown
@@ -195,4 +228,17 @@ export function planningWebCases(text) {
     }
     return scan(0, tokens.length)
   } catch { return unknown }
+}
+
+// Reuse the already-collected native catalogue; no additional collection/jobs.
+export function assertPlanningWebBounds(rows, readFile) {
+  const counts = new Map()
+  for (const row of rows) if (row.kind === 'browser') counts.set(row.file, (counts.get(row.file) ?? 0) + 1)
+  for (const [file, native] of counts) {
+    const estimate = planningWebCases(readFile(file))
+    if (estimate <= browserCaseLimit && estimate < native) {
+      throw new Error(`Browser planner undercount: ${file}: planner ${estimate}, native ${native}`)
+    }
+  }
+  return counts.size
 }

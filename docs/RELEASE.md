@@ -1907,9 +1907,13 @@ checks their file. Explicit exception/metadata rows retain the config/project
 change fence. A new browser file still needs its launch policy. The lightweight
 trusted planner counts Go Test/Fuzz identifiers from its bounded test-source
 snapshot, including references, comments and inactive candidates conservatively.
-Without a native browser inventory it bounds registrations from the trusted source
-snapshot, including literal parameter loops. Unsupported syntax or counts over 300
-widen to full. Runners with native inventories retain the same 300-case bound.
+Without a native browser inventory it uses a conservative planner estimate from
+its trusted source snapshot, including literal parameter loops and every impacted
+`web/tests/` file. Unsupported syntax, ambiguous calls, non-spec registrations,
+byte/token caps or estimates over 300 widen to full. Native runners select from
+actual registrations and widen when their counts exceed 300. The existing web-unit
+and web-shard tier collection checks each collected file's estimate against the
+native count; a known under-count fails with the file and both counts.
 Removing a NIGHTLY exception promotes that registration to full and must execute
 it in the affected lane; exception removal never narrows the gate.
 
@@ -1919,6 +1923,12 @@ with `node scripts/test-tiers/cli.mjs manifests --write`; verify with
 `go-static`/nightly script-test command checks canonical form; these root script
 tests are outside the dynamically collected Go and `web/tests/` inventories.
 No workflow command or static-check registry changes are needed.
+Offline 80-PR replay compares scheduling mode against the base using recorded
+file lists and the current source tree/common dependency graph; it does not
+reconstruct historical trees. With the affected-lane flag unset, lane comparison
+is tautological. L4 “after” selection uses native rows, so it does not prove the
+trusted source-bound planner path equivalent; source-bound/native mode differences
+and unsupported spec names are reported separately.
 `node scripts/test-tiers/prove-manifests.mjs [FULL_BASE_SHA]` independently
 compares against the local pre-conversion commit (default: HEAD), checks retained
 exception data and every weight/metadata value, and collects native registrations
@@ -1961,7 +1971,9 @@ ESSENTIAL/NIGHTLY classification requires `--only`, adds only new matching
 exceptions and preserves known classifications. Unlisted tests already gate full CI.
 `--tier GATED-FULL` resets matching existing exceptions to
 the implicit full tier: plain rows disappear, additional metadata stays. Unmatched
-rows retain their policy. Known-flaky ESSENTIAL restrictions still apply. Legacy
+rows retain their policy. Known-flaky ESSENTIAL restrictions still apply.
+`--only` matching more than 25 existing tests requires `--expect-count N`
+equal to the total match count across the selected kinds, before any writes. Legacy
 `classify go|web` fails because unclassified tests no longer exist. Web discovery
 lists cases without launching browsers.
 

@@ -16,7 +16,7 @@ import { runnerDecision, runnerSelection } from './cli.mjs'
 import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs'
 import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import { collectGo } from './collect.mjs'
-import { planningWebCases } from './planning-web.mjs'
+import { planningWebCases, planningTokenLimit, assertPlanningWebBounds } from './planning-web.mjs'
 import './manifests.test.mjs'
 import './tiers-merge-driver.test.mjs'
 
@@ -613,9 +613,13 @@ test('offline replay CLI policy fixture prints every real PR with selected count
   const report=JSON.parse(result.stdout)
   assert.equal(report.replay.length,80)
   // Measured on the current tree (consumers, migrations); deleted files replay as full.
-  assert.deepEqual(report.transitions,{'full->full':44,'full->essential':20,'essential->essential':16})
+  assert.deepEqual(report.transitions,{'full->full':44,'full->essential':27,'essential->essential':9})
   assert.equal(report.summary.newNarrowed,36)
-  assert.equal(report.summary.oldEssential,16)
+  assert.equal(report.summary.oldEssential,9)
+  assert.equal(report.browserBounds.unsupportedSpecs.length,report.browserBounds.overLimitOrUnsupported)
+  assert.deepEqual(report.browserBounds.undercounts,[])
+  assert.match(report.sourceBoundComparison.unsupportedCostMethod,/cost only/)
+  assert.ok(report.sourceBoundComparison.l4NativeDifferences.every(row=>row.planner==='full'&&row.native==='essential'))
   assert.ok(report.summary.fullReasons['CI machinery']>=15)
   for(const row of report.replay) {
     assert.ok(row.oldCases>0&&row.newCases>0)
@@ -1472,4 +1476,55 @@ test('three-tier full proof rejects incomplete gated results and old two-tier ev
   const {['GATED-FULL']:gated,...oldClasses}=report.classes
   assert.throws(()=>checkFull({...report,classes:oldClasses},env),/Full execution/)
   for(const counts of [{...gated,notRun:1},{...gated,failed:1}])assert.throws(()=>checkFull({...report,classes:{...report.classes,'GATED-FULL':counts}},env),/Full execution/)
+})
+
+for (const [scenario, source] of [
+  ['describe function callback with nested hook arrow', "test.describe('x', function(){ test.beforeEach(async()=>{}); test('a',()=>{}); test('b',()=>{}) })"],
+  ['describe callback is not the last argument', "test.describe('x', ()=>{test('a',()=>{})}, other)"],
+  ['redeclared array name across describe scope', "const roles=[1,2,3,4]; test.describe('x',()=>{const roles=[1];for(const r of roles)test('inner',()=>{})});for(const r of roles)test('outer',()=>{})"],
+  ['optional registration factory call', "fn?.(); test('a',()=>{})"],
+  ['indirect registration factory call', "(0,fn)(); test('a',()=>{})"],
+  ['tagged registration factory call', "fn`cases`; test('a',()=>{})"],
+  ['optional factory in initializer', "const x=fn?.(); test('a',()=>{})"],
+  ['indirect factory in initializer', "const x=(0,fn)(); test('a',()=>{})"],
+  ['tagged factory in initializer', "const x=fn`cases`; test('a',()=>{})"],
+  ['registration modifier argument calls a factory', "test.skip(registerTests())"],
+  ['for-of iterable calls an optional factory', "for(const c of xs?.()) {}"],
+  ['for-of iterable registers tests', "const xs=[1,2]; for(const c of xs.map(c=>test(c,()=>{}))) {}"],
+  ['describe title registers tests', "test.describe(test('hidden',()=>{}),()=>{test('a',()=>{})})"],
+  ['describe title calls a registration factory', "test.describe(title(),()=>{test('a',()=>{})})"],
+  ['test title registers tests', "test(test('hidden',()=>{}),()=>{})"],
+  ['test title calls a registration factory', "test(title(),()=>{})"],
+  ['raw newline in single-quoted string', "const text='bad\nstring'; test('a',()=>{})"],
+  ['raw newline in double-quoted string', `const text="bad\nstring"; test('a',()=>{})`],
+  ...['&&','||','?',';','}'].map(operator=>[`ambiguous slash after ${operator}`, `a ${operator} /it's/.test(s); test('a',()=>{}); test('b',()=>{})`]),
+]) test(`browser planner rejects ${scenario}`, () => assert.ok(planningWebCases(source) > 300))
+
+test('browser planner bounds every impacted tests file and rejects non-spec registrations', () => {
+  for (const file of ['tests/helper.ts','tests/helper.js','tests/helper.mjs','tests/a.unit.test.ts']) {
+    const tree={complete:true,webTests:new Map([[file,"test('case',()=>{})"]])}
+    for (const affectedLane of [undefined,'on']) {
+      const result=schedulingDecision('pull_request',[`web/${file}`],()=>true,{affectedLane,graph:{[file]:[]},tree,tests:[g('internal/auth','TestCore','ESSENTIAL')]})
+      assert.equal(result.mode,'full',file)
+      assert.match(result.reason,/source bound unavailable/)
+    }
+  }
+})
+
+test('native web collection guard rejects undercounts with file and both counts', () => {
+  const rows=Array.from({length:2},()=>({kind:'browser',file:'tests/a.spec.ts'}))
+  assert.throws(()=>assertPlanningWebBounds(rows,()=>"test('one',()=>{})"), /tests\/a\.spec\.ts: planner 1, native 2/)
+  assert.equal(assertPlanningWebBounds(rows,()=>"registerTests()"),1)
+  assert.equal(assertPlanningWebBounds(rows,()=>"test('one',()=>{}); test('two',()=>{})"),1)
+  // Existing web-unit/shard tier runners use this collector, without another job.
+  assert.match(readFileSync(new URL('./collect.mjs',import.meta.url),'utf8'), /assertPlanningWebBounds\(tests, file => boundedText\(web, file\)\)/)
+  assert.match(readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8'), /cli\.mjs run web --unit/)
+})
+
+test('browser planner token cap rejects a near-2 MB input before scanning registrations', () => {
+  const source='x;'.repeat(planningTokenLimit)+' '.repeat(1_900_000)+"test('case',()=>{})"
+  assert.ok(Buffer.byteLength(source)<2*1024*1024)
+  assert.ok(planningWebCases(source)>300)
+  // Many interpolation markers take the cheap template prefilter path.
+  assert.equal(planningWebCases('const title=`'+ '${x}'.repeat(10_000)+"`; test('case',()=>{})"),1)
 })

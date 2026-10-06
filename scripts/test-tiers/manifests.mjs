@@ -208,13 +208,20 @@ export function writeManifests(root) {
   for (const [path, source] of outputs) atomicWrite(path, source)
 }
 
-export function classifyManifest(manifest, discovered, { tier, only } = {}) {
+export function confirmClassifyCount(count, { only, expectCount } = {}) {
+  if (expectCount !== undefined && (!Number.isSafeInteger(expectCount) || expectCount < 0 || only === undefined)) throw new ManifestInputError('--expect-count requires --only and a nonnegative integer')
+  if (only !== undefined && count > 25 && expectCount === undefined) throw new ManifestInputError(`--only matches ${count} tests; requires --expect-count ${count}`)
+  if (expectCount !== undefined && count !== expectCount) throw new ManifestInputError(`--expect-count ${expectCount} differs from match count ${count}`)
+}
+
+export function classifyManifest(manifest, discovered, { tier, only, expectCount } = {}) {
   if (!tiers.includes(tier)) throw new ManifestInputError('classify requires --tier ESSENTIAL|GATED-FULL|NIGHTLY')
   if (only !== undefined && (typeof only !== 'string' || !only || only.length > 1024)) throw new ManifestInputError('Expected nonempty --only pattern (at most 1024 characters)')
   if (tier !== implicitTier && only === undefined) throw new ManifestInputError('ESSENTIAL/NIGHTLY classification requires --only; unlisted tests already gate GATED-FULL')
   // --only is a literal identity substring, not an unbounded regular expression.
   const declared = rowMap(manifest.tests, { identity: testIdentity }, 'tests', true)
   const found = rowMap(discovered, { identity: testIdentity }, 'inventory', true)
+  confirmClassifyCount([...found.values()].filter(row => only === undefined || key(row).includes(only)).length, { only, expectCount })
   const added = []
   for (const [id, row] of found) if ((!declared.has(id) || tier === implicitTier) && (only === undefined || key(row).includes(only))) {
     const { leaf, line, id: nativeId, active, file, ...entry } = row

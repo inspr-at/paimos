@@ -1,11 +1,9 @@
 {
   "ticket": "OPS-257",
   "package": "L13 stage 2",
-  "workerAttribution": "I work on this \u2014 session: codex-sol-ops257-l13s2 (1286b8da-59c2-4c57-bae8-b1a52b6e1270); role: builder; started: 2026-10-06T06:31:14Z",
+  "workerAttribution": "I work on this — session: codex-sol-ops257-l13s2 (1286b8da-59c2-4c57-bae8-b1a52b6e1270); role: builder; started: 2026-10-06T06:31:14Z",
   "branch": "work/ops-257-l13-stage2",
-  "state": "Stage 2 committed by OPS at 1f25979829d29cc4f2b4cd2e9abda2e0cdbe86c1; fix round 1 uncommitted on top; no commit, push, PR change, rebase or deployment by this worker",
   "mergeGate": "OPS merges only after release 124 is cut",
-  "trackedSourcePatchSha256": "aa4d1756f44e6d55a0388bcce3bdbc0b88fbe1b85a76ce9c9ce7dc309009e821",
   "proof": {
     "base": "601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
     "files": [
@@ -228,7 +226,7 @@
           "vitest:tests/settings-owner.unit.test.ts:a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-a\"},\"principal\":{\"id\":\"person-b\"}})",
           "vitest:tests/settings-owner.unit.test.ts:a different authenticated owner replaces the frozen child with fresh state ({\"tenant\":{\"id\":\"tenant-b\"},\"principal\":{\"id\":\"person-a\"}})",
           "vitest:tests/settings-owner.unit.test.ts:same-owner refresh keeps mounted state, but lost permission closes Access",
-          "vitest:tests/settings-owner.unit.test.ts:a new owner without Access cannot resurrect the previous owner\u2019s shown section on expiry",
+          "vitest:tests/settings-owner.unit.test.ts:a new owner without Access cannot resurrect the previous owner’s shown section on expiry",
           "vitest:tests/settings-owner.unit.test.ts:an incoming owner clears frozen Access before fresh permissions arrive",
           "vitest:tests/settings-routing.unit.test.ts:direct Workspace #work-vocabulary entry keeps the query and opens vocabulary",
           "vitest:tests/settings-routing.unit.test.ts:direct Workspace #ticket-types entry keeps the query and opens vocabulary",
@@ -362,6 +360,1214 @@
     {
       "name": "requested-node-suite",
       "command": "node --test --test-concurrency=1 scripts/test-tiers/*.test.mjs scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs web/scripts/ci-web-shard.test.mjs web/scripts/aeon-676-ci.test.mjs web/scripts/aeon-681-ci.test.mjs",
+      "passed": 463,
+      "failed": 0,
+      "logSha256": "f04c0cc471ac64da22ba095cab0eb7f887120fb9f200f62db2cebbadf3acdfbe"
+    },
+    {
+      "name": "go-static-with-no-web-dependencies",
+      "command": "NODE_OPTIONS=--import=/private/tmp/ops257-fix1-no-web-deps.mjs node --test scripts/test-tiers/test-tiers.test.mjs",
+      "passed": 215,
+      "failed": 0,
+      "logSha256": "97e9967a54809ee24ebfb7a8913447eeea334eee9399f277a539f9e70d1e876c"
+    },
+    {
+      "name": "web-failure-reporting-native-node-runner",
+      "command": "node --experimental-strip-types --test web/tests/test-tier-failures.test.ts",
+      "passed": 8,
+      "failed": 0,
+      "logSha256": "c3b7eddaf70be128df24bfbe63de31543d118e079f91b63b724e8f120ceb26b3"
+    },
+    {
+      "name": "go-packages-offline-nix-shell",
+      "command": "XDG_CACHE_HOME=/private/tmp/ops257-fix2-nixcache nix develop --offline --no-write-lock-file -c bash -c 'GOCACHE=/private/tmp/ops257-fix2-gocache GOPROXY=off GOTOOLCHAIN=local go test ./scripts/ci-runner-guard ./scripts/releaseworkflow ./scripts/ci-go-shards -count=1'",
+      "passed": false,
+      "blocked": "Sandbox denies Nix daemon socket: Operation not permitted",
+      "logSha256": "1530c443e9bd68a768ae38d6ed826ccb330649f80ecad6aedf43f351a5c9ca67"
+    },
+    {
+      "name": "go-packages-installed-nix-store-toolchain-fallback",
+      "command": "GOCACHE=/private/tmp/ops257-fix2-gocache GOPROXY=off GOTOOLCHAIN=local /nix/store/5k3v90pgx77ibb4xzabk5hghnaqklmy1-go-1.26.7/bin/go test ./scripts/ci-runner-guard ./scripts/releaseworkflow ./scripts/ci-go-shards -count=1",
+      "passedPackages": 3,
+      "output": [
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-runner-guard\t4.340s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/releaseworkflow\t4.501s",
+        "ok  \tgithub.com/inspr-at/paimos/scripts/ci-go-shards\t6.041s"
+      ],
+      "logSha256": "e09a88548b019af7fe9e7f43553445fdc7504300bf381b8f6c7f38ae38eecca5"
+    },
+    {
+      "command": "node scripts/test-tiers/cli.mjs manifests --check",
+      "passed": true
+    },
+    {
+      "command": "git diff --check",
+      "passed": true
+    },
+    {
+      "command": "node scripts/test-tiers/prove-manifests.mjs 601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
+      "passed": true,
+      "outputSha256": "efb8b88d7fc2ff4e192d3eca00a45151cd57796c1e711546ed7ab1ea3856fa27"
+    },
+    {
+      "name": "planner-base-replay-and-native-undercount-sweep",
+      "command": "node scripts/test-tiers/replay.mjs --json --compare-base 601dbaa4f",
+      "passed": true,
+      "prs": 80,
+      "matchingModes": 73,
+      "modeChanges": 7,
+      "undercounts": 0,
+      "outputSha256": "fdf4ea80bf4d26b118afed7db8165355046a3142456a3cf53ac0b1fed0691aec"
+    }
+  ],
+  "nodeSuiteFiles": [
+    "scripts/test-tiers/manifests.test.mjs",
+    "scripts/test-tiers/test-tiers.test.mjs",
+    "scripts/test-tiers/tiers-merge-driver.test.mjs",
+    "scripts/ci-pr-plan.test.mjs",
+    "scripts/ci-tree-reuse.test.mjs",
+    "scripts/ci-static.test.mjs",
+    "web/scripts/ci-web-shard.test.mjs",
+    "web/scripts/aeon-676-ci.test.mjs",
+    "web/scripts/aeon-681-ci.test.mjs"
+  ],
+  "environment": {
+    "network": "No network; existing dependencies reused; no browser launch, Docker, secrets, push or deployment.",
+    "go": "Installed Nix-store Go 1.26.7 darwin/arm64; GOCACHE=/private/tmp/ops257-fix2-gocache, GOPROXY=off, GOTOOLCHAIN=local",
+    "nixDevelopOffline": "Attempted with cache in writable /private/tmp; sandbox denies Nix daemon socket. Used installed store Go directly with downloads disabled.",
+    "web": "Native Node/Vitest/Playwright collection only; no browser launch; VITE_CACHE_DIR=/private/tmp/ops257-fix2-vite",
+    "noWebDependencyGuard": "import {registerHooks} from 'node:module'\nregisterHooks({resolve(specifier,context,next){const result=next(specifier,context);if(result.url.includes('/node_modules/'))throw new Error('go-static must not import web dependencies');return result}})\n",
+    "postSuiteEdits": "Only this evidence and git-ignored progress metadata changed after the final passing requested suite."
+  },
+  "consumerAudit": {
+    "searchRoots": [
+      "scripts/",
+      "web/scripts/",
+      "web/tests/",
+      ".github/workflows/",
+      "Go source"
+    ],
+    "queries": [
+      "go-test-tiers.json",
+      "web-test-tiers.json",
+      "defaultNewTier",
+      "GATED-FULL",
+      "NIGHTLY",
+      ".tests",
+      ".tier"
+    ],
+    "updated": [
+      "core.validate/select/goCaseCount/counts/manifestPromotions",
+      "diff.planningGoCases/schedulingDecision",
+      "cli.plan",
+      "manifests.normalize/write/check/classify",
+      "standalone merge driver with mixed-layout parity",
+      "prove-manifests",
+      "replay",
+      "reportCases",
+      "manifest-reader regression tests"
+    ],
+    "unchangedWithReason": {
+      "check-full.mjs": "Checks resolved execution classes, run identity, scope, failure/notRun completeness; no manifest rows. Implicit rows now count in reportCases, and execution-proof tests pass.",
+      "measure.mjs": "Aggregates resolved reports; never writes tier rows.",
+      "collect.saveManifest": "Already uses canonical formatManifest; cannot persist redundant full rows.",
+      "ci-web-shard.mjs": "Reads launch/shard policy, not tier exceptions; tierWeights consumes resolved selected rows.",
+      "static-checks.json/workflow commands/pinned Go command assertions": "Command strings, cwd and step names unchanged; registry and Go contract tests pass."
+    },
+    "fix1PinnedTextSearch": {
+      "command": "git grep -n -E 'classify go|classify web|classify --tier (ESSENTIAL|NIGHTLY)|unclassified tests|browser fan-out unavailable|widens impacted browser|native equivalence' -- README.md docs/RELEASE.md scripts web '*.go' '*_test.go'",
+      "result": "Seven matches: bounded examples and intentional obsolete-syntax errors/assertions. No pinned Go test assertion needs changes; no obsolete browser-widening prose remains outside historical evidence."
+    },
+    "fix2PinnedTextSearch": {
+      "roots": [
+        "README.md",
+        "docs/RELEASE.md",
+        "scripts/test-tiers/",
+        "scripts/ci/static-checks.json",
+        "all tracked *_test.go"
+      ],
+      "queries": [
+        "Without a native browser inventory",
+        "conservative planner estimate",
+        "same 300-case bound",
+        "full->essential.*20",
+        "essential->essential.*16",
+        "oldEssential,16",
+        "25 existing",
+        "expect-count",
+        "80/80"
+      ],
+      "logSha256": "2d210e2339440b2b2883e09579406b868dc575433e3beafe8f0138b8681f4e21",
+      "result": "Only intended current documentation/CLI/tests match; no Go pinned text or static-check registry update required. Replay expectations updated for 7 conservative widenings."
+    }
+  },
+  "risks": [
+    "Hosted merge-group execution/time remains unmeasured; runtime estimates use historical owner/file timings and one second per unmeasured Go/unit case.",
+    "Conservative Go source counting and unsupported browser registration syntax can widen fan-out. On all 80 recorded PR file lists the affected-switch-unset lane and mode match the base; all 246 current native browser specs have no undercounts (202 bounded, 44 over-limit or unsupported).",
+    "Installed external merge-driver copies need refreshing by the coordinator; no external copy was changed."
+  ],
+  "staleExplicitRowsAfter": {
+    "go": [],
+    "web": []
+  },
+  "staleRowsBefore": {
+    "go": [],
+    "web": [
+      "browser:tests/settings.spec.ts:Projects lists the ticket types with their prefixes",
+      "browser:tests/settings.spec.ts:Workspace shows the workspace and my role; people and keys moved to Access",
+      "browser:tests/settings.spec.ts:at 390 the sections sit in a grid and nothing is cut",
+      "browser:tests/settings.spec.ts:the section nav stays put when switching sections, including wide Access"
+    ]
+  },
+  "notes": [
+    "The four stale legacy web rows were plain GATED-FULL and disappear during compaction. The current native catalogue has no stale explicit exceptions."
+  ],
+  "fix1WorkerAttribution": "I work on this — session: codex-sol-ops257-l13s2-fix1 (95abfc14-7062-4945-8f2a-9371d2ce4467); role: builder; started: 2026-10-06T07:06:57Z",
+  "proofScope": {
+    "lanes": [
+      "gated-full (merge_group)",
+      "essential (README-only pull_request)",
+      "catalogue (schedule)"
+    ],
+    "comparison": "Native Go and web inventories resolved by the base and current selectors; essential and catalogue equal; full adds exactly 141 Go and 59 web cases.",
+    "notProved": [
+      "Affected-lane (L4) selection equivalence",
+      "Shard assignment equivalence",
+      "Hosted execution duration"
+    ],
+    "separatePlannerReplay": "Mode only on recorded file lists with current tree/common graph; unset effectiveLane comparison is tautological. L4 new uses native rows."
+  },
+  "plannerReplay": {
+    "command": "node scripts/test-tiers/replay.mjs --json --compare-base 601dbaa4f",
+    "laneComparison": {
+      "base": "601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
+      "affectedLane": "unset",
+      "prs": 80,
+      "matching": 73,
+      "scope": "Mode only on recorded file lists with current tree/common graph; unset effectiveLane comparison is tautological. L4 new uses native rows.",
+      "essentialAtBase": 16,
+      "differences": [
+        {
+          "number": 236,
+          "baseMode": "essential",
+          "currentMode": "full",
+          "baseLane": "full",
+          "currentLane": "full"
+        },
+        {
+          "number": 244,
+          "baseMode": "essential",
+          "currentMode": "full",
+          "baseLane": "full",
+          "currentLane": "full"
+        },
+        {
+          "number": 246,
+          "baseMode": "essential",
+          "currentMode": "full",
+          "baseLane": "full",
+          "currentLane": "full"
+        },
+        {
+          "number": 252,
+          "baseMode": "essential",
+          "currentMode": "full",
+          "baseLane": "full",
+          "currentLane": "full"
+        },
+        {
+          "number": 253,
+          "baseMode": "essential",
+          "currentMode": "full",
+          "baseLane": "full",
+          "currentLane": "full"
+        },
+        {
+          "number": 263,
+          "baseMode": "essential",
+          "currentMode": "full",
+          "baseLane": "full",
+          "currentLane": "full"
+        },
+        {
+          "number": 294,
+          "baseMode": "essential",
+          "currentMode": "full",
+          "baseLane": "full",
+          "currentLane": "full"
+        }
+      ]
+    },
+    "browserBounds": {
+      "specs": 246,
+      "boundedSpecs": 152,
+      "overLimitOrUnsupported": 94,
+      "unsupportedSpecs": [
+        "tests/a11y.spec.ts",
+        "tests/access.spec.ts",
+        "tests/account-link.spec.ts",
+        "tests/accounts-card-fit.spec.ts",
+        "tests/accounts-computers.spec.ts",
+        "tests/aeon-632b-clip.spec.ts",
+        "tests/agent-done-state.spec.ts",
+        "tests/agent-indicator.spec.ts",
+        "tests/agent-pairing.spec.ts",
+        "tests/agent-rules-doctrine.spec.ts",
+        "tests/agent-rules-shots.spec.ts",
+        "tests/agent-rules-ticks.spec.ts",
+        "tests/agents-dial.spec.ts",
+        "tests/agents-mission.spec.ts",
+        "tests/agents-phone-rows.spec.ts",
+        "tests/agents-top.spec.ts",
+        "tests/agents-worker-tree.spec.ts",
+        "tests/agents.spec.ts",
+        "tests/attach-security.spec.ts",
+        "tests/attachments.spec.ts",
+        "tests/clip-tip.spec.ts",
+        "tests/decision-text.spec.ts",
+        "tests/deploy-target.spec.ts",
+        "tests/doctrine-inbox.spec.ts",
+        "tests/estimates.spec.ts",
+        "tests/first-impression.spec.ts",
+        "tests/footer-flow-pill.spec.ts",
+        "tests/footer-release-pill.spec.ts",
+        "tests/graph-hit.spec.ts",
+        "tests/header-glimpse.spec.ts",
+        "tests/headings.spec.ts",
+        "tests/html-sandbox.spec.ts",
+        "tests/indicator-controls.spec.ts",
+        "tests/indicator-creative-gallery.spec.ts",
+        "tests/journey-confirmation.spec.ts",
+        "tests/journey-overflow.spec.ts",
+        "tests/key-expiry.spec.ts",
+        "tests/knowledge-graph.spec.ts",
+        "tests/knowledge-shots.spec.ts",
+        "tests/live-agents-layout.spec.ts",
+        "tests/live-agents.spec.ts",
+        "tests/live-list-sessions.spec.ts",
+        "tests/outline.spec.ts",
+        "tests/parent-benefits.spec.ts",
+        "tests/planning-columns.spec.ts",
+        "tests/profile-editor.spec.ts",
+        "tests/profile.spec.ts",
+        "tests/project-groups.spec.ts",
+        "tests/project-header.spec.ts",
+        "tests/project-list.spec.ts",
+        "tests/project-sort.spec.ts",
+        "tests/quote-dock-layout.spec.ts",
+        "tests/quote-inspector.spec.ts",
+        "tests/quote-parity-gaps.spec.ts",
+        "tests/quote-save-state.spec.ts",
+        "tests/quote-showcase.spec.ts",
+        "tests/quote-workspace.spec.ts",
+        "tests/quotes-tab.spec.ts",
+        "tests/recurrences.spec.ts",
+        "tests/release-codenames.spec.ts",
+        "tests/release-header.spec.ts",
+        "tests/release-picker.spec.ts",
+        "tests/release-switches.spec.ts",
+        "tests/release-tenant-notes.spec.ts",
+        "tests/role-picker-layout.spec.ts",
+        "tests/row-actions.spec.ts",
+        "tests/service-tier.spec.ts",
+        "tests/session-messages.spec.ts",
+        "tests/session-rows.spec.ts",
+        "tests/settings-shared.spec.ts",
+        "tests/settings.spec.ts",
+        "tests/tap-targets.spec.ts",
+        "tests/tenant-brand.spec.ts",
+        "tests/theme-agents.spec.ts",
+        "tests/theme-settings.spec.ts",
+        "tests/ticket-graph-view.spec.ts",
+        "tests/ticket-outcomes.spec.ts",
+        "tests/ticket-panel.spec.ts",
+        "tests/title-divider.spec.ts",
+        "tests/ui-audit.spec.ts",
+        "tests/usage-accounts.spec.ts",
+        "tests/usage-dashboard.spec.ts",
+        "tests/version-reveal.spec.ts",
+        "tests/views-filters.spec.ts",
+        "tests/webcore-recovery.spec.ts",
+        "tests/wide.spec.ts",
+        "tests/work-aggregates.spec.ts",
+        "tests/work-history-fix5.spec.ts",
+        "tests/work-integration.spec.ts",
+        "tests/work-queue.spec.ts",
+        "tests/work-surfaces-fix2.spec.ts",
+        "tests/work-surfaces-fix3.spec.ts",
+        "tests/work-surfaces-fix4.spec.ts",
+        "tests/work-vocabulary.spec.ts"
+      ],
+      "undercounts": []
+    },
+    "affectedLaneReplaySummary": {
+      "prs": 80,
+      "oldEssential": 9,
+      "newNarrowed": 36,
+      "newStatic": 0,
+      "percentNarrowed": 45,
+      "oldJobs": 2815,
+      "newJobs": 2420,
+      "fullReasons": {
+        "CI machinery": 18,
+        "R3": 9,
+        "R4": 6,
+        "unnarrowed": 8,
+        "missing": 1,
+        "browser fan-out": 1,
+        "unmapped": 1
+      }
+    },
+    "sourceBoundComparison": {
+      "scope": "Current source-bound planner vs base mode (unset) and vs current native L4 mode; no historical tree or source-bound selection equivalence claim.",
+      "unsetModeChanges": [
+        {
+          "number": 236,
+          "base": "essential",
+          "current": "full"
+        },
+        {
+          "number": 244,
+          "base": "essential",
+          "current": "full"
+        },
+        {
+          "number": 246,
+          "base": "essential",
+          "current": "full"
+        },
+        {
+          "number": 252,
+          "base": "essential",
+          "current": "full"
+        },
+        {
+          "number": 253,
+          "base": "essential",
+          "current": "full"
+        },
+        {
+          "number": 263,
+          "base": "essential",
+          "current": "full"
+        },
+        {
+          "number": 294,
+          "base": "essential",
+          "current": "full"
+        }
+      ],
+      "unsupportedUnsetModeChanges": [
+        246
+      ],
+      "l4UnsupportedSpecModeChanges": [
+        246
+      ],
+      "unsupportedCostMethod": "Counterfactual omits the listed unsupported specs from source estimates; all other planner inputs stay unchanged. This measures cost only and is never a runnable fallback.",
+      "l4NativeDifferences": [
+        {
+          "number": 200,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 208,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 214,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 217,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 222,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 225,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 226,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 236,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 244,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 245,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 246,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 247,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 249,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 252,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 253,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 263,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 268,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 273,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 289,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 294,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        },
+        {
+          "number": 297,
+          "native": "essential",
+          "planner": "full",
+          "reason": "browser fan-out exceeds 300 cases (or source bound unavailable)"
+        }
+      ]
+    },
+    "perPRModes": [
+      {
+        "pr": 199,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 200,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 201,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 202,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 203,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 204,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 205,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 206,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 208,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 210,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 211,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 213,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 214,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 216,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 217,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 219,
+        "baseMode": "essential",
+        "mode": "essential",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 220,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 221,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 222,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 223,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 224,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 225,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 226,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 227,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 228,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 229,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 230,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 231,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 232,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 233,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 234,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 235,
+        "baseMode": "essential",
+        "mode": "essential",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 236,
+        "baseMode": "essential",
+        "mode": "full",
+        "matches": false,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 237,
+        "baseMode": "essential",
+        "mode": "essential",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 239,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 240,
+        "baseMode": "essential",
+        "mode": "essential",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 241,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 242,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 243,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 244,
+        "baseMode": "essential",
+        "mode": "full",
+        "matches": false,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 245,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 246,
+        "baseMode": "essential",
+        "mode": "full",
+        "matches": false,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 247,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 248,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 249,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 250,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 251,
+        "baseMode": "essential",
+        "mode": "essential",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 252,
+        "baseMode": "essential",
+        "mode": "full",
+        "matches": false,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 253,
+        "baseMode": "essential",
+        "mode": "full",
+        "matches": false,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 254,
+        "baseMode": "essential",
+        "mode": "essential",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 255,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 256,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 257,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 259,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 260,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 261,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 262,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 263,
+        "baseMode": "essential",
+        "mode": "full",
+        "matches": false,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 264,
+        "baseMode": "essential",
+        "mode": "essential",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 265,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 266,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 267,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 268,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 269,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 270,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 272,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 273,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 275,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 280,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 283,
+        "baseMode": "essential",
+        "mode": "essential",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 284,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 286,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 288,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 289,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 290,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 291,
+        "baseMode": "essential",
+        "mode": "essential",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "essential"
+      },
+      {
+        "pr": 294,
+        "baseMode": "essential",
+        "mode": "full",
+        "matches": false,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 295,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 296,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "full",
+        "sourceBoundL4Mode": "full"
+      },
+      {
+        "pr": 297,
+        "baseMode": "full",
+        "mode": "full",
+        "matches": true,
+        "nativeL4Mode": "essential",
+        "sourceBoundL4Mode": "full"
+      }
+    ],
+    "scope": "Recorded file lists evaluated against current source tree and common dependency graph; no historical per-PR tree reconstruction. Mode is compared; effectiveLane with the flag unset is the same classified value by definition. Native L4 after rows do not prove source-bound planner equivalence.",
+    "unsupportedCost": "94/246 specs are unsupported/over-limit. Seven of 80 PRs widen essential->full vs base. Omitting only the unsupported specs changes one of those modes (PR246); six remain full due to other conservative tests-file uncertainty or combined fan-out. Native-vs-source L4 differs on 21 PRs; unsupported-spec-only counterfactual changes one L4 mode (PR246).",
+    "cheapGenericRuleAssessment": "No safe generic fallback applied: raising token cap 20000->50000->100000 leaves all 94 unsupported specs; ambiguous slash/factory syntax and non-spec registration checks intentionally fail closed. More parsing or a stale manifest-count fallback would weaken the requested guarantee."
+  },
+  "changedSourceFileSha256": {
+    "README.md": "226cda2166c3e41755875a6625a9fbb86c4085a0e39757fc23e943b76488d01a",
+    "docs/RELEASE.md": "25814b81f3f3b7893f40369637d7700633eb02f9fbab0fd0150594d4c4b56d4a",
+    "scripts/ci/go-test-tiers.json": "cced66abd43558aaca46688d1dc90a766ee0f71d2fcb16c80e45a6b7b4713402",
+    "scripts/ci/web-test-tiers.json": "a8eff91ef87f137942b3f33f37c16cf2e05f73a11688a73a9f6517df69a8d96b",
+    "scripts/test-tiers/cli.mjs": "131c4c3ba0fea27a0f6618f7e385b546987c6aa929a00bacc0279c3c3a0ba600",
+    "scripts/test-tiers/collect.mjs": "ec04b744eb32efce3c076ddbfee37c43ca01a4fe21214100bca71f88c3d82cdf",
+    "scripts/test-tiers/core.mjs": "14559a34a5813954b9559579902ba867c60a15eabb2ff019bc44cf1af60145a7",
+    "scripts/test-tiers/diff.mjs": "1b15bc7cd5c6b2ef46cff03e1526074eec51fa0df0f959ada41e3c4829f6d79f",
+    "scripts/test-tiers/manifests.mjs": "b8decc22f2248c451da75d5a5c2c9ae836c89ebfdd8470bdf8c34686fe7177c4",
+    "scripts/test-tiers/manifests.test.mjs": "75f4558c668aff21eef3af822c56b484ea657a863a6de2a3026d098167d563bd",
+    "scripts/test-tiers/planning-web.mjs": "370c71221f108f7a5c9dd3418e3071b8a86e54fc9bf5d5f1457bccde33e597b1",
+    "scripts/test-tiers/prove-manifests.mjs": "0043efefb881a4682f7ca861f134e442c371ecae3cde57d9b3ad29ddb07fa6bb",
+    "scripts/test-tiers/replay.mjs": "ae7b64bd76ad1a3dc5acd3db2e8f320c44d35a55754b53e05223b553fe456034",
+    "scripts/test-tiers/report.mjs": "9c4adb9a2242e060584340df69458eed8fc83d9cfc6ebd44eb4c08bd44116e8c",
+    "scripts/test-tiers/test-tiers.test.mjs": "966f12b0edcee2b5e146e146d95e997a4847f03d1913d8b841dcf79def5e004d",
+    "scripts/test-tiers/tiers-merge-driver.mjs": "a068eb5410389309a1f7b9c8a278dc271b3b5ef1dc57b98796bcdfb53e1d339d",
+    "scripts/test-tiers/tiers-merge-driver.test.mjs": "03a7dca1903e879ad51232c90407cb667e39affbb121ae3cdd7ee242aa416195",
+    "web/scripts/aeon-676-ci.test.mjs": "0b9551e932ed3a0a9144f16e1d810fb636940e3777978c5966e7efee887bce61",
+    "web/scripts/aeon-681-ci.test.mjs": "ddb22cf9c3c02086f2115e223a4491a5dd1a7723e2593bfe4befc76cdb9e9fb4",
+    "web/scripts/ci-web-shard.test.mjs": "0f796bd94b5fa905154c087e7b0ea888496be54c154df4e6d5e99a031c89677e"
+  },
+  "changedSourceClosureSha256": "39b6751ccf70cd30489efea2e145565eb24c090b39147bf5657b680ebc1184d4",
+  "changedSourceClosureScope": "SHA256 of compact JSON (UTF-8, no spaces, sorted file keys) mapping final-byte SHA256 for tracked files changed since immutable proof base, excluding this self-referential evidence file. Independent of whether those bytes are committed.",
+  "fix2WorkerAttribution": "I work on this — session: codex-sol-ops257-l13s2-fix2 (90704f80-a65e-4385-8b4f-f8149be65e13); role: builder; started: 2026-10-06T07:35:54Z",
+  "historicalFix1Checks": [
+    {
+      "name": "requested-node-suite",
+      "command": "node --test --test-concurrency=1 scripts/test-tiers/*.test.mjs scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs web/scripts/ci-web-shard.test.mjs web/scripts/aeon-676-ci.test.mjs web/scripts/aeon-681-ci.test.mjs",
       "passed": 435,
       "failed": 0,
       "logSha256": "3730e72335aa2cfdd3defe6b5f448b407dbcae0dc30a88fc16eedaec5a38fb67"
@@ -414,546 +1620,7 @@
       "logSha256": "d30bab6117efa4b4dc75042f8ba142fb9f99f05e270507e0925f0a510132ae1f"
     }
   ],
-  "nodeSuiteFiles": [
-    "scripts/test-tiers/manifests.test.mjs",
-    "scripts/test-tiers/test-tiers.test.mjs",
-    "scripts/test-tiers/tiers-merge-driver.test.mjs",
-    "scripts/ci-pr-plan.test.mjs",
-    "scripts/ci-tree-reuse.test.mjs",
-    "scripts/ci-static.test.mjs",
-    "web/scripts/ci-web-shard.test.mjs",
-    "web/scripts/aeon-676-ci.test.mjs",
-    "web/scripts/aeon-681-ci.test.mjs"
-  ],
-  "environment": {
-    "network": "No network; existing dependencies reused; no browser launch, Docker, secrets, push or deployment.",
-    "go": "Installed Nix-store Go 1.26.7; GOCACHE=/private/tmp/ops257-fix1-gocache, GOPROXY=off, GOTOOLCHAIN=local",
-    "nixDevelopOffline": "Attempted; sandbox denies writes to Nix fetcher cache. Used installed store Go directly with downloads disabled.",
-    "web": "Native Node/Vitest/Playwright collection only; no browser launch; VITE_CACHE_DIR=/private/tmp/ops257-fix1-vite",
-    "noWebDependencyGuard": "import {registerHooks} from 'node:module'\nregisterHooks({resolve(specifier,context,next){const result=next(specifier,context);if(result.url.includes('/node_modules/'))throw new Error('go-static must not import web dependencies');return result}})\n",
-    "postSuiteEdits": "Only evidence and git-ignored progress metadata updated after final suite start."
-  },
-  "consumerAudit": {
-    "searchRoots": [
-      "scripts/",
-      "web/scripts/",
-      "web/tests/",
-      ".github/workflows/",
-      "Go source"
-    ],
-    "queries": [
-      "go-test-tiers.json",
-      "web-test-tiers.json",
-      "defaultNewTier",
-      "GATED-FULL",
-      "NIGHTLY",
-      ".tests",
-      ".tier"
-    ],
-    "updated": [
-      "core.validate/select/goCaseCount/counts/manifestPromotions",
-      "diff.planningGoCases/schedulingDecision",
-      "cli.plan",
-      "manifests.normalize/write/check/classify",
-      "standalone merge driver with mixed-layout parity",
-      "prove-manifests",
-      "replay",
-      "reportCases",
-      "manifest-reader regression tests"
-    ],
-    "unchangedWithReason": {
-      "check-full.mjs": "Checks resolved execution classes, run identity, scope, failure/notRun completeness; no manifest rows. Implicit rows now count in reportCases, and execution-proof tests pass.",
-      "measure.mjs": "Aggregates resolved reports; never writes tier rows.",
-      "collect.saveManifest": "Already uses canonical formatManifest; cannot persist redundant full rows.",
-      "ci-web-shard.mjs": "Reads launch/shard policy, not tier exceptions; tierWeights consumes resolved selected rows.",
-      "static-checks.json/workflow commands/pinned Go command assertions": "Command strings, cwd and step names unchanged; registry and Go contract tests pass."
-    },
-    "fix1PinnedTextSearch": {
-      "command": "git grep -n -E 'classify go|classify web|classify --tier (ESSENTIAL|NIGHTLY)|unclassified tests|browser fan-out unavailable|widens impacted browser|native equivalence' -- README.md docs/RELEASE.md scripts web '*.go' '*_test.go'",
-      "result": "Seven matches: bounded examples and intentional obsolete-syntax errors/assertions. No pinned Go test assertion needs changes; no obsolete browser-widening prose remains outside historical evidence."
-    }
-  },
-  "risks": [
-    "Hosted merge-group execution/time remains unmeasured; runtime estimates use historical owner/file timings and one second per unmeasured Go/unit case.",
-    "Conservative Go source counting and unsupported browser registration syntax can widen fan-out. On all 80 recorded PR file lists the affected-switch-unset lane and mode match the base; all 246 current native browser specs have no undercounts (202 bounded, 44 over-limit or unsupported).",
-    "Installed external merge-driver copies need refreshing by the coordinator; no external copy was changed."
-  ],
-  "staleExplicitRowsAfter": {
-    "go": [],
-    "web": []
-  },
-  "staleRowsBefore": {
-    "go": [],
-    "web": [
-      "browser:tests/settings.spec.ts:Projects lists the ticket types with their prefixes",
-      "browser:tests/settings.spec.ts:Workspace shows the workspace and my role; people and keys moved to Access",
-      "browser:tests/settings.spec.ts:at 390 the sections sit in a grid and nothing is cut",
-      "browser:tests/settings.spec.ts:the section nav stays put when switching sections, including wide Access"
-    ]
-  },
-  "notes": [
-    "The four stale legacy web rows were plain GATED-FULL and disappear during compaction. The current native catalogue has no stale explicit exceptions."
-  ],
-  "fix1WorkerAttribution": "I work on this \u2014 session: codex-sol-ops257-l13s2-fix1 (95abfc14-7062-4945-8f2a-9371d2ce4467); role: builder; started: 2026-10-06T07:06:57Z",
-  "head": "1f25979829d29cc4f2b4cd2e9abda2e0cdbe86c1",
-  "proofScope": {
-    "lanes": [
-      "gated-full (merge_group)",
-      "essential (README-only pull_request)",
-      "catalogue (schedule)"
-    ],
-    "comparison": "Native Go and web inventories resolved by the base and current selectors; essential and catalogue equal; full adds exactly 141 Go and 59 web cases.",
-    "notProved": [
-      "Affected-lane (L4) selection equivalence",
-      "Shard assignment equivalence",
-      "Hosted execution duration"
-    ],
-    "separatePlannerReplay": "Recorded file lists evaluated on the current source tree/common current dependency graph with CI_AFFECTED_LANE unset, comparing the frozen 601dbaa4f planner and full base manifest against the current source-bound planner. Not historical per-PR tree reconstruction."
-  },
-  "plannerReplay": {
-    "command": "node scripts/test-tiers/replay.mjs --json --compare-base 601dbaa4f",
-    "laneComparison": {
-      "base": "601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
-      "affectedLane": "unset",
-      "prs": 80,
-      "matching": 80,
-      "differences": []
-    },
-    "browserBounds": {
-      "specs": 246,
-      "boundedSpecs": 202,
-      "overLimitOrUnsupported": 44,
-      "undercounts": []
-    },
-    "affectedLaneReplaySummary": {
-      "prs": 80,
-      "oldEssential": 16,
-      "newNarrowed": 36,
-      "newStatic": 0,
-      "percentNarrowed": 45,
-      "oldJobs": 2710,
-      "newJobs": 2420,
-      "fullReasons": {
-        "CI machinery": 18,
-        "R3": 9,
-        "R4": 6,
-        "unnarrowed": 8,
-        "missing": 1,
-        "browser fan-out": 1,
-        "unmapped": 1
-      }
-    },
-    "affectedLaneReplayTransitions": {
-      "full->full": 44,
-      "full->essential": 20,
-      "essential->essential": 16
-    },
-    "logSha256": "d30bab6117efa4b4dc75042f8ba142fb9f99f05e270507e0925f0a510132ae1f",
-    "perPRMatches": [
-      {
-        "pr": 199,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 200,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 201,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 202,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 203,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 204,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 205,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 206,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 208,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 210,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 211,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 213,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 214,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 216,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 217,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 219,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 220,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 221,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 222,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 223,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 224,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 225,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 226,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 227,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 228,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 229,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 230,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 231,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 232,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 233,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 234,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 235,
-        "mode": "essential",
-        "lane": "spec-only"
-      },
-      {
-        "pr": 236,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 237,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 239,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 240,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 241,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 242,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 243,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 244,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 245,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 246,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 247,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 248,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 249,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 250,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 251,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 252,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 253,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 254,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 255,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 256,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 257,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 259,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 260,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 261,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 262,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 263,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 264,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 265,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 266,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 267,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 268,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 269,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 270,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 272,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 273,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 275,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 280,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 283,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 284,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 286,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 288,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 289,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 290,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 291,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 294,
-        "mode": "essential",
-        "lane": "full"
-      },
-      {
-        "pr": 295,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 296,
-        "mode": "full",
-        "lane": "full"
-      },
-      {
-        "pr": 297,
-        "mode": "full",
-        "lane": "full"
-      }
-    ],
-    "perPRMatchesMeaning": "Each listed mode/lane equals the baseline mode/lane; differences are separately enumerated by laneComparison."
-  },
-  "fix1Findings": [
+  "historicalFix1Findings": [
     {
       "severity": "HIGH",
       "finding": "Unbounded implicit-case reclassification",
@@ -984,31 +1651,64 @@
       "regression": "Subprocesses with empty PATH prove non-Go tests load and native-Go tests fail individually with a clear requirement."
     }
   ],
-  "trackedSourcePatchHashScope": "git diff --binary 601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f -- . :(exclude)docs/qa/ops-257-l13-stage2-evidence.json; evidence excludes itself; untracked source files are bound separately below",
-  "untrackedSourceSha256": {
-    "scripts/test-tiers/planning-web.mjs": "4c39daa25621f33e01b79d9c070f0a7a7770338733089a3961119107781e959f"
-  },
-  "changedSourceFileSha256": {
-    "README.md": "b4db9670795e3d7e73100528364a86f74df91bad1d1ba825c1b1d0c192d339e8",
-    "docs/RELEASE.md": "3e3282cdd5fa01177d98b9b69c0d0d0100b789d791711a456dea94ccb77ee32c",
-    "scripts/ci/go-test-tiers.json": "cced66abd43558aaca46688d1dc90a766ee0f71d2fcb16c80e45a6b7b4713402",
-    "scripts/ci/web-test-tiers.json": "a8eff91ef87f137942b3f33f37c16cf2e05f73a11688a73a9f6517df69a8d96b",
-    "scripts/test-tiers/cli.mjs": "5a34e34bf43bbdf17337cab4917927dc04856384c14dbaf9f089339a36597224",
-    "scripts/test-tiers/core.mjs": "14559a34a5813954b9559579902ba867c60a15eabb2ff019bc44cf1af60145a7",
-    "scripts/test-tiers/diff.mjs": "46befc81ed7480a5d02485fcdf5b60916b6ae727cc2108d130a4d5db566f2945",
-    "scripts/test-tiers/manifests.mjs": "9a288346404ae3470efc61831f317ecac7228f15004d3026c54ac1293e67ff00",
-    "scripts/test-tiers/manifests.test.mjs": "ce8e0970f08936a5335bd5a569b6410b266f959b2d7d3c433ee62dbeefb6ef04",
-    "scripts/test-tiers/planning-web.mjs": "4c39daa25621f33e01b79d9c070f0a7a7770338733089a3961119107781e959f",
-    "scripts/test-tiers/prove-manifests.mjs": "0043efefb881a4682f7ca861f134e442c371ecae3cde57d9b3ad29ddb07fa6bb",
-    "scripts/test-tiers/replay.mjs": "e65fe13e51f6bac0cb921c5635df561c2cb4d927c523dcf8de7e3f36a862ee90",
-    "scripts/test-tiers/report.mjs": "9c4adb9a2242e060584340df69458eed8fc83d9cfc6ebd44eb4c08bd44116e8c",
-    "scripts/test-tiers/test-tiers.test.mjs": "d58e217bc59b408f64e020a653328c900effe3edcdc2f4da317824cfb937644f",
-    "scripts/test-tiers/tiers-merge-driver.mjs": "a068eb5410389309a1f7b9c8a278dc271b3b5ef1dc57b98796bcdfb53e1d339d",
-    "scripts/test-tiers/tiers-merge-driver.test.mjs": "03a7dca1903e879ad51232c90407cb667e39affbb121ae3cdd7ee242aa416195",
-    "web/scripts/aeon-676-ci.test.mjs": "0b9551e932ed3a0a9144f16e1d810fb636940e3777978c5966e7efee887bce61",
-    "web/scripts/aeon-681-ci.test.mjs": "ddb22cf9c3c02086f2115e223a4491a5dd1a7723e2593bfe4befc76cdb9e9fb4",
-    "web/scripts/ci-web-shard.test.mjs": "0f796bd94b5fa905154c087e7b0ea888496be54c154df4e6d5e99a031c89677e"
-  },
-  "changedSourceClosureSha256": "0f2dc8633adc7143dbdd4e0492c7311bbafacafe3f24af9e72d1fbc80f034176",
-  "changedSourceClosureScope": "Final bytes of tracked files changed since the proof base plus untracked source files, excluding this self-referential evidence file; SHA256 of the sorted compact JSON digest map."
+  "historicalFix1Note": "Retained attribution, checks and findings describe the earlier round only; fix2 results supersede its planner counts and 80/80 replay claim.",
+  "fix2Findings": [
+    {
+      "finding": "MEDIUM 1(a-d)",
+      "fix": "Require final describe arrow body; redeclared names fail closed; scan titles/options and iterable expressions; optional/indirect/tagged calls fail closed at collection and in initializers; reject raw quoted newlines and ambiguous slash. Each listed scenario has a named regression."
+    },
+    {
+      "finding": "MEDIUM 1(e)",
+      "fix": "Bound every impacted tests/ file; registrations in non-spec files return unknown to the planner."
+    },
+    {
+      "finding": "MEDIUM 1(f)",
+      "fix": "collectWeb reuses native browser rows and invokes assertPlanningWebBounds, rejecting known undercounts with file and planner/native numbers. Existing web-unit and web-shard tier runner jobs already collect through this path; no job/workflow added. Synthetic mismatch and collector/workflow call-site regression pins the guard."
+    },
+    {
+      "finding": "LOW 2",
+      "fix": "All 94 unsupported/over-limit spec names and exact mode costs recorded, including unsupported-spec-only counterfactual."
+    },
+    {
+      "finding": "LOW 3",
+      "fix": "Replay mode scope, tautological unset-lane comparison and native-row L4 after path explicitly recorded here and in RELEASE.md."
+    },
+    {
+      "finding": "LOW 4",
+      "fix": "20000-token cap; template interpolation/test prefilters; prefix queries and next-arrow index remove repeated token slices/indexOf. Near-2 MB input and repeated template interpolation regressions pass."
+    },
+    {
+      "finding": "LOW 5",
+      "fix": "Selections matching more than 25 existing tests require exact --expect-count N. Both direct helper and CLI enforce it; CLI counts across selected kinds and validates all outputs before saving."
+    },
+    {
+      "finding": "Evidence",
+      "fix": "Dropped commit-volatile state/head/uncommitted-patch/untracked-file fields; kept immutable proof base and final-byte input hashes independent of commit status."
+    }
+  ],
+  "provedInputs": {
+    "base": "601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
+    "fileCount": 4014,
+    "roots": [
+      "scripts/",
+      "internal/",
+      "cmd/",
+      "api/",
+      "web/"
+    ],
+    "namedFiles": [
+      "README.md",
+      "docs/RELEASE.md",
+      ".github/workflows/ci.yml",
+      "go.mod",
+      "go.sum",
+      "flake.nix",
+      "flake.lock",
+      "version.json",
+      "justfile"
+    ],
+    "sha256": "0c22eedb484c8cc9fd8be756879f135bbe1bdd86dd2e2a35d8a124c0b9ed4294",
+    "algorithm": "SHA256 of compact UTF-8 JSON mapping sorted tracked input paths to final-byte SHA256, with symlinks hashed as their target text; excludes .env* and encrypted inputs, generated local outputs and installed dependency files. This evidence is outside the selected roots.",
+    "limits": "Current checkout source/data plus dependency lock/config inputs are hashed; installed dependency tree is reused, not independently attested. Immutable base names baseline Git objects; historical PR trees and hosted execution are not proved."
+  }
 }
