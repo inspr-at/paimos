@@ -144,8 +144,13 @@ const isolatedGit = ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=fal
 export function fixedEnvironment(source = process.env, scratch) {
   const env = {}
   // Nix's compiler wrapper needs its SDK search paths when Go links cgo tests.
+  // NIX_LDFLAGS alone does not locate libresolv; the per-target wrapper host
+  // variable carries that SDK library path on Darwin.
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN', 'NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS']) {
     if (source[key] !== undefined) env[key] = source[key]
+  }
+  for (const key of Object.keys(source)) {
+    if (key.startsWith('NIX_CC_WRAPPER_TARGET_HOST_')) env[key] = source[key]
   }
   Object.assign(env, { CI: 'true', CI_LANE: 'full', AEON_TEST_TIER_MODE: 'full', GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', npm_config_audit: 'false', npm_config_fund: 'false' })
