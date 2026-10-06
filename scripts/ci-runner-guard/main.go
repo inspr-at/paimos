@@ -443,8 +443,15 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		case "web-setup", "web-unit", "web-shard":
 			condition = "needs.ci-plan.outputs.lane != 'docs-only'"
 		}
+		// OPS-257 L4: the static layout (PR-only affected lane) skips exactly
+		// the Go shards, timing, browser shards and the server smoke. Static
+		// checks, web setup/units, release checks and migrations always run.
+		switch id {
+		case "go-test", "go-timing", "web-shard", "e2e-run":
+			condition += " && needs.tier-plan.outputs.layout != 'static'"
+		}
 		tierGuard := ""
-		if id == "go-test" || id == "web-setup" || id == "web-unit" || id == "web-shard" {
+		if id == "go-test" || id == "go-timing" || id == "web-setup" || id == "web-unit" || id == "web-shard" || id == "e2e-run" {
 			tierGuard = "needs.tier-plan.result == 'success' && "
 			if !hasNeed(job["needs"], "tier-plan") {
 				return fmt.Errorf("required CI job %q must gate tier planning", id)
@@ -492,8 +499,14 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-setup", "web-unit", "web-shard", "tree-reuse", "cache-prime", "tier-plan"}) {
 				return fmt.Errorf("web must gate setup, every unit shard and every UI shard: %v", job["needs"])
 			}
-		} else if job["if"] != "always()" || !reflect.DeepEqual(job["needs"], []any{"ci-plan", context + "-run", "tree-reuse", "cache-prime"}) {
-			return fmt.Errorf("required check %q must aggregate classified validation for every CI event", context)
+		} else {
+			needs := []any{"ci-plan", context + "-run", "tree-reuse", "cache-prime"}
+			if context == "e2e" {
+				needs = append(needs, "tier-plan") // the static layout skips the smoke; e2e reads the layout
+			}
+			if job["if"] != "always()" || !reflect.DeepEqual(job["needs"], needs) {
+				return fmt.Errorf("required check %q must aggregate classified validation for every CI event", context)
+			}
 		}
 	}
 	return nil

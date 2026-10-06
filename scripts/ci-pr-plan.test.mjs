@@ -260,10 +260,10 @@ for (const id of ['release-check', 'e2e']) {
     const run = requiredJob(id).split('        run: |\n')[1];
     assert.ok(run, `${id} must have an executable gate`);
     const script = run.replace(/^          /gm, '');
-    const execute = (lane, result, plan = 'success') => {
+    const execute = (lane, result, plan = 'success', extra = {}) => {
       const execution = spawnSync('bash', ['-c', script], { cwd: repo.root, encoding: 'utf8', timeout: 10000,
-        env: { ...repo.env, REUSE: 'none', CI_LANE: lane, CI_PLAN: plan, CHECK_RESULT: result,
-          GITHUB_STEP_SUMMARY: join(repo.root, 'summary') } });
+        env: { ...repo.env, REUSE: 'none', CI_LANE: lane, CI_PLAN: plan, CHECK_RESULT: result, TIER_LAYOUT: 'full',
+          GITHUB_STEP_SUMMARY: join(repo.root, 'summary'), ...extra } });
       assert.ifError(execution.error);
       assert.equal(execution.signal, null, 'gate must finish without a signal');
       return execution;
@@ -281,6 +281,17 @@ for (const id of ['release-check', 'e2e']) {
     }
     for (const lane of ['', 'unknown']) {
       assert.equal(execute(lane, 'success').status, 1, `gate must reject CI_LANE=${lane}`);
+    }
+    if (id === 'e2e') {
+      // OPS-257 L4 static layout: PR-only; the smoke is skipped, never faked.
+      const pr = { TIER_LAYOUT: 'static', GITHUB_EVENT_NAME: 'pull_request' };
+      assert.equal(execute('full', 'skipped', 'success', pr).status, 0, 'static layout accepts a skipped smoke');
+      for (const [result, extra] of [['success', pr], ['failure', pr], ['skipped', { ...pr, GITHUB_EVENT_NAME: 'merge_group' }],
+        ['skipped', { TIER_LAYOUT: 'bogus' }], ['skipped', { TIER_LAYOUT: '' }]]) {
+        assert.equal(execute('full', result, 'success', extra).status, 1, `static layout must reject ${result} ${JSON.stringify(extra)}`);
+      }
+    } else {
+      assert.equal(execute('full', 'success', 'success', { TIER_LAYOUT: 'static' }).status, 0, 'release checks ignore the layout');
     }
   });
 }

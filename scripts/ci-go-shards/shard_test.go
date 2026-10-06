@@ -946,7 +946,9 @@ func TestTimingStepUsesHostedAndIsRequiredForFullValidation(t *testing.T) {
 		t.Fatal(err)
 	}
 	timing := workflow.Jobs["go-timing"]
-	if timing.RunsOn != "ubuntu-latest" || timing.If != "always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'" || !reflect.DeepEqual(timing.Needs, []any{"ci-plan", "tree-reuse"}) {
+	// OPS-257 L4: the static layout (PR-only affected lane) is the only skip
+	// beyond the classified exemption; full validation always runs timing hosted.
+	if timing.RunsOn != "ubuntu-latest" || timing.If != "always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full' && needs.tier-plan.outputs.layout != 'static') && needs.tree-reuse.outputs.reuse != 'merge_group'" || !reflect.DeepEqual(timing.Needs, []any{"ci-plan", "tree-reuse", "tier-plan"}) {
 		t.Fatal("timing job must run hosted for full validation")
 	}
 	count := 0
@@ -981,9 +983,12 @@ func TestTimingStepUsesHostedAndIsRequiredForFullValidation(t *testing.T) {
 			hasTiming = true
 		}
 	}
+	// The full layout requires timing success; only the PR-only static layout
+	// (OPS-257 L4) expects it skipped, and that layout never reaches main.
 	if gate.If != "always()" || !ok || !hasTiming ||
 		!strings.Contains(gate.Steps[0].Run, `full) expected=success`) ||
-		!strings.Contains(gate.Steps[0].Run, `test "${GO_TIMING}" = "$expected"`) {
+		!strings.Contains(gate.Steps[0].Run, `full) shards="$expected"`) ||
+		!strings.Contains(gate.Steps[0].Run, `test "${GO_TIMING}" = "$shards"`) {
 		t.Fatal("required go gate does not require successful timing budgets")
 	}
 }

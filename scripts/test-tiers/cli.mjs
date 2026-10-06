@@ -4,11 +4,11 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { collectGo, collectWeb, command, root, web, evidence, saveJSON, saveManifest } from './collect.mjs'
-import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights } from './core.mjs'
+import { validate, select, shard, key, counts, exactPattern, webGraph, measuredWeights, tierManifestPattern } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { runPlaywright } from '../playwright-safe.mjs'
 import { loadManifest as loadBrowserPolicy, tierWeights } from '../../web/scripts/ci-web-shard.mjs'
-import { changedPaths, schedulingMode } from './diff.mjs'
+import { changedPaths, schedulingDecision, eventBase, sourceTree, promotionsBetween } from './diff.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
@@ -20,9 +20,17 @@ export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',p
   const all=validate(manifest,inventory.tests)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
   const graph=kind==='web'||affectedLane==='on'?webGraph(web):{}
+  // Consumer rules read the candidate tree; manifest promotions compare the
+  // fetched event base with the checkout. Both are unused unless the switch is on.
+  const on=affectedLane==='on'&&event==='pull_request'&&Array.isArray(paths)
+  const tree=on?sourceTree(root):undefined
+  const promotions=on&&paths.some(path=>tierManifestPattern.test(path))?promotionsBetween(eventBase(),{cwd:root}):undefined
+  const readFile=path=>readFileSync(resolve(root,path),'utf8')
+  const decision=schedulingDecision(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined,tree,promotions})
   const selection=select(all,{event,paths,imports:inventory.imports,affectedLane,
-    forceFull:full||schedulingMode(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined})==='full',forceAll:catalogue,
-    webImports:graph})
+    forceFull:full||decision.mode==='full',forceAll:catalogue,
+    webImports:graph,tree,promotions,readFile})
+  selection.layout=selection.full?'full':decision.layout
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}
   if(kind==='web'&&!unit) Object.assign(weights,tierWeights(browserPolicy,filtered))
@@ -168,6 +176,7 @@ export async function main(args) {
   if(mode==='collect') { saveJSON(resolve(evidence,`${kind}-inventory.json`),target(kind));return 0 }
   if(mode==='check') {
     const all=validate(load(kind),target(kind).tests,undefined,{strict:options.strict})
+    measuredWeights(load(kind),all) // malformed timing weights fail the manifest check, not a later plan
     if(kind==='web') { console.log(JSON.stringify({inventory:counts(all)}));return 0 }
     const output=command('go',['test','-p','2','-json','-list','^(Test|Fuzz)','./...'],{env:{...process.env,GOMAXPROCS:'2'},timeout:15*60*1000})
     const listed=[]
@@ -190,7 +199,7 @@ export async function main(args) {
   }
   if(options.paths===undefined) options.paths=changedPaths(options.event??process.env.GITHUB_EVENT_NAME,process.env,{fetchBase:true})
   const selection=plan(kind,options)
-  console.log(JSON.stringify({kind,full:selection.full,reason:selection.reason,scope:selection.scope??'changed-area',deferredBrowserCases:selection.deferredBrowserCases??0,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
+  console.log(JSON.stringify({kind,full:selection.full,layout:selection.layout??'full',reason:selection.reason,scope:selection.scope??'changed-area',deferredBrowserCases:selection.deferredBrowserCases??0,inventory:counts(selection.all),selected:counts(selection.tests),kinds:Object.fromEntries(['go','node','vitest','browser'].map(kind=>[kind,selection.tests.filter(row=>row.kind===kind).length]))}))
   if(mode==='run') return run(kind,selection,options)
   return 0
 }

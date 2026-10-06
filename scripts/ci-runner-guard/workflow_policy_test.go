@@ -470,6 +470,10 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 						values[name] = "success"
 						continue
 					}
+					if name == "TIER_LAYOUT" {
+						values[name] = "full"
+						continue
+					}
 					values[name] = "skipped"
 					if lane == "full" || lane == "spec-only" && (name == "WEB_SETUP" || name == "WEB_UNIT" || name == "WEB_SHARD") {
 						values[name] = "success"
@@ -492,7 +496,7 @@ func TestCIClassifiedAggregateResults(t *testing.T) {
 					t.Fatalf("legitimate %s gate rejected: %v", lane, err)
 				}
 				for name, expected := range values {
-					if name == "CI_LANE" || name == "REUSE" || name == "REUSE_PROOF" || name == "SOURCE_RUN" || name == "CACHE_PRIME" {
+					if name == "CI_LANE" || name == "REUSE" || name == "REUSE_PROOF" || name == "SOURCE_RUN" || name == "CACHE_PRIME" || name == "TIER_LAYOUT" {
 						continue
 					}
 					wrong := "success"
@@ -597,4 +601,85 @@ func TestCIPlanUsesTrustedBaseClassifier(t *testing.T) {
 		return
 	}
 	t.Fatal("classifier step is missing")
+}
+
+// OPS-257 L4 phase 2: the static layout is a PR-only feedback lane. Its
+// aggregates accept exactly the skipped shard/timing/smoke jobs and still
+// require static checks, setup and units; any other layout value is rejected.
+func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
+	var workflow map[string]any
+	if err := yaml.Unmarshal(readPolicyWorkflows(t)["ci.yml"], &workflow); err != nil {
+		t.Fatal(err)
+	}
+	jobs := mapping(workflow["jobs"])
+	if mapping(mapping(jobs["tier-plan"])["outputs"])["layout"] != "${{ steps.tiers.outputs.layout }}" {
+		t.Fatal("tier-plan must publish the layout output")
+	}
+	for id, static := range map[string]bool{"go-test": true, "go-timing": true, "web-shard": true, "e2e-run": true, "go-static": false, "web-setup": false, "web-unit": false, "release-check-run": false} {
+		condition, _ := mapping(jobs[id])["if"].(string)
+		if strings.Contains(condition, "needs.tier-plan.outputs.layout != 'static'") != static {
+			t.Fatalf("%s static-layout gate = %v, want %v", id, !static, static)
+		}
+	}
+	if _, exists := mapping(jobs["migration-compat"])["if"]; exists {
+		t.Fatal("migration-compat must stay unconditional in the static layout")
+	}
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	type gate struct {
+		accepted map[string]string
+		rejected []map[string]string
+	}
+	cases := map[string]gate{
+		"go": {
+			accepted: map[string]string{"GO_TEST": "skipped", "GO_TIMING": "skipped", "GO_STATIC": "success"},
+			rejected: []map[string]string{{"GO_TEST": "success"}, {"GO_TEST": "failure"}, {"GO_TIMING": "success"}, {"GO_STATIC": "skipped"}, {"GO_STATIC": "failure"}, {"GITHUB_EVENT_NAME": "merge_group"}, {"GITHUB_EVENT_NAME": "push"}, {"CI_LANE": "spec-only"}, {"TIER_LAYOUT": "bogus"}, {"TIER_LAYOUT": ""}, {"TIER_PLAN": "failure"}},
+		},
+		"web": {
+			accepted: map[string]string{"WEB_SETUP": "success", "WEB_UNIT": "success", "WEB_SHARD": "skipped"},
+			rejected: []map[string]string{{"WEB_SHARD": "success"}, {"WEB_SHARD": "failure"}, {"WEB_UNIT": "skipped"}, {"WEB_UNIT": "failure"}, {"WEB_SETUP": "skipped"}, {"GITHUB_EVENT_NAME": "merge_group"}, {"TIER_LAYOUT": "bogus"}, {"TIER_LAYOUT": ""}},
+		},
+		"e2e": {
+			accepted: map[string]string{"CHECK_RESULT": "skipped"},
+			rejected: []map[string]string{{"CHECK_RESULT": "success"}, {"CHECK_RESULT": "failure"}, {"GITHUB_EVENT_NAME": "merge_group"}, {"TIER_LAYOUT": "bogus"}, {"TIER_LAYOUT": ""}},
+		},
+	}
+	for id, c := range cases {
+		steps := mapping(jobs[id])["steps"].([]any)
+		step := mapping(steps[len(steps)-1])
+		run := step["run"].(string)
+		if _, exists := mapping(step["env"])["TIER_LAYOUT"]; !exists {
+			t.Fatalf("%s must read the tier layout", id)
+		}
+		execute := func(overrides map[string]string) error {
+			values := map[string]string{"CI_LANE": "full", "CI_PLAN": "success", "TIER_PLAN": "success", "TIER_LAYOUT": "static", "REUSE": "none", "REUSE_PROOF": "skipped", "SOURCE_RUN": "", "CACHE_PRIME": "skipped", "GITHUB_EVENT_NAME": "pull_request"}
+			for name, value := range c.accepted {
+				values[name] = value
+			}
+			for name, value := range overrides {
+				values[name] = value
+			}
+			cmd := exec.Command("bash", "-c", run)
+			cmd.Dir = root
+			cmd.Env = append(os.Environ(), "GITHUB_STEP_SUMMARY="+filepath.Join(t.TempDir(), "summary"))
+			for name, value := range values {
+				cmd.Env = append(cmd.Env, name+"="+value)
+			}
+			return cmd.Run()
+		}
+		if err := execute(nil); err != nil {
+			t.Fatalf("%s rejected the legitimate static layout: %v", id, err)
+		}
+		for _, overrides := range c.rejected {
+			if err := execute(overrides); err == nil {
+				t.Fatalf("%s accepted %v in the static layout", id, overrides)
+			}
+		}
+	}
+	// release-check has no layout input: the static lane keeps release checks.
+	if _, exists := mapping(mapping(mapping(jobs["release-check"])["steps"].([]any)[0])["env"])["TIER_LAYOUT"]; exists {
+		t.Fatal("release checks must not vary with the tier layout")
+	}
 }

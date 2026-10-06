@@ -218,6 +218,9 @@ func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
 		if treeMap(s["env"])["TIER_PLAN"] != nil {
 			values["TIER_PLAN"] = "success"
 		}
+		if treeMap(s["env"])["TIER_LAYOUT"] != nil {
+			values["TIER_LAYOUT"] = "full" // planner output, not a job result
+		}
 		for key := range treeMap(s["env"]) {
 			if _, exists := values[key]; !exists {
 				values[key] = "skipped"
@@ -243,7 +246,7 @@ func TestQueueReuseAggregatesRejectPartialResults(t *testing.T) {
 			t.Fatalf("%s rejects verified reuse: %v", id, err)
 		}
 		for key, expected := range values {
-			if key == "REUSE" {
+			if key == "REUSE" || key == "TIER_LAYOUT" {
 				continue
 			} // no reuse falls back to the classified gate, covered separately
 			wrong := "success"
@@ -469,7 +472,8 @@ func TestParallelWebUnitsShareRuntimeAndRunOnce(t *testing.T) {
 func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 	// Pin the accepted c72eb506 classification/full-execution configuration.
 	// Keep that historical fixture and the original AEON-681 tier fixture.
-	// Only six tier-adapted execution jobs use the additive merge-main pins;
+	// Seven tier-adapted execution jobs use the additive merge-main pins (e2e-run
+	// joined with the OPS-257 L4 static layout gate);
 	// lane classification, unaffected jobs and unconditional migrations stay pinned.
 	body, err := os.ReadFile(filepath.Join(root(t), "scripts/releaseworkflow/testdata/ci-main-before-reuse.json"))
 	if err != nil {
@@ -501,7 +505,7 @@ func TestFullFallbackPreservesPinnedMainJobs(t *testing.T) {
 	if err := json.Unmarshal(tierBody, &tierBaseline); err != nil {
 		t.Fatal(err)
 	}
-	if len(tierBaseline.MergeMain.Source) != 40 || len(tierBaseline.MergeMain.Hashes) != 6 {
+	if len(tierBaseline.MergeMain.Source) != 40 || len(tierBaseline.MergeMain.Hashes) != 7 {
 		t.Fatal("incomplete merge-main tier fixture")
 	}
 	for id, expected := range baseline.Hashes {

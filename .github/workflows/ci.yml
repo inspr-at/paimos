@@ -182,6 +182,9 @@ jobs:
     timeout-minutes: 2
     outputs:
       mode: ${{ steps.tiers.outputs.mode }}
+      # full: the mode's shard layout. static (affected PR lane only): static,
+      # unit, release and migration jobs; no Go shards, timing, browsers or e2e.
+      layout: ${{ steps.tiers.outputs.layout }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: contains(fromJSON('["pull_request","merge_group"]'), github.event_name)
@@ -194,7 +197,7 @@ jobs:
         run: |
           case "$GITHUB_EVENT_NAME" in
             pull_request|merge_group) node scripts/test-tiers/diff.mjs ;;
-            *) echo 'mode=full' >> "$GITHUB_OUTPUT" ;;
+            *) printf 'mode=full\nlayout=full\n' >> "$GITHUB_OUTPUT" ;;
           esac
 
   runner-route:
@@ -203,7 +206,7 @@ jobs:
       required-idle-runners: 4
 
   go-test:
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.runner-route.result == 'success'
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full' && needs.tier-plan.outputs.layout != 'static') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.runner-route.result == 'success'
     needs: [runner-route, ci-plan, tree-reuse, tier-plan]
     strategy:
       fail-fast: false
@@ -314,8 +317,8 @@ jobs:
   # Timing budgets were calibrated on hosted hardware. Full validation always
   # runs this job, regardless of the selected Go shard layout.
   go-timing:
-    needs: [ci-plan, tree-reuse]
-    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
+    needs: [ci-plan, tree-reuse, tier-plan]
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full' && needs.tier-plan.outputs.layout != 'static') && needs.tree-reuse.outputs.reuse != 'merge_group'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -420,6 +423,7 @@ jobs:
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
           TIER_PLAN: ${{ needs.tier-plan.result }}
+          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
           CI_PLAN: ${{ needs.ci-plan.result }}
           CI_LANE: ${{ needs.ci-plan.outputs.lane }}
           GO_TEST: ${{ needs.go-test.result }}
@@ -449,9 +453,20 @@ jobs:
             full) expected=success ;;
             *) exit 1 ;;
           esac
-          test "${GO_TEST}" = "$expected"
+          # The static layout is a PR-only feedback lane: static checks run,
+          # Go shards and timing skip. Merge groups and main never use it.
+          case "$TIER_LAYOUT" in
+            full) shards="$expected" ;;
+            static)
+              # Docs-only and spec-only lanes skip these jobs anyway.
+              test "$GITHUB_EVENT_NAME" = pull_request
+              shards=skipped
+              echo 'static layout: Go shards and timing skipped' >> "$GITHUB_STEP_SUMMARY" ;;
+            *) exit 1 ;;
+          esac
+          test "${GO_TEST}" = "$shards"
           test "${GO_STATIC}" = "$expected"
-          test "${GO_TIMING}" = "$expected"
+          test "${GO_TIMING}" = "$shards"
           if [ "$expected" = skipped ]; then echo "$CI_LANE: Go checks skipped" >> "$GITHUB_STEP_SUMMARY"; fi
 
   # OPS-257: install/build once, then fan out balanced UI specs on hosted runners.
@@ -588,7 +603,7 @@ jobs:
         run: npm run test:browser-safety
 
   web-shard:
-    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.web-setup.result == 'success'
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane != 'docs-only' && needs.tier-plan.outputs.layout != 'static') && needs.tree-reuse.outputs.reuse != 'merge_group' && needs.web-setup.result == 'success'
     needs: [ci-plan, web-setup, tree-reuse, tier-plan]
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -686,6 +701,7 @@ jobs:
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           CACHE_PRIME: ${{ needs.cache-prime.result }}
           TIER_PLAN: ${{ needs.tier-plan.result }}
+          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
           CI_PLAN: ${{ needs.ci-plan.result }}
           CI_LANE: ${{ needs.ci-plan.outputs.lane }}
           WEB_SETUP: ${{ needs.web-setup.result }}
@@ -724,7 +740,15 @@ jobs:
             full)
               test "$WEB_SETUP" = success
               test "$WEB_UNIT" = success
-              test "$WEB_SHARD" = success
+              # Static layout (PR-only affected lane): units run, browsers skip.
+              case "$TIER_LAYOUT" in
+                full) test "$WEB_SHARD" = success ;;
+                static)
+                  test "$GITHUB_EVENT_NAME" = pull_request
+                  test "$WEB_SHARD" = skipped
+                  echo 'static layout: browser shards skipped' >> "$GITHUB_STEP_SUMMARY" ;;
+                *) exit 1 ;;
+              esac
               ;;
             *) exit 1 ;;
           esac
@@ -829,7 +853,7 @@ jobs:
 
   e2e:
     if: always()
-    needs: [ci-plan, e2e-run, tree-reuse, cache-prime]
+    needs: [ci-plan, e2e-run, tree-reuse, cache-prime, tier-plan]
     runs-on: ubuntu-latest
     steps:
       - name: Require full validation or the classified PR exemption
@@ -840,6 +864,7 @@ jobs:
           CACHE_PRIME: ${{ needs.cache-prime.result }}
           CI_LANE: ${{ needs.ci-plan.outputs.lane }}
           CI_PLAN: ${{ needs.ci-plan.result }}
+          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
           CHECK_RESULT: ${{ needs.e2e-run.result }}
         run: |
           set -euo pipefail
@@ -862,14 +887,22 @@ jobs:
               test "$CHECK_RESULT" = skipped
               echo "$CI_LANE: end-to-end checks skipped" >> "$GITHUB_STEP_SUMMARY" ;;
             full)
-              test "$CHECK_RESULT" = success
+              # Static layout (PR-only affected lane): no server smoke.
+              case "$TIER_LAYOUT" in
+                full) test "$CHECK_RESULT" = success ;;
+                static)
+                  test "$GITHUB_EVENT_NAME" = pull_request
+                  test "$CHECK_RESULT" = skipped
+                  echo 'static layout: end-to-end checks skipped' >> "$GITHUB_STEP_SUMMARY" ;;
+                *) exit 1 ;;
+              esac
               ;;
             *) exit 1 ;;
           esac
 
   e2e-run:
-    needs: [ci-plan, tree-reuse]
-    if: always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'
+    needs: [ci-plan, tree-reuse, tier-plan]
+    if: always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full' && needs.tier-plan.outputs.layout != 'static') && needs.tree-reuse.outputs.reuse != 'merge_group'
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -989,7 +1022,7 @@ jobs:
 
   tier-measurements:
     if: always()
-    needs: [go, web, release-check, e2e, migration-compat, tree-reuse, ci-plan]
+    needs: [go, web, release-check, e2e, migration-compat, tree-reuse, ci-plan, tier-plan]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1008,6 +1041,7 @@ jobs:
       - name: Report cases and complete job runner minutes
         env:
           CI_LANE: ${{ needs.ci-plan.outputs.lane }}
+          TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
           REUSE: ${{ needs.tree-reuse.outputs.reuse }}
           SOURCE_RUN: ${{ needs.tree-reuse.outputs.run }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
