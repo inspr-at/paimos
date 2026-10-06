@@ -1890,9 +1890,7 @@ AEON-655 ledger entry remains a coordinator action. Linux browser CI and
 OPS-247 remain unverified; local single-file Chromium evidence is not a
 replacement release gate. This fix round neither pushes to origin nor deploys.
 
-## Local static CI pre-filter (OPS-257)
-
-### Merge-friendly CI manifests (OPS-257 L13, stage 1)
+## Merge-friendly CI manifests (OPS-257 L13, stage 1)
 
 Maintain `scripts/ci/{go,web}-test-tiers.json` and `web/ci-web-shards.json`
 with `node scripts/test-tiers/cli.mjs manifests --write`; verify with
@@ -1905,8 +1903,10 @@ compares against the local pre-conversion commit (default: HEAD), allowing only
 row-list order changes. It checks every tier, timing weight and metadata value,
 retains duplicate multiplicity, and emits the base SHA and row counts as JSON.
 
-Tests sort by `(kind, package or file, name, occurrence)` using ordinal comparison,
-with occurrence preserving distinct native registrations with identical titles.
+Tests sort by `(kind, owner, name, occurrence)` using ordinal comparison: owner
+is package for Go and file for every other kind, even if a row carries package
+metadata. Occurrence preserves distinct native registrations with identical
+titles; Go rows reject occurrence because Go identity is package plus name.
 Post-gate identities, deletion candidate rows and other keyed row lists sort by
 identity. Timing owner maps sort by owner, with one complete timing value per line.
 Shard specs sort by file within their group; group order, flags, tiers and weights
@@ -1943,15 +1943,17 @@ with a different `core.mjs`) is checked out. Refresh the copy when the driver is
 updated; its parity tests enforce the same behavior as the in-repo command.
 
 ```sh
-mkdir -p /Users/markus/.local/share/ops-qa/ci
-cp <repo>/scripts/test-tiers/tiers-merge-driver.mjs /Users/markus/.local/share/ops-qa/ci/tiers-merge-driver.mjs
-git -C <repo> config merge.tiers.driver "node /Users/markus/.local/share/ops-qa/ci/tiers-merge-driver.mjs %O %A %B %P"
+mkdir -p "$HOME/.local/share/aeon-ci"
+cp <repo>/scripts/test-tiers/tiers-merge-driver.mjs "$HOME/.local/share/aeon-ci/tiers-merge-driver.mjs"
+# Replace /absolute/path/to/node with the absolute path from command -v node.
+git -C <repo> config merge.tiers.driver '"/absolute/path/to/node" "$HOME/.local/share/aeon-ci/tiers-merge-driver.mjs" %O %A %B %P'
 ```
 
-For another install location, the exact configuration is
-`git -C <repo> config merge.tiers.driver "node /abs/path/tiers-merge-driver.mjs %O %A %B %P"`.
-The executable takes `BASE OURS THEIRS PATH`; PATH selects one of the three
-manifest families. The repository's `.gitattributes` provides these attributes.
+Git runs the driver through a shell, so `$HOME` (or `~`) resolves outside the
+checkout. Use an absolute Node executable path so a different shell PATH cannot
+select another runtime. For another install location, replace only the stable
+script path in that configuration. The executable takes `BASE OURS THEIRS PATH`;
+PATH selects one of the three manifest families. The repository's `.gitattributes` provides these attributes.
 Also add the following lines once to `$GIT_COMMON_DIR/info/attributes` so branches
 that predate `.gitattributes` use the driver. Resolve that directory with
 `git -C <repo> rev-parse --path-format=absolute --git-common-dir`; preserve any
@@ -1966,15 +1968,41 @@ web/ci-web-shards.json merge=tiers
 The driver accepts both old and canonical layouts. It merges keyed row sets:
 independent additions survive; deletion wins over an unchanged row; deletion
 versus change and divergent edits to one row (including tiers/weights) conflict.
-Group specs merge independently while group order and launch policy are retained;
-unrelated metadata changes merge by field. Timing-owner records merge atomically.
+Group specs merge independently. A unilateral reorder of surviving groups is
+taken alongside the other side's content edits; matching reorders are taken,
+divergent reorders conflict. New groups append in identity order. The same order
+rule applies to integration notes. Launch policy and unrelated metadata changes
+merge by field. Timing-owner records merge atomically.
 A clean exit 0 means the canonical merged result has been written to OURS,
 even when the inputs were unchanged old-layout manifests. Exit 1 means a real
-disagreement: handle it in a fix round. Usage/parse errors (including malformed
-JSON, duplicate identities in an input and unsupported paths) exit 2. Every nonzero result
-leaves OURS untouched and names the offending path/key on stderr. Git then keeps
-the path unmerged for explicit resolution. The driver never selects a tier or
-weight to resolve contradictory edits. It is a local convenience, not a GitHub queue fix.
+disagreement: OURS contains deliberately invalid JSON with git-style diff3
+conflict markers and the complete OURS, BASE and THEIRS versions. Unresolved
+markers fail JSON parsing and the canonical check. Usage/parse/IO errors
+(including malformed JSON, duplicate input identities, Go occurrence and
+unsupported paths) exit 2; unexpected crashes exit 3. Those failures leave OURS
+byte-for-byte untouched, so it may still be valid JSON. Every replacement,
+including conflict output, writes a sibling temporary file, fsyncs it, then
+renames it atomically. Failure before rename leaves OURS unchanged. Stderr names
+the offending path/key. The driver never selects a tier or weight to resolve
+contradictory edits. It is a local convenience, not a GitHub queue fix.
+
+If `merge=tiers` is set but `merge.tiers.driver` is not configured, Git falls back
+to its built-in text merge. A configured but missing driver script makes Node
+exit 1 with `MODULE_NOT_FOUND`, which looks like a real disagreement but leaves
+OURS untouched. **Any nonzero driver result means UNRESOLVED: read stderr and
+never `git add` the working file as is.** Git keeps the path unmerged; a valid
+JSON file alone does not prove that THEIRS' classifications survived.
+
+Recreate text conflict markers from the index with
+`git checkout --merge -- <path>`, or start from THEIRS with
+`git show :3:<path> > <path>` and re-apply OURS' missing classification rows using
+`node scripts/test-tiers/cli.mjs classify --tier <T> ...`. Explicitly reconcile
+conflicting tiers, weights, order and metadata against both index versions.
+Finish with `node scripts/test-tiers/cli.mjs manifests --write` and
+`node scripts/test-tiers/cli.mjs manifests --check`, then inspect the complete
+resolved diff against both sides before staging.
+
+## Local static CI pre-filter (OPS-257)
 
 Before pushing, run `node scripts/ci-static.mjs --here` from any directory
 (the script resolves its own worktree). Before enqueueing a committed branch,

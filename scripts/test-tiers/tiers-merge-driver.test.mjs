@@ -2,7 +2,7 @@
 // Runs in the fixed script-test lane through test-tiers.test.mjs.
 import test, { after } from 'node:test'
 import assert from 'node:assert/strict'
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -12,11 +12,8 @@ import { formatManifest, manifestPaths } from './manifests.mjs'
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const standalone = resolve(root, 'scripts/test-tiers/tiers-merge-driver.mjs')
 const cli = resolve(root, 'scripts/test-tiers/cli.mjs')
-const directory = realpathSync(mkdtempSync(join(tmpdir(), 'ops257-l13-fix1-driver-')))
-after(() => {
-  const result = spawnSync('trash', [directory], { encoding: 'utf8', timeout: 10_000 })
-  if (result.error || result.status !== 0) console.warn(`Trash unavailable; retained driver fixtures: ${directory}`)
-})
+const directory = realpathSync(mkdtempSync(join(tmpdir(), 'ops257-l13-fix2-driver-')))
+after(() => rmSync(directory, { recursive: true, force: true }))
 const [go, web, shards] = manifestPaths
 const row = (name, tier = 'GATED-FULL', packageName = 'internal/auth') => ({ kind: 'go', package: packageName, name, tier })
 const manifest = tests => ({ version: 1, defaultNewTier: 'NIGHTLY', tests })
@@ -33,7 +30,7 @@ function run(label, program, inputs, file, extra = [], cwd = directory) {
   const result = spawnSync(process.execPath, [...extra, ...program, ...paths, file], { cwd, encoding: 'utf8', timeout: 10_000 })
   assert.ifError(result.error)
   assert.equal(result.signal, null)
-  return { ...result, before, output: readFileSync(paths[1]) }
+  return { ...result, before, output: readFileSync(paths[1]), remainingFiles: readdirSync(fixture) }
 }
 
 const cases = []
@@ -79,11 +76,12 @@ for (const [name, invalid] of [
   const inputs = [base, base, base]; inputs[i] = invalid
   fixture(`${name} in ${['BASE', 'OURS', 'THEIRS'][i]}`, inputs, go, 2)
 }
+fixture('Go occurrence is not a registration identity', [base, manifest([{ ...row('TestZ'), occurrence: 1 }]), base], go, 2)
 fixture('web shard duplicate spec identity', [shardBase, shardManifest([group('first', [spec('tests/a.spec.ts'), spec('tests/a.spec.ts')])]), shardBase], shards, 2)
 
 for (const { name, inputs, file, status, expected } of cases) test(`OPS-257 standalone/in-repo parity: ${name}`, () => {
-  // Reversing the sides also proves determinism and that either failure leaves
-  // the exact original OURS bytes alone, including malformed OURS input.
+  // Reversing the sides proves deterministic clean merges. Conflicts retain
+  // both sides under markers; setup errors retain the exact original OURS.
   for (const sides of [inputs, [inputs[0], inputs[2], inputs[1]]]) {
     const external = run('standalone', [standalone], sides, file)
     const internal = run('in-repo', [cli, 'manifests', 'merge-driver'], sides, file)
@@ -93,11 +91,19 @@ for (const { name, inputs, file, status, expected } of cases) test(`OPS-257 stan
     assert.equal(external.stderr, internal.stderr)
     if (status === 0) {
       assert.equal(external.output.toString(), formatManifest(expected, file))
+    } else if (status === 1) {
+      assert.ok(external.stderr.trim())
+      const versions = external.output.toString().match(/^<<<<<<< ours\n([\s\S]*)\n\|{7} base\n([\s\S]*)\n=======\n([\s\S]*)\n>>>>>>> theirs\n$/)
+      assert.ok(versions, 'conflict contains every side under diff3 markers')
+      assert.throws(() => JSON.parse(external.output), SyntaxError)
+      assert.deepEqual(versions.slice(1), [sides[1], sides[0], sides[2]].map(data => formatManifest(typeof data === 'string' ? JSON.parse(data) : data, file).trimEnd()))
     } else {
       assert.ok(external.stderr.trim())
       assert.deepEqual(external.output, external.before)
       assert.deepEqual(internal.output, internal.before)
     }
+    assert.deepEqual(external.remainingFiles.sort(), ['base', 'ours', 'theirs'])
+    assert.deepEqual(internal.remainingFiles.sort(), ['base', 'ours', 'theirs'])
   }
 })
 
@@ -123,14 +129,108 @@ test('OPS-257 installed standalone driver reads no repo files from an old extern
   const oldCheckout = join(directory, 'old-checkout')
   mkdirSync(oldCheckout)
   writeFileSync(join(oldCheckout, 'core.mjs'), "throw new Error('old core must not be imported')\n")
-  // Node itself enforces the read allowlist. The copied driver has no access
-  // to the repository, even through its original absolute path or symlinks.
-  const permissions = ['--permission', `--allow-fs-read=${directory}`, `--allow-fs-write=${directory}`]
+  // Node's permission mode disables fsync even with a write allowlist. Use
+  // module/read guards instead, so this isolation test executes the real fsync.
+  const guard = join(directory, 'isolation-guard.mjs')
+  writeFileSync(guard, `import fs from 'node:fs'
+import { registerHooks, syncBuiltinESMExports } from 'node:module'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve, sep } from 'node:path'
+const allowed = fs.realpathSync(dirname(fileURLToPath(import.meta.url))) + sep
+function check(path) {
+  if (!fs.realpathSync(resolve(path instanceof URL ? fileURLToPath(path) : path)).startsWith(allowed)) throw new Error('ERR_ACCESS_DENIED: fixture read allowlist')
+}
+for (const name of ['readFileSync', 'statSync']) {
+  const original = fs[name]
+  fs[name] = (path, ...args) => { check(path); return original(path, ...args) }
+}
+syncBuiltinESMExports()
+registerHooks({ resolve(specifier, context, next) {
+  const result = next(specifier, context)
+  if (result.url.startsWith('file:')) check(fileURLToPath(result.url))
+  return result
+} })
+`)
+  const permissions = ['--import', guard]
   const denied = spawnSync(process.execPath, [...permissions, '-e', "require('node:fs').readFileSync(process.argv[1])", standalone], { cwd: oldCheckout, encoding: 'utf8', timeout: 10_000 })
   assert.ifError(denied.error)
   assert.equal(denied.status, 1)
   assert.match(denied.stderr, /ERR_ACCESS_DENIED/)
+  const deniedImport = spawnSync(process.execPath, [...permissions, standalone], { cwd: oldCheckout, encoding: 'utf8', timeout: 10_000 })
+  assert.ifError(deniedImport.error)
+  assert.equal(deniedImport.status, 1)
+  assert.match(deniedImport.stderr, /ERR_ACCESS_DENIED/)
   const result = run('installed', [installed], [base, ours, theirs], go, permissions, oldCheckout)
   assert.equal(result.status, 0, result.stderr)
   assert.equal(result.output.toString(), formatManifest(combined, go))
+})
+
+
+test('OPS-257 both driver CLIs report unexpected crashes as 3 and preserve OURS', () => {
+  const injected = join(directory, 'crash.mjs')
+  writeFileSync(injected, `import fs from 'node:fs'
+import { syncBuiltinESMExports } from 'node:module'
+fs.statSync = () => { throw new TypeError('injected unexpected crash') }
+syncBuiltinESMExports()
+`)
+  for (const program of [[standalone], [cli, 'manifests', 'merge-driver']]) {
+    const result = run('crash', program, [base, ours, theirs], go, ['--import', injected])
+    assert.equal(result.status, 3, result.stderr)
+    assert.match(result.stderr, /injected unexpected crash/)
+    assert.deepEqual(result.output, result.before)
+    assert.deepEqual(result.remainingFiles.sort(), ['base', 'ours', 'theirs'])
+  }
+})
+
+for (const operation of ['writeFileSync', 'fsyncSync', 'renameSync']) {
+  test(`OPS-257 atomic ${operation} failure preserves OURS on clean and conflict paths`, () => {
+    const injected = join(directory, `fail-${operation}.mjs`)
+    writeFileSync(injected, `import fs from 'node:fs'
+import { syncBuiltinESMExports } from 'node:module'
+const original = fs.${operation}
+fs.${operation} = (...args) => {
+  ${operation === 'writeFileSync' ? "original(args[0], 'partial temporary bytes')" : ''}
+  throw Object.assign(new Error('injected ${operation} failure'), { code: 'EIO' })
+}
+syncBuiltinESMExports()
+`)
+    for (const program of [[standalone], [cli, 'manifests', 'merge-driver']]) {
+      for (const inputs of [[base, ours, theirs], [base, manifest([row('TestZ', 'ESSENTIAL')]), manifest([row('TestZ', 'NIGHTLY')])]]) {
+        const result = run('atomic', program, inputs, go, ['--import', injected])
+        assert.equal(result.status, 2, result.stderr)
+        assert.match(result.stderr, new RegExp(`injected ${operation} failure`))
+        assert.deepEqual(result.output, result.before)
+        assert.deepEqual(result.remainingFiles.sort(), ['base', 'ours', 'theirs'])
+      }
+    }
+  })
+}
+
+test('OPS-257 both drivers apply one-sided group reorder alongside the other side spec edits', () => {
+  const base = shardManifest(['a', 'b', 'c'].map(id => group(id, [spec(`tests/${id}.spec.ts`)])))
+  const ours = structuredClone(base), theirs = structuredClone(base)
+  ours.groups.reverse()
+  theirs.groups[0].specs.push(spec('tests/new.spec.ts', 17))
+  const expected = structuredClone(theirs); expected.groups.reverse()
+  for (const inputs of [[base, ours, theirs], [base, theirs, ours]]) {
+    for (const program of [[standalone], [cli, 'manifests', 'merge-driver']]) {
+      const result = run('reorder', program, inputs, shards)
+      assert.equal(result.status, 0, result.stderr)
+      assert.equal(result.output.toString(), formatManifest(expected, shards))
+    }
+  }
+})
+
+test('OPS-257 standalone full-size old/canonical merges retain the union idempotently', () => {
+  const rows = Array.from({ length: 3_800 }, (_, i) => row(`TestExisting${String(i).padStart(4, '0')}`, i % 2 ? 'NIGHTLY' : 'GATED-FULL'))
+  const base = manifest([...rows].reverse())
+  const ours = manifest([row('TestAddedOurs', 'ESSENTIAL'), ...base.tests])
+  const theirs = manifest([row('TestAddedTheirs'), ...base.tests])
+  const expected = formatManifest(manifest([ours.tests[0], theirs.tests[0], ...rows]), go)
+  const result = run('full-size', [standalone], [base, ours, formatManifest(theirs, go)], go)
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.output.toString(), expected)
+  const again = run('full-size-idempotent', [standalone], [expected, expected, expected], go)
+  assert.equal(again.status, 0, again.stderr)
+  assert.equal(again.output.toString(), expected)
 })

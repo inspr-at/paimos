@@ -2,12 +2,15 @@
 // Self-contained: install this file outside the checkout for old-branch merges.
 // Minimal copies of manifests.mjs identity, canonical writer and set merge.
 // Keep behavior aligned with tiers-merge-driver.test.mjs parity fixtures.
-import { readFileSync, writeFileSync, statSync } from 'node:fs'
+import { readFileSync, writeFileSync, statSync, openSync, closeSync, fsyncSync, renameSync, unlinkSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 
 const manifestPaths = ['scripts/ci/go-test-tiers.json', 'scripts/ci/web-test-tiers.json', 'web/ci-web-shards.json']
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0
 const absent = Symbol('absent')
 class MergeConflictError extends Error {}
+class ManifestInputError extends Error {}
+const testOwner = row => row.kind === 'go' ? row.package : row.file
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 const fields = ['kind', 'package', 'file', 'name', 'occurrence']
 const keys = value => Object.keys(value).sort((a, b) => {
@@ -21,21 +24,21 @@ const equal = (a, b) => a === absent || b === absent ? a === b : JSON.stringify(
 function testIdentity(row) {
   if (!object(row) || !['go', 'node', 'vitest', 'browser'].includes(row.kind) ||
       typeof row.name !== 'string' || !row.name ||
-      typeof (row.package ?? row.file) !== 'string' || !(row.package ?? row.file) ||
-      (row.kind === 'go' ? !row.package : !row.file) ||
+      typeof testOwner(row) !== 'string' || !testOwner(row) ||
+      (row.kind === 'go' && Object.hasOwn(row, 'occurrence')) ||
       (row.occurrence !== undefined && (!Number.isSafeInteger(row.occurrence) || row.occurrence < 1))) {
-    throw new Error('Invalid test row identity')
+    throw new ManifestInputError('Invalid test row identity')
   }
   // A tuple avoids colon/# collisions in parameterized test titles. Occurrence
   // is part of native registration identity, not policy or a scheduling value.
-  return JSON.stringify([row.kind, row.kind === 'go' ? row.package : row.file, row.name, row.occurrence ?? null])
+  return JSON.stringify([row.kind, testOwner(row), row.name, row.occurrence ?? null])
 }
 const fieldIdentity = field => row => {
-  if (!object(row) || typeof row[field] !== 'string' || !row[field]) throw new Error(`Invalid ${field} row identity`)
+  if (!object(row) || typeof row[field] !== 'string' || !row[field]) throw new ManifestInputError(`Invalid ${field} row identity`)
   return row[field]
 }
 const stringIdentity = row => {
-  if (typeof row !== 'string' || !row) throw new Error('Expected nonempty string identity')
+  if (typeof row !== 'string' || !row) throw new ManifestInputError('Expected nonempty string identity')
   return row
 }
 
@@ -57,7 +60,7 @@ function listPolicy(path, shards) {
 function rowCompare(a, b, identity) {
   if (object(a) && a.kind && object(b) && b.kind && a.name && b.name) {
     for (const field of ['kind', 'owner', 'name', 'occurrence']) {
-      const value = row => field === 'owner' ? row.package ?? row.file : row[field] ?? 0
+      const value = row => field === 'owner' ? testOwner(row) : row[field] ?? 0
       const order = compare(value(a), value(b))
       if (order) return order
     }
@@ -67,27 +70,27 @@ function rowCompare(a, b, identity) {
 }
 
 function rowMap(rows, policy, label, rejectDuplicates) {
-  if (!Array.isArray(rows)) throw new Error(`Expected row list: ${label}`)
-  if (rows.length > 50_000) throw new Error(`Too many rows: ${label}`)
+  if (!Array.isArray(rows)) throw new ManifestInputError(`Expected row list: ${label}`)
+  if (rows.length > 50_000) throw new ManifestInputError(`Too many rows: ${label}`)
   const result = new Map()
   for (const row of rows) {
     const id = policy.identity(row)
-    if (result.has(id) && (rejectDuplicates || !equal(result.get(id), row))) throw new Error(`Duplicate key: ${label}: ${id}`)
+    if (result.has(id) && (rejectDuplicates || !equal(result.get(id), row))) throw new ManifestInputError(`Duplicate key: ${label}: ${id}`)
     result.set(id, row)
   }
   return result
 }
 
 function manifestType(path) {
-  if (!manifestPaths.includes(path)) throw new Error(`Unsupported manifest: ${path}`)
+  if (!manifestPaths.includes(path)) throw new ManifestInputError(`Unsupported manifest: ${path}`)
   return path === manifestPaths[2]
 }
 
 function normalizeManifest(data, file, { rejectDuplicates = false } = {}) {
   const shards = manifestType(file)
-  if (!object(data) || data.version !== 1 || !Array.isArray(data[shards ? 'groups' : 'tests'])) throw new Error(`Expected version 1 manifest: ${file}`)
+  if (!object(data) || data.version !== 1 || !Array.isArray(data[shards ? 'groups' : 'tests'])) throw new ManifestInputError(`Expected version 1 manifest: ${file}`)
   function visit(value, path = []) {
-    if (path.length > 64) throw new Error('Manifest nesting exceeds 64 levels')
+    if (path.length > 64) throw new ManifestInputError('Manifest nesting exceeds 64 levels')
     const policy = listPolicy(path, shards)
     if (policy) {
       const rows = [...rowMap(value, policy, path.join('.'), rejectDuplicates).values()]
@@ -102,7 +105,7 @@ function normalizeManifest(data, file, { rejectDuplicates = false } = {}) {
   if (shards) {
     const seen = new Set()
     for (const group of result.groups) for (const spec of group.specs) {
-      if (seen.has(spec.file)) throw new Error(`Duplicate spec across groups: ${spec.file}`)
+      if (seen.has(spec.file)) throw new ManifestInputError(`Duplicate spec across groups: ${spec.file}`)
       seen.add(spec.file)
     }
   }
@@ -134,7 +137,7 @@ function formatManifest(data, file, options) {
 }
 
 function readManifest(path) {
-  if (statSync(path).size > 32 * 1024 * 1024) throw new Error(`Manifest exceeds 32 MiB: ${path}`)
+  if (statSync(path).size > 32 * 1024 * 1024) throw new ManifestInputError(`Manifest exceeds 32 MiB: ${path}`)
   return readFileSync(path, 'utf8')
 }
 
@@ -158,10 +161,20 @@ function mergeManifests(base, ours, theirs, file) {
         const row = merge(...maps.map(map => map.has(id) ? map.get(id) : absent), [...path, id], !policy.recursive)
         if (row !== absent) merged.set(id, row)
       }
-      // Preserve existing group/history order. Concurrent new groups/notes
-      // append by identity rather than by whichever side happened to be OURS.
-      const order = policy.ordered ? [...maps[0].keys(), ...[...ids].filter(id => !maps[0].has(id)).sort(compare)] : [...merged.keys()]
-      return order.filter(id => merged.has(id)).map(id => merged.get(id))
+      let order = [...merged.keys()]
+      if (policy.ordered) {
+        // Compare surviving BASE identities only: additions still append in
+        // identity order, and deletions are handled by the keyed row merge.
+        const sequences = maps.map(map => [...map.keys()].filter(id => maps[0].has(id) && merged.has(id)))
+        const [baseOrder, oursOrder, theirsOrder] = sequences
+        const same = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+        let retained = baseOrder
+        if (same(oursOrder, theirsOrder) || same(baseOrder, theirsOrder)) retained = oursOrder
+        else if (same(baseOrder, oursOrder)) retained = theirsOrder
+        else return conflict([...path, '<order>'])
+        order = [...retained, ...[...merged.keys()].filter(id => !maps[0].has(id)).sort(compare)]
+      }
+      return order.map(id => merged.get(id))
     }
     if ((b === absent || object(b)) && object(o) && object(t)) {
       const names = new Set([b === absent ? [] : Object.keys(b), Object.keys(o), Object.keys(t)].flat())
@@ -177,29 +190,68 @@ function mergeManifests(base, ours, theirs, file) {
   const merged = merge(...inputs)
   try { return normalizeManifest(merged, file, { rejectDuplicates: true }) }
   catch (error) {
+    if (!(error instanceof ManifestInputError)) throw error
     // Individually valid sides can introduce the same spec in two groups.
     // That disagreement is a merge conflict, rather than an input parse error.
     throw new MergeConflictError(`Manifest merge conflict: ${file}: ${error.message}`)
   }
 }
 
+// All fallible writes target a unique sibling. Rename is the commit point;
+// nothing that could report failure runs after OURS has been replaced.
+function atomicWrite(path, source) {
+  const temporary = `${path}.${randomUUID()}.tmp`
+  let descriptor, created = false
+  try {
+    descriptor = openSync(temporary, 'wx', statSync(path).mode & 0o777)
+    created = true
+    writeFileSync(descriptor, source)
+    fsyncSync(descriptor)
+    closeSync(descriptor)
+    descriptor = undefined
+    renameSync(temporary, path)
+  } catch (error) {
+    if (descriptor !== undefined) { try { closeSync(descriptor) } catch {} }
+    if (created) { try { unlinkSync(temporary) } catch {} }
+    throw error
+  }
+}
+
 function mergeDriver(basePath, oursPath, theirsPath, file) {
   const inputs = [basePath, oursPath, theirsPath].map(path => JSON.parse(readManifest(path)))
-  const output = formatManifest(mergeManifests(...inputs, file), file, { rejectDuplicates: true })
-  // Failures leave OURS untouched; Git marks the path unmerged and stderr
-  // identifies the conflicting key. Never write a partially merged manifest.
-  writeFileSync(oursPath, output)
+  let output, disagreement
+  try {
+    output = formatManifest(mergeManifests(...inputs, file), file, { rejectDuplicates: true })
+  } catch (error) {
+    if (!(error instanceof MergeConflictError)) throw error
+    disagreement = error
+    // Preserve all three complete versions, even when the semantic conflict
+    // (e.g. duplicate specs across groups) would merge cleanly as plain text.
+    const [base, ours, theirs] = inputs.map(data => formatManifest(data, file, { rejectDuplicates: true }))
+    output = `<<<<<<< ours
+${ours}||||||| base
+${base}=======
+${theirs}>>>>>>> theirs
+`
+  }
+  atomicWrite(oursPath, output)
+  // Exit 1 only after conflict markers are safely written. Any write failure
+  // propagates instead and leaves the original OURS bytes untouched.
+  if (disagreement) throw disagreement
   return 0
 }
 
 function mergeDriverMain(args) {
   try {
-    if (args.length !== 4) throw new Error('Usage: node tiers-merge-driver.mjs BASE OURS THEIRS PATH')
+    if (args.length !== 4) throw new ManifestInputError('Usage: node tiers-merge-driver.mjs BASE OURS THEIRS PATH')
     return mergeDriver(...args)
   } catch (error) {
+    if (!(error instanceof MergeConflictError) && !(error instanceof ManifestInputError) &&
+        !(error instanceof SyntaxError) && typeof error.code !== 'string') throw error
     console.error(error.message)
     return error instanceof MergeConflictError ? 1 : 2
   }
 }
 
-process.exitCode = mergeDriverMain(process.argv.slice(2))
+try { process.exitCode = mergeDriverMain(process.argv.slice(2)) }
+catch (error) { console.error(error.message); process.exitCode = 3 }

@@ -29,7 +29,13 @@ export function proveConversion(before, after, file) {
   if (!files.includes(file)) throw new Error(`Unsupported proof manifest: ${file}`)
   const shards = file === files[2]
   assert.deepEqual(comparable(after, [], shards), comparable(before, [], shards), `${file}: conversion changed data`)
-  return { file, rows: shards ? after.groups.reduce((n, g) => n + g.specs.length, 0) : after.tests.length, deepEqualExceptRowOrder: true, tiersWeightsAndMetadataUnchanged: true }
+  if (shards) {
+    // Bind weights to their file identity; matching multisets are insufficient.
+    const weights = data => data.groups.flatMap(group => group.specs.map(spec => [spec.file, spec.weightSeconds]))
+      .sort((a, b) => compare(a[0], b[0]))
+    assert.deepEqual(weights(after), weights(before), `${file}: per-file spec weights changed`)
+  }
+  return { ...(shards ? { perFileWeightsUnchanged: true } : {}), file, rows: shards ? after.groups.reduce((n, g) => n + g.specs.length, 0) : after.tests.length, deepEqualExceptRowOrder: true, tiersWeightsAndMetadataUnchanged: true }
 }
 export function proveManifests(base = git(['rev-parse', 'HEAD'])) {
   if (!/^[a-f0-9]{40}$/.test(base)) throw new Error('Proof base must be a full local commit SHA')
