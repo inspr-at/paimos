@@ -2437,7 +2437,14 @@
     "node:tests/work-surfaces-fix4.test.ts:migrated work prompts for benefits on every successful completion transition",
     "node:tests/work-surfaces-fix4.test.ts:iterative Outline keeps create rows first and pagination after all descendants",
     "node:tests/work-vocabulary.test.ts:workspace names depend on leaf shape first, then project-relative depth",
-    "node:tests/work-vocabulary.test.ts:Parents / Leaves and depth survive links, saved views and API translation"
+    "node:tests/work-vocabulary.test.ts:Parents / Leaves and depth survive links, saved views and API translation",
+    "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 390px in light",
+    "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 390px in dark",
+    "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1024px in light",
+    "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1024px in dark",
+    "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1440px in light",
+    "browser:tests/settings.spec.ts:members can read long German Vocabulary names without overflow at 1440px in dark",
+    "browser:tests/settings.spec.ts:settings layout evidence in light and dark at phone, tablet and desktop sizes"
   ],
   "tests": [
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired briefing bookmarks open Agents and keep request links","tier":"GATED-FULL"},
