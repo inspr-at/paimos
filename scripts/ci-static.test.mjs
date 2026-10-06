@@ -31,6 +31,13 @@ test('static CI commands are registered and every origin still exists', () => {
   assert.equal(validateRegistry(registry, parseWorkflow(workflow)), registry.checks)
   assert.ok(staticSteps(parseWorkflow(workflow), registry).length >= 30)
   assert.equal(registry.checks.filter(c => c.optional).length, 6)
+  for (const [id, limit] of [['web-shard-tests', 600], ['go-vet', 180]]) {
+    const bounded = structuredClone(registry)
+    bounded.checks.find(c => c.id === id).timeout_seconds = limit
+    assert.doesNotThrow(() => validateRegistry(bounded, parseWorkflow(workflow)))
+    bounded.checks.find(c => c.id === id).timeout_seconds++
+    assert.throws(() => validateRegistry(bounded, parseWorkflow(workflow)), /Invalid check/)
+  }
 })
 
 test('drift guard catches newly added commands in each full static job', () => {
@@ -74,9 +81,11 @@ test('drift guard rejects deleted origins, changed commands/cwd, duplicate ids a
   const nativeShard = budget.checks.find(c => c.id === 'web-shard-tests')
   nativeShard.timeout_seconds = 300
   assert.equal(validateRegistry(budget, jobs), budget.checks)
-  nativeShard.timeout_seconds = 301
+  nativeShard.timeout_seconds = 600
+  assert.equal(validateRegistry(budget, jobs), budget.checks)
+  nativeShard.timeout_seconds = 601
   assert.throws(() => validateRegistry(budget, jobs), /Invalid check: web-shard-tests/)
-  nativeShard.timeout_seconds = 300
+  nativeShard.timeout_seconds = 600
   budget.checks.find(c => c.id === 'go-vet').timeout_seconds = 181
   assert.throws(() => validateRegistry(budget, jobs), /Invalid check: go-vet/)
   const changed = workflow.replace('        run: npm run typecheck', '        run: npm run typecheck --changed')
