@@ -479,5 +479,39 @@
       "Complete ci-static exit 0 including incoming test-tier/web-shard checks remains required; shared queue produced no result.",
       "No conflict-touched browser specs; no browser suite run in this round."
     ]
+  },
+  "merge_main_round_5": {
+    "checked_source": "783f50ec42279e2e43af23520d6e92ca0f7857e9",
+    "main_commit": "ce67524cf904525ead694170ba6c4d841a40687f",
+    "merge_result": "git merge --no-ff origin/main -m \"AEON-716: merge main\" returned Already up to date; newest fetched main is already the second parent of normal merge 25010c9fb. No redundant merge or amend.",
+    "scope": "Merge-main verification only; no feature changes.",
+    "preservation": [
+      "Inspected all seven incoming files in existing merge 25010c9fb; the five non-manifest files match main by exact Git blob identity.",
+      "All main Go/web test registrations and policy metadata preserved; branch additions retained. Four stale Settings names are intentionally replaced by current main registrations. Occurrence-aware identities are unique.",
+      "All 266 migration numbers are unique; no migration changes or renumbering.",
+      "git diff --check passed."
+    ],
+    "remote_go": {
+      "command": "remote-test.sh <assigned-worktree> ./internal/agentd/... ./internal/agentpairing/... ./internal/agentruns/... ./internal/reportercontract/...",
+      "exit_code": 0,
+      "passed": {
+        "internal/agentd": "149.931s",
+        "internal/agentpairing": "196.960s",
+        "internal/agentruns": "126.456s",
+        "internal/reportercontract": "2.089s"
+      },
+      "retries": "Two exit-3 remote load refusals; waited and retried, without local suite fallback."
+    },
+    "static_prefilter": {
+      "command": "ci-static-locked.sh (remote-first node scripts/ci-static.mjs --merge-main)",
+      "status": "incomplete",
+      "exit_code": 137,
+      "reason": "Queued 15m16s without acquiring shared lane; no static checks started and no output was emitted. Verified own worktree wrapper had only a sleep child; stopped only that queued wrapper and child without executing its shared-lock-removing EXIT trap. Shared locks preserved; no local fallback, gate bypass or skipped-check override."
+    },
+    "safety": "Verified ppm workstation-agents / INSPR and active GitHub markus-barta; coordinator attribution recorded per worker-common. Only assigned branch/worktree edited. No origin push, PR merge, deploy, production access, credentials read, ticket status changes, model review CLI, hook bypass or other worktree edits. Approved runners may use temporary build refs. Pre-existing untracked scripts/audit/__pycache__/ preserved.",
+    "open_gates": [
+      "Complete remote ci-static exit 0 remains required before coordinator approval/release.",
+      "Migration policy tests/check and incoming web-shard/test-tier checks are not proven in this round: the required remote static runner never started. No migration files were changed and all 266 numbers are unique."
+    ]
   }
 }
