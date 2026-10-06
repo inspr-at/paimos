@@ -46,21 +46,24 @@ var (
 
 // Run is the content-free AEON run projection returned by /runs endpoints.
 type Run struct {
-	ReadOnlyReview            bool   `json:"read_only_review,omitempty"`
-	RetryOfRunID              string `json:"retry_of_run_id"`
-	CapacityHandoff           bool   `json:"capacity_handoff,omitempty"`
-	Purpose                   string `json:"purpose,omitempty"`
-	VerificationTask          string `json:"verification_task,omitempty"`
-	MaxDurationSeconds        *int64 `json:"max_duration_seconds,omitempty"`
-	VerificationPolicy        string `json:"verification_policy,omitempty"`
-	RepositoryMutationAllowed *bool  `json:"repository_mutation_allowed,omitempty"`
-	ID                        string `json:"id"`
-	WorkOrderID               string `json:"work_order_id"`
-	AgentPrincipalID          string `json:"agent_principal_id"`
-	ModelProfileID            string `json:"model_profile_id"`
-	AccountID                 string `json:"account_id"`
-	RequestedAccountID        string `json:"requested_account_id"`
-	Status                    string `json:"status"`
+	RecoveryBrief             string  `json:"recovery_brief,omitempty"`
+	RecoveryTier              string  `json:"recovery_service_tier,omitempty"`
+	RecoveryLabel             *string `json:"recovery_display_label,omitempty"`
+	ReadOnlyReview            bool    `json:"read_only_review,omitempty"`
+	RetryOfRunID              string  `json:"retry_of_run_id"`
+	CapacityHandoff           bool    `json:"capacity_handoff,omitempty"`
+	Purpose                   string  `json:"purpose,omitempty"`
+	VerificationTask          string  `json:"verification_task,omitempty"`
+	MaxDurationSeconds        *int64  `json:"max_duration_seconds,omitempty"`
+	VerificationPolicy        string  `json:"verification_policy,omitempty"`
+	RepositoryMutationAllowed *bool   `json:"repository_mutation_allowed,omitempty"`
+	ID                        string  `json:"id"`
+	WorkOrderID               string  `json:"work_order_id"`
+	AgentPrincipalID          string  `json:"agent_principal_id"`
+	ModelProfileID            string  `json:"model_profile_id"`
+	AccountID                 string  `json:"account_id"`
+	RequestedAccountID        string  `json:"requested_account_id"`
+	Status                    string  `json:"status"`
 }
 
 // requestedAccount retains the approved enrollment before Route fills AccountID.
@@ -90,6 +93,8 @@ type Node struct {
 // HarnessSession is the public binding plus the private worker lease held only
 // by this daemon generation. The lease is never persisted in the run journal.
 type HarnessSession struct {
+	AttachedHook     bool                    `json:"-"`
+	DisplayLabel     *string                 `json:"display_label,omitempty"`
 	ServiceTier      string                  `json:"service_tier,omitempty"`
 	Doing            string                  `json:"-"`
 	DoingAt          time.Time               `json:"-"`
