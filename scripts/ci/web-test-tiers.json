@@ -13764,6 +13764,12 @@
     ,
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > does not count a draining account or an account on Hold as ready","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > does not treat a missing sign-in report as ready","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > does not treat a revoked computer snapshot as ready","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > does not treat a revoked enrollment snapshot as ready","tier":"GATED-FULL"}
+    ,
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > keeps a shared login as one account, ready when one door still is","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/accounts-glance.unit.test.ts","name":"the status line > lists a profile-permissions block in Needs you","tier":"GATED-FULL"}

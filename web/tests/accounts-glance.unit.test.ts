@@ -2,12 +2,13 @@
 // AEON-782: the Agents page's status line for Accounts and computers. The words
 // are the design's ("All 3 ready · 2 computers online", "2 of 3 ready · Claude
 // needs verifying on mbp2607 · +1") and the count is honest: an account is ready
-// only with a Ready sign-in and nothing to verify, an old report on an offline
+// only with a connected sign-in that says Ready and nothing to verify. A missing
+// report and a revoked snapshot are not ready. An old report on an offline
 // computer is not a fault, and a transient hold is not a request for action.
 import { describe, expect, it } from 'vitest'
 import type { PairingView } from '../src/lib/agentPairing'
 import type { OverviewAccount } from '../src/lib/accountsOverview'
-import { glanceItems, glanceSummary } from '../src/lib/accountsGlance'
+import { glanceItems, glanceSummary, onlineComputers, signinStatus } from '../src/lib/accountsGlance'
 
 function door(id: string, over: Record<string, unknown> = {}) {
   return {
@@ -104,6 +105,37 @@ describe('the status line', () => {
     const items = glanceItems(accounts, [mbp], LOW, NOW)
     expect(items).toEqual([expect.objectContaining({ kind: 'attention', name: 'Pi needs attention on mbp2607', detail: 'Profile permissions need repair' })])
     expect(glanceSummary(accounts, [mbp], items, NOW).text).toBe('0 of 1 ready · Pi needs attention on mbp2607')
+  })
+
+  it('does not treat a missing sign-in report as ready', () => {
+    const quiet = computer('mbp2607', {}, {
+      enrollments: [{ account_id: 'a-claude', harness: 'claude', label: 'claude', state: 'connected', verification_state: 'completed' }],
+    })
+    const missing = account('claude', [quiet])
+    missing.rows = [door('a-claude')] as never
+    expect(signinStatus(quiet, 'a-claude')).toBe('Not reported')
+    const items = glanceItems([missing], [quiet], LOW, NOW)
+    expect(items).toEqual([])
+    expect(glanceSummary([missing], [quiet], items, NOW)).toMatchObject({ ready: 0, total: 1, tone: 'warn', text: '0 of 1 ready · 1 not ready' })
+  })
+
+  it('does not treat a revoked computer snapshot as ready', () => {
+    const revoked = computer('mbp2607', { claude: 'ready' }, { computer_state: 'revoked' })
+    const gone = account('claude', [revoked])
+    gone.rows = [door('a-claude')] as never
+    expect(signinStatus(revoked, 'a-claude')).toBe('Blocked')
+    expect(onlineComputers([revoked])).toBe(0)
+    expect(glanceSummary([gone], [revoked], [], NOW)).toMatchObject({ ready: 0, total: 1, tone: 'warn', text: '0 of 1 ready · 1 not ready' })
+  })
+
+  it('does not treat a revoked enrollment snapshot as ready', () => {
+    const live = computer('mbp2607', { claude: 'ready' })
+    live.enrollments[0]!.state = 'revoked'
+    const blocked = account('claude', [live])
+    blocked.rows = [door('a-claude')] as never
+    expect(signinStatus(live, 'a-claude')).toBe('Blocked')
+    expect(onlineComputers([live])).toBe(1)
+    expect(glanceSummary([blocked], [live], [], NOW)).toMatchObject({ ready: 0, total: 1, tone: 'warn', text: '0 of 1 ready · 1 not ready' })
   })
 
   it('rejects an estimated quota, a reading older than ten minutes, and a window that already reset', () => {

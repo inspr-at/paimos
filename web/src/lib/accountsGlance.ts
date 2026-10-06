@@ -140,13 +140,17 @@ function bareRow(s: SignInReference): AccountRow {
 }
 /**
  * One aggregated account (a shared login is one). Ready when no sign-in needs a person and
- * the readiness projection says at least one door can start agents. A draining account or a Hold
- * is not ready, even while its sign-in still says Ready.
+ * at least one door is a connected enrollment whose sign-in says Ready and whose readiness
+ * projection can start agents. The projection is not consulted for a missing report or a
+ * revoked snapshot: those words are not Ready. A draining account or a Hold is not ready,
+ * even while its sign-in still says Ready.
  */
 function accountReady(account: OverviewAccount, now: number): boolean {
   if (!account.signins.length || account.signins.some(isProblemSignin)) return false
   const rows = new Map(account.rows.map(row => [row.id, row]))
   return account.signins.some(signin => {
+    if (signin.computer.computer_state !== 'connected' || signin.enrollment.state !== 'connected') return false
+    if (signinStatus(signin.computer, signin.enrollment.account_id) !== 'Ready') return false
     const row = rows.get(signin.enrollment.account_id)
     return readiness(row ? { ...bareRow(signin), ...row } : bareRow(signin), signin.computer, now).kind === 'ready'
   })
@@ -156,7 +160,7 @@ export interface GlanceSummary { tone: 'ok' | 'warn'; text: string; ready: numbe
 /**
  * The status line: "All 3 ready · 2 computers online", or "2 of 3 ready ·
  * Claude needs verifying on mbp2607 · +1" naming the first thing and counting
- * the rest. The count is the readiness projection over aggregated accounts.
+ * the rest. The count is connected Ready sign-ins that the readiness projection still allows.
  */
 export function glanceSummary(accounts: OverviewAccount[], computers: PairingView[], items: GlanceItem[], now: number): GlanceSummary {
   const total = accounts.length
