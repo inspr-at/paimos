@@ -33,6 +33,7 @@ async function load() {
   try {
     const data = await listPlanningReleases(props.projectId)
     if (request !== generation) return
+    if (data.truncated) throw new Error('Older releases were omitted. Release availability could not be confirmed.')
     const releases = data.releases
     const planning = releases.find(release => release.state === 'planning')
     const activeRelease = releases.some(release => !['released', 'superseded'].includes(release.state))

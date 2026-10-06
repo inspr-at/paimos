@@ -92,7 +92,10 @@ func openPlanningRelease(ctx context.Context, tx pgx.Tx, p tenant.Principal, pro
 		if priorDigest != digest {
 			return out, fail(409, "idempotency key was used for another release request")
 		}
-		return out, json.Unmarshal(prior, &out)
+		if err := json.Unmarshal(prior, &out); err != nil {
+			return out, err
+		}
+		return out, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return out, err
@@ -161,8 +164,12 @@ func (m *module) listPlanningReleases(w http.ResponseWriter, r *http.Request) {
 	project := strings.ToLower(r.PathValue("projectId"))
 	before := 0
 	if value := r.URL.Query().Get("before_number"); value != "" {
+		if len(value) > 10 {
+			respond(w, nil, fail(400, "invalid before_number"))
+			return
+		}
 		parsed, err := strconv.Atoi(value)
-		if err != nil || parsed < 1 {
+		if err != nil || parsed < 1 || parsed > 2147483647 {
 			respond(w, nil, fail(400, "invalid before_number"))
 			return
 		}

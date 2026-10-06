@@ -154,3 +154,36 @@ test('native release creation keeps the same key after a lost response and a lat
   assert.equal(result.result.walker.release_node_id, 'original')
   assert.deepEqual(keys, ['native-key', 'native-key', 'native-key'])
 })
+
+test('account changes discard an old native release result and reset pending ownership', async () => {
+  let complete!: (value: Awaited<ReturnType<ReleaseOpenClient['create']>>) => void
+  const client: ReleaseOpenClient = { newKey: () => 'old-owner', create: () => new Promise(resolve => { complete = resolve }) }
+  const pending = openReleaseWithTickets('p', ['a'], client)
+  resetReleaseOpenForTests()
+  assert.equal(assertReleaseOpen('p', ['b']), 'clear')
+  complete({ walker: { release_node_id: 'old-release', project_node_id: 'p', state: 'planning', revision: 2, features: [], tickets: [] }, event_id: 7 })
+  await assert.rejects(pending, /Account changed during release creation/)
+  assert.equal(assertReleaseOpen('p', ['b']), 'clear')
+})
+
+test('ambiguous parent create replay never confirms a backlog leaf as added', async () => {
+  let calls = 0
+  const keys: string[] = []
+  const client: ReleaseOpenClient = { newKey: () => 'key-1', create: async (_project, action) => {
+    keys.push(action.idempotency_key)
+    if (++calls === 1) throw new Error('lost response')
+    return { walker: { release_node_id: 'r-new', project_node_id: 'p', state: 'planning', revision: 2, features: [], tickets: [] }, event_id: 7 }
+  } }
+  await assert.rejects(() => openReleaseWithTickets('p', ['parent'], client), ReleaseUnconfirmed)
+  await openReleaseWithTickets('p', ['parent'], client)
+  assert.deepEqual(keys, ['key-1', 'key-1'])
+  const views = nativeViews(['parent'], parseNativeMemberships({ tickets: [{
+    ticket_node_id: 'parent', is_parent: true, release_count: 1,
+    release_node_id: 'r-new', release_title: 'Release 3', release_state: 'planning',
+    leaf_node_ids: ['assigned', 'backlog'], assigned_leaf_count: 1,
+  }] }))
+  const outcome = reconcileOpenedMembership(['parent'], views)
+  assert.deepEqual(outcome, { status: 'changed' })
+  assert.equal('count' in outcome, false)
+  assert.match(openedMembershipMessage(outcome) ?? '', /not all in one release/)
+})

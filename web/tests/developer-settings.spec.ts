@@ -18,12 +18,15 @@ test('retired Flow bookmarks open tickets and saved opt-ins cannot revive it', a
 for(const width of [390,1024,1440]) for(const theme of ['light','dark'] as const) {
  test(`retirement keeps project and settings controls stable ${width} ${theme}`,async({page},info)=>{
   await page.setViewportSize({width,height:900});await page.emulateMedia({colorScheme:theme})
-  const data=fixtures();data.preferences.theme={choice:theme};data.preferences['developer-ui']={show_flow_controls:true}
+  const data=fixtures();data.preferences.theme={choice:theme};data.preferences['developer-ui']={show_flow_controls:true};data.preferences['list:display']={headerGraph:false}
   await mockWork(page,data);await page.goto('/p/PHAROS/tickets')
   await expect(page.getByRole('tab',{name:'Tickets',exact:true})).toBeVisible()
-  const guard=await controlStability(page,{sections:page.getByRole('tablist',{name:'Project sections'}),tickets:page.getByRole('tab',{name:'Tickets',exact:true})})
-  await guard.check(()=>page.getByRole('tab',{name:'Knowledge',exact:true}).click())
-  await guard.check(()=>page.getByRole('tab',{name:'Tickets',exact:true}).click());guard.done()
+  await expect(page.locator('#row-n-1')).toBeVisible()
+  await page.evaluate(()=>document.fonts.ready)
+  const views=page.getByRole('tablist',{name:'Ticket views'})
+  const guard=await controlStability(page,{sections:page.getByRole('tablist',{name:'Project sections'}),tickets:page.getByRole('tab',{name:'Tickets',exact:true}),views,list:views.getByRole('tab',{name:'List',exact:true}),outline:views.getByRole('tab',{name:'Outline',exact:true})})
+  await guard.check(()=>views.getByRole('tab',{name:'Outline',exact:true}).click())
+  await guard.check(()=>views.getByRole('tab',{name:'List',exact:true}).click());guard.done()
   await page.screenshot({path:info.outputPath(`project-${width}-${theme}.png`)})
   await page.goto('/settings/developer')
   const control=page.getByRole('switch',{name:'Show reserved versions',exact:true})

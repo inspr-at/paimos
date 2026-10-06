@@ -3440,15 +3440,12 @@ Deploy approvals can carry optional `target` metadata: `hosts` or `environment`,
 card, Needs you, and approval history; missing targets read “Target not
 named” and keep existing approval behavior. `target_digest_sha256` identifies the
 recorded metadata and does not add an authority check (enforcement is AEON-287).
-The additive contracts are `approvals/1.1` and `journey/1.3`. Stage handoff
-responses remain byte-compatible `stage-handoffs/1.0` for strict PHAROS readers;
-targets stay in storage and audit events, and the web reads them from the journey
-deploy stage or approval, labelled “named by the agent”.
-Managed agents can pass `target` and an optional `release_node_id` to
-`aeon_request_approval`; `paimos external-stage request --operation deploy`
-accepts an optional `--target-file JSON`. Verify handoffs retain the preceding
-deploy handoff's recorded target internally when present; neither handoff body
-emits target fields.
+The approval contract is `approvals/1.1`. Targets stay in storage and audit events,
+and the web reads them from approvals, labelled “named by the agent”. Managed
+agents can pass `target` and an optional `release_node_id` to
+`aeon_request_approval`. AEON-723 retires the Journey deployment view,
+stage handoffs and the external-stage CLI; compatibility paths retain their
+reporter contract headers and return authenticated 410 errors.
 
 ### Owner workstation confirmation (AEON-580)
 

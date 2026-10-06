@@ -12,6 +12,7 @@ import { resetToasts } from '../lib/toast'
 import { settleConfirm } from '../lib/confirm'
 import { setPreferenceOwner } from '../lib/preferences'
 import { resetPositions } from '../lib/position'
+import { resetReleaseOpen } from '../lib/releaseMembership'
 
 export class SignInError extends Error {
   readonly reason: 'not_member' | 'disabled' | 'invalid' | 'network' | 'failed'
@@ -37,6 +38,7 @@ export const useSession = defineStore('session', () => {
   watch(identity, (who, before) => {
     const same = !!who && !!before && who.tenant.id === before.tenant.id && who.principal.id === before.principal.id
     if (!same) {
+      resetReleaseOpen()
       resetToasts()
       settleConfirm(false)
     }

@@ -15,7 +15,6 @@ import (
 
 	"github.com/inspr-at/paimos/internal/activity"
 	"github.com/inspr-at/paimos/internal/agentaccounts"
-	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/deliveryvote"

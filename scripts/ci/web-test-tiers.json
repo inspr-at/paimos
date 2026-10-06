@@ -16,8 +16,6 @@
     ,
     {"file":"tests/developer-settings.spec.ts","reportedCases":5,"scope":"Retained mixed slice after rule B: real behavior, authority, identity, data safety or control stability assertions remain.","tag":"delete-candidate"}
     ,
-    {"file":"tests/footer-flow-pill.spec.ts","reportedCases":1,"scope":"Retained mixed slice after rule B: real behavior, authority, identity, data safety or control stability assertions remain.","tag":"delete-candidate"}
-    ,
     {"file":"tests/footer-release-pill.spec.ts","reportedCases":15,"scope":"Retained mixed slice after rule B: real behavior, authority, identity, data safety or control stability assertions remain.","tag":"delete-candidate"}
     ,
     {"file":"tests/header-menus.spec.ts","reportedCases":48,"scope":"Retained mixed slice after rule B: real behavior, authority, identity, data safety or control stability assertions remain.","tag":"delete-candidate"}
@@ -853,16 +851,6 @@
     "vitest:tests/crm-undo-receipt.unit.test.ts:S9-002: a save receipt keeps event 10 when event 11 arrives before Undo"
     ,
     "vitest:tests/crm-undo-receipt.unit.test.ts:S9-002: missing receipts and receipts from a previous sign-in refuse Undo"
-    ,
-    "vitest:tests/existing-ticket-picker.unit.test.ts:counts returned leaves for a parent"
-    ,
-    "vitest:tests/existing-ticket-picker.unit.test.ts:counts returned leaves for a parent after move confirmation"
-    ,
-    "vitest:tests/existing-ticket-picker.unit.test.ts:counts returned leaves for a parent plus an overlapping leaf"
-    ,
-    "vitest:tests/existing-ticket-picker.unit.test.ts:counts returned leaves for a parent plus an overlapping leaf after move confirmation"
-    ,
-    "vitest:tests/existing-ticket-picker.unit.test.ts:does not invent a leaf count when an older server omits the leaf IDs"
     ,
     "vitest:tests/features.unit.test.ts:discards old tenant and revoked-session responses"
     ,
@@ -8984,7 +8972,7 @@
     ,
     {"kind":"browser","file":"tests/project-sections.spec.ts","name":"light 390px: SVG tabs, arrow keys, focus order and no horizontal page scroll","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/project-sections.spec.ts","name":"section tabs separate Tickets and Knowledge views; each keeps its filters","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/project-sections.spec.ts","name":"section tabs separate Tickets and Knowledge views; each keeps its filters","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/project-sections.spec.ts","name":"switching Knowledge view while a search waits for the session guard keeps both changes","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12653,6 +12641,10 @@
     {"kind":"node","file":"tests/release-membership.test.ts","name":"a missing availability is not addable","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"a task is unsupported and not addable","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/release-membership.test.ts","name":"account changes discard an old native release result and reset pending ownership","tags":[],"tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/release-membership.test.ts","name":"ambiguous parent create replay never confirms a backlog leaf as added","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/release-membership.test.ts","name":"another open release is a confirmable conflict; a stale revision is not","tier":"GATED-FULL"}
     ,

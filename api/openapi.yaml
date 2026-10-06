@@ -9597,7 +9597,7 @@ paths:
       security: *auth
       parameters:
         - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
-        - {name: before_number, in: query, schema: {type: integer, minimum: 1}}
+        - {name: before_number, in: query, schema: {type: integer, minimum: 1, maximum: 2147483647}}
       responses:
         '200':
           description: Recent releases
@@ -9619,6 +9619,7 @@ paths:
                         title: {type: string}
                         number: {type: integer, minimum: 1}
                         state: {type: string}
+        '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
     post:
       operationId: createPlanningRelease

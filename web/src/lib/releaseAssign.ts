@@ -24,7 +24,7 @@ export interface AssignOutcome {
   releaseTitle: string
   result: MembershipResult | null
   skipped: { key: string; reason: string }[]
-  // Set when the journey action is confirmed. Absent for an existing release.
+  // Set after new-release creation is confirmed. Absent for an existing release.
   opened?: OpenedMembership
 }
 

@@ -170,7 +170,9 @@ const liveOpenClient: ReleaseOpenClient = {
 }
 const pendingOpen = new Map<string, { action: ReleaseCreate; ambiguous: boolean }>()
 const opening = new Map<string, { ids: string; promise: Promise<OpenedRelease> }>()
-export function resetReleaseOpenForTests() { pendingOpen.clear(); opening.clear() }
+let releaseOpenOwner = 0
+export function resetReleaseOpen() { releaseOpenOwner++; pendingOpen.clear(); opening.clear() }
+export const resetReleaseOpenForTests = resetReleaseOpen
 function ticketSet(ids: string[]): string { return [...ids].map(id => id.toLowerCase()).sort().join('\n') }
 export function assertReleaseOpen(projectId: string, ticketIds: string[]): 'replay' | 'clear' {
   const pending = pendingOpen.get(projectId)
@@ -185,17 +187,20 @@ export async function openReleaseWithTickets(projectId: string, ticketIds: strin
     if (flight.ids === ids) return flight.promise
     throw new Error('Another release request is still running.')
   }
+  const owner = releaseOpenOwner
   const pending = pendingOpen.get(projectId) ?? { action: { idempotency_key: client.newKey(), ticket_node_ids: ticketIds }, ambiguous: false }
   pendingOpen.set(projectId, pending)
   const promise = (async () => {
     try {
       const result = parseMembership(await client.create(projectId, pending.action))
+      if (owner !== releaseOpenOwner) throw new Error('Account changed during release creation.')
       if (!result.walker.release_node_id) throw new Error('Missing release identity')
-      pendingOpen.delete(projectId)
+      if (pendingOpen.get(projectId) === pending) pendingOpen.delete(projectId)
       return { result }
     } catch (error) {
+      if (owner !== releaseOpenOwner) throw new Error('Account changed during release creation.')
       if (!pending.ambiguous && error instanceof APIError && error.status >= 400 && error.status < 500 && error.status !== 408) {
-        pendingOpen.delete(projectId)
+        if (pendingOpen.get(projectId) === pending) pendingOpen.delete(projectId)
         throw error
       }
       pending.ambiguous = true

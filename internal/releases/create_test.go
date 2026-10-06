@@ -3,10 +3,11 @@ package releases
 
 import (
 	"encoding/json"
-	"github.com/jackc/pgx/v5"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/jackc/pgx/v5"
 )
 
 func TestNativeReleaseCreationAtomicReplayAndIsolation(t *testing.T) {
@@ -51,9 +52,39 @@ func TestNativeReleaseCreationAtomicReplayAndIsolation(t *testing.T) {
 	if replay.Walker.ReleaseID != first.Walker.ReleaseID || replay.EventID != first.EventID {
 		t.Fatalf("replay drift: %+v", replay)
 	}
+	list := f.request(f.person, http.MethodGet, path, "")
+	var listed struct {
+		Releases  []planningRelease `json:"releases"`
+		Truncated bool              `json:"truncated"`
+	}
+	if err := json.Unmarshal(list.Body.Bytes(), &listed); err != nil || list.Code != 200 || len(listed.Releases) != 2 || listed.Truncated || listed.Releases[0].ID != first.Walker.ReleaseID {
+		t.Fatalf("native list: %d %s (%v)", list.Code, list.Body.String(), err)
+	}
+	page := f.request(f.person, http.MethodGet, path+"?before_number=2", "")
+	if err := json.Unmarshal(page.Body.Bytes(), &listed); err != nil || page.Code != 200 || len(listed.Releases) != 1 || listed.Releases[0].ID != f.release {
+		t.Fatalf("keyset page: %d %s (%v)", page.Code, page.Body.String(), err)
+	}
+	for _, cursor := range []string{"0", "2147483648", "999999999999999999999999999999"} {
+		if got := f.request(f.person, http.MethodGet, path+"?before_number="+cursor, ""); got.Code != 400 || !strings.Contains(got.Body.String(), "invalid before_number") {
+			t.Fatalf("invalid cursor: %d %s", got.Code, got.Body.String())
+		}
+	}
 	conflict := f.request(f.person, http.MethodPost, path, body("native", closed))
 	if conflict.Code != 409 || !strings.Contains(conflict.Body.String(), "idempotency key") {
 		t.Fatalf("key conflict: %d %s", conflict.Code, conflict.Body.String())
+	}
+	f.tx(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='released' WHERE release_node_id=$1`, first.Walker.ReleaseID)
+		return err
+	})
+	nextTicket := f.existing("ticket", f.project, "Next planning work", "open")
+	next := membershipOK(t, f.request(f.person, http.MethodPost, path, body("next", nextTicket)))
+	if next.Walker.ReleaseID == first.Walker.ReleaseID {
+		t.Fatal("new request reused the prior release")
+	}
+	prior := membershipOK(t, f.request(f.person, http.MethodPost, path, request))
+	if prior.Walker.ReleaseID != first.Walker.ReleaseID || prior.EventID != first.EventID {
+		t.Fatalf("replay returned the later current release: %+v", prior)
 	}
 	f.tx(func(tx pgx.Tx) error {
 		var count int
