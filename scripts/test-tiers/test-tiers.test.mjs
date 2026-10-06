@@ -4,13 +4,14 @@ import assert from 'node:assert/strict'
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
-import { spawnSync } from 'node:child_process'
+import { spawnSync, execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
-import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights } from './core.mjs'
+import { validate, select, shard, key, exactPattern, webGraph, counts, measuredWeights, uncertain, affectedRisk } from './core.mjs'
 import { reportCases, goOutcomes, browserOutcomes } from './report.mjs'
 import { aggregate, jobMinutes, readReports } from './measure.mjs'
 import { checkFull } from './check-full.mjs'
-import { changedPaths, schedulingMode } from './diff.mjs'
+import { changedPaths, schedulingMode, schedulingDecision, trustedSchedulingDecision, main as tierPlanMain } from './diff.mjs'
 import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
@@ -20,6 +21,172 @@ const cases=[g('internal/auth','TestCeiling','ESSENTIAL'),g('internal/auth','Tes
   w('tests/scope.test.ts','ceiling','ESSENTIAL'),w('tests/scope.test.ts','revoked'),w('tests/tree.test.ts','tree')]
 const fixture=()=>({version:1,tests:structuredClone(cases)})
 const noFlaky={version:1,entries:[]}
+
+const replay=JSON.parse(readFileSync(new URL('./affected-replay.json',import.meta.url)))
+const legacy=await import(`data:text/javascript;base64,${Buffer.from(replay.legacySelector).toString('base64')}`)
+const replayRows=['go','web'].flatMap(kind=>JSON.parse(readFileSync(new URL(`../ci/${kind}-test-tiers.json`,import.meta.url))).tests)
+const replayGraph=webGraph(fileURLToPath(new URL('../../web',import.meta.url)))
+
+test('affected kill switch off exactly equals the frozen old selector for all 80 real PR lists',()=>{
+  assert.equal(replay.prs.length,80)
+  assert.equal(replay.base,'b6f74faa11d506efd3d21387ca4e2f5a9c687dcf')
+  assert.equal(replay.legacySelectorSHA256,'737a4bb8a805c23e572ad83f2922e65d8c0d34a932afca2e13fd9fa51e26d710')
+  assert.equal(new Set(replay.prs.map(pr=>pr.number)).size,80)
+  assert.equal(createHash('sha256').update(replay.legacySelector).digest('hex'),replay.legacySelectorSHA256)
+  for(const {number,paths} of replay.prs) {
+    const options={event:'pull_request',paths,imports:replay.goImports,webImports:replayGraph}
+    const expected=legacy.select(replayRows,options)
+    for(const affectedLane of [undefined,'','off','ON','true',' on','on '])
+      assert.deepEqual(select(replayRows,{...options,affectedLane}),expected,`PR ${number}, switch ${affectedLane}`)
+  }
+})
+
+test('merge groups always use the exact full gate with either switch state, including every real diff',()=>{
+  const expected=replayRows.filter(row=>row.tier==='ESSENTIAL'||row.tier==='GATED-FULL')
+  for(const affectedLane of [undefined,'off','on'])for(const paths of [[],['README.md'],['internal/auth/key.go'],...replay.prs.map(pr=>pr.paths)]) {
+    const selected=select(replayRows,{event:'merge_group',paths,affectedLane,webImports:replayGraph})
+    assert.equal(selected.full,true)
+    assert.equal(selected.scope,'gated-full')
+    assert.deepEqual(selected.tests,expected)
+    assert.equal(schedulingMode('merge_group',paths,()=>true,{affectedLane,graph:replayGraph}),'full')
+  }
+})
+
+test('R1 R2 R4 R5 retain full with explicit deferral reasons for paths from the real PRs',()=>{
+  const paths=replay.prs.flatMap(pr=>pr.paths)
+  for(const [rule,pattern] of [
+    ['R1',/^(?:scripts\/ci\/.*\.json|web\/ci-web-shards\.json|scripts\/migration-policy.*\.json|scripts\/audit\/.*\.json)$/],
+    ['R2',/^api\//],['R4',/^internal\/db\/migrations\//],['R5',/^scripts\/audit\/(?!.*\.json$)/],
+  ]) {
+    const real=[...new Set(paths.filter(path=>pattern.test(path)))]
+    assert.ok(real.length,`${rule} must be represented by real PR paths`)
+    for(const path of real) {
+      const options={event:'pull_request',paths:[path],affectedLane:'on',webImports:replayGraph}
+      const selected=select(replayRows,options)
+      assert.equal(selected.full,true,path)
+      assert.match(selected.reason,new RegExp(`${rule} deferred`))
+      const decision=schedulingDecision('pull_request',[path],()=>true,{affectedLane:'on',graph:replayGraph})
+      assert.equal(decision.mode,'full')
+      assert.equal(decision.reason,selected.reason)
+    }
+  }
+})
+
+test('R3 real helpers retain essentials and select every mapped importing case, including transitive units',()=>{
+  const helpers=[...new Set(replay.prs.flatMap(pr=>pr.paths).filter(path=>path.startsWith('web/tests/')&&uncertain(path)))]
+  let narrowed=0
+  for(const path of helpers) {
+    const rule=affectedRisk(path,replayGraph)
+    const selected=select(replayRows,{event:'pull_request',paths:[path],affectedLane:'on',webImports:replayGraph})
+    if(rule.full) { assert.equal(selected.full,true,path);continue }
+    narrowed++
+    assert.equal(selected.full,false,path)
+    assert.match(selected.reason,/R3: helper reverse dependants/)
+    const impacted=legacy.reverseDependants(new Set([path.slice(4)]),replayGraph)
+    assert.deepEqual(selected.tests,replayRows.filter(row=>row.tier==='ESSENTIAL'||row.kind!=='go'&&impacted.has(row.file)))
+  }
+  assert.ok(narrowed>0,'The real data must exercise narrowing')
+  const graph={'tests/helpers/shared.ts':[],'tests/helpers/reexport.ts':['tests/helpers/shared.ts'],
+    'tests/feature.unit.test.ts':['tests/helpers/reexport.ts'],'tests/feature.spec.ts':['tests/helpers/reexport.ts']}
+  const rows=[...cases,w('tests/feature.unit.test.ts','unit'),{...w('tests/feature.spec.ts','browser'),kind:'browser'}]
+  const result=select(rows,{event:'pull_request',paths:['web/tests/helpers/shared.ts'],affectedLane:'on',webImports:graph})
+  assert.deepEqual(result.tests,rows.filter(row=>row.tier==='ESSENTIAL'||row.name==='unit'||row.name==='browser'))
+})
+
+test('R3 fails closed on unknown, deleted, unimported and over-15-spec helpers',()=>{
+  const path='web/tests/helpers/shared.ts',file=path.slice(4)
+  for(const graph of [{},{[file]:[]}]) {
+    assert.equal(select(cases,{event:'pull_request',paths:[path],affectedLane:'on',webImports:graph}).full,true)
+    assert.equal(schedulingMode('pull_request',[path],()=>true,{affectedLane:'on',graph}),'full')
+  }
+  for(const n of [15,16]) {
+    const rows=Array.from({length:n},(_,i)=>({...w(`tests/spec-${i}.spec.ts`,`${i}`),kind:'browser'}))
+    const graph={[file]:[],...Object.fromEntries(rows.map(row=>[row.file,[file]]))}
+    const result=select(rows,{event:'pull_request',paths:[path],affectedLane:'on',webImports:graph})
+    assert.equal(result.full,n>15)
+    assert.equal(schedulingMode('pull_request',[path],()=>true,{affectedLane:'on',graph}),n>15?'full':'essential')
+    assert.equal(schedulingMode('pull_request',[path],()=>false,{affectedLane:'on',graph}),'full')
+    if(n>15)assert.match(result.reason,/exceed 15 specs \(16\)/)
+  }
+})
+
+test('every unnarrowed-risk path in the real replay and risk-pattern matrix still forces full',()=>{
+  const real=replay.prs.flatMap(pr=>pr.paths).filter(path=>uncertain(path)&&!path.startsWith('web/tests/'))
+  const matrix=['go.mod','go.sum','go.work','go.work.sum','package.json','package-lock.json',
+    '.github/workflows/ci.yml','.github/actions/helpers/foo.ts','internal/db/runner.go','internal/db/queries.sql','internal/dbtest/db.go',
+    'internal/auth/testdata/key_scope_ceiling.json','scripts/test-tiers/core.mjs','scripts/test-tiers/diff.mjs','scripts/ci-pr-plan.mjs',
+    'scripts/ci-weights.mjs','scripts/check.mjs','web/scripts/run.mjs','web/vite.config.ts','web/playwright.ui.config.ts',
+    'web/tsconfig.json','web/package-other.json','web/src/generated/api.ts','web/tests/helpers/generated.ts',
+    'web/tests/helpers/api.generated.ts','web/tests/helpers/client.gen.ts','internal/auth/client.pb.go','api/codegen.yaml']
+  for(const path of new Set([...real,...matrix])) {
+    const graph={[path.slice(4)]:[],'tests/importer.spec.ts':[path.slice(4)]}
+    assert.equal(select(replayRows,{event:'pull_request',paths:[path],affectedLane:'on',webImports:graph}).full,true,path)
+    assert.equal(schedulingMode('pull_request',[path],()=>true,{affectedLane:'on',graph}),'full',path)
+  }
+})
+
+test('trusted tier planner uses base classifier and base graph despite candidate rewrites',()=>{
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-trusted-plan-test-'))
+  const home=mkdtempSync(resolve(tmpdir(),'aeon-trusted-plan-home-'))
+  const env={PATH:process.env.PATH,HOME:home,XDG_CONFIG_HOME:home,GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null',
+    GIT_AUTHOR_NAME:'Fixture',GIT_AUTHOR_EMAIL:'fixture@example.invalid',GIT_COMMITTER_NAME:'Fixture',GIT_COMMITTER_EMAIL:'fixture@example.invalid',
+    GITHUB_EVENT_NAME:'pull_request',CI_AFFECTED_LANE:'on'}
+  const git=args=>execFileSync('git',args,{cwd:directory,env,encoding:'utf8'})
+  const file=(path,source)=>{mkdirSync(resolve(directory,path,'..'),{recursive:true});writeFileSync(resolve(directory,path),source)}
+  git(['init','-q'])
+  for(const name of ['core.mjs','diff.mjs','collect.mjs'])file(`scripts/test-tiers/${name}`,readFileSync(new URL(name,import.meta.url),'utf8'))
+  file('scripts/ci/web-test-tiers.json',JSON.stringify({tests:[]}))
+  file('web/src/unused.ts','export {}')
+  file('web/e2e/unused.ts','export {}')
+  file('web/tests/helpers/shared.ts','export const value=1')
+  file('web/tests/importer.spec.ts','import "./helpers/shared"')
+  git(['add','.']);git(['commit','-qm','trusted fixture'])
+  const base=git(['rev-parse','HEAD']).trim()
+  // The candidate classifier lies, and candidate graph gains 16 importers.
+  file('scripts/test-tiers/core.mjs','throw new Error("candidate classifier executed")')
+  for(let i=0;i<16;i++)file(`web/tests/extra-${i}.spec.ts`,'import "./helpers/shared"')
+  const run=paths=>trustedSchedulingDecision(base,paths,env,{cwd:directory})
+  assert.equal(run(['web/tests/helpers/shared.ts']).mode,'essential')
+  assert.match(run(['web/tests/helpers/shared.ts']).reason,/R3:.*1 specs/)
+  assert.equal(run(['scripts/test-tiers/core.mjs','web/tests/helpers/shared.ts']).mode,'full')
+  assert.equal(run(['web/tests/extra-0.spec.ts','web/tests/helpers/shared.ts']).mode,'full','new candidate graph nodes must not narrow themselves')
+  assert.throws(()=>run(['x'.repeat(4097)]),/Invalid trusted paths/)
+  assert.throws(()=>trustedSchedulingDecision('--bad',[],env,{cwd:directory}),/Invalid trusted planner base/)
+})
+
+test('merge-group planner writes full without needing payload, checkout history or a network fetch',()=>{
+  const directory=mkdtempSync(resolve(tmpdir(),'aeon-merge-full-'))
+  for(const affectedLane of ['','off','on']) {
+    const output=resolve(directory,`output-${affectedLane}`)
+    assert.equal(tierPlanMain({GITHUB_EVENT_NAME:'merge_group',CI_AFFECTED_LANE:affectedLane,GITHUB_OUTPUT:output}),0)
+    assert.equal(readFileSync(output,'utf8'),'mode=full\n')
+  }
+})
+
+test('impact bounds reject malformed and oversized paths before building a graph or snapshot',()=>{
+  for(const paths of [[null],['../web/tests/helper.ts'],['web//tests/file.ts'],['/absolute'],['web/tests/a\nb.ts'],
+    ['web/tests/'+ 'x'.repeat(4097)],Array.from({length:10001},()=> 'README.md')]) {
+    const options={event:'pull_request',paths,affectedLane:'on'}
+    assert.equal(select(cases,options).reason,'invalid or oversized impact diff')
+    assert.deepEqual(schedulingDecision('pull_request',paths),{mode:'full',reason:'invalid or oversized impact diff'})
+    assert.throws(()=>trustedSchedulingDecision('a'.repeat(40),paths),/Invalid trusted paths/)
+  }
+})
+
+test('offline replay CLI prints every real PR with selected counts, preserved aggregate lane and reasons',()=>{
+  const result=spawnSync(process.execPath,[fileURLToPath(new URL('./replay.mjs',import.meta.url)),'--json'],{encoding:'utf8',timeout:30_000})
+  assert.equal(result.status,0,result.stderr)
+  const report=JSON.parse(result.stdout)
+  assert.equal(report.replay.length,80)
+  assert.deepEqual(report.transitions,{'full->full':64,'essential->essential':16})
+  for(const row of report.replay) {
+    assert.ok(row.oldCases>0&&row.newCases>0)
+    assert.ok(row.reason.length>0)
+    assert.ok(['full','spec-only','docs-only'].includes(row.lane))
+    assert.equal(row.newCases,Object.values(row.newKinds).reduce((sum,n)=>sum+n,0))
+    assert.equal(row.newJobs,row.lane==='spec-only'?12:row.new==='essential'?22:37)
+  }
+})
 
 test('AEON-648 pending writes and identity fences stay protected without promoting ordinary display tests',()=>{
   const manifest=JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json',import.meta.url)))
@@ -49,7 +216,7 @@ test('runtime reconciliation defaults new cases to NIGHTLY and drops stale cases
   assert.equal(rows.find(row=>row.name==='TestCRUD').tier,'ESSENTIAL')
   assert.deepEqual(warnings,[`::warning::Unclassified test (defaults to NIGHTLY; classify these): ${key(added)}`,
     `::warning::Stale manifest entry (dropped): ${key(stale)}`])
-  for(const event of ['pull_request','merge_group']) {
+  for(const event of ['pull_request']) {
     assert.ok(select(rows,{event,paths:['internal/auth/key.go']}).tests.some(row=>key(row)===key(added)))
     assert.ok(!select(rows,{event,paths:['README.md']}).tests.some(row=>key(row)===key(added)))
   }
@@ -99,7 +266,8 @@ test('known-flaky cases cannot enter ESSENTIAL, but remain in changed-area and n
     assert.deepEqual(select(retained,{event:'pull_request',paths:['README.md']}).tests,[])
     assert.deepEqual(select(retained,{event:'schedule',paths:[]}).tests,retained)
     const paths=row.kind==='go'?['internal/importer/source.go']:[`web/${row.file}`]
-    assert.deepEqual(select(retained,{event:'merge_group',paths,webImports:{[row.file]:[]}}).tests,retained)
+    assert.deepEqual(select(retained,{event:'pull_request',paths,webImports:{[row.file]:[]}}).tests,retained)
+    assert.deepEqual(select(retained,{event:'merge_group',paths,webImports:{[row.file]:[]}}).tests,[])
   }
 })
 
@@ -130,9 +298,9 @@ test('known-flaky committed cases retain exact owners and cannot be promoted by 
   }
 })
 
-test('PR and merge group take essential union changed package and reverse dependencies; docs retain core',()=>{
+test('PR takes essential union changed package and reverse dependencies; docs retain core',()=>{
   const imports={'cmd/aeon':['internal/auth'],'internal/auth':[]}
-  for(const event of ['pull_request','merge_group']) {
+  for(const event of ['pull_request']) {
     const docs=select(cases,{event,paths:['README.md','docs/RELEASE.md'],imports})
     assert.equal(docs.full,false)
     assert.deepEqual(docs.tests.map(row=>row.name),['TestCeiling','TestCRUD','ceiling'])
@@ -163,7 +331,7 @@ test('uncertain and missing metadata select full on every premerge event',()=>{
 })
 
 test('fan-out chooses full shard counts for uncertain and deleted paths, small counts for mapped changes',()=>{
-  for(const event of ['pull_request','merge_group']) {
+  for(const event of ['pull_request']) {
     assert.equal(schedulingMode(event,['README.md']), 'essential')
     assert.equal(schedulingMode(event,['internal/auth/flow.go'],()=>true),'essential')
     assert.equal(schedulingMode(event,['.github/workflows/ci.yml']), 'full')
@@ -171,6 +339,8 @@ test('fan-out chooses full shard counts for uncertain and deleted paths, small c
     assert.equal(schedulingMode(event,undefined),'full')
   }
   assert.equal(schedulingMode('schedule',['README.md']),'full')
+  assert.equal(schedulingMode('merge_group',['README.md']),'full')
+  assert.equal(schedulingMode('merge_group',['internal/auth/flow.go'],()=>true),'full')
 })
 
 test('uncertain infrastructure changes preserve the classified gate plus promoted essentials',()=>{
@@ -197,7 +367,7 @@ test('optional changed browser cases run in changed-area selection; uncertain im
     {kind:'browser',file:'tests/other.spec.ts',name:'other',tier:'GATED-FULL'}]
   const webImports={'src/store.ts':[],'tests/optional.spec.ts':['src/store.ts'],'tests/other.spec.ts':[]}
   for(const path of ['web/tests/optional.spec.ts','web/src/store.ts']) {
-    const picked=select(rows,{event:'merge_group',paths:[path],webImports})
+    const picked=select(rows,{event:'pull_request',paths:[path],webImports})
     assert.deepEqual(picked.tests,[rows[0]])
     assert.equal(picked.full,false)
   }
@@ -244,7 +414,7 @@ test('changed modules select dependent specs/units; equal file basenames do not 
   const graph={'src/ceiling.ts':[],'tests/scope.test.ts':['src/ceiling.ts'],'tests/tree.test.ts':[]}
   const selected=select(cases,{event:'pull_request',paths:['web/src/ceiling.ts'],webImports:graph})
   assert.deepEqual(selected.tests.filter(row=>row.kind==='node').map(row=>row.name),['ceiling','revoked'])
-  assert.deepEqual(select(cases,{event:'merge_group',paths:['web/tests/tree.test.ts'],webImports:graph}).tests.filter(row=>row.kind==='node').map(row=>row.name),['ceiling','tree'])
+  assert.deepEqual(select(cases,{event:'pull_request',paths:['web/tests/tree.test.ts'],webImports:graph}).tests.filter(row=>row.kind==='node').map(row=>row.name),['ceiling','tree'])
 })
 
 test('a mapped Go change does not widen unrelated web tests; unmapped rendered components widen web',()=>{
@@ -693,9 +863,9 @@ test('three-tier full is exactly ESSENTIAL plus GATED-FULL even for unknown impa
     assert.equal(selection.deferredBrowserCases,0)
   }
   // The changed-area lane still exercises optional tests when their area changes.
-  for(const event of ['pull_request','merge_group']) assert.deepEqual(
+  for(const event of ['pull_request']) assert.deepEqual(
     select(rows,{event,paths:['web/tests/optional.spec.ts'],webImports:{'tests/optional.spec.ts':[]}}).tests,[rows[0],rows[4]])
-  for(const event of ['pull_request','merge_group']) assert.deepEqual(
+  for(const event of ['pull_request']) assert.deepEqual(
     select(rows,{event,paths:['web/tests/gated.spec.ts'],webImports:{'tests/gated.spec.ts':[]}}).tests,[rows[0],rows[3],rows[5]])
 })
 

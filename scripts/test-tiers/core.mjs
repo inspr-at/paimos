@@ -58,6 +58,51 @@ export function uncertain(path) {
     /(?:^|\/)(?:testdata|fixtures|helpers)(?:\/|\.)|(?:-fixtures|test_helpers)\./.test(path)
 }
 
+export function validImpactPaths(paths) {
+  return Array.isArray(paths) && paths.length <= 10000 && paths.every(path =>
+    typeof path === 'string' && path.length > 0 && path.length <= 4096 &&
+    !path.startsWith('/') && !/^[a-zA-Z]:/.test(path) && !path.includes('\\') &&
+    !/[\x00-\x1f\x7f]/.test(path) && !path.split('/').some(part => ['', '.', '..'].includes(part)))
+}
+
+// The opt-in allowlist is deliberately smaller than uncertain(). Rules whose
+// execution/mapping cannot be proved retain the full gate, with a plan reason.
+export function affectedRisk(path, webImports = {}) {
+  if (/^(?:scripts\/ci\/.*\.json|web\/ci-web-shards\.json|scripts\/migration-policy.*\.json|scripts\/audit\/.*\.json)$/.test(path))
+    return { full: true, reason: 'R1 deferred: static-only jobs and manifest registration diff required' }
+  if (/^api\//.test(path)) return { full: true, reason: 'R2 deferred: no generated API dependency mapping' }
+  if (/^internal\/db\/migrations\//.test(path)) return { full: true, reason: 'R4 deferred: no migration-to-browser dependency mapping' }
+  if (/^scripts\/audit\//.test(path)) return { full: true, reason: 'R5 deferred: static-only execution required' }
+  if (/^(?:web\/tests\/)/.test(path) && uncertain(path) && !/\.(?:spec|test)\.ts$/.test(path) && /\.(?:ts|js|mjs|vue|json|css)$/.test(path)) {
+    const file = path.slice(4)
+    if (!Object.hasOwn(webImports, file)) return { full: true, reason: `R3 full: missing helper dependency metadata: ${path}` }
+    const dependants = reverseDependants(new Set([file]), webImports)
+    const importers = [...dependants].filter(owner => owner !== file && /^tests\/.*\.(?:spec|test)\.ts$/.test(owner))
+    if (!importers.length) return { full: true, reason: `R3 full: helper has no mapped test importer: ${path}` }
+    const specs = importers.filter(owner => owner.endsWith('.spec.ts')).length
+    if (specs > 15) return { full: true, reason: `R3 full: helper imports exceed 15 specs (${specs}): ${path}` }
+    return { full: false, reason: `R3: helper reverse dependants (${specs} specs): ${path}` }
+  }
+  return { full: true, reason: `unnarrowed risk: ${path}` }
+}
+
+export function impactRisk(paths, { event, affectedLane, webImports = {} }) {
+  // Only the literal repository-variable value "on" enables new rules.
+  if (event !== 'pull_request' || affectedLane !== 'on')
+    return { full: paths.some(uncertain), reasons: [] }
+  const reasons = []
+  for (const path of paths) {
+    // Generated inputs/configuration stay full even if a helper name matches.
+    if (/(?:^|[/.])(?:generated|codegen)(?:\/|\.)|\.(?:gen|pb)\.|(?:^|\/)package[^/]*\.json$|(?:^|\/)(?:tsconfig|vite|playwright)[^/]*\.(?:json|ts|js|mjs)$/.test(path))
+      return { full: true, reasons: [`unnarrowed generated/configuration risk: ${path}`] }
+    if (!uncertain(path)) continue
+    const rule = affectedRisk(path, webImports)
+    if (rule.full) return { full: true, reasons: [rule.reason] }
+    reasons.push(rule.reason)
+  }
+  return { full: false, reasons }
+}
+
 export function reverseDependants(changed, imports) {
   const picked = new Set(changed)
   let more = true
@@ -70,9 +115,9 @@ export function reverseDependants(changed, imports) {
   return picked
 }
 
-// A missing diff, unmapped source, or shared input widens selection. Both PRs
-// and merge groups use this same union; neither has an essential-only shortcut.
-export function select(tests, { event, paths, imports = {}, webImports = {}, forceFull = false, forceAll = false }) {
+// A missing diff, unmapped source, or shared input widens selection. The merge
+// queue always proves the full gate, independently of the affected PR switch.
+export function select(tests, { event, paths, imports = {}, webImports = {}, affectedLane, forceFull = false, forceAll = false }) {
   const full = reason => {
     // Full CI retains the established gate. Only nightly/--all widens to the
     // entire catalogue; missing impact data must not promote ungated cases.
@@ -81,9 +126,12 @@ export function select(tests, { event, paths, imports = {}, webImports = {}, for
     return { full: true, reason, scope: catalogue ? 'catalogue' : 'gated-full',
       deferredBrowserCases: tests.filter(row => row.kind === 'browser').length - selected.filter(row => row.kind === 'browser').length, tests: selected }
   }
-  if (forceAll || forceFull || !['pull_request', 'merge_group'].includes(event) || !Array.isArray(paths) || paths.some(uncertain)) {
+  if (forceAll || forceFull || event !== 'pull_request' || !Array.isArray(paths)) {
     return full('full event or uncertain impact')
   }
+  if (!validImpactPaths(paths)) return full('invalid or oversized impact diff')
+  const risk = impactRisk(paths, { event, affectedLane, webImports })
+  if (risk.full) return full(risk.reasons.join('; ') || 'full event or uncertain impact')
   const packages = new Set([...tests.filter(t => t.kind === 'go').map(t => t.package), ...Object.keys(imports)])
   const hasGo=tests.some(t=>t.kind==='go'),hasWeb=tests.some(t=>t.kind!=='go')
   const changedGo = new Set(), changedWeb = new Set()
@@ -110,7 +158,8 @@ export function select(tests, { event, paths, imports = {}, webImports = {}, for
   // Deleted/unknown files cannot be analysed using only the candidate graph.
   if ([...changedWeb].some(file => !Object.hasOwn(webImports, file))) return full('missing web dependency metadata')
   if([...changedWeb].some(file=>file.startsWith('src/')&&!tests.some(row=>row.kind!=='go'&&web.has(row.file)))) return full('web module has no mapped test importer')
-  return { full: false, reason: boundedGo?`essential plus changed area; optional Go reverse dependencies exceed 300 extra cases (${extraGoCases})`:'essential plus changed area and reverse dependencies',
+  const reason = boundedGo?`essential plus changed area; optional Go reverse dependencies exceed 300 extra cases (${extraGoCases})`:'essential plus changed area and reverse dependencies'
+  return { full: false, reason: risk.reasons.length ? `${reason}; ${risk.reasons.join('; ')}` : reason,
     tests: tests.filter(t => t.tier === 'ESSENTIAL' || (t.kind === 'go' ? go.has(t.package) : web.has(t.file))) }
 }
 

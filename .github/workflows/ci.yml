@@ -21,6 +21,10 @@ concurrency:
 permissions:
   contents: read
 
+# Default off. The planners and tier runners must read the same exact value.
+env:
+  CI_AFFECTED_LANE: ${{ vars.CI_AFFECTED_LANE }}
+
 jobs:
   # Read-only exact-SHA proof. Lookup/checkout failure leaves reuse unset.
   tree-reuse:

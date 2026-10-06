@@ -277,6 +277,61 @@ nightly retains its existing once-only `web-unit` evidence. Skipped Actions jobs
 with zero timestamps report absent duration; executed jobs with invalid timestamps
 still fail accounting. Spec-only reports explicitly use `untiered` coverage and
 claim no tier case passes; its native checks still block `web`.
+
+**Affected PR planning (OPS-257 / AEON-743):** `CI_AFFECTED_LANE` is a repository
+variable, default off. Only its exact value `on` enables new rules; unset, `off`
+and every other value preserve old PR selection. The workflow environment passes
+it to the planners and tier runners. Merge groups always use the full gated
+catalogue regardless of the switch. Main push, manual and nightly selection keep
+their established behavior. This remains tier mode `essential`, within aggregate
+lane `full`; required check names, skipped-job accounting, tier evidence, tree
+reuse and unconditional `migration-compat` stay unchanged.
+
+- **R1 manifests:** retain full. Static-only execution and identifying newly
+  registered cases require additional job wiring and a manifest diff. The
+  existing essential lane still executes timing and end-to-end jobs.
+- **R2 API contracts:** retain full. This tree uses handwritten wire types and
+  supplies no generated API dependency mapping that proves the requested Go and
+  web importer set. Generated code and codegen changes also stay full.
+- **R3 web helpers/fixtures:** select ESSENTIAL plus every transitive importing
+  spec and unit. Only graph-supported files beneath `web/tests/` qualify.
+  Unknown, deleted or unimported helpers and helpers imported by more than 15
+  distinct specs stay full; the existing 300-browser-case layout bound applies.
+- **R4 migrations:** retain full until a migration-to-browser mapping exists.
+  Other `internal/db/` and database test support inputs always stay full.
+- **R5 audit scripts and script documentation:** retain full. Audit-only/static
+  execution cannot be expressed by the existing essential lane.
+
+CI infrastructure, `.github/**`, test-tier code, executable CI scripts, module
+and package manifests, and Playwright/Vite/TypeScript configurations stay full.
+Plans log the rule or conservative fallback reason. With the switch enabled,
+the tier planner executes a snapshot of its **base SHA** planner and web graph;
+candidate changes to those inputs cannot narrow the snapshot's decision.
+Missing or pre-adoption base code falls back to full. The ci-plan classifier
+continues to execute its existing trusted base copy. The tier-plan entrypoint
+itself still comes from the workflow's candidate checkout, an existing trust
+limitation that requires a separate trusted workflow bootstrap before treating
+this as protection against a deliberately replaced entrypoint.
+
+Replay the 80 recorded merged PR file lists without browsers using
+`node scripts/test-tiers/replay.mjs` (`--json` for exact per-PR counts/reasons).
+The fixture pins the old selector and Go graph to
+`b6f74faa11d506efd3d21387ca4e2f5a9c687dcf`; replay uses the current manifest
+catalogue and web graph rather than each historical PR tree. Old/new selector
+totals are both **64 full, 16 essential**; one essential diff uses the separate
+spec-only aggregate lane. No sampled complete PR becomes newly essential:
+each R3-bearing PR also touches a retained full-risk input. The unchanged
+workflow projects 37 runner jobs for a successful full PR, 22 for an essential
+PR, and 12 for the spec-only PR. These are layout counts, not hosted measurements
+or the study's proposed 14-job lane.
+
+Rollout stays coordinator-owned: keep the variable unset while this change is
+reviewed and merged, then measure rule reasons, selected cases, jobs, PR wall
+time and merge/nightly failures before enabling more rules. This subset does
+not meet the study's 50% newly-affected target. Roll back by unsetting the
+variable or setting `off`; the merge-group full fix remains. Reverting planner
+code requires a reviewed revert that retains that fix.
+
 The historical shard inventory selected 53 gated specs: the original
 49 measured specs plus `clip-tip`, `aeon-632b-clip`, `key-trim` and `model-prefs`, whose
 weights are scheduling estimates. `clip-tip` uses its complete local serial

@@ -75,6 +75,21 @@ test('Markdown fixtures and implementation documentation require full validation
   assert.equal(classifyPaths(['README.md', 'docs/guide.txt', 'docs/nested/guide.md', 'LICENSE.txt']).lane, 'docs-only');
 });
 
+test('affected switch preserves ci-plan lanes and aggregate evidence for all 80 real PR lists', () => {
+  const replay = JSON.parse(readFileSync(new URL('./test-tiers/affected-replay.json', import.meta.url)));
+  assert.equal(replay.prs.length, 80);
+  for (const { number, paths } of replay.prs) {
+    const before = classifyPaths(paths);
+    // The affected lane is a tier-plan mode, never a new aggregate lane.
+    assert.ok(['full', 'docs-only', 'spec-only'].includes(before.lane), `PR ${number}`);
+    assert.doesNotThrow(() => requireResults(before.lane, 'success', [before.lane === 'full' ? 'success' : 'skipped']));
+  }
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /^env:\n  CI_AFFECTED_LANE: \$\{\{ vars.CI_AFFECTED_LANE \}\}$/m);
+  const migration = requiredJob('migration-compat');
+  assert.doesNotMatch(migration, /^    if:/m, 'Migration compatibility must execute in every lane');
+});
+
 function workflowPlanScript() {
   const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   const step = workflow.split('      - name: Classify local PR diff\n')[1].split(/\n\n  [a-z][a-z-]*:/)[0];
@@ -83,14 +98,14 @@ function workflowPlanScript() {
   return run.startsWith('|\n') ? run.slice(2).replace(/^          /gm, '') : run.trim();
 }
 
-function executeWorkflowPlan(repo, head, { eventName = 'pull_request', base = repo.base } = {}) {
+function executeWorkflowPlan(repo, head, { eventName = 'pull_request', base = repo.base, affectedLane = '' } = {}) {
   const eventPath = join(repo.root, 'event.json'), output = join(repo.root, 'output');
   writeFileSync(eventPath, JSON.stringify({ pull_request: { base: { sha: base }, head: { sha: head } } }));
   writeFileSync(output, '');
   const result = spawnSync('bash', ['-c', workflowPlanScript()], { cwd: repo.root, encoding: 'utf8', timeout: 20000,
     env: { ...repo.env, GITHUB_EVENT_NAME: eventName, GITHUB_EVENT_PATH: eventPath,
       GITHUB_SHA: head, PR_BASE_SHA: base, RUNNER_TEMP: join(repo.root, 'runner-temp'),
-      GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(repo.root, 'summary') } });
+      GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(repo.root, 'summary'), CI_AFFECTED_LANE: affectedLane } });
   assert.equal(result.status, 0, result.stderr);
   return readFileSync(output, 'utf8');
 }
@@ -105,6 +120,20 @@ appendFileSync(process.env.GITHUB_OUTPUT, 'lane=docs-only\\nspecs=[]\\n');\n`);
   const head = repo.commit();
   mkdirSync(join(repo.root, 'runner-temp'));
   assert.equal(executeWorkflowPlan(repo, head), 'lane=full\nspecs=[]\nnix_vendor=true\n');
+});
+
+test('trusted ci-plan keeps R1-R5 in the full aggregate lane under either affected switch state', () => {
+  for (const path of ['scripts/ci/go-test-tiers.json', 'api/openapi.yaml', 'web/tests/helpers/shared.ts',
+    'internal/db/migrations/9999.sql', 'scripts/audit/common.py']) {
+    const repo = repository();
+    repo.file('scripts/ci-pr-plan.mjs', readFileSync(new URL('./ci-pr-plan.mjs', import.meta.url), 'utf8'));
+    repo.base = repo.commit();
+    repo.file(path, 'changed\n');
+    const head = repo.commit();
+    mkdirSync(join(repo.root, 'runner-temp'));
+    for (const affectedLane of ['', 'off', 'on', 'ON'])
+      assert.equal(executeWorkflowPlan(repo, head, { affectedLane }), 'lane=full\nspecs=[]\nnix_vendor=false\n', path);
+  }
 });
 
 test('ci-plan keeps trusted docs/spec lanes and falls back to full without a usable base classifier', () => {

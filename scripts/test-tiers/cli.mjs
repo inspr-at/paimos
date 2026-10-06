@@ -14,14 +14,15 @@ export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
 const target = kind => kind==='go' ? collectGo() : collectWeb()
 
-export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false}={}) {
+export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',paths, affectedLane=process.env.CI_AFFECTED_LANE,index=1,count=1,unit=false,full=false,all:catalogue=false,timing=false}={}) {
   const inventory=target(kind)
   const manifest=load(kind)
   const all=validate(manifest,inventory.tests)
   const browserPolicy=kind==='web'?loadBrowserPolicy():undefined
-  const selection=select(all,{event,paths,imports:inventory.imports,
-    forceFull:full||schedulingMode(event,paths)==='full',forceAll:catalogue,
-    webImports:kind==='web'?webGraph(web):{}})
+  const graph=kind==='web'||affectedLane==='on'?webGraph(web):{}
+  const selection=select(all,{event,paths,imports:inventory.imports,affectedLane,
+    forceFull:full||schedulingMode(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined})==='full',forceAll:catalogue,
+    webImports:graph})
   const filtered=kind==='web'?selection.tests.filter(row=>unit?row.kind!=='browser':row.kind==='browser'):selection.tests.filter(row=>timing?row.lane==='timing':row.lane!=='timing')
   const weights={}
   if(kind==='web'&&!unit) Object.assign(weights,tierWeights(browserPolicy,filtered))
