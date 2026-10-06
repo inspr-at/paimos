@@ -89,7 +89,11 @@ test('fails closed on duplicate keys, missing sections and unsafe anchor forms o
   assert.throws(() => sortOpenAPI('paths: {}\ncomponents: {}\n'), /Expected block mapping paths/)
   assert.throws(() => sortOpenAPI(fixture.replace('components:', 'other:')), /Expected block mapping components/)
   assert.throws(() => sortOpenAPI(fixture.replace('  schemas:', '  schemas: {Z: {}, A: {}}')), /Expected block mapping components.schemas/)
-  assert.throws(() => sortOpenAPI(fixture.replace('&auth [{session: []}, {agentKey: []}]', '&auth')), /Unsupported anchor form/)
+  assert.throws(() => sortOpenAPI(fixture.replace('&auth [{session: []}, {agentKey: []}]', '&auth')), /Alias \*auth would precede its definition after sorting/)
+  assert.throws(() => sortOpenAPI(fixture.replace('&auth [{session: []}, {agentKey: []}]', '&')), /Unsupported anchor form/)
+  assert.throws(() => sortOpenAPI(fixture.replace('    Alpha: {type: string}', '    Alpha:\n      - &key name: value')), /Unsupported anchor form/)
+  assert.throws(() => sortOpenAPI(fixture.replace('    Alpha: {type: string}', '    Alpha:\n      ? &key name\n      : value')), /Unsupported explicit key/)
+  assert.throws(() => sortOpenAPI(fixture.replace('    Alpha: {type: string}', '    &key Alpha: {type: string}')), /Unsupported anchor form/)
   assert.throws(() => sortOpenAPI(fixture.replace('*auth # alias', '&auth [{other: []}]')), /different definitions/)
   assert.throws(() => sortOpenAPI(fixture.replace('&auth [{session: []}, {agentKey: []}]', '*missing')), /precedes its definition/)
 })
@@ -313,4 +317,70 @@ test('canonical contract: every path and component entry is reachable after reve
   assert.equal(sortOpenAPI(sorted), sorted)
   assert.equal(demote(sorted), demote(contract))
   assert.equal(sorted.indexOf('&auth'), contract.indexOf('&auth'))
+})
+
+// Anchors in sequence items, nested flow collections, tagged nodes and block
+// nodes cannot be promoted like whole-line flow anchors. Sorting must track
+// them and fail closed instead of emitting an alias before its definition.
+const anchorForms = [
+  ['oneOf:\n        - &shared {type: string}', 'oneOf:\n        - *shared'],
+  ['oneOf:\n        - - &shared {type: string}', 'oneOf:\n        - - *shared'],
+  ['oneOf:\n        - !!map &shared {type: string}', 'oneOf:\n        - *shared'],
+  ['security: [&shared {session: []}]', 'security: [*shared]'],
+  ['security: [{session: &shared []}]', 'security: [{session: *shared}]'],
+  ['security: [!!map &shared {session: []}]', 'security: [*shared]'],
+  ['security: [{session: []},\n        &shared {agentKey: []}]', 'security: [{session: []},\n        *shared]'],
+  ['x-shared: &shared\n        type: string', 'x-shared: *shared'],
+  ['x-shared: &shared text', 'x-shared: *shared'],
+  ['x-shared:\n        - &shared |\n          text\n          security: *other', 'x-shared:\n        - *shared'],
+]
+
+test('fails closed when sorting would move a tracked alias before its sequence, flow or block anchor', () => {
+  for (const [definition, alias] of anchorForms) {
+    const unsafe = `paths:\n  /z:\n    get:\n      ${definition}\n  /a:\n    get:\n      ${alias}\ncomponents:\n  schemas: {}\n`
+    assert.throws(() => sortOpenAPI(unsafe), /Alias \*shared would precede its definition after sorting/, definition)
+    // An alias ahead of its definition is invalid input and is rejected before any move.
+    const invalid = `paths:\n  /a:\n    get:\n      ${alias}\n  /z:\n    get:\n      ${definition}\ncomponents:\n  schemas: {}\n`
+    assert.throws(() => sortOpenAPI(invalid), /Alias \*shared precedes its definition$/, definition)
+  }
+})
+
+test('sorts around tracked anchors whose bindings stay valid', () => {
+  for (const [definition, alias] of anchorForms) {
+    // /a moves before /m and /z, yet the definition in /m still precedes the alias in /z.
+    const other = text => text.replaceAll('shared', 'other')
+    const input = `paths:\n  /m:\n    get:\n      ${definition}\n  /a: {}\n  /z:\n    get:\n      ${alias}\ncomponents:\n  schemas:\n    Zebra:\n      ${other(definition)}\n    Alpha: {type: string}\n`
+    const sorted = sortOpenAPI(input)
+    assert.ok(sorted.indexOf('  /a:') < sorted.indexOf('  /m:') && sorted.indexOf('  /m:') < sorted.indexOf('  /z:'), definition)
+    assert.ok(sorted.indexOf('    Alpha:') < sorted.indexOf('    Zebra:'), definition)
+    assert.ok(sorted.includes(`  /m:\n    get:\n      ${definition}\n`), definition)
+    assert.ok(sorted.includes(`  /z:\n    get:\n      ${alias}\n`), definition)
+    assert.deepEqual(sorted.split('\n').sort(), input.split('\n').sort(), definition)
+    assert.equal(sortOpenAPI(sorted), sorted, definition)
+    // Repeating a tracked definition cannot be compared, so it fails closed.
+    assert.throws(() => sortOpenAPI(input.replace('  /a: {}', `  /a:\n    get:\n      ${definition}`)), /Cannot reorder repeated definitions of &shared/, definition)
+  }
+})
+
+test('verifies bindings nested inside a promoted whole-line anchor value', () => {
+  const input = `paths:
+  /z:
+    get:
+      x-scopes: &scopes [read]
+      security: &auth [{session: *scopes}]
+  /a:
+    get:
+      security: *auth
+components:
+  schemas: {}
+`
+  // Promoting &auth into /a would carry *scopes above its definition in /z.
+  assert.throws(() => sortOpenAPI(input), /Alias \*scopes precedes its definition after sorting/)
+  // With the nested definition in a path that sorts first, promotion is safe.
+  const safe = input.replace('      x-scopes: &scopes [read]\n', '').replace('paths:\n', 'paths:\n  /-scopes:\n    get:\n      x-scopes: &scopes [read]\n')
+  const sorted = sortOpenAPI(safe)
+  assert.match(sorted, /\/-scopes:\n    get:\n      x-scopes: &scopes \[read\]\n  \/a:\n    get:\n      security: &auth \[\{session: \*scopes\}\]\n/)
+  assert.match(sorted, /\/z:\n    get:\n      security: \*auth\n/)
+  assert.deepEqual(sorted.split('\n').sort(), safe.split('\n').sort())
+  assert.equal(sortOpenAPI(sorted), sorted)
 })

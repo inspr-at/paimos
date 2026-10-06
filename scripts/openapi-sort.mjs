@@ -17,19 +17,41 @@ function entry(line, depth) {
   return { key, value: line.slice(match[0].length).trim() }
 }
 
+// Node properties (tags, anchors) and aliases precede a node's content. Strip
+// them from the text and record every anchor or alias as a token, so that the
+// ordering checks see anchors in sequence items, flow collections and block
+// nodes, not only in whole-line mapping values.
+const anchorName = /^[^\s,\[\]{}]*/
+function properties(text, lines, i, column, tokens) {
+  for (;;) {
+    const tag = /^![^\s,\[\]{}]*\s+/.exec(text)
+    if (tag) { text = text.slice(tag[0].length); column += tag[0].length; continue }
+    if (!/^[&*]/.test(text)) return { text, column }
+    const name = anchorName.exec(text.slice(1))[0]
+    if (!name) throw new Error(`Unsupported anchor form: ${lines[i].trim()}`)
+    tokens.push({ line: i, column, kind: text[0], name })
+    const consumed = 1 + name.length + /^\s*/.exec(text.slice(1 + name.length))[0].length
+    text = text.slice(consumed); column += consumed
+  }
+}
+
 // A hash or blank line inside a scalar is data, not movable map trivia.
 // Track scalar spans before interpreting mapping keys or anchor tokens. Infer
 // block indentation from its first nonblank line, or use the explicit digit.
 // Keep trailing blank lines too: the + chomping indicator owns those bytes.
-function scalarLines(lines, blockContent = new Set()) {
+// Tokens collects every anchor and alias outside scalar content, in order.
+function scalarLines(lines, blockContent = new Set(), tokens = []) {
   const content = new Set()
-  let block, quote, flowDepth = 0
+  let block, quote, flowDepth = 0, prev
   // Flow collections can contain quoted scalars at any nesting depth. Keep
   // scanning after a closing quote: another scalar may open on the same line.
   // Delimiters must balance: a stray closer, or anything but a comment after a
   // closed top-level node, is unsupported source and must fail closed rather
   // than desynchronise the scanner for the rest of the document.
-  const scanInline = (text, line = text) => {
+  // prev is the last significant character of the node being scanned; a node
+  // starts after an opener, a separator or a key, where & and * are anchors.
+  const scanInline = (text, i, offset) => {
+    const line = lines[i]
     let closed = false
     for (let j = 0; j < text.length; j++) {
       const char = text[j]
@@ -39,23 +61,39 @@ function scalarLines(lines, blockContent = new Set()) {
         if (quote === "'" && text[j + 1] === "'") { j++; continue }
         quote = undefined
         closed = flowDepth === 0
-      } else {
-        if (char === '#' && (j === 0 || /\s/.test(text[j - 1]))) break
-        if (char === ']' || char === '}') {
-          if (--flowDepth < 0) throw new Error(`Unbalanced flow delimiter: ${line.trim()}`)
-          closed = flowDepth === 0
-        } else if (/\s/.test(char)) continue
-        else if (closed) throw new Error(`Unsupported content after a flow or quoted node: ${line.trim()}`)
-        else if (char === '[' || char === '{') flowDepth++
-        else if ((char === '"' || char === "'") && (j === 0 || /[\s[{,:?]/.test(text[j - 1]))) quote = char
+        prev = char
+        continue
       }
+      if (char === '#' && (j === 0 || /\s/.test(text[j - 1]))) break
+      if (/\s/.test(char)) continue
+      if (char === ']' || char === '}') {
+        if (--flowDepth < 0) throw new Error(`Unbalanced flow delimiter: ${line.trim()}`)
+        closed = flowDepth === 0
+        prev = char
+        continue
+      }
+      if (closed) throw new Error(`Unsupported content after a flow or quoted node: ${line.trim()}`)
+      const start = prev === undefined || /[[{,:]/.test(prev)
+      if (char === '[' || char === '{') flowDepth++
+      else if ((char === '"' || char === "'") && (j === 0 || /[\s[{,:?]/.test(text[j - 1]))) quote = char
+      else if (start && /[&*!]/.test(char)) {
+        const name = anchorName.exec(text.slice(j + 1))[0]
+        if (char !== '!') {
+          if (!name) throw new Error(`Unsupported anchor form: ${line.trim()}`)
+          tokens.push({ line: i, column: offset + j, kind: char, name })
+        }
+        j += name.length
+        // A tag leaves the node start open for the anchor or content after it.
+        if (char === '!') continue
+      }
+      prev = char
     }
   }
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
     if (quote || flowDepth) {
       content.add(i)
-      scanInline(line)
+      scanInline(line, i, 0)
       continue
     }
     if (block) {
@@ -78,26 +116,32 @@ function scalarLines(lines, blockContent = new Set()) {
       node = node.slice(0, parent) + '  ' + node.slice(parent + 2)
       sequence = true
     }
-    // A flow collection is a complete node: a sequence item such as
-    // - {$ref: '#/x'} is not a mapping entry keyed "{$ref", and its closing
-    // delimiter must pair with its own opener. Scan it before key extraction.
-    const flow = node.trim().replace(/^(?:[&!]\S+\s+)+/, '')
-    if (/^[\[{]/.test(flow)) { scanInline(flow, line); continue }
-    let value
-    try { ({ value } = entry(node, indent(node))); parent = indent(node) }
-    catch {
-      if (!sequence) continue
-      value = node.trim()
+    const head = node.trim()
+    // Explicit keys could carry anchors the entry scanner never sees.
+    if (head === '?' || head.startsWith('? ')) throw new Error(`Unsupported explicit key: ${line.trim()}`)
+    // A sequence item or a node with leading properties is a complete node
+    // (- {$ref: '#/x'}, - &item {x: 1}, - *item, - |), not a mapping entry
+    // keyed by its first word. Anchored mapping entries would hide the key's
+    // anchor or the value's scalar span, so they fail closed.
+    let value, column
+    if (sequence || /^[&*!]/.test(head)) {
+      ;({ text: value, column } = properties(head, lines, i, line.trimEnd().length - head.length, tokens))
+      if (value !== head && /^[^\s'"\[{][^:]*:(?:\s|$)/.test(value)) throw new Error(`Unsupported anchor form: ${line.trim()}`)
+      // A plain or quoted sequence item may still be a mapping entry (- "$ref": x).
+      if (value === head && !/^[\[{|>]/.test(value)) value = undefined
     }
-    // Tags modify a scalar's type, not its source boundaries.
-    value = value.replace(/^(?:!\S+\s+)+/, '')
+    if (value === undefined) {
+      try { ({ value } = entry(node, indent(node))); parent = indent(node); column = line.trimEnd().length - value.length }
+      catch { if (!sequence) continue; value = head; column = line.trimEnd().length - head.length }
+      ;({ text: value, column } = properties(value, lines, i, column, tokens))
+    }
     const header = /^[|>]([1-9][+-]?|[+-][1-9]?|)(?:\s+#.*)?$/.exec(value)
     if (header) {
       const digit = /[1-9]/.exec(header[1])
       block = { parent, depth: digit ? parent + Number(digit[0]) : undefined }
-    } else {
-      const inline = value.replace(/^&[\w-]+\s+/, '')
-      if (/^[\[{'"]/.test(inline)) scanInline(inline, line)
+    } else if (/^[\[{'"]/.test(value)) {
+      prev = undefined
+      scanInline(value, i, column)
     }
   }
   return content
@@ -133,27 +177,37 @@ function sortMap(lines, start, end, depth, label) {
 }
 
 // The contract uses whole-line flow anchors (notably security: &auth [...]).
-// Sorting can put an alias before its definition. Swap that definition with
-// the first alias, retaining every anchor/alias and its exact value. Different
-// definitions of the same name are unsafe to reorder and must fail closed.
-function anchorLines(lines) {
-  const content = scalarLines(lines)
-  const definitions = new Map(), uses = []
-  for (let i = 0; i < lines.length; i++) {
-    if (content.has(i)) continue
-    const match = /^(\s*[^#\s][^:]*:\s+)(?:&([\w-]+)\s+(\[.*\]|\{.*\})|\*([\w-]+))(\s*(?:#.*)?)$/.exec(lines[i])
-    if (!match) {
-      if (/^\s*[^#\s][^:]*:\s+[&*][\w-]+/.test(lines[i])) throw new Error(`Unsupported anchor form: ${lines[i].trim()}`)
+// Sorting can put an alias before its definition. Only that form is promoted:
+// swap the definition with its first alias, retaining every anchor/alias and
+// its exact value. Anchors in sequence items, nested flow collections or block
+// nodes are tracked, so a sort that would move such an alias before its
+// definition fails closed. Different definitions of the same name are unsafe
+// to reorder and fail closed too.
+const wholeLine = /^(\s*[^#\s][^:]*:\s+)(?:&([^\s,\[\]{}]+)\s+(\[.*\]|\{.*\})|\*([^\s,\[\]{}]+))(\s*(?:#.*)?)$/
+function anchorTokens(lines) {
+  const tokens = []
+  scalarLines(lines, undefined, tokens)
+  for (const token of tokens) {
+    const match = wholeLine.exec(lines[token.line])
+    if (match && token.column === match[1].length) Object.assign(token, { whole: true, prefix: match[1], value: match[3], suffix: match[5] })
+  }
+  return tokens
+}
+
+function checkAnchors(tokens, phase) {
+  const definitions = new Map()
+  for (const token of tokens) {
+    if (token.kind === '*') {
+      if (!definitions.has(token.name)) throw new Error(`Alias *${token.name} precedes its definition${phase}`)
       continue
     }
-    const [, prefix, name, value, alias, suffix] = match
-    if (name) {
-      if (definitions.has(name) && definitions.get(name) !== value) throw new Error(`Cannot reorder different definitions of &${name}`)
-      definitions.set(name, value)
+    const previous = definitions.get(token.name)
+    if (previous) {
+      if (!previous.whole || !token.whole) throw new Error(`Cannot reorder repeated definitions of &${token.name}; only equal whole-line flow anchors may repeat`)
+      if (previous.value !== token.value) throw new Error(`Cannot reorder different definitions of &${token.name}`)
     }
-    uses.push({ i, prefix, name, value, alias, suffix })
+    definitions.set(token.name, token)
   }
-  return { definitions, uses }
 }
 
 export function sortOpenAPI(source) {
@@ -164,12 +218,7 @@ export function sortOpenAPI(source) {
   const originalBlocks = new Set()
   scalarLines(lines, originalBlocks)
   // Check the original bindings before moving any blocks.
-  const original = anchorLines(lines)
-  const seen = new Set()
-  for (const use of original.uses) {
-    if (use.name) seen.add(use.name)
-    else if (!seen.has(use.alias)) throw new Error(`Alias *${use.alias} precedes its definition`)
-  }
+  checkAnchors(anchorTokens(lines), '')
   const paths = lines.indexOf('paths:')
   if (paths < 0) throw new Error('Expected block mapping paths:')
   sortMap(lines, paths, endOfMap(lines, paths, 0), 2, 'paths')
@@ -185,18 +234,23 @@ export function sortOpenAPI(source) {
     sortMap(lines, i, sectionEnd, 4, `components.${key}`)
     i = sectionEnd - 1
   }
-  const sorted = anchorLines(lines), declared = new Set()
-  for (const use of sorted.uses) {
-    if (use.name) { declared.add(use.name); continue }
-    if (declared.has(use.alias)) continue
-    const definition = sorted.uses.find(item => item.name === use.alias)
-    if (!definition) throw new Error(`Missing definition for *${use.alias}`)
-    lines[use.i] = `${use.prefix}&${use.alias} ${definition.value}${use.suffix}`
-    lines[definition.i] = `${definition.prefix}*${use.alias}${definition.suffix}`
-    definition.name = undefined
-    definition.alias = use.alias
-    declared.add(use.alias)
+  const tokens = anchorTokens(lines), declared = new Set()
+  for (const token of tokens) {
+    if (token.kind === '&') { declared.add(token.name); continue }
+    if (declared.has(token.name)) continue
+    const definition = tokens.find(item => item.kind === '&' && item.name === token.name)
+    if (!definition) throw new Error(`Missing definition for *${token.name}`)
+    if (!token.whole || !definition.whole) {
+      throw new Error(`Alias *${token.name} would precede its definition after sorting; only whole-line flow anchors (key: &name [...]) can be promoted`)
+    }
+    lines[token.line] = `${token.prefix}&${token.name} ${definition.value}${token.suffix}`
+    lines[definition.line] = `${definition.prefix}*${token.name}${definition.suffix}`
+    definition.kind = '*'
+    declared.add(token.name)
   }
+  // Promotion moves whole lines, including any anchors nested in a promoted
+  // value. Prove the final bindings instead of trusting the bookkeeping.
+  checkAnchors(anchorTokens(lines), ' after sorting')
   const result = lines.join(newline) + (finalNewline ? newline : '')
   if (!finalNewline && result !== source) {
     const sortedBlocks = new Set()
