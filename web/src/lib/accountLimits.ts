@@ -7,7 +7,6 @@
 // replaces them.
 import { api, APIError } from './api.ts'
 import type { AgentAccount, AllowanceWindow } from './agents.ts'
-import { brand } from './brand.ts'
 import { ago, HARNESS_NAME, pct, when, type CapacityReading, type CapacityWindow } from './capacity.ts'
 
 export type LimitUnit = 'percent' | 'runs' | 'requests' | 'tokens' | 'cost_micros'
@@ -46,9 +45,8 @@ export function readingSupport(harness: string): string {
 }
 /** The honest line for an account without a current window. */
 export function noWindowLine(harness: string, host: string): string {
-  const name = HARNESS_NAME[harness] ?? harness
   if (harness === 'claude') return 'Reads with its first run. Agents can start now.'
-  if (BLIND.has(harness)) return `${name} doesn't show its limit to ${brand.value.short_name}. One run at a time by day, freely tonight.`
+  if (BLIND.has(harness)) return 'Usage unknown · reserve not enforceable'
   return host ? `Reading your limits on ${host}…` : 'Reading your limits…'
 }
 

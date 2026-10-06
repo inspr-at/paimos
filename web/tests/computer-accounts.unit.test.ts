@@ -90,7 +90,7 @@ describe('online, no readings yet', () => {
     expect(cards[0].accounts.map(a => a.readiness.kind)).toEqual(['ready', 'ready'])
     expect(cards[0].accounts[0].capacity).toEqual({ kind: 'none' })
     // Cursor has no quota reader, independently of whether learning has begun.
-    expect(cards[0].accounts[1].capacity).toEqual({ kind: 'quiet', text: "Cursor doesn't show its limit · one run at a time by day" })
+    expect(cards[0].accounts[1].capacity).toEqual({ kind: 'quiet', text: 'Usage unknown · reserve not enforceable' })
     expect(cards[0].legend).toBe(false)
     expect(readySummary(cards)).toEqual({ text: '2 of 2 ready', tone: 'ok' })
   })

@@ -369,7 +369,7 @@ export const LOGIN_COMMAND: Record<string, string> = { codex: 'codex login', cla
 /** These harnesses expose no quota reader; a first run cannot produce one. */
 export const hidesCapacityLimit = (harness: string) => ['cursor', 'grok', 'pi'].includes(harness)
 export const unreportedCapacity = (harness: string) => hidesCapacityLimit(harness)
-  ? `${HARNESS_NAME[harness] ?? harness} doesn't show its limit · one run at a time by day`
+  ? 'Usage unknown · reserve not enforceable'
   : harness === 'codex' ? 'No reading yet — readings need a managed run' : harness === 'claude' ? 'No reading yet — captured during a managed run' : 'No reading yet'
 
 const KIND_RANK: Record<string, number> = { monthly: 0, weekly: 1, other: 2, '5h': 3 }
