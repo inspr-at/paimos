@@ -227,6 +227,57 @@ func TestOpenAPIPropertyNamesHaveNoSpace(t *testing.T) {
 	}
 }
 
+// Commas in flow mappings must remain part of the response description, rather
+// than silently truncating the text and introducing unrelated response fields.
+func TestProjectLeadResponseDescriptions(t *testing.T) {
+	for _, source := range []struct {
+		file, prefix string
+	}{
+		{"../../api/openapi.yaml", ""},
+		{"../../internal/harness/openapi.yaml", "/api"},
+	} {
+		t.Run(source.file, func(t *testing.T) {
+			raw, err := os.ReadFile(source.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var doc struct {
+				Paths map[string]struct {
+					Post struct {
+						Responses map[string]map[string]any `yaml:"responses"`
+					} `yaml:"post"`
+				} `yaml:"paths"`
+			}
+			if err := yaml.Unmarshal(raw, &doc); err != nil {
+				t.Fatal(err)
+			}
+			cases := []struct {
+				path, status, description string
+			}{
+				{"/projects/{projectId}/lead", "200", "Explicit lead intent, with unavailable gates shown as waiting_for_room"},
+				{"/projects/{projectId}/lead/claim", "403", "Lease, live authority or owned intent rejected"},
+				{"/projects/{projectId}/lead/claim", "409", "Concurrent claim, unconfirmed stop or revision conflict"},
+			}
+			if source.prefix == "" {
+				cases = append(cases, struct{ path, status, description string }{
+					"/queue/next", "409", "Lead proof missing, stale assignment, paused/revoked/archived lead, mandatory admission unavailable, or bounded scheduling snapshot overflow",
+				})
+			}
+			for _, tc := range cases {
+				t.Run(tc.path+"/"+tc.status, func(t *testing.T) {
+					response := doc.Paths[source.prefix+tc.path].Post.Responses[tc.status]
+					if got := response["description"]; got != tc.description {
+						t.Errorf("parsed description = %q, want %q", got, tc.description)
+					}
+					if len(response) != 1 {
+						t.Errorf("response must contain only its description, got %v", response)
+					}
+				})
+			}
+		})
+	}
+}
+
 func lintSchema(v any, path string) error {
 	obj, ok := v.(map[string]any)
 	if !ok {
