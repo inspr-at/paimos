@@ -353,6 +353,7 @@ func TestRoutedShardMatrixGuard(t *testing.T) {
 		strings.Replace(routedGoShards, "github.ref == 'refs/heads/main' && ", "", 1),
 		strings.Replace(routedGoShards, `"workflow_dispatch"`, `"pull_request"`, 1),
 		strings.Replace(routedGoShards, "outputs.runner_class == 'mbp2606' && ", "", 1),
+		strings.Replace(routedGoShards, "github.event_name == 'pull_request'", `contains(fromJSON('["pull_request","merge_group"]'), github.event_name)`, 1),
 		"[1, 2, 3, 4]",
 	} {
 		body := routedWorkflow("go-test", "    strategy:\n      matrix:\n        shard: "+selection+"\n")

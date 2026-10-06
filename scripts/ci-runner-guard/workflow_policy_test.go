@@ -198,6 +198,20 @@ func TestWorkflowPolicyMutations(t *testing.T) {
 	add("effective-lane-publisher-missing", "ci.yml", "publish the effective lane", func(w map[string]any) {
 		delete(mapping(mapping(mapping(w["jobs"])["tier-plan"])["outputs"]), "lane")
 	})
+	for _, id := range []string{"go-test", "web-unit", "web-shard"} {
+		for _, field := range []string{"if", "run", "env"} {
+			add("merge-group-full-proof/"+id+"/"+field, "ci.yml", "prove full tier execution", func(w map[string]any) {
+				for _, value := range mapping(mapping(w["jobs"])[id])["steps"].([]any) {
+					step := mapping(value)
+					if step["name"] == "Confirm full tier execution" {
+						delete(step, field)
+						return
+					}
+				}
+				t.Fatal("missing proof mutation target")
+			})
+		}
+	}
 	// All contexts and supporting job identities are reserved, even on a
 	// path-filtered workflow, and even when a different id sets a reserved name.
 	for _, id := range []string{"go", "web", "release-check", "e2e", "go-test", "go-static", "go-timing", "runner-route", "ci-plan", "web-setup", "web-unit", "web-shard", "e2e-run", "release-check-run", "cross-family", "gate/cross-family"} {
@@ -550,12 +564,11 @@ func TestCIClassifiedWebShardMatrix(t *testing.T) {
 	for _, lane := range []string{"full", "spec-only"} {
 		for _, event := range []string{"pull_request", "merge_group", "push", "workflow_dispatch"} {
 			for _, mode := range []string{"full", "essential"} {
-				const premerge = `contains(fromJSON('["pull_request","merge_group"]'), github.event_name)`
-				got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{"needs.tier-plan.outputs.lane": lane, "needs.tier-plan.outputs.mode": mode, premerge: map[bool]string{true: "yes", false: ""}[event == "pull_request" || event == "merge_group"]})
+				got := expandConcurrency(t, "${{ "+expression+" }}", map[string]string{"github.event_name": event, "needs.tier-plan.outputs.lane": lane, "needs.tier-plan.outputs.mode": mode})
 				want := "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]"
-				if lane == "spec-only" {
+				if event == "pull_request" && lane == "spec-only" {
 					want = "[1]"
-				} else if mode == "essential" && (event == "pull_request" || event == "merge_group") {
+				} else if mode == "essential" && event == "pull_request" {
 					want = "[1, 2]"
 				}
 				if got != want {
@@ -639,6 +652,9 @@ func TestCIStaticLayoutAggregatesAndJobGates(t *testing.T) {
 		condition, _ := mapping(jobs[id])["if"].(string)
 		if strings.Contains(condition, "needs.tier-plan.outputs.layout != 'static'") != static {
 			t.Fatalf("%s static-layout gate = %v, want %v", id, !static, static)
+		}
+		if static && !strings.Contains(condition, "(github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')") {
+			t.Fatalf("%s must allow the static-layout shortcut only on PRs", id)
 		}
 	}
 	if _, exists := mapping(jobs["migration-compat"])["if"]; exists {
