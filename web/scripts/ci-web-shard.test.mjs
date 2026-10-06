@@ -496,7 +496,7 @@ test('normal CI gates every shared Settings case and records the collected shard
   assert.equal(group.specs.find(row => row.file === file).listedTests, collected.length)
 })
 
-test('normal CI retains renamed Settings cases and gates Vocabulary and bookmark regressions', () => {
+test('Settings cases stay classified: strict validation rejects stale and unclassified registrations', () => {
   const file = 'tests/settings.spec.ts', config = 'playwright.ui.config.ts'
   const result = spawnSync(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '-c', config, file, '--list', '--reporter=json'], {
     cwd: webRoot, encoding: 'utf8', timeout: 30_000, maxBuffer: 4 * 1024 * 1024,
@@ -504,15 +504,23 @@ test('normal CI retains renamed Settings cases and gates Vocabulary and bookmark
   assert.equal(result.error, undefined)
   assert.equal(result.status, 0, result.stderr)
   const collected = flattenBrowser(JSON.parse(result.stdout), config)
-  assert.ok(collected.length >= 20, 'retain renamed cases, Vocabulary sizes/themes and bookmark regressions')
+  assert.ok(collected.length >= 20, 'collect the regrouped Settings cases, including the six Vocabulary overflow variants')
   const stored = JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json', import.meta.url), 'utf8'))
-  const rows = validate({ version: stored.version, tests: stored.tests.filter(row => row.file === file) }, collected, undefined, { strict: true })
+  const manifest = { version: stored.version, tests: stored.tests.filter(row => row.file === file) }
+  // The AEON-694 regrouping renamed cases; the manifest kept the old names and
+  // every run warned. Strict reconciliation throws on either drift direction.
+  const rows = validate(manifest, collected, undefined, { strict: true })
+  assert.deepEqual(rows.map(key).sort(), collected.map(key).sort())
+  const evidence = rows.filter(row => row.name.startsWith('settings layout evidence'))
+  assert.equal(evidence.length, 1)
+  assert.equal(evidence[0].tier, 'NIGHTLY', 'screenshot evidence stays nightly')
+  for (const row of rows) if (row !== evidence[0]) assert.ok(['ESSENTIAL', 'GATED-FULL'].includes(row.tier), `${key(row)} needs an explicit gate tier`)
   for (const event of ['pull_request', 'merge_group']) {
     const selected = select(rows, { event, paths: ['.github/workflows/ci.yml'] }).tests
-    assert.deepEqual(selected.map(key), collected.map(key), `${event} must gate every Settings case`)
+    assert.deepEqual(selected.map(key), rows.filter(row => row !== evidence[0]).map(key), `${event} must gate every functional Settings case`)
   }
-  const manifest = loadManifest()
-  const declarations = manifest.groups.flatMap(group => group.specs.filter(spec => spec.file === file).map(spec => ({ group, spec })))
+  const policy = loadManifest()
+  const declarations = policy.groups.flatMap(group => group.specs.filter(spec => spec.file === file).map(spec => ({ group, spec })))
   assert.equal(declarations.length, 1, 'Settings must have exactly one shard declaration')
   assert.notEqual(declarations[0].group.gate, false, 'Settings must remain in the full browser gate')
   assert.equal(declarations[0].spec.listedTests, collected.length)

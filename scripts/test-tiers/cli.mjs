@@ -15,7 +15,13 @@ import { manifestsMain, classifyManifest } from './manifests.mjs'
 
 export const manifestFile = kind => resolve(root,`scripts/ci/${kind}-test-tiers.json`)
 export const load = kind => JSON.parse(readFileSync(manifestFile(kind),'utf8'))
-const target = kind => kind==='go' ? collectGo() : collectWeb()
+// Collection spawns the Vitest, Node and Playwright listers. One process may
+// plan repeatedly (tests, multi-step runs), so collect each inventory once.
+const inventories = new Map()
+const target = kind => {
+  if (!inventories.has(kind)) inventories.set(kind, kind==='go' ? collectGo() : collectWeb())
+  return inventories.get(kind)
+}
 
 // Planner input is authoritative. Candidate uncertainty can widen it to full,
 // but candidate graph additions can never narrow the base planner's full gate.
