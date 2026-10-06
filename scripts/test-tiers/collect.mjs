@@ -9,7 +9,7 @@ export const web = resolve(root, 'web')
 export const evidence = resolve(root, 'tmp/test-tiers')
 export function command(bin, args, { cwd = root, env = process.env, timeout = 180_000 } = {}) {
   const result = spawnSync(bin, args, { cwd, env, encoding: 'utf8', timeout, maxBuffer: 32*1024*1024 })
-  if (result.error || result.status !== 0) throw new Error(`${bin} ${args.slice(0,4).join(' ')} failed (${result.status ?? result.error?.code}); ${result.stderr?.slice(-2000) ?? ''}`)
+  if (result.error || result.status !== 0) throw Object.assign(new Error(`${bin} ${args.slice(0,4).join(' ')} failed (${result.status ?? result.error?.code}); ${result.stderr?.slice(-2000) ?? ''}`), { stdout: result.stdout ?? '' })
   return result.stdout
 }
 export function collectGo() {

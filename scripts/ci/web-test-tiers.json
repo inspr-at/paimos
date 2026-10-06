@@ -742,6 +742,8 @@
     ,
     "node:tests/test-tier-failures.test.ts:failed Go jsonl names the package and test with the last 40 lines in logs and summary"
     ,
+    "node:tests/test-tier-failures.test.ts:native Go enumeration reports package failure output and retains a failing exit"
+    ,
     "node:tests/test-tier-failures.test.ts:native planning regression reuses one collected snapshot for unchanged-tree CLI checks"
     ,
     "node:tests/theme-colours.test.ts:Suggest changes failing shades, keeps readable shades, hue and saturation"
@@ -13559,6 +13561,8 @@
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Vitest diagnostics retain assertion details and captured stdout stderr within bounds in logs and summary","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"failed Go jsonl names the package and test with the last 40 lines in logs and summary","tier":"NIGHTLY"}
+    ,
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"native Go enumeration reports package failure output and retains a failing exit","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"native planning regression reuses one collected snapshot for unchanged-tree CLI checks","tier":"NIGHTLY"}
     ,

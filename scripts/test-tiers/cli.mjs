@@ -249,7 +249,16 @@ export async function main(args) {
     const all=validate(load(kind),target(kind).tests,undefined,{strict:options.strict})
     measuredWeights(load(kind),all) // malformed timing weights fail the manifest check, not a later plan
     if(kind==='web') { console.log(JSON.stringify({inventory:counts(all)}));return 0 }
-    const output=command('go',['test','-p','2','-json','-list','^(Test|Fuzz)','./...'],{env:{...process.env,GOMAXPROCS:'2'},timeout:15*60*1000})
+    let output
+    try {
+      output=command('go',['test','-p','2','-json','-list','^(Test|Fuzz)','./...'],{env:{...process.env,GOMAXPROCS:'2'},timeout:15*60*1000})
+    } catch(error) {
+      let failures=[]
+      try { failures=goFailures(error.stdout??'') } catch {}
+      if(failures.length)printFailures(failures)
+      else if(error.stdout)console.error(outputTail(error.stdout))
+      throw error
+    }
     const listed=[]
     for(const line of output.split('\n').filter(Boolean)) {
       const event=JSON.parse(line)
