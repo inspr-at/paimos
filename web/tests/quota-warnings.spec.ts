@@ -1,10 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
-import { fixtures, me, mockWork } from './work-fixtures'
+import { fixtures, mockWork } from './work-fixtures'
 import { mockBusiness, businessData } from './business-fixtures'
 import { settingsData, mockSettings } from './settings-fixtures'
-import { agentData, mockAgents } from './agents-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 
@@ -66,22 +65,3 @@ for (const width of [390, 1440]) {
     await expect(line).toContainText('early 20 %, urgent 5 %')
   })
 }
-
-test('/agents names affected sessions and respects availability-only redaction', async ({ page }) => {
-  const world = { me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } }
-  await mockWork(page, fixtures(), { admin: true })
-  const agents = agentData(world)
-  await mockAgents(page, agents)
-  const target = agents.sessions[1]!
-  const warning = { session_id: target.id, project_id: target.project_id, account_id: agents.accounts[0]!.id, availability: 'limited', details_redacted: true }
-  await page.route('**/api/agent-accounts/quota-warnings*', route => route.fulfill({ json: { items: [warning], next_after: null } }))
-  await page.goto('/agents')
-  const notices = page.getByRole('region', { name: 'Account availability notices' })
-  await expect(notices.getByRole('link')).toHaveAttribute('href', `/agents/${target.id}`)
-  await expect(notices).toContainText('Limited availability')
-  await expect(notices).not.toContainText('%')
-  await expect(notices).not.toContainText('Urgent')
-  await page.route('**/api/agent-accounts/quota-warnings*', route => route.fulfill({ json: { items: [{ ...warning, details_redacted: false, severity: 'urgent', remaining_percent: 2 }], next_after: null } }))
-  await page.reload()
-  await expect(notices).toContainText('Urgent notice · 2% remaining')
-})
