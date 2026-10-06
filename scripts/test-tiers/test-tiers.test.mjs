@@ -1284,6 +1284,34 @@ test('committed allowlists preserve classifications, helpers and reviewed AEON-5
   assert.ok([...go.tests,...web.tests].filter(row=>row.tags?.includes('delete-candidate')).every(row=>row.tier==='GATED-FULL'||row.tier==='NIGHTLY'))
 })
 
+// These exact registrations were missing in the AEON-706 static report.
+// Main's post-gate policy classifies new cases explicitly without widening CI.
+for(const [label,pkg,names] of [
+  ['work-order body guards','internal/workorders',[
+    'TestBufferBodyBoundsAndDecode','TestEndpointBodyNetworkDeadline','TestEndpointPositionedBodyNetworkDeadline',
+  ]],
+  ['builder and shared-runtime guards','scripts/releaseworkflow',[
+    'TestBuilderChecksumAndPluginPathFailClosed','TestBuilderVersionAssertionFailsClosed',
+    'TestRehearsedBuilderPins','TestParallelWebUnitsShareRuntimeAndRunOnce',
+  ]],
+]) test(`AEON-706 ${label} retain explicit classifications and nightly execution`,()=>{
+  const manifest=JSON.parse(readFileSync(new URL('../ci/go-test-tiers.json',import.meta.url)))
+  const discovered=names.map(name=>g(pkg,name))
+  const ids=discovered.map(key).sort(), required=new Set(ids)
+  const stored=manifest.tests.filter(row=>required.has(key(row)))
+  assert.deepEqual(stored.map(key).sort(),ids,'Every reported registration needs exactly one explicit classification')
+  const rows=validate({...manifest,tests:stored},discovered,noFlaky,{strict:true})
+  for(const row of rows) {
+    assert.equal(row.tier,'NIGHTLY',key(row))
+    assert.ok(manifest.postGateCases.includes(key(row)),`${key(row)} must retain main's post-gate policy`)
+  }
+  for(const event of ['pull_request','merge_group','push','schedule']) {
+    const selected=select(rows,{event,forceFull:true}).tests.map(key).sort()
+    assert.deepEqual(selected,event==='schedule'?ids:[],`${event}: preserve explicit nightly scope`)
+  }
+  assert.deepEqual(select(rows,{event:'pull_request',forceAll:true}).tests.map(key).sort(),ids)
+})
+
 test('strict classification maintenance is scheduled separately and never a required PR or nightly test dependency',()=>{
   const nightly=readFileSync(new URL('../../.github/workflows/nightly-full.yml',import.meta.url),'utf8')
   const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')

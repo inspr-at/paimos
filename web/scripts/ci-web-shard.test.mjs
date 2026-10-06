@@ -3,7 +3,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
 import { select, validate, key } from '../../scripts/test-tiers/core.mjs'
-import { command, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
+import { command, flattenBrowser, root } from '../../scripts/test-tiers/collect.mjs'
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
@@ -586,4 +586,34 @@ test('Settings cases stay classified: strict validation rejects stale and unclas
   assert.equal(evidence.length, 1)
   assert.equal(evidence[0].tier, 'NIGHTLY', 'screenshot evidence stays nightly')
   for (const row of rows) if (row !== evidence[0]) assert.ok(['ESSENTIAL', 'GATED-FULL'].includes(row.tier), `${key(row)} needs an explicit gate tier`)
+})
+
+// Native expansion catches parameterized routing cases; strict reconciliation
+// prevents new cases from silently becoming nightly-only after a merge.
+for (const [kind, file, minimum] of [
+  ['vitest', 'tests/settings-routing.unit.test.ts', 35],
+  ['node', 'tests/agent-login.test.ts', 3],
+]) test(`${file} native registrations stay explicitly gated`, () => {
+  const directory = mkdtempSync(resolve(tmpdir(), 'aeon-706-native-tiers-'))
+  try {
+    let collected
+    if (kind === 'vitest') {
+      const output = resolve(directory, 'vitest-list.json')
+      command(process.execPath, ['node_modules/vitest/vitest.mjs', 'list', file, `--json=${output}`,
+        '--no-staticParse', '--maxWorkers=1', '--no-fileParallelism', '--configLoader=runner'], { cwd: webRoot, timeout: 30_000 })
+      collected = JSON.parse(readFileSync(output, 'utf8')).map(row => ({ kind, file, name: row.name }))
+    } else {
+      collected = JSON.parse(command(process.execPath, ['--import', resolve(root, 'scripts/test-tiers/node-collect-hook.mjs'),
+        resolve(root, 'scripts/test-tiers/node-collect.mjs'), resolve(webRoot, file)], { cwd: webRoot, timeout: 30_000 }))
+        .map(row => ({ ...row, kind, file }))
+    }
+    assert.ok(collected.length >= minimum, `${file}: native collection must retain parameterized cases`)
+    const stored = JSON.parse(readFileSync(resolve(root, 'scripts/ci/web-test-tiers.json'), 'utf8'))
+    const manifest = { version: stored.version, tests: stored.tests.filter(row => row.file === file) }
+    const rows = validate(manifest, collected, undefined, { strict: true })
+    for (const event of ['pull_request', 'merge_group']) {
+      const selected = select(rows, { event, paths: ['.github/workflows/ci.yml'] }).tests
+      assert.deepEqual(selected.map(key).sort(), collected.map(key).sort(), `${event}: every registration must gate`)
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })
