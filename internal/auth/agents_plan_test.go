@@ -5,6 +5,7 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/inspr-at/paimos/internal/agentplan"
@@ -40,18 +41,23 @@ func TestAgentsPlanRealKeyScopeCreatorAndLiveGrants(t *testing.T) {
 		secured.ServeHTTP(w, r)
 	}))
 	t.Cleanup(app.Close)
-	read := func(key agentKeyCreatedJSON, want int) {
+	read := func(key agentKeyCreatedJSON, want int, messages ...string) {
 		t.Helper()
-		status, _, response := do(t, &http.Client{}, "GET", app.URL+"/api/agents/plan?principal_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "", http.Header{"Authorization": {"Bearer " + key.Token}})
+		status, body, response := do(t, &http.Client{}, "GET", app.URL+"/api/agents/plan?principal_id=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "", http.Header{"Authorization": {"Bearer " + key.Token}})
 		if status != want {
 			t.Fatalf("plan status=%d want=%d", status, want)
+		}
+		for _, message := range messages {
+			if !strings.Contains(string(body), message) {
+				t.Fatalf("plan refusal did not explain %s", message)
+			}
 		}
 		if want == 200 && response.Header.Get("Cache-Control") != "no-store" {
 			t.Fatal("plan is cacheable")
 		}
 	}
 	read(key, 200)
-	read(unscoped, 403)
+	read(unscoped, 403, "scope missing")
 	for _, key := range []agentKeyCreatedJSON{key, writer} {
 		status, _, _ := do(t, &http.Client{}, "PUT", app.URL+"/api/preferences/agents.working", `{"value":{"total":0}}`, http.Header{"Authorization": {"Bearer " + key.Token}})
 		if status != 403 {
@@ -73,9 +79,12 @@ func TestAgentsPlanRealKeyScopeCreatorAndLiveGrants(t *testing.T) {
 	read(key, 403)
 	mutate(`INSERT INTO role_permissions(tenant_id,role_id,permission) SELECT tenant_id,role_id,$2 FROM role_bindings WHERE principal_id=$1 AND scope_type='workspace'`, key.PrincipalID, agentplan.ReadScope)
 	read(key, 200)
-	mutate(`UPDATE agent_keys SET created_by_principal_id=NULL WHERE id=$1`, key.ID)
-	read(key, 403)
-	mutate(`UPDATE agent_keys SET created_by_principal_id=$2 WHERE id=$1`, key.ID, owner.ID)
+	legacyKey(t, m, owner, key.ID)
+	read(key, 403, "no person owner", "Settings")
+	if w := adoptionRequest(m, owner, key.ID); w.Code != 200 {
+		t.Fatalf("adoption status=%d", w.Code)
+	}
+	read(key, 200)
 	// Respect the schema's last-owner guard while exercising deactivation.
 	mutate(`INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Backup owner')`, owner.TenantID)
 	mutate(`INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type)

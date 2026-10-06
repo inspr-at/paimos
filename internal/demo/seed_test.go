@@ -59,6 +59,9 @@ func TestDemoSeedTwice(t *testing.T) {
 	if first.Already || first.Projects != 3 || first.Tickets < 40 || first.Stage != "build" {
 		t.Fatalf("summary %+v", first)
 	}
+	if missing := scalar(t, database, id, `SELECT count(*) FROM agent_keys k LEFT JOIN principals p ON p.tenant_id=k.tenant_id AND p.id=k.created_by_principal_id WHERE p.id IS NULL OR p.kind<>'person'`); missing != 0 {
+		t.Fatalf("demo keys missing person creator: %d", missing)
+	}
 	if legacy := scalar(t, database, id, `SELECT count(*) FROM node_kinds WHERE slug IN ('epic','ticket','task')`); legacy != 0 {
 		t.Fatalf("demo recreated %d retired work kinds", legacy)
 	}
@@ -157,7 +160,7 @@ func TestDemoJourneyScopesOnlyExtendNewKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldKey, principalID, _, err := auth.OperatorCreateAgentKey(ctx, database.App, tenantID, "Lumen Scribe", "", []string{"nodes.read"}, nil)
+	oldKey, principalID, _, err := auth.OperatorCreateAgentKey(ctx, database.App, tenantID, "Lumen Scribe", "", []string{"nodes.read"}, nil, dbtest.KeyPerson(t, database.App, tenantID))
 	if err != nil {
 		t.Fatal(err)
 	}

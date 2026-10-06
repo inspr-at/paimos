@@ -70,7 +70,7 @@ func TestCodexModelUsageThroughSupervisorAndTelemetryHTTP(t *testing.T) {
 			{`INSERT INTO tenants(id,slug,name) VALUES($1,$2,'UC1 synthetic')`, []any{tid, "uc1-" + tid}},
 			{`INSERT INTO principals(tenant_id,id,kind,name) VALUES($1,$2,'person','Synthetic'),($1,$3,'agent','Synthetic')`, []any{tid, personID, agentID}},
 			{`INSERT INTO model_profiles(tenant_id,id,slug,version,harness,family,model,effort,tier) VALUES($1,$2,'uc1','1','codex','openai','model','high','strong')`, []any{tid, profile}},
-			{`INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'Synthetic',$3,$4,$5)`, []any{tid, agentID, prefix, hex.EncodeToString(sum[:]), []string{"run.telemetry", "run.read"}}},
+			{`INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'Synthetic',$3,$4,$5,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, []any{tid, agentID, prefix, hex.EncodeToString(sum[:]), []string{"run.telemetry", "run.read"}}},
 			{`INSERT INTO agent_accounts(tenant_id,id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation) VALUES($1,$2,'synthetic','codex','daemon',$3,'Synthetic',clock_timestamp(),true,$4)`, []any{tid, account, agentID, s.generation}},
 		} {
 			if _, err := tx.Exec(t.Context(), q.sql, q.args...); err != nil {
