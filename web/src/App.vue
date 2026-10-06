@@ -178,11 +178,6 @@ watch(() => releases.available, async version => {
 // ---------- Footer: on phones it folds away while reading down and returns on the way up ----------
 // A project flow pill lives in the footer, so the bar stays while that pill is shown.
 const footerHidden = ref(false)
-const flowPillShown = ref(false)
-function onFlowPill(shown: boolean) {
-  flowPillShown.value = shown
-  if (shown) footerHidden.value = false
-}
 const phoneQuery = window.matchMedia('(max-width: 600px)')
 let lastTop = 0, travel = 0, settleUntil = 0
 function scrolled() {
@@ -191,7 +186,6 @@ function scrolled() {
   const top = el.scrollTop
   const delta = top - lastTop
   lastTop = top
-  if (flowPillShown.value) { footerHidden.value = false; travel = 0; return }
   if (!phoneQuery.matches || Date.now() < settleUntil) return
   // Near the end of the page the footer stays: it is where the page ends.
   const nearEnd = el.scrollHeight - el.clientHeight - top < 48
@@ -241,7 +235,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
       </div>
     </main>
     <!-- A row of the shell: the page, docked panels and toasts all end above it. -->
-    <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openRunningRelease" @pill="onFlowPill" />
+    <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openRunningRelease" />
     <ReleasesSheet v-if="releasesOpen" ref="releasesSheet" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
     <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
     <LeadOverlays v-if="session.identity && !bare && !fatal" />

@@ -1,0 +1,75 @@
+{
+  "ticket": "AEON-750",
+  "validated_source_commit": "cf41078fd2b3de59e1fa512692ef73d760ab9b1e",
+  "design": {
+    "ticket": "AEON-717",
+    "attachment": "theme-settings-d7.html",
+    "attachment_id": "e792e732-92c5-4045-94ab-2946d7660014"
+  },
+  "scope": "Additive Custom state schema, seven approved preset looks, shared mode-specific agent tokens, isolated previews, neutral state words, and HTML motion attributes. No migration or reporter version bump required.",
+  "checks": [
+    {
+      "check": "remote Go themes and reportercontract suites",
+      "result": "passed"
+    },
+    {
+      "check": "locked remote ci-static --merge-main",
+      "result": "passed",
+      "checks_passed": 36,
+      "checks_skipped": 0
+    },
+    {
+      "check": "targeted theme-agents Playwright spec, one worker",
+      "result": "passed",
+      "tests": 14,
+      "viewports": [
+        390,
+        1024,
+        1440
+      ],
+      "modes": [
+        "light",
+        "dark"
+      ],
+      "stability_tolerance_px": 0.5
+    },
+    {
+      "check": "targeted theme/runtime/editor/appearance Vitest units",
+      "result": "passed",
+      "tests": 1723
+    },
+    {
+      "check": "Node palette and colour-engine tests",
+      "result": "passed",
+      "tests": 14
+    },
+    {
+      "check": "test-tier and web-shard Node tests",
+      "result": "passed",
+      "tests": 207
+    },
+    {
+      "check": "ownership audit tests",
+      "result": "passed",
+      "tests": 33
+    },
+    {
+      "check": "TypeScript, generated fallback tokens, canonical manifests, and diff whitespace",
+      "result": "passed"
+    }
+  ],
+  "screenshots": [
+    "web/test-results/theme-agents-390-light-nin-647bb-eviews-and-saved-appearance/aeon-750/agents-390-light.png",
+    "web/test-results/theme-agents-390-dark-nine-1d153-eviews-and-saved-appearance/aeon-750/agents-390-dark.png",
+    "web/test-results/theme-agents-1024-light-ni-23282-eviews-and-saved-appearance/aeon-750/agents-1024-light.png",
+    "web/test-results/theme-agents-1024-dark-nin-4031f-eviews-and-saved-appearance/aeon-750/agents-1024-dark.png",
+    "web/test-results/theme-agents-1440-light-ni-233e7-eviews-and-saved-appearance/aeon-750/agents-1440-light.png",
+    "web/test-results/theme-agents-1440-dark-nin-35e0a-eviews-and-saved-appearance/aeon-750/agents-1440-dark.png"
+  ],
+  "notes": [
+    "Screenshots use Playwright testInfo.outputPath and are ignored; 84 images include component details and long German names.",
+    "The existing migration audit fixture now checks timestamp instants before comparing snapshots normalized to UTC.",
+    "docs/ui-conventions.md is absent; followed repository AGENTS.md, worker-common, UI brief, and attached approved design.",
+    "No origin push, deploy, ticket status change, or model review. Consolidated review and hosted CI remain coordinator-owned."
+  ]
+}

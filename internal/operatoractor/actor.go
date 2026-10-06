@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -20,12 +21,7 @@ func Ensure(ctx context.Context, tx pgx.Tx, tenantID string) (string, error) {
 // EnsureWithProduction marks the principal creation event when a confirmed
 // production host command creates the operator for the first time.
 func EnsureWithProduction(ctx context.Context, tx pgx.Tx, tenantID string, production bool) (string, error) {
-	// Match access mutations and Undo: tenant fence, then tree, then rows.
-	var lockedID string
-	if err := tx.QueryRow(ctx, `SELECT id::text FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, tenantID).Scan(&lockedID); err != nil {
-		return "", err
-	}
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))`, tenantID); err != nil {
+	if err := db.LockTree(ctx, tx, tenantID); err != nil {
 		return "", err
 	}
 	var id string

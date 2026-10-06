@@ -8,7 +8,7 @@ import { can } from '../../lib/authz'
 import type { PairingPermissions, PairingView } from '../../lib/agentPairing'
 import { describeComputerStatus, touchIDConfirmation } from '../../lib/agentPairing'
 import {
-  clone, daysLabel, nightLabel, putSchedule, reserveLabel, reserveLevel, daysSummary, timeLabel, unreportedCapacity, when, whenFull, workStart,
+  clone, daysLabel, holdOptions as holdChoices, nightLabel, overrideDone, ownOverride, poolOfRow, putSchedule, reserveLabel, reserveLevel, daysSummary, timeLabel, unreportedCapacity, when, whenFull,
   type AccountRow, type CapacitySchedule, type Override, type PoolView,
 } from '../../lib/capacity'
 import { buildComputerCards, middleEllipsis, pacingSummary, readySummary, type AccountLine, type ComputerCard } from '../../lib/computerAccounts'
@@ -143,7 +143,7 @@ type Menu = MenuTarget & { style: Record<string, string> }
 const menu = ref<Menu | null>(null)
 const menuEl = ref<HTMLElement>()
 let menuButton: HTMLElement | null = null
-const poolOf = (row: AccountRow): PoolView | undefined => capacity.pools.find(p => p.rows.some(r => r.id === row.id)) ?? capacity.pools.find(p => p.id === (row.groupId ? `group:${row.groupId}` : row.harness))
+const poolOf = (row: AccountRow): PoolView | undefined => poolOfRow(capacity.pools, row)
 async function openMenu(next: MenuTarget, event: Event) {
   const button = event.currentTarget as HTMLElement
   const same = menu.value && menuButton === button
@@ -175,23 +175,10 @@ function menuKeys(event: KeyboardEvent) {
   const i = items.indexOf(document.activeElement as HTMLElement)
   items[(i + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
 }
-/** The pool's own override; Away comes from your own schedule and ends in the header. */
-const ownOverride = (pool: PoolView | undefined): Override => (!pool || pool.override === 'away' ? '' : pool.override)
-function holdOptions() {
-  const later = new Date(Math.floor((now.value + 2 * 3600e3) / 60_000) * 60_000).toISOString()
-  const tomorrow = new Date(workStart(schedule.value, now.value, 1)).toISOString()
-  const [day, time] = when(tomorrow, now.value).split(' ')
-  return [
-    { label: 'For 2 hours', hint: `until ${when(later, now.value)}`, name: 'Hold for 2 hours', until: later },
-    { label: `Until ${day}`, hint: time ?? '', name: `Hold until ${when(tomorrow, now.value)}`, until: tomorrow },
-    { label: 'Until I resume', hint: '', name: 'Hold until I resume', until: undefined },
-  ]
-}
+const holdOptions = () => holdChoices(schedule.value, now.value)
 function setOverride(pool: PoolView, value: Override, until?: string) {
   closeMenu(true)
-  const done = value === 'sprint' ? `Sprint: agents may use everything left on ${pool.name} until it resets.`
-    : value === 'hold' ? `Holding ${pool.name}${until ? ` until ${when(until, now.value)}` : ''}. Running steps finish.` : `${pool.name} follows your work week again.`
-  void run(() => capacity.setPoolOverride(pool.id, value, until), done)
+  void run(() => capacity.setPoolOverride(pool.id, value, until), overrideDone(pool, value, until, now.value))
 }
 const canChange = (view: PairingView) => !!computersRef.value?.canChange(view)
 const removal = (view: PairingView) => computersRef.value?.removal(view) ?? { allowed: false, reason: '' }

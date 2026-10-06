@@ -80,7 +80,7 @@ test('saved theme palette/opacity and personal heartbeat thresholds persist acro
   const palette = (name: string) => page.getByRole('radiogroup', { name: 'State colours' }).getByRole('radio', { name, exact: true })
   await palette('Deutan').click()
   const preview = page.locator('#agents .light [data-preview-state="working"] .live-bot')
-  expect(await preview.evaluate(el => getComputedStyle(el).getPropertyValue('--agent-state-color').trim())).toBe('#1767c4')
+  expect(await preview.evaluate(el => getComputedStyle(el.querySelector('.agent-state-mark')!).color)).toBe('rgb(0, 117, 204)')
   const opacity = page.getByRole('slider', { name: 'Opacity', exact: true })
   await opacity.press('Home')
   for (let step = 0; step < 30; step++) await opacity.press('ArrowRight')
@@ -104,12 +104,12 @@ test('saved theme palette/opacity and personal heartbeat thresholds persist acro
   await expect(page.locator('[data-project-id="p-sc1-unresponsive"] .live-bot')).toHaveAttribute('data-state', 'awaiting')
   for (const view of ['Cards', 'List']) {
     await page.getByRole('radio', { name: `${view} view`, exact: true }).click()
-    await expect(page.locator('[data-project-id="p-sc1-working"] .live-bot')).toHaveCSS('--agent-state-color', '#1767c4')
+    await expect(page.locator('[data-project-id="p-sc1-working"] .agent-state-mark')).toHaveCSS('color', 'rgb(0, 117, 204)')
   }
   await page.goto('/settings/theme#agents')
   await page.getByRole('switch', { name: 'Dim inactive' }).uncheck()
-  await palette('Monochrome').click()
-  const colours = await page.locator('#agents .light .states .live-bot').evaluateAll(bots => bots.slice(0, 4).map(bot => getComputedStyle(bot).getPropertyValue('--agent-state-color').trim()))
+  await palette('One colour').click()
+  const colours = await page.locator('#agents .light .states .live-bot').evaluateAll(bots => bots.slice(0, 4).map(bot => getComputedStyle(bot.querySelector('.agent-state-mark')!).color))
   expect(new Set(colours).size).toBe(1)
   await saveAgentTheme(page)
   expect(appearance.saved.values.agents).toMatchObject({ palette: 'monochrome', dim_inactive: false })
@@ -127,8 +127,8 @@ test('a migrated colour-blind choice uses Deutan while legacy appearance and hea
   await page.goto('/settings/theme#agents')
   const palettes = page.getByRole('radiogroup', { name: 'State colours' })
   await expect(palettes.getByRole('radio', { name: 'Deutan', exact: true })).toBeChecked()
-  expect(await palettes.getByRole('radio').allTextContents()).toEqual(['Standard', 'Protan', 'Deutan', 'Tritan', 'Monochrome'])
-  await expect(page.locator('#agents .light [data-preview-state="problem"] .live-bot')).toHaveCSS('--agent-state-color', '#7d2537')
+  expect(await palettes.getByRole('radio').allTextContents()).toEqual(['Standard', 'Focus', 'Errors only', 'One colour', 'Deutan', 'Protan', 'Tritan'])
+  await expect(page.locator('#agents .light [data-preview-state="problem"] .agent-state-mark')).toHaveCSS('color', 'rgb(177, 61, 9)')
   for (const state of ['working', 'waiting', 'problem', 'idle']) {
     await expect(page.locator(`#agents .light [data-preview-state="${state}"] .agent-state-mark`)).toHaveAttribute('data-mark', state)
   }

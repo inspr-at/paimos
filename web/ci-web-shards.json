@@ -24,7 +24,7 @@
     ,
     {"kind":"browser-test","name":"Decision Desk keyboard, protected adapters and geometry (AEON-567)","command":"npm test -- tests/decision-desk.spec.ts --workers=1 --trace=retain-on-failure","config":"playwright.ui.config.ts","disposition":"Replaced by manifest groups; original jobs must not rerun these current-code specs.","env":{"AEON_DESK_SHOTS":"${{ runner.temp }}/aeon-desk-shots"},"flags":["--workers=1","--trace=retain-on-failure"],"id":"web-14","job":"web","listedTests":35,"measuredSeconds":128,"project":null,"specs":["tests/decision-desk.spec.ts"]}
     ,
-    {"kind":"browser-test","name":"Footer and affected release/brand integration checks","command":"npx playwright test -c playwright.ui.config.ts --workers=2 tests/footer-release-pill.spec.ts tests/footer-flow-pill.spec.ts tests/release-codenames.spec.ts tests/version-reveal.spec.ts tests/developer-settings.spec.ts tests/brand.spec.ts tests/tenant-brand.spec.ts tests/header-menus.spec.ts tests/shell.spec.ts tests/releases.spec.ts","config":"playwright.ui.config.ts","disposition":"Replaced by manifest groups; original jobs must not rerun these current-code specs.","env":{"AEON_SCREENSHOTS_DIR":"test-results/footer-release-pill"},"flags":["--workers=2"],"id":"footer-ui-2","job":"footer-ui","listedTests":246,"measuredSeconds":172,"project":null,"specs":["tests/footer-release-pill.spec.ts","tests/footer-flow-pill.spec.ts","tests/release-codenames.spec.ts","tests/version-reveal.spec.ts","tests/developer-settings.spec.ts","tests/brand.spec.ts","tests/tenant-brand.spec.ts","tests/header-menus.spec.ts","tests/shell.spec.ts","tests/releases.spec.ts"]}
+    {"kind":"browser-test","name":"Footer and affected release/brand integration checks","command":"npx playwright test -c playwright.ui.config.ts --workers=2 tests/footer-release-pill.spec.ts tests/footer-flow-pill.spec.ts tests/release-codenames.spec.ts tests/version-reveal.spec.ts tests/developer-settings.spec.ts tests/brand.spec.ts tests/tenant-brand.spec.ts tests/header-menus.spec.ts tests/shell.spec.ts tests/releases.spec.ts","config":"playwright.ui.config.ts","disposition":"Replaced by manifest groups; original jobs must not rerun these current-code specs.","env":{"AEON_SCREENSHOTS_DIR":"test-results/footer-release-pill"},"flags":["--workers=2"],"id":"footer-ui-2","job":"footer-ui","listedTests":246,"measuredSeconds":172,"project":null,"specs":["tests/footer-release-pill.spec.ts","tests/release-codenames.spec.ts","tests/version-reveal.spec.ts","tests/developer-settings.spec.ts","tests/brand.spec.ts","tests/tenant-brand.spec.ts","tests/header-menus.spec.ts","tests/shell.spec.ts","tests/releases.spec.ts"]}
     ,
     {"kind":"browser-test","name":"Planning columns regression and theme screenshots","command":"npx playwright test tests/planning-columns.spec.ts -c playwright.ui.config.ts --workers=2","config":"playwright.ui.config.ts","disposition":"Replaced by manifest groups; original jobs must not rerun these current-code specs.","env":{},"flags":["--workers=2"],"id":"web-9","job":"web","listedTests":14,"measuredSeconds":31,"project":null,"specs":["tests/planning-columns.spec.ts"]}
     ,
@@ -484,8 +484,6 @@
       "specs": [
         {"file":"tests/developer-settings.spec.ts","listedTests":8,"tierTiming":{"caseSeconds":{"max":7.875,"median":2.7355,"min":1.056},"seconds":29.211495,"selectedTests":8},"weightSeconds":5.593496,"weightSource":"footer-ui-2"}
         ,
-        {"file":"tests/footer-flow-pill.spec.ts","listedTests":2,"tierTiming":{"caseSeconds":{"max":22.334,"median":12.1665,"min":1.999},"seconds":27.863367,"selectedTests":2},"weightSeconds":1.398374,"weightSource":"footer-ui-2"}
-        ,
         {"file":"tests/footer-release-pill.spec.ts","listedTests":40,"tierTiming":{"caseSeconds":{"max":8.312,"median":2.0035,"min":0.89},"seconds":87.614969,"selectedTests":40},"weightSeconds":27.96748,"weightSource":"footer-ui-2"}
         ,
         {"file":"tests/shell.spec.ts","listedTests":32,"tierTiming":{"caseSeconds":{"max":3.212,"median":1.001,"min":0.774},"seconds":43.094797,"selectedTests":32},"weightSeconds":22.373984,"weightSource":"footer-ui-2"}
@@ -543,6 +541,8 @@
         {"file":"tests/model-provider.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":3.347,"median":1.572,"min":0.533},"seconds":7.45261,"selectedTests":3},"weightSeconds":10.5,"weightSource":"e2e-4"}
         ,
         {"file":"tests/model-refresh.spec.ts","listedTests":1,"tierTiming":{"caseSeconds":{"max":4.248,"median":4.248,"min":4.248},"seconds":7.561739,"selectedTests":1},"weightSeconds":3.5,"weightSource":"e2e-4"}
+        ,
+        {"file":"tests/policy-editors.spec.ts","listedTests":64,"weightSeconds":114.485,"weightSource":"local-chromium-single-worker-AEON-633-fix6"}
       ]
     }
     ,
@@ -824,16 +824,6 @@
         ,
         {"file":"tests/intake-extensions.spec.ts","listedTests":17,"weightSeconds":37.731707,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/journey-confirmation.spec.ts","listedTests":19,"weightSeconds":42.170732,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/journey-imported.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/journey-overflow.spec.ts","listedTests":60,"weightSeconds":133.170732,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/journey-renewal.spec.ts","listedTests":6,"weightSeconds":13.317073,"weightSource":"unmeasured-test-rate"}
-        ,
-        {"file":"tests/journey.spec.ts","listedTests":38,"weightSeconds":84.341463,"weightSource":"unmeasured-test-rate"}
-        ,
         {"file":"tests/kind-convert.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/knowledge-dock.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
@@ -984,6 +974,8 @@
         ,
         {"file":"tests/session-rows.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/settings-account-pacing.spec.ts","listedTests":10,"weightSeconds":22.19512,"weightSource":"unmeasured-test-rate"}
+        ,
         {"file":"tests/settings-accounts.spec.ts","listedTests":24,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/stability.spec.ts","listedTests":13,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
@@ -1117,7 +1109,7 @@
       "project": null
       ,
       "specs": [
-        {"file":"tests/agent-pause.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/agent-pause.spec.ts","listedTests":15,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,
@@ -1194,7 +1186,7 @@
         ,
         {"file":"tests/work-aggregates.spec.ts","tierTiming":{"caseSeconds":{"max":5.106,"median":3.728,"min":1.586},"seconds":106.028338,"selectedTests":29},"weightSeconds":60}
         ,
-        {"file":"tests/work-history-fix5.spec.ts","tierTiming":{"caseSeconds":{"max":5.921,"median":4.3555,"min":4.16},"seconds":30.961454,"selectedTests":6},"weightSeconds":60}
+        {"file":"tests/work-history-fix5.spec.ts","tierTiming":{"caseSeconds":{"max":5.921,"median":4.3555,"min":4.16},"seconds":30.961454,"selectedTests":6},"weightSeconds":30.961454,"weightSource":"hosted-tier-timing"}
         ,
         {"file":"tests/work-lifecycle-header.spec.ts","tierTiming":{"caseSeconds":{"max":4.433,"median":3.8555,"min":2.824},"seconds":38.484393,"selectedTests":10},"weightSeconds":60}
         ,
@@ -1202,11 +1194,11 @@
         ,
         {"file":"tests/work-parent-releases.spec.ts","tierTiming":{"caseSeconds":{"max":9.332,"median":8.0815,"min":7.604},"seconds":51.890498,"selectedTests":6},"weightSeconds":60}
         ,
-        {"file":"tests/work-parent-status.spec.ts","tierTiming":{"caseSeconds":{"max":3.868,"median":2.7835,"min":2.54},"seconds":19.092666,"selectedTests":6},"weightSeconds":60}
+        {"file":"tests/work-parent-status.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":3.868,"median":2.7835,"min":2.54},"seconds":19.092666,"selectedTests":6},"weightSeconds":16.082,"weightSource":"hosted-CI-37321154870"}
         ,
         {"file":"tests/work-surfaces-fix2.spec.ts","tierTiming":{"caseSeconds":{"max":4.636,"median":3.728,"min":2.678},"seconds":45.858333,"selectedTests":12},"weightSeconds":60}
         ,
-        {"file":"tests/work-surfaces-fix3.spec.ts","tierTiming":{"caseSeconds":{"max":4.953,"median":3.3495,"min":2.696},"seconds":23.904779,"selectedTests":6},"weightSeconds":60}
+        {"file":"tests/work-surfaces-fix3.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":4.953,"median":3.3495,"min":2.696},"seconds":23.904779,"selectedTests":6},"weightSeconds":16.211,"weightSource":"hosted-CI-37321154870"}
         ,
         {"file":"tests/work-surfaces-fix4.spec.ts","tierTiming":{"caseSeconds":{"max":8.031,"median":6.7135,"min":6.15},"seconds":44.704208,"selectedTests":6},"weightSeconds":60}
         ,
@@ -1264,6 +1256,34 @@
       ,
       "specs": [
         {"file":"tests/lead-flow.spec.ts","listedTests":14,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
+      ]
+    }
+    ,
+    {
+      "config": "playwright.ui.config.ts"
+      ,
+      "env": {}
+      ,
+      "flags": [
+        "--workers=1"
+        ,
+        "--trace=retain-on-failure"
+      ]
+      ,
+      "gate": true
+      ,
+      "hostedOnly": true
+      ,
+      "id": "coarse-hit-area"
+      ,
+      "project": null
+      ,
+      "sourceSteps": [
+        "AEON-723 coarse hit-area selector regression"
+      ]
+      ,
+      "specs": [
+        {"file":"tests/coarse-hit-area.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
       ]
     }
   ]

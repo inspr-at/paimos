@@ -1,6 +1,6 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { SessionControl } from '../../lib/agents'
 import { reparentSession, undoRemoval } from '../../lib/agentRows'
 import { movableWorker, moveTarget } from './sessionMove'
@@ -38,6 +38,9 @@ import { can } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import { DEFAULT_SORT, nextSort, orderForest, readSort, writeSort, type SessionSort, type SortKey } from './sessionOrder'
 import TierCell from './TierCell.vue'
+import FoldSection from './FoldSection.vue'
+import { useSectionFold } from '../../stores/sectionPrefs'
+import { below, shownBelow, treeRows, type TreeRow } from './sessionTree'
 import { useServiceTiers } from '../../stores/serviceTiers'
 import { TIER_NAME } from '../../lib/serviceTier'
 import { FILTER_LABEL, matchesFilter, type HeadFilter } from './headCounts'
@@ -94,7 +97,6 @@ const kept = computed(() => {
   return ids
 })
 const keeps = (branch: Branch) => !filtering.value || kept.value.has(branch.view.session.id)
-const contextOnly = (view: SessionView) => !!filtering.value && !matchesFilter(view, filtering.value)
 const roots = (bucket: Bucket) => showRemoved.value
   ? (bucket === 'stopped' ? forest.value : [])
   : forest.value.filter(branch => bucketOf(branch.group) === bucket && keeps(branch))
@@ -107,8 +109,11 @@ const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
 const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)
 // A direct link may reveal its selected row, but never its stopped siblings.
-const candidates = (branch: Branch) => filtering.value ? branch.children.filter(keeps) : branch.children.filter(child => showRemoved.value || history.value[branch.view.session.id] || child.liveCount > 0 || child.view.status.state === 'paused' || containsSelected(child))
-const isExpanded = (branch: Branch): boolean => candidates(branch).length > 0 && (!!filtering.value || (expanded.value[branch.view.session.id] ?? true))
+const candidates = (branch: Branch) => branch.children.filter(child => showRemoved.value || history.value[branch.view.session.id] || child.liveCount > 0 || child.view.status.state === 'paused' || containsSelected(child))
+// Parents are open by default; a fold lasts for this visit (AEON-784).
+// A head-count filter forces kept parents open through treeRows' match.
+const isExpanded = (branch: Branch): boolean => candidates(branch).length > 0 && (expanded.value[branch.view.session.id] ?? true)
+// The fold button sits in its parent's row, so a click already moves the cursor there.
 function toggle(branch: Branch) {
   const id = branch.view.session.id
   expanded.value[id] = !isExpanded(branch)
@@ -123,26 +128,63 @@ const descendants = (branch: Branch): SessionView[] => branch.children.flatMap(c
 const activityLine = (branch: Branch) => branch.view.session.agent_activity_mode === 'off' ? '' :
   (branch.view.session.role === 'coordinator' && !branch.view.session.stopped_at ? workerActivity(descendants(branch), props.now) : '') || currentActivity(branch.view, props.now)
 const workingChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.workingCount, 0)
-const otherChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.liveCount - child.workingCount, 0)
-const workerLabel = (branch: Branch) => `${branch.count - 1} ${branch.count === 2 ? 'worker' : 'workers'}`
-const visible = (group: Bucket) => {
-  const out: { view: SessionView; branch: Branch; depth: number; parent: string; open: boolean; guides: boolean[]; family: boolean; familyEnd: boolean; primary: string; context: string; exec: ReturnType<typeof sessionExecution> }[] = []
-  function walk(branch: Branch, guides: boolean[], parent = '') {
-    const open = isExpanded(branch)
-    const primary = intendedResult(branch.view)
-    out.push({ view: branch.view, branch, depth: guides.length, parent, open, guides, family: guides.length > 0 || open, familyEnd: false, primary, context: sessionContext(branch.view, primary), exec: sessionExecution(branch.view) })
-    if (open) {
-      const children = candidates(branch)
-      children.forEach((child, index) => walk(child, [...guides, index < children.length - 1], branch.view.name))
+// A filter shows every kept child; otherwise the list hides stopped ones until asked.
+const offered = (branch: Branch) => filtering.value ? branch.children.filter(keeps) : candidates(branch)
+const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
+type Row = TreeRow<SessionView> & { view: SessionView; primary: string; context: string; exec: ReturnType<typeof sessionExecution>; family: boolean; familyEnd: boolean; lead: boolean; sub: number; under: ReturnType<typeof below> }
+// Sessions as a tree of any depth (AEON-784): the list decides which children a
+// parent offers and whether it is open; sessionTree lays out the rows.
+function visible(group: Bucket): Row[] {
+  const shown = roots(group).filter(branch => group !== 'stopped' || showRemoved.value || showStopped.value || !!filtering.value || containsSelected(branch))
+  const rows = treeRows(shown, {
+    children: candidates,
+    isOpen: isExpanded,
+    match: filtering.value ? (view: SessionView) => matchesFilter(view, filtering.value!) : null,
+  })
+  return rows.map((row, index) => {
+    const view = row.branch.view
+    const primary = intendedResult(view)
+    return {
+      ...row, view, primary, context: sessionContext(view, primary), exec: sessionExecution(view),
+      family: row.depth > 0 || row.open, familyEnd: !rows[index + 1]?.depth,
+      lead: view.session.role === 'coordinator' || row.branch.children.length > 0,
+      sub: row.foldable ? shownBelow(row.branch, offered) : 0,
+      under: below(row.branch, v => v.name),
     }
+  })
+}
+const bucketRows = computed(() => Object.fromEntries(BUCKETS.map(b => [b.id, visible(b.id)])) as Record<Bucket, Row[]>)
+const rowById = computed(() => new Map(BUCKETS.flatMap(b => bucketRows.value[b.id]).map(row => [row.view.session.id, row])))
+const foldLabel = (row: Row) => `${row.open ? 'Fold' : 'Unfold'} ${row.view.name}: ${plural(row.sub, 'sub-agent')}, ${workingChildren(row.branch)} working`
+const rollLabel = (row: Row) => row.under.problem ? `${row.under.problem} ${row.under.problem === 1 ? 'problem' : 'problems'} below` : `${row.under.ask} ${row.under.ask === 1 ? 'asks' : 'ask'} you below`
+
+// Tree keys (AEON-784): on a row or its fold button, ← folds an open parent or
+// goes to the parent; → unfolds a folded parent or goes to its first child.
+// Other controls in the row (the tier cell) keep their own arrow keys.
+const table = ref<HTMLElement>()
+function focusSession(id: string) {
+  void nextTick(() => {
+    const el = table.value?.querySelector<HTMLElement>(`[data-row="s:${CSS.escape(id)}"]`)
+    el?.focus({ preventScroll: true })
+    el?.scrollIntoView({ block: 'nearest' })
+  })
+}
+function treeKey(event: KeyboardEvent) {
+  if ((event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return
+  const target = event.target as HTMLElement
+  const el = target.closest<HTMLElement>('[data-row]')
+  if (!el || (target !== el && !target.classList.contains('tree-fold'))) return
+  const row = rowById.value.get(el.dataset.row?.slice(2) ?? '')
+  if (!row) return
+  event.preventDefault()
+  if (event.key === 'ArrowLeft') {
+    if (row.open && !filtering.value) toggle(row.branch)
+    else if (row.parent) focusSession(row.parent.view.session.id)
+  } else if (row.foldable && !row.open && !filtering.value) toggle(row.branch)
+  else if (row.open) {
+    const first = offered(row.branch)[0]
+    if (first) focusSession(first.view.session.id)
   }
-  for (const branch of roots(group)) {
-    if (group !== 'stopped' || showRemoved.value || showStopped.value || !!filtering.value || containsSelected(branch)) {
-      walk(branch, [])
-      out[out.length - 1]!.familyEnd = true
-    }
-  }
-  return out
 }
 // Open the route's ancestors on navigation or when that session first arrives;
 // subsequent ticks must not undo a person's explicit collapse.
@@ -337,44 +379,58 @@ function pendingLabel(view: SessionView) {
   if (!c || c.state === 'completed') return ''
   return c.kind === 'stop' ? (c.state === 'claimed' ? 'Stopping…' : 'Stop sent') : (c.state === 'claimed' ? 'Interrupting…' : 'Interrupt sent')
 }
+// The section folds per person (AEON-781/784). Folded, its head still says the
+// state: how many run where, and what needs a look.
+// A page action that leads into the section (a state count, History) opens it
+// for this visit, without changing the preference.
+const { open: sectionOpen, toggle: toggleFold, reveal } = useSectionFold('sessions')
+const liveViews = computed(() => current.value.filter(view => live(view)))
+const foldedSummary = computed(() => {
+  if (!props.loaded || props.state !== 'ready') return props.state === 'error' ? 'Could not be loaded' : ''
+  if (showRemoved.value) return removedCount.value ? plural(removedCount.value, 'ended session') : 'No ended sessions yet'
+  const n = liveViews.value.length
+  if (!n) return 'None running'
+  const hosts = new Set(liveViews.value.map(view => view.session.host).filter(Boolean)).size
+  const problems = liveViews.value.filter(view => view.status.group === 'problem' || view.status.group === 'unresponsive').length
+  const asks = liveViews.value.filter(view => view.status.group === 'needs').length
+  return [`${n} live${hosts ? ` on ${plural(hosts, 'computer')}` : ''}`, problems ? plural(problems, 'problem') : '', asks ? `${asks} ${asks === 1 ? 'asks' : 'ask'} you` : ''].filter(Boolean).join(' · ')
+})
+const sortMenu = ref<HTMLElement | null>(null)
 function rowClick(event: MouseEvent, id: string) {
   if ((event.target as HTMLElement).closest('a, button')) return
   emit('open', id)
 }
-defineExpose({ toggleHistory })
+// The page menu's History shows History; an open section toggles it as before.
+function menuHistory() {
+  if (!reveal() || !showRemoved.value) toggleHistory()
+}
+defineExpose({ toggleHistory, menuHistory, reveal })
 </script>
 
 <template>
-  <section class="sessions glass-card" aria-labelledby="sessions-title">
-    <header class="card-head">
-      <h2 id="sessions-title">{{ showRemoved ? 'History' : 'Sessions' }}</h2>
+  <FoldSection class="sessions" label="Sessions" :open="sectionOpen" :tip="sectionOpen ? 'Fold sessions' : 'Unfold sessions'" @toggle="toggleFold">
+    <template #title><span id="sessions-title">{{ showRemoved ? 'History' : 'Sessions' }}</span><span v-if="loaded && state === 'ready'" class="fs-count" aria-hidden="true">{{ showRemoved ? removedCount : total }}</span></template>
+    <template #head>
       <span v-if="filtering" class="filter-chip"><span class="chip-main">State<span class="chip-value">{{ FILTER_LABEL[filtering] }}</span></span><button type="button" class="chip-x" aria-label="Show all sessions" data-tip="Show all sessions · Esc" @click="emit('clearFilter')"><AppIcon name="close" :size="11" /></button></span>
-      <span v-if="loaded && state === 'ready'" class="head-tools">
+      <span v-if="!sectionOpen && foldedSummary" class="fs-sum">{{ foldedSummary }}</span>
+      <span v-if="sectionOpen && loaded && state === 'ready'" class="head-tools">
         <button v-if="sort" type="button" class="btn sm ghost quiet-btn" data-tip="Order by state, then start time" @click="resetSort">Default order</button>
         <button
+          v-if="sortable" type="button" class="btn sm ghost quiet-btn sort-tool" aria-haspopup="dialog" :aria-expanded="!!sortMenu"
+          :aria-label="`Sort sessions: ${COLUMNS.find(c => c.key === effectiveSort.key)?.label ?? ''}, ${dirWord}`" data-tip="Sort"
+          @click="sortMenu = sortMenu ? null : ($event.currentTarget as HTMLElement)"
+        ><AppIcon name="sort" :size="14" /></button>
+        <button
           v-if="!showRemoved && stale.length" type="button" class="btn sm ghost quiet-btn" :disabled="removal.busy.value"
+          :aria-label="`Clear stale: ${stale.length} without a heartbeat for 15 minutes`"
           :data-tip="`${stale.length} without a heartbeat for 15 minutes`" @click="removal.clearStale(stale)"
-        >Clear stale</button>
+        ><AppIcon name="trash" :size="13" /><span class="tool-label">Clear stale</span></button>
         <button
           type="button" class="btn sm ghost quiet-btn" :aria-pressed="showRemoved"
           :aria-label="showRemoved ? 'Back to sessions' : 'Show history: every ended or removed session'" @click="toggleHistory"
-        ><template v-if="showRemoved"><AppIcon name="arrow-left" :size="13" />Sessions</template><template v-else><AppIcon name="clock" :size="13" />History</template></button>
+        ><template v-if="showRemoved"><AppIcon name="arrow-left" :size="13" /><span class="tool-label">Sessions</span></template><template v-else><AppIcon name="history" :size="13" /><span class="tool-label">History</span></template></button>
       </span>
-    </header>
-
-    <div v-if="sortable" class="sort-bar" role="group" aria-label="Sort sessions">
-      <label class="sort-pick">
-        <span class="sort-label">Sort</span>
-        <select class="sort-select" :value="effectiveSort.key" aria-describedby="sort-beat-help" @change="pickSort">
-          <option v-for="column in COLUMNS" :key="column.key" :value="column.key">{{ column.label }}</option>
-        </select>
-      </label>
-      <button
-        type="button" class="icon-btn sort-dir" :aria-label="`Order ${dirWord}; switch to ${effectiveSort.dir === 'asc' ? 'descending' : 'ascending'}`"
-        :data-tip="`Order ${dirWord}`" @click="sortBy(effectiveSort.key)"
-      ><AppIcon :name="effectiveSort.dir === 'asc' ? 'arrow-up' : 'arrow-down'" :size="14" /></button>
-      <p v-if="effectiveSort.key === 'heartbeat'" class="sort-note">{{ HEARTBEAT_HELP }}</p>
-    </div>
+    </template>
     <span v-if="sortable" id="sort-beat-help" class="sr-only">{{ HEARTBEAT_HELP }}</span>
 
     <div v-if="state === 'forbidden'" class="state">
@@ -394,7 +450,7 @@ defineExpose({ toggleHistory })
     <p v-else-if="showRemoved && !removedCount" class="state" :role="historyState === 'error' ? 'alert' : undefined">{{ historyState === 'loading' ? 'Loading history…' : historyState === 'error' ? 'History could not be loaded.' : 'No ended sessions yet.' }}</p>
     <ConnectHint v-else-if="!total && !showRemoved" :can-start="canStart" :can-lead="canLead" @start="emit('start')" />
 
-    <div v-else class="table" :class="{ 'has-eta': hasEta }" role="table" aria-label="Agent sessions">
+    <div v-else ref="table" class="table" :class="{ 'has-eta': hasEta }" role="treegrid" :aria-label="showRemoved ? 'Ended sessions' : 'Agent sessions'" @keydown="treeKey">
       <div class="thead" role="row">
         <template v-for="column in COLUMNS" :key="column.key">
         <span role="columnheader" :class="column.cls" :aria-sort="ariaSort(column.key)">
@@ -419,87 +475,97 @@ defineExpose({ toggleHistory })
           </span>
         </div>
         <div
-          v-for="{ view, branch, depth, parent, open, guides, family, familyEnd, primary, context, exec } in visible(group.id)" :key="view.session.id" class="row agent-state-surface" :data-state="view.status.state" role="row" :data-row="`s:${view.session.id}`" :data-parent="view.session.parent_harness_session_id || undefined" :data-depth="depth" :style="{ '--depth': depth, ...appearance(view.status.state) }" tabindex="-1" @focusin="emit('focusRow', `s:${view.session.id}`)"
-          :draggable="permittedWorker(view) && !moving"
-          :data-drop-target="dragged && targetFor(dragged, view) ? 'true' : undefined"
-          @dragstart="startDrag($event, view)" @dragend="endDrag" @dragover="dragOver($event, view)" @dragleave="dropOver = ''" @drop="drop($event, view)"
-          :class="[view.status.group, { 'filter-context': contextOnly(view), 'drop-over': dropOver === view.session.id, worker: depth > 0, family, 'family-start': family && !depth, 'family-end': family && familyEnd, active: cursor === `s:${view.session.id}`, selected: selected === view.session.id }]" @click="rowClick($event, view.session.id)"
+          v-for="row in bucketRows[group.id]" :key="row.view.session.id" class="row agent-state-surface" :data-state="row.view.status.state" role="row"
+          :aria-level="row.depth + 1" :aria-posinset="row.posinset" :aria-setsize="row.setsize" :aria-expanded="row.foldable ? row.open : undefined" :aria-selected="selected === row.view.session.id"
+          :data-row="`s:${row.view.session.id}`" :data-parent="row.view.session.parent_harness_session_id || undefined" :data-depth="row.depth" :style="{ '--depth': row.depth, ...appearance(row.view.status.state) }" tabindex="-1" @focusin="emit('focusRow', `s:${row.view.session.id}`)"
+          :draggable="permittedWorker(row.view) && !moving"
+          :data-drop-target="dragged && targetFor(dragged, row.view) ? 'true' : undefined"
+          @dragstart="startDrag($event, row.view)" @dragend="endDrag" @dragover="dragOver($event, row.view)" @dragleave="dropOver = ''" @drop="drop($event, row.view)"
+          :class="[row.view.status.group, { 'filter-context': row.contextOnly, 'context-only': row.contextOnly, 'drop-over': dropOver === row.view.session.id, worker: row.depth > 0, family: row.family, 'family-start': row.family && !row.depth, 'family-end': row.family && row.familyEnd, active: cursor === `s:${row.view.session.id}`, selected: selected === row.view.session.id }]" @click="rowClick($event, row.view.session.id)"
         >
-          <span v-if="depth || open" class="tree-lines" aria-hidden="true">
-            <span v-for="(continues, level) in guides" :key="level" class="tree-guide" :class="{ continues, elbow: level === depth - 1, last: level === depth - 1 && !continues }" :style="{ '--level': level }" />
-            <span v-if="open" class="tree-stem" :style="{ '--level': depth }" />
+          <span v-if="row.depth || row.open" class="tree-lines" aria-hidden="true">
+            <span v-for="(continues, level) in row.guides" :key="level" class="tree-guide" :class="{ continues, elbow: level === row.depth - 1, last: level === row.depth - 1 && !continues }" :style="{ '--level': level }" />
+            <span v-if="row.open" class="tree-stem" :style="{ '--level': row.depth }" />
           </span>
-          <span role="cell" class="c-state" :class="{ 'vendor-limit': view.session.vendor_limited }">
-            <AgentStateLabel :state="view.status.state" :label="view.status.label" :detail="view.session.archived_at ? 'Removed' : tierRequestLabel(view) || pendingLabel(view)" />
+          <span role="gridcell" class="c-state" :class="{ 'vendor-limit': row.view.session.vendor_limited }">
+            <AgentStateLabel :state="row.view.status.state" :label="row.view.status.label" :detail="row.view.session.archived_at ? 'Removed' : tierRequestLabel(row.view) || pendingLabel(row.view)" />
             <!-- No inbox (AEON-282) is the more specific cue; otherwise the listening cue (AEON-280). -->
-            <span v-if="live(view) && view.session.management_mode === 'managed' && view.session.run_id && !view.session.advertised_capabilities.includes('inbox')" class="no-inbox" title="This session has no inbox delivery path. Launch a managed worker to receive follow-up messages.">No inbox</span>
-            <ListeningLabel v-else class="state-listen" :session="view.session" :now="now" compact />
+            <span v-if="live(row.view) && row.view.session.management_mode === 'managed' && row.view.session.run_id && !row.view.session.advertised_capabilities.includes('inbox')" class="no-inbox" title="This session has no inbox delivery path. Launch a managed worker to receive follow-up messages.">No inbox</span>
+            <ListeningLabel v-else class="state-listen" :session="row.view.session" :now="now" compact />
           </span>
-          <span role="cell" class="c-agent">
-            <span v-if="depth" class="sr-only">Worker of {{ parent }}. </span>
-            <RouterLink class="agent-link" :to="`/agents/${view.session.id}`" :aria-label="`${view.harness} ${view.name}, ${view.status.label}${view.session.role === 'coordinator' ? ', lead' : ''}. ${primary}. ${context}`">
+          <span role="gridcell" class="c-agent">
+            <span v-if="row.depth" class="sr-only">Worker of {{ row.parent?.view.name }}. </span>
+            <button
+              v-if="row.foldable" type="button" class="tree-fold" data-fold="family" tabindex="-1" :disabled="!!filtering" :aria-expanded="row.open" :aria-label="foldLabel(row)"
+              :data-tip="row.open ? 'Fold · Left arrow' : 'Unfold · Right arrow'" @click="toggle(row.branch)"
+            ><AppIcon name="chevron-right" :size="14" class="chev" :class="{ turned: row.open }" /></button>
+            <span v-else class="tree-fold-space" aria-hidden="true" />
+            <RouterLink class="agent-link" :to="`/agents/${row.view.session.id}`" :aria-label="`${row.view.harness} ${row.view.name}, ${row.view.status.label}${row.lead ? ', lead' : ''}${row.under.problem ? `, ${rollLabel(row)}` : ''}. ${row.primary}. ${row.context}`">
               <span class="bot">
-                <AgentGlyph :view="view" :size="30" />
-                <HarnessBadge :harness="view.session.harness" />
+                <AgentGlyph :view="row.view" :size="30" />
+                <HarnessBadge :harness="row.view.session.harness" />
+                <i v-if="row.under.problem" class="roll-dot" data-tip="A problem below" />
               </span>
               <span class="who">
-                <span class="result" :title="primary">{{ primary }}</span>
+                <span class="result" :title="row.primary">{{ row.primary }}</span>
                 <span class="session-context">
-                  <span class="session-name" :title="context">{{ context }}</span>
-                  <span v-if="view.session.role === 'coordinator'" class="role" data-tip="Coordinates other sessions">Lead</span>
-                  <time v-if="view.session.heartbeat_at" class="ctx-beat" :datetime="view.session.heartbeat_at">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time>
+                  <span class="session-name" :title="row.context">{{ row.context }}</span>
+                  <span v-if="row.lead" class="role" data-tip="Coordinates other sessions">Lead</span>
+                  <time v-if="row.view.session.heartbeat_at" class="ctx-beat" :datetime="row.view.session.heartbeat_at">{{ relativeTime(row.view.session.heartbeat_at, { now }) }}</time>
                 </span>
-                <span v-if="activityLine(branch)" class="current-activity" :title="activityLine(branch)">{{ activityLine(branch) }}</span>
+                <span v-if="activityLine(row.branch)" class="current-activity" :title="activityLine(row.branch)">{{ activityLine(row.branch) }}</span>
               </span>
             </RouterLink>
-            <span v-if="view.session.stopped_at && view.session.handed_over_to_id" class="lineage">
-              <RouterLink :to="`/agents/${view.session.handed_over_to_id}`" :title="`Handed over to ${lineageName(view.session.handed_over_to_id)}`">Handed over to {{ lineageName(view.session.handed_over_to_id) }}</RouterLink>
-              <button v-if="stoppedChildren(branch)" type="button" class="worker-toggle history-toggle" :aria-expanded="!!history[view.session.id]" :aria-label="`Show stopped workers of ${view.name}`" @click="toggleStopped(branch)">{{ stoppedChildren(branch) }} stopped</button>
+            <span v-if="row.view.session.stopped_at && row.view.session.handed_over_to_id" class="lineage">
+              <RouterLink :to="`/agents/${row.view.session.handed_over_to_id}`" :title="`Handed over to ${lineageName(row.view.session.handed_over_to_id)}`">Handed over to {{ lineageName(row.view.session.handed_over_to_id) }}</RouterLink>
+              <button v-if="stoppedChildren(row.branch)" type="button" class="worker-toggle history-toggle" :aria-expanded="!!history[row.view.session.id]" :aria-label="`Show stopped workers of ${row.view.name}`" @click="toggleStopped(row.branch)">{{ stoppedChildren(row.branch) }} stopped</button>
             </span>
-            <span v-else-if="branch.children.length" class="worker-tools">
-              <button type="button" class="worker-toggle" :disabled="!candidates(branch).length || !!filtering" :aria-expanded="open" :aria-label="`${open ? 'Collapse' : 'Expand'} ${workerLabel(branch)} of ${view.name}: ${workingChildren(branch)} working`" @click="toggle(branch)">
-                <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: open }" />{{ workingChildren(branch) }} working
-              </button>
-              <template v-if="otherChildren(branch)"><span aria-hidden="true"> · </span><span class="idle-count">{{ otherChildren(branch) }} other active</span></template>
-              <span aria-hidden="true"> · </span>
-              <button type="button" class="worker-toggle history-toggle" :disabled="!stoppedChildren(branch)" :aria-expanded="!!history[view.session.id]" :aria-label="`${history[view.session.id] ? 'Hide' : 'Show'} stopped workers of ${view.name}: ${stoppedChildren(branch)} stopped`" @click="toggleStopped(branch)">{{ stoppedChildren(branch) }} stopped</button>
+            <!-- A parent's line stays whether it is open or folded, so a fold never moves the row's controls.
+                 Folded, a problem or ask below joins it at the line end. -->
+            <span v-else-if="row.foldable || stoppedChildren(row.branch)" class="worker-tools">
+              <span v-if="row.foldable" class="kid-count">{{ plural(row.sub, 'sub-agent') }}</span>
+              <button
+                v-if="stoppedChildren(row.branch)" type="button" class="worker-toggle history-toggle" :aria-expanded="!!history[row.view.session.id]"
+                :aria-label="`${history[row.view.session.id] ? 'Hide' : 'Show'} stopped workers of ${row.view.name}: ${stoppedChildren(row.branch)} stopped`" @click="toggleStopped(row.branch)"
+              >{{ stoppedChildren(row.branch) }} stopped</button>
+              <span v-if="row.foldable && !row.open && (row.under.problem || row.under.ask)" class="roll" :class="row.under.problem ? 'problem' : 'ask'" :title="`${rollLabel(row)}: ${(row.under.problem ? row.under.names.problem : row.under.names.ask).join(', ')}`">{{ rollLabel(row) }}</span>
             </span>
-            <RouterLink v-if="view.session.adopted_from_id" class="lineage adopted" :to="`/agents/${view.session.adopted_from_id}`" :title="`Adopted from ${lineageName(view.session.adopted_from_id)}`">Adopted from {{ lineageName(view.session.adopted_from_id) }}</RouterLink>
+            <RouterLink v-if="row.view.session.adopted_from_id" class="lineage adopted" :to="`/agents/${row.view.session.adopted_from_id}`" :title="`Adopted from ${lineageName(row.view.session.adopted_from_id)}`">Adopted from {{ lineageName(row.view.session.adopted_from_id) }}</RouterLink>
           </span>
-          <span role="cell" class="c-ticket">
-            <TicketPeekLink v-if="view.ticket" class="ticket-chip" :ticket-key="view.ticket.key" :href="view.ticket.href" :tip="view.ticket.title">{{ view.ticket.key }}</TicketPeekLink>
-            <span v-else class="faint">{{ view.projectKey || '—' }}</span>
-            <SessionEstimate v-if="etaOf(view) || working(view)" class="row-eta" :eta="etaOf(view)" :now="now" :missing="working(view)" />
+          <span role="gridcell" class="c-ticket">
+            <TicketPeekLink v-if="row.view.ticket" class="ticket-chip" :ticket-key="row.view.ticket.key" :href="row.view.ticket.href" :tip="row.view.ticket.title">{{ row.view.ticket.key }}</TicketPeekLink>
+            <span v-else class="faint">{{ row.view.projectKey || '—' }}</span>
+            <SessionEstimate v-if="etaOf(row.view) || working(row.view)" class="row-eta" :eta="etaOf(row.view)" :now="now" :missing="working(row.view)" />
           </span>
           <span class="execution-host" role="presentation">
-            <span role="cell" class="c-exec" :aria-label="[exec.model ? exec.providerLabel : '', exec.modelLine, exec.accountLine].filter(Boolean).join('. ')">
-              <span class="exec-icon"><ExecutionMark :kind="exec.kind" :provider="exec.provider" /></span>
+            <span role="gridcell" class="c-exec" :aria-label="[row.exec.model ? row.exec.providerLabel : '', row.exec.modelLine, row.exec.accountLine].filter(Boolean).join('. ')">
+              <span class="exec-icon"><ExecutionMark :kind="row.exec.kind" :provider="row.exec.provider" /></span>
               <span class="exec-copy">
-                <span v-if="exec.model" class="exec-model" :title="exec.modelLine">{{ exec.modelLine }}</span>
-                <span class="exec-account" :title="exec.accountLine"><span v-if="view.harness" class="exec-harness">{{ exec.kind === 'ai' ? view.harness : exec.accountLine }}</span><span v-if="exec.account" class="exec-acct"><template v-if="view.harness"> · </template>{{ exec.account }}</span></span>
+                <span v-if="row.exec.model" class="exec-model" :title="row.exec.modelLine">{{ row.exec.modelLine }}</span>
+                <span class="exec-account" :title="row.exec.accountLine"><span v-if="row.view.harness" class="exec-harness">{{ row.exec.kind === 'ai' ? row.view.harness : row.exec.accountLine }}</span><span v-if="row.exec.account" class="exec-acct"><template v-if="row.view.harness"> · </template>{{ row.exec.account }}</span></span>
               </span>
-              <TierCell class="phone-tier" :session="view.session" :name="view.name" phone />
+              <TierCell class="phone-tier" :session="row.view.session" :name="row.view.name" phone />
             </span>
-            <span role="cell" class="c-tier"><TierCell :session="view.session" :name="view.name" /></span>
-            <span role="cell" class="c-host">
-              <SessionHost :key="`${viewer}:${view.session.host}`" :host="view.session.host" :label="hostLabels.get(view.session.host)" :editable="grant.person" @renamed="renamedHost(view.session.host, $event)" />
+            <span role="gridcell" class="c-tier"><TierCell :session="row.view.session" :name="row.view.name" /></span>
+            <span role="gridcell" class="c-host">
+              <SessionHost :key="`${viewer}:${row.view.session.host}`" :host="row.view.session.host" :label="hostLabels.get(row.view.session.host)" :editable="grant.person" @renamed="renamedHost(row.view.session.host, $event)" />
             </span>
           </span>
-          <span role="cell" class="right c-beat">
-            <time v-if="view.session.heartbeat_at" :datetime="view.session.heartbeat_at">{{ relativeTime(view.session.heartbeat_at, { now }) }}</time>
+          <span role="gridcell" class="right c-beat">
+            <time v-if="row.view.session.heartbeat_at" :datetime="row.view.session.heartbeat_at">{{ relativeTime(row.view.session.heartbeat_at, { now }) }}</time>
             <span v-else class="faint">never</span>
-            <ListeningLabel class="beat-listen" :session="view.session" :now="now" compact />
+            <ListeningLabel class="beat-listen" :session="row.view.session" :now="now" compact />
           </span>
-          <span role="cell" class="right c-elapsed mono-cell">{{ elapsed(view.session, now) }}</span>
-          <span role="cell" class="c-actions">
-            <SessionPauseActions :session="view.session" compact />
+          <span role="gridcell" class="right c-elapsed mono-cell">{{ elapsed(row.view.session, now) }}</span>
+          <span role="gridcell" class="c-actions">
+            <SessionPauseActions :session="row.view.session" compact />
             <button
-              v-if="bin(view)" type="button" class="icon-btn sm flat bin" :aria-label="`Remove ${view.name}`" data-tip="Remove · undo right after"
-              :disabled="removal.busy.value" @click="removal.removeOne(view.session, view.name, true)"
+              v-if="bin(row.view)" type="button" class="icon-btn sm flat bin" :aria-label="`Remove ${row.view.name}`" data-tip="Remove · undo right after"
+              :disabled="removal.busy.value" @click="removal.removeOne(row.view.session, row.view.name, true)"
             ><AppIcon name="trash" :size="16" /></button>
             <button
-              v-if="hasMenu(view)" type="button" class="icon-btn sm flat more" :aria-label="`Actions for ${view.name}`" aria-haspopup="menu"
-              :aria-expanded="menu?.view.session.id === view.session.id" @click="openMenu(view, $event)"
+              v-if="hasMenu(row.view)" type="button" class="icon-btn sm flat more" :aria-label="`Actions for ${row.view.name}`" aria-haspopup="menu"
+              :aria-expanded="menu?.view.session.id === row.view.session.id" @click="openMenu(row.view, $event)"
             ><AppIcon name="more" :size="16" /></button>
           </span>
         </div>
@@ -544,6 +610,21 @@ defineExpose({ toggleHistory })
         <p v-else-if="menuItems.note" class="menu-note">{{ menuItems.note }}</p>
       </div>
     </FloatingPanel>
+    <FloatingPanel v-if="sortMenu" :anchor="sortMenu" align="end" :width="280" label="Sort sessions" cycle @close="sortMenu = null">
+      <div class="sort-pop" role="group" aria-label="Sort sessions">
+        <label class="sort-pick">
+          <span class="sort-label">Sort</span>
+          <select class="sort-select" :value="effectiveSort.key" aria-describedby="sort-beat-help" data-autofocus @change="pickSort">
+            <option v-for="column in COLUMNS" :key="column.key" :value="column.key">{{ column.label }}</option>
+          </select>
+        </label>
+        <button
+          type="button" class="icon-btn sort-dir" :aria-label="`Order ${dirWord}; switch to ${effectiveSort.dir === 'asc' ? 'descending' : 'ascending'}`"
+          :data-tip="`Order ${dirWord}`" @click="sortBy(effectiveSort.key)"
+        ><AppIcon :name="effectiveSort.dir === 'asc' ? 'arrow-up' : 'arrow-down'" :size="14" /></button>
+        <p v-if="effectiveSort.key === 'heartbeat'" class="sort-note">{{ HEARTBEAT_HELP }}</p>
+      </div>
+    </FloatingPanel>
     <FloatingPanel v-if="moveMenu" :anchor="moveMenu.anchor" align="end" :width="248" :label="`Move ${moveMenu.view.name} to lead`" @close="closeMove">
       <div role="menu" :aria-label="`Move ${moveMenu.view.name} to lead`" @keydown="menuKeys">
         <p class="menu-note">Move to lead</p>
@@ -552,7 +633,7 @@ defineExpose({ toggleHistory })
         </button>
       </div>
     </FloatingPanel>
-  </section>
+  </FoldSection>
 </template>
 
 <style scoped>
@@ -560,14 +641,18 @@ defineExpose({ toggleHistory })
 .phone-tier { display: none; }
 .row.drop-over { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--ink-2); }
 .move-lead .mi-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lineage { flex-basis: 100%; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 3px 38px; font-size: 11px; color: var(--ink-2); }
+.lineage { flex-basis: 100%; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 2px 0 3px 70px; font-size: 11px; color: var(--ink-2); }
 .lineage a, .lineage.adopted { color: inherit; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lineage a:hover, .lineage.adopted:hover { text-decoration: underline; }
 .lineage .history-toggle { flex-shrink: 0; }
 .sessions { overflow: clip; container: sessions / inline-size; }
-.card-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 10px; }
-.card-head h2 { font-size: 15px; font-weight: 650; }
-.head-tools { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; margin-right: -8px; }
+/* The section head (FoldSection): title and count, the folded state, then quiet
+   tools at the line end, so a tool that appears moves nothing before it. */
+.fs-count { font: 500 12px/1 var(--mono); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.fs-sum { min-width: 0; font-size: 13px; color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.head-tools { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; margin-right: -4px; }
+.tool-label { white-space: nowrap; }
+.sort-tool { display: none; }
 /* The head count's filter (AEON-780): a teal chip after the title; × or Esc clears it. */
 .filter-chip { display: inline-flex; align-items: stretch; align-self: center; flex: none; height: 28px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .chip-main { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px 0 12px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
@@ -576,8 +661,6 @@ defineExpose({ toggleHistory })
 .chip-x { display: grid; place-items: center; width: 28px; padding: 0; border: 0; border-radius: 0 999px 999px 0; background: transparent; color: var(--teal-ink); }
 @media (hover: hover) { .chip-x:hover { background: var(--row-hover); } }
 .chip-x:focus-visible { box-shadow: var(--focus-ring); }
-/* Ancestors of a match stay as context: present, unfolded and quiet. */
-.row.filter-context { opacity: .55; }
 .filter-empty { color: var(--ink-3); font-size: 13px; }
 .quiet-btn { color: var(--ink-2); font-weight: 550; }
 .quiet-btn:hover { color: var(--ink); }
@@ -601,14 +684,15 @@ defineExpose({ toggleHistory })
 .th-sort:focus-visible { box-shadow: var(--focus-ring); }
 .sort-mark { display: inline-grid; place-items: center; flex: none; width: 11px; height: 11px; }
 .default-sort { opacity: .55; }
-/* Where headers (or their Running and Heartbeat columns) are hidden, this bar carries the same keys and direction. */
-.sort-bar { display: none; align-items: center; flex-wrap: wrap; gap: 8px; padding: 6px 18px 10px; border-top: 1px solid var(--line); }
+/* Where headers (or their Running and Heartbeat columns) are hidden, the head's sort tool carries the same keys and direction. */
+.sort-pop { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px; }
 .sort-pick { display: inline-flex; align-items: center; gap: 8px; }
 .sort-label { font: 500 10.5px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
 .sort-select { height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--field-bg); font: inherit; font-size: 13px; color: var(--ink); }
 .sort-select:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .sort-dir { width: 34px; height: 34px; }
 .sort-note { flex-basis: 100%; font-size: 12px; color: var(--ink-3); }
+@media (max-width: 720px) { .sort-select { height: 44px; font-size: 16px; } .sort-dir { width: 44px; height: 44px; } }
 .group-row { margin: 10px 6px 2px; padding: 0 12px; }
 .group-label { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 8px; height: 26px; font: 500 10.5px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
 .group-row.attention .group-label { color: var(--gold-ink); }
@@ -629,25 +713,42 @@ defineExpose({ toggleHistory })
 .row.stopped { color: var(--ink-2); }
 .row.stopped .agent-name { font-weight: 450; color: var(--ink-2); }
 .row.worker .c-agent { padding-left: calc(8px + var(--depth) * var(--tree-step)); }
-/* The track is anchored to the lead glyph's centre. Each visible descendant
-   carries its ancestors' tracks across row boundaries; the last child closes
-   its track at the badge. The toggle remains in the lead's text column. */
-.row > .tree-lines { position: absolute; inset: 0 0 0 calc(var(--state-width) + 17px); padding: 0; pointer-events: none; color: var(--ink-3); }
+/* The track hangs from each parent's fold button (AEON-784). Each visible
+   descendant carries its ancestors' tracks across row boundaries; the elbow
+   ends at the child's own fold slot, and the last child closes its track. */
+.row > .tree-lines { position: absolute; inset: 0 0 0 calc(var(--state-width) + 14px); padding: 0; pointer-events: none; color: var(--ink-3); }
 .tree-guide, .tree-stem { position: absolute; left: calc(var(--level) * var(--tree-step)); top: 0; bottom: 0; width: var(--tree-step); }
 .tree-guide.continues::before, .tree-guide.elbow::before { content: ''; position: absolute; top: 0; bottom: 0; width: 1px; background: currentColor; }
 .tree-guide.last::before { bottom: auto; height: calc(var(--tree-joint) - 4px); }
 .tree-guide.elbow::after { content: ''; position: absolute; top: calc(var(--tree-joint) - 4px); left: 0; width: calc(var(--tree-step) - 15px); height: 5px; border: solid currentColor; border-width: 0 0 1px 1px; border-radius: 0 0 0 5px; }
-.tree-stem { top: calc(var(--tree-joint) + 15px); bottom: 0; width: 1px; background: currentColor; }
-.worker-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; flex-basis: 100%; padding: 2px 0 6px 38px; color: var(--ink-2); font-size: 11.5px; }
+.tree-stem { top: calc(var(--tree-joint) + 9px); bottom: 0; width: 1px; background: currentColor; }
+/* Every row keeps the fold slot, so names stay on one edge when a parent appears. */
+.tree-fold, .tree-fold-space { flex: none; width: 24px; height: 24px; }
+.tree-fold { display: grid; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); cursor: pointer; }
+@media (hover: hover) { .tree-fold:hover { background: var(--row-hover); color: var(--teal-ink); } }
+.tree-fold:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+/* Every ancestor of a problem carries a small dot on its mark. */
+.roll-dot { position: absolute; top: -1px; right: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--danger); box-shadow: 0 0 0 1.5px var(--surface-raised); }
+/* A folded parent says what is under it; a problem or ask below in its tone. */
+.kid-count { padding-inline: 4px 2px; color: var(--ink-2); font-weight: 550; white-space: nowrap; }
+.roll { display: block; flex: 0 1 auto; min-width: 0; height: 20px; padding: 0 8px; border-radius: 999px; font-weight: 600; line-height: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A folded parent's line never wraps, so folding never changes the row's height; a narrow
+   column shortens the chip, whose names stay in its tooltip and the row's accessible name. */
+.worker-tools > :not(.roll) { flex: none; }
+.roll.problem { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); color: var(--danger); }
+.roll.ask { background: var(--queue-wait-bg); box-shadow: inset 0 0 0 1px var(--queue-wait-line); color: var(--queue-wait-ink); }
+.worker-tools { display: flex; align-items: center; flex-wrap: nowrap; gap: 4px 6px; flex-basis: 100%; min-width: 0; min-height: 28px; padding: 0 0 6px 70px; color: var(--ink-2); font-size: 11.5px; }
 .worker-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 28px; padding: 2px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font: inherit; font-weight: 550; white-space: nowrap; }
 .worker-toggle:hover:not(:disabled) { background: var(--row-hover); }
 .worker-toggle:disabled { cursor: default; }
 .worker-toggle:focus-visible { box-shadow: var(--focus-ring); }
 .history-toggle { color: var(--ink-2); font-weight: 450; }
 .history-toggle[aria-expanded="true"] { background: var(--row-hover); color: var(--ink); }
-.idle-count { padding-inline: 4px; white-space: nowrap; }
 .chev { transition: transform .2s ease; }
 @media (prefers-reduced-motion: reduce) { .row, .chev { transition: none; } }
+/* A filter's context rows (ancestors of a match) stay present and quiet. */
+.row.context-only > :not(.c-agent), .row.context-only .who,
+.row.filter-context > :not(.c-agent), .row.filter-context .who { opacity: .55; }
 .c-state { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
 .c-state:has(.no-inbox) { flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; }
 .no-inbox { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
@@ -659,7 +760,7 @@ defineExpose({ toggleHistory })
 .state-label { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.needs .state-label { color: var(--gold-ink); font-weight: 600; }
 .row > .c-agent { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; padding-block: 6px; }
-.agent-link { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
+.agent-link { display: inline-flex; flex: 1 1 0; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
 .agent-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 6px; }
 .bot { position: relative; display: inline-grid; width: 30px; height: 30px; flex: none; }
 .who { display: grid; min-width: 0; line-height: 1.25; }
@@ -730,7 +831,7 @@ defineExpose({ toggleHistory })
    or increase existing row heights. The other flexible tracks absorb Host. */
 .table.has-eta { grid-template-columns: var(--state-width) minmax(140px, 1.45fr) minmax(max(112px, calc((100% - var(--state-width) - 236px) * .48 / 2.75)), .48fr) minmax(128px, .82fr) 80px 132px 80px 80px 108px; }
 @container sessions (max-width: 1000px) {
-  .sort-bar { display: flex; }
+  .sort-tool { display: inline-flex; }
   .table { --state-width: 156px; grid-template-columns: var(--state-width) minmax(100px, 1.35fr) minmax(68px, .42fr) minmax(108px, .75fr) 80px 132px 64px 108px; }
   .table.has-eta { grid-template-columns: var(--state-width) minmax(100px, 1.35fr) minmax(104px, .42fr) minmax(108px, .75fr) 80px 132px 64px 108px; }
   .c-elapsed { display: none; }
@@ -740,43 +841,51 @@ defineExpose({ toggleHistory })
 /* Narrow lists stack identity, execution and state. Tier uses its inline glyph;
    the wider breakpoint retains Host and the pause/remove/overflow reservation. */
 @container sessions (max-width: 880px) {
-  /* One text column beside the avatar column: title (two lines at most) with
-     the heartbeat inline under it, one execution line, one state line, then a
-     lead's worker toggles. The avatar column stays free for the tree lines. */
-  .table { --tree-step: 28px; --title-line: 18px; display: block; }
+  /* One text column beside the fold and avatar columns: title (two lines at
+     most) with the heartbeat inline under it, one execution line, one state
+     line, then what a folded lead holds. 16 px per tree level (AEON-784). */
+  .table { --tree-step: 16px; --title-line: 18px; display: block; }
   .thead, .c-tier { display: none; }
   .phone-tier { display: inline-flex; }
   /* Default needs the same reachable control as paid tiers. Reserve its box
      through confirmation, price feedback and Undo so neighbours stay put. */
   .phone-tier :deep(.tier-mark) { width: 72px; }
   .phone-tier :deep(.price) { max-width: 44px; overflow: hidden; text-overflow: ellipsis; }
-  .group-row { display: block; margin: 12px 8px 2px; padding: 0 8px; }
-  .row { --tree-joint: 25px; display: grid; grid-template-columns: 30px auto minmax(0, 1fr) 44px; grid-template-rows: auto auto auto auto; grid-template-areas: ". . . actions" ". . . actions" ". . . actions" ". . . actions"; column-gap: 8px; row-gap: 0; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
+  /* Flex, not an inline line box: the Ended toggle is a button and its baseline
+     made that header ~20px taller than the text headers, so the row jumped
+     when a phone session moved from Pausing to Ended (AEON-790). */
+  .group-row { display: flex; align-items: center; height: 26px; margin: 12px 8px 2px; padding: 0 8px; }
+  .row { --tree-joint: 25px; display: grid; grid-template-columns: 44px 30px auto minmax(0, 1fr) 44px; grid-template-rows: auto auto auto auto; grid-template-areas: ". . . . actions" ". . . . actions" ". . . . actions" ". . . . actions"; column-gap: 8px; row-gap: 0; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span, .execution-host > span { padding: 0; }
-  .row > .c-agent { grid-column: 1 / 4; grid-row: 1 / 5; display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid; align-items: start; padding-block: 0; }
+  .row > .c-agent { grid-column: 1 / 5; grid-row: 1 / 5; display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid; align-items: start; padding-block: 0; }
   .row.worker .c-agent { padding-left: 0; }
-  .agent-link { grid-column: 1 / -1; grid-row: 1; display: grid; grid-template-columns: subgrid; align-items: start; }
+  /* The 44 px fold button is centred on the glyph's centre line. */
+  .tree-fold, .tree-fold-space { grid-column: 1; grid-row: 1; width: 44px; height: 44px; margin-top: calc(var(--tree-joint) - 10px - 22px); }
+  .agent-link { grid-column: 2 / -1; grid-row: 1; display: grid; grid-template-columns: subgrid; align-items: start; }
   .who { grid-column: 2 / -1; line-height: 1.3; }
   .result { font-size: 14px; line-height: var(--title-line); white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
   .session-context { margin-top: 2px; }
   .ctx-beat { display: inline; }
   .ctx-beat::before { content: '·'; margin-right: 6px; }
-  .row > .tree-lines { left: 25px; }
+  /* Lines run beside the fold buttons: 16 px per level, the elbow ends at the child's fold slot. */
+  .row > .tree-lines { left: 18px; }
+  .tree-guide.elbow::after { width: calc(var(--tree-step) - 8px); }
+  .tree-stem { top: calc(var(--tree-joint) + 22px); }
   .row:has(.lineage) { grid-template-rows: auto auto auto auto auto; }
   .row:has(.lineage) > .c-agent { grid-row: 1 / 6; }
   .lineage { grid-column: 2 / -1; grid-row: 4; padding: 4px 0 0; min-height: 24px; }
   .worker-tools ~ .lineage { grid-row: 5; }
-  .worker-tools { grid-column: 2 / -1; grid-row: 4; flex-wrap: nowrap; white-space: nowrap; margin: 0 0 0 -6px; padding: 0; }
-  /* The 44 px toggle line closes a lead's row by itself. */
+  .worker-tools { grid-column: 2 / -1; grid-row: 4; flex-wrap: nowrap; white-space: nowrap; min-height: 44px; margin: 0 0 0 -4px; padding: 0; }
+  /* The 44 px line closes a lead's row by itself. */
   .row:has(> .c-agent > .worker-tools) { padding-bottom: 0; }
   .worker-toggle { min-height: 44px; padding-inline: 6px; }
-  .worker-tools .idle-count, .worker-tools > span[aria-hidden]:has(+ .idle-count) { display: none; }
   /* Reserve every available action on the title line. A silent session can
      offer Pause, Remove and Actions together; Host owns the line below. */
-  .row:has(> .c-actions > :is(.bin, .pause-controls:not(:empty))):has(> .c-actions > .more) { grid-template-columns: 30px auto minmax(0, 1fr) max-content; }
+  .row:has(> .c-actions > :is(.bin, .pause-controls:not(:empty))):has(> .c-actions > .more) { grid-template-columns: 44px 30px auto minmax(0, 1fr) max-content; }
   .row > .c-actions:has(> :is(.bin, .pause-controls:not(:empty))):has(> .more) { flex-direction: row; }
   /* Execution and Host share the whole line below the actions; a short host
      returns its spare width to the model/command. */
+  /* The lines below the title start under the glyph: the fold column keeps the tree. */
   .execution-host { display: grid; grid-column: 2 / -1; grid-row: 2; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; margin-top: 6px; }
   /* Keep the train's Default tier control without consuming main's command
      text slot beside Host. Its reserved line also keeps tier feedback still. */
@@ -793,10 +902,11 @@ defineExpose({ toggleHistory })
   .exec-harness { order: -1; flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-2); }
   .exec-model { flex: 0 1 auto; min-width: 0; font-size: 12px; }
   .exec-harness ~ .exec-model::before, .exec-copy:has(.exec-harness) .exec-model::before { content: '·'; margin: 0 .4em; color: var(--ink-3); }
-  .c-state { grid-column: 2; grid-row: 3; min-width: 0; margin-top: 4px; min-height: 22px; }
+  .c-state { grid-column: 2 / 4; grid-row: 3; min-width: 0; margin-top: 4px; min-height: 22px; }
   .c-state :deep(.agent-state-label) { min-width: 0; max-width: 100%; align-items: flex-start; }
   .c-state :deep(.state-word) { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
-  .c-ticket { grid-column: 3; grid-row: 3; justify-self: start; min-width: 0; overflow: hidden; margin-top: 4px; min-height: 22px; }
+  /* The actions sit on the title line, so the ticket and its estimate may use their column below. */
+  .c-ticket { grid-column: 4 / -1; grid-row: 3; justify-self: start; min-width: 0; overflow: hidden; margin-top: 4px; min-height: 22px; }
   .row > .c-ticket { padding-block: 0; }
   .c-beat { display: none; }
   /* AEON-280 x AEON-304: no beat cell on phones, so the listening cue joins the state line as
@@ -811,15 +921,13 @@ defineExpose({ toggleHistory })
 /* AEON-304: the overflow sits top-right, its icon centred on the title's first line. */
 @container sessions (max-width: 880px) {
   .row > .c-actions { align-self: start; margin-top: calc(var(--title-line) / 2 - 22px); }
-  /* With Default order showing, the tools take their own line rather than clip. */
-  .card-head { flex-wrap: wrap; align-items: center; padding: 6px 10px 2px 18px; }
-  .head-tools { flex-wrap: wrap; justify-content: flex-end; }
+  /* Phone tools: 44 px icon buttons; their names stay for screen readers. The head
+     keeps their height when it folds and they leave, so the fold control stays put. */
+  .sessions > :deep(.fs-head) { min-height: 60px; }
   .filter-chip { height: 44px; }
   .chip-x { width: 44px; }
-  .head-tools .btn { min-height: 44px; }
-  .sort-bar { padding: 8px 18px; }
-  .sort-select { height: 44px; font-size: 16px; }
-  .sort-dir { width: 44px; height: 44px; }
+  .head-tools .btn { min-width: 44px; min-height: 44px; justify-content: center; }
+  .head-tools .tool-label { display: none; }
 }
 /* A very narrow list cannot fit both Terminal and its command beside Host.
    Grow the execution copy downward to leave room for command text. */

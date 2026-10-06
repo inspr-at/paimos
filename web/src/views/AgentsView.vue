@@ -17,6 +17,7 @@ import { useCapacity } from '../stores/capacity'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
+import KeyCap from '../components/KeyCap.vue'
 import ApprovalQueue from '../components/agents/ApprovalQueue.vue'
 import SessionList from '../components/agents/SessionList.vue'
 import ChangeTierPopover from '../components/agents/ChangeTierPopover.vue'
@@ -69,6 +70,9 @@ const session = useSession()
 const route = useRoute()
 const router = useRouter()
 const cursor = ref('')
+const runQueue = ref<InstanceType<typeof RunQueue>>()
+const sessionList = ref<InstanceType<typeof SessionList>>()
+const filter = ref<HeadFilter | null>(null)
 // Decision Desk and notification links focus the existing request card.
 watch([() => route.query.needs, () => agents.loaded], async ([id, loaded]) => {
   if (!loaded || typeof id !== 'string' || !/^[am]:[0-9a-f-]{36}$/i.test(id)) return
@@ -83,6 +87,8 @@ watch([() => route.query.run, () => agents.loaded, () => agents.sessions, () => 
   if (linked) { void router.replace({ path: `/agents/${linked.id}`, query: { ...route.query, run: undefined } }); return }
   await nextTick()
   if (route.query.run !== id) return
+  // A folded Queued section opens for this visit to show the linked run.
+  if (runQueue.value?.reveal()) await nextTick()
   const queued = document.getElementById(`run-${id}`)
   if (queued) { queued.focus(); queued.scrollIntoView({ block: 'nearest' }); void router.replace({ query: { ...route.query, run: undefined } }) }
 }, { immediate: true })
@@ -229,10 +235,13 @@ async function control(view: SessionView, kind: SessionControl['kind']) {
 }
 // A head count filters Sessions to its state (AEON-780); pressing it again, the
 // chip's × or Esc shows all again. The filter is a look, never a setting.
-const filter = ref<HeadFilter | null>(null)
+// A folded Sessions section opens for this visit (AEON-784). The reveal is
+// recorded even when Sessions shows open, so a preference read that lands
+// after the filter cannot fold the rows away.
 async function setFilter(next: HeadFilter) {
   filter.value = filter.value === next ? null : next
   if (!filter.value) return
+  if (sessionList.value?.reveal()) await nextTick()
   await nextTick()
   // The cursor starts on the first match; Sessions scroll into view only when out of view.
   const first = document.querySelector<HTMLElement>('.agents-page .sessions .row[data-row]:not(.filter-context)')
@@ -280,7 +289,8 @@ async function closePanel() {
 }
 
 // ---------- Keyboard: j/k move, a approve, d deny, Enter opens, Esc closes ----------
-function rows() { return [...document.querySelectorAll<HTMLElement>('.agents-page [data-row]')] }
+// A folded section's rows stay in the page but inert; the cursor skips them.
+function rows() { return [...document.querySelectorAll<HTMLElement>('.agents-page [data-row]')].filter(el => !el.closest('[inert]')) }
 function focusRow(id: string) {
   const el = document.querySelector<HTMLElement>(`.agents-page [data-row="${CSS.escape(id)}"]`)
   el?.focus({ preventScroll: true })
@@ -429,7 +439,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
         <WindDownPanel v-if="agents.loaded" />
         <SessionList
-          v-if="agents.loaded"
+          v-if="agents.loaded" ref="sessionList"
           :groups="agents.grouped" :history="agents.historyViews" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
           :loaded="agents.loaded" :controls="agents.controls" :can-start="manualStart" :can-lead="canStart" :filter="filter"
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()" @history="agents.loadHistory(true)" @older="agents.loadOlderHistory()" @clear-filter="clearFilter"
@@ -441,9 +451,9 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="agents.decide" :revoke="agents.revoke" :resolve="resolveHeld"
         />
         <QuotaWarnings v-if="agents.loaded && showCapacity" :sessions="agents.views" />
-        <RunQueue v-if="agents.loaded" @emptied="pageTitle?.focus()" />
+        <RunQueue v-if="agents.loaded" ref="runQueue" @emptied="pageTitle?.focus()" />
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
-          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
+          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <KeyCap k="left" /><KeyCap k="right" /> fold · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
       </div>
     </div>

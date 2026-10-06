@@ -196,9 +196,10 @@ for (const width of [1440, 1024, 390]) {
         // geometry through focus, hover and press instead of its CSS spelling.
         { name: 'focus total stepper', run: async () => { await more.focus(); await expect(more).toBeFocused() } },
         { name: 'hover total stepper', run: () => more.hover() },
+        // A held + repeats (AEON-781); it may reach 30 and disable itself, so the steps below start downward.
         { name: 'hold total stepper', run: () => page.mouse.down() },
         { name: 'release total stepper', run: () => page.mouse.up() },
-        ...[more, more, fewer, fewer].map((button, i) => ({ name: `total step ${i + 1}`, run: () => button.click() })),
+        ...[fewer, fewer, more, more].map((button, i) => ({ name: `total step ${i + 1}`, run: () => button.click() })),
         ...[rowMore, rowFewer].map((button, i) => ({ name: `${i ? 'fewer' : 'more'} on Codex`, run: async () => { await expect(button).toHaveAccessibleName(/^Codex:/); await button.click() } })),
       ],
     })
@@ -219,6 +220,46 @@ for (const width of [1440, 1024, 390]) {
       controls: { more, fewer, selector: row.getByRole('radiogroup'), row },
       scrollAreas: { rows: dial.locator('.rows') },
       interactions: ['No limit', 'Off', 'At most'].map(name => ({ name, run: async () => { await row.getByRole('radio', { name, exact: true }).click(); await expect(row.getByRole('radio', { name, exact: true })).toHaveAttribute('aria-checked', 'true') } })),
+    })
+  })
+
+  // AEON-784: folding a parent, walking the tree with ← and →, toggling History
+  // and folding the Sessions section never move a control. A parent's line stays
+  // when it folds, so its row keeps its height and actions.
+  test(`Sessions tree and section folds keep their controls put at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    const data = await setup(page)
+    Object.assign(data.sessions[1]!, { parent_harness_session_id: data.sessions[0]!.id })
+    await page.goto('/agents')
+    const sessions = page.getByRole('region', { name: 'Sessions', exact: true })
+    const lead = sessions.locator(`[data-row="s:${data.sessions[0]!.id}"]`)
+    const worker = sessions.locator(`[data-row="s:${data.sessions[1]!.id}"]`)
+    const fold = lead.locator('.tree-fold')
+    // Its name says Fold or Unfold; the same button is measured either way.
+    const sectionFold = sessions.locator('.fs-head > .fs-tog')
+    const history = sessions.getByRole('button', { name: 'Show history: every ended or removed session' })
+    await expect(worker).toBeVisible()
+    await expectStableControls({
+      controls: { fold, more: lead.getByRole('button', { name: /^Actions for / }), glyph: lead.locator('.bot'), history, sectionFold },
+      interactions: [
+        { name: 'hover fold', run: () => fold.hover() },
+        { name: 'fold the lead', run: async () => { await fold.click(); await expect(worker).toHaveCount(0); await expect(lead.locator('.kid-count')).toHaveText('1 sub-agent') } },
+        { name: 'unfold the lead', run: async () => { await fold.click(); await expect(worker).toBeVisible() } },
+        { name: '← folds', run: async () => { await lead.focus(); await page.keyboard.press('ArrowLeft'); await expect(fold).toHaveAttribute('aria-expanded', 'false') } },
+        { name: '→ unfolds', run: async () => { await page.keyboard.press('ArrowRight'); await expect(worker).toBeVisible() } },
+      ],
+    })
+    // The title's words change with History; its fold chevron stays put.
+    const title = sessions.locator('.fs-title')
+    await expectStableControls({
+      controls: { sectionFold },
+      interactions: [
+        { name: 'history on', run: async () => { await history.click(); await expect(title).toContainText('History') } },
+        { name: 'history off', run: async () => { await sessions.getByRole('button', { name: 'Back to sessions' }).click(); await expect(title).toContainText('Sessions') } },
+        { name: 'fold the section', run: async () => { await sectionFold.click(); await expect(sessions.locator('.fs-sum')).toContainText('live on') } },
+        { name: 'unfold the section', run: async () => { await sessions.getByRole('button', { name: 'Sessions: unfold' }).click(); await expect(lead).toBeVisible() } },
+      ],
     })
   })
 }

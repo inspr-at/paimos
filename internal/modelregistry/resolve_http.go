@@ -2,12 +2,14 @@
 package modelregistry
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -89,74 +91,54 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 		writePreferenceError(w, prefFail(400, "invalid_placement"))
 		return
 	}
+	if params.Has("person_id") && !uuidRE.MatchString(requestedPerson) {
+		writePreferenceError(w, prefFail(400, "invalid_placement"))
+		return
+	}
+	q.AuthorFamily, err = NormalizeAuthorFamily(q.AuthorFamily)
+	if err != nil {
+		writePreferenceError(w, fail(400, err.Error()))
+		return
+	}
+	if q.Harness != "" && !validHarness(q.Harness) {
+		writePreferenceError(w, fail(400, "unsupported model harness"))
+		return
+	}
+	if q.Role != "" || ticket == "" {
+		if err := validatePlacementQuery(q); err != nil {
+			writePreferenceError(w, err)
+			return
+		}
+	}
 	var out struct {
 		WorkResolution
 		Preference PreferenceDecision `json:"preference"`
 	}
-	err = m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
+	if err := PrepareCatalog(r.Context(), m.pool, p, CatalogPreparation{Operation: CatalogRead, Request: r, Authorize: func(ctx context.Context, tx pgx.Tx, current tenant.Principal) (bool, error) {
+		_, err := authorizedPlacement(ctx, tx, current, q, ticket, project, requestedPerson, params.Has("person_id"))
+		return err == nil, err
+	}}); err != nil {
+		writePreferenceError(w, err)
+		return
+	}
+	err = m.readSnapshot(r.Context(), p.TenantID, func(tx pgx.Tx) error {
 		ctx := r.Context()
-		if err := authz.RequireTx(ctx, tx, p, "models.read", authz.Scope{}); err != nil {
+		current, err := currentModelReader(r, tx, p)
+		if err != nil {
 			return err
 		}
-		q.PersonID = modelprefs.PrefsPerson(ctx, tx, p)
-		if params.Has("person_id") {
-			if !uuidRE.MatchString(requestedPerson) {
-				return prefFail(400, "invalid_placement")
-			}
-			person, err := modelprefs.CanonicalPerson(ctx, tx, requestedPerson)
-			if err != nil {
-				return err
-			}
-			if q.PersonID == nil || person == nil || *q.PersonID != *person {
-				return prefFail(403, "person_not_caller")
-			}
-		}
-		if ticket != "" {
-			var fields []byte
-			var ticketProject *string
-			if uuidRE.MatchString(ticket) {
-				err = tx.QueryRow(ctx, `SELECT n.id::text,n.fields,n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND n.deleted_at IS NULL AND k.slug IN ('work','ticket','task')`, ticket).Scan(&q.TicketID, &fields, &ticketProject)
-			} else {
-				err = tx.QueryRow(ctx, `SELECT n.id::text,n.fields,n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.deleted_at IS NULL AND k.slug IN ('work','ticket','task') AND (n.key=$1 OR n.id=(SELECT node_id FROM node_key_aliases WHERE key=$1 LIMIT 1)) ORDER BY (n.key=$1) DESC LIMIT 1`, ticket).Scan(&q.TicketID, &fields, &ticketProject)
-			}
-			if err != nil {
-				return err
-			}
-			q.ProjectID = ""
-			if ticketProject != nil {
-				q.ProjectID = *ticketProject
-			}
-			if err := authz.RequireTx(ctx, tx, p, "nodes.read", authz.Scope{ProjectID: q.ProjectID}); err != nil {
-				return err
-			}
-			if project != "" && project != q.ProjectID {
-				return prefFail(400, "ticket_project_mismatch")
-			}
-			placement := modelprefs.PlacementFields(fields)
-			q.Area = placement.Area
-			q.Complexity = placement.Complexity
-			q.ComplexitySource = placement.ComplexitySource
-			q.TicketRole = placement.RouteRole
-			q.TicketResidency = placement.Residency
-			if q.Role == "" {
-				q.Role = q.TicketRole
-			}
-		}
-		if err := readableProject(ctx, tx, p, q.ProjectID); err != nil {
+		q, err := authorizedPlacement(ctx, tx, current, q, ticket, project, requestedPerson, params.Has("person_id"))
+		if err != nil {
 			return err
 		}
-		if err := ensureCatalog(ctx, tx, p); err != nil {
+		if err := requireCatalog(ctx, tx); err != nil {
 			return err
 		}
 		now, err := dbNow(ctx, tx)
 		if err != nil {
 			return err
 		}
-		q.AuthorFamily, err = NormalizeAuthorFamily(q.AuthorFamily)
-		if err != nil {
-			return fail(400, err.Error())
-		}
-		out.WorkResolution, err = ResolveWork(ctx, tx, p, q, now)
+		out.WorkResolution, err = ResolveWork(ctx, tx, current, q, now)
 		if err != nil {
 			return err
 		}
@@ -186,4 +168,74 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, 200, out)
+}
+
+// Resolve the current target, placement and canonical caller under preparation's
+// tenant/tree fences, then repeat the same checks in the read snapshot. No cached
+// ticket project or key creator chooses the preparation scope.
+func authorizedPlacement(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, ticket, project, requestedPerson string, personSupplied bool) (WorkQuery, error) {
+	var err error
+	q.PersonID, err = currentPreferencePerson(ctx, tx, p)
+	if err != nil {
+		return q, err
+	}
+	if personSupplied {
+		if !uuidRE.MatchString(requestedPerson) {
+			return q, prefFail(400, "invalid_placement")
+		}
+		person, err := modelprefs.CanonicalPerson(ctx, tx, requestedPerson)
+		if err != nil {
+			return q, err
+		}
+		if q.PersonID == nil || person == nil || *q.PersonID != *person {
+			return q, prefFail(403, "person_not_caller")
+		}
+	}
+	if ticket != "" {
+		var fields []byte
+		var ticketProject *string
+		if uuidRE.MatchString(ticket) {
+			err = tx.QueryRow(ctx, `SELECT n.id::text,n.fields,n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.id=$1::uuid AND n.deleted_at IS NULL AND k.slug IN ('work','ticket','task')`, ticket).Scan(&q.TicketID, &fields, &ticketProject)
+		} else {
+			err = tx.QueryRow(ctx, `SELECT n.id::text,n.fields,n.project_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id WHERE n.deleted_at IS NULL AND k.slug IN ('work','ticket','task') AND (n.key=$1 OR n.id=(SELECT node_id FROM node_key_aliases WHERE key=$1 LIMIT 1)) ORDER BY (n.key=$1) DESC LIMIT 1`, ticket).Scan(&q.TicketID, &fields, &ticketProject)
+		}
+		if err != nil {
+			return q, err
+		}
+		q.ProjectID = ""
+		if ticketProject != nil {
+			q.ProjectID = *ticketProject
+		}
+		if err := authz.RequireTx(ctx, tx, p, "nodes.read", authz.Scope{ProjectID: q.ProjectID}); err != nil {
+			return q, err
+		}
+		if project != "" && project != q.ProjectID {
+			return q, prefFail(400, "ticket_project_mismatch")
+		}
+		placement := modelprefs.PlacementFields(fields)
+		q.Area = placement.Area
+		q.Complexity = placement.Complexity
+		q.ComplexitySource = placement.ComplexitySource
+		q.TicketRole = placement.RouteRole
+		q.TicketResidency = placement.Residency
+		if q.Role == "" {
+			q.Role = q.TicketRole
+		}
+	}
+	if err := readableProject(ctx, tx, p, q.ProjectID); err != nil {
+		return q, err
+	}
+
+	return q, validatePlacementQuery(q)
+}
+
+// Security review has the same input requirements as ordinary review, but its
+// owner-required outcome belongs to ResolveWork rather than the legacy ladder.
+func validatePlacementQuery(q WorkQuery) error {
+	role := q.Role
+	if role == "review-gate-security" {
+		role = "review-gate"
+	}
+	_, err := validateResolveQuery(resolveQuery{Role: role, AuthorFamily: q.AuthorFamily, Harness: q.Harness})
+	return err
 }

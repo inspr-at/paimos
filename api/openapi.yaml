@@ -1274,6 +1274,8 @@ paths:
       responses:
         '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     post:
       operationId: addWorkQueue
       description: Idempotently queue a ticket. People need run.create in its project; a live coordinator may queue visible tickets. Workers cannot. New and Backlog become Open; In progress with no assignee and no live run/session is stale and also becomes Open. Stale additions return a revision-bound Undo token. Blocked keeps its state and waits. Missing estimates are suggested by readiness and must be explicitly applied before queueing. Acceptance criteria and a named blocker are required. A target pins Start now to that agent and profile without overriding allowances; daemon claim performs pickup. Moving to done, cancelled, archived, delivered or accepted, or soft-deleting the ticket, cancels still-queued work and releases its holds atomically; reopening requires a new queue request.
@@ -1294,6 +1296,8 @@ paths:
       responses:
         '200': {description: Queued entry, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueueEntry'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '409': {description: Active run or changed target conflicts}
         '422': {description: 'Not ready; code queue_not_ready, error text and structured readiness with missing field names and suggested_estimate_hours'}
   /queue/{nodeId}/snapshots:
@@ -1375,6 +1379,8 @@ paths:
       responses:
         '200': {description: Readiness, content: {application/json: {schema: {$ref: '#/components/schemas/QueueReadiness'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /queue/{nodeId}/estimate:
     post:
       operationId: applyWorkQueueEstimate
@@ -1390,6 +1396,8 @@ paths:
       responses:
         '200': {description: Readiness after estimate, content: {application/json: {schema: {$ref: '#/components/schemas/QueueReadiness'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /queue/{nodeId}:
     parameters:
       - {name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -1400,6 +1408,8 @@ paths:
       responses:
         '200': {description: Removed, content: {application/json: {schema: {type: object, properties: {removed: {type: boolean}}}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '409': {description: Run has already started}
   /queue/{nodeId}/move:
     parameters:
@@ -1416,6 +1426,8 @@ paths:
       responses:
         '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '409': {description: Targeted entry cannot be reordered}
   /queue/reset:
     post:
@@ -1425,6 +1437,8 @@ paths:
       responses:
         '200': {description: Work queue, content: {application/json: {schema: {$ref: '#/components/schemas/WorkQueue'}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
   /queue/next:
     post:
       operationId: nextWorkQueue
@@ -1443,6 +1457,8 @@ paths:
       responses:
         '200': {description: Selection, content: {application/json: {schema: {type: object, required: [entry], properties: {wait_reason: {type: string}, entry: {oneOf: [{$ref: '#/components/schemas/WorkQueueEntry'}, {type: 'null'}]}}}}}}
         '403': {$ref: '#/components/responses/Error'}
+        '408': {description: Request body did not arrive within the 30-second request deadline, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '413': {description: Request body exceeds 1 MiB, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '409': {description: 'Lead proof missing, stale assignment, paused/revoked/archived lead, mandatory admission unavailable, or bounded scheduling snapshot overflow'}
   /settings/status-autopilot:
     get:
@@ -6305,10 +6321,17 @@ paths:
         that now looks like it holds a credential hides it. A review verdict
         shows only in the project it was recorded in, while the ticket is
         still there, to people who can read that verdict. Accepted, dismissed
-        and drafted items are omitted. At most 50, newest first.
+        and drafted items are omitted. At most 50, newest first. Each item
+        carries its current recommendation when an agent or person prepared
+        one (AEON-788). When truncated is true, next_cursor continues the list
+        after the last item.
       security: *auth
       parameters:
         - {name: project_id, in: query, required: true, schema: {type: string, format: uuid}}
+        - name: cursor
+          in: query
+          description: "next_cursor of the previous page; at most 160 characters"
+          schema: {type: string, maxLength: 160}
       responses:
         '200':
           description: Open method learnings
@@ -6332,7 +6355,10 @@ paths:
         Text that looks like it holds a credential is not copied: 409
         learning_sensitive with the matched ranges (positions only). A person
         may repeat the request with confirm_not_sensitive; the event records
-        confirmed_not_sensitive. An agent cannot confirm (403).
+        confirmed_not_sensitive. An agent cannot confirm (403). An optional
+        lesson (AEON-788) replaces the learning's own text in the line. With
+        learning_text, a learning whose text changed since the person
+        reviewed it is 409 learning_changed and nothing is written.
       parameters:
         - {name: learningId, in: path, required: true, schema: {type: string}}
         - {name: If-Unmodified-Since, in: header, schema: {type: string}}
@@ -6355,7 +6381,7 @@ paths:
         '404':
           $ref: '#/components/responses/Error'
         '409':
-          description: already_decided, or learning_sensitive with the suspected credential ranges
+          description: already_decided, learning_changed, or learning_sensitive with the suspected credential ranges
           content:
             application/json:
               schema: {$ref: '#/components/schemas/MethodLearningProblem'}
@@ -6370,10 +6396,19 @@ paths:
       description: |
         A person with knowledge.write dismisses one open method learning.
         Records knowledge.learning_dismissed and does not change a knowledge
-        entry. Agents cannot dismiss.
+        entry. Agents cannot dismiss. An optional reason (AEON-788) is
+        recorded in the event; no body or an empty object still dismisses.
+        With learning_text, a learning whose text changed since the person
+        reviewed it is 409 learning_changed. A reason that looks like it holds
+        a credential is 409 learning_sensitive with ranges in field reason.
       parameters:
         - {name: learningId, in: path, required: true, schema: {type: string}}
       security: *auth
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MethodLearningDismiss'}
       responses:
         '200':
           description: Dismissed
@@ -6387,7 +6422,48 @@ paths:
         '404':
           $ref: '#/components/responses/Error'
         '409':
+          description: already_decided, learning_changed, or learning_sensitive with the suspected credential ranges
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningProblem'}
+  /knowledge/learnings/{learningId}/recommendation:
+    put:
+      operationId: recommendMethodLearning
+      description: |
+        Prepares a decision on one open method learning (AEON-788): accept with
+        a target entry in the learning's project and an optional lesson line,
+        or dismiss with a reason. Agents and people with knowledge.write may
+        recommend; nothing is accepted or dismissed. A person applies it
+        through accept and dismiss. The recommendation replaces any earlier one
+        for the learning and records knowledge.learning_recommended. A decided
+        learning is 409 already_decided; a closed one is 404. Lesson or reason
+        text that looks like it holds a credential is 409 learning_sensitive
+        and cannot be confirmed here.
+      parameters:
+        - {name: learningId, in: path, required: true, schema: {type: string}}
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MethodLearningRecommend'}
+      responses:
+        '200':
+          description: The stored recommendation
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningRecommendation'}
+        '400':
           $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+        '409':
+          description: already_decided, or learning_sensitive with the suspected credential ranges
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MethodLearningProblem'}
   /knowledge/learnings/{learningId}/draft:
     post:
       operationId: draftMethodLearning
@@ -6882,7 +6958,7 @@ paths:
     post:
       operationId: requestTicketReview
       summary: Queue an independent managed review of a commit range
-      description: Requires work_orders.write and run.create on the work leaf (legacy tickets and tasks remain supported). Work parents cannot receive new review work orders. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection.
+      description: Requires work_orders.write and run.create on the work leaf (legacy tickets and tasks remain supported). Work parents cannot receive new review work orders. An agent must name its completed author run; only a person may declare an author family for an external change. Replays of the same request_id return the same order. Routes use registry profiles, capacity and existing enrollment approvals, in Codex, Grok, Claude family order, excluding the author and unqualified read-only adapters. An unavailable route creates a blocked review with skip reasons and a closed gate. The daemon supplies the exact local diff, with no reviewer tools. Optional GitHub App reporting posts aeon/review on the exact PR head; the repository owner must configure that context as required in branch protection. Catalog preparation repeats current initiating-key and target permissions in its own fenced transaction. Review resources and their ordered events then commit atomically; replay retains the original immutable binding.
       security: *auth
       parameters: [{name: nodeId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TicketReviewCreate'}}}}
@@ -8586,7 +8662,7 @@ paths:
   /runs/{runId}/telemetry:
     post:
       operationId: reportRunTelemetry
-      description: "Daemon reports monotonic sequence numbers; exact duplicate is idempotent and divergent replay conflicts. Telemetry is content-free. Totals, run status and event update atomically; budget excess blocks further dispatch. Model-only or error-only status and turn reports may precede started after a successful claim; an omitted status preserves the current run state. After observing local exit, a daemon may settle a rejected outbox with a fresh minimal finished/failed report using reporter_unavailable; rejected usage remains unconfirmed, never invented. Lead assignments require local process evidence on finished reports. Unconfirmed ownership_lost remains fenced; a later finished exited report from the same authenticated daemon may reconcile it. No lead-generation change transfers the writer."
+      description: "Daemon reports monotonic sequence numbers; exact duplicate is idempotent and divergent replay conflicts. Telemetry is content-free. Totals, run status and event update atomically; budget excess blocks further dispatch. Model-only or error-only status and turn reports may precede started after a successful claim; an omitted status preserves the current run state. After observing local exit, a daemon may settle a rejected outbox with a fresh minimal finished/failed report using reporter_unavailable; rejected usage remains unconfirmed, never invented. The bounded report is decoded before catalog preparation. Eligible build completion, usage settlement, budget blocking, review resources and their ordered events commit together. Identical accepted sequence replay does not settle or queue twice; divergent replay is refused before setup. Lead assignments require local process evidence on finished reports. Unconfirmed ownership_lost remains fenced; a later finished exited report from the same authenticated daemon may reconcile it. No lead-generation change transfers the writer."
       security: [{agentKey: []}]
       parameters: [{name: runId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RunTelemetry'}}}}
@@ -8783,153 +8859,6 @@ paths:
         '200': {description: Revoked grant, headers: {Aeon-Contract: {$ref: '#/components/headers/ApprovalsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Approval'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
-  /model-preferences:
-    get:
-      operationId: getModelPreferences
-      security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
-      parameters:
-        - {name: project_id, in: query, schema: {type: string, format: uuid}}
-      responses:
-        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferences'}}}}
-        '400': {$ref: '#/components/responses/Error'}
-        '403': {$ref: '#/components/responses/Error'}
-        '404': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
-        '422': {$ref: '#/components/responses/Error'}
-        '413': {$ref: '#/components/responses/Error'}
-  /model-preferences/levels/{level}:
-    put:
-      operationId: replaceModelPreferenceLevel
-      security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
-      parameters:
-        - {name: project_id, in: query, schema: {type: string, format: uuid}}
-        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceLevelWrite'}}}}
-      responses:
-        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
-        '400': {$ref: '#/components/responses/Error'}
-        '403': {$ref: '#/components/responses/Error'}
-        '404': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
-        '422': {$ref: '#/components/responses/Error'}
-        '413': {$ref: '#/components/responses/Error'}
-    delete:
-      operationId: resetModelPreferenceLevel
-      security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
-      parameters:
-        - {name: project_id, in: query, schema: {type: string, format: uuid}}
-        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
-        - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
-      responses:
-        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
-        '400': {$ref: '#/components/responses/Error'}
-        '403': {$ref: '#/components/responses/Error'}
-        '404': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
-        '422': {$ref: '#/components/responses/Error'}
-  /model-preferences/levels/{level}/rows/{kindId}:
-    put:
-      operationId: setModelPreferenceRow
-      security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
-      parameters:
-        - {name: project_id, in: query, schema: {type: string, format: uuid}}
-        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
-        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceRowWrite'}}}}
-      responses:
-        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
-        '400': {$ref: '#/components/responses/Error'}
-        '403': {$ref: '#/components/responses/Error'}
-        '404': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
-        '422': {$ref: '#/components/responses/Error'}
-        '413': {$ref: '#/components/responses/Error'}
-    delete:
-      operationId: resetModelPreferenceRow
-      security: *auth
-      description: Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
-      parameters:
-        - {name: project_id, in: query, schema: {type: string, format: uuid}}
-        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
-        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
-        - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
-      responses:
-        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
-        '400': {$ref: '#/components/responses/Error'}
-        '403': {$ref: '#/components/responses/Error'}
-        '404': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
-        '422': {$ref: '#/components/responses/Error'}
-  /work-kinds:
-    get:
-      operationId: listWorkKinds
-      security: *auth
-      parameters:
-        - {name: project_id, in: query, schema: {type: string, format: uuid}}
-        - {name: include_archived, in: query, schema: {type: boolean, default: false}}
-        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
-        - {name: cursor, in: query, schema: {type: string, format: uuid}, description: Last ID from the preceding page.}
-      responses:
-        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindPage'}}}}
-        '400': {$ref: '#/components/responses/Error'}
-        '403': {$ref: '#/components/responses/Error'}
-        '404': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
-        '422': {$ref: '#/components/responses/Error'}
-    post:
-      operationId: createWorkKind
-      security: *auth
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindWrite'}}}}
-      responses:
-        '201': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
-        '400': {$ref: '#/components/responses/Error'}
-        '403': {$ref: '#/components/responses/Error'}
-        '404': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
-        '422': {$ref: '#/components/responses/Error'}
-  /work-kinds/{kindId}:
-    patch:
-      operationId: updateWorkKind
-      security: *auth
-      parameters:
-        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
-      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindPatch'}}}}
-      responses:
-        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
-        '400': {$ref: '#/components/responses/Error'}
-        '403': {$ref: '#/components/responses/Error'}
-        '404': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
-        '422': {$ref: '#/components/responses/Error'}
-    delete:
-      operationId: archiveWorkKind
-      security: *auth
-      parameters:
-        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
-      responses:
-        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
-        '400': {$ref: '#/components/responses/Error'}
-        '403': {$ref: '#/components/responses/Error'}
-        '404': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
-        '422': {$ref: '#/components/responses/Error'}
-  /work-kinds/{kindId}/restore:
-    post:
-      operationId: restoreWorkKind
-      security: *auth
-      parameters:
-        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
-      responses:
-        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
-        '400': {$ref: '#/components/responses/Error'}
-        '403': {$ref: '#/components/responses/Error'}
-        '404': {$ref: '#/components/responses/Error'}
-        '409': {$ref: '#/components/responses/Error'}
-        '422': {$ref: '#/components/responses/Error'}
   /models/{id}/retire:
     post:
       operationId: retireModelProfile
@@ -8959,6 +8888,7 @@ paths:
   /models:
     get:
       operationId: listModelProfiles
+      description: Catalog preparation commits separately under current read authority before the model snapshot is loaded. Denied preparation creates no profiles, routes or seed events.
       security: *auth
       responses:
         '200': {description: Tenant model registry, headers: {Aeon-Event-Position: {$ref: '#/components/headers/EventPosition'}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelProfile'}}}}}
@@ -9050,24 +8980,202 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '503': {$ref: '#/components/responses/Error'}
   /models/routes:
+    get:
+      operationId: readModelRoutes
+      description: Read-only ladder for one role, requiring models.read. Never seeds the catalog or appends events. CLI uses ladder priority and harness health; ordinary managed review uses legacy family/tier order until an explicit saved-order activation, then saved priorities. Qualification floors, platform capability, approved accounts and preferences still apply. order_mode and managed_fallback_order (profile IDs before qualification/preferences) share the stored-row SQL snapshot; truncated order is incomplete. At most 50 steps, with explicit truncation. Complete snapshots include routes, a quoted strong edit_token over canonical role content (including full-precision expiry and reason), and can_edit for person plus models.manage. Truncated snapshots have no edit token and cannot be edited; no cursor. Unseeded tenants return setup false. Each read applies a five-second statement timeout.
+      security: *auth
+      parameters:
+        - {name: role, in: query, required: true, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
+      responses:
+        '200': {description: Bounded tenant ladder snapshot, content: {application/json: {schema: {$ref: '#/components/schemas/ModelRoutesRead'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '503': {description: Statement timeout; retry later, headers: {Retry-After: {schema: {type: integer}, description: Seconds before retrying}}, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
     put:
       operationId: replaceModelRoutes
-      description: Admin atomically replaces the tenant's role ladders. Temporary unavailable/conserved/budget-limited entries require expiry and reason.
+      description: Person with workspace models.manage replaces routes under a tenant and registry fence with final authorization. Unqualified PUT preserves whole-tenant last-writer-wins compatibility. With role, replace only that complete role and require its quoted strong If-Match token; review-gate tokens include ordering mode. Explicit order_mode is allowed only for conditional review-gate writes; omission and legacy whole-tenant writes preserve the mode. Rows and mode change atomically, including mode-only audit events with before_order_mode/after_order_mode metadata; before/after arrays retain their shape; missing 428 revision_required, malformed 400 invalid_revision, mismatched 409 stale_revision. Never initializes in role mode. At most 50 rows per role and 300 total; audit before/after must be complete within those bounds. Unchanged stored expired holds may be reordered; new or changed holds require strictly future expiry sampled after fences. Conditional expiry_policy=clear compensation converts all desired expired holds to available with empty reason/null expiry. Invalid temporal conditional changes return 422 suppression_expired; legacy keeps 400. No-op emits no replacement event. Thirty-second request deadline; five-second lock and statement timeouts.
       security: [{session: []}]
-      requestBody: {required: true, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
+      parameters:
+        - {name: role, in: query, schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
+        - {name: If-Match, in: header, description: Required in role mode; complete strong SHA-256 content token from GET. No wildcard or weak/list form., schema: {type: string, maxLength: 66}}
+        - {name: order_mode, in: query, description: Only with role=review-gate. saved explicitly activates saved managed fallback priorities; legacy compensates activation. Omission preserves current mode., schema: {type: string, enum: [legacy, saved]}}
+        - {name: expiry_policy, in: query, description: Allowed only with role. clear is for compensation; preserves future holds without extending them., schema: {type: string, enum: [preserve, clear], default: preserve}}
+      requestBody: {required: true, content: {application/json: {schema: {type: array, maxItems: 300, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
       responses:
-        '200': {description: Ordered routes, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
+        '200': {description: Actual normalized stored routes for the addressed role or whole tenant, headers: {ETag: {description: New quoted strong role content token including ordinary review mode in conditional mode, schema: {type: string}}, Model-Order-Mode: {description: Actual stored ordinary review mode for role=review-gate, schema: {type: string, enum: [legacy, saved]}}}, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/ModelRoute'}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+  /model-preferences:
+    get:
+      operationId: getModelPreferences
+      security: *auth
+      description: Sparse Default → You → Project preferences, with canonical caller and edit capabilities in one read-only repeatable-read snapshot. Requires workspace models.read and nodes.read for a supplied live project. Independently authorized catalog preparation precedes the snapshot; no models.manage grant is required. Residency lock loosening is reported as a warning.
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferences'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+  /model-preferences/levels/{level}:
+    put:
+      operationId: replaceModelPreferenceLevel
+      security: *auth
+      description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      parameters:
+        - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceLevelWrite'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: resetModelPreferenceLevel
+      security: *auth
+      description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      parameters:
+        - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+        - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /model-preferences/levels/{level}/rows/{kindId}:
+    put:
+      operationId: setModelPreferenceRow
+      security: *auth
+      description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      parameters:
+        - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceRowWrite'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: resetModelPreferenceRow
+      security: *auth
+      description: Policies permits only row PUT/DELETE and scalar-only level PUT with rows omitted, including Undo. Level DELETE and rows replacement remain for legacy callers and can delete hidden archived rows. Person writes require If-Prefs-Person; supplied Default/Project headers are checked too. Default needs workspace model_prefs.manage; Project needs project model_prefs.manage plus nodes.read; You needs workspace models.read. The full GET additionally requires workspace models.read, so project-only managers retain direct write reach without editor read reach. Sparse Default → You → Project preferences. Person writes use the canonical caller; agents cannot write. Residency locks allow any choice below them and flag a loosening. A level revision of 0 means no stored level; use that level revision as the write token. Model locks are enforced.
+      parameters:
+        - {name: If-Prefs-Person, in: header, description: Required for person level; optional on Default/Project. Equality only against the current server-derived canonical caller; never selects the target. Missing 428 person_precondition_required; malformed 400 invalid_person_precondition; authorized mismatch 409 preference_person_changed., schema: {type: string, format: uuid, maxLength: 36}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: level, in: path, required: true, schema: {type: string, enum: [default, person, project]}}
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: revision, in: query, required: true, schema: {type: integer, format: int64, minimum: 0}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/ModelPreferenceWriteResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '428': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /work-kinds:
+    get:
+      operationId: listWorkKinds
+      security: *auth
+      parameters:
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: include_archived, in: query, schema: {type: boolean, default: false}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+        - {name: cursor, in: query, schema: {type: string, format: uuid}, description: Last ID from the preceding page.}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createWorkKind
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindWrite'}}}}
+      responses:
+        '201': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /work-kinds/{kindId}:
+    patch:
+      operationId: updateWorkKind
+      security: *auth
+      parameters:
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindPatch'}}}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: archiveWorkKind
+      security: *auth
+      parameters:
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
+  /work-kinds/{kindId}/restore:
+    post:
+      operationId: restoreWorkKind
+      security: *auth
+      parameters:
+        - {name: kindId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Result, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKind'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
   /models/resolve:
     get:
       operationId: resolveModelRole
-      description: Replaces classic paimos model resolve. review-gate requires author_family and excludes that family; if no eligible candidate, owner_required is true. Candidate reasons include policy, account availability and allowance. Command templates are rendered from trusted local templates, never stored shell snippets.
+      description: Replaces classic paimos model resolve. role with optional project_id preserves the CLI role ladder and adds residency evidence only. Placement resolution is enabled by mode=placement or the placement-specific ticket, area, complexity or person_id parameters; managed reviews then enforce qualification and approved-account requirements. review-gate requires author_family and excludes that family; if no eligible candidate, owner_required is true. Candidate reasons include policy, account availability and allowance. Command templates are rendered from trusted local templates, never stored shell snippets.
       security: *auth
       parameters:
-        - {name: role, in: query, description: Required unless ticket supplies its route role., schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
-        - {name: author_family, in: query, description: "Required for review-gate. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
+        - {name: role, in: query, description: 'Required unless ticket supplies its route role. review-gate-security requires placement resolution; unavailable security ladders return owner_required with their explanation.', schema: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}}
+        - {name: author_family, in: query, description: "Required for review-gate and review-gate-security. Accepts openai, anthropic, xai, cursor, google or local and aliases codex → openai, claude → anthropic, grok → xai, gemini → google. pi and opencode are ambiguous; pass the model family instead.", schema: {type: string}}
         - {name: harness, in: query, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode, media, terminal]}}
-        - {name: project_id, in: query, description: Optional project for model preference placement and the starter's residency trace., schema: {type: string, format: uuid}}
+        - {name: project_id, in: query, description: Optional project for the starter's residency preference trace., schema: {type: string, format: uuid}}
+        - {name: mode, in: query, description: Explicitly enable placement resolution when only role and project_id are supplied., schema: {type: string, enum: [placement]}}
         - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible work item or legacy ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
         - {name: area, in: query, schema: {type: string, maxLength: 48}}
         - {name: complexity, in: query, schema: {type: string, enum: [S, M, L]}}
@@ -9611,79 +9719,148 @@ paths:
         '200': {description: Selected account, content: {application/json: {schema: {$ref: '#/components/schemas/AccountRoute'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/releases:
+    get:
+      operationId: listPlanningReleases
+      summary: Read recent release planning metadata
+      description: "Returns at most 100 releases, newest first. The truncated flag reports another page. Pass the last returned number as before_number for bounded keyset pagination."
+      security: *auth
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: before_number, in: query, schema: {type: integer, minimum: 1, maximum: 2147483647}}
+      responses:
+        '200':
+          description: Recent releases
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [releases, truncated]
+                properties:
+                  truncated: {type: boolean}
+                  releases:
+                    type: array
+                    maxItems: 100
+                    items:
+                      type: object
+                      required: [id, title, number, state]
+                      properties:
+                        id: {type: string, format: uuid}
+                        title: {type: string}
+                        number: {type: integer, minimum: 1}
+                        state: {type: string}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+    post:
+      operationId: createPlanningRelease
+      summary: Open a planning release with existing work
+      description: "Person-only atomic release creation and membership. A repeated idempotency key returns the originally created release. Existing active releases must be finished first. No Flow stages, gates or handoffs run."
+      security: [{session: []}]
+      parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [idempotency_key, ticket_node_ids]
+              properties:
+                idempotency_key: {type: string, minLength: 1, maxLength: 96}
+                ticket_node_ids: {type: array, minItems: 1, maxItems: 100, uniqueItems: true, items: {type: string, format: uuid}}
+      responses:
+        '200': {description: Original release membership, content: {application/json: {schema: {$ref: '#/components/schemas/ReleaseMembershipResult'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /journey/next-actions:
     get:
+      deprecated: true
       operationId: listJourneyNextActions
       summary: Read derived next actions for a batch of projects
-      description: Person-only snapshot. Reads all projection inputs in one query and derives actions with the existing journey rules. Requires journey.read and journey.act in each project. Invisible or unauthorized projects are omitted. No initialization, mutations or approval decisions.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters:
         - {name: project_ids, in: query, required: true, schema: {type: string}, description: 'Comma-separated unique project UUIDs; at most 100.'}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Current actions, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {type: object, required: [project_node_id, next_action], properties: {project_node_id: {type: string, format: uuid}, next_action: {$ref: '#/components/schemas/JourneyNextAction'}}}}}}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/journey:
     get:
+      deprecated: true
       operationId: getProjectJourney
       summary: Read a project's derived journey
-      description: ProjectId names a live project node. Stage and the single next action are derived from the current brief, decision, agreed requirements, release, handoff results and R2 decisions; clients cannot set them. project_node_id, project_key and tenant_slug are read from the project node and tenant row so a consumer can verify its configured binding. Query parameters and request bodies do not supply them.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Journey projection, headers: {Aeon-Contract: {$ref: '#/components/headers/JourneyContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
         '404': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/journey/profile:
     put:
+      deprecated: true
       operationId: setJourneyProfile
       summary: Choose a journey profile
-      description: Person chooses Personal, Professional or Enterprise; expected_revision prevents a stale profile or gate edit. Profile changes never erase recorded decisions.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: [{session: []}]
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyProfileWrite'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Journey projection, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/journey/actions:
     post:
+      deprecated: true
       operationId: advanceProjectJourney
       summary: Apply the project's next action
-      description: Applies one currently offered action after checking the matching R2 approval where required; never creates an approval decision. Idempotency key and expected_revision fence retries and stale UI actions.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyActionWrite'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Updated journey, content: {application/json: {schema: {$ref: '#/components/schemas/Journey'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/requirements:
     get:
+      deprecated: true
       operationId: listJourneyRequirements
       summary: List project requirements
       security: *auth
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Requirements and generated node links, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/JourneyRequirement'}}}}}
         '404': {$ref: '#/components/responses/Error'}
     post:
+      deprecated: true
       operationId: createJourneyRequirement
       summary: Add a draft requirement
-      description: A person adds a requirement node in the current draft revision. Later edits use the R1 node API and invalidate any stale Aithema draft or agreement gate.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: [{session: []}]
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyRequirementCreate'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '201': {description: Requirement, content: {application/json: {schema: {$ref: '#/components/schemas/JourneyRequirement'}}}}
         '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/requirements/agree:
     post:
+      deprecated: true
       operationId: agreeJourneyRequirements
       summary: Agree a requirements revision
-      description: A person-approved R2 requirements gate pins a revision and atomically creates one epic per functional requirement and idempotent ticket nodes from accepted breakdowns. Nonfunctional requirements become acceptance criteria or knowledge nodes. Drafts alone never generate work.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: [{session: []}]
       parameters: [{name: projectId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/RequirementsAgreement'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Agreed requirements, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/JourneyRequirement'}}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
@@ -9890,33 +10067,27 @@ paths:
         '503': {$ref: '#/components/responses/IntakeError'}
   /stage-handoffs:
     post:
+      deprecated: true
       operationId: requestStageHandoff
       summary: Request a stage operation
-      description: The journey coordinator creates a fenced request for a registered first-party stage plugin. Janus prepare may precede Pharos deploy; Janus apply follows deployment and permit approval. Server resolves owner, permissions, lineage, evidence ceiling and approved gate; caller cannot supply authority or result.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoffWrite'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '201': {description: Handoff, headers: {Aeon-Contract: {$ref: '#/components/headers/StageHandoffsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoff'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}:
     get:
+      deprecated: true
       operationId: getStageHandoff
       summary: Read a stage handoff
-      description: >
-        Allowed with stage_handoffs.read, or with the handoff's own operation
-        scope (stage.prepare, stage.deploy, stage.verify or stage.apply) when
-        the caller is the active agent principal whose name is the plugin the
-        operation routes to (pharos for deploy and verify, janus for prepare
-        and apply). Any other principal is refused, including one that holds
-        the operation scope. prerequisite_seal_sha256 is the stored seal that
-        a terminal result must echo. attempt and authority_epoch identify this
-        attempt; superseded_by points to the latest newer attempt for the same
-        release, stage and operation. authority_open is the current server
-        projection of whether this attempt can accept another action.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Safe handoff projection, headers: {Aeon-Contract: {$ref: '#/components/headers/StageHandoffsContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageHandoff'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -9925,21 +10096,25 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
       - {name: releaseId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
+      deprecated: true
       operationId: getNativeCandidateArtifact
       summary: Read a release's immutable candidate artifact and version pin
-      description: Requires stage_handoffs.read in the project. Registration is null before any built artifact is recorded. Recorded metadata is historical evidence, never launch authority.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Release identity and recorded candidate, content: {application/json: {schema: {$ref: '#/components/schemas/NativeCandidateArtifact'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
     put:
+      deprecated: true
       operationId: registerNativeCandidateArtifact
       summary: Pin a built artifact for a current native deployment handoff
-      description: Requires stage_handoffs.write in the project and the handoff requester or stage_handoffs.decide in that project. Fences the exact release, handoff, attempt, epoch and journey revision. Requires live candidate and deploy gates. Pins a null release version without changing journey or release revision; existing version and full artifact identity across attempts must match. Exact same-principal receipt replay has no side effects, including after authority closes. Divergent replay conflicts. Registration records provenance without approving gates, admitting launch or deploying a host.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/NativeCandidateArtifactWrite'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Recorded candidate or exact replay, content: {application/json: {schema: {$ref: '#/components/schemas/NativeCandidateArtifact'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
@@ -9947,9 +10122,10 @@ paths:
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/classic-batch-alias:
     post:
+      deprecated: true
       operationId: bindClassicBatchAlias
       summary: Bind an imported classic batch ID to an Aeon delivery handoff
-      description: Stores provenance for compatibility lookups; the handoff remains the delivery attempt and owner of evidence.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody:
@@ -9969,11 +10145,13 @@ paths:
                 account_key: {type: string}
                 runtime_generation: {type: string}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '201': {description: Alias bound to the handoff, headers: {Aeon-Contract: {$ref: '#/components/headers/BaselineBatchesContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/ClassicBatchAliasResponse'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/baseline-batches/batches/{batchId}/built-receipt:
     post:
+      deprecated: true
       operationId: reportClassicBatchBuilt
       summary: Record classic shaped built evidence on the aliased Aeon handoff
       security: *auth
@@ -9982,103 +10160,69 @@ paths:
         - {name: batchId, in: path, required: true, schema: {type: integer, minimum: 1}}
       requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Classic batch projection from imported provenance, headers: {Aeon-Contract: {$ref: '#/components/headers/BaselineBatchesContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/ClassicBatchBuiltResponse'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/evidence:
     post:
+      deprecated: true
       operationId: appendStageEvidence
       summary: Append typed stage evidence
-      description: >
-        The bound plugin appends monotonic typed evidence. Exact replay is
-        idempotent; divergent replay and stale authority are conflicts. Janus
-        evidence is value-free. Kind launch_readiness is Pharos observation on
-        a deploy handoff. It requires reviewed_plan_digest (lowercase sha256),
-        host, all_host_eval_passed, target_build_passed, backup_ready,
-        backup_observed_at, restart_required, running_kernel and expected_kernel.
-        Those fields are forbidden on every other kind. Admission treats the
-        flags as authority and ignores the outcome word.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: [{agentKey: []}]
       parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageEvidenceWrite'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '201': {description: Evidence, headers: {Aeon-Contract: {$ref: '#/components/headers/StageEvidenceContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageEvidence'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/result:
     post:
+      deprecated: true
       operationId: closeStageHandoff
       summary: Record a terminal stage result
-      description: A terminal result requires current lineage, required prerequisite seal and typed evidence. Failed or stale results never advance the journey.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: [{agentKey: []}]
       parameters: [{name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}]
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageResultWrite'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Result, headers: {Aeon-Contract: {$ref: '#/components/headers/StageResultContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageResult'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/launch/admit:
     post:
+      deprecated: true
       operationId: admitStageLaunch
       summary: Admit one Pharos launch
-      description: >
-        Issues one launch admission for an active Pharos deploy handoff after
-        the live stage.deploy grant, approved candidate and deploy gates, the
-        release version and EvidenceLaunchChecks all agree. The admit body must
-        equal the artifact Aeon stored for that handoff in
-        stage_handoff_build_evidence (digest_sha256 is the OCI config digest,
-        manifest_digest_sha256 is the release manifest digest). The body is
-        confirmation, not evidence. A launch_readiness row for this handoff and
-        its current authority_epoch must have all_host_eval_passed,
-        target_build_passed and backup_ready true, and observed_at within 900
-        seconds of Aeon's clock. That window is LaunchFreshness. The caller
-        cannot pass it. A later launch_readiness row with a false flag or a
-        different reviewed_plan_digest contradicts the claim and is refused.
-        binding_digest_sha256 is hex(sha256("inspr.aeon.launch-binding.v1" +
-        NUL + canonical JSON)). The JSON object has sorted keys, no whitespace
-        and UTF-8, and is exactly artifact_digest_sha256, authority_epoch
-        (a JSON number), handoff_id, release_node_id and reviewed_plan_digest.
-        Idempotency-Key is a required UUID. An exact replay by the same routed
-        principal and key returns the original admission without a new event,
-        even after consumption. A different body or principal using that key
-        returns 409 idempotency_conflict. A new key cannot issue a second live
-        admission. Replays end 24 hours after the handoff's terminal result.
-        Refused when the handoff is closed, stale, or not an active Pharos deploy.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters:
         - {name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageArtifact'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Original launch admission, headers: {Aeon-Contract: {$ref: '#/components/headers/StageLaunchContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchAdmission'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
   /stage-handoffs/{handoffId}/launch/consume:
     post:
+      deprecated: true
       operationId: consumeStageLaunch
       summary: Consume one launch admission
-      description: >
-        Marks the admission consumed. Exactly one new key wins, including under
-        concurrent requests. An exact replay with the original UUID
-        Idempotency-Key, routed principal and canonical body returns the
-        original receipt with consumed_at and no new event, including after a
-        terminal result. A different body or principal using that key returns
-        409 idempotency_conflict. A new key after consumption returns 409.
-        Replays end 24 hours after the handoff's terminal result.
-        Consume recomputes binding_digest_sha256 from the current handoff, the
-        stored candidate artifact and the qualifying launch_readiness row, and
-        refuses when any of those drifted. The admission must belong to this
-        handoff. Missing, foreign, expired and already-consumed admissions are
-        refused. A new consume requires the same live stage.deploy grant as
-        admission; an exact replay checks the active routed principal.
+      description: "The INSPR Flow is retired. This compatibility route returns 410 without reading or changing Flow data. Historic success schemas remain pinned for external clients."
       security: *auth
       parameters:
         - {name: handoffId, in: path, required: true, schema: {type: string, format: uuid}}
         - {name: Idempotency-Key, in: header, required: true, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchConsume'}}}}
       responses:
+        '410': {$ref: '#/components/responses/Error'}
         '200': {description: Consumption receipt, headers: {Aeon-Contract: {$ref: '#/components/headers/StageLaunchContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageLaunchConsumption'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -12224,6 +12368,16 @@ components:
       properties:
         light: {type: string, pattern: '^#[0-9a-fA-F]{6}$'}
         dark: {type: [string, 'null'], pattern: '^#[0-9a-fA-F]{6}$', description: 'Null means derived; explicit Porcelain dark preserves the current look'}
+    ThemeAgentStates:
+      type: object
+      additionalProperties: false
+      required: [working, waiting, throttled, problem, idle]
+      properties:
+        working: {$ref: '#/components/schemas/ThemeAccent'}
+        waiting: {$ref: '#/components/schemas/ThemeAccent'}
+        throttled: {$ref: '#/components/schemas/ThemeAccent'}
+        problem: {$ref: '#/components/schemas/ThemeAccent'}
+        idle: {$ref: '#/components/schemas/ThemeAccent'}
     ThemeValues:
       type: object
       additionalProperties: false
@@ -12242,12 +12396,27 @@ components:
           type: object
           additionalProperties: false
           required: [avatar, ring, hover, size, palette]
+          allOf:
+            - if:
+                properties:
+                  palette: {const: custom}
+                required: [palette]
+              then:
+                required: [custom_states]
+                properties:
+                  custom_states: {$ref: '#/components/schemas/ThemeAgentStates'}
           properties:
             avatar: {type: string, enum: [pulse, robot-1, robot-2, robot-3, robot-4, robot-5, orbit, quill, sprite]}
             ring: {type: [string, 'null'], enum: [moving, still, off, null], description: Null retains the selected style's drawn ring}
             hover: {type: boolean}
             size: {type: [integer, 'null'], minimum: 30, maximum: 100, description: Artwork fullness percentage; null retains the style's drawn size}
-            palette: {type: string, enum: [standard, protan, deutan, tritan, monochrome]}
+            palette: {type: string, enum: [standard, protan, deutan, tritan, monochrome, focus, errors, custom]}
+            custom_states:
+              description: 'Five state accents; required and non-null for custom, retained for other looks. Omitted means null; no migration needed.'
+              default: null
+              oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/ThemeAgentStates'
             dim_inactive: {type: boolean, description: 'Dim idle and ended agents; omitted means true'}
             inactive_opacity: {type: integer, minimum: 40, maximum: 80, description: 'Inactive opacity percent; omitted means 55'}
     Theme:
@@ -18333,192 +18502,6 @@ components:
             decision: {type: [string, 'null'], enum: [approved, denied, null]}
             decided_by_principal_id: {type: [string, 'null'], format: uuid}
             target_digest_sha256: {type: string, pattern: '^[0-9a-f]{64}$', description: Digest of the recorded target; informational only}
-    ModelSelector:
-      type: object
-      additionalProperties: false
-      required: [mode]
-      description: Auto has no other fields; pinned requires only profile_id; latest requires family, line and effort, with optional harness.
-      oneOf:
-        - properties: {mode: {const: auto}}
-          not: {anyOf: [{required: [profile_id]}, {required: [family]}, {required: [line]}, {required: [effort]}, {required: [harness]}]}
-        - properties: {mode: {const: pinned}}
-          required: [profile_id]
-          not: {anyOf: [{required: [family]}, {required: [line]}, {required: [effort]}, {required: [harness]}]}
-        - properties: {mode: {const: latest}}
-          required: [family, line, effort]
-          not: {required: [profile_id]}
-      properties:
-        mode: {type: string, enum: [auto, latest, pinned]}
-        profile_id: {type: string, format: uuid}
-        family: {type: string, maxLength: 32}
-        line: {type: string, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
-        effort: {type: string, maxLength: 32}
-        harness: {type: string, enum: [codex, claude, grok, pi, cursor, gemini, opencode]}
-    ModelPreferenceRow:
-      type: object
-      required: [kind_id, locked, normal, complex]
-      properties:
-        kind_id: {type: string, format: uuid}
-        locked: {type: boolean}
-        normal: {$ref: '#/components/schemas/ModelSelector'}
-        complex: {$ref: '#/components/schemas/ModelSelector'}
-    ModelPreferenceRowWrite:
-      type: object
-      additionalProperties: false
-      required: [revision]
-      description: Both selectors required unless locked=true requests copy-on-lock; project locks are forbidden.
-      properties:
-        revision: {type: integer, format: int64, minimum: 0}
-        locked: {type: boolean}
-        normal: {$ref: '#/components/schemas/ModelSelector'}
-        complex: {$ref: '#/components/schemas/ModelSelector'}
-    ModelPreferenceLevelWrite:
-      type: object
-      additionalProperties: false
-      required: [revision]
-      properties:
-        revision: {type: integer, format: int64, minimum: 0}
-        residency: {type: [string, 'null'], enum: [any, eu, local, null]}
-        residency_locked: {type: boolean}
-        prefs_locked: {type: boolean}
-        rows: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/ModelPreferenceRow'}}
-    ModelPreferenceLevel:
-      type: object
-      required: [revision, residency, residency_locked, prefs_locked, rows, updated_by, updated_at]
-      properties:
-        revision: {type: integer, format: int64, minimum: 0}
-        residency: {type: [string, 'null'], enum: [any, eu, local, null]}
-        residency_locked: {type: boolean}
-        prefs_locked: {type: boolean}
-        rows: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/ModelPreferenceRow'}}
-        updated_by: {type: [string, 'null'], format: uuid}
-        updated_at: {type: [string, 'null'], format: date-time}
-    ModelPreferenceEffective:
-      type: object
-      required: [selector, profile, label, brand, follows_latest, pinned, today_version]
-      properties:
-        selector: {$ref: '#/components/schemas/ModelSelector'}
-        profile: {oneOf: [{$ref: '#/components/schemas/ModelProfile'}, {type: 'null'}]}
-        label: {type: string}
-        brand: {type: string}
-        follows_latest: {type: boolean}
-        pinned: {type: boolean}
-        today_version: {type: string}
-        unavailable_reason: {type: string}
-    ModelPreferenceView:
-      type: object
-      required: [residency, rows, changes]
-      properties:
-        choices_truncated: {type: boolean, description: More than 256 non-retired profiles exist; picker choices and route counts cover only the returned profiles. Automatic routing still uses the full registry.}
-        choices:
-          type: array
-          maxItems: 256
-          description: Advisory picker metadata for this level; live routing remains authoritative. Retired versions are hidden, unqualified review harnesses and models without residency routes are disabled.
-          items:
-            type: object
-            required: [profile, line, model_version, retired, review_ladder, review_reason, residency_routes]
-            properties:
-              profile: {$ref: '#/components/schemas/ModelProfile'}
-              line: {type: string}
-              model_version: {type: string}
-              retired: {type: boolean}
-              review_ladder: {type: boolean}
-              review_reason: {type: string}
-              residency_routes: {type: integer, minimum: 0}
-        residency:
-          allOf:
-            - {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
-            - {type: object, properties: {qualifying_routes: {type: integer, minimum: 0}}}
-        rows:
-          type: array
-          maxItems: 256
-          items:
-            type: object
-            required: [kind_id, set_by, locked_by, changed_here, reset_to, warnings, normal, complex]
-            properties:
-              kind_id: {type: string, format: uuid}
-              set_by: {type: string}
-              locked_by: {type: string}
-              changed_here: {type: boolean}
-              reset_to: {type: string}
-              warnings: {type: array, items: {type: string}}
-              normal: {$ref: '#/components/schemas/ModelPreferenceEffective'}
-              complex: {$ref: '#/components/schemas/ModelPreferenceEffective'}
-        changes: {type: integer, minimum: 0}
-    ModelPreferences:
-      description: The document revision sums the included level revisions; writes compare the target level revision.
-      type: object
-      required: [revision, person_id, kinds, levels, views, can, residency_lock_mode]
-      properties:
-        revision: {type: integer, format: int64}
-        person_id: {type: [string, 'null'], format: uuid}
-        kinds: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/WorkKind'}}
-        levels:
-          type: object
-          required: [default, person, project]
-          properties:
-            default: {$ref: '#/components/schemas/ModelPreferenceLevel'}
-            person: {$ref: '#/components/schemas/ModelPreferenceLevel'}
-            project: {oneOf: [{$ref: '#/components/schemas/ModelPreferenceLevel'}, {type: 'null'}]}
-        views:
-          type: object
-          required: [default, person, project]
-          properties:
-            default: {$ref: '#/components/schemas/ModelPreferenceView'}
-            person: {$ref: '#/components/schemas/ModelPreferenceView'}
-            project: {oneOf: [{$ref: '#/components/schemas/ModelPreferenceView'}, {type: 'null'}]}
-        can:
-          type: object
-          required: [edit_default, edit_person, edit_project, add_default_kind, add_project_kind]
-          properties:
-            edit_default: {type: boolean}
-            edit_person: {type: boolean}
-            edit_project: {type: boolean}
-            add_default_kind: {type: boolean}
-            add_project_kind: {type: boolean}
-        residency_lock_mode: {type: string, const: warn}
-    ModelPreferenceWriteResult:
-      type: object
-      required: [level, revision, running_outside, residency]
-      properties:
-        level: {$ref: '#/components/schemas/ModelPreferenceLevel'}
-        revision: {type: integer, format: int64}
-        running_outside: {type: array, items: {type: string, format: uuid}}
-        residency: {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
-    WorkKind:
-      type: object
-      required: [id, slug, label, hint, position]
-      properties:
-        id: {type: string, format: uuid}
-        slug: {type: string, maxLength: 48}
-        label: {type: string, minLength: 1, maxLength: 60}
-        hint: {type: string, maxLength: 120}
-        project_id: {type: string, format: uuid}
-        system: {type: string, enum: [review, security, other]}
-        position: {type: integer}
-        archived_at: {type: string, format: date-time}
-    WorkKindWrite:
-      type: object
-      additionalProperties: false
-      required: [label]
-      properties:
-        label: {type: string, minLength: 1, maxLength: 60}
-        hint: {type: string, maxLength: 120}
-        project_id: {type: string, format: uuid}
-    WorkKindPatch:
-      type: object
-      additionalProperties: false
-      minProperties: 1
-      properties:
-        label: {type: string, minLength: 1, maxLength: 60}
-        hint: {type: string, maxLength: 120}
-        position: {type: integer, minimum: -1000000, maximum: 1000000}
-    WorkKindPage:
-      type: object
-      required: [items, next_cursor]
-      properties:
-        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/WorkKind'}}
-        next_cursor: {type: [string, 'null'], format: uuid}
     ModelRetirementWrite:
       type: object
       additionalProperties: false
@@ -18591,11 +18574,35 @@ components:
       required: [role, priority, profile_id, state]
       properties:
         role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}
-        priority: {type: integer, minimum: 1}
+        priority: {type: integer, minimum: 1, maximum: 2147483647}
         profile_id: {type: string, format: uuid}
         state: {type: string, enum: [available, unavailable, conserved, budget_limited]}
         reason: {type: string}
         valid_until: {type: [string, 'null'], format: date-time}
+    ModelRoutesRead:
+      type: object
+      required: [role, steps, routes, edit_token, can_edit, setup, truncated, dispatch_family_order, review_floors]
+      properties:
+        role: {type: string, enum: [scout, mechanical, build, build-hard, review-gate, review-gate-security]}
+        routes: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/ModelRoute'}, description: Stored rows matching steps; conditional PUT sends this complete array.}
+        edit_token: {type: [string, 'null'], description: Quoted SHA-256 content token; null when truncated. Time passing alone never changes it.}
+        can_edit: {type: boolean, description: Person with models.manage and a complete initialized snapshot; source authorization still checked on save.}
+        steps:
+          type: array
+          maxItems: 50
+          items:
+            allOf:
+              - {$ref: '#/components/schemas/ModelRoute'}
+              - type: object
+                required: [profile]
+                properties:
+                  profile: {$ref: '#/components/schemas/ModelProfile'}
+        setup: {type: boolean, description: Whether the tenant has any model profiles; false means the registry has not been set up.}
+        truncated: {type: boolean, description: More than 50 steps exist for this role; the omitted steps still apply.}
+        order_mode: {type: string, enum: [legacy, saved], description: Present for review-gate; absent metadata means legacy. Included in the complete token.}
+        managed_fallback_order: {type: array, maxItems: 50, items: {type: string, format: uuid}, description: Present for review-gate. Applied fallback order of the displayed profiles before qualification and model preferences; incomplete when truncated.}
+        dispatch_family_order: {type: array, items: {type: string}, description: 'Built-in family order used only by legacy ordinary review dispatch.'}
+        review_floors: {type: array, items: {type: string}, description: Existing review constraints in words; not new enforcement.}
     ModelResolution:
       type: object
       required: [role, ladder, owner_required, source]
@@ -18608,8 +18615,196 @@ components:
         owner_required: {type: boolean}
         source: {type: string, enum: [aeon]}
         trace: {$ref: '#/components/schemas/ModelPreferenceTrace'}
+        residency: {type: string, enum: [any, eu, local], description: Present for placement-aware resolution.}
         preference: {$ref: '#/components/schemas/ModelPreferenceDecision'}
-        residency: {type: string, enum: [any, eu, local]}
+    ModelSelector:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      description: Auto has no other fields; pinned requires only profile_id; latest requires family, line and effort, with optional harness.
+      oneOf:
+        - properties: {mode: {const: auto}}
+          not: {anyOf: [{required: [profile_id]}, {required: [family]}, {required: [line]}, {required: [effort]}, {required: [harness]}]}
+        - properties: {mode: {const: pinned}}
+          required: [profile_id]
+          not: {anyOf: [{required: [family]}, {required: [line]}, {required: [effort]}, {required: [harness]}]}
+        - properties: {mode: {const: latest}}
+          required: [family, line, effort]
+          not: {required: [profile_id]}
+      properties:
+        mode: {type: string, enum: [auto, latest, pinned]}
+        profile_id: {type: string, format: uuid}
+        family: {type: string, maxLength: 32}
+        line: {type: string, maxLength: 64, pattern: '^[a-z0-9][a-z0-9._-]{0,63}$'}
+        effort: {type: string, maxLength: 32}
+        harness: {type: string, enum: [codex, claude, grok, pi, cursor, gemini, opencode]}
+    ModelPreferenceRow:
+      type: object
+      required: [kind_id, locked, normal, complex]
+      properties:
+        kind_id: {type: string, format: uuid}
+        locked: {type: boolean}
+        normal: {$ref: '#/components/schemas/ModelSelector'}
+        complex: {$ref: '#/components/schemas/ModelSelector'}
+    ModelPreferenceRowWrite:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      description: Both selectors required unless locked=true requests copy-on-lock; project locks are forbidden.
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        locked: {type: boolean}
+        normal: {$ref: '#/components/schemas/ModelSelector'}
+        complex: {$ref: '#/components/schemas/ModelSelector'}
+    ModelPreferenceLevelWrite:
+      type: object
+      additionalProperties: false
+      required: [revision]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        residency: {type: [string, 'null'], enum: [any, eu, local, null]}
+        residency_locked: {type: boolean}
+        prefs_locked: {type: boolean}
+        rows: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/ModelPreferenceRow'}}
+    ModelPreferenceWriteResult:
+      type: object
+      required: [person_id, level, revision, running_outside, residency]
+      properties:
+        person_id: {type: [string, 'null'], format: uuid, description: Canonical caller confirmed in the fenced write; session principal remains audit actor.}
+        level: {$ref: '#/components/schemas/ModelPreferenceLevel'}
+        revision: {type: integer, format: int64}
+        running_outside: {type: array, items: {type: string, format: uuid}}
+        residency: {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
+    WorkKindWrite:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties:
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        project_id: {type: string, format: uuid}
+    WorkKindPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        position: {type: integer, minimum: -1000000, maximum: 1000000}
+    WorkKindPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/WorkKind'}}
+        next_cursor: {type: [string, 'null'], format: uuid}
+    ModelPreferenceLevel:
+      type: object
+      required: [revision, residency, residency_locked, prefs_locked, rows, updated_by, updated_at]
+      properties:
+        revision: {type: integer, format: int64, minimum: 0}
+        residency: {type: [string, 'null'], enum: [any, eu, local, null]}
+        residency_locked: {type: boolean}
+        prefs_locked: {type: boolean}
+        rows: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/ModelPreferenceRow'}}
+        updated_by: {type: [string, 'null'], format: uuid}
+        updated_at: {type: [string, 'null'], format: date-time}
+    ModelPreferenceEffective:
+      type: object
+      required: [selector, profile, label, brand, follows_latest, pinned, today_version]
+      properties:
+        selector: {$ref: '#/components/schemas/ModelSelector'}
+        profile: {oneOf: [{$ref: '#/components/schemas/ModelProfile'}, {type: 'null'}]}
+        label: {type: string}
+        brand: {type: string}
+        follows_latest: {type: boolean}
+        pinned: {type: boolean}
+        today_version: {type: string}
+        unavailable_reason: {type: string}
+    ModelPreferenceView:
+      type: object
+      required: [residency, rows, changes]
+      properties:
+        choices_truncated: {type: boolean, description: More than 256 non-retired profiles exist; picker choices and route counts cover only the returned profiles. Live dispatch still uses the full registry.}
+        resolution_truncated: {type: boolean, description: A preview required more than 256 catalog profiles (including retired revisions) or role ladder steps. Affected cells have no selected profile and explain the incomplete preview in unavailable_reason and row warnings. Bounded reads are reused across levels and selectors; live dispatch remains authoritative.}
+        choices:
+          type: array
+          maxItems: 256
+          description: Advisory picker metadata for this level; live routing remains authoritative. Retired versions are hidden, unqualified review harnesses and models without residency routes are disabled.
+          items:
+            type: object
+            required: [profile, line, model_version, retired, review_ladder, review_reason, residency_routes]
+            properties:
+              profile: {$ref: '#/components/schemas/ModelProfile'}
+              line: {type: string}
+              model_version: {type: string}
+              retired: {type: boolean}
+              review_ladder: {type: boolean}
+              review_reason: {type: string}
+              residency_routes: {type: integer, minimum: 0}
+        residency:
+          allOf:
+            - {$ref: '#/components/schemas/ModelPreferenceTrace/properties/residency'}
+            - {type: object, properties: {qualifying_routes: {type: integer, minimum: 0}}}
+        rows:
+          type: array
+          maxItems: 256
+          items:
+            type: object
+            required: [kind_id, set_by, locked_by, changed_here, reset_to, warnings, normal, complex]
+            properties:
+              kind_id: {type: string, format: uuid}
+              set_by: {type: string}
+              locked_by: {type: string}
+              changed_here: {type: boolean}
+              reset_to: {type: string}
+              warnings: {type: array, items: {type: string}}
+              normal: {$ref: '#/components/schemas/ModelPreferenceEffective'}
+              complex: {$ref: '#/components/schemas/ModelPreferenceEffective'}
+        changes: {type: integer, minimum: 0}
+    ModelPreferences:
+      description: The document revision sums the included level revisions; writes compare the target level revision.
+      type: object
+      required: [revision, person_id, kinds, levels, views, can, residency_lock_mode]
+      properties:
+        revision: {type: integer, format: int64}
+        person_id: {type: [string, 'null'], format: uuid}
+        kinds: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/WorkKind'}}
+        levels:
+          type: object
+          required: [default, person, project]
+          properties:
+            default: {$ref: '#/components/schemas/ModelPreferenceLevel'}
+            person: {$ref: '#/components/schemas/ModelPreferenceLevel'}
+            project: {oneOf: [{$ref: '#/components/schemas/ModelPreferenceLevel'}, {type: 'null'}]}
+        views:
+          type: object
+          required: [default, person, project]
+          properties:
+            default: {$ref: '#/components/schemas/ModelPreferenceView'}
+            person: {$ref: '#/components/schemas/ModelPreferenceView'}
+            project: {oneOf: [{$ref: '#/components/schemas/ModelPreferenceView'}, {type: 'null'}]}
+        can:
+          type: object
+          required: [edit_default, edit_person, edit_project, add_default_kind, add_project_kind]
+          properties:
+            edit_default: {type: boolean}
+            edit_person: {type: boolean}
+            edit_project: {type: boolean}
+            add_default_kind: {type: boolean}
+            add_project_kind: {type: boolean}
+        residency_lock_mode: {type: string, const: warn}
+    WorkKind:
+      type: object
+      required: [id, slug, label, hint, position]
+      properties:
+        id: {type: string, format: uuid}
+        slug: {type: string, maxLength: 48}
+        label: {type: string, minLength: 1, maxLength: 60}
+        hint: {type: string, maxLength: 120}
+        project_id: {type: string, format: uuid}
+        system: {type: string, enum: [review, security, other]}
+        position: {type: integer}
+        archived_at: {type: string, format: date-time}
     ModelPreferenceDecision:
       type: object
       description: Additive resolution evidence returned only when preference placement parameters are supplied.
@@ -18649,6 +18844,8 @@ components:
       type: object
       description: Creation-time preference evidence. Historical runs and reviews may omit it. Residency warnings survive a looser chosen value below a lock.
       properties:
+        selector: {$ref: '#/components/schemas/ModelSelector'}
+        order_mode: {type: string, enum: [legacy, saved], description: "Ordinary managed review fallback source captured with its ladder; preferences still apply within qualified candidates."}
         worker_assignment: {$ref: '#/components/schemas/WorkerHandoff'}
         project_lead:
           type: object
@@ -18658,7 +18855,6 @@ components:
             generation: {type: integer, format: int64, minimum: 1}
         role: {type: string}
         project_id: {type: string, format: uuid}
-        selector: {$ref: '#/components/schemas/ModelSelector'}
         ticket_requirement: {type: string, enum: [any, eu, local]}
         person_id: {type: [string, 'null'], format: uuid}
         residency:
@@ -19898,18 +20094,51 @@ components:
         author:
           oneOf: [{type: 'null'}, {$ref: '#/components/schemas/KnowledgePerson'}]
         href: {type: string}
+        recommendation: {$ref: '#/components/schemas/MethodLearningRecommendation'}
     MethodLearningPage:
       type: object
       required: [items, truncated]
       properties:
         items: {type: array, items: {$ref: '#/components/schemas/MethodLearning'}}
         truncated: {type: boolean}
+        next_cursor: {type: string, description: "Present when truncated; pass as cursor for the next page"}
+    MethodLearningRecommend:
+      type: object
+      required: [decision]
+      additionalProperties: false
+      properties:
+        decision: {type: string, enum: [accept, dismiss]}
+        knowledge_id: {type: string, format: uuid, description: "Required for accept; not allowed for dismiss"}
+        lesson: {type: string, maxLength: 240, description: "Accept only. The changelog sentence; the learning's own text when absent"}
+        reason: {type: string, maxLength: 500, description: "Required for dismiss, optional for accept"}
+    MethodLearningRecommendation:
+      type: object
+      required: [decision, by, at, event_id, stale, target_missing]
+      properties:
+        decision: {type: string, enum: [accept, dismiss]}
+        knowledge_id: {type: string, format: uuid}
+        knowledge_title: {type: string}
+        lesson: {type: string}
+        reason: {type: string}
+        by:
+          oneOf: [{type: 'null'}, {$ref: '#/components/schemas/KnowledgePerson'}]
+        at: {type: string, format: date-time}
+        event_id: {type: integer, format: int64}
+        stale: {type: boolean, description: "The learning's text changed after it was recommended"}
+        target_missing: {type: boolean, description: "The chosen entry was deleted or left the project"}
+    MethodLearningDismiss:
+      type: object
+      properties:
+        reason: {type: string, maxLength: 500}
+        learning_text: {type: string, maxLength: 2000, description: "The learning's text as the person reviewed it; a learning that reads differently now is 409 learning_changed"}
     MethodLearningAccept:
       type: object
       required: [knowledge_id]
       additionalProperties: false
       properties:
         knowledge_id: {type: string, format: uuid}
+        lesson: {type: string, maxLength: 240, description: "Replaces the learning's own text in the changelog line"}
+        learning_text: {type: string, maxLength: 2000, description: "The learning's text as the person reviewed it; a learning that reads differently now is 409 learning_changed"}
         confirm_not_sensitive:
           type: boolean
           description: A person confirms that text flagged as a credential is not one. Agents cannot confirm.
@@ -19931,14 +20160,14 @@ components:
         code: {type: string}
         ranges:
           type: array
-          description: With learning_sensitive, the suspected credentials as Unicode code point offsets into the learning's text or title. The text itself is never returned.
+          description: "With learning_sensitive, the suspected credentials as Unicode code point offsets into the learning's text or title, or into the lesson or reason sent with the request. The text itself is never returned."
           items: {$ref: '#/components/schemas/SensitiveRange'}
     SensitiveRange:
       type: object
       required: [field, start, end]
       additionalProperties: false
       properties:
-        field: {type: string, enum: [text, title]}
+        field: {type: string, enum: [text, title, lesson, reason]}
         start: {type: integer, minimum: 0}
         end: {type: integer, minimum: 0}
     MethodLearningDecision:

@@ -254,3 +254,38 @@ func TestStopOnlyBatchSkipsCooperativeLevelsButAcceptsStopNow(t *testing.T) {
 		t.Fatal(out)
 	}
 }
+
+func TestUnmanagedStopRequestSurvivesHeartbeatUntilWorkerReportsStop(t *testing.T) {
+	f := fixture(t)
+	path, lease := registerPauseWorker(t, f, []string{"status"})
+	request := f.call(f.person, "POST", path+"/pause", map[string]any{"level": "stop_now"}, "")
+	expect(t, request, 200)
+	out := decode(t, request)
+	if out["stopped_at"] != nil || out["pause"].(map[string]any)["stop_requested"] != true {
+		t.Fatal("request claimed stopped", out)
+	}
+	beat := f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 1}, lease)
+	expect(t, beat, 200)
+	out = decode(t, beat)
+	pause := out["pause"].(map[string]any)
+	if out["stopped_at"] != nil || pause["stop_requested"] != true || pause["deliver"] != true {
+		t.Fatal("heartbeat lost pending stop", out)
+	}
+	rejected := f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "stopped"}, "wrong-lease")
+	expect(t, rejected, 403)
+	if !strings.Contains(rejected.Body.String(), "harness worker proof rejected") {
+		t.Fatal("wrong rejection reason", rejected.Body.String())
+	}
+	stopped := f.call(f.agent, "POST", path+"/stop", map[string]any{"reason": "stopped"}, lease)
+	expect(t, stopped, 200)
+	out = decode(t, stopped)
+	if out["phase"] != "stopped" || out["stopped_at"] == nil || out["stop_reason"] != "stopped" {
+		t.Fatal("missing worker stop confirmation", out)
+	}
+	expect(t, f.call(f.agent, "POST", path+"/heartbeat", map[string]any{"phase": "working", "activity_sequence": 2}, lease), 403)
+	read := f.call(f.person, "GET", path, nil, "")
+	expect(t, read, 200)
+	if decode(t, read)["phase"] != "stopped" {
+		t.Fatal("heartbeat resurrected stopped session")
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -267,7 +268,7 @@ type snapshotFencePause struct {
 }
 
 func (p *snapshotFencePause) TraceQueryStart(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryStartData) context.Context {
-	if strings.HasPrefix(q.SQL, "SELECT id FROM tenants WHERE id=current_setting('aeon.tenant_id')") && p.first.CompareAndSwap(false, true) {
+	if q.SQL == db.TenantFenceSQL && p.first.CompareAndSwap(false, true) {
 		close(p.entered)
 		select {
 		case <-p.resume:
@@ -311,6 +312,8 @@ func TestParentQueueSnapshotRevocationWhileApplyWaits(t *testing.T) {
 	}()
 	select {
 	case <-pause.entered:
+	case w := <-done:
+		t.Fatalf("apply returned before the access fence: %d %s", w.Code, w.Body.String())
 	case <-ctx.Done():
 		t.Fatal("apply did not reach access fence")
 	}

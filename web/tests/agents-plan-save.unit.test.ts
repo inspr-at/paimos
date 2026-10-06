@@ -6,7 +6,7 @@ const mocks = vi.hoisted(() => ({ api: vi.fn(), queue: vi.fn() }))
 vi.mock('../src/lib/api.ts', () => ({ api: mocks.api }))
 vi.mock('../src/lib/workQueue.ts', () => ({ queueRequest: mocks.queue }))
 vi.mock('../src/lib/usePolledData.ts', () => ({ usePoller: () => ({ start() {}, stop() {} }) }))
-import { FOLD_KEY, useAgentPlan } from '../src/lib/useAgentPlan'
+import { SETTLE_MS, useAgentPlan } from '../src/lib/useAgentPlan'
 const snapshot: PlanSnapshot = { total: 5, limits: { codex: 4 }, principal_id: 'canonical', running: { codex: 12 }, running_total: 12, source: 'plan', updated_at: null }
 const flush = () => new Promise<void>(resolve => setImmediate(resolve))
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
@@ -87,14 +87,151 @@ describe('canonical plan persistence', () => {
     expect(control.snapshot.value?.principal_id).toBe('new-owner')
     expect(control.error.value).toBe('')
   })
-  it('fold memory is private to the viewer and independent of the start ceiling', async () => {
-    const { control } = setup(); await flush()
-    control.toggleFold(); await flush()
-    expect(control.folded.value).toBe(true)
-    const writes = mocks.api.mock.calls.filter(([, init]) => init?.method === 'PUT')
-    expect(writes.map(([path]) => path)).toEqual([`/preferences/${FOLD_KEY}`])
-    expect(JSON.parse(writes[0]![1].body)).toEqual({ value: { folded: true } })
-    expect(control.plan.value?.total).toBe(5)
+  it('a hold saves only its final value, once, after release', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const { control } = setup(); await flush()
+      const puts = () => mocks.api.mock.calls.filter(([, init]) => init?.method === 'PUT').map(([, init]) => JSON.parse(init.body).value.total)
+      control.hold(true)
+      control.save({ total: 6, limits: { codex: 4 } }); control.save({ total: 7, limits: { codex: 4 } }); control.save({ total: 8, limits: { codex: 4 } })
+      await flush()
+      expect(control.plan.value?.total).toBe(8)
+      expect(puts()).toEqual([])
+      control.hold(false)
+      vi.advanceTimersByTime(SETTLE_MS - 1); await flush()
+      expect(puts()).toEqual([])
+      // A fresh press inside the settle time keeps waiting for its own release.
+      control.hold(true); control.save({ total: 9, limits: { codex: 4 } }); control.hold(false)
+      vi.advanceTimersByTime(SETTLE_MS - 1); await flush()
+      expect(puts()).toEqual([])
+      vi.advanceTimersByTime(1); await flush()
+      expect(puts()).toEqual([9])
+    } finally { vi.useRealTimers() }
+  })
+  it('a hold that starts during an in-flight write never saves its intermediate steps', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const held = deferred<Response>(), writes: number[] = []
+      const { control } = setup(); await flush()
+      mocks.api.mockImplementation(async (path: string, init?: RequestInit) => {
+        if (init?.method !== 'PUT') return path === '/agents/plan' ? json(snapshot) : json({ value: null })
+        writes.push(JSON.parse(init.body as string).value.total)
+        return writes.length === 1 ? held.promise : json({ updated_at: '2026-10-02T18:00:00.000002Z' })
+      })
+      control.save({ total: 4, limits: {} })
+      control.hold(true); control.save({ total: 3, limits: {} }); control.save({ total: 2, limits: {} })
+      held.resolve(json({ updated_at: '2026-10-02T18:00:00.000001Z' })); await flush()
+      expect(writes).toEqual([4])
+      expect(control.plan.value?.total).toBe(2)
+      control.hold(false); vi.advanceTimersByTime(SETTLE_MS); await flush()
+      expect(writes).toEqual([4, 2])
+    } finally { vi.useRealTimers() }
+  })
+  it('a released edit is dropped, never written, when the viewer changes before it settles', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const { control, viewer } = setup(); await flush()
+      control.hold(true); control.save({ total: 9, limits: {} }); control.hold(false)
+      viewer.value = 'tenant:new-person'; await flush()
+      vi.advanceTimersByTime(SETTLE_MS * 2); await flush()
+      expect(mocks.api.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false)
+    } finally { vi.useRealTimers() }
+  })
+  it('a page hidden within the settle time sends the released value with keepalive', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    const target = new EventTarget()
+    vi.stubGlobal('window', target)
+    try {
+      const { control } = setup(); await flush()
+      control.hold(true); control.save({ total: 12, limits: {} }); control.hold(false)
+      target.dispatchEvent(new Event('pagehide'))
+      const puts = mocks.api.mock.calls.filter(([, init]) => init?.method === 'PUT')
+      expect(puts.map(([, init]) => [JSON.parse(init.body).value.total, init.keepalive])).toEqual([[12, true]])
+    } finally { vi.useRealTimers(); vi.unstubAllGlobals() }
+  })
+  it('leaving the page within the settle time still sends the released value', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const { control } = setup(); await flush()
+      control.hold(true); control.save({ total: 11, limits: {} }); control.hold(false)
+      scope.stop()
+      const puts = mocks.api.mock.calls.filter(([, init]) => init?.method === 'PUT')
+      expect(puts.map(([, init]) => JSON.parse(init.body).value.total)).toEqual([11])
+    } finally { vi.useRealTimers() }
+  })
+  it('leaving the view during an outstanding write still sends the released value after it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const held = deferred<Response>(), writes: { total: number; expected: string | null }[] = []
+      const { control } = setup(); await flush()
+      mocks.api.mockImplementation(async (path: string, init?: RequestInit) => {
+        if (init?.method !== 'PUT') return path === '/agents/plan' ? json(snapshot) : json({ value: null })
+        const body = JSON.parse(init.body as string)
+        writes.push({ total: body.value.total, expected: body.expected_updated_at })
+        return writes.length === 1 ? held.promise : json({ updated_at: '2026-10-02T18:00:00.000002Z' })
+      })
+      control.save({ total: 6, limits: {} })
+      control.hold(true); control.save({ total: 7, limits: {} }); control.hold(false)
+      expect(control.plan.value?.total).toBe(7)
+      scope.stop()
+      expect(writes.map(w => w.total)).toEqual([6])
+      held.resolve(json({ updated_at: '2026-10-02T18:00:00.000001Z' })); await flush()
+      expect(writes).toEqual([{ total: 6, expected: null }, { total: 7, expected: '2026-10-02T18:00:00.000001Z' }])
+    } finally { vi.useRealTimers() }
+  })
+  it('a viewer change after leaving the view still cancels the released value', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const held = deferred<Response>(), writes: number[] = []
+      const { control, viewer } = setup(); await flush()
+      mocks.api.mockImplementation(async (path: string, init?: RequestInit) => {
+        if (init?.method !== 'PUT') return path === '/agents/plan' ? json(snapshot) : json({ value: null })
+        writes.push(JSON.parse(init.body as string).value.total)
+        return writes.length === 1 ? held.promise : json({ updated_at: '2026-10-02T18:00:00.000002Z' })
+      })
+      control.save({ total: 6, limits: {} })
+      control.hold(true); control.save({ total: 7, limits: {} }); control.hold(false)
+      scope.stop()
+      viewer.value = 'tenant:new-person'
+      held.resolve(json({ updated_at: '2026-10-02T18:00:00.000001Z' })); await flush()
+      vi.advanceTimersByTime(SETTLE_MS * 2); await flush()
+      expect(writes).toEqual([6])
+    } finally { vi.useRealTimers() }
+  })
+  it('a conflict ends the hold it interrupts: later steps are dropped until a fresh press', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      const held = deferred<Response>(), writes: { total: number; expected: string | null }[] = []
+      const remote = { ...snapshot, total: 12, limits: {}, updated_at: '2026-10-02T18:00:00.000005Z' }
+      let read = snapshot
+      const { control } = setup(); await flush()
+      mocks.api.mockImplementation(async (path: string, init?: RequestInit) => {
+        if (init?.method !== 'PUT') return path === '/agents/plan' ? json(read) : json({ value: null })
+        const body = JSON.parse(init.body as string)
+        writes.push({ total: body.value.total, expected: body.expected_updated_at })
+        return writes.length === 1 ? held.promise : json({ updated_at: '2026-10-02T18:00:00.000006Z' })
+      })
+      control.save({ total: 6, limits: {} })
+      control.hold(true); control.save({ total: 7, limits: {} })
+      const interrupts = control.interrupts?.value
+      read = remote
+      held.resolve(json({}, 409)); await flush()
+      expect(control.plan.value?.total).toBe(12)
+      expect(control.error.value).toContain('changed elsewhere')
+      // The repeat of the interrupted hold changes nothing and keeps the warning.
+      control.save({ total: 13, limits: {} })
+      expect(control.plan.value?.total).toBe(12)
+      expect(control.error.value).toContain('changed elsewhere')
+      control.hold(false); vi.advanceTimersByTime(SETTLE_MS); await flush()
+      expect(writes.map(w => w.total)).toEqual([6])
+      // − and + end their active hold on this signal.
+      expect(control.interrupts.value).toBe(interrupts + 1)
+      // A fresh press edits the newly read plan.
+      control.hold(true); control.save({ total: 13, limits: {} }); control.hold(false)
+      expect(control.error.value).toBe('')
+      vi.advanceTimersByTime(SETTLE_MS); await flush()
+      expect(writes).toEqual([{ total: 6, expected: null }, { total: 13, expected: remote.updated_at }])
+    } finally { vi.useRealTimers() }
   })
   it('does not choose a total when the canonical read is forbidden', async () => {
     mocks.api.mockResolvedValue(json({}, 403))

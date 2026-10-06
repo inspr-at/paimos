@@ -4,12 +4,14 @@ package workorders
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -163,5 +165,77 @@ func assertEndpointBodyNetworkDeadline(t *testing.T, handler http.Handler, p ten
 	case <-requested:
 		t.Fatal("failed read cleared its drain deadline")
 	default:
+	}
+}
+
+// stalledBody signals its first Read and blocks until Close releases it, so
+// the interleaving is established by barriers rather than sleeps.
+type stalledBody struct {
+	entered, release chan struct{}
+	read, close      sync.Once
+}
+
+func (b *stalledBody) Read([]byte) (int, error) {
+	b.read.Do(func() { close(b.entered) })
+	<-b.release
+	return 0, io.EOF
+}
+
+func (b *stalledBody) Close() error {
+	b.close.Do(func() { close(b.release) })
+	return nil
+}
+
+// A cancelled request with a stalled body must still be interrupted. With a
+// transport deadline the failed read keeps it: the expired interrupt deadline
+// is the last deadline call, never followed by a clear that would let net/http
+// drain the unread body without a bound. Without one, Close alone releases it.
+func TestBufferEndpointBodyCancellationKeepsInterruptDeadline(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		transport bool
+	}{{"transport deadline", true}, {"no transport deadline", false}} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := &stalledBody{entered: make(chan struct{}), release: make(chan struct{})}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			deadline := time.Now().Add(15 * time.Second)
+			if tc.transport {
+				var stop context.CancelFunc
+				ctx, stop = context.WithDeadline(ctx, deadline)
+				defer stop()
+			}
+			r := httptest.NewRequest("POST", "/", nil).WithContext(ctx)
+			r.Body = body
+			w := &bodyDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+			result := make(chan error, 1)
+			go func() { result <- BufferEndpointBody(w, r) }()
+			defer body.Close()
+			select {
+			case <-body.entered:
+			case err := <-result:
+				t.Fatalf("buffer returned before reading the body: %v", err)
+			}
+			cancel()
+			var err error
+			select {
+			case err = <-result:
+			case <-time.After(10 * time.Second):
+				t.Fatal("cancellation did not interrupt the stalled body")
+			}
+			var failure *Error
+			if !errors.As(err, &failure) || failure.Status != http.StatusRequestTimeout || failure.Message != "request body read timed out" {
+				t.Fatalf("cancelled read result: %v", err)
+			}
+			if !tc.transport {
+				if len(w.deadlines) != 0 {
+					t.Fatalf("no transport deadline was requested, yet deadlines were set: %v", w.deadlines)
+				}
+				return
+			}
+			if len(w.deadlines) != 2 || !w.deadlines[0].Equal(deadline) || !w.deadlines[1].Equal(time.Unix(1, 0)) {
+				t.Fatalf("expected the installed deadline, one expired interrupt and no clear: %v", w.deadlines)
+			}
+		})
 	}
 }

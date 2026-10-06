@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
@@ -35,15 +35,6 @@ function desk() {
   })
   return { keys, choose, navigate, close, submit }
 }
-function walker() {
-  const toggle = vi.fn(), stepScreen = vi.fn(), step = vi.fn(), feature = vi.fn(), close = vi.fn(), dismissHint = vi.fn()
-  const keys = handler('journey/ReleaseWalker.vue', 'keydown', {
-    Element: Target, sheet: { value: false }, searching: { value: false }, compare: { value: false }, zoom: { value: false },
-    dialog: { value: {} }, toggle, stepScreen, step, feature, close, dismissHint,
-  })
-  return { keys, toggle, stepScreen, step, feature, close }
-}
-
 describe('Decision Desk selected-answer scrolling', () => {
   for (const key of scrolling) for (const shift of [false, true]) it(`keeps ${shift ? 'Shift+' : ''}${key} native without changing the answer or memo`, () => {
     const { keys, choose, navigate, submit } = desk(), event = keyEvent(key, '.answer-slot', shift)
@@ -58,17 +49,13 @@ describe('Decision Desk selected-answer scrolling', () => {
     keys(keyEvent('Escape', '.answer-slot')); expect(close).toHaveBeenCalledOnce()
   })
 })
-describe('Release Walker description scrolling', () => {
-  for (const key of scrolling) for (const shift of [false, true]) it(`keeps ${shift ? 'Shift+' : ''}${key} native without changing membership, screens or tickets`, () => {
-    const { keys, toggle, stepScreen, step, feature } = walker(), event = keyEvent(key, '.description.revealed', shift)
-    keys(event)
-    expect(event.preventDefault).not.toHaveBeenCalled()
-    expect(toggle).not.toHaveBeenCalled(); expect(stepScreen).not.toHaveBeenCalled(); expect(step).not.toHaveBeenCalled(); expect(feature).not.toHaveBeenCalled()
-  })
-  it('retains membership and screen shortcuts outside the description and Escape inside it', () => {
-    const { keys, toggle, stepScreen, close } = walker()
-    keys(keyEvent(' ', '')); expect(toggle).toHaveBeenCalledOnce()
-    keys(keyEvent('ArrowDown', '')); expect(stepScreen).toHaveBeenCalledWith(1)
-    keys(keyEvent('Escape', '.description.revealed')); expect(close).toHaveBeenCalledOnce()
+describe('retired Release Walker', () => {
+  // At 560b78d9 this suite still called handler() on the deleted walker, and every case threw ENOENT.
+  it('is not opened by this scrolling suite', () => {
+    const suite = readFileSync(new URL('./decision-scroll.unit.test.ts', import.meta.url), 'utf8')
+    const calls = [...suite.matchAll(/handler\(\s*'([^']+)'/g)].map(match => match[1])
+    expect(calls).toEqual(['agents/DecisionDeskMemo.vue'])
+    const retired = ['journey', 'ReleaseWalker.vue'].join('/')
+    expect(existsSync(new URL(`../src/components/${retired}`, import.meta.url))).toBe(false)
   })
 })

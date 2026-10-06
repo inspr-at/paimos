@@ -16,6 +16,80 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Policies
+
+Settings → Policies (`/settings/policies`) explains existing rules and provides
+scoped editors for saved job orders and model preferences. Each tab follows its source permission: review ladders need
+`models.read`; agent key limits read the permission registry with `roles.read`
+and a person session; ownership and advisory rules are visible to signed-in
+people. Links lead only to existing screens the person may open.
+
+`GET /api/models/routes?role=review-gate` reads one of the six model roles,
+ordered by priority and profile id, with at most 50 steps and an explicit
+`truncated` flag. An unseeded registry returns `setup: false` without creating
+profiles or events. The read applies a five-second statement timeout and returns
+503 with `Retry-After` if it expires. CLI priority and qualified review dispatch
+are labelled separately; this display endpoint does not resolve a dispatch.
+Review family ordering and qualification floors are shown only for Review gate.
+Suspension expiry includes an explicit UTC time and date. A late server refusal
+clears the private rows while keeping the existing selector and detail link in
+place; a person without the source permission sees only its permission sentence.
+
+People with `models.read` and `models.manage` can edit one complete role order,
+using its quoted `If-Match` token. Truncated snapshots remain read-only.
+Add, move and remove operations renumber the draft in displayed order, including
+orders with gaps in their stored priorities. Ordinary managed reviews retain
+built-in family/tier fallback until a person deliberately saves the review order.
+The draft starts from the currently applied fallback. Save sends
+`order_mode=saved` on the conditional `review-gate` PUT; Undo restores the captured
+rows and `legacy`/`saved` mode together. Omitted mode and whole-tenant legacy PUTs
+preserve activation. The strong role token covers both rows and mode; mode-only
+changes emit `model.routes_replaced` with unchanged before/after arrays and
+`before_order_mode`/`after_order_mode` metadata. GET returns `order_mode` and
+`managed_fallback_order` from the same snapshot, and review traces capture the
+mode. Preferences may still choose another qualified reviewer. Author-family,
+effort/tier, platform, account and residency checks stay enforced; security uses
+its separate refusing path. Already queued profile/account bindings stay fixed.
+
+Model preferences use Default, You and an explicitly visible Project, with the
+source GET/write permissions. Project-only management also needs workspace
+model visibility to use this screen. Each mutation carries the GET's canonical
+`If-Prefs-Person` and the addressed level revision. Row edits preserve both
+complexity buckets and the row lock; Reset affects only that selected row.
+Row DELETE sends the captured revision in the query string, alongside project
+context where needed; Undo of a newly added row uses the same conditional DELETE.
+Provider and section-lock writes send only the three scalar fields, never
+`rows`; neither Save nor Undo issues whole-level DELETE. Archived and sibling
+work-kind settings therefore remain stored by these UI operations.
+
+Save is provisional until the source confirms its actual result. Undo is a
+conditional compensating source write with the confirmed token/revision, not an
+event deletion. Ladder Undo uses `expiry_policy=clear`; expired holds stay
+available. Newer changes, revoked permissions, linked-person changes and retired
+kinds refuse honestly without retrying the old draft. Unknown outcomes require
+reconciliation; an equal value alone never certifies success. Provider Undo does
+not lower requirements already stamped on existing runs. Navigation discards
+local drafts and Undo; it does not promise to roll back an in-flight server write.
+For preferences, a focus permission refresh keeps drafts, confirmed Undo and
+pending-write handling when authority remains unchanged. Identity and relevant
+permission changes invalidate them. Local work-kind and editor-mode changes
+discard mutations while retaining the same source document during the next
+preview read, so picker options and preference rows remain on screen.
+
+Queue routes finish buffering request bodies before opening their transaction
+or retaining tenant/tree/pairing locks. Input is capped at 1 MiB and shares a
+30-second request deadline with the transaction; interrupted input returns 408,
+and oversized input returns 413 before queue work starts.
+
+Editors reserve useful read/help space above the previews and keep long content
+inside scrolling bodies. Phone editors use full-height sheets with safe-area
+action bars. Save keycaps follow the platform; keyboard Save focuses the stable
+Save action before fields are disabled, retaining focus for subsequent keyboard
+Undo and Escape. Escape first leaves a field, then
+closes the editor. Browser geometry and request-contract coverage lives in
+`web/tests/policy-editors.spec.ts`; screenshot evidence is generated locally in
+`web/test-results/aeon-633web/` and is not committed.
+
 ## Agent conversation foundation
 
 AEON-618 R1 introduces a separate `chat-v1` identity contract in
@@ -1245,9 +1319,8 @@ coverage or omitted failures. These unsigned diagnostic records do not mint
 receipts, baseline credit, certificates or success checks. No workflow, required
 check, runner route, queue reuse, timing reuse or UI selection changes in C.
 
-Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
-`/p/KEY/knowledge`. A ticket uses `/p/KEY/TICKET`; `?section=journey` or
-`?section=knowledge` retains its background section. Tickets is the default,
+Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/knowledge`, and `/p/KEY/settings`. A ticket uses
+`/p/KEY/TICKET`; `?section=knowledge` retains its background section. Tickets is the default,
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
@@ -1359,12 +1432,16 @@ the counter before its handler as a lower bound and runs once. A page covering
 the hint that triggered its batch updates the row immediately; newer hints
 remain queued for a follow-up read, so busy tenants do not need a quiet gap.
 
-The flow UI is hidden by default. People working on Paimos itself can enable
-**Show the flow controls (not yet tested end to end)** under **Settings →
-Developer** (`/settings/developer#flow-controls`). This per-person, per-workspace
-preference reveals the footer flow pill, Journey tab, stages and release walker;
-it does not grant action permissions. Journey bookmarks explain the opt-in while
-it is off. Turning it off removes the flow UI again.
+The INSPR Flow is retired (AEON-723). Journey stages, the Journey project view,
+the footer Flow pill, stage handoffs, and the external-stage CLI are removed.
+Old Journey bookmarks open the project's tickets. Stored Flow data is preserved;
+deprecated Journey, requirements and handoff APIs return authenticated 410 errors
+without executing stage actions. Existing reporter success schemas and contract
+headers remain pinned for PHAROS/JANUS compatibility. Ordinary release creation
+and membership use the native release APIs, independently of Flow gates.
+No table or column is dropped in this release. Contract-phase cleanup needs a
+separate follow-up, including migrating the legacy-named release ledger and
+historical provenance before removing dormant Flow tables and compatibility routes.
 
 Reserved, never-published versions are hidden in the release history by default.
 **Show reserved versions** under **Settings → Developer**
@@ -1373,29 +1450,6 @@ workspace, including comparison choices and previous/next navigation. Statistics
 and result counts always include reservations; the footer's **N new** count
 includes only visible versions. A direct link still opens a hidden reservation
 with a quiet explanation of the setting.
-
-If a standing candidate or deployment gate expires or is revoked before
-deployment finishes, Journey offers renewal on the Deploy stage. An agent
-requests a fresh release-bound approval; its person decider applies it with
-`renew_candidate` or `renew_deploy` through the journey actions API, including
-the current `release_id` and `expected_revision`. Candidate renewal precedes
-deployment renewal and preserves enterprise reviewer independence. Each renewal
-appends gate history and advances the journey revision without changing the
-release identity. Existing handoffs lose authority; terminal evidence from
-before either renewal is historical, so rerun preparation after both renewals,
-then request a new deployment. Journey contract `journey/1.2` adds the optional
-`next_action.renewal_action`; clients must use it when present. Existing action
-keys and reporter major versions remain unchanged.
-
-Journey contract `journey/1.4` adds the optional
-`next_action.access_renewal_action` without extending the existing renewal enum.
-An expired or revoked Access permit can be replaced with `renew_permit`, using
-its fresh approval, current release ID and journey revision. The original
-approval and evidence remain in history; stale Access handoffs cannot report
-new results. The completed deployment remains valid. Both terminal handoff
-paths (verification without Access, and Access apply) use the same transactional
-settlement as journey actions: pin the deployment version, supersede prior live
-releases, and trigger ticket publication once.
 
 Native intake drafts accept an optional Aithema `extensions` map and the
 original review snapshot as `document_bytes` alongside the required native
@@ -1782,7 +1836,7 @@ The same change is available as `aeon keys scopes <key-id> --add harness.worker 
 
 `whoami` and doctor's auth check use the same `GET /api/me` client call. A valid session or agent key can read its own identity without a workspace role or extra key scope, including project-only and empty-scope keys. Doctor probes public health and version information anonymously; schema and rules checks retain their own permissions. This grants no access to other workspace data or profile routes. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes `whoami`, `ask`, `ask_status`, issue list/get/create/update/comment, knowledge list/get/create/update, and search over stdio. Work tools reuse the CLI application operations and scoped HTTP APIs; updates preserve revision checks and kind changes remain person-only. JSON field writes preserve exact numeric tokens. Node walks fail explicitly if a cursor repeats or remains after fifty pages. Project-scoped issue search resolves ancestor membership and continues search pages up to the requested limit within the server’s ranked window of 200 matches. An ancestor returning not-found excludes that path from the visible descendant set; other lookup errors and traversal limits still fail the search. Onboarding `--check` compares the complete rendered bundle, options and managed header, normalizing only its generation timestamp.
 
-Model catalog v3 upgrades existing tenants on server startup (or first registry access). It adds the current Codex and Grok CLI pins, retires known-invalid models from resolution, and upgrades only role ladders that still exactly match the v2 defaults. Customized routes and active availability overrides are preserved. `review-gate-security` uses Grok CLI → Cursor Grok → Codex, stays read-only and excludes the author's family; the normal review gate retains Claude.
+Model catalog v3 upgrades existing tenants on server startup (or first registry access). It adds the current Codex and Grok CLI pins, retires known-invalid models from resolution, and upgrades only role ladders that still exactly match the v2 defaults. Customized routes and active availability overrides are preserved. An explicitly saved ordinary review order remains unchanged even when it matches the old default. `review-gate-security` uses Grok CLI → Cursor Grok → Codex, stays read-only and excludes the author's family; the normal review gate retains Claude.
 
 Migration 1126 is an expansion: security-review routes live in a separate tenant-isolated table, leaving the published role table and its constraint unchanged. Current catalog reads and route replacement include both tables; previous release binaries continue using the original routes. The refresh tables use explicit forced RLS policies.
 
@@ -3460,15 +3514,12 @@ Deploy approvals can carry optional `target` metadata: `hosts` or `environment`,
 card, Needs you, and approval history; missing targets read “Target not
 named” and keep existing approval behavior. `target_digest_sha256` identifies the
 recorded metadata and does not add an authority check (enforcement is AEON-287).
-The additive contracts are `approvals/1.1` and `journey/1.3`. Stage handoff
-responses remain byte-compatible `stage-handoffs/1.0` for strict PHAROS readers;
-targets stay in storage and audit events, and the web reads them from the journey
-deploy stage or approval, labelled “named by the agent”.
-Managed agents can pass `target` and an optional `release_node_id` to
-`aeon_request_approval`; `paimos external-stage request --operation deploy`
-accepts an optional `--target-file JSON`. Verify handoffs retain the preceding
-deploy handoff's recorded target internally when present; neither handoff body
-emits target fields.
+The approval contract is `approvals/1.1`. Targets stay in storage and audit events,
+and the web reads them from approvals, labelled “named by the agent”. Managed
+agents can pass `target` and an optional `release_node_id` to
+`aeon_request_approval`. AEON-723 retires the Journey deployment view,
+stage handoffs and the external-stage CLI; compatibility paths retain their
+reporter contract headers and return authenticated 410 errors.
 
 ### Owner workstation confirmation (AEON-580)
 

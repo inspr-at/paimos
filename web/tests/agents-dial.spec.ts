@@ -8,6 +8,7 @@ import { capacityWorld, defaultSchedule, NOW } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { PlanSnapshot } from '../src/lib/agentsWorking'
+import { SETTLE_MS } from '../src/lib/useAgentPlan'
 const shots = process.env.AEON_647_SHOTS ?? 'test-results/aeon-647'
 const states = {
   wind: { total: 5, running: { codex: 12, claude: 1, cursor: 3 }, limits: { codex: 4, claude: 2, cursor: 'off' } },
@@ -20,7 +21,7 @@ async function setup(page: Page, state: keyof typeof states = 'wind', folded = f
   await page.clock.setSystemTime(NOW)
   const work = fixtures(), initial = states[state]
   work.preferences['agents.working'] = { total: initial.total, limits: initial.limits }
-  work.preferences['agents.working.display'] = { folded }
+  work.preferences['ui.agents.sections'] = { dial: !folded }
   await mockWork(page, work, { admin: true })
   const data = agentData({ me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' } })
   const capacity = capacityWorld()
@@ -85,7 +86,7 @@ test('AEON-720: idle dial reports real account room and explains unknown reading
   await expect(detail).not.toContainText('Full right now')
   await capture()
   await expectStableControls({
-    controls: { more: totalMore(page), fewer: totalFewer(page), fold: card.locator('.f-fold'), choices: card.locator('[data-key="codex"] .seg'), row: card.locator('[data-key="codex"]') },
+    controls: { more: totalMore(page), fewer: totalFewer(page), fold: card.locator('.fs-tog'), choices: card.locator('[data-key="codex"] .seg'), row: card.locator('[data-key="codex"]') },
     scrollAreas: { card },
     interactions: [
       { name: 'reading disappears during a poll', run: async () => {
@@ -134,7 +135,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' })
     const errors = watchErrors(page), { work, calls } = await setup(page, state)
     await page.goto('/agents')
-    const card = dial(page), codex = card.locator('[data-key="codex"]'), fold = card.locator('.f-fold')
+    const card = dial(page), codex = card.locator('[data-key="codex"]'), fold = card.locator('.fs-tog')
     const more = totalMore(page), fewer = totalFewer(page)
     await expect(codex).toBeVisible()
     await expect(card.locator('.f-num')).toHaveText(String(states[state].total))
@@ -198,7 +199,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
       ],
     })
     expect((await inc.boundingBox())!.width).toBe(22)
-    await expect.poll(() => work.preferences['agents.working.display']).toEqual({ folded: true })
+    await expect.poll(() => work.preferences['ui.agents.sections']).toMatchObject({ dial: false })
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
     expect(calls.filter(c => c.method !== 'GET' && /harness-sessions|\/controls|\/stop|\/interrupt/.test(c.path))).toEqual([])
     expect(errors).toEqual([])
@@ -208,7 +209,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
 test('fold memory survives reload; mode and step keys preserve browser shortcuts', async ({ page }) => {
   const { work } = await setup(page, 'wind', true)
   await page.goto('/agents')
-  const card = dial(page), fold = card.locator('.f-fold'), more = totalMore(page)
+  const card = dial(page), fold = card.locator('.fs-tog'), more = totalMore(page)
   await expect(fold).toHaveAttribute('aria-expanded', 'false')
   await more.focus(); await more.press('ArrowUp')
   await expect(card.locator('.f-num')).toHaveText('6')
@@ -232,7 +233,7 @@ test('a failed ceiling write restores the confirmed value and keeps the live fee
   await page.goto('/agents')
   const card = dial(page), more = totalMore(page)
   await expect(card.locator('.f-num')).toHaveText('5')
-  await expectStableControls({ controls: { more, fewer: totalFewer(page), fold: card.locator('.f-fold'), live: card.locator('.f-live') }, interactions: [{ name: 'write failure', run: async () => { await more.click(); await expect(card.locator('.f-live')).toContainText('Couldn’t save'); await expect(card.locator('.f-num')).toHaveText('5') } }] })
+  await expectStableControls({ controls: { more, fewer: totalFewer(page), fold: card.locator('.fs-tog'), live: card.locator('.f-live') }, interactions: [{ name: 'write failure', run: async () => { await more.click(); await expect(card.locator('.f-live')).toContainText('Couldn’t save'); await expect(card.locator('.f-num')).toHaveText('5') } }] })
   await expect(card.locator('.f-now')).toContainText('16 are running')
 })
 
@@ -247,7 +248,10 @@ test('zero and thirty are real ceilings; idle glyph rests and disabled boundarie
   await expect(card.locator('[data-key="codex"] .lim-num')).toHaveText('0')
   await expect(card.locator('.f-bot')).not.toHaveClass(/busy/)
   expect(await card.locator('.f-bot').evaluate(el => el.getAnimations({ subtree: true }).length)).toBe(0)
-  await expectStableControls({ controls: { more, fewer, fold: card.locator('.f-fold'), unit: card.locator('.f-unit') }, interactions: [{ name: 'one to zero', run: async () => { await fewer.click(); await expect(card.locator('.f-num')).toHaveText('0'); await expect(more).toBeFocused() } }, { name: 'zero to one', run: async () => { await more.click(); await expect(card.locator('.f-num')).toHaveText('1') } }] })
+  // Only the released value is saved, after the settle time; wait for that save to land.
+  const savedOne = page.waitForResponse(r => r.request().method() === 'PUT' && r.url().endsWith('/api/preferences/agents.working') && r.request().postDataJSON().value.total === 1)
+  await expectStableControls({ controls: { more, fewer, fold: card.locator('.fs-tog'), unit: card.locator('.f-unit') }, interactions: [{ name: 'one to zero', run: async () => { await fewer.click(); await expect(card.locator('.f-num')).toHaveText('0'); await expect(more).toBeFocused() } }, { name: 'zero to one', run: async () => { await more.click(); await expect(card.locator('.f-num')).toHaveText('1') } }] })
+  await savedOne
   await expect.poll(() => work.preferences['agents.working']).toMatchObject({ total: 1 })
   work.preferences['agents.working'] = { total: 29, limits: { codex: 30 } }
   await page.reload()
@@ -298,6 +302,8 @@ test('save failure remains visible after a successful scheduled poll', async ({ 
   await page.goto('/agents')
   await expect(dial(page).locator('.f-num')).toHaveText('5')
   await totalMore(page).click()
+  // The released value is saved once the settle time has passed.
+  await page.clock.runFor(SETTLE_MS)
   await expect(dial(page).locator('.f-live')).toContainText('Couldn’t save')
   const initialReads = reads
   await page.clock.fastForward(15_000)
@@ -360,7 +366,7 @@ for (const width of [1440, 390]) test(`all seven harnesses fit at ${width} and r
   await expect(card.locator('[data-harness="codex"] .f-n')).toHaveText('30')
   await expect(card.locator('[data-harness="gemini"] .f-n')).toHaveText('0')
   expect(await card.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
-  await expectStableControls({ controls: { more: totalMore(page), fewer: totalFewer(page), fold: card.locator('.f-fold') }, interactions: [{ name: 'unfold seven harnesses', run: () => card.locator('.f-fold').click() }] })
+  await expectStableControls({ controls: { more: totalMore(page), fewer: totalFewer(page), fold: card.locator('.fs-tog') }, interactions: [{ name: 'unfold seven harnesses', run: () => card.locator('.fs-tog').click() }] })
   await expect(card.locator('.rows > li')).toHaveCount(7)
   await expect(card.locator('[data-key="claude"] .lim-num')).toHaveText('30')
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1)
@@ -413,7 +419,7 @@ test('a typed write failure restores the confirmed harness value', async ({ page
   const card = dial(page), chip = card.locator('[data-harness="codex"]')
   await expect(chip.locator('.f-n')).toHaveText('4')
   await expectStableControls({
-    controls: { value: chip.locator('.f-n'), minus: chip.locator('.pm').first(), plus: chip.locator('.pm').last(), fold: card.locator('.f-fold'), live: card.locator('.f-live') },
+    controls: { value: chip.locator('.f-n'), minus: chip.locator('.pm').first(), plus: chip.locator('.pm').last(), fold: card.locator('.fs-tog'), live: card.locator('.f-live') },
     interactions: [{ name: 'failed typed limit', run: async () => {
       await chip.locator('.value').click(); await chip.locator('input').fill('30'); await chip.locator('input').press('Enter')
       await expect(card.locator('.f-live')).toContainText('Couldn’t save')
@@ -454,7 +460,7 @@ test.describe('phone touch targets', () => {
     const { work } = await setup(page, 'room', true)
     work.preferences['agents.working'] = { total: 8, limits: { codex: 4, claude: 'no_limit', cursor: 'off', grok: 2, pi: 'off', gemini: 'no_limit', opencode: 3 } }
     await page.goto('/agents')
-    const card = dial(page), chip = card.locator('[data-harness="codex"]'), fold = card.locator('.f-fold')
+    const card = dial(page), chip = card.locator('[data-harness="codex"]'), fold = card.locator('.fs-tog')
     await expect(chip).toBeVisible()
     const targets = async () => {
       const sizes = await card.locator('button:visible').evaluateAll(elements => elements.map(el => { const box = el.getBoundingClientRect(); return { width: box.width, height: box.height } }))
@@ -462,6 +468,9 @@ test.describe('phone touch targets', () => {
       for (const size of sizes) { expect(size.width).toBeGreaterThanOrEqual(44); expect(size.height).toBeGreaterThanOrEqual(44) }
     }
     await targets()
+    // Folded on a phone, the mark sits between − and the value, and still cycles.
+    const xs = await Promise.all(['.pm.dec', '.f-mode', '.value-slot', '.pm.inc'].map(async s => (await chip.locator(s).boundingBox())!.x))
+    expect(xs).toEqual([...xs].sort((a, b) => a - b))
     await expectStableControls({
       controls: { fold, more: totalMore(page), fewer: totalFewer(page), chip, cycle: chip.locator('.f-mode'), minus: chip.locator('.pm').first(), plus: chip.locator('.pm').last(), value: chip.locator('.f-n') },
       scrollAreas: { card, chips: card.locator('.f-chips') },
@@ -493,4 +502,190 @@ test('long German waiting details wrap at every evidence width and theme', async
     expect(await card.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
     await card.screenshot({ path: `${shots}/${width}-${theme}-long-german-unfolded.png`, animations: 'disabled' })
   }
+})
+
+// AEON-781: press and hold on − and +, like a remote's volume button.
+test('AEON-781: a held + speeds up, pauses before a mode boundary and saves only the final value once', async ({ page }) => {
+  await page.clock.install({ time: NOW })
+  await setup(page, 'wind')
+  const puts: { limits: Record<string, unknown> }[] = []
+  await page.route('**/api/preferences/agents.working', async route => {
+    if (route.request().method() === 'PUT') puts.push(route.request().postDataJSON().value)
+    await route.fallback()
+  })
+  await page.goto('/agents')
+  const row = dial(page).locator('[data-key="codex"]'), plus = row.locator('.pm.inc'), minus = row.locator('.pm.dec'), value = row.locator('.f-n'), said = row.locator('[aria-live]')
+  await expect(value).toHaveText('4')
+  await page.clock.pauseAt(NOW + 60_000)
+  await plus.hover(); await page.mouse.down()
+  await expect(value).toHaveText('5')
+  await page.clock.runFor(449); await expect(value).toHaveText('5')
+  await page.clock.runFor(1); await expect(value).toHaveText('6')
+  await page.clock.runFor(360 + 290); await expect(value).toHaveText('8')
+  await page.clock.runFor(20_000)
+  // 30 → no own limit is a boundary: the hold pauses there instead of crossing.
+  await expect(value).toHaveText('30')
+  await expect(plus).toBeEnabled()
+  expect(puts).toEqual([])
+  await expect(said).toHaveText('')
+  await page.mouse.up()
+  await page.clock.runFor(SETTLE_MS)
+  await expect.poll(() => puts.length).toBe(1)
+  expect(puts[0]!.limits.codex).toBe(30)
+  await expect(said).toHaveText('at most 30')
+  // A fresh press crosses.
+  await page.mouse.down(); await page.mouse.up()
+  await expect(row.locator('.value svg')).toBeVisible()
+  await expect(plus).toBeDisabled()
+  // Down from no own limit, the hold pauses at 1 instead of turning the harness off.
+  await minus.hover(); await page.mouse.down()
+  await page.clock.runFor(20_000)
+  await expect(value).toHaveText('1')
+  await page.mouse.up()
+  await page.mouse.down(); await page.mouse.up()
+  await expect(value).toHaveText('off')
+  await page.clock.runFor(SETTLE_MS)
+  await expect.poll(() => puts.at(-1)?.limits.codex).toBe('off')
+  expect(puts.length).toBeLessThanOrEqual(4)
+})
+
+test('AEON-781: an arrow key keeps its own pace; leaving, blur and a disabled end stop a hold', async ({ page }) => {
+  await page.clock.install({ time: NOW })
+  const { work } = await setup(page, 'wind')
+  await page.goto('/agents')
+  const card = dial(page), total = card.locator('.f-num'), more = totalMore(page), fewer = totalFewer(page)
+  await expect(total).toHaveText('5')
+  await page.clock.pauseAt(NOW + 60_000)
+  // The OS key repeat (repeat: true) is ignored; the hold paces itself.
+  await more.focus()
+  await page.keyboard.down('ArrowUp'); await expect(total).toHaveText('6')
+  for (let i = 0; i < 5; i++) await page.keyboard.down('ArrowUp')
+  await expect(total).toHaveText('6')
+  await page.clock.runFor(450); await expect(total).toHaveText('7')
+  await page.keyboard.up('ArrowUp')
+  await page.clock.runFor(5_000); await expect(total).toHaveText('7')
+  // Leaving the button ends a pointer hold.
+  await more.hover(); await page.mouse.down(); await expect(total).toHaveText('8')
+  await page.mouse.move(1, 1)
+  await page.clock.runFor(5_000); await expect(total).toHaveText('8')
+  await page.mouse.up()
+  // A window blur ends a hold.
+  await more.hover(); await page.mouse.down(); await expect(total).toHaveText('9')
+  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
+  await page.clock.runFor(5_000); await expect(total).toHaveText('9')
+  await page.mouse.up()
+  // Held down to 0, − runs out, the hold ends and focus moves to +.
+  await fewer.hover(); await page.mouse.down()
+  await page.clock.runFor(20_000)
+  await expect(total).toHaveText('0'); await expect(fewer).toBeDisabled(); await expect(more).toBeFocused()
+  await page.mouse.up()
+  // A long press opens no context menu and selects no text.
+  expect(await more.evaluate(el => el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })))).toBe(false)
+  expect(await more.evaluate(el => getComputedStyle(el).userSelect)).toBe('none')
+  await page.clock.runFor(SETTLE_MS)
+  await expect.poll(() => work.preferences['agents.working']).toMatchObject({ total: 0 })
+})
+
+test('AEON-781: a save conflict ends a hold; the next step needs a fresh press', async ({ page }) => {
+  await page.clock.install({ time: NOW })
+  const { work } = await setup(page, 'wind')
+  let revision: string | null = null, answer!: () => void
+  const gate = new Promise<void>(resolve => { answer = resolve })
+  const puts: { value: { total: number }; expected_updated_at: string | null }[] = []
+  await page.route('**/api/agents/plan', route => route.fulfill({ json: { ...work.preferences['agents.working'], principal_id: me.id, running: {}, running_total: 0, source: 'plan', updated_at: revision } }))
+  await page.route('**/api/preferences/agents.working', async route => {
+    if (route.request().method() !== 'PUT') return route.fallback()
+    const request = route.request().postDataJSON()
+    puts.push(request)
+    if (puts.length === 1) {
+      await gate
+      work.preferences['agents.working'] = { total: 12, limits: {} }
+      revision = '2026-10-02T18:00:00.000001Z'
+      return route.fulfill({ status: 409, json: { error: 'changed' } })
+    }
+    work.preferences['agents.working'] = request.value
+    revision = '2026-10-02T18:00:00.000002Z'
+    return route.fulfill({ json: { key: 'agents.working', value: request.value, updated_at: revision } })
+  })
+  await page.goto('/agents')
+  const total = dial(page).locator('.f-num'), more = totalMore(page), said = dial(page).locator('.f-pm-total [aria-live]')
+  await expect(total).toHaveText('5')
+  await page.clock.pauseAt(NOW + 60_000)
+  await more.click()
+  await page.clock.runFor(SETTLE_MS)
+  await expect.poll(() => puts.length).toBe(1)
+  // A hold starts while that write is still out.
+  await more.hover(); await page.mouse.down()
+  await expect(total).toHaveText('7')
+  answer()
+  await expect(dial(page).locator('.f-live')).toContainText('changed elsewhere')
+  await expect(total).toHaveText('12')
+  // The hold has ended: still held, nothing repeats, the warning stays and the newly read total is announced.
+  await expect(said).toHaveText('Run up to 12 at once')
+  await page.clock.runFor(5_000)
+  await expect(total).toHaveText('12')
+  await expect(dial(page).locator('.f-live')).toContainText('changed elsewhere')
+  await page.mouse.up()
+  await page.clock.runFor(SETTLE_MS)
+  expect(puts).toHaveLength(1)
+  // A fresh press edits the newly read revision.
+  await page.mouse.down(); await page.mouse.up()
+  await expect(total).toHaveText('13')
+  await page.clock.runFor(SETTLE_MS)
+  await expect.poll(() => puts.length).toBe(2)
+  expect(puts[1]).toEqual({ value: { total: 13, limits: {} }, expected_updated_at: '2026-10-02T18:00:00.000001Z' })
+})
+
+test('AEON-781: the chevron comes first, folding moves nothing above the body, and the fold follows the person', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  const { work } = await setup(page, 'wind')
+  delete work.preferences['ui.agents.sections']
+  await page.goto('/agents')
+  const card = dial(page), tog = card.locator('.fs-tog')
+  // First visit: open.
+  await expect(tog).toHaveAttribute('aria-expanded', 'true')
+  await expect(tog).toHaveAttribute('aria-label', 'Agents at once: fold')
+  expect(await card.locator('.fs-head').evaluate(el => el.firstElementChild?.classList.contains('fs-tog'))).toBe(true)
+  await expect(card.locator('[data-key="codex"]')).toBeVisible()
+  // Sample every frame of the fold: the chevron and the sentence with its stepper stay put.
+  const watchFold = () => card.evaluate(async el => {
+    const parts = ['.fs-tog', '.f-dial', '.f-num'].map(s => el.querySelector(s)!)
+    const rects = () => JSON.stringify(parts.map(p => { const r = p.getBoundingClientRect(); return [r.x, r.y, r.width, r.height] }))
+    const before = rects(), body = el.querySelector('.fs-body')!
+    let done = false
+    body.addEventListener('transitionend', () => { done = true }, { once: true })
+    ;(el.querySelector('.fs-tog') as HTMLButtonElement).click()
+    let frames = 0, moved = 0
+    while (!done) { await new Promise(r => requestAnimationFrame(r)); frames++; if (rects() !== before) moved++ }
+    return { frames, moved }
+  })
+  const folding = await watchFold()
+  expect(folding.frames).toBeGreaterThan(1)
+  expect(folding.moved).toBe(0)
+  await expect(tog).toHaveAttribute('aria-expanded', 'false')
+  await expect(card.locator('.fs-body')).toHaveAttribute('inert', '')
+  await expect(card.locator('[data-key="codex"]')).toBeHidden()
+  await expect(card.locator('[data-harness="codex"]')).toBeVisible()
+  await expect.poll(() => work.preferences['ui.agents.sections']).toEqual({ dial: false, accounts: false, sessions: true, queued: true })
+  // The fold follows the person, and the cache paints it before the server answers.
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  await page.route('**/api/preferences/ui.agents.sections', async route => { if (route.request().method() === 'GET') await held; await route.fallback() })
+  await page.reload()
+  await expect(tog).toHaveAttribute('aria-expanded', 'false')
+  release()
+  const unfolding = await watchFold()
+  expect(unfolding.moved).toBe(0)
+  await expect(card.locator('[data-key="codex"]')).toBeVisible()
+  await expect.poll(() => work.preferences['ui.agents.sections']).toMatchObject({ dial: true })
+})
+
+test('AEON-781: a dial folded before the fold sections stays folded', async ({ page }) => {
+  const { work } = await setup(page, 'wind')
+  delete work.preferences['ui.agents.sections']
+  work.preferences['agents.working.display'] = { folded: true }
+  await page.goto('/agents')
+  await expect(dial(page).locator('.fs-tog')).toHaveAttribute('aria-expanded', 'false')
+  await expect(dial(page).locator('[data-harness="codex"]')).toBeVisible()
 })
