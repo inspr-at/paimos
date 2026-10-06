@@ -33,7 +33,7 @@ export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',p
     for(const pkg of Object.keys(weights)) weights[pkg]*=filtered.filter(row=>row.package===pkg).length/all.filter(row=>row.package===pkg).length
   }
   if(kind==='go'||unit) Object.assign(weights,measuredWeights(manifest,filtered))
-  return {...selection,all,tests:shard(filtered,index,count,weights)}
+  return {...selection,all,tests:shard(filtered,index,count,weights,{firstShardLast:unit})}
 }
 
 export function browserList(rows,all) {
