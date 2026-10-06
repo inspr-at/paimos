@@ -147,7 +147,7 @@ for (const width of WIDTHS) for (const theme of ['light', 'dark'] as const) {
     // Start agent: L; on phones a near-full card whose footer ends the form.
     await mockStartAgent(page)
     await page.goto('/agents')
-    await page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true }).click()
+    await page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true }).click()
     await page.getByRole('menuitem', { name: /^Start agent/ }).click()
     const start = dialog(page, 'Start agent')
     await check({ name: 'start-agent', frame: start, actions: start.locator('footer'), size: 'l', phoneSheet: false })

@@ -4,7 +4,7 @@ import { useSession } from '../stores/session'
 import { readPreference, writePreference } from './preferences'
 
 export const DEVELOPER_SETTINGS_KEY = 'developer-ui'
-interface Choice { show_flow_controls?: boolean; show_reserved_versions?: boolean }
+interface Choice { show_flow_controls?: boolean; show_reserved_versions?: boolean; show_expert_start?: boolean }
 interface State { value: Choice; ready: Promise<void> | null; loaded: boolean; saving: boolean; failed: boolean }
 // This opt-in belongs to the authenticated person and workspace, including
 // account changes in the same document. Missing or unreadable values are off.
@@ -28,6 +28,8 @@ export function useDeveloperSettings() {
   }, { immediate: true })
   const showFlowControls = computed(() => state.value?.value.show_flow_controls === true)
   const showReservedVersions = computed(() => state.value?.value.show_reserved_versions === true)
+  // AEON-741: manual Start agent and Start now on… sit behind this expert opt-in.
+  const showExpertStart = computed(() => state.value?.value.show_expert_start === true)
   const loading = computed(() => !!state.value && !state.value.loaded)
   const ready = computed(() => state.value?.ready ?? Promise.resolve())
   async function saveChoice(key: keyof Choice, show: boolean) {
@@ -47,5 +49,6 @@ export function useDeveloperSettings() {
   }
   const setShowFlowControls = (show: boolean) => saveChoice('show_flow_controls', show)
   const setShowReservedVersions = (show: boolean) => saveChoice('show_reserved_versions', show)
-  return { showFlowControls, setShowFlowControls, showReservedVersions, setShowReservedVersions, loading, ready, saving: computed(() => state.value?.saving ?? false), failed: computed(() => state.value?.failed ?? false) }
+  const setShowExpertStart = (show: boolean) => saveChoice('show_expert_start', show)
+  return { showFlowControls, setShowFlowControls, showReservedVersions, setShowReservedVersions, showExpertStart, setShowExpertStart, loading, ready, saving: computed(() => state.value?.saving ?? false), failed: computed(() => state.value?.failed ?? false) }
 }

@@ -1724,9 +1724,21 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestSupervisorUsageArchiveDetachesWithoutStoppingRun","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryDeadLettersBoundedAndRecoversAfterObservedExit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryExitedAuthorityRefusalIsBounded","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestTelemetryHTTPAuthorityAndOutagePreserveActiveProcess","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryPollingPreservesOldSettlementAuthority","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestTelemetryProtocolStopsOnlyOwnedChild","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryRestartRecoversBeforeProbeChangesGeneration","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryTerminalRecoveryCountsPermanentRefusals","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestTelemetryTerminalRejectionIsBounded","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestTerminalCannotReadFixtureParentEnvironment","tier":"GATED-FULL"}
     ,
@@ -2210,6 +2222,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestSignOutEverywhereFencesCanonicalSetAndPreservesOtherAccounts","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestStalledVerificationPreservesOwnership","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestStrictWatchRequiresBoundDaemonConfirmation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestStrictWatchUnavailableOnLinuxAndLegacyDaemon","tier":"GATED-FULL"}
@@ -2222,7 +2236,13 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestVerificationAdvertisementMatchesLocalAdapters","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestVerificationErrorOnlyStatusKeepsCauseAndClaimState","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestVerificationRefusalReleasesOnlyOwnedUnclaimedRun","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestVerificationRejectionLogsRunAndProtocolConflicts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestVerificationTelemetryPrestartBatchAndRetry","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestVerifyAgainConnectOnlyPreservesOrdinaryAllowanceAndTenantBoundary","tier":"NIGHTLY"}
     ,
@@ -5986,9 +6006,13 @@
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestAppendChangelog","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/knowledge","name":"TestApplyRecommendationIsPersonOnly","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/knowledge","name":"TestChangelogNeverAppendsInsideCodeExamples","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestCreateReadListAndIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestDecisionRejectsUnreviewedText","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestDeleteUndoAndCreateUndo","tier":"GATED-FULL"}
     ,
@@ -6018,6 +6042,14 @@
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningRuleDraft","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLearningWritesAuthorizeCurrentProject","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLearningsContinuePastFifty","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLearningsContinueThroughTiedScan","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestLearningsPageEndsAtAFullScan","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningsProjectGrant","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestLearningsProjectSessionThroughAuth","tier":"GATED-FULL"}
@@ -6028,9 +6060,13 @@
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestMethodLearnings","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/knowledge","name":"TestNominationsContinuePastScan","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/knowledge","name":"TestOpenLearningsSurviveDecidedWindow","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestOpenNominationSurvivesDecidedWindow","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestRecommendationAgentsCannotApply","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestRetryTagTenantConflictsAndCancellation","tier":"GATED-FULL"}
     ,
@@ -6049,6 +6085,8 @@
     {"kind":"go","package":"internal/knowledge","name":"TestSensitiveProviderFormsNotStored","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestSensitiveRandomKeys","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/knowledge","name":"TestSensitiveRangeFieldsMatchContract","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/knowledge","name":"TestSensitiveRanges","tier":"GATED-FULL"}
     ,
@@ -8292,6 +8330,8 @@
     ,
     {"kind":"go","package":"internal/themes","name":"TestConcurrentCASAndRevocationFence","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/themes","name":"TestCustomAgentStates","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/themes","name":"TestExistingTenantsAndBootstrapGetAuditedPorcelain","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/themes","name":"TestInitialExplicitDefaultPersistsAndWinsAfterLink","tier":"GATED-FULL"}
@@ -8413,6 +8453,10 @@
     {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageGenerationSuccessionAndUnknownEvidence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageHoldsReleaseAndRetryDoNotDoubleCount","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsagePrivacyIdentifierCIBody","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsagePrivacyIdentifierDigitsAreNotTheQuantity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageSharedRunNeverAddsLeadAndWorkerCounters","tier":"ESSENTIAL"}
     ,

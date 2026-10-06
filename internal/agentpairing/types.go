@@ -108,6 +108,7 @@ type Enrollment struct {
 	VerifiedAt               *time.Time `json:"verified_at,omitempty"`
 	VerificationExpiresAt    *time.Time `json:"verification_expires_at,omitempty"`
 	LastUsedAt               *time.Time `json:"last_used_at,omitempty"`
+	VerificationStalled      bool       `json:"verification_stalled"`
 	CanVerify                bool       `json:"can_verify"`
 	LocalProcesses           string     `json:"local_processes"`
 	AccountingState          string     `json:"accounting_state"`

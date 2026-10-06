@@ -9,6 +9,10 @@ export interface SettingsMenuItem {
   disabled?: boolean
   /** Destructive actions cannot run without naming their effect and what remains. */
   confirmation?: { title: string; effect: string; keeps: string; action: string }
+  /** A hairline above this item starts a new group. */
+  separated?: boolean
+  /** Choices under this item (Hold: for 2 hours, until tomorrow, …); the item itself only heads them. */
+  options?: readonly { id: string; label: string; hint?: string; name?: string }[]
 }
 </script>
 <script setup lang="ts">
@@ -135,6 +139,12 @@ function choose(item: SettingsMenuItem) {
   close()
   emit('select', item.id, context)
 }
+function chooseOption(item: SettingsMenuItem, id: string) {
+  if (item.disabled || props.busy) return
+  const context = props.contextKey
+  close()
+  emit('select', id, context)
+}
 function confirm() {
   if (props.busy || !confirmation.value) return
   // The owner keeps the popover open while writing and supplies busy/error.
@@ -229,7 +239,11 @@ onBeforeUnmount(() => { stageObserver?.disconnect(); cleanup() })
   <Teleport to="body">
     <div v-if="open" ref="panel" class="popover" :class="{ 'opens-up': opensUp, staged: mode === 'form' || confirming, 'content-scrolls': contentScrolls }" :role="role" :aria-label="confirming ? confirmation?.title ?? label : label" :aria-busy="busy || undefined" tabindex="-1" :style="{ ...position, visibility: placed ? 'visible' : 'hidden' }">
       <template v-if="mode === 'menu' && !confirming">
-        <button v-for="item in items" :key="item.id" type="button" class="mi" :class="{ danger: item.confirmation }" role="menuitem" :disabled="item.disabled" @click="choose(item)"><AppIcon :name="item.icon ?? 'more'" /><span class="t">{{ item.label }}</span><span v-if="item.detail" class="d">{{ item.detail }}</span></button>
+        <template v-for="item in items" :key="item.id">
+          <span v-if="item.separated" class="sep" role="separator" />
+          <div v-if="item.options" class="mi group" role="group" :aria-label="item.label"><AppIcon :name="item.icon ?? 'more'" /><span class="t">{{ item.label }}</span><span v-if="item.detail" class="d">{{ item.detail }}</span><span class="opts"><button v-for="option in item.options" :key="option.id" type="button" role="menuitem" :aria-label="option.name ?? option.label" :disabled="item.disabled" @click="chooseOption(item, option.id)"><span>{{ option.label }}</span><span class="hint">{{ option.hint }}</span></button></span></div>
+          <button v-else type="button" class="mi" :class="{ danger: item.confirmation }" role="menuitem" :disabled="item.disabled" @click="choose(item)"><AppIcon :name="item.icon ?? 'more'" /><span class="t">{{ item.label }}</span><span v-if="item.detail" class="d">{{ item.detail }}</span></button>
+        </template>
       </template>
       <div v-else-if="confirming && confirmation" class="confirm">
         <div class="staged-body">
@@ -253,9 +267,14 @@ onBeforeUnmount(() => { stageObserver?.disconnect(); cleanup() })
 <style scoped>
 .popover { position: fixed; z-index: 80; overflow: auto; padding: 6px; border-radius: 12px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); overscroll-behavior: contain; }
 .mi { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 2px 10px; width: 100%; padding: 9px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; }
-.mi:hover:not(:disabled), .mi:focus-visible { background: var(--row-hover); outline: none; }.mi svg { grid-row: span 2; margin-top: 2px; color: var(--ink-2); }
+.mi:not(.group):hover:not(:disabled), .mi:focus-visible { background: var(--row-hover); outline: none; }.mi svg { grid-row: span 2; margin-top: 2px; color: var(--ink-2); }
 .t { font-size: 13.5px; font-weight: 600; }.d { font-size: 12px; line-height: 1.4; color: var(--ink-3); }.danger .t, .danger svg { color: var(--danger); }
 .mi:disabled .t, .mi:disabled svg { color: var(--ink-3); }
+.sep { display: block; height: 1px; margin: 4px 8px; background: var(--line); }
+.opts { grid-column: 1 / -1; display: grid; gap: 1px; margin: 6px -4px 0 26px; }
+.opts button { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 550; text-align: left; }
+.opts button:hover:not(:disabled), .opts button:focus-visible { background: var(--row-hover); outline: none; }
+.opts .hint { color: var(--ink-3); font-size: 12px; font-weight: 450; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .staged { display: flex; flex-direction: column; overflow: hidden; }
 .confirm, .qform { display: flex; flex-direction: column; min-height: 0; padding: 10px 10px 6px; }
 .confirm > :not(.feedback), .qform > :not(.feedback) { flex: none; }
@@ -269,7 +288,7 @@ onBeforeUnmount(() => { stageObserver?.disconnect(); cleanup() })
 .confirm p { margin-top: 6px; font-size: 12.5px; }.keeps { color: var(--ink-3); }
 .confirm-acts { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 14px; }.save-keys { display: inline-flex; gap: 2px; }
 .qhint { min-height: 2lh; margin-top: 8px; font-size: 12px; color: var(--ink-3); }.err { color: var(--danger); }
-@media (pointer: coarse), (max-width: 720px) { .mi, .btn, .qform :deep(.field) { min-height: 44px; } }
+@media (pointer: coarse), (max-width: 720px) { .mi, .btn, .opts button, .qform :deep(.field) { min-height: 44px; } }
 @media (prefers-reduced-motion: no-preference) { .popover { animation: appear .14s ease-out; } @keyframes appear { from { opacity: 0; } to { opacity: 1; } } }
 </style>
 <style scoped src="../../styles/settingsButtons.css"></style>

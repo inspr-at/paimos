@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -34,7 +35,7 @@ func TestRemoteTelemetryErrorClassification(t *testing.T) {
 		{"missing", 404, "run not found", false},
 		{"timeout", 408, "request timeout", false},
 		{"generation", 409, "daemon generation conflict", false},
-		{"not_live", 409, "run is not live", false},
+		{"not_live", 409, "run is not live", true},
 		{"draining", 409, "enrollment_draining", false},
 		{"pairing_revoked", 409, "pairing_revoked", false},
 		{"unknown_conflict", 409, "unknown conflict", false},
@@ -53,6 +54,13 @@ func TestRemoteTelemetryErrorClassification(t *testing.T) {
 			err := remote.Report(t.Context(), "run", Telemetry{Sequence: 1, Kind: "status"})
 			if err == nil || errors.Is(err, ErrTelemetryProtocol) != tc.protocol {
 				t.Fatalf("HTTP %d classified incorrectly: %v", tc.status, err)
+			}
+			authority := tc.status == 401 || tc.status == 403 || tc.status == 404 || tc.status == 410 || tc.name == "generation"
+			if errors.Is(err, ErrTelemetryAuthority) != authority {
+				t.Fatalf("HTTP %d authority refusal classified incorrectly: %v", tc.status, err)
+			}
+			if (tc.protocol || authority) && strings.Contains(err.Error(), tc.message) {
+				t.Fatal("permanent refusal propagated server response text")
 			}
 		})
 	}

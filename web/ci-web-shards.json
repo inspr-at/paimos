@@ -982,6 +982,8 @@
         ,
         {"file":"tests/session-rows.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/settings-account-pacing.spec.ts","listedTests":10,"weightSeconds":22.19512,"weightSource":"unmeasured-test-rate"}
+        ,
         {"file":"tests/settings-accounts.spec.ts","listedTests":24,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/stability.spec.ts","listedTests":13,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
@@ -1236,6 +1238,32 @@
         {"file":"tests/settings-host-capacity.spec.ts","listedTests":12,"weightSeconds":24,"weightSource":"unmeasured-test-count-estimate"}
         ,
         {"file":"tests/settings-shared.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":6.613,"median":0.701,"min":0.409},"seconds":38.002851,"selectedTests":23},"weightSeconds":20,"weightSource":"unmeasured-test-count-estimate"}
+      ]
+    }
+    ,
+    {
+      "config": "playwright.ui.config.ts"
+      ,
+      "env": {}
+      ,
+      "flags": [
+        "--workers=1"
+        ,
+        "--trace=retain-on-failure"
+      ]
+      ,
+      "hostedOnly": true
+      ,
+      "id": "lead-flow"
+      ,
+      "project": null
+      ,
+      "sourceSteps": [
+        "AEON-741 lead flow UI regressions"
+      ]
+      ,
+      "specs": [
+        {"file":"tests/lead-flow.spec.ts","listedTests":14,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
       ]
     }
   ]

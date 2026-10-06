@@ -8,7 +8,7 @@ import { can } from '../../lib/authz'
 import type { PairingPermissions, PairingView } from '../../lib/agentPairing'
 import { describeComputerStatus, touchIDConfirmation } from '../../lib/agentPairing'
 import {
-  clone, daysLabel, nightLabel, putSchedule, reserveLabel, reserveLevel, daysSummary, timeLabel, unreportedCapacity, when, whenFull, workStart,
+  clone, daysLabel, holdOptions as holdChoices, nightLabel, overrideDone, ownOverride, poolOfRow, putSchedule, reserveLabel, reserveLevel, daysSummary, timeLabel, unreportedCapacity, when, whenFull,
   type AccountRow, type CapacitySchedule, type Override, type PoolView,
 } from '../../lib/capacity'
 import { buildComputerCards, middleEllipsis, pacingSummary, readySummary, type AccountLine, type ComputerCard } from '../../lib/computerAccounts'
@@ -62,7 +62,18 @@ function toggleFold() {
 
 // ---------- Cards ----------
 const rows = computed(() => (props.showAccounts ? capacity.rows : []))
-const cards = computed(() => buildComputerCards({ computers: props.permissions.canListComputers ? capacity.computers : [], rows: rows.value, now: now.value }))
+// Start with attention first, then keep controls where the person saw them.
+// A successful retry changes readiness; it must not reorder the clicked card.
+const cardSnapshot = computed<{ identity: string; cards: ComputerCard[] }>((previous) => {
+  const identity = `${session.identity?.tenant.id ?? ''}/${session.identity?.principal.id ?? ''}`
+  const next = buildComputerCards({ computers: props.permissions.canListComputers ? capacity.computers : [], rows: rows.value, now: now.value })
+  if (previous?.identity === identity) {
+    const rank = new Map(previous.cards.map((card, index) => [card.key, index]))
+    next.sort((a, b) => (rank.get(a.key) ?? rank.size) - (rank.get(b.key) ?? rank.size))
+  }
+  return { identity, cards: next }
+})
+const cards = computed(() => cardSnapshot.value.cards)
 const summary = computed(() => readySummary(cards.value))
 const pacingLine = computed(() => pacingSummary(schedule.value))
 const empty = computed(() => capacity.loaded && !cards.value.length)
@@ -79,7 +90,8 @@ function canVerify(line: AccountLine, card: ComputerCard) {
     && card.computer.verification_capabilities?.[line.harness]?.supported === true
 }
 function verifyBusy(line: AccountLine, card: ComputerCard) {
-  return !!verifying.value || ['starting', 'running', 'waiting', 'ownership_lost'].includes(enrollmentOf(line, card)?.verification_state ?? '')
+  const e = enrollmentOf(line, card)
+  return !!verifying.value || !e?.verification_stalled && ['starting', 'running', 'waiting', 'ownership_lost'].includes(e?.verification_state ?? '')
 }
 async function verifyAgain(line: AccountLine, card: ComputerCard) {
   if (!canVerify(line, card) || verifyBusy(line, card)) return
@@ -89,7 +101,10 @@ async function verifyAgain(line: AccountLine, card: ComputerCard) {
   verifying.value = account
   try {
     const response = await api(`/agent-pairing/computers/${computer}/enrollments/${account}/verify`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expected_revision: revision, expected_verification_run_id: priorRun }) })
-    if (!response.ok) throw new Error(response.status === 403 ? 'Only the account owner may verify it again.' : response.status === 409 ? 'The account or verification changed. Refresh before verifying again.' : 'Verification could not be requested. Please try again.')
+    if (!response.ok) {
+      const problem = await response.json().catch(() => ({})) as { code?: string }
+      throw new Error(response.status === 403 ? 'Only the account owner may verify it again.' : response.status === 409 && problem.code === 'verification_active' ? 'The helper must confirm that the previous check stopped and settle its reports before another can start.' : response.status === 409 ? 'The account or verification changed. Refresh before verifying again.' : 'Verification could not be requested. Please try again.')
+    }
     const created = await response.json() as { account_id?: string; run_id?: string }
     if (created.account_id !== account || typeof created.run_id !== 'string') throw new Error('Verification response could not be confirmed. Refresh the account list.')
     const current = cards.value.find(card => card.computer?.computer_id === computer)?.computer
@@ -128,7 +143,7 @@ type Menu = MenuTarget & { style: Record<string, string> }
 const menu = ref<Menu | null>(null)
 const menuEl = ref<HTMLElement>()
 let menuButton: HTMLElement | null = null
-const poolOf = (row: AccountRow): PoolView | undefined => capacity.pools.find(p => p.rows.some(r => r.id === row.id)) ?? capacity.pools.find(p => p.id === (row.groupId ? `group:${row.groupId}` : row.harness))
+const poolOf = (row: AccountRow): PoolView | undefined => poolOfRow(capacity.pools, row)
 async function openMenu(next: MenuTarget, event: Event) {
   const button = event.currentTarget as HTMLElement
   const same = menu.value && menuButton === button
@@ -160,23 +175,10 @@ function menuKeys(event: KeyboardEvent) {
   const i = items.indexOf(document.activeElement as HTMLElement)
   items[(i + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
 }
-/** The pool's own override; Away comes from your own schedule and ends in the header. */
-const ownOverride = (pool: PoolView | undefined): Override => (!pool || pool.override === 'away' ? '' : pool.override)
-function holdOptions() {
-  const later = new Date(Math.floor((now.value + 2 * 3600e3) / 60_000) * 60_000).toISOString()
-  const tomorrow = new Date(workStart(schedule.value, now.value, 1)).toISOString()
-  const [day, time] = when(tomorrow, now.value).split(' ')
-  return [
-    { label: 'For 2 hours', hint: `until ${when(later, now.value)}`, name: 'Hold for 2 hours', until: later },
-    { label: `Until ${day}`, hint: time ?? '', name: `Hold until ${when(tomorrow, now.value)}`, until: tomorrow },
-    { label: 'Until I resume', hint: '', name: 'Hold until I resume', until: undefined },
-  ]
-}
+const holdOptions = () => holdChoices(schedule.value, now.value)
 function setOverride(pool: PoolView, value: Override, until?: string) {
   closeMenu(true)
-  const done = value === 'sprint' ? `Sprint: agents may use everything left on ${pool.name} until it resets.`
-    : value === 'hold' ? `Holding ${pool.name}${until ? ` until ${when(until, now.value)}` : ''}. Running steps finish.` : `${pool.name} follows your work week again.`
-  void run(() => capacity.setPoolOverride(pool.id, value, until), done)
+  void run(() => capacity.setPoolOverride(pool.id, value, until), overrideDone(pool, value, until, now.value))
 }
 const canChange = (view: PairingView) => !!computersRef.value?.canChange(view)
 const removal = (view: PairingView) => computersRef.value?.removal(view) ?? { allowed: false, reason: '' }
