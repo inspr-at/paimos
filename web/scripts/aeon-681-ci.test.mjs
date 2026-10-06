@@ -5,16 +5,29 @@ import { readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync } from 'nod
 import { spawnSync } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { run, browserList, plan, main } from '../../scripts/test-tiers/cli.mjs'
-import { command, root, web, evidence, flattenBrowser, collectWeb } from '../../scripts/test-tiers/collect.mjs'
+import { command, root, web, evidence, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
 import { resolve, relative } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerHooks } from 'node:module'
 import { validate, key, select } from '../../scripts/test-tiers/core.mjs'
 
-// One native collection serves every plan in this file: the web-unit shard
-// budget is 120 seconds and each recollection costs tens of seconds.
+// The planner assertions concern browser gates. Collect every browser case
+// natively once, and use declared unit identities for the unrelated unit lane.
+// Native unit collection/execution has its own selector regression below and
+// the static web-tiers check reconciles the complete catalogue independently.
 let collected
-const inventory=()=>collected??=collectWeb()
+const inventory=()=>{
+  if(!collected) {
+    const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))
+    const tests=manifest.tests.filter(row=>row.kind!=='browser')
+    for(const config of ['playwright.ui.config.ts','playwright.perf.config.ts']) {
+      const rows=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','-c',config,'--list','--reporter=json'],{cwd:web})),config)
+      tests.push(...rows.filter(row=>config!=='playwright.ui.config.ts'||row.file!=='tests/performance.spec.ts'))
+    }
+    collected={tests}
+  }
+  return collected
+}
 
 test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async()=>{
   // Every planner call sees the same unchanged tree. Collect it natively once,
