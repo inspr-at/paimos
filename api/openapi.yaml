@@ -11302,6 +11302,73 @@ paths:
         '200': {description: Result, headers: {Aeon-Contract: {$ref: '#/components/headers/StageResultContract'}}, content: {application/json: {schema: {$ref: '#/components/schemas/StageResult'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /status-autopilot/attention:
+    get:
+      operationId: listAutopilotAttention
+      summary: Needs attention across visible projects, 50 rows per keyset page
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: after, in: query, schema: {type: string, maxLength: 120}}
+        - {name: kind, in: query, schema: {type: string, enum: [proposed, triage, cancel, blocked, missed]}}
+        - {name: project_id, in: query, schema: {type: string, format: uuid}}
+        - {name: assignee, in: query, schema: {type: string, maxLength: 36, description: 'Principal UUID, or none for unassigned'}}
+        - {name: q, in: query, schema: {type: string, maxLength: 200}}
+      responses:
+        '200':
+          description: Visible items and counts, with bounded project and assignee facets
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AutopilotAttentionPage'}
+        '400': {description: Invalid filter or cursor}
+  /status-autopilot/attention/actions:
+    post:
+      operationId: resolveAutopilotAttention
+      summary: Apply, dismiss or undo up to 100 suggestions with individual results
+      security: [{session: []}, {agentKey: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [action, items]
+              properties:
+                action: {type: string, enum: [apply, dismiss, undo]}
+                items:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items: {$ref: '#/components/schemas/AutopilotAttentionAction'}
+      responses:
+        '200':
+          description: Each item commits independently; failures remain explicit
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      required: [event_id, ok]
+                      properties:
+                        event_id: {type: integer, format: int64}
+                        ok: {type: boolean}
+                        resolution_event_id: {type: integer, format: int64}
+                        revision: {type: string, format: date-time}
+                        release_id: {type: string, format: uuid}
+                        release_revision: {type: integer, format: int64}
+                        release_project_revision: {type: integer, format: int64}
+                        previous_release_project_revision: {type: integer, format: int64}
+                        previous_release_revision:
+                          type: integer
+                          format: int64
+                          description: Release revision verified before this committed change; refresh only identities matching it
+                        error: {type: string}
+        '400': {description: Invalid action or batch}
   /status-autopilot/changes:
     get:
       operationId: listStatusAutopilotChanges
@@ -13163,6 +13230,60 @@ components:
         id: {type: string, format: uuid}
         key: {type: string}
         name: {type: string}
+    AutopilotAttentionAction:
+      type: object
+      additionalProperties: false
+      required: [event_id, node_id, revision]
+      properties:
+        event_id: {type: integer, format: int64, minimum: 1}
+        node_id: {type: string, format: uuid}
+        revision: {type: string, format: date-time}
+        resolution_event_id: {type: integer, format: int64}
+        release_id: {type: string, format: uuid}
+        release_revision: {type: integer, format: int64}
+        release_project_revision: {type: integer, format: int64}
+    AutopilotAttentionFacet:
+      type: object
+      required: [id, label]
+      properties:
+        id: {type: string}
+        label: {type: string}
+    AutopilotAttentionItem:
+      type: object
+      required: [event_id, node_id, revision, key, title, project_id, kind, from, to, reason, at, editable, applicable]
+      properties:
+        event_id: {type: integer, format: int64}
+        node_id: {type: string, format: uuid}
+        revision: {type: string, format: date-time}
+        key: {type: string}
+        title: {type: string}
+        project_id: {type: string, format: uuid}
+        kind: {type: string, enum: [proposed, triage, cancel, blocked, missed]}
+        from: {type: string}
+        to: {type: string}
+        reason: {type: string}
+        at: {type: string, format: date-time}
+        editable: {type: boolean}
+        applicable: {type: boolean}
+        unavailable_reason: {type: string}
+        release_id: {type: string, format: uuid}
+        release_revision: {type: integer, format: int64}
+        release_project_revision: {type: integer, format: int64}
+        release_title: {type: string}
+    AutopilotAttentionPage:
+      type: object
+      required: [items, total, counts, facets, facets_truncated, next_cursor]
+      properties:
+        items: {type: array, maxItems: 50, items: {$ref: '#/components/schemas/AutopilotAttentionItem'}}
+        total: {type: integer}
+        counts: {type: object, additionalProperties: {type: integer}}
+        next_cursor: {type: [string, 'null']}
+        facets_truncated: {type: boolean}
+        facets:
+          type: object
+          properties:
+            projects: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AutopilotAttentionFacet'}}
+            assignees: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AutopilotAttentionFacet'}}
     AvatarCrop:
       type: object
       additionalProperties: false

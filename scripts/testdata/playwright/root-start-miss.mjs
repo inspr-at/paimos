@@ -7,7 +7,9 @@ import { setTimeout as delay } from 'node:timers/promises'
 
 // Keep the preload behind the supervisor's identity check. Readiness, rather
 // than child startup speed, determines when this fixture may proceed.
-if (process.env.AEON_PW_TEST_ROOT_VERIFIED) {
+// Only the transient verified path publishes this file. Persistent and
+// owner-change passes set the same variable and must not wait on it.
+if (process.env.AEON_PW_TEST_MISS === 'transient' && process.env.AEON_PW_TEST_ROOT_VERIFIED) {
   const deadline = Date.now() + 15000
   while (!existsSync(process.env.AEON_PW_TEST_ROOT_VERIFIED)) {
     if (Date.now() >= deadline) throw new Error('Supervisor root verification barrier timed out')

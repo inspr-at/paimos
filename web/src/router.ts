@@ -53,6 +53,7 @@ export const router = createRouter({
       ],
     },
     // Knowledge across every project: search runbooks, guidelines, memory and more.
+    { path: '/tickets', component: () => import('./views/NeedsAttentionView.vue'), meta: { title: 'Needs attention' } },
     { path: '/knowledge', component: () => import('./views/KnowledgeView.vue'), meta: { title: 'Knowledge' } },
     // The earlier workspace tree and list are gone; the projects page replaces them.
     { path: '/workspace', redirect: '/' },

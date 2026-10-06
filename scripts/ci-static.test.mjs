@@ -305,25 +305,13 @@ test('fixed check environment removes caller flags and identity but supplies CI 
     NIX_CC_WRAPPER_TARGET_HOST_aarch64_unknown_linux_gnu: '1',
     DEVELOPER_DIR: '/fixture/apple-sdk', SDKROOT: '/fixture/apple-sdk/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk',
     NIX_LDFLAGS_FOR_BUILD: '-L/fixture/build-sdk/usr/lib', NIX_CFLAGS_COMPILE_FOR_TARGET: '-isystem /fixture/target-sdk/usr/include',
-    // Salts are targetPlatform.config with '-' → '_': aarch64-apple-darwin, arm64-apple-darwin, x86_64-apple-darwin.
-    // arm64 CC host stays the SDK library path set above, so a non-flag value is kept.
-    NIX_CC_WRAPPER_TARGET_HOST_aarch64_apple_darwin: '1', NIX_BINTOOLS_WRAPPER_TARGET_HOST_aarch64_apple_darwin: '1',
     NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
-    NIX_CC_WRAPPER_TARGET_HOST_x86_64_apple_darwin: '1', NIX_BINTOOLS_WRAPPER_TARGET_HOST_x86_64_apple_darwin: '1',
-    NIX_CC_WRAPPER_TARGET_BUILD_aarch64_apple_darwin: '1', NIX_CC_WRAPPER_FLAGS_SET_aarch64_apple_darwin: '1',
     NIX_CC_WRAPPER_TARGET_BUILD_arm64_apple_darwin: '1', NIX_BINTOOLS_WRAPPER_TARGET_TARGET_arm64_apple_darwin: '1',
     NIX_CC_WRAPPER_FLAGS_SET_arm64_apple_darwin: '1', NIX_DEBUG: '7', NIX_CC: 'fixture-cc' }
   await runChecks([{ id: 'env', command: 'true', cwd: '.', needs: [], timeout_seconds: 5 }], cwd, { env: source, run: async (_command, { env }) => {
     assert.equal(env.GOFLAGS, undefined); assert.equal(env.AEON_TEST_DATABASE_URL, undefined)
     assert.equal(env.RANDOM_EXTRA, undefined); assert.equal(env.AEON_TEST_TIER_MODE, 'full')
     assert.equal(env.CI, 'true'); assert.equal(env.CI_LANE, 'full')
-    for (const salt of ['aarch64_apple_darwin', 'arm64_apple_darwin', 'x86_64_apple_darwin']) for (const wrapper of ['CC', 'BINTOOLS']) {
-      const key = `NIX_${wrapper}_WRAPPER_TARGET_HOST_${salt}`
-      assert.equal(env[key], source[key], key)
-    }
-    assert.equal(env.NIX_CC_WRAPPER_TARGET_BUILD_aarch64_apple_darwin, '1')
-    assert.equal(env.NIX_CC_WRAPPER_FLAGS_SET_aarch64_apple_darwin, undefined)
-    assert.equal(env.DEVELOPER_DIR, source.DEVELOPER_DIR)
     assert.equal(env.NIX_CFLAGS_COMPILE, source.NIX_CFLAGS_COMPILE)
     assert.equal(env.NIX_LDFLAGS, source.NIX_LDFLAGS)
     assert.equal(env.NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin, source.NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin)
@@ -342,6 +330,28 @@ test('fixed check environment removes caller flags and identity but supplies CI 
     return { status: 'passed', seconds: 0 }
   } })
   assert.equal(fixedEnvironment({ PATH: '/bin', GIT_CONFIG_COUNT: '1' }).GIT_CONFIG_COUNT, undefined)
+})
+
+test('fixed check environment retains Nix compiler role markers and SDK flags without caller selection flags', () => {
+  const flags = {
+    NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
+    NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
+    NIX_CC_WRAPPER_TARGET_BUILD_x86_64_apple_darwin: '1',
+    NIX_BINTOOLS_WRAPPER_TARGET_TARGET_aarch64_unknown_linux_gnu: '1',
+    NIX_CFLAGS_COMPILE_arm64_apple_darwin: '-isystem /fixture/sdk/usr/include',
+    NIX_CFLAGS_LINK_arm64_apple_darwin: '-F/fixture/sdk/System/Library/Frameworks',
+    NIX_LDFLAGS_BEFORE_arm64_apple_darwin: '-L/fixture/sdk/usr/lib',
+    NIX_LDFLAGS_arm64_apple_darwin: '-L/fixture/sdk/usr/lib',
+    NIX_LDFLAGS_x86_64_apple_darwin: '-L/fixture/intel-sdk/usr/lib',
+    NIX_LDFLAGS_aarch64_unknown_linux_gnu: '-L/fixture/linux-sdk/lib',
+  }
+  const env = fixedEnvironment({ ...flags, GOFLAGS: '-run=^$', AEON_TEST_TIER_MODE: 'essential',
+    NIX_AUTH_TOKEN: 'fixture', NIX_LDFLAGS_SECRET: 'fixture' })
+  for (const [key, value] of Object.entries(flags)) assert.equal(env[key], value, key)
+  assert.equal(env.GOFLAGS, undefined)
+  assert.equal(env.AEON_TEST_TIER_MODE, 'full')
+  assert.equal(env.NIX_AUTH_TOKEN, undefined)
+  assert.equal(env.NIX_LDFLAGS_SECRET, undefined)
 })
 
 test('version warnings compare installed versions with workflow pins', t => {

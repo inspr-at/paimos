@@ -141,33 +141,31 @@ export function parseArgs(args) {
 const isolatedGit = ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=false', '-c', 'merge.ff=true',
   '-c', 'user.name=Static CI fixture', '-c', 'user.email=ci-static@example.invalid']
 
-// Nix exports NIX_<CC|BINTOOLS>_WRAPPER_TARGET_HOST_<suffixSalt>, where the salt is
-// targetPlatform.config with '-' and '.' replaced by '_' (aarch64_apple_darwin on
-// the aarch64-apple-darwin triple, arm64_apple_darwin on nixpkgs that spell the
-// Darwin config arm64-apple-darwin, x86_64_apple_darwin on Intel Macs).
-export const nixHostRoleMarker = /^NIX_(?:CC|BINTOOLS)_WRAPPER_TARGET_HOST_[A-Za-z0-9_]+$/
-
-// Build and target role flags are the literal "1". Host markers keep their
-// source value: the salt is targetPlatform.config, not only a lowercase flag.
-const nixBuildTargetRoleMarker = /^NIX_(?:CC|BINTOOLS)_WRAPPER_TARGET_(?:BUILD|TARGET)_[A-Za-z0-9_]+$/
-
 export function fixedEnvironment(source = process.env, scratch) {
   const env = {}
-  // Nix's wrappers consume the SDK and search paths only for their declared
-  // roles. NIX_LDFLAGS alone does not locate libresolv; the per-target CC and
-  // bintools host markers carry that SDK library path, so those markers keep
-  // their source value (the salt is targetPlatform.config, not only a flag).
-  // Build and target role flags stay the literal "1". Keep the selected SDK,
-  // including cross-build variants, when Go links cgo tests. Do not carry
-  // wrapper state, debug flags, or the caller's test options.
+  // Nix's compiler wrapper needs its SDK search paths when Go links cgo tests.
+  // NIX_LDFLAGS alone does not locate libresolv; NIX_CC_WRAPPER_TARGET_HOST_<triple>
+  // carries that target SDK library path on Darwin and is what lets clang find it.
+  // Other wrapper roles stay limited to their declared flags (value "1"), including
+  // cross-build variants, without wrapper state, debug flags or the caller's test options.
   const toolchain = ['NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'DEVELOPER_DIR', 'SDKROOT']
     .flatMap(key => ['', '_FOR_BUILD', '_FOR_TARGET'].map(suffix => key + suffix))
   for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN', ...toolchain]) {
     if (source[key] !== undefined) env[key] = source[key]
   }
+  // Nix wrappers need their target role markers before they consume SDK flags.
+  // Preserve only qualified compiler configuration, never caller test selectors.
+  // Multi-segment compiler roles keep their defined values. A single-token
+  // wrapper role marker from main is kept only when it is exactly "1".
+  const nixTargetBuildVariable = /^NIX_(?:(?:CC|BINTOOLS)_WRAPPER_TARGET_(?:BUILD|HOST|TARGET)|CFLAGS_(?:COMPILE(?:_BEFORE)?|LINK)|LDFLAGS(?:_BEFORE)?)_[a-z0-9]+(?:_[a-z0-9]+)+$/
+  const nixWrapperRole = /^NIX_(?:CC|BINTOOLS)_WRAPPER_TARGET_(?:BUILD|HOST|TARGET)_[a-z0-9_]+$/
   for (const key of Object.keys(source)) {
-    if (nixHostRoleMarker.test(key)) env[key] = source[key]
-    else if (nixBuildTargetRoleMarker.test(key) && source[key] === '1') env[key] = '1'
+    // Main copies every CC host SDK path, including a single-token suffix whose
+    // value is not the role marker "1". Multi-segment compiler roles keep their
+    // defined values. Any other single-token wrapper role is kept only as "1".
+    if (key.startsWith('NIX_CC_WRAPPER_TARGET_HOST_') && source[key] !== undefined) env[key] = source[key]
+    else if (nixTargetBuildVariable.test(key) && source[key] !== undefined) env[key] = source[key]
+    else if (nixWrapperRole.test(key) && source[key] === '1') env[key] = '1'
   }
   Object.assign(env, { CI: 'true', CI_LANE: 'full', AEON_TEST_TIER_MODE: 'full', GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', npm_config_audit: 'false', npm_config_fund: 'false' })
