@@ -167,6 +167,11 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 		}
 		return out, err
 	}
+	if escalated, err := escalationForWork(ctx, tx, p, q, now); err != nil {
+		return WorkResolution{}, err
+	} else if escalated != nil {
+		return *escalated, nil
+	}
 	role, ok := roleByName(q.Role)
 	if !ok {
 		return WorkResolution{}, fail(400, "unknown model role")
