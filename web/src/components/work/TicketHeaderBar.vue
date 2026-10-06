@@ -56,7 +56,8 @@ const catalog = ref<Kind[]>([])
 onMounted(() => { void kinds().then(rows => { catalog.value = rows }).catch(() => {}) })
 // The bar folds only when its actions do not fit, measured rather than guessed
 // from a width (wider Linux fonts pushed Close out of the default dock): first
-// the wide-only actions (also in More), then the position, then Queue's word.
+// the wide-only actions (also in More), then the position, then Queue's word,
+// then Edit's word (its aria-label keeps the name; tablet docks need it).
 // Each fit starts unfolded and runs synchronously inside the observer callback,
 // so nothing paints in between; folding never changes the bar's own width, so
 // it cannot oscillate. data-fold is outside Vue's class patching.
@@ -67,7 +68,7 @@ function fit() {
   if (!el || !bar) return
   let level = 0
   bar.dataset.fold = '0'
-  while (level < 3 && el.clientWidth > 0 && el.scrollWidth > el.clientWidth) bar.dataset.fold = String(++level)
+  while (level < 4 && el.clientWidth > 0 && el.scrollWidth > el.clientWidth) bar.dataset.fold = String(++level)
 }
 onMounted(() => {
   if (!main.value || typeof ResizeObserver === 'undefined') return
@@ -126,7 +127,7 @@ void props
     </template>
     <template v-else>
     <slot name="queue" />
-    <button v-if="canWrite" type="button" class="btn sm edit-btn" aria-keyshortcuts="e" data-tip="Edit title, text and properties · e" @click="emit('edit')"><AppIcon name="edit" :size="13" />Edit</button>
+    <button v-if="canWrite" type="button" class="btn sm edit-btn" aria-label="Edit" aria-keyshortcuts="e" data-tip="Edit title, text and properties · e" @click="emit('edit')"><AppIcon name="edit" :size="13" /><span class="edit-word">Edit</span></button>
     <button v-if="mode === 'panel'" type="button" class="icon-btn sm flat wide-only" aria-label="Open as full page" data-tip="Full page · f" @click="emit('expand')"><AppIcon name="expand" :size="14" /></button>
     <button v-else type="button" class="icon-btn sm flat wide-only" aria-label="Show beside the list" data-tip="Side panel · f" @click="emit('collapse')"><AppIcon name="collapse" :size="14" /></button>
     <button type="button" class="icon-btn sm flat wide-only" aria-label="Open in a new tab" data-tip="Open in new tab" @click="emit('newTab')"><AppIcon name="external" :size="14" /></button>
@@ -211,8 +212,9 @@ void props
   .wide-only, .position { display: none; }
 }
 /* Measured folds (see fit); each level keeps the ones before it. */
-.panel-bar:is([data-fold="1"], [data-fold="2"], [data-fold="3"]) .wide-only, .panel-bar:is([data-fold="2"], [data-fold="3"]) .position { display: none; }
-.panel-bar[data-fold="3"] :deep(.q-word), .panel-bar[data-fold="3"] :deep(.q-key) { display: none; }
+.panel-bar:is([data-fold="1"], [data-fold="2"], [data-fold="3"], [data-fold="4"]) .wide-only, .panel-bar:is([data-fold="2"], [data-fold="3"], [data-fold="4"]) .position { display: none; }
+.panel-bar:is([data-fold="3"], [data-fold="4"]) :deep(.q-word), .panel-bar:is([data-fold="3"], [data-fold="4"]) :deep(.q-key) { display: none; }
+.panel-bar[data-fold="4"] .edit-word { display: none; }
 @media (max-width: 720px) {
   .panel-bar { padding: 0 6px 0 12px; }
   .panel-bar-main { height: 56px; }

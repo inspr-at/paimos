@@ -50,8 +50,8 @@ async function setup(page: Page, theme: 'light' | 'dark' = 'light', reportedMeta
 test('live tiles show current steps and rows nest workers with stopped history collapsed', async ({ page }) => {
   const { lead, worker, stopped } = await setup(page)
   await page.goto('/agents')
-  // One compact live line counts them; names and steps live in the table (AEON-299).
-  await expect(page.getByRole('group', { name: 'Live sessions' })).toContainText('2 live')
+  // The head counts them (AEON-780); names and steps live in the table (AEON-299).
+  await expect(page.getByRole('group', { name: 'Show sessions by state' }).locator('[data-filter="working"]')).toContainText('2working')
   await expect(page.locator(`[data-row="s:${worker.id}"]`)).toHaveAttribute('data-parent', lead.id)
   await expect(page.locator(`[data-row="s:${worker.id}"] .result`)).toHaveText('PDF worker image')
   await expect(page.locator(`[data-row="s:${worker.id}"] .session-name`)).toHaveText('hausv')
@@ -136,7 +136,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     const { worker } = await setup(page, theme, true)
     await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
     await page.goto('/agents')
-    await expect(page.getByRole('group', { name: 'Live sessions' })).toContainText('2 live')
+    await expect(page.getByRole('group', { name: 'Show sessions by state' }).locator('[data-filter="working"]')).toContainText('2working')
     await expect(page.locator(`[data-row="s:${worker.id}"] .exec-model`)).toHaveText('gpt-6-sol · xhigh')
     await expect(page.locator(`[data-row="s:${worker.id}"] .exec-account`)).toHaveText('Codex · Codex Pro')
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)

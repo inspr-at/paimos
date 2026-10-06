@@ -99,8 +99,8 @@ test('sessions are grouped by what they need, with ticket and heartbeat; details
   await expect(row(page, session(7))).toHaveCount(0)
   await page.getByRole('button', { name: /^Ended/ }).click()
   await expect(row(page, session(7))).toBeVisible()
-  // One compact live line; the table groups carry the rest.
-  await expect(page.getByRole('group', { name: 'Live sessions' })).toContainText(/^\d+ live/)
+  // The head counts are filters (AEON-780); the table groups carry the rest.
+  await expect(page.getByRole('group', { name: 'Show sessions by state' }).locator('[data-filter="working"]')).toContainText(/^\d+working$/)
   await lead.locator('.agent-link').click()
   await expect(panel(page)).toContainText('Claude Max')
   await expect(panel(page)).toContainText('claude-fable-high')
@@ -485,8 +485,8 @@ test('an empty workspace explains how an agent connects', async ({ page }) => {
   await expect(page.locator('.connect .lead')).toHaveText('Start an agent to queue a run; its daemon connects when an account is ready.')
   // No request waits (a failed check is not a sign-in prompt).
   await expect(queue(page).locator('.item:not(.signin)')).toHaveCount(0)
-  // The empty state says it once; the header adds no second sentence.
-  await expect(page.getByRole('group', { name: 'Live sessions' })).toHaveText('')
+  // The empty state says it once; the head only shows faint zero counts.
+  await expect(page.getByRole('group', { name: 'Show sessions by state' }).locator('.count:not(.zero)')).toHaveCount(0)
   await page.locator('.connect').getByRole('button', { name: 'Start agent' }).click()
   await expect(page.getByRole('dialog', { name: 'Start agent' }).getByRole('button', { name: 'Queue run' })).toBeVisible()
 })
