@@ -1568,7 +1568,7 @@ paths:
                         key: {type: string}
                         title: {type: string}
                         override: {$ref: '#/components/schemas/StatusAutopilotOverride'}
-        '400': {description: Invalid mode, search or cursor}
+        '400': {description: "Invalid mode, search or cursor"}
         '403': {description: Workspace settings.manage required}
   /status-autopilot/attention:
     get:
