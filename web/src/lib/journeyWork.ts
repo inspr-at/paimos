@@ -22,7 +22,9 @@ export function parentLeafGroups(rows: ListItem[]): Map<string, ListItem[]> {
   for (const leaf of rows.filter(isJourneyLeaf)) {
     let id = workParentId(leaf)
     const seen = new Set<string>()
-    while (id && !seen.has(id) && seen.size < 64) {
+    // Supplied rows bound the traversal; the seen set terminates cycles without
+    // silently dropping leaves from valid deep ancestors.
+    while (id && !seen.has(id)) {
       seen.add(id)
       groups.get(id)?.push(leaf)
       const parent = byId.get(id)

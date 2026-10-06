@@ -53,7 +53,7 @@ test('timing failures keep typed values and controls anchored, and save again on
     if (route.request().method() === 'GET') return route.fulfill({ json: { interval_minutes: 10 } })
     writes++
     if (failed) { await held; return route.fulfill({ status: 500, json: { message: 'refused' } }) }
-    expect(route.request().postDataJSON()).toEqual({ interval_minutes: 20 })
+    expect(route.request().postDataJSON()).toEqual({ interval_minutes: 20, expected_interval_minutes: 10 })
     return route.fulfill({ json: { interval_minutes: 21 } })
   })
   await page.route('**/api/settings/heartbeat-lost', route => route.fulfill({ json: { heartbeat_lost_minutes: 15 } }))

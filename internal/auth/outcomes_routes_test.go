@@ -32,3 +32,17 @@ func TestOutcomeAgentRouteCeiling(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestLeadUsageAgentRouteCeiling(t *testing.T) {
+	for _, tc := range []struct{ method, path, want string }{
+		{http.MethodGet, "/api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/lead/usage", "harness.read"},
+		{http.MethodHead, "/api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/lead/usage", "harness.read"},
+		{http.MethodPost, "/api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/lead/usage", ""},
+		{http.MethodGet, "/api/projects/aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa/lead/usage/extra", ""},
+	} {
+		got, ok := coreAgentScope(httptest.NewRequest(tc.method, tc.path, nil))
+		if got != tc.want || ok != (tc.want != "") {
+			t.Fatalf("%s %s: %q %v", tc.method, tc.path, got, ok)
+		}
+	}
+}

@@ -124,7 +124,7 @@ onBeforeUnmount(() => {
   <SettingsCard title="While agents work" icon="agent" anchor="while-agents-work">
     <template #lead>What agents show, how often they estimate, and when a silent session counts as lost. Applies to every project.</template>
     <div class="fields" :aria-busy="fields.some(item => item.loading)">
-      <div class="frow">
+      <div id="agent-activity" class="frow">
         <div id="activity-label" class="flabel">Agent activity<small>What agents show while they work.</small></div>
         <div class="fbody">
           <fieldset class="opts" :aria-invalid="!!activity.error" aria-describedby="mode-feedback" role="radiogroup" aria-labelledby="activity-label" :disabled="activity.loading || activity.saving || activity.loadError || !can('settings.manage')">
@@ -135,7 +135,7 @@ onBeforeUnmount(() => {
           </fieldset>
         </div>
       </div>
-      <div v-for="item in numbers" :key="item.key" class="frow">
+      <div v-for="item in numbers" :id="item === estimate ? 'estimates' : 'silent-sessions'" :key="item.key" class="frow">
         <label class="flabel" :for="item.key">{{ item.label }}<small>{{ item === estimate ? 'How often a working agent reports when a ticket will be ready, and when it will be live.' : `A session running outside ${brand.short_name} that stops reporting is marked Lost contact. Its next heartbeat brings it back.` }}</small></label>
         <div class="fbody">
           <input :id="item.key" :value="item.draft" class="num" @input="item.draft = ($event.target as HTMLInputElement).value" type="number" :min="item.min" :max="item.max" step="1" inputmode="numeric" :disabled="item.loading || item.saving || item.loadError || !can('settings.manage')" :aria-invalid="!!item.error" :aria-describedby="`${item.key}-feedback`" :aria-keyshortcuts="mac ? 'Meta+Enter' : 'Control+Enter'" @blur="save(item)" @keydown="keys($event, item)" />

@@ -4,7 +4,7 @@ import AxeBuilder from '@axe-core/playwright'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
-import { capacityWorld, NOW } from './capacity-fixtures'
+import { capacityWorld, defaultSchedule, NOW } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 import { expectStableControls } from './helpers/stable'
 import type { PlanSnapshot } from '../src/lib/agentsWorking'
@@ -40,7 +40,7 @@ async function setup(page: Page, state: keyof typeof states = 'wind', folded = f
       const harness = data.accounts.find(account => account.id === a.account_id)?.harness
       const slots = harness && !seen.has(harness) ? available[harness as keyof typeof available] ?? 0 : 0
       if (harness) seen.add(harness)
-      return { ...a, routing: { rank: 1, available_slots: slots } }
+      return { ...a, routing: state === 'full' ? { rank: 0, available_slots: 0, wait: { code: 'capacity', run_now_allowed: false } } : { rank: 1, available_slots: slots } }
     }) })
   })
   const queue = state === 'room' ? [] : Array.from({ length: state === 'off' ? 2 : 3 }, (_, i) => ({ node_id: `waiting-${i}`, key: `AEON-${i}`, title: 'Waiting work', state: 'open', priority: 'normal', estimate_hours: 1, queued: { model_profile_id: null, waiting: false, wait_reason: '' } }))
@@ -50,6 +50,81 @@ async function setup(page: Page, state: keyof typeof states = 'wind', folded = f
 const dial = (page: Page) => page.getByRole('region', { name: 'Agents at once' })
 const totalMore = (page: Page) => dial(page).getByRole('button', { name: 'One agent more at once' })
 const totalFewer = (page: Page) => dial(page).getByRole('button', { name: 'One agent fewer at once' })
+
+test('AEON-720: idle dial reports real account room and explains unknown readings without inventing waiting agents', async ({ page }) => {
+  const { data, calls } = await setup(page, 'room')
+  let reading: 'ready' | 'missing' | 'blocked' = 'ready'
+  let capacityReads = 0
+  await page.route('**/api/agents/plan', route => route.fulfill({ json: { total: 5, limits: {}, principal_id: me.id, running: {}, running_total: 0, source: 'plan', updated_at: null } }))
+  await page.route('**/api/agent-accounts/capacity', route => {
+    capacityReads++
+    return route.fulfill({ json: data.accounts.map(a => ({
+      account_id: a.id, schedule: defaultSchedule(),
+      windows: [], routing: reading === 'ready' ? { rank: 1, available_slots: 2 }
+        : { rank: 0, available_slots: 0, wait: { code: reading === 'missing' ? 'reading' : 'schedule', run_now_allowed: false } },
+    })) })
+  })
+  await page.clock.install({ time: NOW })
+  await page.goto('/agents')
+  const card = dial(page), detail = card.locator('.f-info')
+  const capture = async () => {
+    mkdirSync(shots, { recursive: true })
+    for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+      await page.setViewportSize({ width, height: 1800 })
+      await page.emulateMedia({ colorScheme: theme })
+      expect(await card.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1)
+      await card.screenshot({ path: `${shots}/${width}-${theme}-idle-${reading}.png`, animations: 'disabled' })
+    }
+    await page.setViewportSize({ width: 1440, height: 1800 })
+  }
+  await expect(card.locator('.f-now')).toContainText('0 are running; 5 more can start as work comes in.')
+  await expect(detail).toContainText(`Room for ${data.accounts.length * 2} more right now.`)
+  await expect(detail).toContainText('quota not measured yet')
+  await expect(card.locator('.f-wait')).toHaveText('No work queued.')
+  await expect(card.locator('.f-now')).not.toContainText('wait')
+  await expect(detail).not.toContainText('Full right now')
+  await capture()
+  await expectStableControls({
+    controls: { more: totalMore(page), fewer: totalFewer(page), fold: card.locator('.f-fold'), choices: card.locator('[data-key="codex"] .seg'), row: card.locator('[data-key="codex"]') },
+    scrollAreas: { card },
+    interactions: [
+      { name: 'reading disappears during a poll', run: async () => {
+        const before = capacityReads
+        reading = 'missing'
+        await page.clock.fastForward(30_000)
+        await expect.poll(() => capacityReads).toBeGreaterThan(before)
+        await expect(detail).toContainText('Account room is not measured yet; see the reasons below.')
+        await expect(detail).toContainText('a current reading is missing')
+        await expect(card.locator('.f-live')).toHaveText('0 running · account room not measured yet')
+        await capture()
+      } },
+      { name: 'scheduled hours block new starts', run: async () => {
+        reading = 'blocked'
+        await page.clock.fastForward(30_000)
+        await expect(detail).toContainText('outside scheduled hours')
+        await expect(detail).toContainText('No account starts are available right now.')
+        await expect(detail).not.toContainText('Full right now')
+        await expect(card.locator('.f-now')).not.toContainText('wait')
+      } },
+    ],
+  })
+  await capture()
+  expect(calls.filter(c => c.method !== 'GET' && /harness-sessions|\/controls|\/stop|\/interrupt/.test(c.path))).toEqual([])
+})
+
+test('AEON-720: accounts owned by another person never become dial room or a false full', async ({ page }) => {
+  const { data } = await setup(page, 'room')
+  for (const a of data.accounts) Object.assign(a, { owner_person_id: 'other-person', registered_by_principal_id: 'other-agent' })
+  await page.route('**/api/agents/plan', route => route.fulfill({ json: { total: 5, limits: {}, principal_id: me.id, running: {}, running_total: 0, source: 'plan', updated_at: null } }))
+  await page.goto('/agents')
+  const card = dial(page)
+  await expect(card.locator('.f-info')).toContainText('No linked accounts.')
+  await expect(card.locator('.f-info')).toContainText('Codex no linked accounts')
+  await expect(card.locator('.f-live')).toHaveText('0 running · no account starts available')
+  await expect(card.locator('.f-now')).not.toContainText('wait')
+  await expect(card.locator('.f-info')).not.toContainText('Full right now')
+})
+
 for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
   const state = 'wind' as const
   test(`${width} ${theme} ${state}: stepping, modes and folding keep every control put`, async ({ page }) => {
@@ -296,7 +371,8 @@ test('linked viewer keeps room on alias-owned accounts while counts use the cano
   data.accounts = data.accounts.map(a => ({ ...a, owner_person_id: me.id }))
   await page.route('**/api/agents/plan', route => route.fulfill({ json: { ...work.preferences['agents.working'], principal_id: 'canonical-person', running: { codex: 2, claude: 1 }, running_total: 3, source: 'plan', updated_at: null } }))
   await page.goto('/agents')
-  await expect(dial(page).locator('.f-right')).toContainText('Room for 9 more right now, 12 at once in all.')
+  await expect(dial(page).locator('.f-right')).toContainText('Room for 9 more right now.')
+  await expect(dial(page).locator('.f-right')).toContainText('Codex room for 4 more')
   await expect(dial(page).locator('.f-live')).toContainText('3 running · room for 5 more')
 })
 
