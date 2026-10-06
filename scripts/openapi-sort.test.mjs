@@ -218,3 +218,99 @@ test('fails closed before writing when a block scalar moves into or out of unter
     }
   }
 })
+
+test('recognizes flow collection sequence items and keeps sorting after them', () => {
+  const items = [
+    "- {$ref: '#/components/schemas/Zebra'}",
+    '- {$ref: "#/components/schemas/Alpha"}',
+    '- {type: object, required: [expected_revision], properties: {expected_revision: {type: integer, minimum: 1}}}',
+    "- [one, 'two: ]', \"three: }\"] # trailing comment",
+    "- &item {x: 'y'}",
+    "- !!map {x: 'y'}",
+    '- {name: split,\n            in: query}',
+    '- - {nested: [1]}',
+    '- - [{deep: "}"}]',
+  ]
+  for (const item of items) {
+    const input = `paths:
+  /z:
+    get:
+      security: &auth [{session: []}]
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  ${item}
+                  - {type: 'null'}
+  /m:
+    get:
+      security: *auth
+  /a:
+    get:
+      security: *auth
+      description: "After the flow item: still a sortable entry"
+components:
+  schemas:
+    Zebra: {type: string}
+    Alpha: {type: string}
+`
+    const sorted = sortOpenAPI(input)
+    assert.ok(sorted.includes(`                  ${item}\n                  - {type: 'null'}\n`), item)
+    assert.ok(sorted.indexOf('  /a:') < sorted.indexOf('  /m:') && sorted.indexOf('  /m:') < sorted.indexOf('  /z:'), item)
+    assert.ok(sorted.indexOf('    Alpha:') < sorted.indexOf('    Zebra:'), item)
+    assert.match(sorted, /\/a:\n    get:\n      security: &auth \[\{session: \[\]\}\]\n/, item)
+    assert.match(sorted, /\/z:\n    get:\n      security: \*auth\n/, item)
+    assert.deepEqual(sorted.split('\n').sort(), input.split('\n').sort(), item)
+    assert.equal(sortOpenAPI(sorted), sorted, item)
+  }
+})
+
+test('fails closed on unbalanced flow delimiters and content after a flow node', () => {
+  assert.throws(() => sortOpenAPI(fixture.replace('Alpha: {type: string}', 'Alpha: {type: string}}')), /Unbalanced flow delimiter/)
+  assert.throws(() => sortOpenAPI(fixture.replace('Alpha: {type: string}', 'Alpha: {type: [string]]}')), /Unbalanced flow delimiter/)
+  assert.throws(() => sortOpenAPI(fixture.replace('Alpha: {type: string}', "Alpha: {type: 'a'}, b")), /Unsupported content after a flow or quoted node/)
+  assert.throws(() => sortOpenAPI(fixture.replace('Alpha: {type: string}', 'Alpha:\n      - [flow, key]: value')), /Unsupported content after a flow or quoted node/)
+  assert.throws(() => sortOpenAPI(fixture.replace('Alpha: {type: string}', 'Alpha:\n      - [one,\n        two] three')), /Unsupported content after a flow or quoted node/)
+  assert.throws(() => sortOpenAPI(fixture.replace('Alpha: {type: string}', 'Alpha:\n      - "one\n        two" three')), /Unsupported content after a flow or quoted node/)
+})
+
+// Reverse the entries of one block mapping, moving each entry's leading
+// comment and blank lines with it. Resorting must restore every byte, which
+// proves the sorter reaches every path and component in the real contract.
+function reverseSection(text, header, depth) {
+  const lines = text.split('\n')
+  const start = lines.indexOf(header), pad = ' '.repeat(depth)
+  let end = start + 1
+  while (end < lines.length && (lines[end].startsWith(pad) || !lines[end].trim())) end++
+  while (!lines[end - 1].trim()) end--
+  const blocks = [], begins = []
+  for (let i = start + 1; i < end; i++) if (lines[i].startsWith(pad) && /\S/.test(lines[i][depth]) && lines[i][depth] !== '#') {
+    let begin = i
+    while (begin > start + 1 && /^\s*(#|$)/.test(lines[begin - 1])) begin--
+    begins.push(begin)
+  }
+  begins.forEach((begin, i) => blocks.push(lines.slice(begin, begins[i + 1] ?? end)))
+  assert.ok(blocks.length > 1, `${header} has ${blocks.length} entries`)
+  lines.splice(start + 1, end - start - 1, ...lines.slice(start + 1, begins[0]), ...blocks.reverse().flat())
+  return lines.join('\n')
+}
+
+test('canonical contract: every path and component entry is reachable after reversal', () => {
+  const contract = readFileSync(new URL('../api/openapi.yaml', import.meta.url), 'utf8')
+  assert.ok(contract.split('\n').some(line => /^\s*- \{\$ref: ['"]/.test(line)), 'contract has flow sequence items')
+  let reversed = reverseSection(contract, 'paths:', 2)
+  for (const section of ['schemas', 'parameters', 'requestBodies', 'responses']) reversed = reverseSection(reversed, `  ${section}:`, 4)
+  assert.notEqual(reversed, contract)
+  assert.deepEqual(reversed.split('\n').sort(), contract.split('\n').sort())
+  // Reversal moves the &auth definitions behind their aliases. Keep the input
+  // valid YAML by defining the anchor at its first use, as the sorter does.
+  const [, value] = /security: &auth (.*)/.exec(contract)
+  const demote = text => text.replace(/&auth (\[.*\])/g, (_, found) => { assert.equal(found, value); return '*auth' })
+  const input = demote(reversed).replace('security: *auth', `security: &auth ${value}`)
+  const sorted = sortOpenAPI(input)
+  assert.equal(sortOpenAPI(sorted), sorted)
+  assert.equal(demote(sorted), demote(contract))
+  assert.equal(sorted.indexOf('&auth'), contract.indexOf('&auth'))
+})

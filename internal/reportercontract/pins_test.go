@@ -307,6 +307,9 @@ func TestOpenAPISortPreservesScalarValues(t *testing.T) {
 			"{nested:\n        {description: \"quoted \\\"text\n        security: &demo [one]\n        other: *demo\n        end\"}}",
 			"{first: 'one', second: 'quoted text\n        security: &demo [one]\n        other: *demo\n        end'}",
 			"{first: \"one\", second: \"quoted text\n        security: &demo [one]\n        other: *demo\n        end\"}",
+			// Flow sequence items are complete nodes, not mapping keys named "{$ref".
+			"\n        - {$ref: '#/components/schemas/Zebra'}\n        - {type: 'null'}",
+			"\n        - {$ref: \"#/components/schemas/Zebra\"}\n        - [{nested: 'quoted text\n          security: &demo [one]\n          other: *demo'}]",
 		} {
 			t.Run(section+"/"+scalar, func(t *testing.T) {
 				var source string

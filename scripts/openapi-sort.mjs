@@ -26,7 +26,11 @@ function scalarLines(lines, blockContent = new Set()) {
   let block, quote, flowDepth = 0
   // Flow collections can contain quoted scalars at any nesting depth. Keep
   // scanning after a closing quote: another scalar may open on the same line.
-  const scanInline = text => {
+  // Delimiters must balance: a stray closer, or anything but a comment after a
+  // closed top-level node, is unsupported source and must fail closed rather
+  // than desynchronise the scanner for the rest of the document.
+  const scanInline = (text, line = text) => {
+    let closed = false
     for (let j = 0; j < text.length; j++) {
       const char = text[j]
       if (quote) {
@@ -34,10 +38,15 @@ function scalarLines(lines, blockContent = new Set()) {
         if (char !== quote) continue
         if (quote === "'" && text[j + 1] === "'") { j++; continue }
         quote = undefined
+        closed = flowDepth === 0
       } else {
         if (char === '#' && (j === 0 || /\s/.test(text[j - 1]))) break
-        if (char === '[' || char === '{') flowDepth++
-        else if (char === ']' || char === '}') flowDepth--
+        if (char === ']' || char === '}') {
+          if (--flowDepth < 0) throw new Error(`Unbalanced flow delimiter: ${line.trim()}`)
+          closed = flowDepth === 0
+        } else if (/\s/.test(char)) continue
+        else if (closed) throw new Error(`Unsupported content after a flow or quoted node: ${line.trim()}`)
+        else if (char === '[' || char === '{') flowDepth++
         else if ((char === '"' || char === "'") && (j === 0 || /[\s[{,:?]/.test(text[j - 1]))) quote = char
       }
     }
@@ -69,6 +78,11 @@ function scalarLines(lines, blockContent = new Set()) {
       node = node.slice(0, parent) + '  ' + node.slice(parent + 2)
       sequence = true
     }
+    // A flow collection is a complete node: a sequence item such as
+    // - {$ref: '#/x'} is not a mapping entry keyed "{$ref", and its closing
+    // delimiter must pair with its own opener. Scan it before key extraction.
+    const flow = node.trim().replace(/^(?:[&!]\S+\s+)+/, '')
+    if (/^[\[{]/.test(flow)) { scanInline(flow, line); continue }
     let value
     try { ({ value } = entry(node, indent(node))); parent = indent(node) }
     catch {
@@ -83,7 +97,7 @@ function scalarLines(lines, blockContent = new Set()) {
       block = { parent, depth: digit ? parent + Number(digit[0]) : undefined }
     } else {
       const inline = value.replace(/^&[\w-]+\s+/, '')
-      if (/^[\[{'"]/.test(inline)) scanInline(inline)
+      if (/^[\[{'"]/.test(inline)) scanInline(inline, line)
     }
   }
   return content
