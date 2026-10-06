@@ -195,11 +195,18 @@ test('skips report INCOMPLETE and code 3; allow-skips remains explicitly incompl
 
 test('fixed check environment removes caller flags and identity but supplies CI values', async t => {
   const cwd = temporary(t), source = { ...process.env, GOFLAGS: '-skip', AEON_TEST_TIER_MODE: 'essential', AEON_TEST_DATABASE_URL: 'fixture', RANDOM_EXTRA: 'fixture',
-    NIX_CFLAGS_COMPILE: '-isystem /fixture/sdk/usr/include', NIX_LDFLAGS: '-L/fixture/sdk/usr/lib' }
+    NIX_CFLAGS_COMPILE: '-isystem /fixture/sdk/usr/include', NIX_LDFLAGS: '-L/fixture/sdk/usr/lib', DEVELOPER_DIR: '/fixture/sdk',
+    NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1', NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
+    NIX_CC_WRAPPER_TARGET_HOST_x86_64_apple_darwin: '1', NIX_BINTOOLS_WRAPPER_TARGET_HOST_x86_64_apple_darwin: '1' }
   await runChecks([{ id: 'env', command: 'true', cwd: '.', needs: [], timeout_seconds: 5 }], cwd, { env: source, run: async (_command, { env }) => {
     assert.equal(env.GOFLAGS, undefined); assert.equal(env.AEON_TEST_DATABASE_URL, undefined)
     assert.equal(env.RANDOM_EXTRA, undefined); assert.equal(env.AEON_TEST_TIER_MODE, 'full')
     assert.equal(env.CI, 'true'); assert.equal(env.CI_LANE, 'full')
+    for (const arch of ['arm64', 'x86_64']) for (const wrapper of ['CC', 'BINTOOLS']) {
+      const key = `NIX_${wrapper}_WRAPPER_TARGET_HOST_${arch}_apple_darwin`
+      assert.equal(env[key], source[key], key)
+    }
+    assert.equal(env.DEVELOPER_DIR, source.DEVELOPER_DIR)
     assert.equal(env.NIX_CFLAGS_COMPILE, source.NIX_CFLAGS_COMPILE)
     assert.equal(env.NIX_LDFLAGS, source.NIX_LDFLAGS)
     assert.ok(env.npm_config_cache.startsWith(tmpdir()))

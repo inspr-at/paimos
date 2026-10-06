@@ -143,8 +143,12 @@ const isolatedGit = ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=fal
 
 export function fixedEnvironment(source = process.env, scratch) {
   const env = {}
-  // Nix's compiler wrapper needs its SDK search paths when Go links cgo tests.
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN', 'NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS']) {
+  // Nix's Darwin wrappers use host-role markers to apply SDK search paths.
+  // Keep those markers and the selected SDK when Go links cgo tests.
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN',
+    'NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'DEVELOPER_DIR',
+    'NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin', 'NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin',
+    'NIX_CC_WRAPPER_TARGET_HOST_x86_64_apple_darwin', 'NIX_BINTOOLS_WRAPPER_TARGET_HOST_x86_64_apple_darwin']) {
     if (source[key] !== undefined) env[key] = source[key]
   }
   Object.assign(env, { CI: 'true', CI_LANE: 'full', AEON_TEST_TIER_MODE: 'full', GIT_CONFIG_NOSYSTEM: '1',
