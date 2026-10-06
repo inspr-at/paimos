@@ -3,6 +3,7 @@ import { defineStore } from 'pinia'
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { api } from '../lib/api'
 import { workLevel, type WorkVocabulary } from '../lib/workVocabulary'
+import { setLeadWords } from '../lib/lead'
 import { scopeOwner } from '../lib/identityScope'
 import { useSession } from './session'
 
@@ -19,11 +20,13 @@ export const useWorkVocabulary = defineStore('workVocabulary', () => {
     value.value = { revision: 0, leaf: { name: '', icon: '' }, levels: [] }
   }, { flush: 'sync' })
   onScopeDispose(() => { generation++; controller?.abort() })
+  // Every screen that names the lead reads LEAD_WORDS; it follows the workspace's agent names.
+  watch(() => value.value.lead, lead => setLeadWords(lead), { immediate: true })
 
   function accept(next: WorkVocabulary) {
     if (!owner.value) return
     generation++; controller?.abort(); pending = undefined
-    value.value = { ...next, leaf: { ...next.leaf }, levels: next.levels.map(level => ({ ...level })) }
+    value.value = { ...next, leaf: { ...next.leaf }, levels: next.levels.map(level => ({ ...level })), ...(next.lead ? { lead: { ...next.lead } } : {}) }
     loaded.value = true; error.value = ''
   }
   function load(): Promise<void> {

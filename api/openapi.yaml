@@ -20205,6 +20205,15 @@ components:
           type: array
           maxItems: 32
           items: {$ref: '#/components/schemas/WorkLevel'}
+        lead: {$ref: '#/components/schemas/LeadNames'}
+    LeadNames:
+      type: object
+      additionalProperties: false
+      required: [singular, plural]
+      description: 'The word people read for a project lead (AEON-791). Inside PAIMOS it is always the lead. Absent when unset; blank names use Lead and Leads. A PUT without lead keeps the saved names.'
+      properties:
+        singular: {type: string, maxLength: 40, description: 'Empty uses Lead.'}
+        plural: {type: string, maxLength: 40, description: 'Empty derives the plural from singular, or Leads.'}
     WorkLevel:
       type: object
       additionalProperties: false

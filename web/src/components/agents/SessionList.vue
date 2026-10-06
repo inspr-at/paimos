@@ -38,6 +38,7 @@ import { can } from '../../lib/authz'
 import { useSession } from '../../stores/session'
 import { DEFAULT_SORT, nextSort, orderForest, readSort, writeSort, type SessionSort, type SortKey } from './sessionOrder'
 import TierCell from './TierCell.vue'
+import { LEAD_WORDS } from '../../lib/lead'
 import { useServiceTiers } from '../../stores/serviceTiers'
 import { TIER_NAME } from '../../lib/serviceTier'
 const serviceTiers = useServiceTiers()
@@ -62,7 +63,7 @@ function toggleHistory() {
 const removal = useSessionRemoval()
 const current = computed(() => GROUPS.flatMap(g => props.groups[g.id]))
 const stale = computed(() => current.value.map(v => v.session).filter(s => isStale(s, props.now) && removal.canRemove(s)))
-const lineageName = (id: string) => [...current.value, ...(props.history ?? [])].find(v => v.session.id === id)?.name || 'lead session'
+const lineageName = (id: string) => [...current.value, ...(props.history ?? [])].find(v => v.session.id === id)?.name || `${LEAD_WORDS.l} session`
 const total = computed(() => GROUPS.reduce((sum, g) => sum + props.groups[g.id].length, 0))
 type Branch = SessionBranch<SessionView>
 // Families in the viewer's order (AEON-468): state, then start time, unless they chose a column.
@@ -487,7 +488,7 @@ defineExpose({ toggleHistory })
     <FloatingPanel v-if="menu && menuItems" :anchor="menu.anchor" align="end" :width="248" :label="`Actions for ${menu.view.name}`" @close="menu = null">
       <div role="menu" :aria-label="`Actions for ${menu.view.name}`" @keydown="menuKeys">
         <button v-if="permittedWorker(menu.view) && leadsFor(menu.view).length" type="button" role="menuitem" class="menu-item" data-autofocus @click="pickMove">
-          <AppIcon name="arrow" :size="16" /><span class="mi-text">Move to lead…</span>
+          <AppIcon name="arrow" :size="16" /><span class="mi-text">Move to {{ LEAD_WORDS.l }}…</span>
         </button>
         <button v-if="agentRecovery.action(menu.view.session)" type="button" role="menuitem" class="menu-item" :disabled="agentRecovery.busy[menu.view.session.id]" @click="pickRecovery"><AppIcon name="refresh" :size="16" /><span class="mi-text">{{ agentRecovery.action(menu.view.session) === 'restart' ? 'Restart' : 'Reconnect' }}</span></button>
         <button v-if="pause.eligible(menu.view.session, 'pause') && (menu.view.session.supported_pause_levels?.includes('pause') || menu.view.session.advertised_capabilities.includes('inbox') || menu.view.session.advertised_capabilities.includes('pause'))" type="button" role="menuitem" class="menu-item" @click="pause.open('pause', [menu.view.session], menu.anchor); menu = null"><AppIcon name="pause" /><span class="mi-text">Pause…</span></button>
@@ -520,9 +521,9 @@ defineExpose({ toggleHistory })
         <p v-else-if="menuItems.note" class="menu-note">{{ menuItems.note }}</p>
       </div>
     </FloatingPanel>
-    <FloatingPanel v-if="moveMenu" :anchor="moveMenu.anchor" align="end" :width="248" :label="`Move ${moveMenu.view.name} to lead`" @close="closeMove">
-      <div role="menu" :aria-label="`Move ${moveMenu.view.name} to lead`" @keydown="menuKeys">
-        <p class="menu-note">Move to lead</p>
+    <FloatingPanel v-if="moveMenu" :anchor="moveMenu.anchor" align="end" :width="248" :label="`Move ${moveMenu.view.name} to ${LEAD_WORDS.l}`" @close="closeMove">
+      <div role="menu" :aria-label="`Move ${moveMenu.view.name} to ${LEAD_WORDS.l}`" @keydown="menuKeys">
+        <p class="menu-note">Move to {{ LEAD_WORDS.l }}</p>
         <button v-for="lead in leadsFor(moveMenu.view)" :key="lead.session.id" type="button" role="menuitem" class="menu-item move-lead" :title="lead.name" @click="move(moveMenu.view, lead)">
           <AppIcon name="arrow" :size="16" /><span class="mi-text">{{ lead.name }}</span>
         </button>

@@ -5136,6 +5136,12 @@
     ,
     {"kind":"browser","file":"tests/agent-indicator.spec.ts","name":"nine real avatars keep their order and family layout","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-names.spec.ts","name":"agent names save beside the work levels without wiping or conflicting at 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-names.spec.ts","name":"agent names save beside the work levels without wiping or conflicting at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-names.spec.ts","name":"the saved word names the lead on the project band","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"Agents links to Connect your machine","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pairing.spec.ts","name":"Homebrew offers two commands and removal after draining","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13061,6 +13067,8 @@
     {"kind":"node","file":"tests/knowledge.test.ts","name":"the docked entry lives in ?entry=<type>/<slug>, and only real kinds and slugs count","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/knowledge.test.ts","name":"the docking width leaves the list 560px beside a 560px pane","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/lead.test.ts","name":"AEON-791: the saved agent names reach every screen that reads LEAD_WORDS, and clearing restores Lead","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/lead.test.ts","name":"Resume is only a restart after a confirmed stop; Pause needs an existing intent","tier":"ESSENTIAL"}
     ,

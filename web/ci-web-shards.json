@@ -702,6 +702,8 @@
         ,
         {"file":"tests/agent-indicator.spec.ts","listedTests":15,"weightSeconds":33.292682647,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/agent-names.spec.ts","listedTests":3,"weightSeconds":6.658536,"weightSource":"unmeasured-test-rate"}
+        ,
         {"file":"tests/agent-pairing.spec.ts","listedTests":35,"tierTiming":{"caseSeconds":{"max":1.871,"median":1.871,"min":1.871},"seconds":3.943477,"selectedTests":1},"weightSeconds":77.682927,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/agent-rules-budget-clients.spec.ts","listedTests":10,"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}
