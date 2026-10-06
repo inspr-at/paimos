@@ -435,5 +435,49 @@
       "reason": "Mandatory shared lock was not acquired after approximately 30 minutes; own invocation process tree remained bash -> sleep across multiple lock handoffs. Stopped only that queued invocation. No static check result was emitted; no lock bypass, --allow-skips or green claim.",
       "checked_source": "a8f06b86c; uncommitted evidence report excluded"
     }
+  },
+  "merge_main_round_4": {
+    "checked_source": "e37e1a8dca28779083a49f01d4a2b798be5450ca",
+    "main_commit": "601dbaa4f9f2e3a6d196f5435d66c3bb4d40216f",
+    "merge_result": "Already up to date: newest origin/main is already included in existing normal merge e37e1a8dc. No amend or redundant merge commit.",
+    "scope": "Merge-main verification only; no feature changes.",
+    "preservation": [
+      "All 18 incoming files checked against both parents by exact Git blob identity.",
+      "All non-manifest incoming files match main; reviewed branch source and tests match pre-merge HEAD byte-for-byte.",
+      "Go and web tier manifests equal the exact semantic union of both parents, without duplicate entries or changed policy metadata.",
+      "All 266 migration numbers are unique; no migration changes or renumbering.",
+      "git diff --check passed."
+    ],
+    "remote_go": {
+      "command": "remote-test.sh <assigned-worktree> ./internal/agentd/... ./internal/agentpairing/... ./internal/agentruns/... ./internal/reportercontract/...",
+      "exit_code": 1,
+      "passed": [
+        "internal/reportercontract (2.402s)"
+      ],
+      "blocked": [
+        "internal/agentd",
+        "internal/agentpairing",
+        "internal/agentruns"
+      ],
+      "cause": "Remote Postgres bootstrap cannot create vector extension: extension vector is not available (SQLSTATE 0A000). Database-backed suites remain unproven; shared host not modified."
+    },
+    "safety": "ppm workstation-agents / INSPR and active GitHub markus-barta verified; coordinator marker recorded per worker-common. Only assigned branch/worktree edited. No origin push, PR merge, deployment, production access, secret reads, ticket status changes, model CLI reviews, foreign worktree edits or hook bypass. Approved remote test/static runners use temporary build refs. Pre-existing untracked scripts/audit/__pycache__/ preserved.",
+    "static_prefilter": {
+      "command": "ci-static-locked.sh (remote-first node scripts/ci-static.mjs --merge-main)",
+      "status": "incomplete",
+      "exit_code": 137,
+      "reason": "Queued approximately 20 minutes across repeated shared-lock handoffs. Process tree confirmed own wrapper had only a sleep child; no checks started. Stopped only own queued wrapper and sleep child without running its lock-removing exit trap; another worker shared lock was preserved. No local static fallback, lock bypass, skipped-check override or green claim."
+    },
+    "migration_checks": {
+      "location": "local, lightweight targeted Node checks after remote/static attempts; remote Node execution remains unproven",
+      "tests": "node --test scripts/check-migrations.test.mjs: 33 passed, 0 failed, 0 skipped",
+      "guard": "node scripts/check-migrations.mjs --base-ref v261005070923.0.0: passed",
+      "invocation_note": "Bare check-migrations.mjs requires --base-ref and returned usage exit 1; rerun with latest reachable published tag."
+    },
+    "open_gates": [
+      "Full remote database-backed Go suites require vector-enabled Postgres on mbp2606.",
+      "Complete ci-static exit 0 including incoming test-tier/web-shard checks remains required; shared queue produced no result.",
+      "No conflict-touched browser specs; no browser suite run in this round."
+    ]
   }
 }
