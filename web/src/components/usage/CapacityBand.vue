@@ -106,6 +106,7 @@ function resetTip(row: BandRow) {
               <template v-else-if="account.capacity.kind === 'offline'">No reading while the computer is offline</template>
               <template v-else>{{ unreportedCapacity(account.harness) }}</template>
             </p>
+            <p v-if="account.learnedUse" class="learned-use">{{ account.learnedUse }}</p>
           </li>
         </ul>
       </li>
@@ -155,6 +156,7 @@ function resetTip(row: BandRow) {
 .account-state { margin-left: auto; color: var(--ink-2); }
 .account-state.warn { color: var(--warn-ink); }
 .account-hint, .account-fix, .account-reading { margin: 3px 0 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.learned-use { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.4; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .account-hint { color: var(--warn-ink); }
 .account-fix code { color: var(--ink); font-size: 12px; user-select: all; }
 .skeleton-row { display: flex; gap: 18px; }

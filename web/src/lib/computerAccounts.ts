@@ -8,7 +8,7 @@
 // capacity projection, the pairing list and the person's schedule.
 import { agentUpdateAdvice, describeEnrollmentDiagnostic, describeEnrollmentStatus, describeHarnessFix, describeHarnessHint, platformCaption, verificationFailureText, type PairingEnrollment, type PairingView } from './agentPairing.ts'
 import {
-  HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, estimateLabel, gauge as gaugeOf, hidesCapacityLimit, hourLabel, pct, unreportedCapacity, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
+  HARNESS_NAME, LOGIN_COMMAND, accountPlan, activeOverride, consumptionLine, estimateLabel, gauge as gaugeOf, hidesCapacityLimit, hourLabel, pct, unreportedCapacity, when, type AccountRow, type CapacitySchedule, type CapacityWindow, type Gauge,
 } from './capacity.ts'
 import { capacityWaitText } from './capacityWait.ts'
 
@@ -41,6 +41,8 @@ export interface AccountLine {
   group: string
   readiness: Readiness
   capacity: CapacityCell
+  /** Observed spend when this vendor reported no window. Empty without numeric evidence. */
+  learnedUse: string
   row: AccountRow
 }
 export interface ComputerNotice { title: string; body: string; command: string }
@@ -170,6 +172,17 @@ export function readiness(row: AccountRow, computer: PairingView | null, now: nu
 
 const WINDOW_WORD: Record<string, string> = { weekly: 'this week', monthly: 'this month', '5h': 'this window', other: 'this period' }
 
+/**
+ * Spend Aeon already observed, when the vendor reported no window.
+ * A missing quota stays the unknown-usage sentence; this does not invent a bar or a reserve.
+ */
+export function learnedUseText(row: AccountRow): string {
+  const learning = row.learning
+  if (row.primary || !learning) return ''
+  if (learning.runs <= 0 && learning.cost_micros <= 0 && learning.tokens <= 0) return ''
+  return consumptionLine(learning)
+}
+
 /** The capacity cell: a bar only for a real reading, otherwise one honest sentence. */
 export function capacityCell(row: AccountRow, ready: Readiness, now: number, sharedWith = ''): CapacityCell {
   if (sharedWith) return { kind: 'quiet', text: `Shares quota with ${sharedWith}` }
@@ -218,7 +231,7 @@ export function buildComputerCards(input: { computers: PairingView[]; rows: Acco
     if (!state.hint && hint && !/accounts? needs? attention$/.test(hint)) state.hint = hint
     const shared = row.sameQuotaAs && byId.has(row.sameQuotaAs) && byId.get(row.sameQuotaAs)!.primary ? byId.get(row.sameQuotaAs)! : null
     const sharedWith = shared ? `${shared.name}${shared.host && shared.host !== row.host ? ` on ${shared.host}` : ''}` : ''
-    return { id: row.id, harness: row.harness, vendor: HARNESS_NAME[row.harness] ?? row.harness, identity: row.name, group: row.groupName, readiness: state, capacity: capacityCell(row, state, now, sharedWith), row }
+    return { id: row.id, harness: row.harness, vendor: HARNESS_NAME[row.harness] ?? row.harness, identity: row.name, group: row.groupName, readiness: state, capacity: capacityCell(row, state, now, sharedWith), learnedUse: learnedUseText(row), row }
   }
   const cards: ComputerCard[] = live.map(computer => {
     const own = rows.filter(r => owner.get(r.id) === computer)
