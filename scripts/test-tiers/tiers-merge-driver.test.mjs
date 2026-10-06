@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { formatManifest, manifestPaths } from './manifests.mjs'
+import { formatManifest, manifestPaths, checkManifests } from './manifests.mjs'
 
 const root = fileURLToPath(new URL('../../', import.meta.url))
 const standalone = resolve(root, 'scripts/test-tiers/tiers-merge-driver.mjs')
@@ -51,7 +51,7 @@ fixture('removal versus tier change', [base, manifest([]), manifest([row('TestZ'
 fixture('divergent edits to one row', [base, manifest([row('TestZ', 'ESSENTIAL')]), manifest([row('TestZ', 'NIGHTLY')])], go, 1)
 fixture('divergent concurrent new rows', [manifest([]), manifest([row('TestA', 'ESSENTIAL')]), manifest([row('TestA', 'NIGHTLY')])], go, 1)
 const timing = { ...base, timingWeights: { owners: { a: { seconds: 1, selectedTests: 2 } } } }
-fixture('owner records remain atomic', [timing, { ...base, timingWeights: { owners: { a: { seconds: 3, selectedTests: 2 } } } }, { ...base, timingWeights: { owners: { a: { seconds: 1, selectedTests: 4 } } } }], go, 1)
+fixture('owner records merge independent fields', [timing, { ...base, timingWeights: { owners: { a: { seconds: 3, selectedTests: 2 } } } }, { ...base, timingWeights: { owners: { a: { seconds: 1, selectedTests: 4 } } } }], go, 0, { ...base, timingWeights: { owners: { a: { seconds: 3, selectedTests: 4 } } } })
 const webRow = (name, occurrence) => ({ kind: 'node', file: 'tests/a.test.ts', name, occurrence, tier: 'NIGHTLY' })
 const webBase = manifest([webRow('case:#2', 1)])
 fixture('web registration occurrences retain distinct identities', [webBase, manifest([webRow('case:#2', 2), ...webBase.tests]), manifest([webRow('case:#2', 3), ...webBase.tests])], web, 0, manifest([webRow('case:#2', 1), webRow('case:#2', 2), webRow('case:#2', 3)]))
@@ -79,6 +79,42 @@ for (const [name, invalid] of [
 fixture('Go occurrence is not a registration identity', [base, manifest([{ ...row('TestZ'), occurrence: 1 }]), base], go, 2)
 fixture('web shard duplicate spec identity', [shardBase, shardManifest([group('first', [spec('tests/a.spec.ts'), spec('tests/a.spec.ts')])]), shardBase], shards, 2)
 
+// Exact record shapes extracted from the locally cached PR merge bases,
+// origin/main 568fa2e76, and PR heads 298, 278 and 279.
+const viewsBefore = { file: 'tests/views-filters.spec.ts', listedTests: 17, weightSeconds: 42.152047, weightSource: 'web-13' }
+const viewsTiming = { caseSeconds: { max: 12.895, median: 2.377, min: 1.202 }, seconds: 61.40423, selectedTests: 17 }
+for (const [pr, count] of [[298, 20], [278, 29]]) {
+  const wrap = record => shardManifest([group('stable-controls', [record])])
+  fixture(`real PR ${pr} count versus timing`, [wrap(viewsBefore), wrap({ ...viewsBefore, tierTiming: viewsTiming }), formatManifest(wrap({ ...viewsBefore, listedTests: count }), shards)], shards, 0, wrap({ ...viewsBefore, listedTests: count, tierTiming: viewsTiming }))
+}
+const parentBefore = { file: 'tests/work-parent-status.spec.ts', weightSeconds: 60 }
+const parentTiming = { caseSeconds: { max: 3.868, median: 2.7835, min: 2.54 }, seconds: 19.092666, selectedTests: 6 }
+const parentAfter = { ...parentBefore, weightSeconds: 16.082, weightSource: 'hosted-CI-37321154870', listedTests: 6 }
+const wrapParent = record => shardManifest([group('work-node-integration', [record])])
+fixture('real PR 279 weight versus timing', [wrapParent(parentBefore), formatManifest(wrapParent({ ...parentBefore, tierTiming: parentTiming }), shards), wrapParent(parentAfter)], shards, 0, wrapParent({ ...parentAfter, tierTiming: parentTiming }))
+for (const [file, testRow] of [[go, row('TestFields')], [web, webRow('fields', 1)]]) {
+  const original = { ...testRow, metadata: { old: true, keep: [1, { x: 2 }] } }
+  const o = { ...original, tier: 'ESSENTIAL', metadata: { keep: [1, { x: 2 }] } }
+  const t = { ...original, measuredSeconds: 3, metadata: { ...original.metadata, added: true } }
+  fixture(`${file} tier and metadata field merge`, [manifest([original]), manifest([o]), manifest([t])], file, 0, manifest([{ ...o, measuredSeconds: 3, metadata: { keep: [1, { x: 2 }], added: true } }]))
+  fixture(`${file} add/add independent fields`, [manifest([]), manifest([{ ...testRow, left: 1 }]), manifest([{ ...testRow, right: 2 }])], file, 0, manifest([{ ...testRow, left: 1, right: 2 }]))
+}
+fixture('same scalar and deep equal arrays converge', [manifest([row('TestZ')]), manifest([{ ...row('TestZ'), extras: [{ b: 2, a: 1 }] }]), manifest([{ ...row('TestZ'), extras: [{ a: 1, b: 2 }] }])], go, 0, manifest([{ ...row('TestZ'), extras: [{ a: 1, b: 2 }] }]))
+fixture('group object fields merge', [shardBase, { ...shardBase, groups: [{ ...shardBase.groups[0], env: { LEFT: '1' } }, shardBase.groups[1]] }, { ...shardBase, groups: [{ ...shardBase.groups[0], env: { RIGHT: '2' }, gate: false }, shardBase.groups[1]] }], shards, 0, { ...shardBase, groups: [{ ...shardBase.groups[0], env: { LEFT: '1', RIGHT: '2' }, gate: false }, shardBase.groups[1]] })
+
+for (const [file, empty, field, identity] of [
+  [go, manifest([]), 'deleteCandidateGroups', { file: 'tests/candidate.spec.ts' }],
+  ...['configs', 'duplicateCurrentSpecs', 'exclusions'].map(field => [shards, shardManifest([]), field, { file: 'tests/config.spec.ts' }]),
+  [shards, shardManifest([]), 'ciInventory', { id: 'inventory' }],
+]) {
+  const b = { ...empty, [field]: [{ ...identity, old: true, stable: { a: 1, b: [2] } }] }
+  const o = { ...empty, [field]: [{ ...identity, left: 1, stable: { b: [2], a: 1 } }] }
+  const t = { ...empty, [field]: [{ ...b[field][0], right: 2 }] }
+  fixture(`${field} keyed records merge fields`, [b, o, t], file, 0, { ...empty, [field]: [{ ...identity, left: 1, right: 2, stable: { a: 1, b: [2] } }] })
+}
+fixture('ordered group deletion versus modification retains a marker', [shardBase, shardManifest([shardBase.groups[1]]), shardManifest([{ ...shardBase.groups[0], gate: false }, shardBase.groups[1]])], shards, 1)
+fixture('removed field versus modification conflicts', [manifest([{ ...row('TestZ'), note: 'base' }]), base, manifest([{ ...row('TestZ'), note: 'changed' }])], go, 1)
+
 for (const { name, inputs, file, status, expected } of cases) test(`OPS-257 standalone/in-repo parity: ${name}`, () => {
   // Reversing the sides proves deterministic clean merges. Conflicts retain
   // both sides under markers; setup errors retain the exact original OURS.
@@ -93,10 +129,11 @@ for (const { name, inputs, file, status, expected } of cases) test(`OPS-257 stan
       assert.equal(external.output.toString(), formatManifest(expected, file))
     } else if (status === 1) {
       assert.ok(external.stderr.trim())
-      const versions = external.output.toString().match(/^<<<<<<< ours\n([\s\S]*)\n\|{7} base\n([\s\S]*)\n=======\n([\s\S]*)\n>>>>>>> theirs\n$/)
-      assert.ok(versions, 'conflict contains every side under diff3 markers')
+      assert.match(external.output.toString(), /^<<<<<<< ours$/m)
+      assert.match(external.output.toString(), /^\|{7} base$/m)
+      assert.match(external.output.toString(), /^=======$/m)
+      assert.match(external.output.toString(), /^>>>>>>> theirs$/m)
       assert.throws(() => JSON.parse(external.output), SyntaxError)
-      assert.deepEqual(versions.slice(1), [sides[1], sides[0], sides[2]].map(data => formatManifest(typeof data === 'string' ? JSON.parse(data) : data, file).trimEnd()))
     } else {
       assert.ok(external.stderr.trim())
       assert.deepEqual(external.output, external.before)
@@ -282,5 +319,63 @@ test('OPS-257 both drivers merge real pre-L13 data with canonical sides idempote
       assert.equal(again.status, 0, again.stderr)
       assert.equal(again.output.toString(), expected)
     }
+  }
+})
+
+test('OPS-257 multiple field conflicts mark only affected rows and retain clean unions', () => {
+  const b = manifest([row('TestA'), row('TestB'), row('TestKeep')])
+  const o = manifest([{ ...row('TestA', 'ESSENTIAL'), extra: { seconds: 2 } }, row('TestB', 'ESSENTIAL'), row('TestKeep'), row('TestO')])
+  const t = manifest([{ ...row('TestA', 'NIGHTLY'), extra: { seconds: 3 } }, row('TestB', 'NIGHTLY'), { ...row('TestKeep'), note: 'retained' }, row('TestT')])
+  for (const program of [[standalone], [cli, 'manifests', 'merge-driver']]) {
+    const result = run('localized', program, [b, o, t], go)
+    assert.equal(result.status, 1, result.stderr)
+    const text = result.output.toString()
+    assert.match(text, /^\{/)
+    const blocks = [...text.matchAll(/^<<<<<<< ours\n([\s\S]*?)^\|{7} base\n([\s\S]*?)^=======\n([\s\S]*?)^>>>>>>> theirs$/gm)]
+    assert.equal(blocks.length, 2)
+    for (const [i, block] of blocks.entries()) {
+      assert.deepEqual(block.slice(1).map(s => JSON.parse(s)), [o.tests[i], b.tests[i], t.tests[i]])
+    }
+    const resolved = text.replace(/^<<<<<<< ours\n([\s\S]*?)^\|{7} base\n[\s\S]*?^=======\n[\s\S]*?^>>>>>>> theirs$/gm, '$1'.trimEnd())
+    const data = JSON.parse(resolved)
+    assert.deepEqual(data.tests.map(r => r.name), ['TestA', 'TestB', 'TestKeep', 'TestO', 'TestT'])
+    assert.equal(data.tests[2].note, 'retained')
+    for (const field of ['extra.seconds', 'tier']) assert.ok(result.stderr.includes(field), result.stderr)
+    assert.match(result.stderr, /base=<absent>; ours=2; theirs=3/)
+    assert.match(result.stderr, /base="GATED-FULL"; ours="ESSENTIAL"; theirs="NIGHTLY"/)
+    const checkRoot = mkdtempSync(join(directory, 'check-markers-'))
+    for (const file of manifestPaths) {
+      mkdirSync(resolve(checkRoot, file, '..'), { recursive: true })
+      writeFileSync(resolve(checkRoot, file), file === go ? text : formatManifest(file === shards ? shardManifest([]) : manifest([]), file))
+    }
+    assert.throws(() => checkManifests(checkRoot), /Noncanonical CI manifests/)
+  }
+})
+
+test('OPS-257 spec markers preserve clean records and group policy edits', () => {
+  const b = shardManifest([group('first', [spec('tests/a.spec.ts'), spec('tests/keep.spec.ts')]), group('other', [spec('tests/other.spec.ts')])])
+  const o = structuredClone(b), t = structuredClone(b)
+  o.groups[0].specs[0].weightSeconds = 11
+  t.groups[0].specs[0].weightSeconds = 12
+  o.groups[0].gate = false
+  t.groups[0].specs[1].listedTests = 5
+  t.groups[1].specs.push(spec('tests/new.spec.ts'))
+  for (const program of [[standalone], [cli, 'manifests', 'merge-driver']]) {
+    const result = run('spec-markers', program, [b, o, t], shards)
+    assert.equal(result.status, 1, result.stderr)
+    const text = result.output.toString()
+    assert.equal((text.match(/^<<<<<<< ours$/gm) ?? []).length, 1)
+    const blocks = [...text.matchAll(/^<<<<<<< ours\n([\s\S]*?)^\|{7} base\n([\s\S]*?)^=======\n([\s\S]*?)^>>>>>>> theirs$/gm)]
+    assert.deepEqual(blocks[0].slice(1).map(v => JSON.parse(v)), [o.groups[0].specs[0], b.groups[0].specs[0], t.groups[0].specs[0]])
+    const resolved = JSON.parse(text.replace(/^<<<<<<< ours\n([\s\S]*?)^\|{7} base\n[\s\S]*?^=======\n[\s\S]*?^>>>>>>> theirs$/gm, '$1'))
+    assert.equal(resolved.groups[0].gate, false)
+    assert.equal(resolved.groups[0].specs[1].listedTests, 5)
+    assert.ok(resolved.groups[1].specs.some(s => s.file === 'tests/new.spec.ts'))
+    assert.match(result.stderr, /groups.first.specs.tests\/a.spec.ts.weightSeconds: base=10; ours=11; theirs=12/)
+    // Selecting deletion leaves an empty side; markers still locate the row.
+    const deleted = structuredClone(b); deleted.groups[0].specs.shift()
+    const deletion = run('spec-deleted', program, [b, deleted, t], shards)
+    assert.equal(deletion.status, 1, deletion.stderr)
+    assert.match(deletion.output.toString(), /^<<<<<<< ours\n\|{7} base$/m)
   }
 })
