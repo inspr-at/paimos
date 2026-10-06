@@ -683,8 +683,9 @@ test('offline replay CLI prints every real PR with selected counts, effective la
   const report=JSON.parse(result.stdout)
   assert.equal(report.replay.length,80)
   // Measured on the current tree (consumers, migrations); deleted files replay as full.
-  assert.deepEqual(report.transitions,{'full->full':44,'full->essential':20,'essential->essential':16})
-  assert.equal(report.summary.newNarrowed,36)
+  // The merge puts PR 245 over the 1000-case Go consumer bound (openapi fan-out).
+  assert.deepEqual(report.transitions,{'full->full':45,'full->essential':19,'essential->essential':16})
+  assert.equal(report.summary.newNarrowed,35)
   assert.equal(report.summary.oldEssential,16)
   assert.ok(report.summary.fullReasons['CI machinery']>=15)
   for(const row of report.replay) {
