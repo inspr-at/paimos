@@ -244,7 +244,7 @@ func mintKey(t *testing.T, f *harnessFixture, p tenant.Principal, scopes []strin
 	sum := sha256.Sum256([]byte(secret))
 	prefix := strings.ReplaceAll(uid(), "-", "")
 	f.tx(t, p, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'provenance',$3,$4,$5)`, p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]), scopes)
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'provenance',$3,$4,$5,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]), scopes)
 		return err
 	})
 	return "aeon_" + prefix + "_" + secret
