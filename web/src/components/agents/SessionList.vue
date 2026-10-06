@@ -40,16 +40,17 @@ import { DEFAULT_SORT, nextSort, orderForest, readSort, writeSort, type SessionS
 import TierCell from './TierCell.vue'
 import { useServiceTiers } from '../../stores/serviceTiers'
 import { TIER_NAME } from '../../lib/serviceTier'
+import { FILTER_LABEL, matchesFilter, type HeadFilter } from './headCounts'
 const serviceTiers = useServiceTiers()
 
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
 const props = defineProps<{
   history?: SessionView[]; historyState?: 'idle' | 'loading' | 'ready' | 'error'; historyMore?: boolean; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
-  loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean; canLead?: boolean
+  loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean; canLead?: boolean; filter?: HeadFilter | null
 }>()
 const agentRecovery = useAgentRecovery()
-const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: [] }>()
+const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: []; clearFilter: [] }>()
 const showStopped = ref(false)
 // History is a separate, opt-in list of every ended or removed session. The
 // main list keeps only sessions that ended in the last 24 hours (AEON-291).
@@ -58,7 +59,10 @@ const removedCount = computed(() => props.history?.length ?? 0)
 function toggleHistory() {
   showRemoved.value = !showRemoved.value
   if (showRemoved.value) emit('history')
+  // History lists ended sessions; a state filter only applies to the live list.
+  if (showRemoved.value && props.filter) emit('clearFilter')
 }
+watch(() => props.filter, value => { if (value) showRemoved.value = false })
 const removal = useSessionRemoval()
 const current = computed(() => GROUPS.flatMap(g => props.groups[g.id]))
 const stale = computed(() => current.value.map(v => v.session).filter(s => isStale(s, props.now) && removal.canRemove(s)))
@@ -73,15 +77,33 @@ const forest = computed(() => orderForest(sessionForest(showRemoved.value ? prop
 type Bucket = 'attention' | 'live' | 'pausing' | 'paused' | 'stopped'
 const BUCKETS: { id: Bucket; label: string }[] = [{ id: 'attention', label: 'Needs attention' }, { id: 'live', label: 'Live' }, { id: 'pausing', label: 'Pausing' }, { id: 'paused', label: 'Paused' }, { id: 'stopped', label: 'Ended' }]
 const bucketOf = (group: SessionGroup): Bucket => group === 'stopped' ? 'stopped' : group === 'pausing' ? 'pausing' : group === 'paused' ? 'paused' : group === 'working' || group === 'idle' ? 'live' : 'attention'
+// A head count's filter (AEON-780) keeps matching sessions and their ancestors,
+// which stay as dimmed context, unfolded.
+const filtering = computed(() => showRemoved.value ? null : props.filter ?? null)
+const kept = computed(() => {
+  const ids = new Set<string>()
+  const active = filtering.value
+  if (!active) return ids
+  const walk = (branch: Branch): boolean => {
+    const below = branch.children.map(walk).some(Boolean)
+    const keep = below || matchesFilter(branch.view, active)
+    if (keep) ids.add(branch.view.session.id)
+    return keep
+  }
+  forest.value.forEach(walk)
+  return ids
+})
+const keeps = (branch: Branch) => !filtering.value || kept.value.has(branch.view.session.id)
+const contextOnly = (view: SessionView) => !!filtering.value && !matchesFilter(view, filtering.value)
 const roots = (bucket: Bucket) => showRemoved.value
   ? (bucket === 'stopped' ? forest.value : [])
-  : forest.value.filter(branch => bucketOf(branch.group) === bucket)
+  : forest.value.filter(branch => bucketOf(branch.group) === bucket && keeps(branch))
 const expanded = ref<Record<string, boolean>>({})
 const history = ref<Record<string, boolean>>({})
 const containsSelected = (branch: Branch): boolean => branch.view.session.id === props.selected || branch.children.some(containsSelected)
 // A direct link may reveal its selected row, but never its stopped siblings.
-const candidates = (branch: Branch) => branch.children.filter(child => showRemoved.value || history.value[branch.view.session.id] || child.liveCount > 0 || child.view.status.state === 'paused' || containsSelected(child))
-const isExpanded = (branch: Branch): boolean => candidates(branch).length > 0 && (expanded.value[branch.view.session.id] ?? true)
+const candidates = (branch: Branch) => filtering.value ? branch.children.filter(keeps) : branch.children.filter(child => showRemoved.value || history.value[branch.view.session.id] || child.liveCount > 0 || child.view.status.state === 'paused' || containsSelected(child))
+const isExpanded = (branch: Branch): boolean => candidates(branch).length > 0 && (!!filtering.value || (expanded.value[branch.view.session.id] ?? true))
 function toggle(branch: Branch) {
   const id = branch.view.session.id
   expanded.value[id] = !isExpanded(branch)
@@ -110,7 +132,7 @@ const visible = (group: Bucket) => {
     }
   }
   for (const branch of roots(group)) {
-    if (group !== 'stopped' || showRemoved.value || showStopped.value || containsSelected(branch)) {
+    if (group !== 'stopped' || showRemoved.value || showStopped.value || !!filtering.value || containsSelected(branch)) {
       walk(branch, [])
       out[out.length - 1]!.familyEnd = true
     }
@@ -318,6 +340,7 @@ defineExpose({ toggleHistory })
   <section class="sessions glass-card" aria-labelledby="sessions-title">
     <header class="card-head">
       <h2 id="sessions-title">{{ showRemoved ? 'History' : 'Sessions' }}</h2>
+      <span v-if="filtering" class="filter-chip"><span class="chip-main">State<span class="chip-value">{{ FILTER_LABEL[filtering] }}</span></span><button type="button" class="chip-x" aria-label="Show all sessions" data-tip="Show all sessions · Esc" @click="emit('clearFilter')"><AppIcon name="close" :size="11" /></button></span>
       <span v-if="loaded && state === 'ready'" class="head-tools">
         <button v-if="sort" type="button" class="btn sm ghost quiet-btn" data-tip="Order by state, then start time" @click="resetSort">Default order</button>
         <button
@@ -376,6 +399,7 @@ defineExpose({ toggleHistory })
         </template>
         <span role="columnheader"><span class="sr-only">Actions</span></span>
       </div>
+      <div v-if="filtering && !kept.size" class="group-row filter-empty" role="row"><span role="cell">No session is {{ FILTER_LABEL[filtering].toLowerCase() }} right now.</span></div>
       <template v-for="group in BUCKETS" :key="group.id">
         <div v-if="roots(group.id).length" class="group-row" :class="group.id" role="row">
           <span role="rowheader" class="group-label">
@@ -391,7 +415,7 @@ defineExpose({ toggleHistory })
           :draggable="permittedWorker(view) && !moving"
           :data-drop-target="dragged && targetFor(dragged, view) ? 'true' : undefined"
           @dragstart="startDrag($event, view)" @dragend="endDrag" @dragover="dragOver($event, view)" @dragleave="dropOver = ''" @drop="drop($event, view)"
-          :class="[view.status.group, { 'drop-over': dropOver === view.session.id, worker: depth > 0, family, 'family-start': family && !depth, 'family-end': family && familyEnd, active: cursor === `s:${view.session.id}`, selected: selected === view.session.id }]" @click="rowClick($event, view.session.id)"
+          :class="[view.status.group, { 'filter-context': contextOnly(view), 'drop-over': dropOver === view.session.id, worker: depth > 0, family, 'family-start': family && !depth, 'family-end': family && familyEnd, active: cursor === `s:${view.session.id}`, selected: selected === view.session.id }]" @click="rowClick($event, view.session.id)"
         >
           <span v-if="depth || open" class="tree-lines" aria-hidden="true">
             <span v-for="(continues, level) in guides" :key="level" class="tree-guide" :class="{ continues, elbow: level === depth - 1, last: level === depth - 1 && !continues }" :style="{ '--level': level }" />
@@ -425,7 +449,7 @@ defineExpose({ toggleHistory })
               <button v-if="stoppedChildren(branch)" type="button" class="worker-toggle history-toggle" :aria-expanded="!!history[view.session.id]" :aria-label="`Show stopped workers of ${view.name}`" @click="toggleStopped(branch)">{{ stoppedChildren(branch) }} stopped</button>
             </span>
             <span v-else-if="branch.children.length" class="worker-tools">
-              <button type="button" class="worker-toggle" :disabled="!candidates(branch).length" :aria-expanded="open" :aria-label="`${open ? 'Collapse' : 'Expand'} ${workerLabel(branch)} of ${view.name}: ${workingChildren(branch)} working`" @click="toggle(branch)">
+              <button type="button" class="worker-toggle" :disabled="!candidates(branch).length || !!filtering" :aria-expanded="open" :aria-label="`${open ? 'Collapse' : 'Expand'} ${workerLabel(branch)} of ${view.name}: ${workingChildren(branch)} working`" @click="toggle(branch)">
                 <AppIcon name="chevron-right" :size="12" class="chev" :class="{ turned: open }" />{{ workingChildren(branch) }} working
               </button>
               <template v-if="otherChildren(branch)"><span aria-hidden="true"> · </span><span class="idle-count">{{ otherChildren(branch) }} other active</span></template>
@@ -536,6 +560,17 @@ defineExpose({ toggleHistory })
 .card-head { display: flex; align-items: baseline; gap: 10px; padding: 14px 18px 10px; }
 .card-head h2 { font-size: 15px; font-weight: 650; }
 .head-tools { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; margin-right: -8px; }
+/* The head count's filter (AEON-780): a teal chip after the title; × or Esc clears it. */
+.filter-chip { display: inline-flex; align-items: stretch; align-self: center; flex: none; height: 28px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.chip-main { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px 0 12px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.chip-value { color: var(--ink); font-weight: 500; }
+.chip-value::before { content: '·'; margin-right: 6px; color: var(--ink-3); }
+.chip-x { display: grid; place-items: center; width: 28px; padding: 0; border: 0; border-radius: 0 999px 999px 0; background: transparent; color: var(--teal-ink); }
+@media (hover: hover) { .chip-x:hover { background: var(--row-hover); } }
+.chip-x:focus-visible { box-shadow: var(--focus-ring); }
+/* Ancestors of a match stay as context: present, unfolded and quiet. */
+.row.filter-context { opacity: .55; }
+.filter-empty { color: var(--ink-3); font-size: 13px; }
 .quiet-btn { color: var(--ink-2); font-weight: 550; }
 .quiet-btn:hover { color: var(--ink); }
 .quiet-btn[aria-pressed="true"] { background: transparent; box-shadow: none; color: var(--ink-2); }
@@ -771,6 +806,8 @@ defineExpose({ toggleHistory })
   /* With Default order showing, the tools take their own line rather than clip. */
   .card-head { flex-wrap: wrap; align-items: center; padding: 6px 10px 2px 18px; }
   .head-tools { flex-wrap: wrap; justify-content: flex-end; }
+  .filter-chip { height: 44px; }
+  .chip-x { width: 44px; }
   .head-tools .btn { min-height: 44px; }
   .sort-bar { padding: 8px 18px; }
   .sort-select { height: 44px; font-size: 16px; }

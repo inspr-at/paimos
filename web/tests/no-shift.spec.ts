@@ -38,9 +38,10 @@ for (const width of [1440, 1024, 390]) {
       interactions: [{ name: 'open merged navigation', run: async () => {
         await more.click()
         const menu = page.getByRole('menu')
-        for (const name of ['Pause all…', 'Resume all…', 'Wind down…', 'Usage', 'Agent keys', 'History', 'Agent settings']) {
-          await expect(menu.getByRole('menuitem').filter({ hasText: name })).toBeVisible()
-        }
+        // AEON-780: "…" keeps five items; Pause all, Resume all, Wind down and History have their one home elsewhere.
+        await expect(menu.getByRole('menuitem')).toHaveText([/^Model preferences/, /^Usage/, /^Decision Desk/, /^Agent keys/, /^Agent settings/])
+        await expect(page.locator('.bulk-tools').getByRole('button', { name: 'Pause all…', exact: true })).toBeVisible()
+        await expect(page.locator('.sessions .head-tools').getByRole('button', { name: /^Show history/ })).toBeVisible()
         await expect(menu.getByRole('menuitem', { name: 'Decision Desk', exact: true })).toHaveAttribute('href', '/decision-desk')
       } }],
     })

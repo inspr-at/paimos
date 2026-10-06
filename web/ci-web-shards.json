@@ -728,6 +728,8 @@
         ,
         {"file":"tests/agents-harness-status.spec.ts","listedTests":26,"weightSeconds":57.707317,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/agents-head.spec.ts","listedTests":3,"weightSeconds":6.658537,"weightSource":"unmeasured-test-rate"}
+        ,
         {"file":"tests/agents-hierarchy.spec.ts","listedTests":6,"weightSeconds":13.317073,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/agents-metadata.spec.ts","listedTests":10,"weightSeconds":22.195122,"weightSource":"unmeasured-test-rate"}

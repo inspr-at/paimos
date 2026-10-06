@@ -100,7 +100,8 @@ test('returning to a visible tab refreshes immediately and failed reads keep the
     document.dispatchEvent(new Event('visibilitychange'))
   })
   await expect(row(page, child)).toContainText('Returned worker', { timeout: 3000 })
-  await expect(page.locator('.live')).toHaveText('Live')
+  // Only a delay is said in the head; once updates land again it goes (AEON-780: no "Live").
+  await expect(page.locator('.page-head .freshness')).toHaveCount(0)
 })
 
 test('a stopped lead with a live grandchild stays visible and direct worker links open their ancestors', async ({ page }) => {
