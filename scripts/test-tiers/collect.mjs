@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'n
 import { resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createHash } from 'node:crypto'
+import { formatManifest } from './manifests.mjs'
 export const root = fileURLToPath(new URL('../../', import.meta.url))
 export const web = resolve(root, 'web')
 export const evidence = resolve(root, 'tmp/test-tiers')
@@ -121,7 +122,5 @@ function collectWebNow() {
 }
 export function saveJSON(path,data) { mkdirSync(resolve(path,'..'),{recursive:true});writeFileSync(path,JSON.stringify(data,null,2)+'\n') }
 export function saveManifest(path,manifest) {
-  const {tests,...metadata}=manifest
-  const header=JSON.stringify(metadata,null,2).slice(0,-2)
-  writeFileSync(path,`${header},\n  "tests": [\n${tests.map(row=>'    '+JSON.stringify(row)).join(',\n')}\n  ]\n}\n`)
+  writeFileSync(path,formatManifest(manifest,relative(root,path)))
 }
