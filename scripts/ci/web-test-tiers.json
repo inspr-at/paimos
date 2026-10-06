@@ -4832,6 +4832,10 @@
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-685: tablet verification control is independent of the status label width","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-716: stalled verification reports the ownership fence and remains retryable after settlement","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"AEON-716: verification warnings preserve offline and account recovery controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Agents at once saves one ceiling and independent harness limits","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/accounts-computers.spec.ts","name":"Check now says what came back: a failure as a failure, still nothing, then the reading","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -11840,6 +11844,8 @@
     ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"six blocked accounts of seven keep the full count and are not labeled ready","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/agent-pairing.test.ts","name":"stalled verification preserves offline, login and setup recovery progress","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"the Nix guide is additive, parsed as published, and never guesses a paired service option","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/agent-pairing.test.ts","name":"the guide uses the server origin and stays available when the session is frozen","tier":"GATED-FULL"}
@@ -13571,6 +13577,14 @@
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"online, no readings yet > each account is ready, and capacity says honestly that nothing was read","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"online, no readings yet > is online, seen just now, with the full identities","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification reporting failures > explains a rejected report without blaming the vendor protocol or exposing raw errors","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification reporting failures > shows a stalled check as a problem without changing its active ownership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification warnings preserve recovery precedence > keeps failed and stalled checks behind sign-in and harness repair commands","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"verification warnings preserve recovery precedence > keeps failed verification behind offline, disconnecting and setup states","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/computer-accounts.unit.test.ts","name":"waits from the server routing > a ranked account with a free slot stays ready","tier":"GATED-FULL"}
     ,

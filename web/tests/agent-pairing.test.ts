@@ -1234,3 +1234,21 @@ test('AEON-623: an account absent from a blocked diagnostic list is not ready', 
   assert.equal(describeEnrollmentStatus(report, { account_id: ACCOUNT_2, harness: 'claude' }), 'Needs attention')
   assert.equal(describeEnrollmentDiagnostic(report, { account_id: ACCOUNT_2, harness: 'claude' }), null)
 })
+
+test('stalled verification preserves offline, login and setup recovery progress', () => {
+  for (const [over, title] of [
+    [{ connectivity: 'offline' }, 'The computer is offline'],
+    [{ setup_state: 'login_required' }, 'Vendor sign-in is needed'],
+    [{ setup_state: 'service_conflict' }, 'Setup found a conflict'],
+    [{ setup_state: 'setup_failed' }, 'Setup did not finish'],
+  ] as const) {
+    const v = view({ state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+      enrollments: [enrollment({ verification_state: 'starting', verification_stalled: true, active_run_ids: [RUN] })], ...over })
+    const progress = describeProgress(v)
+    assert.equal(progress.title, title)
+    assert.equal(progress.renewsAuthority, false)
+    assert.deepEqual(v.enrollments[0].active_run_ids, [RUN])
+  }
+  assert.equal(describeProgress(view({ state: 'redeemed', computer_state: 'connected', setup_state: 'connected', connectivity: 'online',
+    enrollments: [enrollment({ verification_state: 'starting', verification_stalled: true })] })).title, 'Verification stalled')
+})
