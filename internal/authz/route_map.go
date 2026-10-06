@@ -264,6 +264,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/agent-pairing/self/disconnect":                                           "run.claim",
 
 	"GET /api/agent-keys/{id}/scopes":                                        "keys.manage",
+	"POST /api/agent-keys/{id}/adopt":                                        "keys.manage",
 	"PATCH /api/agent-keys/{id}/scopes":                                      "keys.manage",
 	"DELETE /api/agent-keys/{id}":                                            "keys.manage",
 	"DELETE /api/members/invites/{id}":                                       "members.manage",

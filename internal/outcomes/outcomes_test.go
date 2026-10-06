@@ -572,7 +572,7 @@ func inTenant(t *testing.T, d *dbtest.DB, p tenant.Principal, fn func(pgx.Tx) er
 
 func agentKey(t *testing.T, d *dbtest.DB, tenantID, name string, scopes []string) (string, string) {
 	t.Helper()
-	_, id, token, err := auth.OperatorCreateAgentKey(t.Context(), d.App, tenantID, name, "", scopes, nil)
+	_, id, token, err := auth.OperatorCreateAgentKey(t.Context(), d.App, tenantID, name, "", scopes, nil, dbtest.KeyPerson(t, d.App, tenantID))
 	if err != nil {
 		t.Fatal(err)
 	}

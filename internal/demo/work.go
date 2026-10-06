@@ -43,7 +43,7 @@ func (s *seeder) agents() error {
 }
 
 func (s *seeder) agent(name string, scopes []string) (tenant.Principal, string, error) {
-	keyID, agentID, token, err := auth.OperatorCreateAgentKey(s.ctx, s.pool, s.tenantID, name, "", scopes, nil)
+	keyID, agentID, token, err := auth.OperatorCreateAgentKey(s.ctx, s.pool, s.tenantID, name, "", scopes, nil, s.admin.ID)
 	if err != nil {
 		return tenant.Principal{}, "", fmt.Errorf("agent %s: %w", name, err)
 	}

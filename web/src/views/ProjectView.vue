@@ -165,7 +165,12 @@ watch(projectId, id => { queueAnchor.value = null; assigneeMenu.value = null; if
 onMounted(() => queuePoller.start())
 onBeforeUnmount(() => queuePoller.stop())
 function closeQueue(restore: boolean) { const anchor = queueAnchor.value; queueAnchor.value = null; if (restore) anchor?.focus() }
-function openAssignee(row: ListItem, anchor: HTMLElement) { assigneeMenu.value = { row, anchor } }
+async function openAssignee(row: ListItem, anchor: HTMLElement) {
+  const request = peopleGeneration, revision = row.updated_at
+  await loadProjectPeople()
+  if (request !== peopleGeneration || !anchor.isConnected || row.updated_at !== revision) return
+  assigneeMenu.value = { row, anchor }
+}
 function closeAssignee(restore: boolean) { const anchor = assigneeMenu.value?.anchor; assigneeMenu.value = null; if (restore) anchor?.focus() }
 async function assignPerson(value: string) {
   const row = assigneeMenu.value?.row
@@ -803,19 +808,44 @@ function showUpdates() {
   if (!fullView.value && !panel.value?.el?.contains(document.activeElement)) table.value?.focusGrid()
 }
 
-// People who can be assigned: everyone assigned somewhere in this project, and you.
+// Discover everyone assigned in the project only when an assignment menu needs
+// them. Cold ticket navigation must not scan assignees and fetch each name.
 const projectPeople = ref<string[]>([])
-watch(projectId, async id => {
+let peopleGeneration = 0
+let projectPeopleLoad: Promise<void> | null = null
+watch([projectId, () => scopeOwner(session.identity)], () => {
+  peopleGeneration++
   projectPeople.value = []
-  if (!id) return
-  try {
-    const page = await listNodes({ within: id, kind: WORK_KINDS, facets: ['assignee'], limit: 1 })
-    const ids = Object.keys(page.facets?.assignee ?? {}).filter(value => value !== 'none')
-    await list.resolveNames(ids)
-    if (projectId.value === id) projectPeople.value = ids
-  } catch { /* the menu still offers you and Unassigned */ }
-}, { immediate: true })
-const people = computed(() => projectPeople.value.map(id => ({ id, name: list.names.get(id) ?? 'Someone' })))
+  projectPeopleLoad = null
+}, { flush: 'sync' })
+onBeforeUnmount(() => { peopleGeneration++ })
+function loadProjectPeople(): Promise<void> {
+  const id = projectId.value
+  if (!id) return Promise.resolve()
+  if (projectPeopleLoad) return projectPeopleLoad
+  const request = peopleGeneration
+  projectPeopleLoad = (async () => {
+    try {
+      const page = await listNodes({ within: id, kind: WORK_KINDS, facets: ['assignee'], limit: 1 })
+      if (request !== peopleGeneration) return
+      const ids = Object.keys(page.facets?.assignee ?? {}).filter(value => value !== 'none')
+      await list.resolveNames(ids)
+      if (request === peopleGeneration) projectPeople.value = ids
+    } catch {
+      // A later opening retries; already loaded people remain available.
+      if (request === peopleGeneration) projectPeopleLoad = null
+    }
+  })()
+  return projectPeopleLoad
+}
+const people = computed(() => {
+  const known = new Map<string, string>()
+  for (const row of [...list.rows.value, panelItem.value]) {
+    if (row?.project?.id === projectId.value && row.assignee) known.set(row.assignee.id, row.assignee.name)
+  }
+  for (const id of projectPeople.value) known.set(id, list.names.get(id) ?? 'Someone')
+  return [...known].map(([id, name]) => ({ id, name }))
+})
 
 let openedFromList = false
 let openedQuery = ''
@@ -1276,16 +1306,26 @@ watch(() => selected.value.size > 0, on => {
 onBeforeUnmount(() => { frameObserver?.disconnect(); window.removeEventListener('resize', measureFrame) })
 const bulkBusy = ref(false)
 const bulkMenu = ref<{ kind: 'status' | 'assignee' | 'priority' | 'labels' | 'move' | 'release'; anchor: HTMLElement } | null>(null)
+let bulkMenuGeneration = 0
 const releaseIds = ref<string[]>([])
-function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
+async function openBulk(kind: NonNullable<typeof bulkMenu.value>['kind'], anchor?: HTMLElement | null) {
+  const opening = ++bulkMenuGeneration
   const at = anchor ?? document.querySelector<HTMLElement>(`.bulk-bar [aria-keyshortcuts="${{ status: 's', assignee: 'a', priority: 'p', labels: 'l', move: 'm', release: 'g' }[kind]}"]`)
   if (!at) return
   if (kind === 'release') { openRelease(at, liveSelection()); return }
   if (kind === 'labels') void list.requestFacet('tag')
+  if (kind === 'assignee') {
+    const request = peopleGeneration
+    const selection = () => JSON.stringify(selectedRows.value.map(row => [row.id, row.updated_at]))
+    const shown = selection()
+    await loadProjectPeople()
+    if (opening !== bulkMenuGeneration || request !== peopleGeneration || !at.isConnected || selection() !== shown) return
+  }
   if (kind === 'move') void list.loadEpics()
   bulkMenu.value = { kind, anchor: at }
 }
 function closeBulk(restore: boolean) {
+  bulkMenuGeneration++
   const anchor = bulkMenu.value?.anchor
   bulkMenu.value = null
   if (restore) anchor?.focus()
@@ -1319,7 +1359,7 @@ async function runBulk(change: Omit<BulkChange, 'ids'>, done: (count: number) =>
   const gone = new Set(selectedDeleted.value)
   ids = ids.filter(id => !gone.has(id))
   if (!ids.length || bulkBusy.value) return
-  bulkMenu.value = null
+  closeBulk(false)
   bulkBusy.value = true
   try {
     const bulkRows = selectionRows.value
@@ -1406,7 +1446,7 @@ async function undoBulk(eventId: number) {
 const count = (n: number) => plural(n, 'ticket')
 async function bulkStatus(state: string) {
   if (bulkBusy.value) return
-  bulkMenu.value = null
+  closeBulk(false)
   const gated = selectedRows.value.filter(row => needsBenefitPrompt(row, state))
   const gatedIds = new Set(gated.map(row => row.id))
   const ready = [...selected.value].filter(id => !gatedIds.has(id))
@@ -1436,6 +1476,7 @@ function bulkMove(epic: { id: string; key: string; title: string } | null) {
   void runBulk({ parent_id: target }, n => epic ? `Moved ${count(n)} to ${epic.title}` : `Took ${count(n)} out of their epic`)
 }
 function openRelease(anchor: HTMLElement, ids: string[]) {
+  bulkMenuGeneration++
   if (!ids.length || !can('releases.write', project.value?.id)) return
   releaseIds.value = ids
   bulkMenu.value = { kind: 'release', anchor }
@@ -1450,7 +1491,7 @@ async function chooseRelease(target: ReleaseTarget) {
     const row = rows.find(item => item.id === id)
     return { id, key: row?.key ?? id, title: row?.title ?? '', state: row?.state, kind: row?.kind_slug, isParent: releaseViewIsParent(nativeReleases.value.get(id)) }
   })
-  bulkMenu.value = null
+  closeBulk(false)
   const attempt = ++releaseAttempt
   bulkBusy.value = true
   const here = () => attempt === releaseAttempt && project.value?.id === projectId
@@ -1858,7 +1899,7 @@ watch([project, panelItem, knowledgeActive, knowledgeEntryOpen, knowledgeDocked]
         v-if="ticketKey" :key="`${project.id}/${me?.id ?? ''}/${ticketKey.toUpperCase()}`" ref="panel" :item="panelItem" :ticket-key="ticketKey.toUpperCase()" :resolving="panelLoading" :resolve-error="panelError"
         :position="panelPosition" :now="now" :mode="fullView ? 'full' : 'panel'" :project="{ id: project.id, routeKey: project.routeKey }"
         :names="list.names" :me="me" :can-write="writable" :can-delete="nodeDeletable" :can-move="nodeMovable" :can-link="relationLinkable" :can-unlink="relationUnlinkable"
-        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :native-releases="nativeReleases"
+        :can-comment="commentable" :can-delete-comment="commentDeletable" :can-attach="attachable" :people="people" :ensure-people="loadProjectPeople" :native-releases="nativeReleases"
         @close="closePanel" @prev="move(-1)" @next="move(1)" @expand="expand" @collapse="collapse" @new-tab="newTab(panelItem?.key ?? ticketKey)"
         @status="anchor => panelItem && openStatus(panelItem, anchor, 'panel')" @open-key="openRelated" :trail="trail" @trail-back="trailBack" @removed="removed" @created="childCreated" @moved="childMoved" @assigned="() => { void list.load(); void refreshMemberships() }" @retry="resolvePanel"
       />
