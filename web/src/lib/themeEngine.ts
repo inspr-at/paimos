@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Port of the approved AEON-717 theme-settings-d7 colour engine. No DOM/Vue.
 import type { ThemeAccent, ThemeValues } from './themes.ts'
+import type { AgentThemeAppearance } from './agentTheme.ts'
+import { AGENT_PALETTES, AGENT_STATES, normalizeAgentPalette } from './agentPalettes.ts'
+import { nativeIconSize } from './indicatorVariants.ts'
 
 export type ColourMode = 'light' | 'dark'
 export type Triple = [number, number, number]
@@ -109,11 +112,26 @@ const accentTokens = (k: string, r: AccentRoles) => ({
   [`--${k}`]: r.fill, [`--${k}-hi`]: r.hi, [`--${k}-lo`]: r.lo, [`--${k}-on`]: r.on,
   [`--${k}-line`]: r.line, [`--${k}-ink`]: r.ink, [`--${k}-tint`]: r.t1, [`--${k}-tint-2`]: r.t2, [`--${k}-tint-3`]: r.t3,
 })
+export function agentTokens(agents: AgentThemeAppearance, mode: ColourMode): Record<string, string> {
+  const palette = normalizeAgentPalette(agents.palette)
+  const preset = AGENT_PALETTES.find(p => p.id === palette) ?? AGENT_PALETTES[0]!
+  if (palette === 'custom' && !agents.custom_states) throw new TypeError('Custom states need five accents')
+  const colours = AGENT_STATES.map((state, i) => palette === 'custom' ? modeValue(agents.custom_states![state], mode) : preset[mode][i]!)
+  return {
+    ...Object.fromEntries(AGENT_STATES.map((state, i) => [`--agent-${state}`, colours[i]!])),
+    '--agent-idle-opacity': String((agents.dim_inactive ?? true) ? (agents.inactive_opacity ?? 55) / 100 : 1),
+    '--agent-art-scale': String(agents.size == null ? 1 : Math.round(agents.size / nativeIconSize(agents.avatar) * 1000) / 1000),
+  }
+}
+/** Isolated previews and legacy preferences follow their container's color-scheme. */
+export function agentPreviewTokens(agents: AgentThemeAppearance): Record<string, string> {
+  const light = agentTokens(agents, 'light'), dark = agentTokens(agents, 'dark')
+  return Object.fromEntries(Object.entries(light).map(([key, value]) => [key, AGENT_STATES.some(state => key === `--agent-${state}`) ? `light-dark(${value}, ${dark[key]})` : value]))
+}
 export function themeTokens(v: ThemeValues, mode: ColourMode): Record<string, string> {
   const light = mode === 'light', P = roles(modeValue(v.primary, mode), mode), S = roles(modeValue(v.secondary, mode), mode), mk = markerValue(v, mode)
-  // Agent appearance still publishes through agentTheme; AEON-750 owns its new state schema/palettes.
   return {
-    ...accentTokens('primary', P), ...accentTokens('secondary', S), '--marker': mk, '--marker-on': onFor(mk),
+    ...agentTokens(v.agents, mode), ...accentTokens('primary', P), ...accentTokens('secondary', S), '--marker': mk, '--marker-on': onFor(mk),
     '--teal': P.line, '--teal-ink': P.ink, '--aqua': P.t1, '--aqua-2': P.t2, '--aqua-3': P.t3, '--button-ink': P.on, '--level-person': P.line,
     '--row-hover': light ? mix(P.line, 5.5) : mix(P.fill, 6), '--row-selected': light ? mix(P.t1, 30) : mix(P.fill, 11),
     '--chip-teal-bg': light ? `linear-gradient(180deg, #fff, ${P.t2})` : `linear-gradient(180deg, ${mix(P.fill, 20)}, ${mix(P.fill, 10)})`,
@@ -136,5 +154,5 @@ export function themeCss(values: ThemeValues) {
 export const PORCELAIN: ThemeValues = {
   primary: { light: '#0e6f6c', dark: '#a4e5df' }, secondary: { light: '#d69b31', dark: '#e2b45a' },
   recurring_marker: { source: 'secondary', custom: null },
-  agents: { avatar: 'robot-1', ring: null, hover: false, size: null, palette: 'standard' },
+  agents: { avatar: 'robot-1', ring: null, hover: false, size: null, palette: 'standard', custom_states: null },
 }

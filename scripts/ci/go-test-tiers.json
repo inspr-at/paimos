@@ -8066,6 +8066,8 @@
     ,
     {"kind":"go","package":"internal/themes","name":"TestConcurrentCASAndRevocationFence","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/themes","name":"TestCustomAgentStates","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/themes","name":"TestExistingTenantsAndBootstrapGetAuditedPorcelain","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/themes","name":"TestInitialExplicitDefaultPersistsAndWinsAfterLink","tier":"GATED-FULL"}
@@ -8187,6 +8189,10 @@
     {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageGenerationSuccessionAndUnknownEvidence","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageHoldsReleaseAndRetryDoNotDoubleCount","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsagePrivacyIdentifierCIBody","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsagePrivacyIdentifierDigitsAreNotTheQuantity","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/usagedashboard","name":"TestLeadUsageSharedRunNeverAddsLeadAndWorkerCounters","tier":"ESSENTIAL"}
     ,

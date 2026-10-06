@@ -81,7 +81,11 @@ func newWorld(t *testing.T) *world {
 
 func (w *world) project(t *testing.T, p tenant.Principal, key, title string) string {
 	t.Helper()
-	id := uid()
+	return w.projectWithID(t, p, uid(), key, title)
+}
+
+func (w *world) projectWithID(t *testing.T, p tenant.Principal, id, key, title string) string {
+	t.Helper()
 	w.tx(t, p, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,key,kind_id,title) SELECT $1,$2,$3,id,$4 FROM node_kinds WHERE slug='project'`, p.TenantID, id, key, title)
 		return err

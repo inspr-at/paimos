@@ -12284,6 +12284,16 @@ components:
       properties:
         light: {type: string, pattern: '^#[0-9a-fA-F]{6}$'}
         dark: {type: [string, 'null'], pattern: '^#[0-9a-fA-F]{6}$', description: 'Null means derived; explicit Porcelain dark preserves the current look'}
+    ThemeAgentStates:
+      type: object
+      additionalProperties: false
+      required: [working, waiting, throttled, problem, idle]
+      properties:
+        working: {$ref: '#/components/schemas/ThemeAccent'}
+        waiting: {$ref: '#/components/schemas/ThemeAccent'}
+        throttled: {$ref: '#/components/schemas/ThemeAccent'}
+        problem: {$ref: '#/components/schemas/ThemeAccent'}
+        idle: {$ref: '#/components/schemas/ThemeAccent'}
     ThemeValues:
       type: object
       additionalProperties: false
@@ -12302,12 +12312,27 @@ components:
           type: object
           additionalProperties: false
           required: [avatar, ring, hover, size, palette]
+          allOf:
+            - if:
+                properties:
+                  palette: {const: custom}
+                required: [palette]
+              then:
+                required: [custom_states]
+                properties:
+                  custom_states: {$ref: '#/components/schemas/ThemeAgentStates'}
           properties:
             avatar: {type: string, enum: [pulse, robot-1, robot-2, robot-3, robot-4, robot-5, orbit, quill, sprite]}
             ring: {type: [string, 'null'], enum: [moving, still, off, null], description: Null retains the selected style's drawn ring}
             hover: {type: boolean}
             size: {type: [integer, 'null'], minimum: 30, maximum: 100, description: Artwork fullness percentage; null retains the style's drawn size}
-            palette: {type: string, enum: [standard, protan, deutan, tritan, monochrome]}
+            palette: {type: string, enum: [standard, protan, deutan, tritan, monochrome, focus, errors, custom]}
+            custom_states:
+              description: 'Five state accents; required and non-null for custom, retained for other looks. Omitted means null; no migration needed.'
+              default: null
+              oneOf:
+                - type: 'null'
+                - $ref: '#/components/schemas/ThemeAgentStates'
             dim_inactive: {type: boolean, description: 'Dim idle and ended agents; omitted means true'}
             inactive_opacity: {type: integer, minimum: 40, maximum: 80, description: 'Inactive opacity percent; omitted means 55'}
     Theme:
