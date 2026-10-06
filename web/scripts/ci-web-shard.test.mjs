@@ -484,7 +484,7 @@ test('normal CI gates every shared Settings case and records the collected shard
   const collected = flattenBrowser(JSON.parse(result.stdout), config)
   assert.ok(collected.length > 15, 'collect original cases and short-viewport regressions')
   const stored = JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json', import.meta.url), 'utf8'))
-  const manifest = { version: stored.version, tests: stored.tests.filter(row => row.file === file) }
+  const manifest = { version: stored.version, implicitTier: stored.implicitTier, tests: stored.tests.filter(row => row.file === file) }
   const rows = validate(manifest, collected, undefined, { strict: true })
   for (const event of ['pull_request', 'merge_group']) {
     // Shared inputs and unknown impact use this full gate, which used to omit

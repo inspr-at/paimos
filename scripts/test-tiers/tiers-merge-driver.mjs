@@ -6,6 +6,11 @@ import { readFileSync, writeFileSync, statSync, openSync, closeSync, fsyncSync, 
 import { randomUUID } from 'node:crypto'
 
 const manifestPaths = ['scripts/ci/go-test-tiers.json', 'scripts/ci/web-test-tiers.json', 'web/ci-web-shards.json']
+const tiers = ['ESSENTIAL', 'GATED-FULL', 'NIGHTLY']
+const implicitTier = 'GATED-FULL'
+const key = row => row.kind === 'go' ? `${row.package}:${row.name}` : `${row.kind}:${row.file}:${row.name}${row.occurrence===undefined?'':`#${row.occurrence}`}`
+const plainFullRow = row => row.tier === implicitTier && Object.keys(row).every(field =>
+  ['kind', row.kind === 'go' ? 'package' : 'file', 'name', 'tier', ...(row.kind === 'browser' ? ['config', 'project'] : [])].includes(field))
 const compare = (a, b) => a < b ? -1 : a > b ? 1 : 0
 const absent = Symbol('absent')
 class MergeConflictError extends Error {}
@@ -95,11 +100,23 @@ function manifestType(path) {
 function canonicalize(data, file, { rejectDuplicates = false } = {}, allowDuplicateSpecs = false) {
   const shards = manifestType(file)
   if (!object(data) || data.version !== 1 || !Array.isArray(data[shards ? 'groups' : 'tests'])) throw new ManifestInputError(`Expected version 1 manifest: ${file}`)
+  if (!shards) {
+    if (Object.hasOwn(data, 'implicitTier') && data.implicitTier !== implicitTier) throw new ManifestInputError('Expected implicitTier GATED-FULL')
+    if (Object.hasOwn(data, 'defaultNewTier') && data.defaultNewTier !== 'NIGHTLY') throw new ManifestInputError('Invalid legacy defaultNewTier')
+    const { defaultNewTier, ...policy } = data
+    data = { ...policy, implicitTier }
+  }
   function visit(value, path = []) {
     if (path.length > 64) throw new ManifestInputError('Manifest nesting exceeds 64 levels')
     const policy = listPolicy(path, shards)
     if (policy) {
-      const rows = [...rowMap(value, policy, path.join('.'), rejectDuplicates).values()]
+      let rows = [...rowMap(value, policy, path.join('.'), rejectDuplicates).values()]
+      if (!shards && path.length === 1 && path[0] === 'tests') {
+        for (const row of rows) if (!tiers.includes(row.tier)) throw new ManifestInputError(`Invalid tier: ${key(row)}`)
+        // Validate duplicates before dropping redundant registrations. Keep
+        // provisional conflicting rows so their markers cannot disappear.
+        if (!allowDuplicateSpecs) rows = rows.filter(row => !plainFullRow(row))
+      }
       if (!policy.ordered) rows.sort((a, b) => rowCompare(a, b, policy.identity))
       return rows.map(row => visit(row, [...path, policy.identity(row)]))
     }

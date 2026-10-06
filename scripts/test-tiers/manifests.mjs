@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync, statSync, openSync, closeSync, fsyncSync, renameSync, unlinkSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { resolve } from 'node:path'
-import { tiers, key } from './core.mjs'
+import { tiers, key, plainFullRow, implicitTier } from './core.mjs'
 
 export const manifestPaths = ['scripts/ci/go-test-tiers.json', 'scripts/ci/web-test-tiers.json', 'web/ci-web-shards.json']
 export const fixCommand = 'node scripts/test-tiers/cli.mjs manifests --write'
@@ -95,11 +95,23 @@ function manifestType(path) {
 function canonicalize(data, file, { rejectDuplicates = false } = {}, allowDuplicateSpecs = false) {
   const shards = manifestType(file)
   if (!object(data) || data.version !== 1 || !Array.isArray(data[shards ? 'groups' : 'tests'])) throw new ManifestInputError(`Expected version 1 manifest: ${file}`)
+  if (!shards) {
+    if (Object.hasOwn(data, 'implicitTier') && data.implicitTier !== implicitTier) throw new ManifestInputError('Expected implicitTier GATED-FULL')
+    if (Object.hasOwn(data, 'defaultNewTier') && data.defaultNewTier !== 'NIGHTLY') throw new ManifestInputError('Invalid legacy defaultNewTier')
+    const { defaultNewTier, ...policy } = data
+    data = { ...policy, implicitTier }
+  }
   function visit(value, path = []) {
     if (path.length > 64) throw new ManifestInputError('Manifest nesting exceeds 64 levels')
     const policy = listPolicy(path, shards)
     if (policy) {
-      const rows = [...rowMap(value, policy, path.join('.'), rejectDuplicates).values()]
+      let rows = [...rowMap(value, policy, path.join('.'), rejectDuplicates).values()]
+      if (!shards && path.length === 1 && path[0] === 'tests') {
+        for (const row of rows) if (!tiers.includes(row.tier)) throw new ManifestInputError(`Invalid tier: ${key(row)}`)
+        // Validate duplicates before dropping redundant registrations. Keep
+        // provisional conflicting rows so their markers cannot disappear.
+        if (!allowDuplicateSpecs) rows = rows.filter(row => !plainFullRow(row))
+      }
       if (!policy.ordered) rows.sort((a, b) => rowCompare(a, b, policy.identity))
       return rows.map(row => visit(row, [...path, policy.identity(row)]))
     }
@@ -179,7 +191,12 @@ export function checkManifests(root) {
   for (const file of manifestPaths) {
     try {
       const source = readManifest(resolve(root, file))
-      if (source !== formatManifest(JSON.parse(source), file)) failures.push(file)
+      const data = JSON.parse(source)
+      if (file !== manifestPaths[2]) {
+        const redundant = data.tests?.filter(plainFullRow) ?? []
+        if (redundant.length) throw new ManifestInputError(`Redundant plain GATED-FULL row: ${key(redundant[0])} (${redundant.length} rows); omit implicit classifications`)
+      }
+      if (source !== formatManifest(data, file)) failures.push(file)
     } catch (error) { failures.push(`${file}: ${error.message}`) }
   }
   if (failures.length) throw new ManifestInputError(`Noncanonical CI manifests:\n${failures.join('\n')}\nFix: ${fixCommand}`)
@@ -198,11 +215,13 @@ export function classifyManifest(manifest, discovered, { tier, only } = {}) {
   const declared = rowMap(manifest.tests, { identity: testIdentity }, 'tests', true)
   const found = rowMap(discovered, { identity: testIdentity }, 'inventory', true)
   const added = []
-  for (const [id, row] of found) if (!declared.has(id) && (only === undefined || key(row).includes(only))) {
+  for (const [id, row] of found) if ((!declared.has(id) || tier === implicitTier) && (only === undefined || key(row).includes(only))) {
     const { leaf, line, id: nativeId, active, file, ...entry } = row
-    added.push({ ...entry, ...(row.kind === 'go' ? {} : { file }), tier })
+    const updated = { ...entry, ...(row.kind === 'go' ? {} : { file }), ...declared.get(id), tier }
+    declared.set(id, updated)
+    added.push(updated)
   }
-  return { manifest: { ...manifest, tests: [...manifest.tests, ...added] }, added }
+  return { manifest: { ...manifest, implicitTier, tests: [...declared.values()].filter(row => !plainFullRow(row)) }, added }
 }
 
 export function mergeManifests(base, ours, theirs, file) {

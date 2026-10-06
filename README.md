@@ -989,25 +989,29 @@ PRs keep their existing per-PR cancellation, while each queue and manual run
 keeps a unique group. Required checks remain `go`, `web`, `release-check` and
 `e2e`; the external `gate/cross-family` status is unchanged.
 
-Test tiers (AEON-681): full-lane PRs and merge groups run ESSENTIAL plus changed-area
+Test tiers (AEON-681): mapped PRs run ESSENTIAL plus changed-area
 cases; Go reverse dependencies add at most 300 extra cases. There are three tiers:
-ESSENTIAL is the approved core; GATED-FULL retains the other previously gated Go,
-unit and browser cases; NIGHTLY includes the never-gated browser catalogue.
-Shared inputs, uncertain impact, main/manual CI and explicit `--full` select
-exactly ESSENTIAL + GATED-FULL. Browser gate membership comes from OPS-257's
-`gate:true` groups in `web/ci-web-shards.json`, with approved ESSENTIAL promotions
-preserved. Mapped changed-area selection still includes optional cases in the
+ESSENTIAL is the approved core; GATED-FULL is implicit for every unlisted test;
+NIGHTLY explicitly defers reviewed cases, including the legacy optional browser
+catalogue. Merge groups, shared inputs, uncertain impact, main/manual CI and
+explicit `--full` select exactly ESSENTIAL + GATED-FULL. Existing browser
+exceptions preserve OPS-257's reviewed gate membership and ESSENTIAL promotions;
+new discoveries gate even in an optional launch group. Launch configuration stays
+in `web/ci-web-shards.json`. Mapped changed-area selection includes optional cases in the
 affected area. Unknown impact widens to the established full gate.
 Reports name the selection `scope` (`gated-full`, `catalogue` or `changed-area`) and count
 `deferredBrowserCases`; deferred cases are not reported as passes or skips.
-Classifications live in the [Go manifest](scripts/ci/go-test-tiers.json)
+Tier exceptions and scheduling/deletion metadata live in the [Go manifest](scripts/ci/go-test-tiers.json)
 and [web manifest](scripts/ci/web-test-tiers.json). Use
 `node scripts/test-tiers/cli.mjs classify go` (or `web`) for new NIGHTLY cases,
 then `check`. CI reconciles manifests at runtime: unlisted cases default to
-NIGHTLY, stale entries are dropped, and named Actions warnings report the drift.
-New cases retain changed-area and nightly coverage without requiring
-manifest edits in each PR. A separate scheduled classification check runs
-`check go --strict` and `check web --strict` to report cases needing classification;
+GATED-FULL (`implicitTier` is validated), stale explicit entries are dropped,
+and named Actions warnings report only stale exceptions. New cases gate full CI
+without manifest edits. Plain GATED-FULL rows are omitted by the canonical writer;
+`classify --tier GATED-FULL` removes matching plain exceptions. Implicit browser
+routing follows native discovery; explicit rows retain the config/project fence.
+A separate scheduled classification check runs
+`check go --strict` and `check web --strict` to report stale exceptions;
 it does not gate PRs or the nightly test jobs. Remove stale entries when updating
 the stored manifests. Malformed entries and known-flaky ESSENTIAL cases still
 fail validation. New browser specs also need a

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { key, tiers } from './core.mjs'
+import { key, tiers, resolvedTier } from './core.mjs'
 
 export function reportCases(selected, outcomes, seconds, job) {
   const seen = new Map()
@@ -9,10 +9,10 @@ export function reportCases(selected, outcomes, seconds, job) {
   }
   const classes = {}
   for (const tier of tiers) {
-    const rows = selected.filter(row=>row.tier===tier)
+    const rows = selected.filter(row=>resolvedTier(row)===tier)
     const tally = { selected:rows.length,run:0,passed:0,skipped:0,failed:0,notRun:0,platformInactive:0 }
     for (const row of rows) {
-      if (!row.active && row.kind==='go') { tally.platformInactive++;tally.skipped++;continue }
+      if (row.active === false && row.kind==='go') { tally.platformInactive++;tally.skipped++;continue }
       const outcome = seen.get(key(row))
       if (!outcome) { tally.notRun++;continue }
       if (outcome.started) tally.run++

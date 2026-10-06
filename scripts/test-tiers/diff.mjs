@@ -6,7 +6,7 @@ import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { command, root } from './collect.mjs'
 import { boundedText, inputMetadata, readInput, inputBounds } from './inputs.mjs'
-import { reverseDependants, webGraph, impactRisk, validImpactPaths, manifestPromotions, tierManifestPattern } from './core.mjs'
+import { reverseDependants, webGraph, impactRisk, validImpactPaths, manifestPromotions, tierManifestPattern, key, implicitTier, validateImplicitTier } from './core.mjs'
 
 export function changedPaths(event, env=process.env, { fetchBase=false, exec=command }={}) {
   if (!['pull_request','merge_group'].includes(event)) return undefined
@@ -101,7 +101,25 @@ export function promotionsBetween(base,{cwd=root,exec=command,baseDirectory}={})
   } catch { return undefined }
 }
 
-export function schedulingDecision(event,paths,exists,{affectedLane,graph,checkout=root,base,tree,promotions,readFile}={}) {
+// The trusted lightweight planner has no Go compiler or web dependencies.
+// Count every Test/Fuzz identifier in its bounded test-source snapshot. This
+// includes references/comments/inactive files: an upper bound also handles
+// comments between declaration tokens and Unicode Go identifiers safely.
+export function planningGoCases(manifest, tree) {
+  if (!manifest) return []
+  validateImplicitTier(manifest)
+  const declared = new Map(manifest.tests.map(row => [key(row), row]))
+  const rows = new Map()
+  for (const [file, text] of tree?.go ?? []) if (file.endsWith('_test.go')) {
+    for (const match of text.matchAll(/(?:Test|Fuzz)[\p{L}\p{N}_]*/gu)) {
+      const row = { kind: 'go', package: file.slice(0, file.lastIndexOf('/')), name: match[0], tier: implicitTier }
+      rows.set(key(row), { ...row, ...declared.get(key(row)) })
+    }
+  }
+  return [...rows.values()]
+}
+
+export function schedulingDecision(event,paths,exists,{affectedLane,graph,checkout=root,base,tree,promotions,readFile,tests}={}) {
   exists??=path=>existsSync(resolve(checkout,path))
   const full=reason=>({mode:'full',layout:'full',reason})
   if(event!=='pull_request'||!Array.isArray(paths)) return full('full event or missing diff')
@@ -114,7 +132,12 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
     if(promotions===undefined&&paths.some(path=>tierManifestPattern.test(path))) promotions=promotionsBetween(base,{cwd:checkout})
   }
   const manifests=on?manifestsAt(file=>existsSync(resolve(checkout,file))?readFileSync(resolve(checkout,file),'utf8'):undefined):{}
-  const tests=on?Object.values(manifests).flatMap(manifest=>manifest.tests??[]):[]
+  if (on && !tests?.some(row=>row.kind==='go')) {
+    if (!manifests.go) return full('Go tier policy unavailable for fan-out')
+    // A web runner's native inventory cannot prove Go consumer counts.
+    tests = [...planningGoCases(manifests.go, tree), ...(tests ?? [])]
+  }
+  tests ??= []
   const risk=impactRisk(paths,{event,affectedLane,webImports:graph,tree,promotions,tests,
     readFile:readFile??(path=>exists(path)?boundedText(checkout,path):undefined)})
   if(risk.full)return full(risk.reasons.join('; ')||'full event or uncertain impact')
@@ -132,8 +155,13 @@ export function schedulingDecision(event,paths,exists,{affectedLane,graph,checko
     if(webChanges.some(file=>file.startsWith('src/'))&&![...impacted].some(file=>/^tests\/.*\.(?:spec|test)\.ts$/.test(file)))return full('web module has no mapped test importer')
     // Large mapped fan-outs use the old full layout too. The tier selector
     // still records the exact essential/changed union within those runners.
-    const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))
-    if(manifest.tests.filter(row=>row.kind==='browser'&&impacted.has(row.file)).length>300)return full('browser fan-out exceeds 300 cases')
+    // Native inventory can prove the bound. Without it, exception rows are
+    // never a complete browser count: widen for any impacted browser spec.
+    if ([...impacted].some(file => file.endsWith('.spec.ts'))) {
+      const browser = tests.filter(row => row.kind === 'browser')
+      if (!browser.length) return full('browser fan-out unavailable without native inventory')
+      if(browser.filter(row=>impacted.has(row.file)).length>300)return full('browser fan-out exceeds 300 cases')
+    }
   }
   return {mode:'essential',layout:risk.layout,reason:risk.reasons.join('; ')||'essential plus changed area and reverse dependencies'}
 }

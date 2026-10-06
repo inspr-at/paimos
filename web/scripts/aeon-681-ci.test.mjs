@@ -9,7 +9,8 @@ import { command, root, web, evidence, flattenBrowser, collectWeb } from '../../
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { registerHooks } from 'node:module'
-import { validate, key, select } from '../../scripts/test-tiers/core.mjs'
+import { validate, key, select, shard } from '../../scripts/test-tiers/core.mjs'
+import { tierWeights } from './ci-web-shard.mjs'
 
 test('native full CI planning retains the OPS-257 gate and essential promotions without gating the optional catalogue',async()=>{
   // Every planner call sees the same unchanged tree. Collect it natively once,
@@ -31,13 +32,27 @@ export const collectWeb = () => (${JSON.stringify(inventory)});`
     const options={event:'pull_request',paths:['.github/workflows/ci.yml']}
     const selection=plan('web',options)
     const browser=selection.all.filter(row=>row.kind==='browser')
-    const declared=new Map(JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8')).tests.map(row=>[key(row),row]))
+    const declared=new Map(browser.map(row=>[key(row),row]))
     const expected=browser.filter(row=>row.tier==='ESSENTIAL'||(gated.has(row.file)&&declared.get(key(row))?.tier==='GATED-FULL'))
     assert.ok(browser.length>expected.length,'Fixture must include optional nonessential registrations')
     assert.deepEqual(selection.tests.map(key).sort(),expected.map(key).sort())
     assert.equal(selection.full,true)
     assert.equal(selection.scope,'gated-full')
     assert.equal(selection.deferredBrowserCases,browser.length-expected.length)
+    // Full native inventories, rather than exception rows or owner fixtures,
+    // prove both browser timing balance and unit registration balance.
+    const weights=tierWeights(policy,selection.tests)
+    const browserBins=Array.from({length:12},(_,i)=>shard(selection.tests,i+1,12,weights))
+    assert.deepEqual(browserBins.flat().map(key).sort(),expected.map(key).sort())
+    const loads=browserBins.map(bin=>[...new Set(bin.map(row=>row.file))].reduce((sum,file)=>sum+weights[file],0)).filter(value=>value>0).sort((a,b)=>a-b)
+    assert.ok(loads.length>0)
+    const middle=(loads[Math.floor((loads.length-1)/2)]+loads[Math.floor(loads.length/2)])/2
+    assert.ok(loads.at(-1)<=1.25*middle,`Hosted native scheduling estimates: ${loads}`)
+    const units=select(selection.all,{event:'merge_group'}).tests.filter(row=>row.kind!=='browser')
+    const unitBins=Array.from({length:4},(_,i)=>shard(units,i+1,4))
+    assert.deepEqual(unitBins.flat().map(key).sort(),units.map(key).sort())
+    const sizes=unitBins.map(bin=>bin.length).sort((a,b)=>a-b)
+    assert.ok(sizes[3]<=1.3*(sizes[1]+sizes[2])/2,`Native unit registration balance: ${sizes}`)
     // Workflow fan-out and explicit --full both retain the established gate.
     const original=process.env.AEON_TEST_TIER_MODE,log=console.log,output=[]
     try {
@@ -68,12 +83,12 @@ test('native Node and Vitest selectors execute the requested registrations, rath
   const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json'),'utf8'))
   const node=manifest.tests.find(row=>row.tier==='ESSENTIAL'&&row.file==='tests/access.test.ts')
   const vitest=manifest.tests.find(row=>row.tier==='ESSENTIAL'&&row.file==='tests/authz.unit.test.ts')
-  const nested=manifest.tests.find(row=>row.file==='tests/kind-convert.test.ts')
+  const nested=JSON.parse(command(process.execPath,['--import',resolve(root,'scripts/test-tiers/node-collect-hook.mjs'),resolve(root,'scripts/test-tiers/node-collect.mjs'),resolve(web,'tests/kind-convert.test.ts')],{cwd:web})).map(row=>({...row,kind:'node',file:'tests/kind-convert.test.ts',tier:'GATED-FULL'}))[0]
   assert.ok(node);assert.ok(vitest);assert.ok(nested)
   // Collection must evaluate parameter registrations without executing bodies.
   const collected=JSON.parse(command(process.execPath,['--import',resolve(root,'scripts/test-tiers/node-collect-hook.mjs'),
     resolve(root,'scripts/test-tiers/node-collect.mjs'),resolve(web,node.file)],{cwd:web}))
-  const reconciled=validate({version:1,tests:manifest.tests.filter(row=>row.file===node.file)},collected.map(row=>({...row,kind:'node',file:node.file})))
+  const reconciled=validate({version:1,implicitTier:'GATED-FULL',tests:manifest.tests.filter(row=>row.file===node.file)},collected.map(row=>({...row,kind:'node',file:node.file})))
   assert.deepEqual(reconciled.map(key).sort(),collected.map(row=>key({...row,kind:'node',file:node.file})).sort())
   assert.ok(collected.some(row=>row.name===node.name))
   const rows=[node,vitest,nested]
@@ -102,11 +117,11 @@ test('native browser selectors cover reconciled essentials and every collected f
     const rows=flattenBrowser(JSON.parse(command(process.execPath,['node_modules/@playwright/test/cli.js','test','-c',config,'--list','--reporter=json'],{cwd:web})),config)
     all.push(...rows.filter(row=>config!=='playwright.ui.config.ts'||row.file!=='tests/performance.spec.ts'))
   }
-  const reconciled=validate({version:1,tests:manifest.tests.filter(row=>row.kind==='browser')},all)
+  const reconciled=validate({version:1,implicitTier:'GATED-FULL',tests:manifest.tests.filter(row=>row.kind==='browser')},all)
   assert.deepEqual(reconciled.map(key).sort(),all.map(key).sort())
   const tiers=new Map(reconciled.map(row=>[key(row),row.tier]))
   const declared=new Map(manifest.tests.filter(row=>row.kind==='browser').map(row=>[key(row),row]))
-  for(const row of reconciled) assert.equal(row.tier,declared.get(key(row))?.tier??'NIGHTLY',key(row))
+  for(const row of reconciled) assert.equal(row.tier,declared.get(key(row))?.tier??'GATED-FULL',key(row))
   const groups=JSON.parse(readFileSync(resolve(web,'ci-web-shards.json'),'utf8')).groups
   for(const mode of ['essential','full','all']) {
     let total=0
@@ -126,7 +141,7 @@ test('native browser selectors cover reconciled essentials and every collected f
   }
 })
 
-test('AEON-648 work Node registrations have explicit tiers and remain in changed-area and nightly runs',()=>{
+test('AEON-648 work Node registrations resolve tiers and remain in changed-area and nightly runs',()=>{
   const manifest=JSON.parse(readFileSync(resolve(root,'scripts/ci/web-test-tiers.json')))
   for(const file of ['tests/done-gate.test.ts','tests/release-membership.test.ts','tests/work-aggregates.test.ts',
     'tests/work-surfaces-fix4.test.ts','tests/work-vocabulary.test.ts']) {
@@ -134,7 +149,7 @@ test('AEON-648 work Node registrations have explicit tiers and remain in changed
       resolve(root,'scripts/test-tiers/node-collect.mjs'),resolve(web,file)],{cwd:web}))
       .map(row=>({...row,kind:'node',file}))
     assert.ok(collected.length>0,file)
-    const declared={version:1,tests:manifest.tests.filter(row=>row.file===file)}
+    const declared={version:1,implicitTier:'GATED-FULL',tests:manifest.tests.filter(row=>row.file===file)}
     const rows=validate(declared,collected,undefined,{strict:true})
     for(const event of ['pull_request','merge_group']) {
       const changed=select(rows,{event,paths:[`web/${file}`],webImports:{[file]:[]}})
@@ -154,7 +169,7 @@ test('AEON-648 work Node registrations have explicit tiers and remain in changed
   }
 })
 
-test('default check command warns once per unclassified native work-node case and exits zero', () => {
+test('default check command gates every implicit native work-node case without warnings', () => {
   const manifest = JSON.parse(readFileSync(resolve(root, 'scripts/ci/web-test-tiers.json'), 'utf8'))
   const cases = []
   for (const file of ['tests/done-gate.test.ts', 'tests/release-membership.test.ts', 'tests/work-aggregates.test.ts',
@@ -178,7 +193,7 @@ export const collectWeb = () => (${JSON.stringify({ tests: [known, ...cases] })}
 import { registerHooks, syncBuiltinESMExports } from 'node:module';
 const read = fs.readFileSync;
 fs.readFileSync = function(path, ...args) {
-  if (String(path) === ${JSON.stringify(resolve(root, 'scripts/ci/web-test-tiers.json'))}) return ${JSON.stringify(JSON.stringify({ version: 1, tests: [known] }))};
+  if (String(path) === ${JSON.stringify(resolve(root, 'scripts/ci/web-test-tiers.json'))}) return ${JSON.stringify(JSON.stringify({ version: 1, implicitTier: 'GATED-FULL', tests: [known] }))};
   return read.call(this, path, ...args);
 };
 syncBuiltinESMExports();
@@ -195,11 +210,10 @@ registerHooks({ resolve(specifier, context, next) {
   assert.ifError(result.error)
   assert.equal(result.status, 0, result.stderr)
   const warnings = result.stderr.trim().split('\n').filter(Boolean)
-  assert.equal(warnings.length, cases.length, result.stderr)
-  const expected = cases.map(row => `::warning::Unclassified test (defaults to NIGHTLY; classify these): ${key(row)}`
-    .replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A'))
-  assert.deepEqual(warnings.sort(), expected.sort())
+  assert.equal(warnings.length, 0, result.stderr)
+  assert.deepEqual(warnings, [])
   const summary = JSON.parse(result.stdout)
-  assert.equal(summary.inventory.NIGHTLY, cases.length + (known.tier === 'NIGHTLY' ? 1 : 0))
+  assert.equal(summary.inventory['GATED-FULL'], cases.length + (known.tier === 'GATED-FULL' ? 1 : 0))
+  assert.equal(summary.inventory.NIGHTLY, known.tier === 'NIGHTLY' ? 1 : 0)
   assert.equal(Object.values(summary.inventory).reduce((sum, n) => sum + n, 0), cases.length + 1)
 })

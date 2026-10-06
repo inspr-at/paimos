@@ -51,7 +51,7 @@ export function plan(kind,{event=process.env.GITHUB_EVENT_NAME??'pull_request',p
   const tree=on?sourceTree(root):undefined
   const promotions=on&&paths.some(path=>tierManifestPattern.test(path))?promotionsBetween(eventBase(),{cwd:root}):undefined
   const readFile=path=>boundedText(root,path)
-  const candidate=schedulingDecision(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined,tree,promotions})
+  const candidate=schedulingDecision(event,paths,undefined,{affectedLane,graph:kind==='web'||affectedLane==='on'?graph:undefined,tree,promotions,tests:all})
   const selection=runnerSelection(all,{event,paths,imports:inventory.imports,affectedLane,
     forceFull:full,forceAll:catalogue,webImports:graph,tree,promotions,readFile},candidate,
     {mode:plannerMode,layout:plannerLayout})

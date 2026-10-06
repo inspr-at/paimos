@@ -1890,7 +1890,27 @@ AEON-655 ledger entry remains a coordinator action. Linux browser CI and
 OPS-247 remain unverified; local single-file Chromium evidence is not a
 replacement release gate. This fix round neither pushes to origin nor deploys.
 
-## Merge-friendly CI manifests (OPS-257 L13, stage 1)
+## Implicit full CI tiers and merge-friendly manifests (OPS-257 L13)
+
+`implicitTier` must be `GATED-FULL`. Every unlisted discovered Go, Node, Vitest
+or browser registration gates full CI immediately, including new tests. The
+manifests list ESSENTIAL and NIGHTLY exceptions plus full rows with additional
+metadata (deletion tags, timing lanes, occurrence or other fields). Plain full
+rows are redundant: `--write` omits them and `--check` names them as errors.
+Timing weights, post-gate history and deletion candidate groups remain intact.
+Runtime checks warn only about stale explicit rows, which drop in memory;
+`check --strict` rejects those stale exceptions, not new implicit tests.
+
+Implicit browser rows use config/project from native discovery. Moving their
+routing cannot demote them: they still gate, and launch policy validation still
+checks their file. Explicit exception/metadata rows retain the config/project
+change fence. A new browser file still needs its launch policy. The lightweight
+trusted planner counts Go Test/Fuzz identifiers from its bounded test-source
+snapshot, including references, comments and inactive candidates conservatively.
+Without a native browser inventory it widens impacted browser specs to full rather than counting only
+exceptions. Runners with native inventories retain the 300-case fan-out bound.
+Removing a NIGHTLY exception promotes that registration to full and must execute
+it in the affected lane; exception removal never narrows the gate.
 
 Maintain `scripts/ci/{go,web}-test-tiers.json` and `web/ci-web-shards.json`
 with `node scripts/test-tiers/cli.mjs manifests --write`; verify with
@@ -1899,9 +1919,14 @@ with `node scripts/test-tiers/cli.mjs manifests --write`; verify with
 tests are outside the dynamically collected Go and `web/tests/` inventories.
 No workflow command or static-check registry changes are needed.
 `node scripts/test-tiers/prove-manifests.mjs [FULL_BASE_SHA]` independently
-compares against the local pre-conversion commit (default: HEAD), allowing only
-row-list order changes. It checks every tier, timing weight and metadata value,
-retains duplicate multiplicity, and emits the base SHA and row counts as JSON.
+compares against the local pre-conversion commit (default: HEAD), checks retained
+exception data and every weight/metadata value, and collects native registrations
+without launching browsers. It compares resolved tiers and full, essential and
+catalogue selections against that commit's selector, names previously unlisted
+cases strengthened from NIGHTLY to full, and estimates their added serial runtime
+from existing owner/file measurements (unmeasured Go/unit cases use one second).
+It emits the base SHA, removed rows, selection counts and strengthened identities
+as JSON. Run in the offline Go development shell when Go is absent from PATH.
 
 Tests sort by `(kind, owner, name, occurrence)` using ordinal comparison: owner
 is package for Go and file for every other kind, even if a row carries package
@@ -1931,10 +1956,20 @@ node scripts/test-tiers/cli.mjs classify --tier NIGHTLY --kind web
 
 `--kind` omitted covers both inventories. `--only` is a literal substring of
 the existing discovery identity (package/file/name), not a regular expression.
-Known rows retain their classifications; unmatched and stale rows retain the
-existing runtime warning/default policy. Known-flaky ESSENTIAL restrictions still
-apply. Legacy `classify go|web` keeps its NIGHTLY default and strict stale check,
-and now writes canonical form. Web discovery lists cases without launching browsers.
+ESSENTIAL/NIGHTLY classification adds only new matching exceptions and preserves
+known classifications. `--tier GATED-FULL` resets matching existing exceptions to
+the implicit full tier: plain rows disappear, additional metadata stays. Unmatched
+rows retain their policy. Known-flaky ESSENTIAL restrictions still apply. Legacy
+`classify go|web` keeps its explicit NIGHTLY choice and strict stale check, and
+writes canonical form. Web discovery lists cases without launching browsers.
+
+The driver accepts old `defaultNewTier: NIGHTLY` sides and explicit plain full
+rows, normalizing each side to the new exception layout before the keyed merge.
+An old side's plain full additions disappear; its ESSENTIAL/NIGHTLY edit beats
+an unchanged side. Divergent exception or metadata edits remain conflicts.
+OPS merges stage 2 only after release 124 is cut. Native equivalence, strengthened
+case names, runtime estimates and command results are recorded in
+[the stage-2 evidence](qa/ops-257-l13-stage2-evidence.json).
 
 Once per clone, install the self-contained driver at a stable absolute path
 outside the repository, then configure local merge-main rounds. This copy uses
