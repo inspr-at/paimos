@@ -734,9 +734,15 @@ func TestStaleQueueSessionEligibility(t *testing.T) {
 				return err
 			}
 			_, err := tx.Exec(t.Context(), `INSERT INTO harness_sessions(tenant_id,project_id,agent_principal_id,ticket_node_id,harness,host,management,role,work_shape,ref_digest,lease_digest,phase,stopped_at,stop_reason)
- VALUES($1,$2,$3,$4,'codex','local','unmanaged','worker','ship',$6,decode(repeat('cd',32),'hex'),CASE WHEN $5 THEN 'stopped' ELSE 'working' END,CASE WHEN $5 THEN now() END,CASE WHEN $5 THEN 'exited' END)`, f.person.TenantID, project, f.agent.ID, id, stopped, []byte(id[:32]))
+ VALUES($1,$2,$3,$4,'codex','local','unmanaged','worker','ship',$6,decode(repeat('cd',32),'hex'),CASE WHEN $5 THEN 'stopped' ELSE 'working' END,CASE WHEN $5 THEN now() END,CASE WHEN $5 THEN 'process_exited' END)`, f.person.TenantID, project, f.agent.ID, id, stopped, []byte(id[:32]))
 			return err
 		})
+		// Use the harness's canonical confirmed-exit reason, and prove that
+		// the fixture establishes the same exit fence enforced by mutation.
+		confirmed := f.count(t, f.person, `SELECT count(*) FROM harness_sessions WHERE ticket_node_id=$1 AND aeon_work_session_stopped(stopped_at,stop_reason)`, id)
+		if (confirmed == 1) != stopped {
+			t.Fatal("fixture did not establish the expected session exit evidence")
+		}
 		var ready struct{ Queueable, Stale bool }
 		f.call(t, f.person, "GET", "/api/queue/"+id+"/readiness", nil, 200, &ready)
 		if ready.Queueable != stopped || ready.Stale != stopped {
