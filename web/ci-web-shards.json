@@ -541,6 +541,8 @@
         {"file":"tests/model-provider.spec.ts","listedTests":3,"tierTiming":{"caseSeconds":{"max":3.347,"median":1.572,"min":0.533},"seconds":7.45261,"selectedTests":3},"weightSeconds":10.5,"weightSource":"e2e-4"}
         ,
         {"file":"tests/model-refresh.spec.ts","listedTests":1,"tierTiming":{"caseSeconds":{"max":4.248,"median":4.248,"min":4.248},"seconds":7.561739,"selectedTests":1},"weightSeconds":3.5,"weightSource":"e2e-4"}
+        ,
+        {"file":"tests/policy-editors.spec.ts","listedTests":64,"weightSeconds":114.485,"weightSource":"local-chromium-single-worker-AEON-633-fix6"}
       ]
     }
     ,
@@ -1184,7 +1186,7 @@
         ,
         {"file":"tests/work-aggregates.spec.ts","tierTiming":{"caseSeconds":{"max":5.106,"median":3.728,"min":1.586},"seconds":106.028338,"selectedTests":29},"weightSeconds":60}
         ,
-        {"file":"tests/work-history-fix5.spec.ts","tierTiming":{"caseSeconds":{"max":5.921,"median":4.3555,"min":4.16},"seconds":30.961454,"selectedTests":6},"weightSeconds":60}
+        {"file":"tests/work-history-fix5.spec.ts","tierTiming":{"caseSeconds":{"max":5.921,"median":4.3555,"min":4.16},"seconds":30.961454,"selectedTests":6},"weightSeconds":30.961454,"weightSource":"hosted-tier-timing"}
         ,
         {"file":"tests/work-lifecycle-header.spec.ts","tierTiming":{"caseSeconds":{"max":4.433,"median":3.8555,"min":2.824},"seconds":38.484393,"selectedTests":10},"weightSeconds":60}
         ,
@@ -1192,11 +1194,11 @@
         ,
         {"file":"tests/work-parent-releases.spec.ts","tierTiming":{"caseSeconds":{"max":9.332,"median":8.0815,"min":7.604},"seconds":51.890498,"selectedTests":6},"weightSeconds":60}
         ,
-        {"file":"tests/work-parent-status.spec.ts","tierTiming":{"caseSeconds":{"max":3.868,"median":2.7835,"min":2.54},"seconds":19.092666,"selectedTests":6},"weightSeconds":60}
+        {"file":"tests/work-parent-status.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":3.868,"median":2.7835,"min":2.54},"seconds":19.092666,"selectedTests":6},"weightSeconds":16.082,"weightSource":"hosted-CI-37321154870"}
         ,
         {"file":"tests/work-surfaces-fix2.spec.ts","tierTiming":{"caseSeconds":{"max":4.636,"median":3.728,"min":2.678},"seconds":45.858333,"selectedTests":12},"weightSeconds":60}
         ,
-        {"file":"tests/work-surfaces-fix3.spec.ts","tierTiming":{"caseSeconds":{"max":4.953,"median":3.3495,"min":2.696},"seconds":23.904779,"selectedTests":6},"weightSeconds":60}
+        {"file":"tests/work-surfaces-fix3.spec.ts","listedTests":6,"tierTiming":{"caseSeconds":{"max":4.953,"median":3.3495,"min":2.696},"seconds":23.904779,"selectedTests":6},"weightSeconds":16.211,"weightSource":"hosted-CI-37321154870"}
         ,
         {"file":"tests/work-surfaces-fix4.spec.ts","tierTiming":{"caseSeconds":{"max":8.031,"median":6.7135,"min":6.15},"seconds":44.704208,"selectedTests":6},"weightSeconds":60}
         ,

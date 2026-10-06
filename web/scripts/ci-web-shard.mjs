@@ -79,8 +79,9 @@ export function loadManifest(path = manifestPath) {
   return manifest
 }
 
-// Longest-processing-time scheduling. File names break weight ties, and the
-// lowest shard index breaks load ties; manifest order cannot change assignment.
+// Longest-processing-time scheduling, then bounded moves/swaps to reduce its
+// longest shard. File names break weight ties, and the lowest shard index
+// breaks load ties; manifest order cannot change assignment.
 // Groups with gate:false are declared (so drift is still caught) but only run with all:true.
 export const gatedGroups = (manifest, all = false) => manifest.groups.filter(group => all || group.gate !== false)
 
@@ -180,32 +181,50 @@ export function balanceShards(manifest, count, { all = false } = {}) {
     shard.specs.push(spec)
     shard.weightSeconds += spec.weightSeconds
   }
-  // LPT can leave avoidable peaks when independent branches add specs. Refine
-  // its result with deterministic swaps, keeping every weight and group intact.
-  // Each swap strictly reduces the pair's peak; cap work at one pass per shard.
-  for (let pass = 0; pass < count; pass++) {
-    const from = shards.reduce((best, candidate) => candidate.weightSeconds > best.weightSeconds ? candidate : best)
-    let best, peak = from.weightSeconds
-    for (const to of shards) {
-      if (to === from) continue
-      for (let give = 0; give < from.specs.length; give++) {
-        for (let take = 0; take < to.specs.length; take++) {
-          const delta = from.specs[give].weightSeconds - to.specs[take].weightSeconds
-          const nextPeak = Math.max(from.weightSeconds - delta, to.weightSeconds + delta)
-          if (nextPeak < peak - 1e-9) { best = { to, give, take, delta }; peak = nextPeak }
+  // Indivisible files can leave LPT just over the gate budget even when there
+  // is room. Each move or swap lowers the affected pair's maximum; no other
+  // shard grows. Bound refinement independently of convergence and keep all
+  // weights, owning groups and launch policies intact. Swaps cover the peak
+  // reduction main added; moves keep a 15/15 fit when no exchange can.
+  for (let pass = 0; pass < Math.min(specs.length, 256); pass++) {
+    const high = shards.reduce((best, candidate) => candidate.weightSeconds > best.weightSeconds ? candidate : best)
+    let best, bestMaximum = high.weightSeconds
+    for (const low of shards) {
+      if (low === high) continue
+      for (let a = 0; a < high.specs.length; a++) {
+        // b=-1 moves a file; otherwise exchange it with a lighter file.
+        for (let b = -1; b < low.specs.length; b++) {
+          const delta = high.specs[a].weightSeconds - (b < 0 ? 0 : low.specs[b].weightSeconds)
+          if (delta <= 0) continue
+          const maximum = Math.max(high.weightSeconds - delta, low.weightSeconds + delta)
+          if (maximum < bestMaximum - 1e-9) {
+            bestMaximum = maximum
+            best = { low, a, b, delta }
+          }
         }
       }
     }
     if (!best) break
-    const { to, give, take, delta } = best
-    ;[from.specs[give], to.specs[take]] = [to.specs[take], from.specs[give]]
-    from.weightSeconds -= delta
-    to.weightSeconds += delta
+    const { low, a, b, delta } = best, spec = high.specs[a]
+    if (b < 0) {
+      high.specs.splice(a, 1)
+      low.specs.push(spec)
+    } else {
+      high.specs[a] = low.specs[b]
+      low.specs[b] = spec
+    }
+    high.weightSeconds -= delta
+    low.weightSeconds += delta
   }
+  // Single moves and swaps stop at a local peak; main's multi-spec exchange
+  // (up to three files a side) can still lower the descending shard weights.
   // One pass per shard matches the pairwise cap above. The real 12-way gate
   // needs fewer passes than that to bring every shard under five minutes.
   lowerMakespan(shards, count)
-  for (const shard of shards) shard.specs.sort((a, b) => compare(a.file, b.file))
+  for (const shard of shards) {
+    shard.specs.sort((a, b) => compare(a.file, b.file))
+    shard.weightSeconds = shard.specs.reduce((total, spec) => total + spec.weightSeconds, 0)
+  }
   return shards
 }
 

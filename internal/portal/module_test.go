@@ -279,6 +279,29 @@ func TestPublicPortalBoundary(t *testing.T) {
 	}
 }
 
+func TestUnknownPortalWritesRemainClosedUnderTenantFence(t *testing.T) {
+	d := dbtest.Open(t)
+	m := New(d.App, false, bytes.Repeat([]byte{11}, 32))
+	mux := http.NewServeMux()
+	m.Mount(mux)
+	f := &fixture{t: t, m: m, d: d, h: mux}
+	makeTenant(t, d, "closed-write-portal", "Closed write portal")
+	for _, tc := range []struct{ path, body string }{
+		{"/wishes/PWS-1/votes", `{}`},
+		{"/wishes", `{"title":"A useful wish","summary":"A public wish for the closed portal."}`},
+		{"/corrections", `{"competitor":"Northwind","aspect":"Owner assembly","statement":"A correction for the closed portal."}`},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			known := f.do("POST", "/api/public/portal/closed-write-portal"+tc.path, tc.body, "203.0.113.90:1000", nil, nil, nil)
+			unknown := f.do("POST", "/api/public/portal/unknown-write-portal"+tc.path, tc.body, "203.0.113.91:1000", nil, nil, nil)
+			if known.Code != http.StatusNotFound || unknown.Code != http.StatusNotFound {
+				t.Fatalf("public tenant fence exposed availability: known=%d %s unknown=%d %s", known.Code, known.Body, unknown.Code, unknown.Body)
+			}
+			sameResponse(t, known, unknown)
+		})
+	}
+}
+
 func sameResponse(t *testing.T, a, b *httptest.ResponseRecorder) {
 	t.Helper()
 	if a.Code != b.Code || a.Body.String() != b.Body.String() {

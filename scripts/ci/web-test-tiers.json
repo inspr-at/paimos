@@ -808,6 +808,8 @@
     ,
     "node:tests/test-tier-failures.test.ts:failed Go jsonl names the package and test with the last 40 lines in logs and summary"
     ,
+    "node:tests/test-tier-failures.test.ts:native Go enumeration reports package failure output and retains a failing exit"
+    ,
     "node:tests/test-tier-failures.test.ts:native planning regression reuses one collected snapshot for unchanged-tree CLI checks"
     ,
     "node:tests/work-aggregates.test.ts:fractional progress rounded by the formatter to 100% retains ETA and staleness in every mode"
@@ -8892,6 +8894,134 @@
     ,
     {"kind":"browser","file":"tests/planning-columns.spec.ts","name":"unknown planned and used effort stays undrawn and is explained to hover and screen readers","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"Project writes bind the chosen visible project and offer no project locks","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"adding to sparse priorities 1,3 saves canonical order and preserves Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"adding to sparse priorities 10,20 saves canonical order and preserves Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"canonical person change during focus refresh drops old preference drafts and Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"focus refresh preserves ladder draft, pending save, Undo and controls 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"focus refresh preserves ladder draft, pending save, Undo and controls 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"focus refresh preserves ladder draft, pending save, Undo and controls 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"focus refresh preserves ladder draft, pending save, Undo and controls 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"focus refresh preserves ladder draft, pending save, Undo and controls 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"focus refresh preserves ladder draft, pending save, Undo and controls 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"focus refresh preserves preference drafts, confirmed Undo and an in-flight save","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape ladder Linux x86_64 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape ladder Linux x86_64 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape ladder MacIntel 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape ladder MacIntel 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape preferences Linux x86_64 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape preferences Linux x86_64 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape preferences MacIntel 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard Save retains action focus through Undo and Escape preferences MacIntel 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"keyboard submits only with platform modifier and Esc first leaves a field","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"ladder geometry and conditional Undo 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"ladder geometry and conditional Undo 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"ladder geometry and conditional Undo 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"ladder geometry and conditional Undo 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"ladder geometry and conditional Undo 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"ladder geometry and conditional Undo 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"managed mode-only change refuses captured Undo without overwriting the new mode","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"managed order activation and mode Undo 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"managed order activation and mode Undo 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"managed order activation and mode Undo 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"managed order activation and mode Undo 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"managed order activation and mode Undo 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"managed order activation and mode Undo 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"native browser shortcuts pass through the editor untouched","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"pending preference selection keeps controls and rows 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"pending preference selection keeps controls and rows 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"pending preference selection keeps controls and rows 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"pending preference selection keeps controls and rows 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"pending preference selection keeps controls and rows 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"pending preference selection keeps controls and rows 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates ladder models.manage draft","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates ladder models.manage saving","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates ladder models.manage undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates ladder models.read draft","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates ladder models.read saving","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates ladder models.read undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates preference draft","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates preference saving","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"permission loss during focus refresh invalidates preference undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"person linking with equal revisions discards old draft and Undo without auto-retry","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference refusal locked_above keeps draft without success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference refusal permission_denied keeps draft without success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference refusal stale_revision keeps draft without success","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference rows/scalars and geometry 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference rows/scalars and geometry 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference rows/scalars and geometry 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference rows/scalars and geometry 1440 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference rows/scalars and geometry 390 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"preference rows/scalars and geometry 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"retired-kind Reset Undo refuses specifically without restoration","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"switching level during save cannot attach old Undo to the new record","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"truncated ladder and missing workspace model visibility have no functioning editors","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"unknown response and failed reconciliation never show success or Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/policy-editors.spec.ts","name":"work-kind selection and lock explanation keep navigation and rows still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/polish-round-two.spec.ts","name":"PL2 hours 390 dark","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/polish-round-two.spec.ts","name":"PL2 hours 390 light","config":"playwright.ui.config.ts","project":"","tags":["delete-candidate"],"tier":"NIGHTLY"}
@@ -10756,7 +10886,7 @@
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"members read Vocabulary as text and cannot invoke its write actions","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
-    {"kind":"browser","file":"tests/settings.spec.ts","name":"members see Personal and Developer; an admin section explains itself","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/settings.spec.ts","name":"members see Personal, Developer and Policies; an admin section explains itself","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/settings.spec.ts","name":"old workspace bookmarks redirect during section and hash changes inside Settings","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
@@ -10833,6 +10963,24 @@
     {"kind":"browser","file":"tests/shell.spec.ts","name":"theme follows the OS and explicit choice wins without hover layout shift","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/shell.spec.ts","name":"version uses six-segment Pretty, keyboard reveal, exact clipboard and one request","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies announces state transitions through a persistent live region","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies controls and detail sheet stay put at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies review qualifications appear only for Review gate in the page and sheet","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies settings-only reader sees permission sentences and static ownership","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies tabs always reference an existing panel and phone selectors use two balanced rows","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/stability.spec.ts","name":"Policies unseeded registry stays honest and lazy tab responses cannot overwrite a later tab","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/stability.spec.ts","name":"at 1440px › an open session holds still while runs and messages land","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -12810,6 +12958,74 @@
     ,
     {"kind":"node","file":"tests/playwright-policy.test.ts","name":"worker override is explicit and invalid overrides fail closed","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/policies.test.ts","name":"each tab calls its own source and refusals disclose no other tab data","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policies.test.ts","name":"failures and invalid or over-limit answers never report success; other tabs still work","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policies.test.ts","name":"identity, tenant, permission loss and disposal discard responses and clear read state","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policies.test.ts","name":"live registry exclusions group by risk, and owner links need actual destination permissions","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policies.test.ts","name":"tab and role switches discard slow successes and failures, even when aborted requests still resolve","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policies.test.ts","name":"truncation and suspension expiry are honest with an injected observation time","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"403/permission_denied retains draft without auto-retry or success","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"409/stale_revision retains draft without auto-retry or success","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"422/locked_above retains draft without auto-retry or success","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"HTTP success alone cannot confirm wrong identity/revision","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"absent-scope scalar compensation uses null/false/false level PUT","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"closed builders preserve sibling fields, capture paths/person and never replace a whole level","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"confirmed save followed by denied preview 401 clears private snapshot and Undo","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"confirmed save followed by denied preview 403 clears private snapshot and Undo","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"drops late save after context other-tenant/person/role","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"drops late save after context signout","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"drops late save after context tenant/other-person/role","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"drops late save after context tenant/person/other-role","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"drops late save after context tenant/person/project/other-kind","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"equal-revision person conflict discards old draft and Undo","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"ladder role CAS, expiry-clear Undo and actual normalized token","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"level writes remain serialized across two row editors and retain each captured revision","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"local picker invalidation keeps its document while dropping drafts, Undo and late writes","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"managed order drafts preserve holds and Undo restores rows plus captured mode","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"older read cannot replace newer snapshot/draft","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"response byte bounds precede JSON parsing","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"retired-kind compensation has the specific honest refusal","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"row Reset and new-row Undo send query revisions at default scope","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"row Reset and new-row Undo send query revisions at person scope","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"row Reset and new-row Undo send query revisions at project scope","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"same-identity preview refresh keeps the captured draft baseline and confirmed Undo revision","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"serializes writes, provisional display, actual confirmation and confirmed-revision Undo","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"unknown outcome and failed reconciliation block new writes without success/Undo","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/policy-editor.test.ts","name":"wrong-person confirmation cannot report success","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/preferences.test.ts","name":"preference writes a later save waits for the in-flight write and is what the server keeps","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/preferences.test.ts","name":"preference writes different keys are written at the same time","tier":"GATED-FULL"}
@@ -13154,7 +13370,7 @@
     ,
     {"kind":"node","file":"tests/sessionRow.test.ts","name":"media and terminal use their execution label and never infer an AI vendor","tier":"GATED-FULL"}
     ,
-    {"kind":"node","file":"tests/settings.test.ts","name":"Personal and Developer are for everyone; workspace sections follow their grants","tier":"GATED-FULL"}
+    {"kind":"node","file":"tests/settings.test.ts","name":"Personal, Developer and Policies are for everyone; workspace sections follow their grants","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/settings.test.ts","name":"agent keys read as active, expired or revoked","tier":"GATED-FULL"}
     ,
@@ -13197,6 +13413,8 @@
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"Vitest diagnostics retain assertion details and captured stdout stderr within bounds in logs and summary","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"failed Go jsonl names the package and test with the last 40 lines in logs and summary","tier":"NIGHTLY"}
+    ,
+    {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"native Go enumeration reports package failure output and retains a failing exit","tier":"NIGHTLY"}
     ,
     {"kind":"node","file":"tests/test-tier-failures.test.ts","name":"native planning regression reuses one collected snapshot for unchanged-tree CLI checks","tier":"NIGHTLY"}
     ,

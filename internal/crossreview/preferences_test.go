@@ -84,7 +84,7 @@ func TestReviewPreferencesStayWithinQualifiedSet(t *testing.T) {
 					return err
 				}
 				if tc.pin != "off-ladder" {
-					if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) VALUES($1,'review-gate',4,$2)`, f.person.TenantID, complexProfile); err != nil {
+					if _, err := tx.Exec(t.Context(), `INSERT INTO model_role_routes(tenant_id,role,priority,profile_id) SELECT $1,'review-gate',coalesce(max(priority),0)+1,$2 FROM model_role_routes WHERE role='review-gate'`, f.person.TenantID, complexProfile); err != nil {
 						return err
 					}
 				}
@@ -161,8 +161,19 @@ func TestReviewStarterPersonAndOperatorKeyCompatibility(t *testing.T) {
 				requester = f.agent
 				if kind == "creator-key" {
 					requester.KeyCreatorID = f.person.ID
+					f.tx(t, func(tx pgx.Tx) error {
+						_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=$1 WHERE principal_id=$2`, f.person.ID, f.agent.ID)
+						return err
+					})
 				} else {
 					want = ""
+					// Fixture keys carry a person creator since AEON-724. An operator
+					// key is the legacy creatorless row; the prepared endpoint re-reads
+					// the creator from the key row, so the row itself must have none.
+					f.tx(t, func(tx pgx.Tx) error {
+						_, err := tx.Exec(t.Context(), `UPDATE agent_keys SET created_by_principal_id=NULL WHERE principal_id=$1`, f.agent.ID)
+						return err
+					})
 				}
 			} else if kind == "linked-person" {
 				alias := testID()
@@ -179,7 +190,7 @@ func TestReviewStarterPersonAndOperatorKeyCompatibility(t *testing.T) {
 				var source string
 				f.tx(t, func(tx pgx.Tx) error {
 					return tx.QueryRow(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,status)
-    SELECT $1,$2,$3,p.id,p.model,'completed' FROM model_profiles p WHERE p.family='openai' RETURNING id::text`, f.person.TenantID, order.NodeID, f.agent.ID).Scan(&source)
+    SELECT $1,$2,$3,p.id,p.model,'completed' FROM model_profiles p WHERE p.family='openai' AND p.version='test-version' RETURNING id::text`, f.person.TenantID, order.NodeID, f.agent.ID).Scan(&source)
 				})
 				in.AuthorRunID = &source
 			}
