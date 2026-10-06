@@ -72,7 +72,8 @@ export const useProjectLeads = defineStore('projectLeads', () => {
       if (started !== epoch) return
       const current = view(id), lead = current.lead
       if (!lead || current.error) return
-      const tasks: Promise<unknown>[] = [
+      // Settings change rarely; the Start lead sheet always reads them fresh.
+      const tasks: Promise<unknown>[] = current.settings ? [] : [
         readLeadSettings(id).then(settings => { if (started === epoch) view(id).settings = settings }).catch(() => { if (started === epoch) view(id).settings = null }),
       ]
       if (lead && lead.state !== 'none') {

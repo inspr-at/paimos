@@ -27,6 +27,9 @@ const summary = useLeadSummary(toRef(props, 'projectId'), toRef(props, 'projectK
 const { view, lead, band, queued, leadSession, workers, decisions, complete, gateIds, mergedIds, questions, keyOf } = summary
 const closeButton = ref<HTMLButtonElement>()
 const dial = ref<{ running: number; total: number } | null>(null)
+// Relative times move on while the panel is open.
+const now = ref(Date.now())
+let clock: ReturnType<typeof setInterval> | undefined
 const mayControl = computed(() => session.identity?.principal.kind === 'person' && can('harness.control', props.projectId))
 const mayStart = computed(() => mayControl.value && can('run.create', props.projectId))
 const poller = usePoller(() => leads.load(props.projectId), 15_000)
@@ -40,11 +43,11 @@ async function readDial() {
   } catch { dial.value = null }
 }
 watch(() => [props.projectId, session.identity?.principal.id], () => { dial.value = null; void leads.load(props.projectId); void queue.load(props.projectId); void readDial() }, { immediate: true })
-onMounted(async () => { poller.start(); await nextTick(); closeButton.value?.focus() })
-onBeforeUnmount(() => poller.stop())
+onMounted(async () => { poller.start(); clock = setInterval(() => { now.value = Date.now() }, 10_000); await nextTick(); closeButton.value?.focus() })
+onBeforeUnmount(() => { poller.stop(); clearInterval(clock) })
 
 const time = (iso?: string | null) => iso ? new Date(iso).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }) : ''
-const minutes = (iso?: string | null) => iso ? Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000)) : 0
+const minutes = (iso?: string | null) => iso ? Math.max(0, Math.round((now.value - new Date(iso).getTime()) / 60000)) : 0
 const subtitle = computed(() => {
   const s = leadSession.value
   return [band.value.status, s && lead.value?.state === 'working' ? `since ${time(s.since)}` : '', s?.model].filter(Boolean).join(' · ')
@@ -59,7 +62,9 @@ const nowCopy = computed(() => {
 })
 const reported = computed(() => {
   const s = leadSession.value
-  return s?.heartbeat_at ? `Reported ${Math.max(0, Math.round((Date.now() - new Date(s.heartbeat_at).getTime()) / 1000))} seconds ago` : 'Not reported yet'
+  if (!s?.heartbeat_at) return 'Not reported yet'
+  const seconds = Math.max(0, Math.round((now.value - new Date(s.heartbeat_at).getTime()) / 1000))
+  return seconds < 90 ? `Reported ${seconds} seconds ago` : `Reported ${Math.round(seconds / 60)} minutes ago`
 })
 const checks = computed(() => startChecks(lead.value, decisions.value, dial.value))
 const unreadable = computed(() => checks.value.some(c => c.state === 'unreadable'))
