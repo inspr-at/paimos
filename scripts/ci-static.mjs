@@ -154,8 +154,11 @@ const nixBuildTargetRoleMarker = /^NIX_(?:CC|BINTOOLS)_WRAPPER_TARGET_(?:BUILD|T
 export function fixedEnvironment(source = process.env, scratch) {
   const env = {}
   // Nix's wrappers consume the SDK and search paths only for their declared
-  // roles. Keep host-role markers, build/target role flags, and the selected
-  // SDK (including cross-build variants) when Go links cgo tests. Do not carry
+  // roles. NIX_LDFLAGS alone does not locate libresolv; the per-target CC and
+  // bintools host markers carry that SDK library path, so those markers keep
+  // their source value (the salt is targetPlatform.config, not only a flag).
+  // Build and target role flags stay the literal "1". Keep the selected SDK,
+  // including cross-build variants, when Go links cgo tests. Do not carry
   // wrapper state, debug flags, or the caller's test options.
   const toolchain = ['NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'DEVELOPER_DIR', 'SDKROOT']
     .flatMap(key => ['', '_FOR_BUILD', '_FOR_TARGET'].map(suffix => key + suffix))

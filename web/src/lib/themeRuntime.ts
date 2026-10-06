@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import type { ActiveTheme, ThemeValues } from './themes.ts'
 import { installAgentTheme } from './agentTheme.ts'
+import { indicatorRing } from './indicatorVariants.ts'
 import { themeCss } from './themeEngine.ts'
 
 export const THEME_CACHE_KEY = 'aeon.theme.v1'
@@ -17,6 +18,10 @@ function cachedPerson(): string | null {
 export function resetTheme(identity = '') {
   const keepBoot = person === null && !!identity && cachedPerson() === identity
   person = identity
+  if (typeof document !== 'undefined' && document.documentElement) {
+    delete document.documentElement.dataset.agentRing
+    delete document.documentElement.dataset.agentFloat
+  }
   if (keepBoot) return
   if (typeof document !== 'undefined') document.getElementById('aeon-theme')?.remove()
   try { localStorage.removeItem(THEME_CACHE_KEY) } catch { /* storage may be disabled */ }
@@ -35,6 +40,10 @@ export function applyTheme(values: ThemeValues) {
     // Vite dev injects token/base styles; production bundles them into a link.
     // Moving the same element after them keeps both cascades deterministic.
     document.head.append(style)
+  }
+  if (typeof document !== 'undefined' && document.documentElement) {
+    document.documentElement.dataset.agentRing = indicatorRing(values.agents.avatar, values.agents.ring ?? undefined)
+    document.documentElement.dataset.agentFloat = String(values.agents.hover)
   }
   installAgentTheme(values.agents)
   if (person) {

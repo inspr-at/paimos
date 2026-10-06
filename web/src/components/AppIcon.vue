@@ -13,7 +13,7 @@ export type IconName =
   | 'command' | 'option' | 'backspace'
   | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash' | 'graph'
   | 'bookmark' | 'pin' | 'lock' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift' | 'thumbs-down'
-  | 'person-check' | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
+  | 'merge' | 'person-check' | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -104,6 +104,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'wrench'" d="M13.75 5.01A3.4 3.4 0 1 1 10.99 2.25l.61 2.15ZM8 8 2.6 13.4" />
     <template v-else-if="name === 'gear'"><path d="M12.4 6.2 14.2 6.8 14.2 9.2 12.4 9.8 13.2 11.5 11.5 13.2 9.8 12.4 9.2 14.2 6.8 14.2 6.2 12.4 4.5 13.2 2.8 11.5 3.6 9.8 1.8 9.2 1.8 6.8 3.6 6.2 2.8 4.5 4.5 2.8 6.2 3.6 6.8 1.8 9.2 1.8 9.8 3.6 11.5 2.8 13.2 4.5Z" /><circle cx="8" cy="8" r="1.9" /></template>
     <template v-else-if="name === 'bug'"><path d="M4.8 8.4a3.2 3.2 0 0 1 6.4 0v2.2a3.2 3.2 0 0 1-6.4 0Z" /><path d="M6.7 5.4 5.9 3.2M9.3 5.4l.8-2.2M4.8 9.6H2.3M11.2 9.6h2.5M5.2 12.4l-1.9 1.2M10.8 12.4l1.9 1.2" /></template>
+    <template v-else-if="name === 'merge'"><circle cx="4.4" cy="3.6" r="1.6" /><circle cx="4.4" cy="12.4" r="1.6" /><circle cx="11.6" cy="8" r="1.6" /><path d="M4.4 5.2v5.6M4.4 5.4c0 1.8 1.6 2.6 5.6 2.6" /></template>
     <template v-else-if="name === 'commit'"><circle cx="8" cy="8" r="2.5" /><path d="M1.6 8h3.9M10.5 8h3.9" /></template>
     <template v-else-if="name === 'tag'"><path d="M2.2 2.9v4.3c0 .3.1.6.4.8l5.6 5.6c.4.4 1 .4 1.4 0l3.9-3.9c.4-.4.4-1 0-1.4L7.9 2.7a1.1 1.1 0 0 0-.8-.3H2.7a.5.5 0 0 0-.5.5Z" /><circle cx="5.2" cy="5.4" r=".6" fill="currentColor" stroke="none" /></template>
     <template v-else-if="name === 'box'"><path d="M8 1.8 13.6 4.9v6.2L8 14.2l-5.6-3.1V4.9Z" /><path d="M2.4 4.9 8 8l5.6-3.1M8 8v6.2" /></template>

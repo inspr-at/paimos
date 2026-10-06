@@ -574,7 +574,7 @@
         ,
         {"file":"tests/features.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/settings.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.461,"median":1.774,"min":1.431},"seconds":14.45241,"selectedTests":6},"weightSeconds":32.564102381,"weightSource":"status-autopilot-ui-2"}
+        {"file":"tests/settings.spec.ts","listedTests":20,"tierTiming":{"caseSeconds":{"max":3.461,"median":1.774,"min":1.431},"seconds":14.45241,"selectedTests":6},"weightSeconds":32.564102381,"weightSource":"status-autopilot-ui-2"}
         ,
         {"file":"tests/status-autopilot.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":10.514,"median":2.467,"min":0.771},"seconds":29.300782,"selectedTests":8},"weightSeconds":22.794872,"weightSource":"status-autopilot-ui-2"}
         ,
@@ -723,6 +723,8 @@
         {"file":"tests/agents-cleanup.spec.ts","listedTests":9,"weightSeconds":19.97561,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/agents-dial.spec.ts","listedTests":23,"weightSeconds":66.585366,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/agents-display.spec.ts","listedTests":9,"weightSeconds":19.975609755,"weightSource":"unmeasured-test-count"}
         ,
         {"file":"tests/agents-handover.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
@@ -980,6 +982,8 @@
         ,
         {"file":"tests/session-rows.spec.ts","listedTests":16,"weightSeconds":35.512195,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/settings-account-pacing.spec.ts","listedTests":10,"weightSeconds":22.19512,"weightSource":"unmeasured-test-rate"}
+        ,
         {"file":"tests/settings-accounts.spec.ts","listedTests":24,"weightSeconds":46.609756,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/stability.spec.ts","listedTests":13,"weightSeconds":28.853659,"weightSource":"unmeasured-test-rate"}
@@ -1234,6 +1238,32 @@
         {"file":"tests/settings-host-capacity.spec.ts","listedTests":12,"weightSeconds":24,"weightSource":"unmeasured-test-count-estimate"}
         ,
         {"file":"tests/settings-shared.spec.ts","listedTests":23,"tierTiming":{"caseSeconds":{"max":6.613,"median":0.701,"min":0.409},"seconds":38.002851,"selectedTests":23},"weightSeconds":20,"weightSource":"unmeasured-test-count-estimate"}
+      ]
+    }
+    ,
+    {
+      "config": "playwright.ui.config.ts"
+      ,
+      "env": {}
+      ,
+      "flags": [
+        "--workers=1"
+        ,
+        "--trace=retain-on-failure"
+      ]
+      ,
+      "hostedOnly": true
+      ,
+      "id": "lead-flow"
+      ,
+      "project": null
+      ,
+      "sourceSteps": [
+        "AEON-741 lead flow UI regressions"
+      ]
+      ,
+      "specs": [
+        {"file":"tests/lead-flow.spec.ts","listedTests":14,"weightSeconds":8.6,"weightSource":"unmeasured-test-count-estimate"}
       ]
     }
   ]
