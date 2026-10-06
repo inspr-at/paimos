@@ -60,6 +60,10 @@ describe('what each screen says', () => {
     expect(phoneRoom(settingsFooter({ saving: false, failed: true, needs: 0, act }))).toBe(false)
     expect(phoneRoom(settingsFooter({ saving: false, failed: false, needs: 0, act }))).toBe(false)
     expect(phoneRoom(settingsFooter({ saving: false, failed: false, needs: 2, act }))).toBe(true)
+    // Pending needs already hold the phone slot. Saving and the failure must keep it.
+    expect(phoneRoom(settingsFooter({ saving: true, failed: false, needs: 2, act }))).toBe(true)
+    expect(phoneRoom(settingsFooter({ saving: false, failed: true, needs: 2, act }))).toBe(true)
+    expect(phoneRoom(settingsFooter({ saving: true, failed: true, needs: 2, act }))).toBe(true)
   })
 
   it('says nothing when settings are calm, and a skeleton while a screen loads', () => {

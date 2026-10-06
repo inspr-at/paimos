@@ -235,6 +235,38 @@ test('a phone save does not move the release control', async ({ page }) => {
   pending.shift()?.()
   await expect(sum(page)).toHaveCount(0)
   await still(resting)
+  // Pending needs already hide the version. The save must not bring it back.
+  await page.evaluate(async () => {
+    const { settingsNeeds } = await import('/src/lib/footerProviders.ts')
+    settingsNeeds.value = 2
+  })
+  await expect(sum(page)).toContainText('2 need you')
+  const releaseHidden = async () => {
+    const displays = await page.locator('footer.app-footer .version-value, footer.app-footer .release-divider').evaluateAll(nodes => nodes.map(node => getComputedStyle(node).display))
+    expect(displays.length).toBeGreaterThan(0)
+    expect(displays.every(display => display === 'none')).toBe(true)
+  }
+  await releaseHidden()
+  const withNeeds = await place()
+  fail = true
+  await page.evaluate(async () => { const { usePreference } = await import('/src/lib/preferences.ts'); usePreference('footer-summary-probe').save({ a: 1 }, 0) })
+  await expect(sum(page)).toContainText('Saving…')
+  await expect.poll(() => pending.length).toBe(1)
+  await still(withNeeds)
+  await releaseHidden()
+  pending.shift()?.()
+  await expect(sum(page)).toContainText('Not saved')
+  await still(withNeeds)
+  await releaseHidden()
+  fail = false
+  await sum(page).click()
+  await expect.poll(() => pending.length).toBe(1)
+  await still(withNeeds)
+  await releaseHidden()
+  pending.shift()?.()
+  await expect(sum(page)).toContainText('2 need you')
+  await still(withNeeds)
+  await releaseHidden()
 })
 
 for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {

@@ -165,9 +165,11 @@ export const settingsNeeds = ref(0)
 export interface SettingsFooter { saving: boolean; failed: boolean; needs: number; act: { retry: () => void; needs: () => void } }
 // Calm says nothing: the centre stays empty.
 export function settingsFooter(s: SettingsFooter): FooterSummary | null {
-  // Saving and a failed save come and go. They must not change the phone release layout.
-  if (s.failed) return { ...build('attention', [exception('Not saved'), said(' · Try again')], [exception('Not saved')], 'Not saved. Save again.', s.act.retry), transient: true }
-  if (s.saving) return { ...build('idle', [said('Saving…')], [said('Saving…')], 'Saving.'), transient: true }
+  // Saving and a failed save come and go. The phone release stays as the summary
+  // underneath left it, including while needs you is waiting under the save line.
+  const phone = s.needs > 0
+  if (s.failed) return { ...build('attention', [exception('Not saved'), said(' · Try again')], [exception('Not saved')], 'Not saved. Save again.', s.act.retry), transient: true, phone }
+  if (s.saving) return { ...build('idle', [said('Saving…')], [said('Saving…')], 'Saving.'), transient: true, phone }
   if (s.needs) {
     const x = `${s.needs} ${s.needs === 1 ? 'needs' : 'need'} you`
     return build('attention', [exception(x)], [exception(x)], `${x}. Open Accounts and computers at Needs you.`, s.act.needs)

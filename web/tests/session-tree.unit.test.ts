@@ -54,6 +54,28 @@ describe('session tree rows', () => {
     expect(folded.map(row => row.branch.view.session.id)).not.toContain('a1x')
   })
 
+  it('chooses the folded live problem the footer counted, not an earlier ended failure', () => {
+    // The ended failure is the first child. A walk that ignores liveness selects it, then
+    // stopped-child filtering hides that row after its ancestors open, so focus does nothing.
+    // The live failure sits under `a`, which a fold hides until those ancestors open.
+    const view = (id: string, state: string, parent: string | null, ended = false) => ({
+      session: { id, parent_harness_session_id: parent, stopped_at: ended ? '2026-10-01T00:00:00Z' : null, phase: ended ? 'stopped' : 'working' },
+      status: { state },
+    })
+    const views = [
+      view('lead', 'working', null),
+      view('ended', 'problem', 'lead', true),
+      view('a', 'working', 'lead'),
+      view('live', 'problem', 'a'),
+    ]
+    expect(jumpTarget(views, 'problem')).toEqual({ id: 'live', ancestors: ['lead', 'a'] })
+    const roots = [node('lead', 'working', [node('ended', 'problem'), node('a', 'working', [node('live', 'problem')])])]
+    const folded = treeRows(roots, { children: all, isOpen: branch => branch.view.session.id !== 'a' })
+    expect(folded.map(row => row.branch.view.session.id)).toEqual(['lead', 'ended', 'a'])
+    const opened = treeRows(roots, { children: all, isOpen: () => true })
+    expect(opened.map(row => row.branch.view.session.id)).toContain('live')
+  })
+
   it('keeps a deep match with its ancestors as unfolded context, even where a person folded them', () => {
     const rows = treeRows(tree(), { children: () => [], isOpen: () => false, match: v => v.status.group === 'problem' })
     expect(rows.map(r => [r.branch.view.session.id, r.contextOnly, r.open])).toEqual([

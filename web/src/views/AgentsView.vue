@@ -44,7 +44,7 @@ import WindDownPanel from '../components/agents/WindDownPanel.vue'
 import FloatingPanel from '../components/work/FloatingPanel.vue'
 import { useAgentPause } from '../stores/agentPause'
 import { agentsFooter } from '../lib/footerProviders'
-import { jumpTarget } from '../components/agents/sessionTree'
+import { countedLive, jumpTarget } from '../components/agents/sessionTree'
 import { useFooterSummary } from '../lib/footerSummary'
 import { clockTime, liveSession } from '../lib/agentPause'
 
@@ -268,7 +268,7 @@ const footerWind = computed(() => {
 useFooterSummary(() => {
   // A first read that failed shows its own error; the footer does not wait for it.
   if (!session.identity || (!agents.loaded && agents.sessionsError)) return null
-  const live = agents.views.filter(v => !v.session.stopped_at && v.session.phase !== 'stopped')
+  const live = agents.views.filter(countedLive)
   const states = (groups: string[]) => live.filter(v => groups.includes(v.status.group)).length
   const paused = agents.views.filter(v => v.status.state === 'paused').length
   const top = () => document.querySelector('main')?.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' })

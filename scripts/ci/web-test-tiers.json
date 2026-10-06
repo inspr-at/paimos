@@ -1162,6 +1162,8 @@
     ,
     "vitest:tests/row-store.unit.test.ts:derived parent status > updates a full cached row without changing the edit revision or opening a conflict"
     ,
+    "vitest:tests/session-tree.unit.test.ts:session tree rows > chooses the folded live problem the footer counted, not an earlier ended failure"
+    ,
     "vitest:tests/session-tree.unit.test.ts:session tree rows > names a problem hidden by a fold, including a lost heartbeat, and the ancestors that must open"
     ,
     "vitest:tests/theme-editor.unit.test.ts:runtime appearance follows every confirmed theme > a settings card unmounting never stops the shared editor"
@@ -15589,6 +15591,8 @@
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a slow poll cannot overwrite the reply loaded after a send","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"filters before limiting and keeps two sessions of one principal separate","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > chooses the folded live problem the footer counted, not an earlier ended failure","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/session-tree.unit.test.ts","name":"session tree rows > keeps a deep match with its ancestors as unfolded context, even where a person folded them","tier":"GATED-FULL"}
     ,
