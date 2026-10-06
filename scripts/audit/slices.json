@@ -167,6 +167,7 @@
         "internal/decisiondesk/**",
         "internal/deskdelivery/**",
         "internal/outcomes/**",
+        "internal/escalation/**",
         "internal/relations/**",
         "internal/projectgroups/**",
         "internal/views/**",

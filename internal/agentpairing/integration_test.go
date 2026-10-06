@@ -1693,3 +1693,27 @@ func (f *fixture) addClaude(p *proposal, computerID, key string) agentpairing.Vi
 	f.approve(q, "connect_only")
 	return f.redeem(q)
 }
+
+func TestPairingVerificationClaimsWithNullTrace(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.submit(p)
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	e := v.Enrollments[0]
+	var absent bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT trace IS NULL FROM agent_runs WHERE id=$1`, *e.VerificationRunID).Scan(&absent); err != nil {
+		t.Fatal(err)
+	}
+	if !absent {
+		t.Fatal("pairing fixture no longer covers NULL trace")
+	}
+	f.probe(v, e, key, 200)
+	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+	var run agentruns.Run
+	decodeResult(t, f.call("GET", "/api/runs/"+*e.VerificationRunID, nil, false, key, 200), &run)
+	if run.Status != "starting" || run.Purpose != "pairing_verification" || run.RepositoryMutationAllowed {
+		t.Fatal("verification claim lost its read-only contract", run)
+	}
+}
