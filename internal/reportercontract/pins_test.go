@@ -156,6 +156,37 @@ func TestPinnedShapeKeys(t *testing.T) {
 	}
 }
 
+// TestLeadSettingsStartGatesSchema preserves the complete safety explanation
+// as one string, without comma-separated prose becoming schema keywords.
+func TestLeadSettingsStartGatesSchema(t *testing.T) {
+	raw, err := os.ReadFile("../../api/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Properties map[string]map[string]any `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(raw, &doc); err != nil {
+		t.Fatal(err)
+	}
+	gates := doc.Components.Schemas["LeadSettingsView"].Properties["required_start_gates"]
+	const description = "Dial, harness, account room and host load must be rechecked on every start; unreadable gates mean wait"
+	if gates["description"] != description {
+		t.Fatalf("start-gate explanation truncated: got %q, want %q", gates["description"], description)
+	}
+	if len(gates) != 3 || gates["type"] != "array" {
+		t.Fatalf("unexpected start-gate schema: %#v", gates)
+	}
+	items, ok := gates["items"].(map[string]any)
+	if !ok || len(items) != 1 || items["type"] != "string" {
+		t.Fatalf("unexpected start-gate items: %#v", gates["items"])
+	}
+}
+
 // TestOpenAPIPropertyNamesHaveNoSpace re-parses the canonical contract and the
 // harness fragment. An unquoted flow-mapping description that contains ", " or
 // ": " becomes extra keys, and those keys contain a space.
@@ -195,6 +226,57 @@ func TestOpenAPIPropertyNamesHaveNoSpace(t *testing.T) {
 			walk(doc, "")
 			if len(bad) > 0 {
 				t.Fatalf("parsed OpenAPI property names contain a space:\n%s", strings.Join(bad, "\n"))
+			}
+		})
+	}
+}
+
+// Commas in flow mappings must remain part of the response description, rather
+// than silently truncating the text and introducing unrelated response fields.
+func TestProjectLeadResponseDescriptions(t *testing.T) {
+	for _, source := range []struct {
+		file, prefix string
+	}{
+		{"../../api/openapi.yaml", ""},
+		{"../../internal/harness/openapi.yaml", "/api"},
+	} {
+		t.Run(source.file, func(t *testing.T) {
+			raw, err := os.ReadFile(source.file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var doc struct {
+				Paths map[string]struct {
+					Post struct {
+						Responses map[string]map[string]any `yaml:"responses"`
+					} `yaml:"post"`
+				} `yaml:"paths"`
+			}
+			if err := yaml.Unmarshal(raw, &doc); err != nil {
+				t.Fatal(err)
+			}
+			cases := []struct {
+				path, status, description string
+			}{
+				{"/projects/{projectId}/lead", "200", "Explicit lead intent, with unavailable gates shown as waiting_for_room"},
+				{"/projects/{projectId}/lead/claim", "403", "Lease, live authority or owned intent rejected"},
+				{"/projects/{projectId}/lead/claim", "409", "Concurrent claim, unconfirmed stop or revision conflict"},
+			}
+			if source.prefix == "" {
+				cases = append(cases, struct{ path, status, description string }{
+					"/queue/next", "409", "Lead proof missing, stale assignment, paused/revoked/archived lead, mandatory admission unavailable, or bounded scheduling snapshot overflow",
+				})
+			}
+			for _, tc := range cases {
+				t.Run(tc.path+"/"+tc.status, func(t *testing.T) {
+					response := doc.Paths[source.prefix+tc.path].Post.Responses[tc.status]
+					if got := response["description"]; got != tc.description {
+						t.Errorf("parsed description = %q, want %q", got, tc.description)
+					}
+					if len(response) != 1 {
+						t.Errorf("response must contain only its description, got %v", response)
+					}
+				})
 			}
 		})
 	}

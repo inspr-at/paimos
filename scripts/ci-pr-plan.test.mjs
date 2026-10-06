@@ -400,8 +400,8 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
         const job = requiredJob(id), expression = /^        shard: (.+)$/m.exec(job)?.[1];
         assert.ok(expression, id);
         const rows = evaluate(expression, context);
-        const wanted = id !== 'go-test' && lane === 'spec-only' ? 1 : id !== 'web-unit' &&
-          ['pull_request', 'merge_group'].includes(event) && mode === 'essential' ? 2 : fullRows;
+        const wanted = event === 'pull_request' && id !== 'go-test' && lane === 'spec-only' ? 1 : id !== 'web-unit' &&
+          event === 'pull_request' && mode === 'essential' ? 2 : fullRows;
         assert.equal(rows.length, wanted, `${label}/${id} matrix`);
         if (flag === 'on' && mode === 'full') assert.equal(rows.length, fullRows, `${label}/${id} full matrix`);
       }
@@ -425,6 +425,37 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
   assert.equal(combinations, 90);
   for (const flag of [undefined, '', 'ON', 'true', ' on', 'on ']) for (const lane of ['full', 'spec-only', 'docs-only'])
     assert.equal(effectiveLane(lane, {mode: 'full', event: 'push', affectedLane: flag}), lane, 'flag off remains exact');
+});
+
+test('merge-group workflow retains full matrices, job gates and execution proofs despite essential/static planner outputs', () => {
+  for (const event of ['pull_request', 'merge_group', 'push', 'workflow_dispatch', 'schedule'])
+    for (const mode of ['essential', 'full']) for (const layout of ['static', 'full']) {
+      const label = `${event}/${mode}/${layout}`;
+      const context = {'github.event_name': event, 'github.ref': 'refs/heads/main', 'github.run_attempt': '1',
+        'needs.ci-plan.result': 'success', 'needs.tier-plan.result': 'success',
+        'needs.tier-plan.outputs.lane': 'full', 'needs.tier-plan.outputs.mode': mode,
+        'needs.tier-plan.outputs.layout': layout, 'needs.tree-reuse.outputs.reuse': 'none',
+        'needs.runner-route.result': 'success', 'needs.runner-route.outputs.run_attempt': '1',
+        'needs.runner-route.outputs.runner_class': 'hosted', 'needs.web-setup.result': 'success'};
+      for (const id of ['go-test', 'go-timing', 'web-shard', 'e2e-run']) {
+        const condition = /^    if: (.+)$/m.exec(requiredJob(id))[1];
+        assert.equal(Boolean(evaluate(condition, context)), event !== 'pull_request' || layout !== 'static', `${label}/${id}`);
+      }
+      for (const [id, fullRows] of [['go-test', 7], ['web-unit', 4], ['web-shard', 12]]) {
+        const job = requiredJob(id), expression = /^        shard: (.+)$/m.exec(job)[1];
+        const wanted = event === 'pull_request' && mode === 'essential' && id !== 'web-unit' ? 2 : fullRows;
+        assert.equal(evaluate(expression, context).length, wanted, `${label}/${id} matrix`);
+        const proof = job.split('      - name: Confirm full tier execution\n')[1].split(/\n      - /)[0];
+        assert.match(proof, /run: node scripts\/test-tiers\/check-full\.mjs/);
+        assert.match(proof, /TIER_REPORT: .*\$\{\{ matrix.shard \}\}-measurement\.json/);
+        const condition = /^        if: (.+)$/m.exec(proof)[1];
+        assert.equal(Boolean(evaluate(condition, context)), event !== 'pull_request' || mode !== 'essential', `${label}/${id} full proof`);
+        context['needs.tier-plan.outputs.lane'] = 'spec-only';
+        assert.equal(evaluate(expression, context).length, event === 'pull_request' && id !== 'go-test' ? 1 : wanted, `${label}/${id} spec-only matrix`);
+        if (event === 'merge_group') assert.equal(Boolean(evaluate(condition, context)), true, `${label}/${id} spec-only full proof`);
+        context['needs.tier-plan.outputs.lane'] = 'full';
+      }
+    }
 });
 
 test('every CI lane and tier runner consumer uses the single effective publisher', () => {

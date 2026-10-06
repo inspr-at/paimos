@@ -344,6 +344,8 @@
       "specs": [
         {"file":"tests/accounts-computers.spec.ts","listedTests":26,"tierTiming":{"caseSeconds":{"max":4.348,"median":2.018,"min":1.197},"seconds":30.144583,"selectedTests":13},"weightSeconds":32.233918,"weightSource":"web-13"}
         ,
+        {"file":"tests/agent-recovery.spec.ts","listedTests":9,"weightSeconds":20}
+        ,
         {"file":"tests/agents-top.spec.ts","listedTests":33,"tierTiming":{"caseSeconds":{"max":7.262,"median":2.31,"min":0},"seconds":74.572143,"selectedTests":33},"weightSeconds":81.824561,"weightSource":"web-13"}
         ,
         {"file":"tests/approval-feedback.spec.ts","listedTests":13,"tierTiming":{"caseSeconds":{"max":7.243,"median":3.129,"min":0.039},"seconds":58.110583,"selectedTests":13},"weightSeconds":32.233918,"weightSource":"web-13"}
@@ -575,6 +577,8 @@
         {"file":"tests/settings.spec.ts","listedTests":10,"tierTiming":{"caseSeconds":{"max":3.461,"median":1.774,"min":1.431},"seconds":14.45241,"selectedTests":6},"weightSeconds":32.564102381,"weightSource":"status-autopilot-ui-2"}
         ,
         {"file":"tests/status-autopilot.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":10.514,"median":2.467,"min":0.771},"seconds":29.300782,"selectedTests":8},"weightSeconds":22.794872,"weightSource":"status-autopilot-ui-2"}
+        ,
+        {"file":"tests/workspace-activity.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
       ]
     }
     ,

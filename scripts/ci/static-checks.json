@@ -18,7 +18,7 @@
     "tier-plan": {
       "kind": "not-static",
       "reason": "Hosted tier scheduling and output wiring.",
-      "runs_sha256": "1ab52397cefc307e01b6c29041a8a82eda009bad87da6f761ffba92ef8309ccd"
+      "runs_sha256": "56ee0df4b79df17e54da6861167896084752f6cf81e5ff7b45af3dc7ca8c1fbe"
     },
     "runner-route": {
       "kind": "not-static",
@@ -688,7 +688,7 @@
         "node",
         "npm-installed"
       ],
-      "timeout_seconds": 120,
+      "timeout_seconds": 600,
       "optional": true
     },
     {

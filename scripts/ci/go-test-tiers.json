@@ -930,6 +930,12 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestAdditionalHarnessAttachRequiresRecordedNativeImage","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestAgentRecoveryGenerationIdentityAndDeadlineRefuseSignals","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestAgentRecoveryReconnectRefreshesReportingWithoutStopping","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestAgentRecoveryRestartWaitsForExitAndRetriesOnlyOutcome","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestApprovedDeadlineDoesNotWaitForTelemetryLock","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestArchivedWorkerResponseDetachesWithoutStoppingChild","tier":"GATED-FULL"}
@@ -1059,6 +1065,10 @@
     {"kind":"go","package":"internal/agentd","name":"TestAttachWrapperFixtureArgv","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestAttachWrapperMarkerNormalArgvDoesNotSkip","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestAttachedHookHelperCrashResumePreservesBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestAttachedHookSocketAndReconnectPreserveExternalOwnership","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestBlockedClaudeAccountsKeepDistinctDiagnostics","tier":"GATED-FULL"}
     ,
@@ -1787,6 +1797,10 @@
     {"kind":"go","package":"internal/agentd","name":"TestWireWriteLockWaitIsCancellable","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentdwire","name":"TestAttachConflictDiagnosticIsSurfacedAndBounded","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentdwire","name":"TestAttachedHookInboxResponseBoundsAndStrictJSON","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentdwire","name":"TestAttachedHookMaximumInboxDeliveryDoesNotBlockNext","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentdwire","name":"TestAuthenticatedLocalControl","tier":"ESSENTIAL"}
     ,
@@ -2804,6 +2818,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestAgentKeyReleaseMembershipReadScopeAndVisibility","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestAgentRecoveryRuntimeRouteCeiling","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestAgentRoleCannotManageKeys","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestAgentScopeSeparatesProjectSubpathsAndUnknownRoutes","tier":"GATED-FULL"}
@@ -2931,6 +2947,10 @@
     {"kind":"go","package":"internal/auth","name":"TestKeyTrimRestoreRechecksEditorAndOriginalCreatorCeilings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyTrimTenantIsolationAndBoundedInput","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestLeadSettingsAgentRoutesReadOnly","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestLeadSettingsProductionMiddleware","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestLeadUsageAgentRouteCeiling","tier":"ESSENTIAL"}
     ,
@@ -3846,6 +3866,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatOmitsOverlongHarnessVersion","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestHeartbeatPairedReconnectBindsOnlyItsLiveIndexedSession","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatRegistersHarnessVersion","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestHeartbeatRejectedStatusEstimatesRetryWithoutBlockingLiveness","tier":"GATED-FULL"}
@@ -3960,6 +3982,10 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestLeadDecisionCLIRejectsUnboundedAndPrivateEvidence","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestLeadSettingsCLIContractAndValidation","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestLeadSettingsCLIUsesExplicitPersonSession","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestLegacyCodexStateDoesNotRecount","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestListenFollowLongPoll","tier":"GATED-FULL"}
@@ -4027,6 +4053,8 @@
     {"kind":"go","package":"internal/cli","name":"TestOwnerStampUintRejectsOverflow","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestOwnerWorkstationKeyCommands","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/cli","name":"TestPairedInboxHookAcknowledgesOnlyForegroundHandoff","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestParseCLIETABounds","tier":"GATED-FULL"}
     ,
@@ -4628,6 +4656,8 @@
     ,
     {"kind":"go","package":"internal/events","name":"TestAccountEventHistoryAndSSEUseCurrentOwnerSharing","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/events","name":"TestActivityCursorBindsFiltersAndBoundsInput","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/events","name":"TestCounterWaitsForCommitAndNotificationContainsOnlyHint","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/events","name":"TestEventListRejectsRetiredWindowParameters","tier":"GATED-FULL"}
@@ -4708,7 +4738,19 @@
     ,
     {"kind":"go","package":"internal/harness","name":"TestActivityNotesValidationHistoryAndIsolation","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryDiagnosisDoesNotGuessExitOrAuth","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryOpenAPIContractsAgree","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryRequestAuthorityAndSingleClaim","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryRestartQueuesOneBoundContinuation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAgentRecoveryRevocationExpiryAndObservationFence","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/harness","name":"TestArchivedSessionRejectsProvenanceReplayAndNewRevision","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestAttachedAgentRecoveryRequiresPairedHookAndCurrentAuthority","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestAutomaticProvenanceFitsTheRulesBudget","tier":"GATED-FULL"}
     ,
@@ -5655,6 +5697,18 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestFailuresMustBeSpacedAndReceiptsAreBounded","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestLatestPreferencesAcceptEveryProfileHarness","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadPolicyInheritanceAndBounds","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsArchivedKindsRemainReadableAndResettable","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsConcurrentRevisionHasOneWinner","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsInputAndCurrentBindings","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsRevisionsOwnershipInheritanceAndRedaction","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestLeadSettingsWriteRechecksRevocation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestModelKeyMatchesAliasesAndAPIIDs","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
@@ -6740,6 +6794,8 @@
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestHarnessStatusAndHeartbeatContract","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestLeadSettingsStartGatesSchema","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/reportercontract","name":"TestNoRequestStatusAndHeartbeatAreByteIdenticalToV1","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestOpenAPIPropertyNamesHaveNoSpace","tier":"ESSENTIAL"}
@@ -6749,6 +6805,8 @@
     {"kind":"go","package":"internal/reportercontract","name":"TestPausePlanningHeartbeatFieldsStayOptional","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestPinnedShapeKeys","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestProjectLeadResponseDescriptions","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestReporterRoutesDeclareHeaderBeforeAuthentication","tier":"GATED-FULL"}
     ,
@@ -7525,6 +7583,8 @@
     {"kind":"go","package":"internal/statusautopilot","name":"TestUpgradePublicationWaitsAndResumesAfterConfirmation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestUpgradeSuggestsWithoutTicketMutationsUntilOwnerConfirms","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestWorkspaceActivityPagingAndCurrentUndoAuthority","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/tenant","name":"TestPrincipalContextPreservesLegacyLabels","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,

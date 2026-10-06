@@ -446,6 +446,33 @@ func normalizeEffectiveLane(t *testing.T, id string, value map[string]any) {
 		for key, raw := range m {
 			switch v := raw.(type) {
 			case string:
+				// Preserve historical pins after checking the added workflow-level
+				// merge-group guards; never rewrite the immutable fixtures.
+				if key == "if" && m["name"] == "Confirm full tier execution" && id != "web-setup" {
+					old := "needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential'"
+					if id == "go-test" {
+						old = "needs.tier-plan.outputs.mode != 'essential'"
+					}
+					want := "github.event_name != 'pull_request' || (" + old + ")"
+					if id == "go-test" {
+						want = "github.event_name != 'pull_request' || " + old
+					}
+					if v != want {
+						t.Fatalf("%s must prove full execution on every merge-group shard", id)
+					}
+					v = old
+				}
+				if key == "if" && strings.Contains(v, "needs.tier-plan.outputs.layout != 'static'") {
+					guard := "(github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')"
+					if !strings.Contains(v, guard) {
+						t.Fatalf("%s must restrict static skips to PRs", id)
+					}
+					v = strings.Replace(v, guard, "needs.tier-plan.outputs.layout != 'static'", 1)
+				}
+				if key == "shard" {
+					v = strings.Replace(v, "github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential'", `contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential'`, 1)
+					v = strings.Replace(v, "github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only'", "needs.tier-plan.outputs.lane == 'spec-only'", 1)
+				}
 				m[key] = strings.ReplaceAll(v, "needs.tier-plan.outputs.lane", "needs.ci-plan.outputs.lane")
 			case map[string]any:
 				if layout, exists := v["AEON_TEST_TIER_LAYOUT"]; exists {
