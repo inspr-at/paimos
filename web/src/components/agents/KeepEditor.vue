@@ -50,7 +50,7 @@ const personLabel = computed(() => reserveLabel(mode.value === 'fixed' ? { reser
 const BLIND = new Set(['grok', 'cursor', 'pi'])
 const vendorRows = computed(() => props.pools.filter(p => !p.id.startsWith('group:')).map(p => {
   const measured = p.rows.some(r => r.primary)
-  const note = measured ? '' : BLIND.has(p.mark || p.id) ? `${p.name} doesn't show its limit · one run at a time by day` : 'No reading yet'
+  const note = measured ? '' : BLIND.has(p.mark || p.id) ? 'Usage unknown · reserve not enforceable' : 'No reading yet'
   const learned = p.rows.some(r => r.learning?.windows.some(w => w.auto_reserve_percent))
   return { id: p.id, mark: p.mark || p.id, name: p.name, measured, note, auto: learned ? 'Auto · learned per account' : `Auto · ~${AUTO_RESERVE}%` }
 }))

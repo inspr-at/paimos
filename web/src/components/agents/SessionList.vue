@@ -44,16 +44,17 @@ import { useSectionFold } from '../../stores/sectionPrefs'
 import { below, shownBelow, treeRows, type TreeRow } from './sessionTree'
 import { useServiceTiers } from '../../stores/serviceTiers'
 import { TIER_NAME } from '../../lib/serviceTier'
+import { FILTER_LABEL, matchesFilter, type HeadFilter } from './headCounts'
 const serviceTiers = useServiceTiers()
 
 // Session families stay together across status groups. Each lead's history is
 // opt-in for this mounted list only; refreshes never open it or persist it.
 const props = defineProps<{
   history?: SessionView[]; historyState?: 'idle' | 'loading' | 'ready' | 'error'; historyMore?: boolean; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
-  loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean; canLead?: boolean
+  loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean; canLead?: boolean; filter?: HeadFilter | null
 }>()
 const agentRecovery = useAgentRecovery()
-const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: [] }>()
+const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: []; clearFilter: [] }>()
 const showStopped = ref(false)
 // History is a separate, opt-in list of every ended or removed session. The
 // main list keeps only sessions that ended in the last 24 hours (AEON-291).
@@ -62,7 +63,10 @@ const removedCount = computed(() => props.history?.length ?? 0)
 function toggleHistory() {
   showRemoved.value = !showRemoved.value
   if (showRemoved.value) emit('history')
+  // History lists ended sessions; a state filter only applies to the live list.
+  if (showRemoved.value && props.filter) emit('clearFilter')
 }
+watch(() => props.filter, value => { if (value) showRemoved.value = false })
 const removal = useSessionRemoval()
 const current = computed(() => GROUPS.flatMap(g => props.groups[g.id]))
 const stale = computed(() => current.value.map(v => v.session).filter(s => isStale(s, props.now) && removal.canRemove(s)))
@@ -77,9 +81,26 @@ const forest = computed(() => orderForest(sessionForest(showRemoved.value ? prop
 type Bucket = 'attention' | 'live' | 'pausing' | 'paused' | 'stopped'
 const BUCKETS: { id: Bucket; label: string }[] = [{ id: 'attention', label: 'Needs attention' }, { id: 'live', label: 'Live' }, { id: 'pausing', label: 'Pausing' }, { id: 'paused', label: 'Paused' }, { id: 'stopped', label: 'Ended' }]
 const bucketOf = (group: SessionGroup): Bucket => group === 'stopped' ? 'stopped' : group === 'pausing' ? 'pausing' : group === 'paused' ? 'paused' : group === 'working' || group === 'idle' ? 'live' : 'attention'
+// A head count's filter (AEON-780) keeps matching sessions and their ancestors,
+// which stay as dimmed context, unfolded.
+const filtering = computed(() => showRemoved.value ? null : props.filter ?? null)
+const kept = computed(() => {
+  const ids = new Set<string>()
+  const active = filtering.value
+  if (!active) return ids
+  const walk = (branch: Branch): boolean => {
+    const below = branch.children.map(walk).some(Boolean)
+    const keep = below || matchesFilter(branch.view, active)
+    if (keep) ids.add(branch.view.session.id)
+    return keep
+  }
+  forest.value.forEach(walk)
+  return ids
+})
+const keeps = (branch: Branch) => !filtering.value || kept.value.has(branch.view.session.id)
 const roots = (bucket: Bucket) => showRemoved.value
   ? (bucket === 'stopped' ? forest.value : [])
-  : forest.value.filter(branch => bucketOf(branch.group) === bucket)
+  : forest.value.filter(branch => bucketOf(branch.group) === bucket && keeps(branch))
 // Count sessions, including folded descendants, rather than family roots.
 const pausedCount = (branch: Branch): number => Number(branch.view.status.state === 'paused') + branch.children.reduce((sum, child) => sum + pausedCount(child), 0)
 const attentionCount = (branch: Branch): number => Number(bucketOf(branch.view.status.group) === 'attention') + branch.children.reduce((sum, child) => sum + attentionCount(child), 0)
@@ -91,6 +112,7 @@ const containsSelected = (branch: Branch): boolean => branch.view.session.id ===
 // A direct link may reveal its selected row, but never its stopped siblings.
 const candidates = (branch: Branch) => branch.children.filter(child => showRemoved.value || history.value[branch.view.session.id] || child.liveCount > 0 || child.view.status.state === 'paused' || containsSelected(child))
 // Parents are open by default; a fold lasts for this visit (AEON-784).
+// A head-count filter forces kept parents open through treeRows' match.
 const isExpanded = (branch: Branch): boolean => candidates(branch).length > 0 && (expanded.value[branch.view.session.id] ?? true)
 // The fold button sits in its parent's row, so a click already moves the cursor there.
 function toggle(branch: Branch) {
@@ -107,13 +129,19 @@ const descendants = (branch: Branch): SessionView[] => branch.children.flatMap(c
 const activityLine = (branch: Branch) => branch.view.session.agent_activity_mode === 'off' ? '' :
   (branch.view.session.role === 'coordinator' && !branch.view.session.stopped_at ? workerActivity(descendants(branch), props.now) : '') || currentActivity(branch.view, props.now)
 const workingChildren = (branch: Branch) => branch.children.reduce((sum, child) => sum + child.workingCount, 0)
+// A filter shows every kept child; otherwise the list hides stopped ones until asked.
+const offered = (branch: Branch) => filtering.value ? branch.children.filter(keeps) : candidates(branch)
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 type Row = TreeRow<SessionView> & { view: SessionView; primary: string; context: string; exec: ReturnType<typeof sessionExecution>; family: boolean; familyEnd: boolean; lead: boolean; sub: number; under: ReturnType<typeof below> }
 // Sessions as a tree of any depth (AEON-784): the list decides which children a
 // parent offers and whether it is open; sessionTree lays out the rows.
 function visible(group: Bucket): Row[] {
-  const shown = roots(group).filter(branch => group !== 'stopped' || showRemoved.value || showStopped.value || containsSelected(branch))
-  const rows = treeRows(shown, { children: candidates, isOpen: isExpanded })
+  const shown = roots(group).filter(branch => group !== 'stopped' || showRemoved.value || showStopped.value || !!filtering.value || containsSelected(branch))
+  const rows = treeRows(shown, {
+    children: candidates,
+    isOpen: isExpanded,
+    match: filtering.value ? (view: SessionView) => matchesFilter(view, filtering.value!) : null,
+  })
   return rows.map((row, index) => {
     const view = row.branch.view
     const primary = intendedResult(view)
@@ -121,7 +149,7 @@ function visible(group: Bucket): Row[] {
       ...row, view, primary, context: sessionContext(view, primary), exec: sessionExecution(view),
       family: row.depth > 0 || row.open, familyEnd: !rows[index + 1]?.depth,
       lead: view.session.role === 'coordinator' || row.branch.children.length > 0,
-      sub: row.foldable ? shownBelow(row.branch, candidates) : 0,
+      sub: row.foldable ? shownBelow(row.branch, offered) : 0,
       under: below(row.branch, v => v.name),
     }
   })
@@ -151,11 +179,11 @@ function treeKey(event: KeyboardEvent) {
   if (!row) return
   event.preventDefault()
   if (event.key === 'ArrowLeft') {
-    if (row.open) toggle(row.branch)
+    if (row.open && !filtering.value) toggle(row.branch)
     else if (row.parent) focusSession(row.parent.view.session.id)
-  } else if (row.foldable && !row.open) toggle(row.branch)
+  } else if (row.foldable && !row.open && !filtering.value) toggle(row.branch)
   else if (row.open) {
-    const first = candidates(row.branch)[0]
+    const first = offered(row.branch)[0]
     if (first) focusSession(first.view.session.id)
   }
 }
@@ -398,8 +426,9 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 
 <template>
   <FoldSection class="sessions" label="Sessions" :open="sectionOpen" :tip="sectionOpen ? 'Fold sessions' : 'Unfold sessions'" @toggle="toggleFold">
-    <template #title><span id="sessions-title">{{ showRemoved ? 'History' : 'Sessions' }}</span><span v-if="loaded && state === 'ready'" class="fs-count">{{ showRemoved ? removedCount : total }}</span></template>
+    <template #title><span id="sessions-title">{{ showRemoved ? 'History' : 'Sessions' }}</span><span v-if="loaded && state === 'ready'" class="fs-count" aria-hidden="true">{{ showRemoved ? removedCount : total }}</span></template>
     <template #head>
+      <span v-if="filtering" class="filter-chip"><span class="chip-main">State<span class="chip-value">{{ FILTER_LABEL[filtering] }}</span></span><button type="button" class="chip-x" aria-label="Show all sessions" data-tip="Show all sessions · Esc" @click="emit('clearFilter')"><AppIcon name="close" :size="11" /></button></span>
       <span v-if="!sectionOpen && foldedSummary" class="fs-sum">{{ foldedSummary }}</span>
       <span v-if="sectionOpen && loaded && state === 'ready'" class="head-tools">
         <button v-if="sort" type="button" class="btn sm ghost quiet-btn" data-tip="Order by state, then start time" @click="resetSort">Default order</button>
@@ -451,6 +480,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
         </template>
         <span role="columnheader"><span class="sr-only">Actions</span></span>
       </div>
+      <div v-if="filtering && !kept.size" class="group-row filter-empty" role="row"><span role="cell">No session is {{ FILTER_LABEL[filtering].toLowerCase() }} right now.</span></div>
       <template v-for="group in BUCKETS" :key="group.id">
         <div v-if="roots(group.id).length" class="group-row" :class="group.id" role="row">
           <span role="rowheader" class="group-label">
@@ -468,7 +498,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
           :draggable="permittedWorker(row.view) && !moving"
           :data-drop-target="dragged && targetFor(dragged, row.view) ? 'true' : undefined"
           @dragstart="startDrag($event, row.view)" @dragend="endDrag" @dragover="dragOver($event, row.view)" @dragleave="dropOver = ''" @drop="drop($event, row.view)"
-          :class="[row.view.status.group, { 'drop-over': dropOver === row.view.session.id, worker: row.depth > 0, family: row.family, 'family-start': row.family && !row.depth, 'family-end': row.family && row.familyEnd, active: cursor === `s:${row.view.session.id}`, selected: selected === row.view.session.id, 'context-only': row.contextOnly }]" @click="rowClick($event, row.view.session.id)"
+          :class="[row.view.status.group, { 'filter-context': row.contextOnly, 'context-only': row.contextOnly, 'drop-over': dropOver === row.view.session.id, worker: row.depth > 0, family: row.family, 'family-start': row.family && !row.depth, 'family-end': row.family && row.familyEnd, active: cursor === `s:${row.view.session.id}`, selected: selected === row.view.session.id }]" @click="rowClick($event, row.view.session.id)"
         >
           <span v-if="row.depth || row.open" class="tree-lines" aria-hidden="true">
             <span v-for="(continues, level) in row.guides" :key="level" class="tree-guide" :class="{ continues, elbow: level === row.depth - 1, last: level === row.depth - 1 && !continues }" :style="{ '--level': level }" />
@@ -483,7 +513,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
           <span role="gridcell" class="c-agent">
             <span v-if="row.depth" class="sr-only">Worker of {{ row.parent?.view.name }}. </span>
             <button
-              v-if="row.foldable" type="button" class="tree-fold" data-fold="family" tabindex="-1" :aria-expanded="row.open" :aria-label="foldLabel(row)"
+              v-if="row.foldable" type="button" class="tree-fold" data-fold="family" tabindex="-1" :disabled="!!filtering" :aria-expanded="row.open" :aria-label="foldLabel(row)"
               :data-tip="row.open ? 'Fold · Left arrow' : 'Unfold · Right arrow'" @click="toggle(row.branch)"
             ><AppIcon name="chevron-right" :size="14" class="chev" :class="{ turned: row.open }" /></button>
             <span v-else class="tree-fold-space" aria-hidden="true" />
@@ -640,6 +670,15 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 .head-tools { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; margin-right: -4px; }
 .tool-label { white-space: nowrap; }
 .sort-tool { display: none; }
+/* The head count's filter (AEON-780): a teal chip after the title; × or Esc clears it. */
+.filter-chip { display: inline-flex; align-items: stretch; align-self: center; flex: none; height: 28px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
+.chip-main { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px 0 12px; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.chip-value { color: var(--ink); font-weight: 500; }
+.chip-value::before { content: '·'; margin-right: 6px; color: var(--ink-3); }
+.chip-x { display: grid; place-items: center; width: 28px; padding: 0; border: 0; border-radius: 0 999px 999px 0; background: transparent; color: var(--teal-ink); }
+@media (hover: hover) { .chip-x:hover { background: var(--row-hover); } }
+.chip-x:focus-visible { box-shadow: var(--focus-ring); }
+.filter-empty { color: var(--ink-3); font-size: 13px; }
 .quiet-btn { color: var(--ink-2); font-weight: 550; }
 .quiet-btn:hover { color: var(--ink); }
 .quiet-btn[aria-pressed="true"] { background: transparent; box-shadow: none; color: var(--ink-2); }
@@ -725,7 +764,8 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 .chev { transition: transform .2s ease; }
 @media (prefers-reduced-motion: reduce) { .row, .chev { transition: none; } }
 /* A filter's context rows (ancestors of a match) stay present and quiet. */
-.row.context-only > :not(.c-agent), .row.context-only .who { opacity: .55; }
+.row.context-only > :not(.c-agent), .row.context-only .who,
+.row.filter-context > :not(.c-agent), .row.filter-context .who { opacity: .55; }
 .c-state { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
 .c-state:has(.no-inbox) { flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; }
 .no-inbox { color: var(--ink-3); font-size: 11px; white-space: nowrap; }
@@ -901,6 +941,8 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
   /* Phone tools: 44 px icon buttons; their names stay for screen readers. The head
      keeps their height when it folds and they leave, so the fold control stays put. */
   .sessions > :deep(.fs-head) { min-height: 60px; }
+  .filter-chip { height: 44px; }
+  .chip-x { width: 44px; }
   .head-tools .btn { min-width: 44px; min-height: 44px; justify-content: center; }
   .head-tools .tool-label { display: none; }
 }

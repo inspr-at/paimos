@@ -16,6 +16,7 @@ import ShortcutSheet from './components/work/ShortcutSheet.vue'
 import StatusHelpSheet from './components/work/StatusHelpSheet.vue'
 import AppIcon from './components/AppIcon.vue'
 import TicketPeekHost from './components/TicketPeekHost.vue'
+import LeadOverlays from './components/lead/LeadOverlays.vue'
 import { command, consume } from './lib/commands'
 import { clearFatal, fatal } from './lib/fatal'
 import { provideTicketPeek } from './lib/ticketPeek'
@@ -47,10 +48,10 @@ const bare = computed(() => !!route.meta.bare && !fatal.value)
 const sessionEndedHere = computed(() => sessionFreezeApplies(route.path, session.requiresSignIn))
 // Keep the mounted page readable and copyable after a 401, while every editor
 // and action control becomes inert. The observer covers controls rendered after
-// an in-flight request settles.
+// an in-flight request settles. The lead panel and sheets live in the shell, not the page.
 function freezePage() {
   if (!sessionEndedHere.value) return
-  for (const root of document.querySelectorAll<HTMLElement>('.page-flow, .sheet-root')) {
+  for (const root of document.querySelectorAll<HTMLElement>('.page-flow, .sheet-root, .lead-panel, .lead-sheet')) {
     for (const field of root.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select')) {
       if (field instanceof HTMLSelectElement || (field instanceof HTMLInputElement && ['checkbox', 'radio', 'file', 'button', 'submit'].includes(field.type))) {
         if (!field.disabled) field.disabled = true
@@ -236,6 +237,7 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
     <AppFooter v-if="!bare" :hidden="footerHidden" @releases="openRunningRelease" />
     <ReleasesSheet v-if="releasesOpen" ref="releasesSheet" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
     <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
+    <LeadOverlays v-if="session.identity && !bare && !fatal" />
     <ModelPrefsDialog v-if="modelPrefsContext && session.identity && !session.requiresSignIn" :key="modelPrefsContext.requestId" :context="modelPrefsContext" @close="closeModelPrefs" />
     <ToastHost />
     <ConfirmHost />

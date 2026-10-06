@@ -1,6 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, onBeforeUnmount, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { leadOverlay, resetLeadOverlays } from '../../lib/leadOverlay'
 import { useProjects } from '../../stores/projects'
 import { useSession } from '../../stores/session'
@@ -8,10 +9,13 @@ import LeadPanel from './LeadPanel.vue'
 import LeadPauseSheet from './LeadPauseSheet.vue'
 import StartLeadSheet from './StartLeadSheet.vue'
 
-// Hosts the docked lead panel and the lead sheets for the view that mounts it.
-const projects = useProjects(), session = useSession()
+// The app shell's one host for the docked lead panel and the lead sheets, so a
+// ticket preview over any page can open them. Leaving the view that opened an
+// overlay closes it, as before; moving within that view keeps it.
+const projects = useProjects(), session = useSession(), route = useRoute()
 const panelProject = computed(() => leadOverlay.panel ? projects.byId(leadOverlay.panel) ?? null : null)
 watch(() => `${session.identity?.tenant.id}:${session.identity?.principal.id}`, () => resetLeadOverlays())
+watch(() => route.matched[0], () => resetLeadOverlays())
 onBeforeUnmount(resetLeadOverlays)
 </script>
 

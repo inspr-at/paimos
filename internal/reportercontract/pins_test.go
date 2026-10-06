@@ -3,14 +3,18 @@
 package reportercontract
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"reflect"
 	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -357,6 +361,137 @@ func TestVersionShape(t *testing.T) {
 			if _, err := strconv.Atoi(number); err != nil {
 				t.Errorf("%s: invalid version %s", name, s.version)
 			}
+		}
+	}
+}
+
+// Sorting must preserve parsed values, including whitespace owned by scalars.
+func TestOpenAPISortPreservesScalarValues(t *testing.T) {
+	for _, section := range []string{"paths", "schemas"} {
+		for _, scalar := range []string{
+			"|-\n        # literal trailing hash",
+			">-\n        Text\n        # literal trailing hash",
+			"|+\n        Text\n\n\n",
+			"|2+\n        # explicit indentation\n\n",
+			">+2\n        # explicit indentation\n\n",
+			"|-\n        security: &demo [one]\n        other: *demo",
+			"|+\n\n        # leading blank and trailing whitespace\n        \n",
+			"|- # header comment\n        # scalar comment",
+			"!!str |+\n        # tagged scalar\n\n",
+			"|-\n        security: &undefined\n        other: *undefined",
+			"'quoted text\n        security: &demo [one]\n        other: *demo'",
+			"\"quoted text\n        security: &demo [one]\n        other: *demo\"",
+			"{nested: 'quoted text\n        security: &demo [one]\n        other: *demo\n        end'}",
+			"{nested: \"quoted text\n        security: &demo [one]\n        other: *demo\n        end\"}",
+			"[{nested: ['quoted text\n        security: &demo [one]\n        other: *demo\n        end']}]",
+			"[{nested: [\"quoted text\n        security: &demo [one]\n        other: *demo\n        end\"]}]",
+			"{nested:\n        {description: 'quoted ''text\n        security: &demo [one]\n        other: *demo\n        end'}}",
+			"{nested:\n        {description: \"quoted \\\"text\n        security: &demo [one]\n        other: *demo\n        end\"}}",
+			"{first: 'one', second: 'quoted text\n        security: &demo [one]\n        other: *demo\n        end'}",
+			"{first: \"one\", second: \"quoted text\n        security: &demo [one]\n        other: *demo\n        end\"}",
+			// Flow sequence items are complete nodes, not mapping keys named "{$ref".
+			"\n        - {$ref: '#/components/schemas/Zebra'}\n        - {type: 'null'}",
+			"\n        - {$ref: \"#/components/schemas/Zebra\"}\n        - [{nested: 'quoted text\n          security: &demo [one]\n          other: *demo'}]",
+		} {
+			t.Run(section+"/"+scalar, func(t *testing.T) {
+				var source string
+				if section == "paths" {
+					source = "paths:\n  /z:\n    get:\n      description: " + scalar + "\n  # Alpha comment\n  /a: {}\ncomponents:\n  schemas: {}\n"
+				} else {
+					// Z sorts to the end of the document; its trailing newlines
+					// must travel with it even when no following section exists.
+					source = "paths:\n  /a: {}\ncomponents:\n  schemas:\n    Z:\n      description: " + scalar + "\n    # Alpha comment\n    A: {}\n"
+				}
+				// The two literal examples cross blocks when sorting, which
+				// used to promote a fake anchor and rewrite both descriptions.
+				if strings.Contains(scalar, "&demo [one]") && strings.HasPrefix(scalar, "|-") {
+					if section == "paths" {
+						source = strings.Replace(source, "  /a: {}", "  /a:\n    get:\n      description: |-\n        security: *demo", 1)
+					} else {
+						source = strings.Replace(source, "    A: {}", "    A:\n      description: |-\n        security: *demo", 1)
+					}
+				}
+				if strings.HasPrefix(scalar, "{") || strings.HasPrefix(scalar, "[") {
+					alias := strings.Replace(scalar, "&demo [one]", "*demo", 1)
+					if section == "paths" {
+						source = strings.Replace(source, "  /a: {}", "  /a:\n    get:\n      description: "+alias, 1)
+					} else {
+						source = strings.Replace(source, "    A: {}", "    A:\n      description: "+alias, 1)
+					}
+				}
+				var before any
+				if err := yaml.Unmarshal([]byte(source), &before); err != nil {
+					t.Fatalf("invalid input fixture: %v", err)
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, "node", "--input-type=module", "-e", `
+import { readFileSync } from 'node:fs';
+import { sortOpenAPI } from './scripts/openapi-sort.mjs';
+const sorted = sortOpenAPI(readFileSync(0, 'utf8'));
+if (sortOpenAPI(sorted) !== sorted) throw new Error('sort is not idempotent');
+process.stdout.write(sorted);
+`)
+				cmd.Dir = "../.."
+				cmd.Stdin = strings.NewReader(source)
+				sorted, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("sort failed: %v\n%s", err, sorted)
+				}
+				var after any
+				if err := yaml.Unmarshal(sorted, &after); err != nil {
+					t.Fatalf("sorted fixture is invalid: %v\n%s", err, sorted)
+				}
+				if !reflect.DeepEqual(before, after) {
+					t.Fatalf("sort changed parsed YAML values\nbefore: %#v\nafter: %#v\n%s", before, after, sorted)
+				}
+			})
+		}
+	}
+	for _, header := range []string{"|", ">", "|+", ">+", "|2", ">2"} {
+		for _, direction := range []string{"into", "out of"} {
+			t.Run(header+"/"+direction+" unterminated EOF", func(t *testing.T) {
+				tail := "    Z: {}\n    A:\n      description: " + header + "\n        Text"
+				if direction == "into" {
+					tail = "    Z:\n      description: " + header + "\n        Text\n    A: {}"
+				}
+				source := "paths:\n  /a: {}\ncomponents:\n  schemas:\n" + tail
+				var original, before any
+				if err := yaml.Unmarshal([]byte(source), &original); err != nil {
+					t.Fatalf("invalid unterminated fixture: %v", err)
+				}
+				if err := yaml.Unmarshal([]byte(source+"\n"), &before); err != nil {
+					t.Fatalf("invalid terminated fixture: %v", err)
+				}
+				if direction == "out of" && reflect.DeepEqual(original, before) {
+					t.Fatal("fixture must demonstrate that the EOF newline changes the scalar value")
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				cmd := exec.CommandContext(ctx, "node", "--input-type=module", "-e", `
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { sortOpenAPI } from './scripts/openapi-sort.mjs';
+const source = readFileSync(0, 'utf8');
+assert.throws(() => sortOpenAPI(source), /Cannot move a block scalar into or out of unterminated EOF/);
+const sorted = sortOpenAPI(source + '\n');
+assert.equal(sortOpenAPI(sorted), sorted);
+process.stdout.write(sorted);
+`)
+				cmd.Dir = "../.."
+				cmd.Stdin = strings.NewReader(source)
+				sorted, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("EOF guard or terminated sort failed: %v\n%s", err, sorted)
+				}
+				var after any
+				if err := yaml.Unmarshal(sorted, &after); err != nil {
+					t.Fatalf("sorted terminated fixture is invalid: %v", err)
+				}
+				if !reflect.DeepEqual(before, after) {
+					t.Fatalf("terminated sort changed parsed values\nbefore: %#v\nafter: %#v", before, after)
+				}
+			})
 		}
 	}
 }

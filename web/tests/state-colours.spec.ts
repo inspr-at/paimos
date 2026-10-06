@@ -28,8 +28,8 @@ for (const theme of ['light', 'dark'] as const) {
       for (const value of ['AEON-221', '/Code/aeon-sc1', 'sc1.state-colours', 'abc1234', 'Integrate session states']) await expect(work).toContainText(value)
       await page.getByRole('button', { name: 'Close session details' }).click()
     }
-    // The live line carries each state's mark (AEON-299 replaced the tiles).
-    for (const state of ['working', 'waiting', 'throttled', 'problem']) await expect(page.locator(`.live-line [data-mark="${state}"]`).first()).toBeVisible()
+    // The head counts carry each state's mark (AEON-780 replaced the live line).
+    for (const state of ['working', 'waiting', 'throttled', 'problem']) await expect(page.locator(`.page-head .head-counts [data-mark="${state}"]`).first()).toBeVisible()
     await page.goto('/')
     for (const layout of ['Cards', 'List']) {
       await page.getByRole('radio', { name: `${layout} view`, exact: true }).click()
@@ -173,7 +173,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.goto('/agents')
     await expect(page.locator('.row[data-state="awaiting"] .agent-state-label')).toHaveText('Awaiting heartbeat')
     await expect(page.locator('.group-row').filter({ hasText: 'Needs attention' })).toBeVisible()
-    await expect(page.getByRole('group', { name: 'Live sessions' })).toContainText('live')
+    await expect(page.getByRole('group', { name: 'Show sessions by state' })).toContainText('working')
     // Closing a session retains the page keyboard cursor and returns to the list.
     await page.locator('[data-state="working"] .agent-link').click()
     await page.getByRole('button', { name: 'Close session details' }).click()
@@ -187,13 +187,13 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     expect(accounts.y + accounts.height).toBeLessThanOrEqual(sessions.y)
     await page.locator('h1').scrollIntoViewIfNeeded()
     await page.mouse.move(0, 0)
-    // State counts in the live line share one neutral surface; the colour is in the mark.
-    const counts = page.locator('.live-line .state-count')
+    // Head counts share one neutral surface and the colour is in the mark; only a problem or a request is tinted.
+    const counts = page.locator('.page-head .head-counts .count:not(.hot):not(.ask)')
     const surfaces = await counts.evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor))
     expect(new Set(surfaces).size).toBe(1)
     const rows = page.locator('.row[data-state]:not(.active):not(.selected)')
     expect(new Set(await rows.evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor))).size).toBe(1)
-    await expect(page.locator('.live-line [data-mark="problem"]').first()).toBeVisible()
+    await expect(page.locator('.page-head .head-counts [data-mark="problem"]').first()).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath(`sc2-${theme}-${width}-agents.png`), fullPage: true })
     const problem = page.locator('.row[data-state="problem"]').first()
     await problem.locator('.agent-link').click()
