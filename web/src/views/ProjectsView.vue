@@ -16,7 +16,6 @@ import { PROJECT_COLUMNS, chosenProjectColumns, customisedProjectColumns, fittin
 import { byRank, keepOrder, nearestCell, place, prunedOrder, sameOrder } from '../lib/projectOrder'
 import AppIcon, { type IconName } from '../components/AppIcon.vue'
 import WelcomeBlock from '../components/WelcomeBlock.vue'
-import MorningBriefingReminder from '../components/MorningBriefingReminder.vue'
 import FloatingPanel from '../components/work/FloatingPanel.vue'
 import ColumnPicker from '../components/work/ColumnPicker.vue'
 import RowMenu from '../components/business/RowMenu.vue'
@@ -861,7 +860,6 @@ const archivedSelection = computed(() => selectedProjects.value.length > 0 && se
       <p v-else class="summary"><span class="skeleton summary-skeleton" /></p>
     </header>
 
-    <MorningBriefingReminder />
     <div ref="listCard" class="projects-card glass-card">
       <div class="projects-toolbar">
         <label class="search-field project-search">

@@ -2,11 +2,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
+import { select, validate, key } from '../../scripts/test-tiers/core.mjs'
+import { command, flattenBrowser, root } from '../../scripts/test-tiers/collect.mjs'
 import { readFileSync, writeFileSync, mkdtempSync, mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
-import { command, flattenBrowser } from '../../scripts/test-tiers/collect.mjs'
-import { key, select, validate } from '../../scripts/test-tiers/core.mjs'
 import {
   balanceShards, checkCoverage, checkSpecInventory, discoverSpecs, loadManifest, main, parseArgs,
   parseShard, planCommands, planFlakeRetry, reconcileManifest, retryCount, selectChangedSpecs, validateManifest, mergeReports, webRoot,
@@ -87,7 +87,7 @@ test('source manifest accounts for every spec, including nested files, before re
   const manifest = loadManifest(), discovered = discoverSpecs(webRoot, manifest.specDirectories)
   assert.deepEqual(checkSpecInventory(manifest, discovered), { specs: discovered.length, excluded: 0 })
   assert.deepEqual(manifest.exclusions, [])
-  for (const file of ['tests/clip-tip.spec.ts', 'tests/aeon-632b-clip.spec.ts', 'tests/key-trim.spec.ts', 'tests/model-prefs.spec.ts', 'tests/record-ownership.spec.ts']) {
+  for (const file of ['tests/clip-tip.spec.ts', 'tests/aeon-632b-clip.spec.ts', 'tests/aeon-632b-clip-settings.spec.ts', 'tests/key-trim.spec.ts', 'tests/model-prefs.spec.ts', 'tests/record-ownership.spec.ts']) {
     assert.equal(balanceShards(manifest, 12).flatMap(shard => shard.specs).filter(spec => spec.file === file).length, 1, `${file} must gate exactly once`)
   }
 })
@@ -124,6 +124,46 @@ test('LPT balancing distributes a known fixture optimally and covers it exactly 
   const manifest = fixture(), shards = balanceShards(manifest, 3)
   assert.deepEqual(shards.map(s => s.weightSeconds), [13, 13, 13])
   assert.deepEqual(checkCoverage(manifest, shards, files(manifest)), { specs: 6, shards: 3 })
+  // Greedy placement alone gives 17/13. Swapping the 8- and 6-second specs
+  // reaches 15/15 without dropping coverage or understating a timing weight.
+  const uneven = { version: 1, groups: [group('a', [8, 7]), group('b', [6, 5, 4])] }
+  const before = structuredClone(uneven), balanced = balanceShards(uneven, 2)
+  assert.deepEqual(balanced.map(s => s.weightSeconds), [15, 15])
+  assert.deepEqual(checkCoverage(uneven, balanced, files(uneven)), { specs: 5, shards: 2 })
+  assert.deepEqual(uneven, before, 'Balancing must retain source weights and policies')
+  for (const shard of balanced) assert.equal(shard.weightSeconds, shard.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0))
+  uneven.groups.reverse().forEach(g => g.specs.reverse())
+  assert.deepEqual(balanceShards(uneven, 2), balanced, 'Swap selection must not depend on source order')
+})
+
+test('indivisible specs rebalance after LPT without changing weights, coverage or launch policy', () => {
+  // LPT alone assigns [8, 5, 4] and [7, 6]: 17/13 despite a 15/15 fit.
+  const manifest = { version: 1, groups: [group('a', [8, 7, 6]), group('b', [5, 4])] }
+  const before = structuredClone(manifest), shards = balanceShards(manifest, 2)
+  assert.deepEqual(shards.map(shard => shard.weightSeconds), [15, 15])
+  assert.deepEqual(checkCoverage(manifest, shards, files(manifest)), { specs: 5, shards: 2 })
+  for (const shard of shards) {
+    assert.equal(shard.weightSeconds, shard.specs.reduce((total, spec) => total + spec.weightSeconds, 0))
+    for (const spec of shard.specs) {
+      const owner = manifest.groups.find(group => group.id === spec.groupId)
+      assert.deepEqual(spec, { ...owner.specs.find(row => row.file === spec.file), groupId: owner.id })
+    }
+  }
+  assert.deepEqual(manifest, before)
+  const reordered = structuredClone(manifest)
+  reordered.groups.reverse().forEach(group => group.specs.reverse())
+  assert.deepEqual(balanceShards(reordered, 2), shards)
+})
+
+test('multi-spec exchanges lower a peak that pairwise swaps leave in place', () => {
+  // LPT plus one-for-one swaps stops at 51/47/46 for these weights. A three-spec
+  // exchange reaches the even 48/48/48 split, which is what merged gate weights need.
+  const manifest = { version: 1, groups: [group('peak', [40, 21, 20, 19, 18, 8, 7, 6, 5])] }
+  const shards = balanceShards(manifest, 3)
+  assert.deepEqual(shards.map(shard => shard.weightSeconds), [48, 48, 48])
+  assert.deepEqual(checkCoverage(manifest, shards, files(manifest)), { specs: 9, shards: 3 })
+  manifest.groups[0].specs.reverse()
+  assert.deepEqual(balanceShards(manifest, 3).map(shard => shard.weightSeconds), [48, 48, 48])
 })
 
 test('one-worker tier weights convert measured parallel steps but retain serial and unmeasured estimates', async () => {
@@ -261,7 +301,7 @@ test('real manifest covers every non-excluded UI spec once for 1, 12 and 256 sha
   assert.notEqual(recurrence.gate, false)
   assert.deepEqual(recurrence.flags, ['--workers=1', '--trace=retain-on-failure'])
   assert.equal(recurrence.env.AEON_RECURRENCE_SHOTS, '${RUNNER_TEMP}/aeon-recurrence-shots')
-  assert.deepEqual(recurrence.specs.map(s => s.file), ['tests/recurrences.spec.ts', 'tests/recurrence-marker.spec.ts'])
+  assert.deepEqual(recurrence.specs.map(s => s.file), ['tests/recurrence-marker.spec.ts', 'tests/recurrences.spec.ts'])
   assert.equal(balanceShards(manifest, 12).flatMap(s => s.specs).filter(s => s.file === 'tests/recurrences.spec.ts').length, 1)
   assert.equal(files(manifest).filter(file => file === 'tests/access.spec.ts').length, 1)
   for (const e of manifest.ciInventory.filter(e => e.kind === 'browser-test' && e.config === 'playwright.ui.config.ts' && !e.revision)) {
@@ -477,7 +517,18 @@ test('ungated groups stay declared and checked but only run with --all', () => {
   const gated = balanceShards(real, 12).flatMap(s => s.specs)
   assert.ok(gated.some(spec => spec.file === 'tests/knowledge.spec.ts'), 'Decision Knowledge regressions must gate CI')
   assert.equal(gated.length, files(real).length - real.groups.find(g => g.id === 'remaining-ui').specs.length)
-  assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < 300, 'gate shard exceeds five minutes of test time')
+  // Preserve main's five-minute estimate for every gated group except
+  // AEON-697's attention spec. That spec is one file, so the balancer cannot
+  // spread it; the expanded gate may grow by its whole weight and no more.
+  // These weights are scheduling estimates, not a hosted-runtime promise.
+  const attention = real.groups.find(group => group.id === 'needs-attention')
+  assert.ok(attention, 'Attention regressions must remain in the gate')
+  const priorGate = { ...real, groups: real.groups.filter(group => group !== attention) }
+  const priorMax = Math.max(...balanceShards(priorGate, 12).map(s => s.weightSeconds))
+  assert.ok(priorMax < 300, 'prior gate exceeds its five-minute estimate budget')
+  const added = attention.specs.reduce((sum, spec) => sum + spec.weightSeconds, 0)
+  assert.ok(Math.max(...balanceShards(real, 12).map(s => s.weightSeconds)) < priorMax + added,
+    'expanded gate exceeds the prior estimate plus the attention specs')
 })
 
 test('runtime reconciliation leaves new specs ungated, drops removed specs and reports drift', async () => {
@@ -556,4 +607,64 @@ test('normal CI gates every shared Settings case and records the collected shard
   }
   const group = loadManifest().groups.find(row => row.id === 'settings-shared')
   assert.equal(group.specs.find(row => row.file === file).listedTests, collected.length)
+})
+
+test('Settings cases stay classified: strict validation rejects stale and unclassified registrations', () => {
+  const file = 'tests/settings.spec.ts', config = 'playwright.ui.config.ts'
+  const result = spawnSync(process.execPath, ['node_modules/@playwright/test/cli.js', 'test', '-c', config, file, '--list', '--reporter=json'], {
+    cwd: webRoot, encoding: 'utf8', timeout: 30_000, maxBuffer: 4 * 1024 * 1024,
+  })
+  assert.equal(result.error, undefined)
+  assert.equal(result.status, 0, result.stderr)
+  const collected = flattenBrowser(JSON.parse(result.stdout), config)
+  assert.ok(collected.length >= 20, 'collect the regrouped Settings cases, including the six Vocabulary overflow variants')
+  const stored = JSON.parse(readFileSync(new URL('../../scripts/ci/web-test-tiers.json', import.meta.url), 'utf8'))
+  const manifest = { version: stored.version, tests: stored.tests.filter(row => row.file === file) }
+  // The AEON-694 regrouping renamed cases; the manifest kept the old names and
+  // every run warned. Strict reconciliation throws on either drift direction.
+  const rows = validate(manifest, collected, undefined, { strict: true })
+  assert.deepEqual(rows.map(key).sort(), collected.map(key).sort())
+  const evidence = rows.filter(row => row.name.startsWith('settings layout evidence'))
+  assert.equal(evidence.length, 1)
+  assert.equal(evidence[0].tier, 'NIGHTLY', 'screenshot evidence stays nightly')
+  for (const row of rows) if (row !== evidence[0]) assert.ok(['ESSENTIAL', 'GATED-FULL'].includes(row.tier), `${key(row)} needs an explicit gate tier`)
+  for (const event of ['pull_request', 'merge_group']) {
+    const selected = select(rows, { event, paths: ['.github/workflows/ci.yml'] }).tests
+    assert.deepEqual(selected.map(key), rows.filter(row => row !== evidence[0]).map(key), `${event} must gate every functional Settings case`)
+  }
+  const policy = loadManifest()
+  const declarations = policy.groups.flatMap(group => group.specs.filter(spec => spec.file === file).map(spec => ({ group, spec })))
+  assert.equal(declarations.length, 1, 'Settings must have exactly one shard declaration')
+  assert.notEqual(declarations[0].group.gate, false, 'Settings must remain in the full browser gate')
+  assert.equal(declarations[0].spec.listedTests, collected.length)
+})
+
+// Native expansion catches parameterized routing cases; strict reconciliation
+// prevents new cases from silently becoming nightly-only after a merge.
+for (const [kind, file, minimum] of [
+  ['vitest', 'tests/settings-routing.unit.test.ts', 35],
+  ['node', 'tests/agent-login.test.ts', 3],
+]) test(`${file} native registrations stay explicitly gated`, () => {
+  const directory = mkdtempSync(resolve(tmpdir(), 'aeon-706-native-tiers-'))
+  try {
+    let collected
+    if (kind === 'vitest') {
+      const output = resolve(directory, 'vitest-list.json')
+      command(process.execPath, ['node_modules/vitest/vitest.mjs', 'list', file, `--json=${output}`,
+        '--no-staticParse', '--maxWorkers=1', '--no-fileParallelism', '--configLoader=runner'], { cwd: webRoot, timeout: 30_000 })
+      collected = JSON.parse(readFileSync(output, 'utf8')).map(row => ({ kind, file, name: row.name }))
+    } else {
+      collected = JSON.parse(command(process.execPath, ['--import', resolve(root, 'scripts/test-tiers/node-collect-hook.mjs'),
+        resolve(root, 'scripts/test-tiers/node-collect.mjs'), resolve(webRoot, file)], { cwd: webRoot, timeout: 30_000 }))
+        .map(row => ({ ...row, kind, file }))
+    }
+    assert.ok(collected.length >= minimum, `${file}: native collection must retain parameterized cases`)
+    const stored = JSON.parse(readFileSync(resolve(root, 'scripts/ci/web-test-tiers.json'), 'utf8'))
+    const manifest = { version: stored.version, tests: stored.tests.filter(row => row.file === file) }
+    const rows = validate(manifest, collected, undefined, { strict: true })
+    for (const event of ['pull_request', 'merge_group']) {
+      const selected = select(rows, { event, paths: ['.github/workflows/ci.yml'] }).tests
+      assert.deepEqual(selected.map(key).sort(), collected.map(key).sort(), `${event}: every registration must gate`)
+    }
+  } finally { rmSync(directory, { recursive: true, force: true }) }
 })

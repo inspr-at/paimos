@@ -209,17 +209,18 @@ func TestIntakePreservesPersonEdits(t *testing.T) {
 	if reqView.Status != "accepted" || reqView.TargetNodeID == nil || len(reqView.Suggestions) != 1 || !reqView.Suggestions[0].Later || !reqView.Suggestions[0].AccessChange {
 		t.Fatalf("requirement view %+v", reqView)
 	}
-	var kind, origin, creation string
+	var kind string
 	if err := database.Admin.QueryRow(ctx, `
-		SELECT k.slug, r.origin_draft_id::text, r.creation_key
-		FROM journey_requirements r
-		JOIN nodes n ON n.tenant_id = r.tenant_id AND n.id = r.requirement_node_id
+		SELECT k.slug FROM nodes n
 		JOIN node_kinds k ON k.tenant_id = n.tenant_id AND k.id = n.kind_id
-		WHERE r.requirement_node_id = $1::uuid`, *reqView.TargetNodeID).Scan(&kind, &origin, &creation); err != nil {
+		WHERE n.id = $1::uuid`, *reqView.TargetNodeID).Scan(&kind); err != nil {
 		t.Fatal(err)
 	}
-	if kind != "requirement" || origin != requirement.ID || creation != "req-1" {
-		t.Fatalf("requirement projection %s %s %s", kind, origin, creation)
+	if kind != "requirement" {
+		t.Fatalf("requirement node kind %s", kind)
+	}
+	if n := count(t, database, `SELECT count(*) FROM journey_requirements WHERE requirement_node_id=$1`, *reqView.TargetNodeID); n != 0 {
+		t.Fatalf("acceptance wrote retired Flow metadata: %d", n)
 	}
 	if n := count(t, database, `SELECT count(*) FROM journey_tickets`); n != 0 {
 		t.Fatalf("acceptance invented tickets: %d", n)
@@ -427,8 +428,8 @@ func insertKey(t *testing.T, pool *pgxpool.Pool, p tenant.Principal, scopes []st
 	sum := sha256.Sum256([]byte(secret))
 	prefix := strings.ReplaceAll(p.TenantID, "-", "") + hex.EncodeToString(sum[:8])
 	if _, err := pool.Exec(t.Context(), `
-		INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6)`,
+		INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes,created_by_principal_id)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`,
 		p.TenantID, p.ID, p.Name, prefix, hex.EncodeToString(sum[:]), scopes); err != nil {
 		t.Fatal(err)
 	}

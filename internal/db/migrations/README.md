@@ -618,3 +618,44 @@ Go suites, Linux Chromium and the previous-binary runtime compatibility probe
 remain unverified in this round and need the coordinator's working test lane or
 hosted CI. No assertions were loosened, origin push, deployment, ticket status
 change or model review ran.
+
+AEON-740 reserves **1259** for owner-bound parent queue snapshots, replacing
+the colliding unpublished 1258 reservation (AEON-734). `parent_queue_snapshots`
+contains personal work activity (`owner_id`, captured node identities/revisions,
+queue results and creation time), located by `(tenant_id,id)`. Classify it as
+personal in the AEON-490 DSAR inventory when that package is integrated;
+`internal/dsar/inventory.json` is absent from this branch and its pinned
+`origin/main`. Snapshots contain no credentials, prompts or account details.
+
+AEON-740 fix round 2 keeps this schema unchanged: the bounded JSON payload also
+retains server-held depth-first continuation cursors with exact sibling positions
+and ancestry. The API returns only `continuation_available`, never cursor paths;
+`continuation_of` refers to an owned snapshot of the same parent. Each capture
+creates independent explicit membership, and application rechecks canonical
+`aeon_work_busy` after identical shared-queue membership replay.
+
+
+## AEON-729 tier A
+
+1264 adds `work_escalations`, located by `(tenant_id,ticket_node_id)`.
+Classify it as personal work activity when AEON-490's DSAR inventory is
+integrated (the inventory is absent on this branch): episode/outcome/question
+and profile identities, round and CI attempt fingerprints, retry count, bounded
+cost holds and revisions. No raw findings, prompts or account identifiers are
+stored. Events retain episode transitions. Existing writers are unaffected.
+
+The AEON-601 adapter is `escalation.ReserveTx`: call under tenant/pairing/tree
+fences in the final retry transaction, then retain ordinary reservation/claim
+and host-load admission. A nonnil rejection with nil error must commit and be
+returned as the conflict (budget exhaustion creates one Decision Desk question,
+not another run). Other errors roll back, including the cost hold. Managed
+retry creation already uses this adapter; ticket-aware registry resolution
+consumes the same episode. Three distinct fix rounds, recurring canonical
+finding fingerprints, or two distinct CI execution IDs for one named check
+trigger tier A. Outcome producers must supply increasing rounds, SHA-256
+finding fingerprints and CI attempt UUIDs. Only a latest verified exact-range
+cross-family `review_id` can resolve the episode on `ok`. A bare reported `ok`
+does not reset the budget. Unknown vendor room waits; manual caps and provisional
+windows are not room evidence. Account/harness/dial/host gates, generation
+ownership, human answers and release activation remain their existing owners'
+responsibility; this package performs no autonomous launch or release.

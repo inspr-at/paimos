@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentactivity"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/localjournal"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/ownedprocess"
@@ -62,10 +63,12 @@ type replay struct {
 // Record contains only local process provenance and bounded control digests.
 // The journal is AEON v2; classic journals are never opened implicitly.
 type Record struct {
-	AutomaticReview       bool   `json:"automatic_review,omitempty"`
-	VerificationReason    string `json:"verification_reason,omitempty"`
-	BudgetStopReason      string `json:"budget_stop_reason,omitempty"`
-	BudgetStopUnconfirmed bool   `json:"budget_stop_unconfirmed,omitempty"`
+	WorkerPickup          *WorkerPickup    `json:"worker_pickup,omitempty"`
+	RecoveryReports       []RecoveryReport `json:"recovery_reports,omitempty"`
+	AutomaticReview       bool             `json:"automatic_review,omitempty"`
+	VerificationReason    string           `json:"verification_reason,omitempty"`
+	BudgetStopReason      string           `json:"budget_stop_reason,omitempty"`
+	BudgetStopUnconfirmed bool             `json:"budget_stop_unconfirmed,omitempty"`
 	// Only launchPrepared proves that adapter.Start has never been called.
 	// Empty is a legacy record, never evidence that no child was forked.
 	LaunchState   string `json:"launch_state,omitempty"`
@@ -76,10 +79,15 @@ type Record struct {
 	ExitObserved  bool   `json:"exit_observed,omitempty"`
 	// LaunchRev and LaunchDefaultRev are the workspace HEAD and the default
 	// branch's commit at launch, the base of the run's commit evidence.
-	LaunchBranch     string            `json:"launch_branch,omitempty"`
-	LaunchRev        string            `json:"launch_rev,omitempty"`
-	LaunchDefaultRev string            `json:"launch_default_rev,omitempty"`
-	Pending          []Telemetry       `json:"pending,omitempty"`
+	LaunchBranch     string      `json:"launch_branch,omitempty"`
+	LaunchRev        string      `json:"launch_rev,omitempty"`
+	LaunchDefaultRev string      `json:"launch_default_rev,omitempty"`
+	Pending          []Telemetry `json:"pending,omitempty"`
+	// Rejected reports remain durable evidence, separate from the retry outbox.
+	DeadLetters      []Telemetry       `json:"dead_letters,omitempty"`
+	ReportRejections int               `json:"report_rejections,omitempty"`
+	TerminalRecovery bool              `json:"terminal_recovery,omitempty"`
+	ReportParked     bool              `json:"report_parked,omitempty"`
 	SettlementGap    bool              `json:"settlement_gap,omitempty"`
 	TenantID         string            `json:"tenant_id"`
 	PrincipalID      string            `json:"principal_id"`
@@ -137,6 +145,9 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	recoveryMu             sync.Mutex
+	attachedHooks          map[string]*attachedHookBinding
+	attachedHookVerifier   *AttachManager
 	stepUps                *StepUpManager
 	capacityNow            func() time.Time
 	capacityWake           chan struct{}
@@ -162,6 +173,7 @@ type Supervisor struct {
 	profilePermissions     map[string]bool
 	harnessFailed          map[string]bool
 	dispatchMu             contextMutex
+	checkout               *agentsetup.Store
 	state                  *agentsetup.Store
 	closing                bool
 	blockedAccounts        map[string]bool
@@ -221,6 +233,25 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	}
 	if !info.IsDir() {
 		return nil, fmt.Errorf("workspace %s is not a directory", physical)
+	}
+	// Git directories below one checkout share files and Git state. Require
+	// its root so pickup digests, durable fences and recovery all use the
+	// same physical directory. A linked worktree's .git file is also a root;
+	// standalone non-Git workspaces retain their directory-scoped identity.
+	for directory := physical; ; directory = filepath.Dir(directory) {
+		_, err := os.Lstat(filepath.Join(directory, ".git"))
+		if err == nil {
+			if directory != physical {
+				return nil, errors.New("workspace must be the Git checkout root")
+			}
+			break
+		}
+		if !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect workspace checkout root: %w", err)
+		}
+		if directory == filepath.Dir(directory) {
+			break
+		}
 	}
 	tenantID, principalID, err := c.API.Identity(ctx)
 	if err != nil {
@@ -486,14 +517,28 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 	if dispatch {
 		// Recover no-launch claims before a fresh probe changes generation.
 		recoveryErr = s.recoverUnlaunched(ctx)
-		s.settlePending(ctx)
 	}
-	if err := pollContextError(ctx, recoveryErr); err != nil {
+	// Probe-only polls run during retryable pairing outages too. Their probes
+	// must not rotate authority while a prior generation still needs to settle.
+	// Dispatch polls then reclaim agent recoveries after that settlement, so a
+	// fresh probe cannot change generation first.
+	settlementErr := s.settlePending(ctx)
+	if dispatch {
+		recoveryErr = errors.Join(recoveryErr, s.recoverAgents(ctx))
+	}
+	if err := pollContextError(ctx, recoveryErr, settlementErr); err != nil {
 		return err
 	}
 	if !s.probeAllowed() || dispatch && !s.dispatchAllowed("") {
 		diagnostic = "dispatch_not_allowed"
 		return nil
+	}
+	if reporter, ok := s.api.(interface {
+		HostCapacity(context.Context) (hostcapacity.View, error)
+	}); ok {
+		if _, err := reporter.HostCapacity(ctx); err != nil && !errors.Is(err, ErrHostCapacityUnsupported) {
+			return err
+		}
 	}
 	if dispatch {
 		var err error
@@ -503,7 +548,7 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			return err
 		}
 	}
-	failures := []error{recoveryErr}
+	failures := []error{recoveryErr, settlementErr}
 	s.mu.Lock()
 	accounts := append([]EnrolledAccount(nil), s.accounts...)
 	adapters := map[string]Adapter{}
@@ -716,7 +761,7 @@ func (s *Supervisor) pollOnce(ctx context.Context, dispatch bool) (resultErr err
 			failures = append(failures, ErrScope)
 			continue
 		}
-		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) {
+		if err := s.StartRun(ctx, run); err != nil && !errors.Is(err, ErrDraining) && !errors.Is(err, ErrHostCapacity) {
 			failures = append(failures, err)
 		}
 	}
@@ -819,6 +864,9 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			run.AccountID = ""
 		}
 	}
+	if err := s.checkHostCapacity(ctx); err != nil {
+		return err
+	}
 	profiles, err := s.api.Profiles(ctx)
 	if err != nil {
 		return err
@@ -913,6 +961,24 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if review != (order.Kind == "review") {
 		return errors.New("review execution mode does not match its work order")
 	}
+	pickup, err := s.workerPickup(run, node, order)
+	if err != nil {
+		return err
+	}
+	if entry != nil {
+		entry.mu.Lock()
+		previous := entry.record.WorkerPickup
+		same := (previous == nil) == (pickup == nil) && (previous == nil || *previous == *pickup)
+		entry.mu.Unlock()
+		if !same {
+			return errors.New("journaled assignment pickup changed")
+		}
+	}
+	if !review && !verification {
+		if err := s.acquireCheckout(run.ID); err != nil {
+			return err
+		}
+	}
 	duration := s.maxRunDuration
 	if order.MaxDurationSeconds != nil {
 		if *order.MaxDurationSeconds <= 0 {
@@ -937,6 +1003,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if !verification && !review {
 		if output, branchErr := exec.CommandContext(ctx, "git", "-C", s.workspace, "branch", "--show-current").Output(); branchErr == nil {
 			branch = strings.TrimSpace(string(output))
+		}
+		if run.RecoveryBrief != "" {
+			if len(run.RecoveryBrief) > 20000 {
+				return errors.New("recovery handover exceeds bound")
+			}
+			prompt += "\n\n" + run.RecoveryBrief
 		}
 		if run.CapacityHandoff {
 			if err := s.validateCapacityHandoff(run, branch); err != nil {
@@ -1009,7 +1081,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		return err
 	}
 	if entry == nil {
-		rec := Record{LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "claim_pending", Controls: map[string]replay{}}
+		rec := Record{WorkerPickup: pickup, LaunchState: launchPrepared, ClaimRoute: &route, AccountID: route.AccountID, ExecutionMode: run.Purpose, TenantID: s.tenantID, PrincipalID: s.principalID, RunID: run.ID, WorkOrderID: run.WorkOrderID, Generation: s.generation, Workspace: s.workspace, State: "claim_pending", Controls: map[string]replay{}}
 		if err := s.journal.Put(rec); err != nil {
 			return err
 		}
@@ -1028,7 +1100,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		entry.record = next
 		entry.mu.Unlock()
 	}
-	if err := s.api.Claim(ctx, run.ID, s.daemonID, s.generation, ids); err != nil {
+	if err := s.claimWorker(ctx, run, ids, pickup); err != nil {
 		return errors.Join(err, s.reconcileUnlaunched(ctx, entry))
 	}
 	// Every error before launch intent must settle this claimed, never-launched
@@ -1081,7 +1153,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	}
 	caps := []string{"status", "stop"}
 	if managedPolicy {
-		caps = append(caps, managedControlCapability, "steer", "rename", "model", "effort")
+		caps = append(caps, recoveryCapability, managedControlCapability, "steer", "rename", "model", "effort")
 	}
 	if profile.Harness != Grok && !review {
 		caps = append(caps, "interrupt")
@@ -1096,7 +1168,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	if (profile.Harness == Claude || profile.Harness == Codex) && !verification && !review {
 		caps = append(caps, servicetier.Capability)
 	}
-	registration := HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB, AccountLabel: route.AccountLabel}
+	registration := HarnessSession{ID: s.generation + "/" + ref, ProjectID: projectID, Lease: leaseA + leaseB, AccountLabel: route.AccountLabel, DisplayLabel: run.RecoveryLabel}
 	if profile.Harness != Codex {
 		registration.Model, registration.ReasoningEffort = profile.Model, profile.Effort
 	}
@@ -1114,6 +1186,21 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 			}
 		}
 		active := "default"
+		if run.RecoveryTier != "" {
+			if !servicetier.Valid(run.RecoveryTier) {
+				return errors.New("invalid recovery service tier")
+			}
+			offered := false
+			for _, tier := range report.Tiers {
+				if tier.Tier == run.RecoveryTier && tier.Offered {
+					offered = true
+				}
+			}
+			if !offered {
+				return errors.New("recovery service tier no longer offered")
+			}
+			active = run.RecoveryTier
+		}
 		if err = api.ReportServiceTiers(ctx, entry.harness, servicetier.Reports(report.Harness, report.Model, report.HarnessVersion), &active); err != nil {
 			return err
 		}
@@ -1231,7 +1318,7 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 	runCtx, cancelRun := context.WithTimeout(s.lifetime, duration)
 	startCtx, cancelStart := context.WithDeadline(ctx, launchedAt.Add(duration))
 	proc, err := adapter.Start(startCtx, StartRequest{Lifetime: runCtx, TenantID: s.tenantID, PrincipalID: s.principalID, Run: run, Profile: profile,
-		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
+		AccountKey: route.AccountKey, Workspace: runWorkspace, StateRoot: filepath.Dir(s.journal.JournalPath()), Prompt: prompt, Generation: s.generation, InboxEnabled: entry.inboxCapable, ManagedPolicy: managedPolicy, Capabilities: caps, ServiceTier: entry.harness.ServiceTier, Tools: runTools, Rules: ephemeralRules, MaxTurns: entry.turnBudget, MaxTokens: entry.tokenBudget}, observe)
 	cancelStart()
 	if err != nil {
 		cancelRun()
@@ -1566,7 +1653,7 @@ func (s *Supervisor) monitor(entry *owned) {
 		status, code = "cancelled", ""
 	}
 	if protocolFailed {
-		status, code = "failed", "app_server_protocol"
+		status, code = "failed", "reporter_unavailable"
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -1849,9 +1936,20 @@ func inboxMessageText(item HarnessDelivery) string {
 func (s *Supervisor) update(ctx context.Context, entry *owned, t Telemetry) error {
 	entry.mu.Lock()
 	defer entry.mu.Unlock()
+	if entry.record.WorkerPickup != nil && t.Kind == "finished" {
+		t.ProcessState = "unconfirmed"
+		if entry.record.ExitObserved {
+			t.ProcessState = "exited"
+		} else if entry.record.LaunchState == launchPrepared {
+			t.ProcessState = "not_attempted"
+		}
+	}
 	t.ServiceTier = entry.harness.ServiceTier
 	if entry.record.Generation != s.generation && entry.record.LaunchState != launchPrepared {
 		return ErrGeneration
+	}
+	if entry.record.TerminalRecovery {
+		return s.flushReports(ctx, entry)
 	}
 	if t.Kind == "heartbeat" && (entry.record.State == "completed" || entry.record.State == "failed" || entry.record.State == "cancelled" || entry.record.State == "ownership_lost") {
 		return nil
@@ -2111,6 +2209,9 @@ func (s *Supervisor) Close(ctx context.Context) error {
 			}
 		}
 	}
+	if err := s.releaseCheckout(); err != nil {
+		return err
+	}
 	if s.lock != nil {
 		if err := s.lock.Close(); err != nil {
 			return err
@@ -2159,6 +2260,7 @@ func (s *Supervisor) heartbeatHarnessPhase(ctx context.Context, entry *owned, ph
 				if identity, err := recovery.Ownership(); err == nil {
 					identity.DaemonID, identity.Generation = s.daemonID, s.generation
 					session.Ownership = &identity
+					entry.harness.Ownership = &identity
 				}
 			}
 		}

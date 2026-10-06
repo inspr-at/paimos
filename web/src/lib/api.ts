@@ -2,7 +2,8 @@
 export interface Identity {
   principal: { id: string; name: string; email?: string; kind?: 'person' | 'agent'; roles?: string[] }
   // brand: the workspace's own header brand (AEON-431), absent when unset.
-  tenant: { id: string; name: string; brand?: import('./tenantBrand').TenantBrand }
+  // slug: the workspace's stable short name (also the default CLI instance name).
+  tenant: { id: string; name: string; slug?: string; brand?: import('./tenantBrand').TenantBrand }
   // The signed-in person's external identity; absent for agent keys.
   identity?: { email?: string; display_name?: string } | null
 }
@@ -285,12 +286,13 @@ export const listNodes = async (params: ListQuery, options: { signal?: AbortSign
   return stampAt(page, { position, start }, 2)
 }
 // U22 saved views: a project's list state with a name, own or shared (api/openapi.yaml SavedView).
+export type SavedViewMode = 'list' | 'outline' | 'graph'
 export interface SavedView {
   id: string; owner_principal_id: string; project_id: string | null; name: string
-  filters: Record<string, unknown>; sort_keys: string[]; group_by: string; columns: string[]; shared: boolean
+  filters: Record<string, unknown>; sort_keys: string[]; group_by: string; mode: SavedViewMode; columns: string[]; shared: boolean
   created_at: string; updated_at: string; deleted_at: string | null
 }
-export interface ViewWrite { name: string; project_id?: string | null; filters: Record<string, string>; sort_keys: string[]; group_by: string; columns: string[]; shared: boolean }
+export interface ViewWrite { name: string; project_id?: string | null; filters: Record<string, string>; sort_keys: string[]; group_by: string; mode: SavedViewMode; columns: string[]; shared: boolean }
 export const listViews = (projectId: string) => json<{ items: SavedView[] }>(`/views${query({ project_id: projectId })}`)
 export const createView = (body: ViewWrite) => json<SavedView>('/views', 'POST', body)
 export const updateView = (id: string, body: Partial<Omit<ViewWrite, 'project_id'>>) => json<SavedView>(`/views/${idPath(id)}`, 'PATCH', body)

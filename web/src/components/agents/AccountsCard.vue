@@ -22,7 +22,10 @@ import HarnessMark from './HarnessMark.vue'
 // detail inline: name, windows, last readings and the Advanced limit. There is
 // no allowance form: limits are observed, and a limit by hand is one sentence.
 // The card's header (SettingsCard) keeps its aside slot for "Add an account".
-const props = defineProps<{ accounts: AgentAccount[]; state: Availability; now: number; admin: boolean; set: (account: AgentAccount, state: AgentAccount['state']) => Promise<void> }>()
+// `all` is every account in the workspace when this card shows a subset (one
+// shared-quota account in Settings → Accounts and computers): name clashes and
+// pool candidates are found across all of them.
+const props = defineProps<{ accounts: AgentAccount[]; all?: AgentAccount[]; state: Availability; now: number; admin: boolean; set: (account: AgentAccount, state: AgentAccount['state']) => Promise<void> }>()
 const session = useSession()
 const agents = useAgents()
 const capacity = useCapacity()
@@ -36,7 +39,7 @@ const renameActivation = ref(0)
 const renameTrigger = ref<HTMLElement | null>(null)
 
 const rowOf = computed(() => new Map(capacity.rows.map(r => [r.id, r])))
-const clashes = computed(() => nameClashes(props.accounts))
+const clashes = computed(() => nameClashes(props.all ?? props.accounts))
 const groups = computed(() => {
   const byHarness = new Map<string, AgentAccount[]>()
   for (const a of props.accounts) byHarness.set(a.harness, [...(byHarness.get(a.harness) ?? []), a])
@@ -74,7 +77,10 @@ function onHead(event: MouseEvent, id: string) {
   if ((event.target as HTMLElement).closest('button, a, input, select')) return
   toggleOpen(id)
 }
+// A busy switch stays focusable (aria-disabled), so focus can return to it
+// when its confirmation closes.
 async function toggleUse(account: AgentAccount) {
+  if (busy.value === account.id) return
   busy.value = account.id; error.value = ''
   try { await props.set(account, agentsAllowed(account) ? 'draining' : 'available') }
   catch (e) { error.value = e instanceof Error ? e.message : 'The account did not change. Please try again.' }
@@ -187,7 +193,7 @@ async function backInPool(account: AgentAccount) {
               </div>
               <button
                 type="button" role="switch" class="use" :aria-checked="agentsAllowed(a)" :aria-label="`Agents may use it · ${accountName(a)}`"
-                :disabled="!mayManage || busy === a.id" :data-tip="mayManage ? undefined : 'People who can manage accounts change this'" @click="toggleUse(a)"
+                :disabled="!mayManage" :aria-disabled="busy === a.id || undefined" :data-tip="mayManage ? undefined : 'People who can manage accounts change this'" @click="toggleUse(a)"
               ><span class="track" aria-hidden="true"><span class="thumb" /></span></button>
               <button type="button" class="icon-btn flat more" :aria-expanded="open === a.id" :aria-controls="`account-detail-${a.id}`" :aria-label="`Details for ${accountName(a)}`" @click="toggleOpen(a.id)"><AppIcon name="chevron" :size="16" /></button>
             </div>
@@ -198,7 +204,7 @@ async function backInPool(account: AgentAccount) {
             </div>
             <CapacityLearning :learning="rowOf.get(a.id)?.learning" :host="a.host_label" :now="now" />
             <AccountDetail
-              v-if="open === a.id" :id="`account-detail-${a.id}`" :account="a" :accounts="accounts" :row="rowOf.get(a.id)" :cap="capacity.byAccount.get(a.id)" :now="now"
+              v-if="open === a.id" :id="`account-detail-${a.id}`" :account="a" :accounts="all ?? accounts" :row="rowOf.get(a.id)" :cap="capacity.byAccount.get(a.id)" :now="now"
               :timezone="capacity.timezone" :may-manage="mayManage" :rename="renameAt === a.id ? renameActivation : 0" :rename-trigger="renameTrigger" @changed="changed"
             />
           </li>
@@ -266,14 +272,14 @@ async function backInPool(account: AgentAccount) {
 .name-it { height: 22px; padding: 0 8px; border: 0; border-radius: 999px; background: var(--gold-wash); color: var(--gold-ink); font-size: 11.5px; font-weight: 600; cursor: pointer; }
 .name-it:focus-visible { box-shadow: var(--focus-ring); }
 .use { display: inline-grid; place-items: center; width: 50px; height: 32px; padding: 0; border: 0; border-radius: 999px; background: transparent; cursor: pointer; }
-@media (hover: hover) { .use:not(:disabled):hover { background: var(--row-selected); } }
+@media (hover: hover) { .use:not(:disabled, [aria-disabled="true"]):hover { background: var(--row-selected); } }
 .use:focus-visible { box-shadow: var(--focus-ring); }
-.use:disabled { cursor: default; }
+.use:disabled, .use[aria-disabled="true"] { cursor: default; }
 .track { position: relative; flex: none; width: 34px; height: 20px; border-radius: 999px; background: var(--track); box-shadow: inset 0 0 0 1px var(--line-2); transition: background-color .15s ease; }
 .thumb { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--surface-raised); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .15s ease; }
 .use[aria-checked="true"] .track { background: linear-gradient(90deg, #0e6f6c, #1a8683); box-shadow: none; }
 .use[aria-checked="true"] .thumb { transform: translateX(14px); background: #fff; }
-.use:disabled .track { opacity: .55; }
+.use:disabled .track, .use[aria-disabled="true"] .track { opacity: .55; }
 .more { justify-self: end; color: var(--ink-3); }
 .more :deep(svg) { transition: transform .15s ease; }
 .more[aria-expanded="true"] :deep(svg) { transform: rotate(180deg); }
@@ -293,7 +299,7 @@ async function backInPool(account: AgentAccount) {
 .account-diagnostic { margin-top: 6px; color: var(--warn-ink); font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
 .account-diagnostic p { margin: 3px 0 0; }
 .account-diagnostic code { color: var(--ink); user-select: all; }
-dialog.separate { width: min(440px, calc(100vw - 32px)); max-height: calc(100vh - 32px); margin: auto; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-raised); color: var(--ink); }
+dialog.separate { width: min(var(--dialog-s), calc(100vw - 32px)); max-height: calc(100vh - 32px); margin: auto; padding: 0; border: 1px solid var(--line); border-radius: 14px; background: var(--surface-raised); color: var(--ink); }
 dialog.separate::backdrop { background: var(--scrim); }
 dialog.separate form { display: grid; gap: 10px; padding: 16px 18px 14px; }
 dialog.separate h3 { margin: 0; font-size: 16px; font-weight: 650; }

@@ -147,6 +147,11 @@ func TestGeneratedTicketReadsGeneratingRequirementExtensions(t *testing.T) {
 		t.Fatalf("accept requirement: %d %s", w.Code, w.Body.String())
 	}
 	decodeJSON(t, w, &accepted)
+	// Historical generating links survive retirement; new intake acceptances
+	// deliberately no longer create the Flow projection.
+	if _, err := database.Admin.Exec(t.Context(), `INSERT INTO journey_requirements (tenant_id,requirement_node_id,project_node_id,kind,revision,origin_draft_id) VALUES ($1,$2,$3,'functional',1,$4)`, fx.tenantA, *accepted.TargetNodeID, fx.projectA, draft.ID); err != nil {
+		t.Fatal(err)
+	}
 	feature, _ := fx.nodeWithEvent(t, database, "work", "EPIC-1", "Feature", "", fx.person.ID)
 	ticket, _ := fx.nodeWithEvent(t, database, "work", "TKT-1", "Generated ticket", "", fx.person.ID)
 	if _, err := database.Admin.Exec(t.Context(), `INSERT INTO journey_features (tenant_id, feature_node_id, project_node_id, requirement_node_id) VALUES ($1,$2,$3,$4)`, fx.tenantA, feature, fx.projectA, *accepted.TargetNodeID); err != nil {

@@ -168,8 +168,8 @@ func insertKey(t *testing.T, pool *pgxpool.Pool, p tenant.Principal, scopes []st
 		scopes = []string{}
 	}
 	if _, err := pool.Exec(t.Context(), `
-		INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes, revoked_at)
-		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7)`,
+		INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash, scopes, revoked_at,created_by_principal_id)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`,
 		p.TenantID, p.ID, p.Name, prefix, hex.EncodeToString(sum[:]), scopes, revokedAt); err != nil {
 		t.Fatal(err)
 	}

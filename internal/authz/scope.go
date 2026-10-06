@@ -127,6 +127,10 @@ var ProjectDecidedRoutes = map[string]bool{
 	"POST /api/recurrences":                                      true,
 	"POST /api/recurrences/preview":                              true,
 	"POST /api/queue":                                            true,
+	"POST /api/queue/{nodeId}/snapshots":                         true,
+	"GET /api/queue-snapshots/{snapshotId}":                      true,
+	"POST /api/queue-snapshots/{snapshotId}/apply":               true,
+	"DELETE /api/queue-snapshots/{snapshotId}":                   true,
 	"POST /api/queue/reset":                                      true,
 	"POST /api/queue/next":                                       true,
 	"GET /api/rules/layers":                                      true,
@@ -174,7 +178,7 @@ func routeTarget(pattern string, values map[string]string) (kind, id string) {
 		return "node", values["nodeId"]
 	case strings.HasPrefix(pattern, "GET /api/knowledge/{id}") || strings.HasPrefix(pattern, "PATCH /api/knowledge/{id}") || strings.HasPrefix(pattern, "DELETE /api/knowledge/{id}"):
 		return "node", values["id"]
-	case pattern == "POST /api/knowledge/learnings/{learningId}/accept" || pattern == "POST /api/knowledge/learnings/{learningId}/dismiss" || pattern == "POST /api/knowledge/learnings/{learningId}/draft":
+	case pattern == "POST /api/knowledge/learnings/{learningId}/accept" || pattern == "POST /api/knowledge/learnings/{learningId}/dismiss" || pattern == "POST /api/knowledge/learnings/{learningId}/draft" || pattern == "PUT /api/knowledge/learnings/{learningId}/recommendation":
 		// Accept and dismiss name the source item, not a project. The node's
 		// project_id is that item's project, including a project node itself.
 		nodeID, ok := learningSourceNode(values["learningId"])
@@ -188,7 +192,7 @@ func routeTarget(pattern string, values map[string]string) (kind, id string) {
 		return "relation", values["relationId"]
 	case values["eventId"] != "":
 		return "event", values["eventId"]
-	case pattern == "GET /api/inbox/messages/{messageId}/receipt":
+	case pattern == "GET /api/inbox/messages/{messageId}/receipt" || pattern == "POST /api/inbox/messages/{messageId}/cancel":
 		return "inbox_receipt", values["messageId"]
 	case strings.HasSuffix(pattern, " /api/node-keys/{key}"):
 		return "node_key", values["key"]

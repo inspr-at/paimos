@@ -79,10 +79,73 @@ export function loadManifest(path = manifestPath) {
   return manifest
 }
 
-// Longest-processing-time scheduling. File names break weight ties, and the
-// lowest shard index breaks load ties; manifest order cannot change assignment.
+// Longest-processing-time scheduling, then bounded moves/swaps to reduce its
+// longest shard. File names break weight ties, and the lowest shard index
+// breaks load ties; manifest order cannot change assignment.
 // Groups with gate:false are declared (so drift is still caught) but only run with all:true.
 export const gatedGroups = (manifest, all = false) => manifest.groups.filter(group => all || group.gate !== false)
+
+const specSum = specs => specs.reduce((total, spec) => total + spec.weightSeconds, 0)
+
+// Non-empty subsets of at most `limit` specs. Specs must already be in the
+// deterministic file-name order the caller wants ties to follow.
+function specSubsets(specs, limit) {
+  const found = []
+  const walk = (start, left, chosen) => {
+    if (left === 0) { found.push(chosen.slice()); return }
+    for (let i = start; i <= specs.length - left; i++) {
+      chosen.push(specs[i])
+      walk(i + 1, left - 1, chosen)
+      chosen.pop()
+    }
+  }
+  const sizes = Math.min(limit, specs.length)
+  for (let size = 1; size <= sizes; size++) walk(0, size, [])
+  return found
+}
+
+// Pairwise swaps stop at a local peak. When two branches each add a small
+// gated spec, exchanging up to three specs a side can still lower the
+// descending shard weights. Spec weights themselves do not change.
+function lowerMakespan(shards, passes) {
+  const descending = values => values.slice().sort((left, right) => right - left)
+  const lower = (next, current) => {
+    for (let i = 0; i < next.length; i++) {
+      if (next[i] < current[i] - 1e-9) return true
+      if (next[i] > current[i] + 1e-9) return false
+    }
+    return false
+  }
+  for (let pass = 0; pass < passes; pass++) {
+    for (const shard of shards) shard.specs.sort((left, right) => compare(left.file, right.file))
+    const current = descending(shards.map(shard => shard.weightSeconds))
+    let best = null
+    for (let i = 0; i < shards.length; i++) {
+      const giveSets = specSubsets(shards[i].specs, shards[i].specs.length > 12 ? 2 : 3)
+      for (let j = i + 1; j < shards.length; j++) {
+        const takeSets = specSubsets(shards[j].specs, shards[j].specs.length > 12 ? 2 : 3)
+        for (const give of giveSets) {
+          const giveWeight = specSum(give)
+          for (const take of takeSets) {
+            const delta = giveWeight - specSum(take)
+            const nextI = shards[i].weightSeconds - delta
+            const nextJ = shards[j].weightSeconds + delta
+            if (nextI > current[0] + 1e-9 || nextJ > current[0] + 1e-9) continue
+            const key = descending(shards.map((shard, index) => index === i ? nextI : index === j ? nextJ : shard.weightSeconds))
+            if (lower(key, current) && (!best || lower(key, best.key))) best = { i, j, give, take, key }
+          }
+        }
+      }
+    }
+    if (!best) return
+    const { i, j, give, take } = best
+    const given = new Set(give), taken = new Set(take)
+    shards[i].specs = shards[i].specs.filter(spec => !given.has(spec)).concat(take)
+    shards[j].specs = shards[j].specs.filter(spec => !taken.has(spec)).concat(give)
+    shards[i].weightSeconds = specSum(shards[i].specs)
+    shards[j].weightSeconds = specSum(shards[j].specs)
+  }
+}
 
 // The tier runner executes with one worker, while some historical measured
 // steps used two. Convert those file allocations to serial scheduling estimates
@@ -118,7 +181,50 @@ export function balanceShards(manifest, count, { all = false } = {}) {
     shard.specs.push(spec)
     shard.weightSeconds += spec.weightSeconds
   }
-  for (const shard of shards) shard.specs.sort((a, b) => compare(a.file, b.file))
+  // Indivisible files can leave LPT just over the gate budget even when there
+  // is room. Each move or swap lowers the affected pair's maximum; no other
+  // shard grows. Bound refinement independently of convergence and keep all
+  // weights, owning groups and launch policies intact. Swaps cover the peak
+  // reduction main added; moves keep a 15/15 fit when no exchange can.
+  for (let pass = 0; pass < Math.min(specs.length, 256); pass++) {
+    const high = shards.reduce((best, candidate) => candidate.weightSeconds > best.weightSeconds ? candidate : best)
+    let best, bestMaximum = high.weightSeconds
+    for (const low of shards) {
+      if (low === high) continue
+      for (let a = 0; a < high.specs.length; a++) {
+        // b=-1 moves a file; otherwise exchange it with a lighter file.
+        for (let b = -1; b < low.specs.length; b++) {
+          const delta = high.specs[a].weightSeconds - (b < 0 ? 0 : low.specs[b].weightSeconds)
+          if (delta <= 0) continue
+          const maximum = Math.max(high.weightSeconds - delta, low.weightSeconds + delta)
+          if (maximum < bestMaximum - 1e-9) {
+            bestMaximum = maximum
+            best = { low, a, b, delta }
+          }
+        }
+      }
+    }
+    if (!best) break
+    const { low, a, b, delta } = best, spec = high.specs[a]
+    if (b < 0) {
+      high.specs.splice(a, 1)
+      low.specs.push(spec)
+    } else {
+      high.specs[a] = low.specs[b]
+      low.specs[b] = spec
+    }
+    high.weightSeconds -= delta
+    low.weightSeconds += delta
+  }
+  // Single moves and swaps stop at a local peak; main's multi-spec exchange
+  // (up to three files a side) can still lower the descending shard weights.
+  // One pass per shard matches the pairwise cap above. The real 12-way gate
+  // needs fewer passes than that to bring every shard under five minutes.
+  lowerMakespan(shards, count)
+  for (const shard of shards) {
+    shard.specs.sort((a, b) => compare(a.file, b.file))
+    shard.weightSeconds = shard.specs.reduce((total, spec) => total + spec.weightSeconds, 0)
+  }
   return shards
 }
 

@@ -1,11 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
-import { useDeveloperSettings } from '../../lib/developerSettings'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 
 type Key = string | { icon: IconName; label: string }
-const { showFlowControls } = useDeveloperSettings()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 // Symbol keys are drawn, never typed: Command and Option on a Mac, words elsewhere.
 const MOD: Key = mac ? { icon: 'command', label: 'Command' } : 'Ctrl'
@@ -49,13 +47,6 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [['t']], label: 'This week' },
     { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Log the entry' },
     { keys: [['Esc']], label: 'Close the review' },
-  ] },
-  { title: 'Journey', rows: [
-    { keys: [['['], [']']], label: 'Previous and next stage' },
-    { keys: [['w']], label: 'Walk through the release' },
-    { keys: [[{ icon: 'arrow-left', label: 'Left arrow' }], [{ icon: 'arrow', label: 'Right arrow' }]], label: 'In the walker: previous and next ticket; with Shift, feature' },
-    { keys: [['Space']], label: 'In the walker: include in the release or defer' },
-    { keys: [['c'], ['z'], ['i']], joiner: '·', label: 'In the walker: compare, 100 %, details' },
   ] },
   { title: 'Release history', rows: [
     { keys: [['j'], ['k']], label: 'Next and previous release' },
@@ -139,7 +130,7 @@ defineExpose({ open, close })
         <h2 id="shortcuts-title">Keyboard shortcuts</h2>
         <button ref="closeButton" type="button" class="icon-btn sm" aria-label="Close shortcuts" @click="close"><AppIcon name="close" :size="14" /></button>
       </header>
-      <section v-for="section in sections.filter(section => section.title !== 'Journey' || showFlowControls)" :key="section.title">
+      <section v-for="section in sections" :key="section.title">
         <p class="eyebrow">{{ section.title }}</p>
         <dl>
           <div v-for="row in section.rows" :key="row.label" class="row">
@@ -163,7 +154,7 @@ defineExpose({ open, close })
 </template>
 
 <style scoped>
-.sheet { width: min(clamp(520px, 44vw, 960px), calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 48px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
+.sheet { width: min(var(--dialog-m), calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 48px); padding: 0; border: 0; background: transparent; color: var(--ink); overflow: visible; }
 .sheet::backdrop { background: var(--scrim); backdrop-filter: blur(3px); }
 .sheet-card { max-height: calc(100dvh - 48px); overflow: auto; padding: 22px 26px 18px; border-radius: var(--radius); border: 1px solid var(--glass-edge); background: linear-gradient(165deg, var(--surface-raised), var(--surface-raised-2)); box-shadow: var(--shadow-pop), var(--shadow); }
 header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }

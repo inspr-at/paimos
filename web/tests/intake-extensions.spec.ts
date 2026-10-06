@@ -3,7 +3,6 @@ import { test, expect } from '@playwright/test'
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
-import { journeyWorld, mockJourney } from './journey-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
 
 const evidence = '  e\u0301\r\n<script>verbatim evidence</script>  '
@@ -14,37 +13,6 @@ const extensions = {
 }
 
 for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const) {
-  for (const stage of ['inspire', 'shape', 'requirements'] as const) {
-    test(`${stage} retains extension versions at ${width} ${theme}`, async ({ page }) => {
-      const errors = watchErrors(page)
-      await page.setViewportSize({ width, height: 1000 })
-      await page.emulateMedia({ colorScheme: theme })
-      await mockWork(page, fixtures())
-      const world = journeyWorld(stage)
-      Object.assign(world.intake.drafts[0]!, { extensions })
-      if (stage === 'requirements') Object.assign(world.intake.drafts[0]!, { kind: 'requirement', status: 'accepted', target_node_id: 'q-1' })
-      await mockJourney(page, world)
-      await page.goto('/p/PHAROS/journey')
-      const block = page.getByRole('region', { name: 'Extension data' })
-      await expect(block).toBeVisible()
-      await expect(block.locator('details')).toHaveCount(3)
-      const disclosure = block.getByLabel('x-unregistered.constraints · version 1.2', { exact: true })
-      await disclosure.focus()
-      await page.keyboard.press('Enter')
-      const data = block.getByLabel('x-unregistered.constraints version 1.2 data', { exact: true })
-      await expect(data).toBeVisible()
-      expect(JSON.parse((await data.textContent())!)).toEqual(extensions['x-unregistered.constraints@1'].data)
-      await expect(block.locator('script')).toHaveCount(0)
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
-      const folder = process.env.EXTENSION_SHOTS
-      if (folder) {
-        await mkdir(folder, { recursive: true })
-        await page.screenshot({ path: join(folder, `${stage}-${width}-${theme}.png`), fullPage: true, animations: 'disabled' })
-        await block.screenshot({ path: join(folder, `${stage}-${width}-${theme}-data.png`), animations: 'disabled' })
-      }
-      expect(errors).toEqual([])
-    })
-  }
   test(`ticket shows originating extension data at ${width} ${theme}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 })
     await page.emulateMedia({ colorScheme: theme })

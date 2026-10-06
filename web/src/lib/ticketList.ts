@@ -23,6 +23,7 @@ export type DatePreset = 'today' | '7d' | '30d' | '90d' | 'month' | 'year'
 export interface DateFilter { field: DateField; preset: DatePreset | null; from: string | null; to: string | null }
 export interface FacetOption { value: string; label: string; count?: number; hint?: string; color?: string }
 export interface ListFilters {
+  mode: 'list' | 'outline' | 'graph'
   q: string
   status: string[]
   // Header filters use canonical statuses or exact server work buckets. Kept
@@ -62,7 +63,7 @@ export const DIMENSIONS: DimensionDef[] = [
   { key: 'human_check', title: 'Human check', facet: 'human_check', primary: false, none: 'No human check' },
   { key: 'epic', title: 'Parent', facet: null, primary: false, none: 'No parent' },
   { key: 'cost', title: 'Cost unit', facet: 'cost_unit', primary: false, none: 'No cost unit' },
-  // Imported fields.release only. The ticket Release column reads native journey membership.
+  // Imported fields.release only. The ticket Release column reads native release membership.
   { key: 'release', title: 'Imported release', facet: 'release', primary: false, none: 'No imported release' },
 ]
 export const DIMENSION_BY_KEY = new Map(DIMENSIONS.map(d => [d.key, d]))
@@ -124,13 +125,14 @@ export function serializeDate(date: DateFilter): string {
 }
 function parseCols(raw: unknown): ColumnId[] | null {
   if (typeof raw !== 'string') return null
-  const ids = normalizeColumnIds(list(raw)).filter(id => !PINNED.includes(id))
-  return ids.length ? ids : null
+  const valid = normalizeColumnIds(list(raw))
+  return valid.length ? valid.filter(id => !PINNED.includes(id)) : null
 }
 const VIEW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 export function filtersFromQuery(query: Record<string, unknown>): ListFilters {
   const group = GROUPS.find(g => g.value === query.group)?.value ?? 'none'
   return {
+    mode: query.view === 'outline' || query.view === 'graph' ? query.view : 'list',
     q: typeof query.q === 'string' ? query.q : '',
     status: list(query.status),
     ...(list(query.status).length && ['canonical', 'open', 'in_progress', 'done', 'closed'].includes(String(query.status_scope))
@@ -166,7 +168,8 @@ export function filtersToQuery(filters: ListFilters): Record<string, string> {
   if (filters.showClosed && filters.hideRestore && filters.status.length) out.hide_restore = '1'
   if (filters.sort.length) out.sort = serializeSort(filters.sort)
   if (filters.group !== 'none') out.group = filters.group
-  if (filters.cols?.length) out.cols = filters.cols.join(',')
+  if (filters.cols) out.cols = filters.cols.length ? filters.cols.join(',') : PINNED.join(',')
+  if (filters.mode !== 'list') out.view = filters.mode
   if (filters.view) out.v = filters.view
   return out
 }
@@ -184,18 +187,19 @@ export function clearedFilters(): Partial<ListFilters> {
 }
 
 // ---------- Saved views: the same state, without the view marker ----------
-export interface ViewShape { filters: Record<string, string>; sort_keys: string[]; group_by: GroupBy; columns: ColumnId[] }
+export interface ViewShape { filters: Record<string, string>; sort_keys: string[]; group_by: GroupBy; columns: ColumnId[]; mode: ListFilters['mode'] }
 export function viewShape(filters: ListFilters): ViewShape {
-  const { sort, group: _group, cols: _cols, v: _v, ...rest } = filtersToQuery(filters)
-  return { filters: rest, sort_keys: sort ? sort.split(',') : [], group_by: filters.group, columns: filters.cols ?? [] }
+  const { sort, group: _group, cols: _cols, v: _v, view: _mode, ...rest } = filtersToQuery(filters)
+  return { filters: rest, sort_keys: sort ? sort.split(',') : [], group_by: filters.group, columns: [...PINNED, ...(filters.cols ?? [])], mode: filters.mode }
 }
-export function filtersFromView(view: { id: string; filters: Record<string, unknown>; sort_keys: string[]; group_by: string; columns: string[] }): ListFilters {
+export function filtersFromView(view: { id: string; filters: Record<string, unknown>; sort_keys: string[]; group_by: string; columns: string[]; mode?: ListFilters['mode'] }): ListFilters {
   const query: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(view.filters ?? {})) if (typeof value === 'string') query[key] = value
   query.sort = view.sort_keys.join(',')
   query.group = view.group_by
   query.cols = view.columns.join(',')
   query.v = view.id
+  query.view = view.mode ?? 'list'
   return filtersFromQuery(query)
 }
 // The list looks as the view says (a view with changes shows a dot and Save).

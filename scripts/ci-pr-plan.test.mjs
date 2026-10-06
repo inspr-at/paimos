@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, realpathSync, chmo
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { classifyPaths, classifyPR, requireResults, validatePath } from './ci-pr-plan.mjs';
+import { effectiveLane } from './test-tiers/diff.mjs';
 
 function repository() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'aeon-pr-plan-')));
@@ -63,6 +64,26 @@ test('real rename/delete diff widens specs and includes a rename source outside 
   }
 });
 
+test('instruction-only PRs require full CI while ordinary documentation stays docs-only (AEON-766)', () => {
+  for (const [path, lane] of [['AGENTS.md', 'full'], ['CLAUDE.md', 'full'],
+    ['README.md', 'docs-only'], ['docs/x.md', 'docs-only']]) {
+    const repo = repository();
+    repo.file(path, 'changed\n');
+    const head = repo.commit();
+    assert.equal(classifyPR('pull_request', repo.event(head), { git: repo.git }).lane, lane, path);
+  }
+  const rollout = JSON.parse(readFileSync(new URL('./rules-bootstrap/rollout.json', import.meta.url), 'utf8'));
+  const pinned = rollout.targets.flatMap(({ target, candidate }) => [target, candidate]);
+  for (const path of [...pinned, 'docs/AGENTS.md', 'docs/nested/CLAUDE.md', 'web/AGENTS.md',
+    'internal/auth/CLAUDE.md', 'cmd/aeon/AGENTS.md', 'internal/rulesimport/testdata/pack/AGENTS.md',
+    'scripts/audit/AGENTS.md', 'agents.md', 'docs/claude.MD', 'internal/auth/cLaUdE.mD']) {
+    assert.equal(classifyPaths([path]).lane, 'full', path);
+    assert.equal(classifyPaths(['README.md', path]).lane, 'full', path);
+  }
+  for (const path of ['README.md', 'docs/x.md', 'docs/guide.txt', 'CHANGELOG.md', 'LICENSE'])
+    assert.equal(classifyPaths([path]).lane, 'docs-only', path);
+});
+
 test('Markdown fixtures and implementation documentation require full validation', () => {
   for (const path of ['internal/rulesimport/testdata/pack/AGENTS.md',
     'internal/db/migrations/README.md', 'scripts/audit/rubric.md', 'web/tests/fixture.md',
@@ -75,6 +96,21 @@ test('Markdown fixtures and implementation documentation require full validation
   assert.equal(classifyPaths(['README.md', 'docs/guide.txt', 'docs/nested/guide.md', 'LICENSE.txt']).lane, 'docs-only');
 });
 
+test('affected switch preserves ci-plan lanes and aggregate evidence for all 80 real PR lists', () => {
+  const replay = JSON.parse(readFileSync(new URL('./test-tiers/affected-replay.json', import.meta.url)));
+  assert.equal(replay.prs.length, 80);
+  for (const { number, paths } of replay.prs) {
+    const before = classifyPaths(paths);
+    // ci-plan remains a raw classifier; tier-plan reconciles its lane before execution.
+    assert.ok(['full', 'docs-only', 'spec-only'].includes(before.lane), `PR ${number}`);
+    assert.doesNotThrow(() => requireResults(before.lane, 'success', [before.lane === 'full' ? 'success' : 'skipped']));
+  }
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  assert.match(workflow, /^env:\n  CI_AFFECTED_LANE: \$\{\{ vars.CI_AFFECTED_LANE \}\}$/m);
+  const migration = requiredJob('migration-compat');
+  assert.doesNotMatch(migration, /^    if:/m, 'Migration compatibility must execute in every lane');
+});
+
 function workflowPlanScript() {
   const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
   const step = workflow.split('      - name: Classify local PR diff\n')[1].split(/\n\n  [a-z][a-z-]*:/)[0];
@@ -83,14 +119,14 @@ function workflowPlanScript() {
   return run.startsWith('|\n') ? run.slice(2).replace(/^          /gm, '') : run.trim();
 }
 
-function executeWorkflowPlan(repo, head, { eventName = 'pull_request', base = repo.base } = {}) {
+function executeWorkflowPlan(repo, head, { eventName = 'pull_request', base = repo.base, affectedLane = '' } = {}) {
   const eventPath = join(repo.root, 'event.json'), output = join(repo.root, 'output');
   writeFileSync(eventPath, JSON.stringify({ pull_request: { base: { sha: base }, head: { sha: head } } }));
   writeFileSync(output, '');
   const result = spawnSync('bash', ['-c', workflowPlanScript()], { cwd: repo.root, encoding: 'utf8', timeout: 20000,
     env: { ...repo.env, GITHUB_EVENT_NAME: eventName, GITHUB_EVENT_PATH: eventPath,
       GITHUB_SHA: head, PR_BASE_SHA: base, RUNNER_TEMP: join(repo.root, 'runner-temp'),
-      GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(repo.root, 'summary') } });
+      GITHUB_OUTPUT: output, GITHUB_STEP_SUMMARY: join(repo.root, 'summary'), CI_AFFECTED_LANE: affectedLane } });
   assert.equal(result.status, 0, result.stderr);
   return readFileSync(output, 'utf8');
 }
@@ -105,6 +141,20 @@ appendFileSync(process.env.GITHUB_OUTPUT, 'lane=docs-only\\nspecs=[]\\n');\n`);
   const head = repo.commit();
   mkdirSync(join(repo.root, 'runner-temp'));
   assert.equal(executeWorkflowPlan(repo, head), 'lane=full\nspecs=[]\nnix_vendor=true\n');
+});
+
+test('trusted ci-plan keeps R1-R5 in the full aggregate lane under either affected switch state', () => {
+  for (const path of ['scripts/ci/go-test-tiers.json', 'api/openapi.yaml', 'web/tests/helpers/shared.ts',
+    'internal/db/migrations/9999.sql', 'scripts/audit/common.py']) {
+    const repo = repository();
+    repo.file('scripts/ci-pr-plan.mjs', readFileSync(new URL('./ci-pr-plan.mjs', import.meta.url), 'utf8'));
+    repo.base = repo.commit();
+    repo.file(path, 'changed\n');
+    const head = repo.commit();
+    mkdirSync(join(repo.root, 'runner-temp'));
+    for (const affectedLane of ['', 'off', 'on', 'ON'])
+      assert.equal(executeWorkflowPlan(repo, head, { affectedLane }), 'lane=full\nspecs=[]\nnix_vendor=false\n', path);
+  }
 });
 
 test('ci-plan keeps trusted docs/spec lanes and falls back to full without a usable base classifier', () => {
@@ -231,10 +281,10 @@ for (const id of ['release-check', 'e2e']) {
     const run = requiredJob(id).split('        run: |\n')[1];
     assert.ok(run, `${id} must have an executable gate`);
     const script = run.replace(/^          /gm, '');
-    const execute = (lane, result, plan = 'success') => {
+    const execute = (lane, result, plan = 'success', extra = {}) => {
       const execution = spawnSync('bash', ['-c', script], { cwd: repo.root, encoding: 'utf8', timeout: 10000,
-        env: { ...repo.env, REUSE: 'none', CI_LANE: lane, CI_PLAN: plan, CHECK_RESULT: result,
-          GITHUB_STEP_SUMMARY: join(repo.root, 'summary') } });
+        env: { ...repo.env, REUSE: 'none', CI_LANE: lane, CI_PLAN: plan, TIER_PLAN: 'success', CHECK_RESULT: result, TIER_LAYOUT: 'full',
+          GITHUB_STEP_SUMMARY: join(repo.root, 'summary'), ...extra } });
       assert.ifError(execution.error);
       assert.equal(execution.signal, null, 'gate must finish without a signal');
       return execution;
@@ -253,11 +303,22 @@ for (const id of ['release-check', 'e2e']) {
     for (const lane of ['', 'unknown']) {
       assert.equal(execute(lane, 'success').status, 1, `gate must reject CI_LANE=${lane}`);
     }
+    if (id === 'e2e') {
+      // OPS-257 L4 static layout: PR-only; the smoke is skipped, never faked.
+      const pr = { TIER_LAYOUT: 'static', GITHUB_EVENT_NAME: 'pull_request' };
+      assert.equal(execute('full', 'skipped', 'success', pr).status, 0, 'static layout accepts a skipped smoke');
+      for (const [result, extra] of [['success', pr], ['failure', pr], ['skipped', { ...pr, GITHUB_EVENT_NAME: 'merge_group' }],
+        ['skipped', { TIER_LAYOUT: 'bogus' }], ['skipped', { TIER_LAYOUT: '' }]]) {
+        assert.equal(execute('full', result, 'success', extra).status, 1, `static layout must reject ${result} ${JSON.stringify(extra)}`);
+      }
+    } else {
+      assert.equal(execute('full', 'success', 'success', { TIER_LAYOUT: 'static' }).status, 0, 'release checks ignore the layout');
+    }
   });
 }
 
 // Exercise the merged YAML commands with process stubs: no browser or build.
-// A new unclassified spec must still reach the spec-only command, while a
+// The effective spec-only lane (off, or agreed by both planners) reaches its command; a
 // full-lane run uses tiers. Both branches must retain a child failure.
 test('merged web commands keep spec-only independent of tiers and propagate failures in both lanes', () => {
   const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
@@ -307,4 +368,139 @@ exit 0
       }
     }
   }
+});
+
+
+// Evaluate the actual reviewed YAML expressions, with all external contexts
+// explicitly supplied. Unknown contexts fail instead of becoming false/skips.
+function evaluate(expression, context) {
+  const source = expression.replace(/^\$\{\{\s*|\s*\}\}$/g, '')
+    .replace(/(?:needs|github)\.[\w.-]+/g, key => {
+      assert.ok(Object.hasOwn(context, key), `Missing expression context: ${key}`);
+      return JSON.stringify(context[key]);
+    });
+  return Function('always', 'contains', 'fromJSON', `return (${source})`)(
+    () => true, (values, value) => values.includes(value), JSON.parse);
+}
+
+test('effective lane precedence and real workflow execution agree for all 90 flag/event/lane/mode combinations', () => {
+  const heavy = ['go-test', 'go-static', 'go-timing', 'web-setup', 'web-unit', 'web-shard', 'e2e-run', 'release-check-run'];
+  const summary = join(mkdtempSync(join(tmpdir(), 'aeon-effective-lanes-')), 'summary');
+  let combinations = 0;
+  for (const flag of ['on', 'off']) for (const event of ['pull_request', 'merge_group', 'push'])
+    for (const raw of ['full', 'spec-only', 'docs-only']) for (const mode of ['full', 'essential', 'static', 'spec-only', 'docs']) {
+      const label = `${flag}/${event}/${raw}/${mode}`;
+      const expected = flag === 'off' ? raw : event === 'pull_request' &&
+        (raw === 'spec-only' && mode === 'spec-only' || raw === 'docs-only' && mode === 'docs') ? raw : 'full';
+      const lane = effectiveLane(raw, {mode, event, affectedLane: flag});
+      assert.equal(lane, expected, label);
+      // Static is possible only for opted-in PRs. A full planner always supplies
+      // the full layout; narrowed modes in this matrix use their wider layout.
+      const layout = flag === 'on' && event === 'pull_request' && mode === 'static' ? 'static' : 'full';
+      const context = {'github.event_name': event, 'github.ref': 'refs/heads/main', 'github.run_attempt': '1',
+        'github.repository': 'inspr-at/paimos', 'github.event.pull_request.head.repo.full_name': 'inspr-at/paimos',
+        'needs.ci-plan.outputs.lane': raw, 'needs.ci-plan.result': 'success',
+        'needs.tier-plan.outputs.lane': lane, 'needs.tier-plan.outputs.mode': mode,
+        'needs.tier-plan.outputs.layout': layout, 'needs.tier-plan.result': 'success',
+        'needs.tree-reuse.outputs.reuse': 'none', 'needs.tree-reuse.result': 'skipped', 'needs.tree-reuse.outputs.run': '',
+        'needs.cache-prime.result': 'skipped', 'needs.runner-route.result': 'success',
+        'needs.runner-route.outputs.run_attempt': '1', 'needs.runner-route.outputs.runner_class': 'hosted',
+        'needs.runner-route.outputs.runs_on': '["ubuntu-latest"]', 'needs.web-setup.result': 'success'};
+      for (const id of heavy) {
+        const job = requiredJob(id);
+        const condition = /^    if: (.+)$/m.exec(job)?.[1];
+        assert.ok(condition, id);
+        const enabled = Boolean(evaluate(condition, context));
+        const want = (id.startsWith('web-') ? lane !== 'docs-only' : lane === 'full') &&
+          !(layout === 'static' && ['go-test', 'go-timing', 'web-shard', 'e2e-run'].includes(id));
+        assert.equal(enabled, want, `${label}/${id}`);
+        if (flag === 'on' && mode === 'full') assert.equal(enabled, true, `${label}/${id}: full planner must execute heavy checks`);
+        context[`needs.${id}.result`] = enabled ? 'success' : 'skipped';
+      }
+      for (const [id, fullRows] of [['go-test', 7], ['web-unit', 4], ['web-shard', 12]]) {
+        const job = requiredJob(id), expression = /^        shard: (.+)$/m.exec(job)?.[1];
+        assert.ok(expression, id);
+        const rows = evaluate(expression, context);
+        const wanted = event === 'pull_request' && id !== 'go-test' && lane === 'spec-only' ? 1 : id !== 'web-unit' &&
+          event === 'pull_request' && mode === 'essential' ? 2 : fullRows;
+        assert.equal(rows.length, wanted, `${label}/${id} matrix`);
+        if (flag === 'on' && mode === 'full') assert.equal(rows.length, fullRows, `${label}/${id} full matrix`);
+      }
+      assert.deepEqual(evaluate(/^    runs-on: (.+)$/m.exec(requiredJob('go-test'))[1], context), ['ubuntu-latest'], label);
+      for (const id of ['go', 'web', 'e2e', 'release-check']) {
+        const job = requiredJob(id), envBlock = job.split('        env:\n')[1].split('        run: |\n')[0];
+        const env = {PATH: process.env.PATH, GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/main', GITHUB_STEP_SUMMARY: summary};
+        for (const match of envBlock.matchAll(/^          ([A-Z_]+): (.+)$/gm)) env[match[1]] = String(evaluate(match[2], context));
+        const run = job.split('        run: |\n')[1].replace(/^          /gm, '');
+        const result = spawnSync('bash', ['-c', run], {env, encoding: 'utf8', timeout: 10_000});
+        assert.equal(result.status, 0, `${label}/${id}: ${result.stderr}`);
+        // A full planner cannot accept omitted heavy work through an old exemption.
+        if (flag === 'on' && mode === 'full') {
+          const resultKey = id === 'go' ? 'GO_TEST' : id === 'web' ? 'WEB_SHARD' : 'CHECK_RESULT';
+          const skipped = spawnSync('bash', ['-c', run], {env: {...env, [resultKey]: 'skipped'}, encoding: 'utf8', timeout: 10_000});
+          assert.notEqual(skipped.status, 0, `${label}/${id} accepted omitted full work`);
+        }
+      }
+      combinations++;
+    }
+  assert.equal(combinations, 90);
+  for (const flag of [undefined, '', 'ON', 'true', ' on', 'on ']) for (const lane of ['full', 'spec-only', 'docs-only'])
+    assert.equal(effectiveLane(lane, {mode: 'full', event: 'push', affectedLane: flag}), lane, 'flag off remains exact');
+});
+
+test('merge-group workflow retains full matrices, job gates and execution proofs despite essential/static planner outputs', () => {
+  for (const event of ['pull_request', 'merge_group', 'push', 'workflow_dispatch', 'schedule'])
+    for (const mode of ['essential', 'full']) for (const layout of ['static', 'full']) {
+      const label = `${event}/${mode}/${layout}`;
+      const context = {'github.event_name': event, 'github.ref': 'refs/heads/main', 'github.run_attempt': '1',
+        'github.repository': 'inspr-at/paimos', 'github.event.pull_request.head.repo.full_name': 'inspr-at/paimos',
+        'needs.ci-plan.result': 'success', 'needs.tier-plan.result': 'success',
+        'needs.tier-plan.outputs.lane': 'full', 'needs.tier-plan.outputs.mode': mode,
+        'needs.tier-plan.outputs.layout': layout, 'needs.tree-reuse.outputs.reuse': 'none',
+        'needs.runner-route.result': 'success', 'needs.runner-route.outputs.run_attempt': '1',
+        'needs.runner-route.outputs.runner_class': 'hosted', 'needs.web-setup.result': 'success'};
+      for (const id of ['go-test', 'go-timing', 'web-shard', 'e2e-run']) {
+        const condition = /^    if: (.+)$/m.exec(requiredJob(id))[1];
+        assert.equal(Boolean(evaluate(condition, context)), event !== 'pull_request' || layout !== 'static', `${label}/${id}`);
+      }
+      for (const [id, fullRows] of [['go-test', 7], ['web-unit', 4], ['web-shard', 12]]) {
+        const job = requiredJob(id), expression = /^        shard: (.+)$/m.exec(job)[1];
+        const wanted = event === 'pull_request' && mode === 'essential' && id !== 'web-unit' ? 2 : fullRows;
+        assert.equal(evaluate(expression, context).length, wanted, `${label}/${id} matrix`);
+        const proof = job.split('      - name: Confirm full tier execution\n')[1].split(/\n      - /)[0];
+        assert.match(proof, /run: node scripts\/test-tiers\/check-full\.mjs/);
+        assert.match(proof, /TIER_REPORT: .*\$\{\{ matrix.shard \}\}-measurement\.json/);
+        const condition = /^        if: (.+)$/m.exec(proof)[1];
+        assert.equal(Boolean(evaluate(condition, context)), event !== 'pull_request' || mode !== 'essential', `${label}/${id} full proof`);
+        context['needs.tier-plan.outputs.lane'] = 'spec-only';
+        assert.equal(evaluate(expression, context).length, event === 'pull_request' && id !== 'go-test' ? 1 : wanted, `${label}/${id} spec-only matrix`);
+        if (event === 'merge_group') assert.equal(Boolean(evaluate(condition, context)), true, `${label}/${id} spec-only full proof`);
+        context['needs.tier-plan.outputs.lane'] = 'full';
+      }
+    }
+});
+
+test('every CI lane and tier runner consumer uses the single effective publisher', () => {
+  const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  assert.equal((workflow.match(/needs\.ci-plan\.outputs\.lane/g) ?? []).length, 1, 'only tier-plan reads the raw lane');
+  assert.match(requiredJob('tier-plan'), /CI_PLAN_LANE: \$\{\{ needs.ci-plan.outputs.lane \}\}/);
+  assert.match(requiredJob('tier-plan'), /^    needs: ci-plan$/m);
+  assert.match(requiredJob('tier-plan'), /^      lane: \$\{\{ steps.tiers.outputs.lane \}\}$/m);
+  const consumers = [];
+  for (const match of workflow.matchAll(/^  ([\w-]+):\n([\s\S]*?)(?=^  [\w-]+:|$(?![\s\S]))/gm)) {
+    const [_, id, body] = match;
+    if (body.includes('needs.tier-plan.outputs.lane')) {
+      consumers.push(id);
+      assert.match(body, /^    needs: .*\btier-plan\b/m, id);
+    }
+    for (const mode of body.matchAll(/^          AEON_TEST_TIER_MODE: (.+)$/gm)) {
+      assert.equal(mode[1], '${{ needs.tier-plan.outputs.mode }}', id);
+      assert.match(body, /^          AEON_TEST_TIER_LAYOUT: \$\{\{ needs.tier-plan.outputs.layout \}\}$/m, id);
+    }
+  }
+  assert.deepEqual(consumers, ['go-test', 'go-timing', 'go-static', 'go', 'web-setup', 'web-unit', 'web-shard', 'web', 'release-check', 'release-check-run', 'e2e', 'e2e-run', 'tier-measurements']);
+  const newSpec = classifyPaths(['web/tests/new-feature.spec.ts']);
+  assert.equal(newSpec.lane, 'spec-only');
+  assert.equal(effectiveLane(newSpec.lane, {mode: 'full', event: 'pull_request', affectedLane: 'on'}), 'full');
+  assert.equal(effectiveLane(newSpec.lane, {mode: 'spec-only', event: 'pull_request', affectedLane: 'on'}), 'spec-only');
 });

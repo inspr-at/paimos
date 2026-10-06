@@ -31,6 +31,7 @@ import (
 	"github.com/inspr-at/paimos/internal/aithema/journal"
 	"github.com/inspr-at/paimos/internal/aithema/tokens"
 	"github.com/inspr-at/paimos/internal/approvals"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachments"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/authz"
@@ -195,10 +196,12 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 		go aithemaHost.Run(ctx)
 	}
 
+	attachedMessages := attachedmsg.New(attachedmsg.Options{Enabled: cfg.AttachedMessages, SingleInstance: cfg.AttachedMessagesSingleInstance, Origin: cfg.PublicURL})
+	go attachedMessages.Run(ctx, pool)
 	questionsMod := questions.New(pool)
 	var messagingMod httpapi.Module
 	if cfg.MessagingKey != nil {
-		m, err := inbox.NewMessaging(pool, cfg.MessagingKey, inbox.WithHeldReplyBridge(questionsMod.ReplyHeld))
+		m, err := inbox.NewMessaging(pool, cfg.MessagingKey, inbox.WithHeldReplyBridge(questionsMod.ReplyHeld), inbox.WithAttachedMessages(attachedMessages))
 		if err != nil {
 			closeListener()
 			return fmt.Errorf("messaging: %w", err)
@@ -328,6 +331,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	}
 	phoneMod := phoneapprovals.New(pool, pairingMod, cfg.PublicURL, cfg.LinkKey, vapid)
 	go phoneMod.Run(ctx)
+	pairingMod.SetAttachedMessages(attachedMessages)
 	doctrineMod := doctrine.New(pool, doctrine.Options{
 		CredentialsDir:    cfg.DoctrineCredentialsDir,
 		GuardKey:          cfg.DoctrineGuardKey,
@@ -389,9 +393,9 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			themes.New(pool),
 			imports.New(pool),
 			// R2: agents
-			inbox.New(pool),
+			inbox.New(pool, attachedMessages),
 			chat.New(pool),
-			harness.New(pool, nodes.CapturePlanningStart),
+			harness.NewWithSessionRecovery(pool, agentruns.PrepareSessionRecovery, nodes.CapturePlanningStart),
 			rules.New(pool),
 			doctrineMod,
 			ticketwork.New(pool),
@@ -400,7 +404,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			usagedashboard.New(pool),
 			workorders.New(pool),
 			reviewMod,
-			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun),
+			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun, reviewMod.PrepareForRun),
 			approvals.New(pool),
 			phoneMod,
 			questionsMod,
@@ -408,7 +412,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			modelMod,
 			agentaccounts.New(pool),
 			pairingMod,
-			// R3: journey
+			// Retired Flow compatibility routes
 			journey.New(pool),
 			requirements.New(pool),
 			releases.New(pool),
@@ -418,7 +422,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			plugins.NewWithRegistry(pool, pluginRegistry),
 			// EvidenceLaunchChecks admits only from the recorded candidate artifact
 			// and a fresh launch_readiness row. A missing record stays refused.
-			stagehandoff.New(pool, pluginRegistry, stagehandoff.EvidenceLaunchChecks{Pool: pool}),
+			stagehandoff.New(pool, pluginRegistry),
 			// R4: business plugins
 			costunits.New(pool, pluginRegistry),
 			crm.NewWithNoteGenerator(pool, pluginRegistry, workspaceNotes),
@@ -612,8 +616,8 @@ func resolveWeb(cfg config.Config) (fs.FS, error) {
 }
 
 // settleUsage lets finished runs settle their account allowance projections (R2).
-func settleUsage(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry) error {
-	return agentaccounts.Settle(ctx, tx, p, run.ID)
+func settleUsage(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, _ agentruns.Telemetry, pending *[]events.Change) error {
+	return agentaccounts.SettleDeferred(ctx, tx, p, run.ID, pending)
 }
 
 // runRoutineDispatchers starts one routine dispatcher per tenant that exists at

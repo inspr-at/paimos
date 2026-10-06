@@ -106,7 +106,7 @@ onMounted(load)
 </script>
 
 <template>
-  <AccessSheet :title="`Edit scopes for ${agent.name}`" size="center" wide actions-first submit-shortcut @submit="save" @close="busy || emit('close')">
+  <AccessSheet :title="`Edit scopes for ${agent.name}`" size="center" scale="l" actions-first submit-shortcut @submit="save" @close="busy || emit('close')">
     <div class="body" :aria-busy="busy">
       <p class="note">Changes to <span class="mono">{{ keyHint(agentKey.prefix) }}</span> apply immediately with the same key.</p>
       <template v-if="loaded">
@@ -150,8 +150,8 @@ onMounted(load)
     <template #foot>
       <div class="foot">
         <div class="actions">
+          <button type="button" class="btn primary" :disabled="busy || !loaded || !allowed || !changed || invalid || selected.size > MAX_KEY_SCOPES" @click="save"><span class="action-label btn-label"><span>{{ busy && loaded ? 'Saving…' : roleAdded.length ? 'Add to role and save scopes' : 'Save scopes' }}</span><span aria-hidden="true">Add to role and save scopes</span></span><kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
           <button type="button" class="btn" :disabled="busy" @click="emit('close')">Cancel</button>
-          <button type="button" class="btn primary" :disabled="busy || !loaded || !allowed || !changed || invalid || selected.size > MAX_KEY_SCOPES" @click="save"><span class="action-label">{{ busy && loaded ? 'Saving…' : roleAdded.length ? 'Add to role and save scopes' : 'Save scopes' }}</span><kbd class="keycap" aria-hidden="true">{{ submitModifier }}<AppIcon name="enter" :size="12" /></kbd></button>
         </div>
       </div>
     </template>
@@ -172,7 +172,8 @@ onMounted(load)
 .scope-row input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--teal); }
 .detail { font-size: 11px; color: var(--ink-3); }
 .foot { display: grid; gap: 12px; width: 100%; min-width: 0; }
-.actions { display: flex; justify-content: end; gap: 8px; }
+.actions { display: flex; flex-wrap: wrap; justify-content: start; gap: 8px; }
+@media (max-width: 600px) { .actions { flex-direction: row-reverse; } .actions .btn { flex: 1 1 auto; min-height: 44px; } .actions .keycap { display: none; } }
 .actions .primary { min-width: 0; }
 .action-label { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.3; }
 .actions .keycap { flex-shrink: 0; }

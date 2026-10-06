@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -237,6 +237,59 @@ test("diagnostic workflow is PR/queue-only, unconditional and cannot emit the Ap
   assert.doesNotMatch(gate, /: write|continue-on-error|node --test|pull_request_target/);
   const ci = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   assert.doesNotMatch(ci, /gate\/cross-family/);
+});
+
+test("diagnostic preview skips absent base policy and preserves installed gate results", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/cross-family-preview.yml", import.meta.url), "utf8");
+  const block = workflow.match(/        run: \|\n((?:          [^\n]*\n)+)/);
+  assert.ok(block, "preview shell step must be present");
+  const shell = block[1].replace(/^          /gm, "");
+  const message = "cross-family gate bootstrap pending; preview skipped";
+  const policyPath = ".github/gate-posters.json";
+  const checkerPath = "scripts/cross-family-gate.mjs";
+  const policy = JSON.stringify({ ...config, fixtureExitCode: 0 });
+  const checker = `import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+const policy = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+assert.deepEqual(policy.posters, ${JSON.stringify(config.posters)});
+console.log('trusted base gate ran');
+process.exit(policy.fixtureExitCode);
+`;
+  function run(files, baseOverride) {
+    const runner = mkdtempSync(join(tmpdir(), "aeon-preview-runner-"));
+    const summary = join(runner, "summary.txt");
+    writeFileSync(summary, "existing summary\n");
+    const base = f.commit(files, [f.main]);
+    const result = spawnSync("bash", ["-c", shell], {
+      cwd: f.cwd, encoding: "utf8", timeout: 10_000,
+      env: { PATH: process.env.PATH, GATE_BASE_SHA: baseOverride ?? base, RUNNER_TEMP: runner, GITHUB_STEP_SUMMARY: summary },
+    });
+    assert.ifError(result.error);
+    assert.equal(result.signal, null);
+    return { ...result, summary: readFileSync(summary, "utf8"), runner };
+  }
+  // Either missing file skips only the diagnostic; no extracted gate runs.
+  for (const files of [{}, { [checkerPath]: checker }, { [policyPath]: policy }]) {
+    const result = run(files);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, `::notice::${message}\n`);
+    assert.equal(result.summary, `existing summary\n${message}\n`);
+    assert.equal(existsSync(join(result.runner, "cross-family-gate.mjs")), false);
+    assert.equal(existsSync(join(result.runner, "gate-posters.json")), false);
+  }
+  // An installed checker executes from the trusted base and retains its exit status.
+  for (const fixtureExitCode of [0, 7]) {
+    const result = run({ [checkerPath]: checker, [policyPath]: JSON.stringify({ ...config, fixtureExitCode }) });
+    assert.equal(result.status, fixtureExitCode, result.stderr);
+    assert.equal(result.stdout, "trusted base gate ran\n");
+    assert.equal(result.summary, "existing summary\n");
+    assert.equal(readFileSync(join(result.runner, "cross-family-gate.mjs"), "utf8"), checker);
+    assert.deepEqual(JSON.parse(readFileSync(join(result.runner, "gate-posters.json"), "utf8")), { ...config, fixtureExitCode });
+  }
+  const invalid = run({}, "invalid-base");
+  assert.equal(invalid.status, 1, invalid.stderr);
+  assert.equal(invalid.stdout, "Invalid gate base commit\n");
+  assert.equal(invalid.summary, "existing summary\n");
 });
 
 test("required status binds to the external App, preserving the existing ruleset separately", () => {

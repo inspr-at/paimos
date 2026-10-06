@@ -28,6 +28,7 @@ type WorkQuery struct {
 	TicketResidency  string
 }
 type PreferenceTrace struct {
+	OrderMode            string                     `json:"order_mode,omitempty"`
 	Selector             *modelprefs.Cell           `json:"selector,omitempty"`
 	Role                 string                     `json:"role,omitempty"`
 	ProjectID            string                     `json:"project_id,omitempty"`
@@ -128,6 +129,10 @@ func expandPreference(cell modelprefs.Cell, profiles []Profile) []Profile {
 // ResolveWork preserves resolveRole byte-for-byte with an empty matrix and an
 // any requirement. Placement chooses a cell; it never changes the role ladder.
 func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time) (WorkResolution, error) {
+	return resolveWorkWithCatalog(ctx, tx, p, q, now, nil)
+}
+
+func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog) (WorkResolution, error) {
 	if q.TicketID != "" {
 		var fields []byte
 		var project *string
@@ -156,7 +161,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 		if q.AuthorFamily == "" {
 			return WorkResolution{}, fail(400, "review-gate requires author_family")
 		}
-		route, err := ResolveReviewFor(ctx, tx, p, q, now)
+		route, err := resolveReviewWithCatalog(ctx, tx, p, q, now, catalog)
 		if err != nil {
 			return WorkResolution{}, err
 		}
@@ -166,6 +171,11 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 			out.CommandTemplate, err = commandTemplate(route.Profile.Harness, route.Profile.Model, route.Profile.Effort, true)
 		}
 		return out, err
+	}
+	if escalated, err := escalationForWork(ctx, tx, p, q, now); err != nil {
+		return WorkResolution{}, err
+	} else if escalated != nil {
+		return *escalated, nil
 	}
 	role, ok := roleByName(q.Role)
 	if !ok {
@@ -195,7 +205,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 		result := modelprefs.ResolveCell(chain, kind.Slug, out.Trace.Bucket)
 		traceCell(&out.Trace, result)
 		if result.Cell != nil && result.Cell.Mode != "auto" {
-			profiles, err := listProfiles(ctx, tx)
+			profiles, err := catalog.profiles(ctx, tx)
 			if err != nil {
 				return out, err
 			}
@@ -246,7 +256,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 			}
 		}
 	}
-	out.Resolution, err = resolveRole(ctx, tx, resolveQuery{Role: q.Role, Harness: q.Harness}, now)
+	out.Resolution, err = resolveRoleWithCatalog(ctx, tx, resolveQuery{Role: q.Role, Harness: q.Harness}, now, catalog)
 	if err != nil {
 		return out, err
 	}
@@ -254,7 +264,7 @@ func ResolveWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery
 	if requirement == "any" {
 		return out, nil
 	}
-	steps, err := loadLadder(ctx, tx, q.Role)
+	steps, err := catalog.ladder(ctx, tx, q.Role)
 	if err != nil {
 		return out, err
 	}
@@ -292,7 +302,7 @@ func preferenceStep(ctx context.Context, tx pgx.Tx, profile Profile, role string
 	err := tx.QueryRow(ctx, `SELECT coalesce(r.state,'available'),coalesce(r.reason,''),r.valid_until,
   EXISTS(SELECT 1 FROM model_profile_retirements x WHERE x.tenant_id=p.tenant_id AND x.profile_id=p.id),
   o.suppressed_until
-  FROM model_profiles p LEFT JOIN model_role_routes r ON r.tenant_id=p.tenant_id AND r.profile_id=p.id AND r.role=$2
+  FROM model_profiles p LEFT JOIN (`+agentaccounts.ModelRoleRoutesSQL+`) r ON r.tenant_id=p.tenant_id AND r.profile_id=p.id AND r.role=$2
   LEFT JOIN model_observations o ON o.tenant_id=p.tenant_id AND o.harness=p.harness AND o.model=p.model AND o.effort=p.effort
   WHERE p.id=$1::uuid`, profile.ID, role).Scan(&step.State, &step.Reason, &step.ValidUntil, &step.Retired, &step.SuppressedUntil)
 	if err != nil {

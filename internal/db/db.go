@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -56,19 +57,48 @@ func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 // admission fence before fn can lock resources. WithKeyScopeUse adds target
 // keys to the sorted admission batch for operations that touch several keys.
 func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
+	return inTenant(ctx, pool, tenantID, pgx.TxOptions{}, true, fn)
+}
+
+// InTenantReadSnapshot reads permissions, canonical identity and response data
+// from one snapshot after any independently committed preparation. Guarded and
+// keyed reads allow authorization row locks and scope-use evidence writes;
+// ordinary reads remain read-only. Neither runs work-status derivation.
+func InTenantReadSnapshot(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(pgx.Tx) error) error {
+	if HasTransaction(ctx) {
+		return fmt.Errorf("tenant read snapshot requires an independent transaction")
+	}
+	options := pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}
+	_, guarded := ctx.Value(tenantGuardKey{}).(TenantGuard)
+	p, keyed := tenant.PrincipalFrom(ctx)
+	if guarded || keyed && p.Kind == tenant.Agent && p.KeyID != "" {
+		options.AccessMode = pgx.ReadWrite
+	}
+	return inTenant(ctx, pool, tenantID, options, false, fn)
+}
+
+func inTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, options pgx.TxOptions, deriveWorkStatus bool, fn func(pgx.Tx) error) error {
 	var tx pgx.Tx
 	var err error
 	if parent, ok := ctx.Value(transactionContextKey{}).(pgx.Tx); ok {
 		tx, err = parent.Begin(ctx)
 	} else {
-		tx, err = pool.Begin(ctx)
+		tx, err = pool.BeginTx(ctx, options)
 	}
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if err := enterTenant(ctx, tx, tenantID); err != nil {
+	// Set only tenant isolation until keyed admission validates the captured
+	// creator. Project visibility must never be built from a stale owner.
+	p, hasPrincipal := tenant.PrincipalFrom(ctx)
+	keyed := hasPrincipal && p.TenantID == tenantID && p.Kind == tenant.Agent && p.KeyID != ""
+	if keyed {
+		if _, err := tx.Exec(ctx, `SELECT set_config($1,$2,true)`, TenantSetting, tenantID); err != nil {
+			return fmt.Errorf("set tenant: %w", err)
+		}
+	} else if err := enterTenant(ctx, tx, tenantID); err != nil {
 		return fmt.Errorf("set tenant: %w", err)
 	}
 	if limit, ok := ctx.Value(readLimitKey{}).(*readLimit); ok {
@@ -79,9 +109,20 @@ func InTenant(ctx context.Context, pool *pgxpool.Pool, tenantID string, fn func(
 	if err := lockAgentScopeUse(ctx, tx, tenantID); err != nil {
 		return err
 	}
-	active, err := beginWorkStatus(ctx, tx)
-	if err != nil {
-		return err
+	if keyed {
+		if err := ValidateKeyCreatorTx(ctx, tx, p); err != nil {
+			return err
+		}
+		if err := enterTenant(ctx, tx, tenantID); err != nil {
+			return fmt.Errorf("set tenant visibility: %w", err)
+		}
+	}
+	var active bool
+	if deriveWorkStatus {
+		active, err = beginWorkStatus(ctx, tx)
+		if err != nil {
+			return err
+		}
 	}
 	if guard, ok := ctx.Value(tenantGuardKey{}).(TenantGuard); ok {
 		if err := guard(ctx, tx, tenantID); err != nil {
@@ -138,6 +179,13 @@ func WithAdditionalTenantGuard(ctx context.Context, guard TenantGuard) context.C
 }
 
 type transactionContextKey struct{}
+
+// HasTransaction identifies a retained outer transaction. Independent preparation
+// must refuse such a context instead of hiding a nested savepoint commit in it.
+func HasTransaction(ctx context.Context) bool {
+	_, ok := ctx.Value(transactionContextKey{}).(pgx.Tx)
+	return ok
+}
 
 // InTransaction groups sequential InTenant calls into one atomic unit. Each
 // tenant operation still enters its own savepoint and sets its RLS context.

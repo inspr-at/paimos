@@ -141,6 +141,10 @@ test('at 390 px the compact sort control orders by Ticket, reverses, and restore
   const start = [sid(3), sid(1), sid(2), sid(4)]
   await expect.poll(() => rowOrder(page)).toEqual(start)
   await expect(page.locator('.thead')).toBeHidden()
+  // The Sessions head's sort tool opens the same select and direction (AEON-784).
+  const tool = page.locator('.sessions .sort-tool')
+  await expect(tool).toHaveAccessibleName(/^Sort sessions: State, ascending/)
+  await tool.click()
   const bar = page.getByRole('group', { name: 'Sort sessions' })
   const pick = bar.getByRole('combobox', { name: 'Sort' })
   await expect(pick).toHaveValue('state')
@@ -162,7 +166,11 @@ test('at 390 px the compact sort control orders by Ticket, reverses, and restore
   await expect(bar.getByText('Beats under 3 minutes old count as equal', { exact: false })).toBeVisible()
   await expect(pick).toHaveAccessibleDescription(/Beats under 3 minutes old/)
 
+  await page.keyboard.press('Escape')
+  await expect(bar).toHaveCount(0)
+  await expect(tool).toHaveAccessibleName(/^Sort sessions: Heartbeat, ascending/)
   await page.getByRole('button', { name: 'Default order' }).click()
   await expect.poll(() => rowOrder(page)).toEqual(start)
+  await tool.click()
   await expect(pick).toHaveValue('state')
 })

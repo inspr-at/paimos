@@ -17,7 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-func TestKnowledgeTenantBeforeTreeAndRowForDeleteAndUndo(t *testing.T) {
+func TestKnowledgeTenantTreeBeforeRowForDeleteAndUndo(t *testing.T) {
 	for _, action := range []string{"delete", "undo-create", "undo-delete", "undo-update"} {
 		t.Run(action, func(t *testing.T) {
 			f := setup(t)
@@ -84,8 +84,10 @@ func TestKnowledgeTenantBeforeTreeAndRowForDeleteAndUndo(t *testing.T) {
 			}()
 			lock := dbtest.BlockedOrDone(t, ctx, f.db.Admin, pid, done)
 			barrier.Release()
+			// The tenant fence precedes the tree and record fences. The first
+			// mutation holds it while stopped before locking the record.
 			if lock != "transactionid" {
-				t.Errorf("generic PATCH waited for %q instead of the tenant access fence", lock)
+				t.Errorf("generic PATCH waited for %q instead of tenant fence", lock)
 			}
 			firstStatus := 201
 			if action == "delete" {
@@ -156,10 +158,10 @@ func TestKnowledgeLockedEligibilityAfterConcurrentDelete(t *testing.T) {
 	expect(t, call(t, f, f.a, "GET", "/api/knowledge/"+e.ID, nil), 200)
 }
 
-// Ordinary Knowledge Undo follows tenant -> pairing -> tree -> event even with
-// work-parent-status explicitly OFF. Pause a real PATCH after pairing, observe
-// Undo's tenant wait, and probe the later fences before release.
-func TestKnowledgeUndoPairingBeforeTreeWithWorkStatusOff(t *testing.T) {
+// Ordinary Knowledge Undo takes the tenant fence before advisory/event locks
+// even with work-parent-status OFF. Pause a PATCH after its shared tree/pairing
+// entry, observe Undo's tenant wait, and probe the owned tree and free event fence.
+func TestKnowledgeUndoTenantBeforeSharedFencesWithWorkStatusOff(t *testing.T) {
 	// This fixture needs only a project and knowledge.
 	f := fixture{db: dbtest.Open(t)}
 	f.a = tenant.Principal{Kind: tenant.Person, Name: "Markus Barta"}
@@ -238,8 +240,8 @@ func TestKnowledgeUndoPairingBeforeTreeWithWorkStatusOff(t *testing.T) {
 	if err != nil || rollbackErr != nil {
 		t.Fatalf("fence probe: %v; rollback: %v", err, rollbackErr)
 	}
-	if lock != "transactionid" || !tenantWait || !treeFree || !eventFree {
-		t.Fatalf("Undo must wait on tenant before pairing/tree/event: lock=%q tenantWait=%v treeFree=%v eventFree=%v; PATCH=%d Undo=%d", lock, tenantWait, treeFree, eventFree, writeResult.Code, undoResult.Code)
+	if lock != "transactionid" || !tenantWait || treeFree || !eventFree {
+		t.Fatalf("Undo must wait on tenant while PATCH owns tree and event remains free: lock=%q tenantWait=%v treeFree=%v eventFree=%v; PATCH=%d Undo=%d", lock, tenantWait, treeFree, eventFree, writeResult.Code, undoResult.Code)
 	}
 	expect(t, writeResult, http.StatusOK)
 	expect(t, undoResult, http.StatusCreated)

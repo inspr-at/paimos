@@ -18,6 +18,7 @@ import { useCapacity } from '../stores/capacity'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
+import KeyCap from '../components/KeyCap.vue'
 import ApprovalQueue from '../components/agents/ApprovalQueue.vue'
 import SessionList from '../components/agents/SessionList.vue'
 import ChangeTierPopover from '../components/agents/ChangeTierPopover.vue'
@@ -30,6 +31,11 @@ import AccountsComputers from '../components/agents/AccountsComputers.vue'
 import { openModelPrefs } from '../lib/modelPrefsCommand'
 import AgentsWorking from '../components/agents/AgentsWorking.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
+import LeadsList from '../components/lead/LeadsList.vue'
+import LeadOverlays from '../components/lead/LeadOverlays.vue'
+import { openStartLead } from '../lib/leadOverlay'
+import { LEAD_WORDS } from '../lib/lead'
+import { useDeveloperSettings } from '../lib/developerSettings'
 import RunQueue from '../components/agents/RunQueue.vue'
 import QuotaWarnings from '../components/agents/QuotaWarnings.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
@@ -67,7 +73,8 @@ const session = useSession()
 const route = useRoute()
 const router = useRouter()
 const cursor = ref('')
-// Briefing links focus the existing request card; decisions stay on that card.
+const runQueue = ref<InstanceType<typeof RunQueue>>()
+// Decision Desk and notification links focus the existing request card.
 watch([() => route.query.needs, () => agents.loaded], async ([id, loaded]) => {
   if (!loaded || typeof id !== 'string' || !/^[am]:[0-9a-f-]{36}$/i.test(id)) return
   await nextTick()
@@ -81,6 +88,8 @@ watch([() => route.query.run, () => agents.loaded, () => agents.sessions, () => 
   if (linked) { void router.replace({ path: `/agents/${linked.id}`, query: { ...route.query, run: undefined } }); return }
   await nextTick()
   if (route.query.run !== id) return
+  // A folded Queued section opens for this visit to show the linked run.
+  if (runQueue.value?.reveal()) await nextTick()
   const queued = document.getElementById(`run-${id}`)
   if (queued) { queued.focus(); queued.scrollIntoView({ block: 'nearest' }); void router.replace({ query: { ...route.query, run: undefined } }) }
 }, { immediate: true })
@@ -99,7 +108,14 @@ const pairingAccess = computed(() => pairingPermissions({
 }))
 const showConnect = computed(() => !!session.identity && session.identity.principal.kind !== 'agent')
 const canAttach = computed(() => session.identity?.principal.kind === 'person' && pairingAccess.value.canLookup)
-const showNew = computed(() => canStart.value || canAttach.value || showConnect.value)
+// AEON-741: leads start workers; the manual Start agent is an expert opt-in.
+const { showExpertStart } = useDeveloperSettings()
+const leadsList = ref<InstanceType<typeof LeadsList>>()
+const manualStart = computed(() => canStart.value && showExpertStart.value)
+const leadless = computed(() => leadsList.value?.withoutLead ?? [])
+const canStartLead = computed(() => !!leadsList.value?.mayStart && leadless.value.length > 0)
+const leadlessNote = computed(() => leadless.value.length === 1 ? `${projects.byId(leadless.value[0]!)?.routeKey ?? 'One project'} has none. One per project.` : `${leadless.value.length} projects have none. One per project.`)
+const showNew = computed(() => manualStart.value || canStartLead.value || canAttach.value || showConnect.value)
 watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => { headerMenu.value = null })
 
 const ticketPeek = inject(TICKET_PEEK, null)
@@ -218,11 +234,15 @@ async function control(view: SessionView, kind: SessionControl['kind']) {
     toast(kind === 'stop' ? `Stop sent to ${view.name}.` : `Interrupt sent to ${view.name}.`)
   } catch (e) { toast(message(e), { tone: 'error' }) }
 }
-// The live line's counts jump to the first session in that state.
-function jump(state: AgentState) {
+// The live line's counts jump to the first session in that state; a folded
+// Sessions section opens for this visit to show it (AEON-784). The reveal is
+// recorded even when Sessions shows open, so a preference read that lands
+// after the jump cannot fold the row away.
+async function jump(state: AgentState) {
   const states = state === 'problem' ? ['problem', 'unresponsive'] : state === 'waiting' ? ['waiting'] : [state]
   const el = [...document.querySelectorAll<HTMLElement>('.agents-page .row[data-state]')].find(row => states.includes(row.dataset.state ?? ''))
   if (!el?.dataset.row) return
+  if (sessionList.value?.reveal()) await nextTick()
   cursor.value = el.dataset.row
   el.focus({ preventScroll: true })
   el.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
@@ -260,7 +280,8 @@ async function closePanel() {
 }
 
 // ---------- Keyboard: j/k move, a approve, d deny, Enter opens, Esc closes ----------
-function rows() { return [...document.querySelectorAll<HTMLElement>('.agents-page [data-row]')] }
+// A folded section's rows stay in the page but inert; the cursor skips them.
+function rows() { return [...document.querySelectorAll<HTMLElement>('.agents-page [data-row]')].filter(el => !el.closest('[inert]')) }
 function focusRow(id: string) {
   const el = document.querySelector<HTMLElement>(`.agents-page [data-row="${CSS.escape(id)}"]`)
   el?.focus({ preventScroll: true })
@@ -359,7 +380,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           <h1 id="agents-title" ref="pageTitle" tabindex="-1">Agents</h1>
           <div class="head-side">
             <p class="freshness" :class="{ on: live && !stale, stale }" :data-tip="freshnessTip"><span class="live-mark" aria-hidden="true" /><span>{{ stale ? 'Update delayed' : live ? 'Live' : 'Connecting…' }}</span></p>
-            <button v-if="showNew" type="button" class="btn primary add-agent" aria-label="New: start an agent, attach a session or connect a machine" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'add'" @click="headerAction('add', $event)"><AppIcon name="plus" :size="17" /></button>
+            <button v-if="showNew" type="button" class="btn primary add-agent" aria-label="New: start a lead, attach a session or connect a machine" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'add'" @click="headerAction('add', $event)"><AppIcon name="plus" :size="17" /></button>
             <button type="button" class="icon-btn flat" aria-label="More agent actions" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'more'" @click="headerAction('more', $event)"><AppIcon name="more" /></button>
           </div>
         </div>
@@ -369,9 +390,13 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
       <FloatingPanel v-if="headerMenu" :anchor="headerMenu.anchor" align="end" :width="300" :label="headerMenu.type === 'add' ? 'Add agent or computer' : 'More agent actions'" @close="restore => { if (restore) headerMenu?.anchor.focus(); headerMenu = null }">
         <div role="menu" class="header-menu" @keydown="menuKeys">
           <template v-if="headerMenu.type === 'add'">
-            <button v-if="canStart" type="button" role="menuitem" class="menu-item" @click="menuAction(() => startDialog?.open())"><AppIcon name="agent" /><span>Start agent…<small>Pick a ticket and a harness.</small></span></button>
+            <button v-if="canStartLead" type="button" role="menuitem" class="menu-item" @click="menuAction(() => openStartLead(leadless, headerMenu?.anchor ?? null, true))"><AppIcon name="play" /><span>Start {{ LEAD_WORDS.l }}…<small>{{ leadlessNote }}</small></span></button>
             <button v-if="canAttach" type="button" role="menuitem" class="menu-item" @click="menuAction(() => attachDialog?.open())"><AppIcon name="link" /><span>Attach a running session…<small>Bring in a session started in a terminal.</small></span></button>
             <RouterLink v-if="showConnect" role="menuitem" class="menu-item" to="/agents/register-agent" @click="headerMenu = null"><AppIcon name="monitor" /><span>Connect your machine…<small>Install agentd so it can run agents.</small></span></RouterLink>
+            <template v-if="manualStart">
+              <div class="menu-sep" role="separator" /><p class="eyebrow menu-eyebrow">Expert</p>
+              <button type="button" role="menuitem" class="menu-item" @click="menuAction(() => startDialog?.open())"><AppIcon name="agent" /><span>Start agent manually…<small>Pick ticket, host, harness, account, model and thinking yourself. Same checks apply.</small></span></button>
+            </template>
           </template>
           <template v-else>
             <button v-if="pause.person && can('harness.control')" type="button" role="menuitem" class="menu-item" @click="menuAction(() => windDown?.openBulk('pause-all'))"><AppIcon name="pause" /><span>Pause all…<small>Choose one level, with per-agent overrides.</small></span></button>
@@ -381,7 +406,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
             <RouterLink role="menuitem" class="menu-item" to="/decision-desk" @click="headerMenu = null"><AppIcon name="inbox" /><span>Decision Desk</span></RouterLink>
             <RouterLink role="menuitem" class="menu-item" to="/agents/usage" @click="headerMenu = null"><AppIcon name="pulse" /><span>Usage<small>Tokens and cost per agent, account and day.</small></span></RouterLink>
             <RouterLink v-if="can('keys.manage')" role="menuitem" class="menu-item" to="/settings/access/agents" @click="headerMenu = null"><AppIcon name="key" /><span>Agent keys<small>Scoped API keys for agents.</small></span></RouterLink>
-            <button role="menuitem" type="button" class="menu-item" @click="menuAction(() => sessionList?.toggleHistory())"><AppIcon name="history" /><span>History<small>Ended sessions and saved handovers.</small></span></button>
+            <button role="menuitem" type="button" class="menu-item" @click="menuAction(() => sessionList?.menuHistory())"><AppIcon name="history" /><span>History<small>Ended sessions and saved handovers.</small></span></button>
             <RouterLink role="menuitem" class="menu-item" to="/settings/personal#agents" @click="headerMenu = null"><AppIcon name="gear" /><span>Agent settings<small>Default pause level and indicators.</small></span></RouterLink>
           </template>
         </div>
@@ -403,13 +428,14 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         </Transition>
         </AttachPending>
         <AgentsWorking v-if="showSetup && session.identity?.principal.kind === 'person'" />
+        <LeadsList v-if="agents.loaded" ref="leadsList" />
         <AccountsComputers v-if="showSetup" :permissions="pairingAccess" :show-accounts="showCapacity" />
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
         <WindDownPanel v-if="agents.loaded" ref="windDown" />
         <SessionList
           v-if="agents.loaded" ref="sessionList"
           :groups="agents.grouped" :history="agents.historyViews" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
-          :loaded="agents.loaded" :controls="agents.controls" :can-start="canStart"
+          :loaded="agents.loaded" :controls="agents.controls" :can-start="manualStart" :can-lead="canStart"
           @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()" @history="agents.loadHistory(true)" @older="agents.loadOlderHistory()"
         />
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
@@ -419,9 +445,9 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="agents.decide" :revoke="agents.revoke" :resolve="resolveHeld"
         />
         <QuotaWarnings v-if="agents.loaded && showCapacity" :sessions="agents.views" />
-        <RunQueue v-if="agents.loaded" @emptied="pageTitle?.focus()" />
+        <RunQueue v-if="agents.loaded" ref="runQueue" @emptied="pageTitle?.focus()" />
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
-          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
+          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <KeyCap k="left" /><KeyCap k="right" /> fold · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
       </div>
     </div>
@@ -433,6 +459,7 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
     <ChangeTierPopover v-if="serviceTiers.dialog" :key="serviceTiers.dialog.instance" />
     <TierToast />
     <StartAgentDialog ref="startDialog" />
+    <LeadOverlays />
     <p class="sr-only" aria-live="polite" aria-atomic="true">{{ announcement }}</p>
   </section>
 </template>
@@ -484,13 +511,13 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
   .connect { grid-area: connect; }
   .start-agent, .connect { min-height: 44px; justify-content: center; }
   .connect { height: auto; line-height: 1.2; white-space: normal; padding-top: 8px; padding-bottom: 8px; }
-  .head-links { grid-area: links; margin: 0 0 0 -10px; }
+  .head-links { grid-area: links; margin: 0 0 0 -10px; flex-wrap: wrap; }
   .context-link { height: 36px; }
   .freshness { order: 9; margin: 0 0 0 auto; height: 36px; padding-right: 0; }
 }
 </style>
 
 <style scoped>
-.head-main{width:100%;min-width:0}.title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.title-row .head-side{display:flex;flex-wrap:nowrap;align-items:center;gap:6px}.title-row h1{margin:6px 0 0}.title-row .freshness{height:36px;font-size:12px;padding:0}.add-agent{width:36px;height:36px;padding:0}.header-menu .menu-item{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:8px 10px;border:0;border-radius:6px;background:transparent;color:var(--ink);font-size:13px;text-align:left;text-decoration:none}.header-menu .menu-item:hover{background:var(--row-hover)}.header-menu .menu-item span{display:grid;gap:3px}.header-menu small{font-size:11px;color:var(--ink-3)}
+.head-main{width:100%;min-width:0}.title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.title-row .head-side{display:flex;flex-wrap:nowrap;align-items:center;gap:6px}.title-row h1{margin:6px 0 0}.title-row .freshness{height:36px;font-size:12px;padding:0}.add-agent{width:36px;height:36px;padding:0}.header-menu .menu-sep{height:1px;margin:4px 8px;background:var(--line)}.header-menu .menu-eyebrow{margin:0;padding:8px 10px 2px}.header-menu .menu-item{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:8px 10px;border:0;border-radius:6px;background:transparent;color:var(--ink);font-size:13px;text-align:left;text-decoration:none}.header-menu .menu-item:hover{background:var(--row-hover)}.header-menu .menu-item span{display:grid;gap:3px}.header-menu small{font-size:11px;color:var(--ink-3)}
 @media(max-width:600px){.title-row .head-side{display:flex}.title-row .freshness{margin:0}.title-row .icon-btn,.title-row .add-agent{width:40px;height:40px}}
 </style>

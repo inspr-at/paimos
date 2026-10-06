@@ -32,7 +32,8 @@ import (
 // cmdHarnessV2 is the complete P5.3 harness command tree.
 func (rt *runtime) cmdHarnessV2() *Command {
 	return &Command{Name: "harness", Short: "Manage durable harness generations", Use: "harness <command>", subs: []*Command{
-		rt.harnessRegister(), rt.harnessLeavingAt(), rt.harnessPauseDefault(), rt.harnessPause("pause"), rt.harnessPause("resume"), rt.harnessWorker("pause-plan"), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessRun(), rt.harnessProvenance(), rt.harnessInvoke(),
+		rt.harnessDecision(),
+		rt.harnessRegister(), rt.harnessLeadUsage(), rt.harnessLeavingAt(), rt.harnessPauseDefault(), rt.harnessPause("pause"), rt.harnessPause("resume"), rt.harnessWorker("pause-plan"), rt.harnessRead("list"), rt.harnessRead("status"), rt.harnessRead("orchestrator"), rt.harnessBind(), rt.harnessWorker("heartbeat"), rt.harnessWorker("yield"), rt.harnessWorker("drain"), rt.harnessWorker("complete-delivery"), rt.harnessControl("interrupt"), rt.harnessControl("stop"), rt.harnessControl("complete-control"), rt.harnessWorker("mark-stopped"), rt.harnessRunHeartbeat(), rt.harnessRun(), rt.harnessProvenance(), rt.harnessInvoke(),
 	}}
 }
 
@@ -169,7 +170,7 @@ func (rt *runtime) reportedSessionFileLimit(projectID, sessionID string) (int, e
 }
 
 // harnessDoCtx is harnessDo bound to ctx so a heartbeat can abort on shutdown.
-func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string, body, dest any) error {
+func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string, body, dest any, extra ...map[string]string) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -198,6 +199,11 @@ func (rt *runtime) harnessDoCtx(ctx context.Context, method, path, lease string,
 	}
 	if lease != "" {
 		req.Header.Set("X-Aeon-Worker-Lease", lease)
+	}
+	for _, headers := range extra {
+		for name, value := range headers {
+			req.Header.Set(name, value)
+		}
 	}
 	hc := &http.Client{Timeout: 30 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return errors.New("harness request redirect refused") }}
 	res, err := hc.Do(req)

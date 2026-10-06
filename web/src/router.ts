@@ -26,7 +26,7 @@ export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: ProjectsView, meta: { title: 'Projects' } },
-    { path: '/briefing', component: () => import('./views/MorningBriefingView.vue'), meta: { title: 'Morning briefing' } },
+    { path: '/briefing', redirect: '/agents' },
     { path: '/activity', component: () => import('./views/ActivityView.vue'), meta: { title: 'Activity' } },
     // One record for the project page: its list, the open ticket and its Knowledge
     // tab and entries are children, so moving between them never remounts the page
@@ -35,7 +35,7 @@ export const router = createRouter({
       path: '/p/:projectKey', component: () => import('./views/ProjectView.vue'), meta: { title: 'Project' },
       children: [
         { path: 'tickets', component: RouteMarker, meta: { projectSection: 'tickets' } },
-        { path: 'journey', component: RouteMarker, meta: { title: 'Journey', projectSection: 'journey' } },
+        { path: 'journey', redirect: to => ({ path: `/p/${encodeURIComponent(String(to.params.projectKey))}/tickets`, hash: to.hash }) },
         { path: 'settings', component: RouteMarker, meta: { title: 'Project settings', projectSection: 'settings' } },
         // A docked entry (?entry=<type>/<slug>) on a screen too narrow to dock it opens the entry's own page.
         { path: 'knowledge', component: RouteMarker, meta: { title: 'Knowledge', projectSection: 'knowledge' }, beforeEnter: to => {
@@ -57,16 +57,14 @@ export const router = createRouter({
     { path: '/knowledge', component: () => import('./views/KnowledgeView.vue'), meta: { title: 'Knowledge' } },
     // The earlier workspace tree and list are gone; the projects page replaces them.
     { path: '/workspace', redirect: '/' },
-    // Earlier journey links lead to the project's Journey section.
+    // Retired Flow bookmarks lead to the project's tickets.
     {
-      path: '/projects/:projectId/:rest(.*)*', component: NotFoundView, meta: { title: 'Journey' },
+      path: '/projects/:projectId/:rest(.*)*', component: NotFoundView, meta: { title: 'Project' },
       beforeEnter: async to => {
         const projects = useProjects()
         await projects.load()
         const project = projects.byId(String(to.params.projectId))
-        const rest = Array.isArray(to.params.rest) ? to.params.rest : []
-        const stage = rest[0] === 'journey' && rest[1] ? { stage: rest[1] } : {}
-        return project ? { path: `/p/${encodeURIComponent(project.routeKey)}/journey`, query: { ...to.query, ...stage }, hash: to.hash, replace: true } : true
+        return project ? { path: `/p/${encodeURIComponent(project.routeKey)}/tickets`, query: {}, hash: to.hash, replace: true } : true
       },
     },
     // Business: Overview · Customers · Quotes · Hours · Rates.
@@ -102,7 +100,7 @@ export const router = createRouter({
     { path: '/settings', redirect: '/settings/personal' },
     { path: '/settings/projects', redirect: to => ({ path: '/settings/vocabulary', query: to.query, hash: to.hash }) },
     { path: '/settings/business/profiles/:profileId?', component: () => import('./views/settings/DocumentProfilesView.vue'), props: true, meta: { title: 'Document profiles', fill: true } },
-    { path: '/settings/:section(personal|theme|developer|agent-rules|accounts|workspace|vocabulary|agents|autopilot|business|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
+    { path: '/settings/:section(personal|theme|developer|policies|agent-rules|accounts|workspace|vocabulary|agents|autopilot|business|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     // Access: /settings/access/<tab>/<id> (a person, a role, a project).
     { path: '/settings/:section(access)/:tab(people|invites|roles|projects|agents|audit)?/:id?', component: () => import('./views/SettingsView.vue'), meta: { title: 'Access', keepsFocus: true } },
     { path: '/link', component: () => import('./views/LinkAccountView.vue'), meta: { title: 'Link an account' } },
@@ -163,7 +161,11 @@ router.beforeEach(async (to, from) => {
     let section = projectSection(to)
     let path = to.path
     if (!to.meta.projectSection) {
-      if (query.view === 'journey' || query.view === 'knowledge') {
+      if (query.view === 'journey' || query.section === 'journey') {
+        for (const key of ['view', 'section', 'stage', 'release', 'walk']) delete query[key]
+        return { path: to.path, query, hash: to.hash, replace: true }
+      }
+      if (query.view === 'knowledge') {
         section = query.view
         delete query.view
       }
@@ -230,6 +232,12 @@ router.beforeEach(async (to, from) => {
     await vocabulary.load()
     if (!session.identity || session.requiresSignIn) return signInAgain(to.fullPath)
     if (vocabulary.error) toast(vocabulary.error, { tone: 'error' })
+  }
+  // The Agents page names every project's lead in the workspace word (AEON-791);
+  // an unreadable vocabulary keeps the default word, so nothing to report here.
+  if (session.identity && !to.params.projectKey && (to.path === '/agents' || to.path.startsWith('/agents/'))) {
+    await useWorkVocabulary().load()
+    if (!session.identity || session.requiresSignIn) return signInAgain(to.fullPath)
   }
 })
 // A held attach code is offered once the navigation that cleaned the address bar has settled.

@@ -110,6 +110,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/me", reportercontract.WithHeader(reportercontract.Me, m.handleMe))
 	mux.HandleFunc("POST /api/agent-keys", m.handleCreateAgentKey)
 	mux.HandleFunc("GET /api/agent-keys", m.handleListAgentKeys)
+	mux.HandleFunc("POST /api/agent-keys/{id}/adopt", m.handleAdoptAgentKey)
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
 	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
@@ -145,6 +146,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				m.clearSessionCookie(w)
 			}
 		case credSession:
+			p.BrowserSession = true
 			if !publicRequest(r) {
 				if c, cErr := r.Cookie(sessionCookieName); cErr == nil {
 					m.setSessionCookie(w, c.Value)
@@ -176,6 +178,16 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				}
 				agentpairing.WriteError(w, err)
 				return
+			}
+			if r.Pattern == "GET /api/agents/plan" {
+				if !hasScope(p.Scopes, "agents.plan.read") {
+					httpapi.WriteError(w, http.StatusForbidden, "agents.plan.read scope missing")
+					return
+				}
+				if p.KeyCreatorID == "" {
+					httpapi.WriteError(w, http.StatusForbidden, "key has no person owner — adopt it in Settings › Keys")
+					return
+				}
 			}
 			scope, controlled := coreAgentScope(r)
 			if authz.OwnerWorkstation(p) && workstationGovernance(r) && !strings.HasSuffix(r.Pattern, "/owner-workstation") {
@@ -328,6 +340,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		return resource + ".write", true
 	}
 	switch parts[0] {
+	case "status":
+		// Definitions and live limits are read-only tenant metadata. Project
+		// overrides remain confined by the handler's project visibility.
+		if len(parts) == 2 && parts[1] == "help" && read {
+			return authz.AuthenticatedRoute, true
+		}
 	case "recurrences":
 		// This is an explicit agent allowlist. Every recurrence handler also
 		// checks the custom role and recurrences.manage key scope in its tenant.
@@ -401,6 +419,21 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "lead-settings":
+			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
+				return "nodes.read", true
+			}
+		case "lead":
+			if len(parts) == 4 && parts[3] == "usage" && read {
+				return "harness.read", true
+			}
+			// Starting a lead remains person-only, regardless of key scopes.
+			if len(parts) == 3 && read {
+				return "harness.read", true
+			}
+			if len(parts) == 4 && r.Method == http.MethodPost && (parts[3] == "claim" || parts[3] == "pause" || parts[3] == "yield") {
+				return "harness.worker", true
+			}
 		case "questions":
 			if len(parts) == 3 && read {
 				return "questions.read", true
@@ -509,7 +542,8 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "knowledge":
 		// Listing candidates is ordinary knowledge read. Accept and dismiss stay
 		// with a person: an agent key has no authority on those two routes, and
-		// the handler refuses every agent again.
+		// the handler refuses every agent again. A recommendation (PUT
+		// .../recommendation) is ordinary knowledge.write: it decides nothing.
 		if r.Method == http.MethodPost && len(parts) == 4 && parts[1] == "learnings" && (parts[3] == "accept" || parts[3] == "dismiss" || parts[3] == "draft") {
 			return "", false
 		}
@@ -578,6 +612,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "", false
 		}
 		return harnessScope(parts[1:], read), true
+	case "harness-recoveries":
+		if r.Method == http.MethodPost && (len(parts) == 2 && parts[1] == "claim" || len(parts) == 3 && validRouteUUID(parts[1]) && parts[2] == "complete") {
+			return "harness.worker", true
+		}
 	case "agentd":
 		if r.Pattern == "GET /api/agentd/step-ups/{challenge_id}" {
 			return "harness.worker", true
@@ -589,7 +627,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/attach" {
 			return "harness.worker", true
 		}
-		if r.Method == "GET" && r.URL.Path == "/api/agent-pairing/self" || r.Method == "POST" && r.URL.Path == "/api/agent-pairing/self/disconnect" {
+		if r.Method == "GET" && r.URL.Path == "/api/agent-pairing/self" || r.Method == "POST" && (r.URL.Path == "/api/agent-pairing/self/disconnect" || r.URL.Path == "/api/agent-pairing/self/capacity") {
 			return "run.claim", true
 		}
 	case "agent-accounts":
@@ -675,7 +713,7 @@ func harnessScope(parts []string, read bool) string {
 const selfScope = "self"
 
 func agentHasScope(have []string, want string) bool {
-	if want == selfScope {
+	if want == selfScope || want == authz.AuthenticatedRoute {
 		return true
 	}
 	if want == "stage.<op>" {

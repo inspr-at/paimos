@@ -55,6 +55,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/deskdelivery"
 	"github.com/inspr-at/paimos/internal/httpapi"
@@ -71,10 +72,26 @@ import (
 )
 
 type Module struct {
-	planningStart  func(context.Context, pgx.Tx, string, string) error
-	pool           *pgxpool.Pool
-	controlText    controlRelay
-	ownershipClock func(context.Context, pgx.Tx) (time.Time, error)
+	sessionRecovery SessionRecovery
+	leadAdmission   LeadAdmission
+	planningStart   func(context.Context, pgx.Tx, string, string) error
+	pool            *pgxpool.Pool
+	controlText     controlRelay
+	ownershipClock  func(context.Context, pgx.Tx) (time.Time, error)
+}
+
+// SessionRecovery prepares a continuation under the caller's transaction and
+// returns its ID and deferred event flush without coupling harness to runs.
+// A non-nil rejection is already written in this transaction. The caller records
+// recovery without a continuation and returns that rejection as the HTTP result
+// so the Decision Desk transition commits.
+type SessionRecovery func(context.Context, pgx.Tx, tenant.Principal, string, string, string, string) (string, func() error, *workorders.Error, error)
+
+// NewWithSessionRecovery connects the existing run admission writer.
+func NewWithSessionRecovery(pool *pgxpool.Pool, recovery SessionRecovery, planningStart ...func(context.Context, pgx.Tx, string, string) error) httpapi.Module {
+	m := New(pool, planningStart...).(*Module)
+	m.sessionRecovery = recovery
+	return m
 }
 
 var _ httpapi.Module = (*Module)(nil)
@@ -96,6 +113,11 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		status         int
 		fn             func(*http.Request, pgx.Tx, tenant.Principal) (any, error)
 	}{
+		{"GET /api/projects/{projectId}/lead", "harness.read", false, 200, m.readLead},
+		{"POST /api/projects/{projectId}/lead", "harness.control", false, 200, m.startLead},
+		{"POST /api/projects/{projectId}/lead/claim", "harness.worker", true, 200, m.claimLead},
+		{"POST /api/projects/{projectId}/lead/pause", "harness.worker", false, 200, m.pauseLead},
+		{"POST /api/projects/{projectId}/lead/yield", "harness.worker", true, 200, m.yieldLead},
 		{"POST /api/projects/{projectId}/harness-sessions", "harness.write", false, 201, m.register},
 		{"GET /api/me/host-labels", "harness.read", false, 200, m.listHostLabels},
 		{"PUT /api/me/host-labels", "harness.read", false, 200, m.putHostLabel},
@@ -132,6 +154,8 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.read", false, 200, m.readProvenance},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/provenance", "harness.worker", true, 200, m.recordProvenance},
 		{"GET /api/projects/{projectId}/instruction-provenance", "harness.read", false, 200, m.queryInstructionSources},
+		{"GET /api/projects/{projectId}/lead-decisions", "nodes.read", false, 200, m.listLeadDecisions},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/lead-decisions", "harness.worker", true, 200, m.recordLeadDecision},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.read", false, 200, m.readRulesReceipts},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/rules-receipts", "harness.worker", true, 200, m.recordRulesReceipt},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/yield", "harness.worker", true, 200, m.yield},
@@ -157,6 +181,11 @@ func (m *Module) Mount(mux *http.ServeMux) {
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/controls/{controlId}/complete", "harness.worker", true, 200, m.completeControl},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/stop", "harness.worker", true, 200, m.markStopped},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/confirm-exit", "harness.worker", true, 200, m.confirmExit},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/recover-agent", "harness.control", false, 200, m.diagnoseRecovery},
+		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/recover-agent", "harness.control", false, 201, m.requestAgentRecovery},
+		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/recover-agent/{requestId}", "harness.read", false, 200, m.readAgentRecovery},
+		{"POST /api/harness-recoveries/claim", "harness.worker", true, 200, m.claimAgentRecoveries},
+		{"POST /api/harness-recoveries/{requestId}/complete", "harness.worker", true, 200, m.completeAgentRecovery},
 		{"GET /api/projects/{projectId}/harness-sessions/{sessionId}/recovery", "harness.read", false, 200, m.recovery},
 		{"POST /api/projects/{projectId}/harness-sessions/{sessionId}/remove", "harness.read", false, 200, m.remove},
 		{"POST /api/projects/{projectId}/harness-sessions/remove-stale", "harness.read", false, 200, m.removeStale},
@@ -567,7 +596,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 				continue
 			}
 			switch v {
-			case "inbox", "pause", "owned_stop_v1", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability, servicetier.Capability:
+			case "inbox", "pause", "owned_stop_v1", "status", "steer", "interrupt", "stop", "rename", "model", "effort", managedControlCapability, recoveryCapability, servicetier.Capability:
 			default:
 				return nil, workorders.Fail(400, "invalid capability")
 			}
@@ -578,7 +607,7 @@ func normalizeCaps(in []string, management string) ([]string, error) {
 			out = append(out, v)
 		}
 	}
-	if management == "unmanaged" && (seen["interrupt"] || seen["stop"] || seen["rename"] || seen["model"] || seen["effort"] || seen[managedControlCapability] || seen[servicetier.Capability]) {
+	if management == "unmanaged" && (seen["interrupt"] || seen["stop"] || seen["rename"] || seen["model"] || seen["effort"] || seen[managedControlCapability] || seen[recoveryCapability] || seen[servicetier.Capability]) {
 		return nil, workorders.Fail(400, "unmanaged session cannot own controls")
 	}
 	sort.Strings(out)
@@ -820,6 +849,9 @@ func (m *Module) registerBeforeEvents(r *http.Request, tx pgx.Tx, p tenant.Princ
 		return nil, err
 	}
 	ref, lease := digest("ref", in.SessionRef), digest("lease", in.WorkerLease)
+	if err = fenceLeadRegistration(ctx, tx, projectID, in, ref, lease); err != nil {
+		return nil, err
+	}
 	vendor, err := vendorRefDigest(in.SessionRef, in.WorkerLease, in.VendorSessionRef)
 	if err != nil {
 		return nil, err
@@ -1266,6 +1298,7 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		ModelReports []modelregistry.Observation `json:"model_reports"`
 		pauseProgressReport
 		rules.ClientReport
+		AttachedHook     bool                    `json:"attached_hook"`
 		ProcessOwnership *ownedprocess.Identity  `json:"process_ownership"`
 		Phase            string                  `json:"phase"`
 		Activity         string                  `json:"activity"`
@@ -1288,6 +1321,11 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 		return nil, workorders.Fail(400, "invalid heartbeat")
 	}
 	ctx := r.Context()
+	if in.AttachedHook {
+		if err := agentpairing.LockMutation(ctx, tx); err != nil {
+			return nil, err
+		}
+	}
 	if err := lockActivityPolicy(ctx, tx, true); err != nil {
 		return nil, err
 	}
@@ -1299,8 +1337,11 @@ func (m *Module) heartbeat(r *http.Request, tx pgx.Tx, p tenant.Principal) (resu
 	if err != nil {
 		return nil, err
 	}
+	if in.AttachedHook && in.ProcessOwnership == nil {
+		return nil, workorders.Fail(400, "exact attached hook identity required")
+	}
 	if in.ProcessOwnership != nil {
-		if err := m.reportOwnership(ctx, tx, s, *in.ProcessOwnership); err != nil {
+		if err := m.reportOwnership(ctx, tx, s, *in.ProcessOwnership, in.AttachedHook); err != nil {
 			return nil, err
 		}
 	}

@@ -151,3 +151,33 @@ func TestWorkShapeFilterBounds(t *testing.T) {
 		t.Fatal("shape lost from cursor identity")
 	}
 }
+
+// AEON-791: agent names ride on the vocabulary. The risk is that a writer which
+// does not know them (older clients, the Work vocabulary card) wipes them.
+func TestWorkVocabularyLeadNamesSurviveLeadlessWrites(t *testing.T) {
+	p := newPrincipal(t, "vocabulary-lead")
+	named := `{"revision":0,"leaf":{"name":"","icon":""},"levels":[],"lead":{"singular":"Dirigent","plural":"Dirigenten"}}`
+	status, body := call(t, &p, "PUT", "/api/settings/work-vocabulary", named)
+	if saved := decode[workVocabulary](t, status, body, 200); saved.Lead == nil || saved.Lead.Singular != "Dirigent" || saved.Lead.Plural != "Dirigenten" {
+		t.Fatalf("saved %s", body)
+	}
+	status, body = call(t, &p, "PUT", "/api/settings/work-vocabulary", `{"revision":1,"leaf":{"name":"Schritt","icon":""},"levels":[]}`)
+	if kept := decode[workVocabulary](t, status, body, 200); kept.Leaf.Name != "Schritt" || kept.Lead == nil || kept.Lead.Plural != "Dirigenten" {
+		t.Fatalf("leadless write dropped the names: %s", body)
+	}
+	status, body = call(t, &p, "GET", "/api/settings/work-vocabulary", "")
+	if read := decode[workVocabulary](t, status, body, 200); read.Revision != 2 || read.Lead == nil || read.Lead.Singular != "Dirigent" {
+		t.Fatalf("read %s", body)
+	}
+	for _, bad := range []string{`{"singular":" Lead","plural":""}`, `{"singular":"` + strings.Repeat("ö", 41) + `","plural":""}`, `{"singular":"A\tB","plural":""}`, `{"singular":"Lead"}`, `{"singular":"Lead","plural":"","extra":1}`} {
+		in := `{"revision":2,"leaf":{"name":"Schritt","icon":""},"levels":[],"lead":` + bad + `}`
+		if status, body = call(t, &p, "PUT", "/api/settings/work-vocabulary", in); status != 400 {
+			t.Fatalf("accepted lead %s: %d %s", bad, status, body)
+		}
+	}
+	// Blank names clear back to the defaults: the field is absent again.
+	status, body = call(t, &p, "PUT", "/api/settings/work-vocabulary", `{"revision":2,"leaf":{"name":"Schritt","icon":""},"levels":[],"lead":{"singular":"","plural":""}}`)
+	if cleared := decode[workVocabulary](t, status, body, 200); cleared.Lead != nil || strings.Contains(string(body), `"lead"`) {
+		t.Fatalf("cleared %s", body)
+	}
+}

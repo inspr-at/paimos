@@ -247,8 +247,8 @@ onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); poll.s
 .pq-btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 0 18px; border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface-raised); color: var(--ink); font: 600 14px/1 var(--font); text-decoration: none; white-space: nowrap; cursor: pointer; }
 @media (hover: hover) { .pq-btn:hover { background: var(--row-hover); } }
 .pq-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.pq-btn.primary { border-color: var(--teal); background: var(--teal); color: var(--button-ink); }
-@media (hover: hover) { .pq-btn.primary:hover { filter: brightness(1.06); background: var(--teal); } }
+.pq-btn.primary { border-color: var(--primary-line); background: var(--primary); color: var(--primary-on); }
+@media (hover: hover) { .pq-btn.primary:hover { filter: brightness(1.06); background: var(--primary); } }
 .pq-btn:disabled { opacity: .5; cursor: default; }
 .pq-note { margin-top: -8px; font-size: 13px; color: var(--danger); }
 /* The desk: the frozen document on a quiet surface, as light paper in any theme. */

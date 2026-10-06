@@ -173,6 +173,9 @@ func TestGatePreviewDoesNotReportRequiredStatusOnPushOrDispatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if problems, err := checkWorkflow("cross-family-preview.yml", body); err != nil || len(problems) != 0 {
+		t.Fatalf("diagnostic preview with bootstrap skip must be accepted: %v %v", problems, err)
+	}
 	for _, changed := range []string{
 		strings.Replace(string(body), "  pull_request:", "  push:\n  pull_request:", 1),
 		strings.Replace(string(body), "  pull_request:", "  workflow_dispatch:\n  pull_request:", 1),
@@ -209,9 +212,11 @@ func checkRunnerWorkflow(name string, body []byte) ([]string, error) {
 func TestUntrustedRunnerSelections(t *testing.T) {
 	for _, selection := range []string{
 		"mbp2606", "[self-hosted, Linux, ARM64, mbp2606]", "[ubuntu-latest, mbp2606]",
-		"mbp2606-push", "mbp2606-dispatch",
+		"mbp2606-push", "mbp2606-dispatch", "mbp2606-pr", "mbp2606-mq",
 		"[self-hosted, Linux, ARM64, mbp2606, mbp2606-push]",
 		"[self-hosted, Linux, ARM64, mbp2606, mbp2606-dispatch]",
+		"[self-hosted, Linux, ARM64, mbp2606, mbp2606-pr]",
+		"[self-hosted, Linux, ARM64, mbp2606, mbp2606-mq]",
 		"ubuntu-2mbp2606", "macos-15-mbp2606", "windows-2025-mbp2606",
 		"${{ needs.runner-route.outputs.runs_on }}", "${{ fromJSON(vars.RUNNER) }}",
 		"${{ github.event_name != 'pull_request' && 'mbp2606' || 'ubuntu-latest' }}",
@@ -331,7 +336,10 @@ func TestCanonicalEventGuard(t *testing.T) {
 	for _, replacement := range []string{
 		strings.Replace(body, `"workflow_dispatch"`, `"pull_request"`, 1),
 		strings.Replace(body, `"workflow_dispatch"`, `"merge_group"`, 1),
-		strings.Replace(body, "github.ref == 'refs/heads/main' && ", "", 1),
+		strings.Replace(body, "github.ref == 'refs/heads/main'", "true", 1),
+		strings.Replace(body, " && github.event.pull_request.head.repo.full_name == github.repository", "", 1),
+		strings.Replace(body, "github.event.pull_request.head.repo.full_name", "github.event.pull_request.base.repo.full_name", 1),
+		strings.Replace(body, "github.event_name == 'merge_group'", "true", 1),
 		strings.Replace(body, "needs.runner-route.outputs.run_attempt == github.run_attempt && ", "", 1),
 		strings.Replace(body, "outputs.run_attempt == github.run_attempt", "outputs.run_attempt != github.run_attempt", 1),
 		strings.Replace(body, "needs: runner-route", "needs: wrong-route", 1),
@@ -350,9 +358,11 @@ func TestRoutedShardMatrixGuard(t *testing.T) {
 	for _, selection := range []string{
 		routedGoShards,
 		strings.Replace(routedGoShards, "outputs.run_attempt == github.run_attempt && ", "", 1),
-		strings.Replace(routedGoShards, "github.ref == 'refs/heads/main' && ", "", 1),
+		strings.Replace(routedGoShards, "github.ref == 'refs/heads/main'", "true", 1),
+		strings.Replace(routedGoShards, " && github.event.pull_request.head.repo.full_name == github.repository", "", 1),
 		strings.Replace(routedGoShards, `"workflow_dispatch"`, `"pull_request"`, 1),
 		strings.Replace(routedGoShards, "outputs.runner_class == 'mbp2606' && ", "", 1),
+		strings.Replace(routedGoShards, "github.event_name == 'pull_request'", `contains(fromJSON('["pull_request","merge_group"]'), github.event_name)`, 1),
 		"[1, 2, 3, 4]",
 	} {
 		body := routedWorkflow("go-test", "    strategy:\n      matrix:\n        shard: "+selection+"\n")

@@ -3,7 +3,7 @@
 import { nextTick, onBeforeUnmount, onMounted } from 'vue'
 import { useThemeEditor } from '../../stores/themeEditor'
 import type { ThemeRecord } from '../../lib/themes'
-import { derivedDark } from '../../lib/themeColours'
+import { deriveDark } from '../../lib/themeEngine'
 import { toast } from '../../lib/toast'
 import SettingsCard from './SettingsCard.vue'
 import ThemeColoursCard from './ThemeColoursCard.vue'
@@ -40,7 +40,7 @@ onBeforeUnmount(() => editor.leave())
       <div class="theme-list" aria-label="Themes list">
         <div v-for="theme in items" :key="theme.id" class="theme-row" :class="{ selected: theme.id === active?.theme.id }" :data-theme-id="theme.id">
           <button type="button" class="theme-choice" :inert="confirming?.id === theme.id" :aria-label="`Use ${theme.name}`" :aria-pressed="theme.id === active?.theme.id" :disabled="!canChoose" @click="editor.choose(theme)">
-            <span class="theme-dots" aria-hidden="true"><i :style="{ background: theme.values.primary.light }" /><i :style="{ background: theme.values.primary.dark ?? derivedDark(theme.values.primary.light) }" /><i :style="{ background: theme.values.secondary.light }" /></span><span class="choice-indicator" aria-hidden="true"><AppIcon v-if="theme.id === active?.theme.id" name="check" :size="14" /></span>
+            <span class="theme-dots" aria-hidden="true"><i :style="{ background: theme.values.primary.light }" /><i :style="{ background: theme.values.primary.dark ?? deriveDark(theme.values.primary.light) }" /><i :style="{ background: theme.values.secondary.light }" /></span><span class="choice-indicator" aria-hidden="true"><AppIcon v-if="theme.id === active?.theme.id" name="check" :size="14" /></span>
           </button>
           <div class="theme-details" :inert="confirming?.id === theme.id">
             <input v-if="renaming === theme.id && draft?.id === theme.id" :value="draft.name" class="theme-name-input" maxlength="80" aria-label="Theme name" :disabled="busy" @input="editor.update(next => next.name = ($event.target as HTMLInputElement).value)" @blur="editor.renameEnd" />

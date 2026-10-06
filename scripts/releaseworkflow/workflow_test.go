@@ -25,9 +25,11 @@ type step struct {
 }
 
 type job struct {
-	RunsOn   string `yaml:"runs-on"`
-	If       string
-	Strategy struct {
+	TimeoutMinutes int `yaml:"timeout-minutes"`
+	Env            map[string]string
+	RunsOn         string `yaml:"runs-on"`
+	If             string
+	Strategy       struct {
 		FailFast bool `yaml:"fail-fast"`
 		Matrix   struct {
 			Include []struct {
@@ -45,6 +47,7 @@ type job struct {
 }
 
 type workflow struct {
+	Env         map[string]string
 	On          map[string]any
 	Permissions map[string]string
 	Jobs        map[string]job
@@ -109,6 +112,43 @@ func TestImageDoesNotWaitForClients(t *testing.T) {
 	}
 	if _, ok := w.Jobs["homebrew-tap"]; ok {
 		t.Fatal("Homebrew must stay on AEON-356's separate post-publication workflow")
+	}
+}
+
+func TestDarwinHookCLIIsSignedAndRehearsedBeforeAssembly(t *testing.T) {
+	w := readWorkflow(t, "release.yml")
+	dry := readWorkflow(t, "release-image-check.yml")
+	buildAt, build := named(t, w.Jobs["agentd-darwin"], "Build darwin paimos-agentd with LocalAuthentication")
+	signAt, sign := named(t, w.Jobs["agentd-darwin"], "Sign and notarize paimos-agentd")
+	_, rehearsal := named(t, dry.Jobs["agentd-rehearsal"], "Build darwin paimos-agentd with LocalAuthentication")
+	if buildAt >= signAt || build.Run != rehearsal.Run || !reflect.DeepEqual(build.Env, rehearsal.Env) || !strings.Contains(build.Run, "build-release-binaries.sh cli-darwin") {
+		t.Fatal("native rehearsal must build the same CLI and daemon as production")
+	}
+	for _, fragment := range []string{
+		`sign-notarize.sh --identifier aeon-cli "dist/aeon-cli-darwin-${{ matrix.arch }}"`,
+		`codesign --verify --strict -R='anchor apple generic and identifier "aeon-cli" and certificate leaf[subject.OU] = "P66J39QV6V"'`,
+	} {
+		if !strings.Contains(sign.Run, fragment) {
+			t.Fatal("CLI signing requirement missing")
+		}
+	}
+	for _, j := range []job{w.Jobs["agentd-darwin"], dry.Jobs["agentd-rehearsal"]} {
+		found := false
+		for i, s := range j.Steps {
+			if strings.HasPrefix(s.Uses, "actions/upload-artifact@") {
+				found = true
+				if !strings.Contains(s.With["path"], "dist/aeon-cli-darwin-${{ matrix.arch }}") || (j.Environment == "release-signing" && i <= signAt) {
+					t.Fatal("CLI uploaded before signing or omitted")
+				}
+			}
+		}
+		if !found {
+			t.Fatal("missing native artifact handoff")
+		}
+	}
+	_, assemble := named(t, w.Jobs["assets"], "Build linux paimos-agentd and aeon-cli")
+	if !strings.Contains(assemble.Run, "build-release-binaries.sh cli-linux") || strings.Contains(assemble.Run, "build-release-binaries.sh cli\n") {
+		t.Fatal("assets assembly can overwrite signed Darwin CLI bytes")
 	}
 }
 
@@ -211,6 +251,78 @@ func TestLoadedImageResolverFailsClosed(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPublishedRuntimeMustMatchSmokedRuntime(t *testing.T) {
+	j := readWorkflow(t, "release.yml").Jobs["image-platform"]
+	pushIndex, _ := named(t, j, "Build and push")
+	identityIndex, identity := named(t, j, "Verify pushed runtime matches smoke")
+	attestIndex, _ := named(t, j, "Attest pushed image")
+	if !(pushIndex < identityIndex && identityIndex < attestIndex) || identity.If != "" || identity.ContinueOnError {
+		t.Fatal("runtime identity gate can be bypassed")
+	}
+	for _, tc := range []struct {
+		name, published string
+		ok              bool
+	}{
+		{"same-export", "smoked", true},
+		{"clock-only", "clock-only", true},
+		{"different-rootfs", "different-rootfs", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			smoked := "sha256:" + strings.Repeat("a", 64)
+			// Stub only Docker transport; identity data are the unchanged configs
+			// of real BuildKit exports, including two injected creation clocks.
+			stub := `#!/bin/bash
+if [[ $1 == pull ]]; then exit 0; fi
+if [[ ${@: -1} == "$SMOKED_IMAGE" ]]; then cat "$SMOKED_FIXTURE"; else cat "$PUBLISHED_FIXTURE"; fi
+`
+			if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(stub), 0700); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "-c", identity.Run)
+			cmd.Dir = root(t)
+			fixtures := filepath.Join(root(t), "scripts/releaseworkflow/testdata/runtime-identity")
+			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "RUNNER_TEMP="+dir, "SMOKED_IMAGE="+smoked, "DIGEST=sha256:"+strings.Repeat("c", 64), "SMOKED_FIXTURE="+filepath.Join(fixtures, "smoked.json"), "PUBLISHED_FIXTURE="+filepath.Join(fixtures, tc.published+".json"))
+			output, err := cmd.CombinedOutput()
+			if (err == nil) != tc.ok {
+				t.Fatalf("identity gate error=%v output=%s", err, output)
+			}
+		})
+	}
+}
+
+func TestExportsShareSourceEpoch(t *testing.T) {
+	j := readWorkflow(t, "release.yml").Jobs["image-platform"]
+	epochIndex, epoch := named(t, j, "Pin both exports to the source epoch")
+	buildIndex, build := named(t, j, "Build cached smoke image")
+	_, push := named(t, j, "Build and push")
+	if epochIndex >= buildIndex || epoch.ID != "source-epoch" || epoch.If != "" || epoch.ContinueOnError || epoch.Env["FROZEN_SOURCE_EPOCH"] != "${{ steps.inputs.outputs.epoch }}" || build.With["build-args"] != push.With["build-args"] {
+		t.Fatal("exports do not share an unconditional source epoch")
+	}
+	if strings.Count(build.With["build-args"], "SOURCE_DATE_EPOCH=${{ steps.inputs.outputs.epoch }}\n") != 1 {
+		t.Fatal("exports must share the frozen build-input epoch")
+	}
+	for _, value := range []string{"1700000000", "1700000100", "", "bad", "1700000000\n1700000100"} {
+		dir := t.TempDir()
+		stub := "#!/bin/bash\n[[ $1 == show && $2 == -s && $3 == --format=%ct && $4 == HEAD ]] || exit 1\nprintf '%s\\n' \"$FIXTURE_EPOCH\"\n"
+		if err := os.WriteFile(filepath.Join(dir, "git"), []byte(stub), 0700); err != nil {
+			t.Fatal(err)
+		}
+		output := filepath.Join(dir, "output")
+		cmd := exec.Command("bash", "-c", epoch.Run)
+		cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "FIXTURE_EPOCH="+value, "FROZEN_SOURCE_EPOCH=1700000000", "GITHUB_OUTPUT="+output)
+		if err := cmd.Run(); (err == nil) != (value == "1700000000") {
+			t.Fatalf("source epoch %q: %v", value, err)
+		}
+		if value == "1700000000" {
+			body, err := os.ReadFile(output)
+			if err != nil || string(body) != "epoch=1700000000\n" {
+				t.Fatal("source epoch output differs")
+			}
+		}
 	}
 }
 
@@ -570,8 +682,8 @@ func TestPinProposalFollowsVerificationWithoutWaitingForAssets(t *testing.T) {
 		t.Fatal("pin regression tests must run in full draft PR CI")
 	}
 	worker, gate := ci.Jobs["release-check-run"], ci.Jobs["release-check"]
-	if worker.If != "always() && needs.ci-plan.result == 'success' && (needs.ci-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'" || gate.If != "always()" ||
-		!reflect.DeepEqual(gate.Needs, []any{"ci-plan", "release-check-run", "tree-reuse", "cache-prime"}) {
+	if worker.If != "always() && needs.ci-plan.result == 'success' && needs.tier-plan.result == 'success' && (needs.tier-plan.outputs.lane == 'full') && needs.tree-reuse.outputs.reuse != 'merge_group'" || gate.If != "always()" ||
+		!reflect.DeepEqual(gate.Needs, []any{"ci-plan", "release-check-run", "tree-reuse", "cache-prime", "tier-plan"}) {
 		t.Fatal("pin regressions must retain classified validation and the required aggregate")
 	}
 }

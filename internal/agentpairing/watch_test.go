@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentactivity"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -56,17 +57,20 @@ func TestAttachActivityRequiresActiveApprovalAndHonorsPolicy(t *testing.T) {
 	}
 }
 
-func watchFixture(t *testing.T) (*fixture, string, attachwatch.DeviceRequest) {
+func watchFixture(t *testing.T, messages ...*attachedmsg.Service) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
-	return watchFixtureWithKey(t, "")
+	return watchFixtureWithHarness(t, "", "codex", messages...)
 }
 func watchFixtureWithKey(t *testing.T, publicKey string) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
 	return watchFixtureWithHarness(t, publicKey, "codex")
 }
-func watchFixtureWithHarness(t *testing.T, publicKey, harness string) (*fixture, string, attachwatch.DeviceRequest) {
+func watchFixtureWithHarness(t *testing.T, publicKey, harness string, messages ...*attachedmsg.Service) (*fixture, string, attachwatch.DeviceRequest) {
 	t.Helper()
-	f := newFixture(t)
+	return watchFixtureFromFixture(t, newFixture(t, messages...), publicKey, harness)
+}
+func watchFixtureFromFixture(t *testing.T, f *fixture, publicKey, harness string) (*fixture, string, attachwatch.DeviceRequest) {
+	t.Helper()
 	p := f.proposePlatformKey("darwin", "arm64", publicKey, harness)
 	f.approve(p, "connect_only")
 	v := f.redeem(p)
@@ -88,7 +92,7 @@ func watchFixtureWithHarness(t *testing.T, publicKey, harness string) (*fixture,
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	in.PollKey = nonce()
 	in.Digest = in.Snapshot.Digest()
-	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
+	f.call("POST", "/api/agent-pairing/attach", attachwatch.DeviceRequest{MessageProtocol: attachedmsg.Protocol, AttachProtocol: attachwatch.Protocol, LocalConsentProofVersion: attachwatch.LocalConsentProofVersion, Operation: "register", ComputerID: in.ComputerID, DeviceProof: p.lifecycle, PollKey: in.PollKey}, false, key, 200)
 	return f, key, in
 }
 func requestWatch(t *testing.T, f *fixture, key string, in attachwatch.DeviceRequest) attachwatch.View {

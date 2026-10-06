@@ -18,13 +18,14 @@ import WorkspaceSection from '../components/settings/WorkspaceSection.vue'
 import AccessSection from '../components/access/AccessSection.vue'
 import AgentRulesSection from '../components/rules/AgentRulesSection.vue'
 import AccountsSection from '../components/settings/AccountsSection.vue'
+import PoliciesSection from '../components/settings/PoliciesSection.vue'
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId } from '../lib/settings'
 import { useSession } from '../stores/session'
 import { doctrineInbox } from '../lib/doctrineInbox'
 import { scopeOwner } from '../lib/identityScope'
 
 // Settings groups share one frame; explicit grants gate Access, rules and accounts.
-// /settings/<section>#<card> deep-links to one card, which is ringed on arrival.
+// /settings/<section>#<target> deep-links to a card or field, ringed on arrival.
 const route = useRoute()
 const session = useSession()
 const admin = computed(() => can('settings.manage'))
@@ -54,8 +55,8 @@ const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
 // Which sections show depends on my permissions: the layout waits for them, so
 // the nav never re-flows under the pointer (usually a few milliseconds).
 void refreshPermissions()
-const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, workspace: WorkspaceSection, vocabulary: VocabularySection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
-const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', workspace: 'building', vocabulary: 'tag', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'monitor', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
+const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, policies: PoliciesSection, workspace: WorkspaceSection, vocabulary: VocabularySection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
+const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', policies: 'shield', workspace: 'building', vocabulary: 'tag', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'monitor', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
 const groups = computed(() => SETTINGS_GROUPS.map(label => ({ label, sections: sections.value.filter(section => section.group === label) })).filter(group => group.sections.length))
 const pickerOpen = ref(false)
 const picker = ref<HTMLButtonElement>()
@@ -89,7 +90,7 @@ onMounted(() => { document.addEventListener('pointerdown', outside); window.addE
 onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', resize); clearTimeout(arrival); disposed = true })
 let disposed = false
 
-// A deep link scrolls to its card once the section has rendered it.
+// A deep link scrolls to its target once the section has rendered it.
 let arrival: ReturnType<typeof setTimeout> | undefined
 watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
   if (!hash) return
@@ -99,10 +100,12 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
     const target = document.getElementById(decodeURIComponent(hash.slice(1)))
     if (target) {
       target.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
-      const card = target.classList.contains('settings-card') ? target : target.querySelector<HTMLElement>('.settings-card, .setup')
-      card?.classList.add('arrived')
+      // Legacy bookmarks can now point to a field inside a consolidated card.
+      // Keep wrapper links ringing their card, and ring field links themselves.
+      const highlight = target.classList.contains('settings-card') ? target : target.querySelector<HTMLElement>('.settings-card, .setup') ?? target
+      highlight.classList.add('arrived')
       clearTimeout(arrival)
-      arrival = setTimeout(() => card?.classList.remove('arrived'), 1800)
+      arrival = setTimeout(() => highlight.classList.remove('arrived'), 1800)
       return
     }
     await new Promise(resolve => setTimeout(resolve, 50))
@@ -115,7 +118,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
     <header class="page-head">
       <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
       <h1 id="settings-title">Settings</h1>
-      <p class="summary">{{ admin ? 'Your own preferences, and the workspace’s for admins.' : 'Your own preferences.' }}</p>
+      <p class="summary">Preferences, policies and the workspace settings available to you.</p>
     </header>
     <!-- One grid for everyone: with only Personal to show, the nav still holds its column. -->
     <div v-if="!permissionsKnown()" class="layout waiting" role="status" aria-label="Loading settings"><span class="skeleton nav-skeleton" /><span class="skeleton body-skeleton" /></div>

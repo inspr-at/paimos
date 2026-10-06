@@ -19,8 +19,11 @@ const world: AgentWorld = {
 const session = (n: number) => `5e000000-0000-4000-8000-0000000000${String(n).padStart(2, '0')}`
 const camy = session(1), nova = session(2), kite = session(4)
 
-async function setup(page: Page, options: AgentMockOptions & { empty?: boolean; readOnly?: boolean; member?: boolean } = {}) {
-  await mockWork(page, fixtures(), { readOnly: options.readOnly, admin: !options.member })
+async function setup(page: Page, options: AgentMockOptions & { empty?: boolean; readOnly?: boolean; member?: boolean; expert?: boolean } = {}) {
+  const work = fixtures()
+  // AEON-741: manual Start agent is an expert opt-in.
+  if (options.expert) work.preferences['developer-ui'] = { show_expert_start: true }
+  await mockWork(page, work, { readOnly: options.readOnly, admin: !options.member })
   const data = agentData({ ...world, empty: options.empty })
   const calls = await mockAgents(page, data, options)
   return { data, calls }
@@ -443,15 +446,20 @@ test('Settings lists limits set by hand as Set by you, never as a vendor percent
   const { calls } = await setup(page)
   await grantAccounts(page, true)
   await page.goto('/settings/accounts')
+  // AEON-686: each account's logins and switches live in its docked panel.
   const accounts = page.locator('#agent-accounts')
-  const claude = accounts.locator('.account').filter({ hasText: 'Claude Max' })
+  const panel = page.locator('section.pane')
+  await accounts.locator('.list-row').filter({ hasText: 'Claude Max' }).click()
+  const claude = panel.locator('.account').filter({ hasText: 'Claude Max' })
   await expect(claude.locator('.chip.mine')).toHaveText('Set by you')
   await expect(claude).toContainText('Team')
   await claude.getByRole('button', { name: 'Details for Claude Max' }).click()
   await expect(claude.locator('ul.mine .what')).toContainText('5,000,000 tokens')
   await expect(claude.locator('ul.mine')).not.toContainText('%')
   await expect(claude.getByRole('meter')).toHaveCount(0)
-  const codex = accounts.locator('.account').filter({ hasText: 'Codex Pro' })
+  await panel.getByRole('button', { name: 'Close details' }).click()
+  await accounts.locator('.list-row').filter({ hasText: 'Codex Pro' }).click()
+  const codex = panel.locator('.account').filter({ hasText: 'Codex Pro' })
   await codex.getByRole('switch', { name: /Agents may use it/ }).click()
   await page.getByRole('dialog', { name: 'Drain Codex Pro?' }).getByRole('button', { name: 'Drain account' }).click()
   await expect(codex.locator('.state')).toHaveText('Paused in Settings')
@@ -466,7 +474,7 @@ test('accounts explain themselves when the person may not see them', async ({ pa
 })
 
 test('an empty workspace explains how an agent connects', async ({ page }) => {
-  await setup(page, { empty: true })
+  await setup(page, { empty: true, expert: true })
   await page.route('**/api/me/permissions*', route => {
     const effective = mockEffectivePermissions('admin')
     effective.workspace.permissions.push('run.create')

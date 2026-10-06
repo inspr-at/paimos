@@ -28,19 +28,34 @@ func (m *Module) getActivityMode(r *http.Request, tx pgx.Tx, _ tenant.Principal)
 
 func (m *Module) putActivityMode(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Mode string `json:"mode"`
+		Mode     string  `json:"mode"`
+		Expected *string `json:"expected_mode,omitempty"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
 	}
-	if !agentactivity.Mode(in.Mode) {
+	if !agentactivity.Mode(in.Mode) || in.Expected != nil && !agentactivity.Mode(*in.Expected) {
 		return nil, workorders.Fail(400, "invalid agent activity mode")
+	}
+	if err := lockAgentWorkSettings(r.Context(), tx, p); err != nil {
+		return nil, err
 	}
 	if err := lockActivityPolicy(r.Context(), tx, false); err != nil {
 		return nil, err
 	}
-	_, err := tx.Exec(r.Context(), `INSERT INTO harness_settings(tenant_id,agent_activity_mode) VALUES($1,$2)
+	before, err := activityMode(r.Context(), tx)
+	if err != nil {
+		return nil, err
+	}
+	if in.Expected != nil && *in.Expected != before {
+		return nil, workorders.Fail(409, "agent settings changed; reload before undoing")
+	}
+	_, err = tx.Exec(r.Context(), `INSERT INTO harness_settings(tenant_id,agent_activity_mode) VALUES($1,$2)
 		ON CONFLICT (tenant_id) DO UPDATE SET agent_activity_mode=EXCLUDED.agent_activity_mode,updated_at=now()`, p.TenantID, in.Mode)
+	if err != nil {
+		return nil, err
+	}
+	err = recordAgentWorkSetting(r.Context(), tx, p, "mode", before, in.Mode)
 	return map[string]string{"mode": in.Mode}, err
 }
 

@@ -2,7 +2,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { mkdirSync } from 'node:fs'
 import { fixtures, mockWork } from './work-fixtures'
-import { journeyWorld, mockJourney } from './journey-fixtures'
 import { expectStableControls } from './helpers/stable'
 
 function migrated() {
@@ -80,36 +79,5 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await shot(page, 'classification', width, theme)
     await page.goto('/p/PHAROS/PHAROS-10')
     await expect(page.getByRole('complementary', { name: 'Ticket details' }).getByRole('combobox', { name: 'Kind of work', exact: true })).toHaveCount(0)
-  })
-
-  test(`canonical project journey shows leaves and parent groups at ${width}px ${theme}`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme: theme })
-    const calls = await mockWork(page, migrated())
-    const world = journeyWorld('open', { derived: true }); world.projectBody = 'Ein übernommenes Projekt mit nachvollziehbaren Arbeitspaketen und eindeutig zugeordneten Verantwortlichkeiten. Die Freigabe einer Bereitstellung setzt eine bestätigte Preisprüfung voraus; nach Abschluss bleiben überprüfbare Ergebnisse und keine unbemerkten Ressourcen zurück.'
-    await mockJourney(page, world)
-    for (const stage of ['inspire', 'requirements', 'plan', 'build']) {
-      await page.goto(`/p/PHAROS?view=journey&stage=${stage}`)
-      await expect(page.locator('.journey-view .skeleton')).toHaveCount(0)
-      if (stage === 'inspire') {
-        const brought = page.getByRole('list', { name: 'What the project brought' })
-        await expect(brought).toContainText('2epics'); await expect(brought).toContainText('4tickets · 1 done')
-      } else if (stage === 'requirements') {
-        const features = page.getByRole('region', { name: /Features · 2 · imported epics/ })
-        await expect(features).toContainText('0 of 2 tickets done'); await expect(features).toContainText('2 tickets are not tied to an epic.')
-      } else if (stage === 'plan') {
-        const backlog = page.getByRole('region', { name: 'Backlog · what release 1 is chosen from' })
-        await expect(backlog).toContainText('3 open tickets'); await expect(backlog).toContainText('Guarded multi-cloud provisioning')
-        await expect(backlog.getByRole('button', { name: 'Beacon health probes' })).toHaveCount(0)
-      } else {
-        await expect(page.getByRole('region', { name: 'Later: Not yet' })).toContainText('3 open tickets wait in the backlog')
-      }
-      const tabs = page.getByRole('navigation', { name: 'Project journey' })
-      await expectStableControls({ controls: { tabs, clickedStage: tabs.getByRole('button').nth(4) }, interactions: [{ name: 'navigate to Build and back', run: async () => {
-        await tabs.getByRole('button').nth(4).click(); await expect(page).toHaveURL(/stage=build/)
-        await tabs.getByRole('button').nth(['inspire', 'shape', 'requirements', 'plan', 'build'].indexOf(stage)).click(); await expect(page).toHaveURL(new RegExp(`stage=${stage}`))
-      } }] })
-      await shot(page, `journey-${stage}`, width, theme)
-    }
-    expect(calls.filter(c => c.path === '/api/nodes' && c.query.get('within') === 'p-pharos').some(c => c.query.get('kind')?.split(',').includes('work'))).toBe(true)
   })
 }

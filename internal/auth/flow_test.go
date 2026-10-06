@@ -587,7 +587,7 @@ func TestAgentKeyRLS(t *testing.T) {
 		t.Fatalf("original bearer %d", status)
 	}
 
-	other, err := mod.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantB, Roles: []string{"admin"}}, "b", "", nil, nil)
+	other, err := mod.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantB, KeyCreatorID: keyTestPerson(t, mod.pool, tenantB), Roles: []string{"admin"}}, "b", "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,8 +604,8 @@ func TestAgentKeyRLS(t *testing.T) {
 
 	err = testInTenant(t.Context(), appPool, tenantA, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `
-			INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash)
-			VALUES ($1::uuid, $2::uuid, 'x', 'cross-prefix-should-fail', 'hash')
+			INSERT INTO agent_keys (tenant_id, principal_id, name, prefix, hash,created_by_principal_id)
+			VALUES ($1::uuid, $2::uuid, 'x', 'cross-prefix-should-fail', 'hash',(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))
 		`, tenantB, created.PrincipalID)
 		return err
 	})

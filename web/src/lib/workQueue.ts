@@ -77,7 +77,7 @@ export async function queueRequest<T>(path: string, method = 'GET', body?: unkno
 export interface QueueUndoToken { run_id: string; revision: string }
 export interface QueueWireEntry {
   undo?: QueueUndoToken
-  node_id: string; key: string; title: string; state: string; priority: string; estimate_hours: number
+  node_id: string; project_id?: string | null; key: string; title: string; state: string; priority: string; estimate_hours: number
   queued: { run_id: string; position: number; by: QueuedTicket['by']; at: string; target_agent_id: string | null; expected_agent_id: string | null; model_profile_id: string | null; expected_start_at: string | null; waiting: boolean; wait_reason: string }
 }
 export interface QueueWireSnapshot {
@@ -122,3 +122,25 @@ export async function queueTargets(ticket: string): Promise<{ items: QueueTarget
 }
 
 export const undoQueueAddition = (ticket: string, token: QueueUndoToken) => queueRequest<{ removed: boolean }>(`/queue/${encodeURIComponent(ticket)}/undo`, 'POST', token)
+
+// AEON-740: a parent queues a bounded, permission-checked snapshot of its open leaves.
+export type ParentLeafOutcome = 'pending' | 'queued' | 'already_queued' | 'changed' | 'not_ready' | 'active' | 'unavailable'
+export interface ParentQueueSnapshot {
+  id: string; parent_id: string; state: 'pending' | 'applied' | 'cancelled'; truncated: boolean; continuation_available?: boolean
+  partial: boolean; tree_changed: boolean; items: { node_id: string; outcome: ParentLeafOutcome; run_id?: string }[]
+}
+export const captureParentQueue = (parent: string, revision: string, continuationOf?: string) =>
+  queueRequest<ParentQueueSnapshot>(`/queue/${encodeURIComponent(parent)}/snapshots`, 'POST', { expected_revision: revision, ...(continuationOf ? { continuation_of: continuationOf } : {}) })
+export const applyParentQueue = (snapshot: string) => queueRequest<ParentQueueSnapshot>(`/queue-snapshots/${encodeURIComponent(snapshot)}/apply`, 'POST')
+/** One honest sentence for what a parent queue did, including skips and what is left. */
+export function parentQueueSummary(result: ParentQueueSnapshot): string {
+  const count = (outcome: ParentLeafOutcome) => result.items.filter(item => item.outcome === outcome).length
+  const queued = count('queued'), already = count('already_queued')
+  const skipped = result.items.length - queued - already
+  const parts = [`${queued} queued`]
+  if (already) parts.push(`${already} already queued`)
+  if (skipped) parts.push(`${skipped} skipped (changed, not ready, active or unavailable)`)
+  if (result.continuation_available) parts.push('more open work remains below; Queue again to continue')
+  else if (result.truncated) parts.push('the tree is deeper than 32 levels; deeper work was not included')
+  return parts.join(' · ')
+}

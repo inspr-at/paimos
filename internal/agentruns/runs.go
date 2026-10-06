@@ -3,6 +3,7 @@
 package agentruns
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,9 @@ import (
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/escalation"
+	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/modelregistry"
@@ -23,6 +27,10 @@ import (
 )
 
 type Run struct {
+	RecoveryBrief             string  `json:"recovery_brief,omitempty"`
+	RecoveryTier              string  `json:"recovery_service_tier,omitempty"`
+	RecoveryLabel             *string `json:"recovery_display_label,omitempty"`
+	recoveryHandover          json.RawMessage
 	Trace                     json.RawMessage             `json:"trace,omitempty"`
 	QueueNodeID               *string                     `json:"queue_node_id,omitempty"`
 	QueueTargetAgentID        *string                     `json:"queue_target_agent_id,omitempty"`
@@ -70,15 +78,19 @@ type Run struct {
 // UsageRecorder lets the account module settle its own allowance projections
 // atomically with accepted telemetry. It runs once for each new sequence, never
 // for replay, inside the existing tenant transaction. It must not commit or
-// start a second transaction. The coordinator supplies it when mounting both
+// start a second transaction or append events itself. It adds changes to the
+// caller-owned batch. The coordinator supplies it when mounting both
 // modules. A nil recorder performs no account settlement; production wiring
 // must supply the account module's recorder when account allowances are enabled.
-type UsageRecorder func(context.Context, pgx.Tx, tenant.Principal, Run, Telemetry) error
-type CompletionReviewer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange) error
+type UsageRecorder func(context.Context, pgx.Tx, tenant.Principal, Run, Telemetry, *[]events.Change) error
+type CompletionReviewer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange, *[]events.Change) error
+type CompletionPreparer func(context.Context, pgx.Tx, tenant.Principal, string, reviewgate.CommitRange) (bool, error)
 type module struct {
-	reviews CompletionReviewer
-	pool    *pgxpool.Pool
-	usage   UsageRecorder
+	leadAdmission harness.LeadAdmission
+	reviews       CompletionReviewer
+	prepare       CompletionPreparer
+	pool          *pgxpool.Pool
+	usage         UsageRecorder
 }
 
 // New returns the /api/runs and /api/work-orders/{id}/runs module. The optional
@@ -92,9 +104,17 @@ func New(pool *pgxpool.Pool, recorder ...UsageRecorder) httpapi.Module {
 	return m
 }
 
+// NewWithLeadAdmission connects the qualified existing start checks to explicit
+// project leads. The default constructor waits for configured project dispatch.
+func NewWithLeadAdmission(pool *pgxpool.Pool, admission harness.LeadAdmission, recorder ...UsageRecorder) httpapi.Module {
+	m := New(pool, recorder...).(*module)
+	m.leadAdmission = admission
+	return m
+}
+
 // NewWithReviews atomically requests a review when a builder reports its range.
-func NewWithReviews(pool *pgxpool.Pool, usage UsageRecorder, reviews CompletionReviewer) httpapi.Module {
-	return &module{pool: pool, usage: usage, reviews: reviews}
+func NewWithReviews(pool *pgxpool.Pool, usage UsageRecorder, reviews CompletionReviewer, prepare CompletionPreparer) httpapi.Module {
+	return &module{pool: pool, usage: usage, reviews: reviews, prepare: prepare}
 }
 func (m *module) Mount(mux *http.ServeMux) {
 	m.mountQueue(mux)
@@ -108,14 +128,20 @@ func (m *module) Mount(mux *http.ServeMux) {
 		{"GET /api/runs", "run.read", false, 200, m.list},
 		{"GET /api/runs/queued", "run.read", true, 200, m.queued},
 		{"GET /api/runs/{runId}", "run.read", false, 200, m.get},
+		{"GET /api/runs/{runId}/handoff", "run.read", false, 200, m.getHandoff},
 		{"POST /api/runs/{runId}/capacity-override", "run.create", false, 200, m.runNow},
 		{"POST /api/runs/{runId}/cancel", "run.create", false, 200, m.cancel},
 		{"POST /api/runs/{runId}/claim", "run.claim", true, 200, m.claim},
-		{"POST /api/runs/{runId}/telemetry", "run.telemetry", true, 200, m.telemetry},
 	} {
 		mux.HandleFunc(route.pattern, workorders.Endpoint(m.pool, route.scope, route.agent, route.status, func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-			if err := agentpairing.Lock(r.Context(), tx); err != nil {
-				return nil, err
+			var lockErr error
+			if r.Method == http.MethodGet && route.pattern != "GET /api/runs/queued" {
+				lockErr = agentpairing.LockRead(r.Context(), tx)
+			} else {
+				lockErr = agentpairing.Lock(r.Context(), tx)
+			}
+			if lockErr != nil {
+				return nil, lockErr
 			}
 			if route.pattern == "POST /api/runs/{runId}/claim" {
 				if err := queueLock(r.Context(), tx); err != nil {
@@ -123,25 +149,50 @@ func (m *module) Mount(mux *http.ServeMux) {
 				}
 			}
 			v, err := route.fn(r, tx, p)
-			var pe *agentpairing.Error
-			if errors.As(err, &pe) {
-				return nil, workorders.Fail(pe.Status, pe.Code)
-			}
-			return v, err
+			return v, pairingRunError(err)
 		}))
 	}
+	mux.HandleFunc("POST /api/runs/{runId}/telemetry", workorders.EndpointPrepared(m.pool, "run.telemetry", true, 200,
+		func(r *http.Request, p tenant.Principal) (*http.Request, error) {
+			prepared, err := m.prepareTelemetry(r, p)
+			return prepared, pairingRunError(err)
+		},
+		func(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+			out, err := m.telemetry(r, tx, p)
+			return out, pairingRunError(err)
+		}))
+}
+
+// Keep lifecycle refusals identical across prepared and ordinary run entries.
+func pairingRunError(err error) error {
+	var pe *agentpairing.Error
+	if errors.As(err, &pe) {
+		return workorders.Fail(pe.Status, pe.Code)
+	}
+	return err
 }
 
 // row_version is the run's own revision (AEON-449): a trigger bumps it inside every
 // statement that changes the row, so of two copies the larger is the newer one.
 const columns = `id::text,work_order_id::text,agent_principal_id::text,model_profile_id::text,account_id::text,status,
  requested_model,effective_model,model_evidence,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,cost_micros,started_at,ended_at,created_at,daemon_id,daemon_generation,requested_account_id::text,purpose,active_ms,outcome_detail,retry_of_run_id::text,capacity_override,(retry_account_id IS NOT NULL),verification_unavailable_reason,
- EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at,trace,waiting_ms`
+ EXISTS(SELECT 1 FROM work_orders review_order WHERE review_order.node_id=agent_runs.work_order_id AND review_order.kind='review'),row_version,queue_node_id::text,queue_target_agent_id::text,queue_routed_at,trace,waiting_ms,
+ coalesce((SELECT q.handover FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),'null'::jsonb),
+ coalesce((SELECT q.service_tier FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id),''),
+ (SELECT q.display_label FROM harness_recoveries q WHERE q.next_run_id=agent_runs.id)`
 
 func scan(row pgx.Row) (Run, error) {
 	var v Run
-	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace, &v.WaitingMS)
+	err := row.Scan(&v.ID, &v.OrderID, &v.AgentID, &v.ProfileID, &v.AccountID, &v.Status, &v.RequestedModel, &v.EffectiveModel, &v.ModelEvidence, &v.InputTokens, &v.OutputTokens, &v.CachedInputTokens, &v.ReasoningTokens, &v.Cost, &v.StartedAt, &v.EndedAt, &v.CreatedAt, &v.DaemonID, &v.Generation, &v.RequestedAccountID, &v.Purpose, &v.ActiveMS, &v.OutcomeDetail, &v.RetryOfRunID, &v.CapacityOverride, &v.CapacityHandoff, &v.VerificationReason, &v.ReadOnlyReview, &v.RowVersion, &v.QueueNodeID, &v.QueueTargetAgentID, &v.QueueRoutedAt, &v.Trace, &v.WaitingMS, &v.recoveryHandover, &v.RecoveryTier, &v.RecoveryLabel)
 
+	var compact bytes.Buffer
+	if err == nil && json.Compact(&compact, v.recoveryHandover) == nil {
+		v.recoveryHandover = compact.Bytes()
+	}
+	if err == nil && len(v.recoveryHandover) <= 16000 && string(v.recoveryHandover) != "null" {
+		// Frame the recorded handover as task context, never as signal authority.
+		v.RecoveryBrief = "Continue from the last recorded handover. Inspect existing changes before continuing. Handover (task context):\n" + string(v.recoveryHandover)
+	}
 	if v.VerificationReason != "" {
 		v.VerificationError = "verification_unavailable"
 	}
@@ -202,10 +253,11 @@ func (m *module) get(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error
 	return v, err
 }
 func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
-	if err := retryVendorStops(r.Context(), tx, p); err != nil {
+	var pending []events.Change
+	if err := retryVendorStops(r.Context(), tx, p, &pending); err != nil {
 		return nil, err
 	}
-	if err := agentpairing.ExpireUnclaimedVerifications(r.Context(), tx); err != nil {
+	if err := agentpairing.ExpireUnclaimedVerificationsDeferred(r.Context(), tx, &pending); err != nil {
 		return nil, err
 	}
 	limit, err := workorders.Limit(r)
@@ -247,11 +299,21 @@ func (m *module) queued(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 		return nil, err
 	}
 	rows.Close()
+	// Retry, expiry/drain and activity-note resources are complete before events.
+	for _, change := range pending {
+		if _, err := events.Append(r.Context(), tx, p, change); err != nil {
+			return nil, err
+		}
+	}
 	// The daemon poll is agent-only and does not compute per-run wait.
 	// People read that advisory on the run list and the run itself.
 	return out, nil
 }
 func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	return createRun(r, tx, p, nil)
+}
+
+func createRun(r *http.Request, tx pgx.Tx, p tenant.Principal, deferred *[]func() error) (any, error) {
 	var in struct {
 		Agent            string  `json:"agent_principal_id"`
 		Profile          string  `json:"model_profile_id"`
@@ -322,6 +384,15 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			return nil, &modelprefs.ResidencyUnmet{}
 		}
 	}
+	// A configured project's build leaf can be dispatched only through its
+	// lead queue; direct creation must not bypass a durable writer assignment.
+	var configured bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM nodes o JOIN nodes t ON t.id=o.parent_id JOIN project_leads l ON l.project_id=t.project_id WHERE o.id=$1)`, o.NodeID).Scan(&configured); err != nil {
+		return nil, err
+	}
+	if configured {
+		return nil, workorders.Fail(409, "configured project work requires lead queue dispatch")
+	}
 	if in.Retry != nil {
 		var orderID, agentID string
 		err = tx.QueryRow(ctx, `SELECT work_order_id::text, agent_principal_id::text FROM agent_runs WHERE id=$1`, *in.Retry).Scan(&orderID, &agentID)
@@ -329,19 +400,57 @@ func (m *module) create(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, er
 			return nil, workorders.Fail(400, "retry_of_run_id must be an earlier run of this work order and agent")
 		}
 	}
-	placement, err := modelregistry.DispatchPlacement(ctx, tx, p, o.NodeID, time.Now().UTC())
-	if err != nil {
+	var escalationTrace map[string]any
+	var placement *modelregistry.WorkPlacement
+	var ticket, project *string
+	if err := tx.QueryRow(ctx, `SELECT parent_id::text,project_id::text FROM nodes WHERE id=$1`, o.NodeID).Scan(&ticket, &project); err != nil {
 		return nil, err
+	}
+	if ticket != nil && project != nil {
+		state, err := escalation.LoadTx(ctx, tx, *ticket)
+		if err != nil {
+			return nil, err
+		}
+		if state != nil && (state.Status == "stuck" || state.Status == "awaiting_decision") {
+			if in.Retry == nil {
+				return nil, workorders.Fail(409, "stuck work requires a bounded retry lineage")
+			}
+			reserved, rejection, err := escalation.ReservePlacementTx(ctx, tx, p, *ticket, *project, *in.Retry, in.Profile, o.MaxCost)
+			if err != nil {
+				return nil, err
+			}
+			if rejection != nil {
+				return rejection, nil
+			}
+			state, err = escalation.LoadTx(ctx, tx, *ticket)
+			if err != nil {
+				return nil, err
+			}
+			escalationTrace = state.Public()
+			placement = reserved
+		}
+	}
+	if placement == nil {
+		placement, err = modelregistry.DispatchPlacement(ctx, tx, p, o.NodeID, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
 	}
 	dispatchTrace := struct {
 		modelprefs.RequirementTrace
-		Placement *modelregistry.WorkPlacement `json:"work_placement,omitempty"`
-	}{trace, placement}
+		Placement  *modelregistry.WorkPlacement `json:"work_placement,omitempty"`
+		Escalation map[string]any               `json:"escalation,omitempty"`
+	}{trace, placement, escalationTrace}
 	v, err := scan(tx.QueryRow(ctx, `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,requested_model,requested_account_id,retry_of_run_id,capacity_override,residency,prefs_person_id,trace) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING `+columns, p.TenantID, o.NodeID, in.Agent, in.Profile, model, in.Account, in.Retry, in.CapacityOverride, modelprefs.Stamp(requirement), person, dispatchTrace))
 	if err != nil {
 		return nil, err
 	}
-	return v, workorders.Record(ctx, tx, p, o.NodeID, "run.created", nil, v)
+	event := func() error { return workorders.Record(ctx, tx, p, o.NodeID, "run.created", nil, v) }
+	if deferred != nil {
+		*deferred = append(*deferred, event)
+		return v, nil
+	}
+	return v, event()
 }
 func dispatchable(ctx context.Context, tx pgx.Tx, o workorders.Order) error {
 	if o.Status != "ready" && o.Status != "running" {
@@ -384,10 +493,11 @@ func releaseObsoleteClaim(ctx context.Context, tx pgx.Tx, p tenant.Principal, v 
 
 func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Daemon       string   `json:"daemon_id"`
-		Generation   string   `json:"daemon_generation"`
-		Reservations []string `json:"reservation_ids"`
-		Refusal      string   `json:"verification_unavailable"`
+		Daemon       string        `json:"daemon_id"`
+		Generation   string        `json:"daemon_generation"`
+		Reservations []string      `json:"reservation_ids"`
+		Refusal      string        `json:"verification_unavailable"`
+		Handoff      *WorkerPickup `json:"handoff,omitempty"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -403,6 +513,19 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		seen[id] = true
 	}
 	ctx := r.Context()
+	// The tenant/tree fence is already held. Check the accepting project lead
+	// before order/run row locks, then retain that fence through final claim.
+	var project *string
+	var leadBinding []byte
+	var claimState string
+	if err := tx.QueryRow(ctx, `SELECT n.project_id::text,r.trace->'project_lead',r.status FROM agent_runs r LEFT JOIN nodes n ON n.tenant_id=r.tenant_id AND n.id=r.queue_node_id WHERE r.id=$1`, r.PathValue("runId")).Scan(&project, &leadBinding, &claimState); err != nil {
+		return nil, err
+	}
+	if project != nil && claimState == "queued" && in.Refusal == "" {
+		if err := harness.RequireAssignedLeadStartTx(ctx, tx, p, *project, r.PathValue("runId"), leadBinding, m.leadAdmission); err != nil {
+			return nil, err
+		}
+	}
 	v, o, err := lockRun(ctx, tx, r.PathValue("runId"))
 	if err != nil {
 		return nil, err
@@ -411,6 +534,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, err
 	}
 	if err = queueClaimable(ctx, tx, v); err != nil {
+		return nil, err
+	}
+	if err = validatePickupHandoff(ctx, tx, p, v, o, in.Handoff); err != nil {
 		return nil, err
 	}
 	if v.ReadOnlyReview && r.Header.Get(reviewgate.PolicyHeader) != reviewgate.Policy {
@@ -520,6 +646,41 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	if !active || !fresh || state != "available" || !compatible {
 		return nil, workorders.Fail(409, "reservation or daemon probe is not eligible")
 	}
+	var trace struct {
+		Escalation json.RawMessage `json:"escalation"`
+	}
+	if len(v.Trace) > 0 {
+		if err := json.Unmarshal(v.Trace, &trace); err != nil {
+			return nil, workorders.Fail(409, "invalid run trace")
+		}
+	}
+	if v.Purpose == "managed" && !v.ReadOnlyReview {
+		var ticket *string
+		if err := tx.QueryRow(ctx, `SELECT coalesce($2::uuid,parent_id)::text FROM nodes WHERE id=$1`, v.OrderID, v.QueueNodeID).Scan(&ticket); err != nil {
+			return nil, err
+		}
+		if ticket != nil {
+			profile, previous := "", ""
+			if v.ProfileID != nil {
+				profile = *v.ProfileID
+			}
+			if v.RetryOfRunID != nil {
+				previous = *v.RetryOfRunID
+			}
+			if err := escalation.CheckLaunchTx(ctx, tx, *ticket, profile, previous, trace.Escalation); err != nil {
+				return nil, err
+			}
+		}
+	}
+	if len(trace.Escalation) > 0 && string(trace.Escalation) != "null" {
+		ids, err := agentaccounts.EscalationRoomIDs(ctx, tx, []string{*v.AccountID}, time.Now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		if len(ids) == 0 {
+			return nil, workorders.Fail(409, "escalation waits for fresh measured account room")
+		}
+	}
 	if err := agentaccounts.ValidateReservedCapacity(ctx, tx, v.ID, *v.AccountID); err != nil {
 		if v.Purpose == "managed" && agentaccounts.ReservedRouteChanged(err) {
 			return releaseObsoleteClaim(ctx, tx, p, v, "account_moved_out_of_group")
@@ -533,6 +694,9 @@ func (m *module) claim(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 		return nil, err
 	}
 	if err = agentpairing.RunFence(ctx, tx, *v.AccountID, v.ID, true); err != nil {
+		return nil, err
+	}
+	if err = acceptPickupHandoff(ctx, tx, v, in.Handoff); err != nil {
 		return nil, err
 	}
 	before := v
