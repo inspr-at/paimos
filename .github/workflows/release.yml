@@ -382,6 +382,15 @@ jobs:
             exit 1
           fi
 
+      - name: Pin both exports to the source epoch
+        id: source-epoch
+        env:
+          FROZEN_SOURCE_EPOCH: ${{ steps.inputs.outputs.epoch }}
+        run: |
+          set -euo pipefail
+          epoch="$(git show -s --format=%ct HEAD)"
+          [[ "$epoch" =~ ^[0-9]+$ && "$epoch" == "$FROZEN_SOURCE_EPOCH" ]] || exit 1
+          echo "epoch=$epoch" >> "$GITHUB_OUTPUT"
       # Prepared cold in every tag build and rehearsal, from the digest-pinned
       # Alpine base and the pinned chromium/tini. No registry cache is read or
       # written for it and no-cache excludes a builder-local layer, so the APK
@@ -508,6 +517,22 @@ jobs:
           DIGEST: ${{ steps.push.outputs.digest }}
           SMOKE_CONFIG_DIGEST: ${{ steps.build.outputs.imageid }}
         run: node scripts/verify-pushed-image.mjs registry "ghcr.io/inspr-at/aeon@${DIGEST}" linux/${{ matrix.arch }}
+      # Compare ordered rootfs diff IDs and runtime settings. Export timestamps
+      # and provenance are not runtime identity; both builds share one epoch.
+      - name: Verify pushed runtime matches smoke
+        env:
+          SMOKED_IMAGE: ${{ steps.smoke-image.outputs.image }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          reference="ghcr.io/inspr-at/aeon@${DIGEST}"
+          docker pull "$reference"
+          directory="$(mktemp -d "$RUNNER_TEMP/runtime-identity.XXXXXX")"
+          format='{"architecture":{{json .Architecture}},"os":{{json .Os}},"variant":{{json .Variant}},"rootfs":{"type":{{json .RootFS.Type}},"diff_ids":{{json .RootFS.Layers}}},"config":{{json .Config}}}'
+          docker image inspect --format "$format" "$SMOKED_IMAGE" > "$directory/smoked.json"
+          docker image inspect --format "$format" "$reference" > "$directory/published.json"
+          node scripts/release-image-index.mjs identity "$directory/smoked.json" "$directory/published.json"
 
       - name: Attest pushed image
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
