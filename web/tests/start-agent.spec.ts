@@ -8,13 +8,13 @@ import { expectStableControls } from './helpers/stable'
 import { me } from './work-fixtures'
 
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Start agent', exact: true })
-const newAgent = (page: Page) => page.getByRole('button', { name: 'New: start an agent, attach a session or connect a machine', exact: true })
+const newAgent = (page: Page) => page.getByRole('button', { name: 'New: start a lead, attach a session or connect a machine', exact: true })
 async function open(page: Page, ticket = false) {
   // Ticket dispatch now uses the Queue/assignee menu (work-queue.spec.ts).
   // Keep the explicit account cascade covered through the /agents New menu.
   await page.goto('/agents')
   await newAgent(page).click()
-  await page.getByRole('menuitem', { name: /^Start agent…/ }).click()
+  await page.getByRole('menuitem', { name: /^Start agent manually…/ }).click()
   await expect(dialog(page)).toBeVisible()
   if (ticket) {
     await dialog(page).getByRole('searchbox').fill('PHAROS-11')
@@ -268,7 +268,7 @@ test('failed prerequisites keep launch disabled and read-only people have no act
   await expect(page.getByRole('heading', { name: 'Agents', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Start agent', exact: true })).toHaveCount(0)
   await newAgent(page).click()
-  await expect(page.getByRole('menuitem', { name: /^Start agent…/ })).toHaveCount(0)
+  await expect(page.getByRole('menuitem', { name: /^Start agent manually…/ })).toHaveCount(0)
 })
 
 for (const theme of ['light', 'dark']) {
@@ -330,11 +330,11 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
       interactions: [
         { name: 'open New menu', run: async () => {
           await newAgent(page).click()
-          await expect(page.getByRole('menuitem', { name: /^Start agent…/ })).toBeVisible()
+          await expect(page.getByRole('menuitem', { name: /^Start agent manually…/ })).toBeVisible()
           await page.screenshot({ path: info.outputPath(`agents-header-${width}-${theme}.png`), fullPage: true })
         } },
         { name: 'open start dialog', run: async () => {
-          await page.getByRole('menuitem', { name: /^Start agent…/ }).click()
+          await page.getByRole('menuitem', { name: /^Start agent manually…/ }).click()
           await expect(dialog(page)).toBeVisible()
         } },
         { name: 'close start dialog', run: async () => {

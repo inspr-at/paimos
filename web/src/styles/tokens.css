@@ -123,6 +123,13 @@
   --gold-wash: rgba(232, 192, 122, 0.12);
   --level-default: #8a9a9b;  --level-project: #d69b31;
   /* BEGIN GENERATED THEME light (scripts/theme-tokens.mjs) */
+  --agent-working: #00870e;
+  --agent-waiting: #c47a08;
+  --agent-throttled: #7039c6;
+  --agent-problem: #b92229;
+  --agent-idle: #6a7378;
+  --agent-idle-opacity: 0.55;
+  --agent-art-scale: 1;
   --primary: #0e6f6c;
   --primary-hi: #2a817d;
   --primary-lo: #00605d;
@@ -202,6 +209,13 @@
    --light-wash: transparent; --aqua-wash: rgba(164, 229, 223, 0.09); --gold-wash: rgba(214, 155, 49, 0.06);
   --level-default: #8fa5a4;  --level-project: #e2b45a;
   /* BEGIN GENERATED THEME dark (scripts/theme-tokens.mjs) */
+  --agent-working: #00d773;
+  --agent-waiting: #ffd787;
+  --agent-throttled: #ab71fa;
+  --agent-problem: #f75653;
+  --agent-idle: #a3a3a3;
+  --agent-idle-opacity: 0.55;
+  --agent-art-scale: 1;
   --primary: #a4e5df;
   --primary-hi: #b7f9f3;
   --primary-lo: #94d5cf;
@@ -282,6 +296,13 @@
      --light-wash: transparent; --aqua-wash: rgba(164, 229, 223, 0.09); --gold-wash: rgba(214, 155, 49, 0.06);
     --level-default: #8fa5a4;  --level-project: #e2b45a;
     /* BEGIN GENERATED THEME dark (scripts/theme-tokens.mjs) */
+    --agent-working: #00d773;
+    --agent-waiting: #ffd787;
+    --agent-throttled: #ab71fa;
+    --agent-problem: #f75653;
+    --agent-idle: #a3a3a3;
+    --agent-idle-opacity: 0.55;
+    --agent-art-scale: 1;
     --primary: #a4e5df;
     --primary-hi: #b7f9f3;
     --primary-lo: #94d5cf;

@@ -46,7 +46,7 @@ const serviceTiers = useServiceTiers()
 // opt-in for this mounted list only; refreshes never open it or persist it.
 const props = defineProps<{
   history?: SessionView[]; historyState?: 'idle' | 'loading' | 'ready' | 'error'; historyMore?: boolean; groups: Record<SessionGroup, SessionView[]>; now: number; cursor: string; selected: string; state: Availability; error: string
-  loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean
+  loaded: boolean; controls: Record<string, SessionControl>; canStart: boolean; canLead?: boolean
 }>()
 const agentRecovery = useAgentRecovery()
 const emit = defineEmits<{ open: [id: string]; control: [view: SessionView, kind: SessionControl['kind']]; focusRow: [id: string]; retry: []; start: []; history: []; older: [] }>()
@@ -369,7 +369,7 @@ defineExpose({ toggleHistory })
       <div v-for="i in 5" :key="i" class="sk-row"><span class="skeleton dot" /><span class="skeleton" :style="{ width: `${18 + (i * 7) % 16}%` }" /><span class="skeleton key" /><span class="skeleton" style="width: 12%" /></div>
     </div>
     <p v-else-if="showRemoved && !removedCount" class="state" :role="historyState === 'error' ? 'alert' : undefined">{{ historyState === 'loading' ? 'Loading history…' : historyState === 'error' ? 'History could not be loaded.' : 'No ended sessions yet.' }}</p>
-    <ConnectHint v-else-if="!total && !showRemoved" :can-start="canStart" @start="emit('start')" />
+    <ConnectHint v-else-if="!total && !showRemoved" :can-start="canStart" :can-lead="canLead" @start="emit('start')" />
 
     <div v-else class="table" :class="{ 'has-eta': hasEta }" role="table" aria-label="Agent sessions">
       <div class="thead" role="row">
@@ -715,7 +715,10 @@ defineExpose({ toggleHistory })
      through confirmation, price feedback and Undo so neighbours stay put. */
   .phone-tier :deep(.tier-mark) { width: 72px; }
   .phone-tier :deep(.price) { max-width: 44px; overflow: hidden; text-overflow: ellipsis; }
-  .group-row { display: block; margin: 12px 8px 2px; padding: 0 8px; }
+  /* Flex, not an inline line box: the Ended toggle is a button and its baseline
+     made that header ~20px taller than the text headers, so the row jumped
+     when a phone session moved from Pausing to Ended (AEON-790). */
+  .group-row { display: flex; align-items: center; height: 26px; margin: 12px 8px 2px; padding: 0 8px; }
   .row { --tree-joint: 25px; display: grid; grid-template-columns: 30px auto minmax(0, 1fr) 44px; grid-template-rows: auto auto auto auto; grid-template-areas: ". . . actions" ". . . actions" ". . . actions" ". . . actions"; column-gap: 8px; row-gap: 0; align-items: start; min-height: 0; margin: 0 6px; padding: 10px 0 10px calc(10px + var(--depth) * var(--tree-step)); }
   .row > span, .execution-host > span { padding: 0; }
   .row > .c-agent { grid-column: 1 / 4; grid-row: 1 / 5; display: grid; grid-template-columns: subgrid; grid-template-rows: subgrid; align-items: start; padding-block: 0; }
