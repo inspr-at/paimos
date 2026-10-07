@@ -100,11 +100,36 @@
         "project_id": "metadata",
         "required_checks": "metadata",
         "deadlines": "metadata",
-        "updated_at": "metadata"
+        "updated_at": "metadata",
+        "required_workflow": "metadata"
       }
     },
-    "delivery_alerts": {
-      "locator": "delivery_alerts WHERE tenant_id = :tenant_id",
+    {
+      "table": "delivery_queue_failures",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "repository": "metadata",
+        "pull_request": "metadata",
+        "head_sha": "metadata",
+        "check_name": "metadata",
+        "workflow": "metadata",
+        "conclusion": "metadata",
+        "kind": "metadata",
+        "check_run_id": "metadata",
+        "at": "metadata"
+      }
+    },
+    {
+      "table": "delivery_alerts",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "recipient_principal_id"
+      },
       "columns": {
         "tenant_id": "metadata",
         "item_id": "metadata",

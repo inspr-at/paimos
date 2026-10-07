@@ -31,6 +31,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/delivery/audit", m.auditList)
 	mux.HandleFunc("GET /api/delivery", m.list)
 	mux.HandleFunc("GET /api/delivery/alerts", m.listAlerts)
+	mux.HandleFunc("GET /api/delivery/enqueue-allowed", m.enqueueAllowed)
 	mux.HandleFunc("GET /api/nodes/{id}/delivery", m.list)
 	mux.HandleFunc("POST /api/delivery/{itemId}/hold", m.hold)
 	mux.HandleFunc("DELETE /api/delivery/{itemId}/hold", m.hold)

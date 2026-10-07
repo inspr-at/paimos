@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -184,6 +185,19 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 	if dup {
 		if m.fanoutRecord(ctx, id) != nil {
 			w.WriteHeader(502)
+			return
+		}
+		w.WriteHeader(204)
+		return
+	}
+	if handled, queueErr := m.quarantineEvent(ctx, name, id, raw); handled {
+		if queueErr != nil {
+			var refusal *apiError
+			if errors.As(queueErr, &refusal) {
+				w.WriteHeader(refusal.status)
+			} else {
+				w.WriteHeader(502)
+			}
 			return
 		}
 		w.WriteHeader(204)
