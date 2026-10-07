@@ -340,7 +340,11 @@ func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 	other := addPrincipal(t, person.TenantID, "person", "Other", nil)
 	runner := addPrincipal(t, person.TenantID, "agent", "runtime", nil)
 	codexProfile(t, person)
-	now := time.Now().UTC()
+	// A manual allowance waits for the person's default schedule (weekdays,
+	// 08:00-22:00 UTC), so the wall clock made this fail at night and on weekends.
+	// The injected clock is a Wednesday noon, and the claim no longer depends on
+	// when the suite runs.
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 	var own, private string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
 		for _, row := range []struct{ label, owner string }{{"Own", person.ID}, {"Private", other.ID}} {
@@ -362,7 +366,13 @@ func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 		t.Fatal(err)
 	}
 	var page overviewPage
-	callStatus(t, accountsMod(), &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
+	rec := evidenceHTTP(accountsMod(), t.Context(), person, "", "GET", "/api/agent-accounts/overview", "", now)
+	if rec.Code != 200 {
+		t.Fatalf("overview status %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatalf("json: %v body %s", err, rec.Body.String())
+	}
 	seen := map[string]overviewAccount{}
 	for _, a := range page.Accounts {
 		seen[a.AccountID] = a
