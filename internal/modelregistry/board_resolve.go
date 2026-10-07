@@ -31,6 +31,11 @@ func boardDispatchAdopted(s modelprefs.BoardState) bool {
 	return s.Person != nil && s.Person.Revision > 0
 }
 
+// boardInitialized reports whether any board profile exists, adopted or not.
+func boardInitialized(s modelprefs.BoardState) bool {
+	return s.Workspace.ID != "" || s.Person != nil && s.Person.ID != ""
+}
+
 func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, excluded []string) (*WorkResolution, error) {
 	if q.Role == "scout" || q.Role == "mechanical" {
 		return nil, nil
@@ -54,9 +59,11 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		return nil, err
 	}
 	// A revision-0 workspace row is the closed initializer. It must not replace
-	// saved role routes. Migrated profiles use the default revision, and a save
-	// or a rule adopts the board.
-	if !boardDispatchAdopted(s) {
+	// saved role routes for dispatch, review or escalation. Migrated profiles
+	// use the default revision, and a save or a rule adopts the board. An
+	// explicit placement request still reads the initialized board, but never
+	// one that was not initialized (saved role routes without a board).
+	if !boardDispatchAdopted(s) && !(q.ExplicitBoard && boardInitialized(s)) {
 		return nil, nil
 	}
 	c, err := loadBoardCatalog(ctx, tx)
