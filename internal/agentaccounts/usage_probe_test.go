@@ -4,6 +4,7 @@ package agentaccounts
 import (
 	"encoding/json"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/jackc/pgx/v5"
 	"slices"
@@ -50,7 +51,7 @@ func TestUsageProbeOwnerConsentFencesReadingsAndBinding(t *testing.T) {
 	}
 	callStatus(t, f.mod, &f.runner, f.token, "POST", path+"/readings", body, 409, nil)
 	var a []Account
-	callStatus(t, f.mod, &f.runner, f.token, "GET", "/api/agent-accounts", "", 200, &a)
+	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts", "", 200, &a)
 	if len(a) != 1 || a[0].UsageProbeEnabled {
 		t.Fatal("owner consent survived binding change")
 	}
@@ -69,6 +70,7 @@ func TestUsageProbeDollarBudgetStorageAndPrivacy(t *testing.T) {
 	reset(t)
 	f := limitFixture{admin: makePrincipal(t, "usage-probe-budget", "person", "Owner", []string{"admin"})}
 	f.runner = addPrincipal(t, f.admin.TenantID, "agent", "runner", []string{"admin"})
+	dbtest.BindRole(t, testDB, f.runner.TenantID, f.runner.ID, "admin")
 	f.token = issueKey(t, f.runner, []string{"account.manage", "account.probe"})
 	f.mod = fixedClockModule{Module: accountsMod(), at: now}
 	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"main","harness":"pi","daemon_id":"daemon-a","label":"Main"}`, 201, &f.account)
