@@ -150,16 +150,33 @@ func auditReview(ctx context.Context, tx pgx.Tx, o Observation) (bool, error) {
 	return reviewgate.VerifiedLatestTx(ctx, tx, order, *o.Ticket)
 }
 
+func auditQueued(ctx context.Context, tx pgx.Tx, repo, sha string) (bool, error) {
+	var group bool
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_github_events WHERE repository=$1 AND event='merge_group' AND action='checks_requested' AND head_sha=$2)`, repo, sha).Scan(&group)
+	return group, err
+}
+
+// A merge group is proved on the merge commit. Any other merge is proved on
+// the pull-request head: a landed merge commit does not carry those check runs.
+func auditProofSHA(queued bool, f MergeFact) string {
+	if queued {
+		return f.SHA
+	}
+	return f.Head
+}
+
 func auditChecksTx(ctx context.Context, tx pgx.Tx, repo, sha string, s Settings) ([]Check, error) {
 	if s.RequiredChecks == nil {
 		return nil, nil
 	}
+	// A missing checks field is JSON null, which is not SQL NULL. coalesce would
+	// still pass that scalar to jsonb_array_elements and fail the audit.
 	rows, err := tx.Query(ctx, `SELECT DISTINCT ON (c->>'name') c->>'name',c->>'status',c->>'conclusion'
         FROM (
             SELECT e.sequence,e.head_sha,e.audit_checks AS checks FROM delivery_github_events e WHERE e.repository=$1 AND e.head_sha=$2 AND e.audit_checks IS NOT NULL
             UNION ALL
             SELECT e.sequence,o->>'head_sha',o->'checks' FROM delivery_github_events e CROSS JOIN LATERAL jsonb_array_elements(e.observations) o WHERE e.repository=$1 AND o->>'head_sha'=$2
-        ) facts CROSS JOIN LATERAL jsonb_array_elements(coalesce(facts.checks,'[]'::jsonb)) c
+        ) facts CROSS JOIN LATERAL jsonb_array_elements(CASE WHEN jsonb_typeof(facts.checks)='array' THEN facts.checks ELSE '[]'::jsonb END) c
         WHERE c->>'name'=ANY($3::text[])
         ORDER BY c->>'name',facts.sequence DESC LIMIT 65`, repo, sha, *s.RequiredChecks)
 	if err != nil {
@@ -288,9 +305,11 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 		return err
 	}
 	// Resolve missing checks with the existing read-only installation token.
-	// No transaction or row lock spans this external lookup.
+	// No transaction or row lock spans this external lookup. One read, bound
+	// to the SHA chosen here; the final write discards it if that SHA changes.
 	var cs []Check
 	complete := false
+	proof := ""
 	err = db.InTenant(db.AllProjects(ctx, "merge audit stored checks"), m.pool, tid, func(tx pgx.Tx) error {
 		o, err := auditLink(ctx, tx, m.config.Repository, f)
 		if err != nil {
@@ -300,7 +319,12 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 		if err != nil {
 			return err
 		}
-		cs, err = auditChecksTx(ctx, tx, m.config.Repository, f.SHA, s)
+		queued, err := auditQueued(ctx, tx, m.config.Repository, f.SHA)
+		if err != nil {
+			return err
+		}
+		proof = auditProofSHA(queued, f)
+		cs, err = auditChecksTx(ctx, tx, m.config.Repository, proof, s)
 		complete = allSuccess(Observation{Settings: s, Checks: cs})
 		return err
 	})
@@ -308,7 +332,7 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 		return err
 	}
 	if !complete {
-		cs, err = reader.AuditChecks(ctx, f.SHA)
+		cs, err = reader.AuditChecks(ctx, proof)
 		if err != nil {
 			return err
 		}
@@ -337,19 +361,24 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 			return err
 		}
 		a := MergeAudit{Repository: m.config.Repository, SHA: f.SHA, PR: f.PR, Ticket: o.Ticket, Project: o.Project, MergedBy: f.MergedBy, At: f.At}
-		a.ViaQueue = f.MergedBy == "github-merge-queue[bot]"
-		var group bool
-		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_github_events WHERE repository=$1 AND event='merge_group' AND action='checks_requested' AND head_sha=$2)`, a.Repository, a.SHA).Scan(&group); err != nil {
+		queued, err := auditQueued(ctx, tx, a.Repository, a.SHA)
+		if err != nil {
 			return err
 		}
-		a.ViaQueue = a.ViaQueue || group
-		if complete {
+		a.ViaQueue = f.MergedBy == "github-merge-queue[bot]" || queued
+		want := auditProofSHA(queued, f)
+		switch {
+		case want != proof:
+			// Queue membership changed after the external read. A green
+			// pull-request head must not satisfy this merge commit.
+			cs, err = auditChecksTx(ctx, tx, a.Repository, want, s)
+		case complete:
 			// Re-read under the final fence, including settings changes made
 			// during any earlier preparation or external work.
-			cs, err = auditChecksTx(ctx, tx, a.Repository, a.SHA, s)
-			if err != nil {
-				return err
-			}
+			cs, err = auditChecksTx(ctx, tx, a.Repository, want, s)
+		}
+		if err != nil {
+			return err
 		}
 		a.ChecksPassed = allSuccess(Observation{Settings: s, Checks: cs})
 		a.ReviewOK, err = auditReview(ctx, tx, o)

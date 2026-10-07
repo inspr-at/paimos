@@ -24,6 +24,7 @@ type auditFake struct {
 	checks     map[string][]Check
 	checksErr  error
 	checkReads int
+	checkSHAs  []string
 	onCheck    func()
 }
 
@@ -33,6 +34,7 @@ func (g *auditFake) AuditCommit(_ context.Context, sha string) (*MergeFact, erro
 }
 func (g *auditFake) AuditChecks(_ context.Context, sha string) ([]Check, error) {
 	g.checkReads++
+	g.checkSHAs = append(g.checkSHAs, sha)
 	if g.onCheck != nil {
 		g.onCheck()
 	}
@@ -44,6 +46,12 @@ func auditGreen() []Check {
 		out = append(out, Check{Name: name, Status: "completed", Conclusion: "success"})
 	}
 	return out
+}
+func auditCheckRuns(t *testing.T, f *fixture, sha, id string, checks []Check) {
+	t.Helper()
+	for i, c := range checks {
+		auditSend(t, f, "check_run", id+"-"+string(rune('a'+i)), map[string]any{"action": "completed", "check_run": map[string]string{"head_sha": sha, "name": c.Name, "status": c.Status, "conclusion": c.Conclusion}}, 204)
+	}
 }
 func auditSend(t *testing.T, f *fixture, name, id string, body map[string]any, want int) {
 	t.Helper()
@@ -104,6 +112,7 @@ func TestMergeAuditWebhookReconciliationAndIsolation(t *testing.T) {
 	pr := int64(7)
 	queue := MergeFact{SHA: strings.Repeat("c", 40), Head: p.Head, Title: p.Title, Branch: p.Branch, MergedBy: "github-merge-queue[bot]", PR: &pr, At: f.at}
 	g.checks[queue.SHA] = auditGreen()
+	auditSend(t, f, "merge_group", "audit-queue-group", map[string]any{"action": "checks_requested", "merge_group": map[string]string{"head_sha": queue.SHA, "base_sha": p.Base, "head_ref": "refs/heads/gh-readonly-queue/main/pr-7-group"}}, 204)
 	auditSend(t, f, "pull_request", "audit-queue", auditPRBody(f, queue), 204)
 	a := auditRead(t, f, queue.SHA)
 	if len(a.Flags) != 0 || !a.ViaQueue || !a.ChecksPassed || !a.ReviewOK || a.Ticket == nil || *a.Ticket != f.ticket {
@@ -117,7 +126,7 @@ func TestMergeAuditWebhookReconciliationAndIsolation(t *testing.T) {
 	admin.SHA = strings.Repeat("d", 40)
 	admin.MergedBy = "admin"
 	admin.At = f.at.Add(time.Minute)
-	g.checks[admin.SHA] = auditGreen()
+	g.checks[admin.Head] = auditGreen()
 	auditSend(t, f, "pull_request", "audit-admin", auditPRBody(f, admin), 204)
 	a = auditRead(t, f, admin.SHA)
 	if !reflect.DeepEqual(a.Flags, []string{"no_queue"}) || a.AlertedAt == nil {
@@ -148,7 +157,7 @@ func TestMergeAuditWebhookReconciliationAndIsolation(t *testing.T) {
 	stale := queue
 	stale.SHA = strings.Repeat("e", 40)
 	stale.Head = strings.Repeat("a", 40)
-	g.checks[stale.SHA] = auditGreen()
+	g.checks[stale.Head] = auditGreen()
 	auditSend(t, f, "pull_request", "audit-stale-head", auditPRBody(f, stale), 204)
 	if a = auditRead(t, f, stale.SHA); !reflect.DeepEqual(a.Flags, []string{"no_review"}) {
 		t.Fatalf("wrong head satisfied review: %+v", a)
@@ -168,7 +177,6 @@ func TestMergeAuditWebhookReconciliationAndIsolation(t *testing.T) {
 	missed.SHA = strings.Repeat("1", 40)
 	g.commits = []string{missed.SHA, queue.SHA, direct.SHA}
 	g.facts[missed.SHA] = &missed
-	g.checks[missed.SHA] = auditGreen()
 	if err := f.m.ReconcileAudit(t.Context(), f.person.TenantID); err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +283,7 @@ func TestMergeAuditPendingAlertsAndAtomicFailure(t *testing.T) {
 		t.Fatal("failed lookup committed audit")
 	}
 	g.checksErr = nil
-	g.checks[fact.SHA] = auditGreen()
+	g.checks[fact.Head] = auditGreen()
 	auditSend(t, f, "pull_request", "audit-failure", auditPRBody(f, fact), 204)
 	if a := auditRead(t, f, fact.SHA); a.AlertedAt != nil || !reflect.DeepEqual(a.Flags, []string{"no_queue"}) {
 		t.Fatal("missing lead marked notified")
@@ -299,7 +307,6 @@ func TestMergeAuditPendingAlertsAndAtomicFailure(t *testing.T) {
 	})
 	next := fact
 	next.SHA = strings.Repeat("e", 40)
-	g.checks[next.SHA] = auditGreen()
 	auditSend(t, f, "pull_request", "audit-inbox-fail", auditPRBody(f, next), 502)
 	if rows, events, alerts := auditCounts(t, f); rows != 1 || events != 1 || alerts != 1 {
 		t.Fatal("partial audit/inbox write survived failure")
@@ -325,9 +332,98 @@ func TestMergeAuditPendingAlertsAndAtomicFailure(t *testing.T) {
 	}
 	revoked := fact
 	revoked.SHA = strings.Repeat("f", 40)
-	g.checks[revoked.SHA] = auditGreen()
 	auditSend(t, f, "pull_request", "audit-revoked-lead", auditPRBody(f, revoked), 204)
 	if rows, events, alerts := auditCounts(t, f); rows != 3 || events != 3 || alerts != 2 || auditRead(t, f, revoked.SHA).AlertedAt != nil {
 		t.Fatal("revoked lead received an alert")
+	}
+}
+
+func TestMergeAuditAdminHeadChecksDoNotUseMergeCommit(t *testing.T) {
+	// Risk: required checks for an admin merge are stored on the pull-request
+	// head. Judging the landed merge commit reports a check failure that did
+	// not happen. A later merge group must still be judged on its own SHA, so
+	// that green head cannot hide a failed queue run.
+	f := newFixture(t)
+	f.build(t)
+	f.review(t)
+	g := &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}
+	f.m.github = g
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state) VALUES($1,$2,$3,'paused')`, f.person.TenantID, f.project, f.person.ID)
+		return err
+	})
+	p := f.pull()
+	p.Open = false
+	p.Merged = true
+	f.gh.pulls[7] = p
+	pr := int64(7)
+	admin := MergeFact{SHA: strings.Repeat("d", 40), Head: p.Head, Title: p.Title, Branch: p.Branch, MergedBy: "admin", PR: &pr, At: f.at}
+	g.checks[admin.Head] = auditGreen()
+	auditSend(t, f, "pull_request", "audit-admin-head-read", auditPRBody(f, admin), 204)
+	if !reflect.DeepEqual(g.checkSHAs, []string{admin.Head}) {
+		t.Fatalf("admin check read used %v", g.checkSHAs)
+	}
+	if a := auditRead(t, f, admin.SHA); !reflect.DeepEqual(a.Flags, []string{"no_queue"}) || !a.ChecksPassed || a.ViaQueue || !a.ReviewOK {
+		t.Fatalf("admin merge judged the merge commit: %+v", a)
+	}
+
+	g.checksErr = errors.New("lookup unavailable")
+	reads := g.checkReads
+	auditCheckRuns(t, f, p.Head, "audit-admin-head-check", auditGreen())
+	stored := admin
+	stored.SHA = strings.Repeat("e", 40)
+	stored.At = f.at.Add(time.Minute)
+	auditSend(t, f, "pull_request", "audit-admin-stored-head", auditPRBody(f, stored), 204)
+	if g.checkReads != reads {
+		t.Fatal("stored pull-request head checks were ignored")
+	}
+	if a := auditRead(t, f, stored.SHA); !reflect.DeepEqual(a.Flags, []string{"no_queue"}) || !a.ChecksPassed || a.ViaQueue || !a.ReviewOK {
+		t.Fatalf("stored head checks did not satisfy admin merge: %+v", a)
+	}
+
+	g.checksErr = nil
+	queueSHA := strings.Repeat("c", 40)
+	auditSend(t, f, "merge_group", "audit-admin-queue-group", map[string]any{"action": "checks_requested", "merge_group": map[string]string{"head_sha": queueSHA, "base_sha": p.Base, "head_ref": "refs/heads/gh-readonly-queue/main/pr-7-group"}}, 204)
+	failed := auditGreen()
+	for i := range failed {
+		failed[i].Conclusion = "failure"
+	}
+	auditCheckRuns(t, f, queueSHA, "audit-queue-failed", failed)
+	queued := admin
+	queued.SHA = queueSHA
+	queued.MergedBy = "github-merge-queue[bot]"
+	queued.At = f.at.Add(2 * time.Minute)
+	auditSend(t, f, "pull_request", "audit-queue-failed-merge", auditPRBody(f, queued), 204)
+	if a := auditRead(t, f, queueSHA); !a.ViaQueue || a.ChecksPassed || !reflect.DeepEqual(a.Flags, []string{"checks_missing"}) {
+		t.Fatalf("green pull-request head hid the failed queue run: %+v", a)
+	}
+}
+
+func TestMergeAuditObservationChecksOnPullHead(t *testing.T) {
+	// Risk: AEON-848 stores required checks on the pull observation. An admin
+	// merge must accept that array on the pull head without asking GitHub.
+	f := newFixture(t)
+	f.build(t)
+	f.review(t)
+	g := &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}
+	f.m.github = g
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state) VALUES($1,$2,$3,'paused')`, f.person.TenantID, f.project, f.person.ID)
+		return err
+	})
+	p := f.pull()
+	p.Open = false
+	p.Merged = true
+	p.Checks = auditGreen()
+	f.gh.pulls[7] = p
+	pr := int64(7)
+	admin := MergeFact{SHA: strings.Repeat("d", 40), Head: p.Head, Title: p.Title, Branch: p.Branch, MergedBy: "admin", PR: &pr, At: f.at}
+	g.checksErr = errors.New("lookup unavailable")
+	auditSend(t, f, "pull_request", "audit-observation-head", auditPRBody(f, admin), 204)
+	if g.checkReads != 0 {
+		t.Fatal("observation checks on the pull head were ignored")
+	}
+	if a := auditRead(t, f, admin.SHA); !reflect.DeepEqual(a.Flags, []string{"no_queue"}) || !a.ChecksPassed || a.ViaQueue || !a.ReviewOK {
+		t.Fatalf("observation checks did not satisfy admin merge: %+v", a)
 	}
 }
