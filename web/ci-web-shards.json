@@ -842,7 +842,7 @@
         ,
         {"file":"tests/knowledge-shots.spec.ts","listedTests":15,"weightSeconds":33.292683,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/list-columns.spec.ts","listedTests":6,"weightSeconds":13.317073,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/list-columns.spec.ts","listedTests":18,"weightSeconds":39.951219,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/live-agents-layout.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
         ,
