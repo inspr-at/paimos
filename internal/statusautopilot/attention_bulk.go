@@ -310,6 +310,11 @@ func (m *Module) previewAttentionBulk(w http.ResponseWriter, r *http.Request, p 
 		if err := authz.RequireTx(ctx, tx, p, "nodes.write", authz.Scope{AnyProject: true}); err != nil {
 			return err
 		}
+		// Reclaim only expired receipts, in a bounded batch. Their public lookup
+		// already expires at 24 hours even when there are no later preview requests.
+		if _, err := tx.Exec(ctx, `DELETE FROM attention_batches WHERE id IN (SELECT id FROM attention_batches WHERE created_at<clock_timestamp()-interval '24 hours' ORDER BY created_at,id LIMIT 100 FOR UPDATE SKIP LOCKED)`); err != nil {
+			return err
+		}
 		args, err := attentionPreparedArgs(ctx, tx, p, in.Scope)
 		if err != nil {
 			return err
@@ -801,7 +806,7 @@ func (m *Module) processAttentionBatch(ctx context.Context, p tenant.Principal, 
 		if err != nil {
 			return err
 		}
-		_, err = events.Append(ctx, tx, p, events.Change{Type: "status_autopilot.attention_bulk", Metadata: raw})
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "status_autopilot.attention_bulk", After: final.Result, Metadata: raw})
 		return err
 	})
 	if err != nil {

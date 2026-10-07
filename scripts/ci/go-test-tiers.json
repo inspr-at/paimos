@@ -8364,6 +8364,8 @@
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkScopeConcurrencyAndFinalAuthorityFence","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkUnavailableProposalsAndAgentReleaseRights","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkUndoOwnershipAndAuthenticationGuard","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionChecksRevocationUnderFinalWriteFence","tier":"ESSENTIAL"}

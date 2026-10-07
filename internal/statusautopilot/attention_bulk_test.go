@@ -384,3 +384,63 @@ func TestAttentionBulkUndoOwnershipAndAuthenticationGuard(t *testing.T) {
 		t.Fatalf("authentication guard ignored: called=%v code=%d", called, w.Code)
 	}
 }
+
+// Risk: paused proposals are applied anyway, groups overstate agent release
+// rights, or dismiss is incorrectly blocked by apply-only eligibility checks.
+func TestAttentionBulkUnavailableProposalsAndAgentReleaseRights(t *testing.T) {
+	t.Setenv("AEON_STATUS_AUTOPILOT", "suggest")
+	f := setup(t)
+	id := f.add("AUT-2", "work", "in_progress", 4, nil)
+	f.run(f.now)
+	t.Setenv("AEON_STATUS_AUTOPILOT", "off")
+	in, preview := bulkPreview(f, f.p, "apply", attentionScope{ProjectID: f.project})
+	if len(preview.Moves) != 0 || bulkSkipCount(preview.Skipped, "The server operator has paused status autopilot.") != 1 {
+		t.Fatalf("paused preview %+v", preview)
+	}
+	out := bulkRun(f, f.p, in, "paused")
+	if out.Changed != 0 || len(out.Failed) != 0 || len(out.Skipped) != 1 || f.state(id).State != "in_progress" {
+		t.Fatalf("paused run %+v", out)
+	}
+	in, preview = bulkPreview(f, f.p, "dismiss", attentionScope{ProjectID: f.project})
+	if len(preview.Moves) != 1 || len(preview.Skipped) != 0 {
+		t.Fatalf("paused dismiss preview %+v", preview)
+	}
+	out = bulkRun(f, f.p, in, "dismiss-paused")
+	if out.Changed != 1 {
+		t.Fatalf("paused dismiss %+v", out)
+	}
+	if undo := bulkUndo(f, f.p, out.BatchID, 200); undo.Changed != 1 || len(undo.Failed) != 0 {
+		t.Fatalf("proposal undo %+v", undo)
+	}
+	t.Setenv("AEON_STATUS_AUTOPILOT", "on")
+	missed := f.add("AUT-3", "work", "done", 15, nil)
+	f.run(f.now)
+	release := f.release(nil)
+	f.tx(func(tx pgx.Tx) error {
+		if _, err := tx.Exec(t.Context(), `UPDATE journey_releases SET state='planning',released_at=NULL,version=NULL,version_scheme=NULL WHERE release_node_id=$1`, release); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE journey_projects SET current_release_node_id=$1 WHERE project_node_id=$2`, release, f.project)
+		return err
+	})
+	agent := tenant.Principal{TenantID: f.p.TenantID, Kind: tenant.Agent, Name: "Bulk agent", Scopes: []string{"nodes.read", "nodes.write", "events.undo"}}
+	f.tx(func(tx pgx.Tx) error {
+		return tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Bulk agent') RETURNING id::text`, f.p.TenantID).Scan(&agent.ID)
+	})
+	dbtest.BindRole(t, f.d, agent.TenantID, agent.ID, "owner")
+	in, preview = bulkPreview(f, agent, "apply", attentionScope{ProjectID: f.project, Kind: "missed"})
+	if preview.Total != 1 || len(preview.Moves) != 0 || bulkSkipCount(preview.Skipped, "Adding to a release needs permission to manage releases.") != 1 {
+		t.Fatalf("agent release preview %+v", preview)
+	}
+	out = bulkRun(f, agent, in, "agent-release")
+	if out.Changed != 0 || !f.state(missed).Marks["missed_release"] {
+		t.Fatalf("agent release run %+v", out)
+	}
+	var groups attentionGroupsPage
+	if err := json.Unmarshal(f.call(agent, "GET", "/api/status-autopilot/attention/groups?by=kind&kind=missed", "", 200).Body.Bytes(), &groups); err != nil {
+		t.Fatal(err)
+	}
+	if len(groups.Groups) != 1 || groups.Groups[0].Applicable != 0 || groups.Groups[0].Editable != 1 {
+		t.Fatalf("agent group rights %+v", groups)
+	}
+}
