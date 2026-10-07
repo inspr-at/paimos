@@ -15486,9 +15486,9 @@
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #members entry keeps the query and opens access","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #model-refresh entry keeps the query and opens models","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #model-refresh entry keeps the query and opens models","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #models entry keeps the query and opens models","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #models entry keeps the query and opens models","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #quota-warnings entry keeps the query and opens accounts","tier":"GATED-FULL"}
     ,
@@ -15500,9 +15500,9 @@
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"direct Workspace #work-vocabulary entry keeps the query and opens vocabulary","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Agents #model-refresh bookmark opens catalog freshness and keeps its context","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Agents #model-refresh bookmark opens catalog freshness and keeps its context","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Agents #models bookmark opens catalog freshness and keeps its context","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired Agents #models bookmark opens catalog freshness and keeps its context","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"retired briefing bookmarks open Agents and keep request links","tier":"GATED-FULL"}
     ,
@@ -15522,9 +15522,9 @@
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #members opens access","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #model-refresh opens models","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #model-refresh opens models","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #models opens models","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #models opens models","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"same-record navigation to Workspace #quota-warnings opens accounts","tier":"GATED-FULL"}
     ,
