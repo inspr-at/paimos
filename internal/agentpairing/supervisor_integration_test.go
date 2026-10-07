@@ -245,7 +245,7 @@ func TestLaterConnectOnlyApprovalCancelsQueuedVerification(t *testing.T) {
 }
 
 func TestVerificationRefusalReleasesOnlyOwnedUnclaimedRun(t *testing.T) {
-	for _, cause := range []string{"adapter_unsupported", "binding_incomplete", "local_binding_missing", "account_not_ready"} {
+	for _, cause := range []string{"adapter_unsupported", "binding_incomplete", "local_binding_missing"} {
 		t.Run(cause, func(t *testing.T) {
 			f := newFixture(t)
 			p := f.propose("claude")

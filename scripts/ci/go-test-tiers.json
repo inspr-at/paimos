@@ -1828,7 +1828,7 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestUnsupportedVerificationPollProbesWithoutLaunching","tier":"GATED-FULL"}
     ,
-    {"kind":"go","package":"internal/agentd","name":"TestVerificationFailedProbeSettlesWithoutVendorLaunch","tier":"ESSENTIAL"}
+    {"kind":"go","package":"internal/agentd","name":"TestVerificationFailedProbeRetainsQueuedRunWithoutVendorLaunch","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestVerificationOneShotNoRepoToolsAndNoDuplicate","tier":"GATED-FULL"}
     ,

@@ -27,7 +27,7 @@ func verificationLog(store *agentsetup.Store) func(string, string, string, strin
 			return
 		}
 		switch reason {
-		case "", "queue_unavailable", "dispatch_not_allowed", "probe_failed", "probe_timeout", "adapter_unsupported", "binding_incomplete", "local_binding_missing", "account_not_ready", "start_unconfirmed", "child_exit_failed", "vendor_limit", "reporter_unavailable":
+		case "", "queue_unavailable", "dispatch_not_allowed", "probe_failed", "probe_timeout", "adapter_unsupported", "binding_incomplete", "local_binding_missing", "start_unconfirmed", "child_exit_failed", "vendor_limit", "reporter_unavailable":
 		default:
 			return
 		}

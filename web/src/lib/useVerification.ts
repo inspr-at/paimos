@@ -10,16 +10,20 @@ export function verificationWords(s: SignInReference): string {
   const e = s.enrollment
   if (e.verification_stalled) return 'Verification stalled. The helper must confirm process exit and settle its reports.'
   switch (e.verification_state) {
-    case 'queued': return s.computer.connectivity !== 'online' ? 'Verifying… Waiting for this computer to come online.' : 'Verifying… Waiting for the computer to start the check.'
+    case 'queued': {
+      if (s.computer.connectivity !== 'online') return 'Verifying… Waiting for this computer to come online.'
+      const readiness = describeEnrollmentStatus(s.computer, { ...e, verification_state: 'not_selected' })
+      if (readiness && readiness !== 'Ready') return `Verification is queued. Waiting for this computer: ${readiness}. Check the sign-in or local setup on this computer.`
+      return 'Verifying… Waiting for the computer to start the check.'
+    }
     case 'starting': return 'Verifying… Starting the safe check.'
     case 'running': return 'Verifying… Check running.'
     case 'waiting': return 'Verifying… Waiting for the check to finish.'
     case 'ownership_lost': return 'Verification needs attention. Process exit has not been confirmed.'
     case 'completed': return 'Verification passed.'
     case 'unavailable': {
-      if (e.verification_reason !== 'account_not_ready') return verificationFailureText(e)
-      const readiness = describeEnrollmentStatus(s.computer, { ...e, verification_state: 'not_selected' })
-      return `Verification could not run: the account availability check did not pass. ${readiness && readiness !== 'Ready' ? `Current status: ${readiness}. ` : ''}Check the sign-in on this computer, then try again.`
+      const causes: Record<string, string> = { adapter_unsupported: 'the installed adapter cannot enforce safe verification', binding_incomplete: 'the verification binding is incomplete or unsafe', local_binding_missing: 'the approved account has no usable local binding' }
+      return `Verification could not run: ${causes[e.verification_reason ?? ''] ?? 'safe verification is unavailable'}. Check the sign-in and helper on this computer.`
     }
     case 'failed': return verificationFailureText(e) || 'Verification failed. Check the sign-in on this computer.'
     case 'cancelled': return 'Verification cancelled. No successful result was confirmed.'

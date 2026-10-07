@@ -110,7 +110,7 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await page.screenshot({ path: info.outputPath(`computer-panel-${width}-${theme}.png`), fullPage: true })
     const panelGuard = await controlStability(page, { footer, close: pane.getByRole('button', { name: 'Close details' }), frame: pane })
     await panelGuard.check(async () => { await footer.click(); await expect(footer).toHaveAttribute('aria-busy', 'true') })
-    await panelGuard.check(async () => { Object.assign(e, { verification_state: 'unavailable', verification_error: 'verification_unavailable', verification_reason: 'account_not_ready' }); c.harness_statuses = { ...c.harness_statuses, claude: 'blocked' }; c.harness_details = { ...c.harness_details, claude: { state: 'blocked', reason: 'probe_failed' } }; await refresh(); await expect(pane.locator('.si-feedback')).toContainText('Verification could not run: the account availability check did not pass.') })
+    await panelGuard.check(async () => { Object.assign(e, { verification_state: 'queued' }); c.harness_statuses = { ...c.harness_statuses, claude: 'blocked' }; c.harness_details = { ...c.harness_details, claude: { state: 'blocked', reason: 'probe_failed' } }; await refresh(); await expect(pane.locator('.si-feedback')).toContainText('Verification is queued. Waiting for this computer: Account availability check failed.') })
     panelGuard.done()
     await page.screenshot({ path: info.outputPath(`computer-result-${width}-${theme}.png`), fullPage: true })
     await page.goto(`/settings/accounts?account=${ACCOUNTS.claude}`)

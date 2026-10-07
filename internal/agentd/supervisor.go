@@ -908,24 +908,6 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 				reason = "local_binding_missing"
 			}
 		}
-		// Failed availability is not permission to launch a verification. Give
-		// the unclaimed request a terminal, replayable no-launch result instead
-		// of leaving it queued until its allowance expires. Local dependency or
-		// profile repairs retain their existing queued recovery path.
-		if reason == "" && !held && !s.accountAvailable(run.requestedAccount()) {
-			accountID := run.requestedAccount()
-			s.mu.Lock()
-			localRepair := s.dependencyErrors[accountID] != "" || s.harnessFailed[accountID] || s.profilePermissions[accountID]
-			switch s.probeReasonDetails[accountID] {
-			case agentsetup.ProbeProfileMissing, agentsetup.ProbeProfilePhysical, agentsetup.ProbeProfilePrivate, agentsetup.ProbeClaudeDefaultPrivate:
-				localRepair = true
-			}
-			knownFailure := !localRepair && s.probePendingSince[accountID].IsZero() && s.blockedAccounts[accountID] && !s.blockedAccounts[""]
-			s.mu.Unlock()
-			if knownFailure && s.dispatchAllowed(run.requestedAccount()) {
-				reason = "account_not_ready"
-			}
-		}
 		if reason != "" {
 			if err := s.refuseVerification(run, reason); err != nil {
 				return err

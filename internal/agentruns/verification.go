@@ -15,7 +15,7 @@ import (
 // independent of account readiness: it cannot launch work or grant authority.
 func refuseVerification(ctx context.Context, tx pgx.Tx, p tenant.Principal, v Run, daemon, generation, reason string) (any, error) {
 	switch reason {
-	case "adapter_unsupported", "binding_incomplete", "local_binding_missing", "account_not_ready":
+	case "adapter_unsupported", "binding_incomplete", "local_binding_missing":
 	default:
 		return nil, workorders.Fail(400, "unknown verification refusal")
 	}

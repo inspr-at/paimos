@@ -32,11 +32,11 @@ func TestVerificationLogPrivateBoundedAndRejectsLinkedFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	log("", "", "poll_blocked", "probe_failed")
-	log("run", "account", "refused", "account_not_ready")
+	log("run", "account", "refused", "local_binding_missing")
 	verificationLog(store)("run-2", "account", "completed", "")
 	log("run", "account", "failed", "fixture-private-payload")
 	raw, err := store.Read("verification.log", 256<<10)
-	if err != nil || !bytes.Contains(raw, []byte("probe_failed")) || !bytes.Contains(raw, []byte("account_not_ready")) || !bytes.Contains(raw, []byte("run-2")) || bytes.Contains(raw, []byte("fixture-private-payload")) {
+	if err != nil || !bytes.Contains(raw, []byte("probe_failed")) || !bytes.Contains(raw, []byte("local_binding_missing")) || !bytes.Contains(raw, []byte("run-2")) || bytes.Contains(raw, []byte("fixture-private-payload")) {
 		t.Fatal("private bounded log lost evidence", err)
 	}
 	info, err := os.Stat(filepath.Join(store.Path(), "verification.log"))
