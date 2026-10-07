@@ -306,7 +306,10 @@ func TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation(t *testing.T) {
 		t.Fatal("keyset lost reviews")
 	}
 	f.call(t, f.person, "GET", path, nil, 200, &page)
-	before := page
+	beforeBytes, err := json.Marshal(page)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Queue projection replay deletes/re-inserts its physical rows. Review
 	// observations must not prevent that independent replay with an FK.
 	f.tx(t, func(tx pgx.Tx) error {
@@ -323,7 +326,11 @@ func TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	f.call(t, f.person, "GET", path, nil, 200, &page)
-	if !reflect.DeepEqual(before, page) {
+	afterBytes, err := json.Marshal(page)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(beforeBytes) != string(afterBytes) {
 		t.Fatal("replay changed projections")
 	}
 	f.call(t, f.agent, "POST", path+"/"+first.ID+"/claim", claimInput, 200, &duplicate)
