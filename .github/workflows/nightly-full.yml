@@ -77,12 +77,7 @@ jobs:
             go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-main-
       - name: Install shells used by pairing tests
         timeout-minutes: 4
-        run: |
-          command -v fish && command -v zsh || {
-            for i in 1 2 3; do
-              timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq && timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq zsh fish && break
-            done
-          }
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt zsh fish
       - name: Test this shard (essential plus changed area, or full on main)
         env:
           GOFLAGS: -count=1
@@ -257,12 +252,7 @@ jobs:
         run: node --test scripts/docker-web-inputs.test.mjs
       - name: Install shells used by command round-trip unit tests
         timeout-minutes: 4
-        run: |
-          command -v fish && command -v zsh || {
-            for i in 1 2 3; do
-              timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq && timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq fish zsh && break
-            done
-          }
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" apt fish zsh
       - working-directory: web
         run: npm run typecheck
       # The session and run ledger fences (AEON-449): endpoints only in lib/agentRows.ts, wire rows only through the ledger.
@@ -378,10 +368,7 @@ jobs:
       - name: Install Chromium system dependencies
         timeout-minutes: 13
         working-directory: web
-        run: |
-          for i in 1 2 3; do
-            timeout 240 npx playwright install-deps chromium && break
-          done
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install-deps chromium
       - name: Run selected UI cases without retries
         env:
           RELEASE_LIST_SHOTS: ${{ runner.temp }}/aeon-release-list-shots
@@ -517,10 +504,7 @@ jobs:
       - name: Install Playwright
         timeout-minutes: 13
         working-directory: web
-        run: |
-          for i in 1 2 3; do
-            timeout 240 npx playwright install --with-deps --only-shell chromium && break
-          done
+        run: bash "$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh" playwright install --with-deps --only-shell chromium
       - name: Measure Chromium shell cleanup on success, failure and interruption
         env:
           AEON_BROWSER_LIFECYCLE: '1'

@@ -519,7 +519,7 @@ func normalizeAEON933InstallBounds(t *testing.T, id string, job map[string]any) 
 	case "go-test":
 		step := reuseStep(t, job, "Install shells when this shard runs pairing path-proof tests")
 		run, _ := step["run"].(string)
-		const bounded = "  command -v fish && command -v zsh || {\n    for i in 1 2 3; do\n      timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq && timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq zsh fish && break\n    done\n  }"
+		const bounded = "  bash \"$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh\" apt zsh fish"
 		const historical = "  sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish"
 		if step["timeout-minutes"] != 4 || !strings.Contains(run, bounded) {
 			t.Fatalf("AEON-933: pairing shell install must skip, bound and retry apt:\n%s\ntimeout=%v", run, step["timeout-minutes"])
@@ -527,16 +527,16 @@ func normalizeAEON933InstallBounds(t *testing.T, id string, job map[string]any) 
 		step["run"] = strings.Replace(run, bounded, historical, 1)
 		delete(step, "timeout-minutes")
 	case "web-shard":
-		restorePlaywrightDeps(t, reuseStep(t, job, "Install Chromium system dependencies"), "npx playwright install-deps chromium", "timeout 240 npx playwright install-deps chromium && break")
+		restorePlaywrightDeps(t, reuseStep(t, job, "Install Chromium system dependencies"), "npx playwright install-deps chromium", "bash \"$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh\" playwright install-deps chromium")
 	case "e2e-run":
-		restorePlaywrightDeps(t, reuseStep(t, job, "Install Playwright"), "npx playwright install --with-deps --only-shell chromium", "timeout 240 npx playwright install --with-deps --only-shell chromium && break")
+		restorePlaywrightDeps(t, reuseStep(t, job, "Install Playwright"), "npx playwright install --with-deps --only-shell chromium", "bash \"$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh\" playwright install --with-deps --only-shell chromium")
 	}
 }
 
 func restoreBoundedShellInstall(t *testing.T, step map[string]any) {
 	t.Helper()
 	run, _ := step["run"].(string)
-	if step["timeout-minutes"] != 4 || !strings.Contains(run, "command -v fish && command -v zsh") || !strings.Contains(run, "for i in 1 2 3; do") || !strings.Contains(run, "timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq fish zsh") {
+	if step["timeout-minutes"] != 4 || !strings.Contains(run, "bash \"$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh\" apt fish zsh") {
 		t.Fatalf("AEON-933: web unit shell install must skip, bound and retry apt: %#v", step)
 	}
 	step["run"] = "sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh"
@@ -546,8 +546,8 @@ func restoreBoundedShellInstall(t *testing.T, step map[string]any) {
 func restorePlaywrightDeps(t *testing.T, step map[string]any, historical, marker string) {
 	t.Helper()
 	run, _ := step["run"].(string)
-	if step["timeout-minutes"] != 13 || !strings.Contains(run, "for i in 1 2 3; do") || !strings.Contains(run, marker) {
-		t.Fatalf("AEON-933: Playwright dependency install must retry for 240s: %#v", step)
+	if step["timeout-minutes"] != 13 || !strings.Contains(run, marker) {
+		t.Fatalf("AEON-933: Playwright dependency install must use a root timeout: %#v", step)
 	}
 	step["run"] = historical
 	delete(step, "timeout-minutes")
