@@ -7083,19 +7083,6 @@ paths:
         '200': {description: Control outcome; inspect outcome and reason, content: {application/json: {schema: {type: object}}}}
         '403': {description: Wrong session agent or generation lease}
         '409': {description: 'divergent control completion means the control is already finished. setting authorization expired means an applied setting missed the database deadline. Both are terminal for the worker. Other conflicts, including an unclaimed control, stay retryable.'}
-  /projects/{projectId}/harness-sessions/{sessionId}/notifications:
-    parameters:
-      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
-      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
-      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
-    get:
-      operationId: watchHarnessNotifications
-      description: "Content-free SSE wake hints for this managed generation's controls and inbox, over the existing committed event notification channel. Requires current harness.worker authority and the exact worker lease. harness.wake on connection and relevant changes tells the daemon to claim controls and drain through their existing authorized routes; stream.ping is a keepalive. Hints grant no process authority, carry no message text, and acknowledge nothing. Reconnect triggers a fresh drain to cover missed hints. Authority is rechecked on wakes and every 15 seconds."
-      responses:
-        '200': {description: "SSE harness.wake and stream.ping events with empty JSON objects", content: {text/event-stream: {schema: {type: string}}}}
-        '403': {description: "Worker proof or current permission rejected"}
-        '409': {description: "Managed worker required"}
-        '410': {description: "Archived generation"}
   /projects/{projectId}/harness-sessions/{sessionId}/drain:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -7297,6 +7284,19 @@ paths:
         '200': {description: Evidence recorded}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/harness-sessions/{sessionId}/notifications:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: sessionId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: X-Aeon-Worker-Lease, in: header, required: true, schema: {type: string}}
+    get:
+      operationId: watchHarnessNotifications
+      description: "Content-free SSE wake hints for this managed generation's controls and inbox, over the existing committed event notification channel. Requires current harness.worker authority and the exact worker lease. harness.wake on connection and relevant changes tells the daemon to claim controls and drain through their existing authorized routes; stream.ping is a keepalive. Hints grant no process authority, carry no message text, and acknowledge nothing. Reconnect triggers a fresh drain to cover missed hints. Authority is rechecked on wakes and every 15 seconds."
+      responses:
+        '200': {description: "SSE harness.wake and stream.ping events with empty JSON objects", content: {text/event-stream: {schema: {type: string}}}}
+        '403': {description: "Worker proof or current permission rejected"}
+        '409': {description: "Managed worker required"}
+        '410': {description: "Archived generation"}
   /projects/{projectId}/harness-sessions/{sessionId}/pause:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
