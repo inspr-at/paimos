@@ -350,6 +350,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/events":                                                        "events.read",
 	"GET /api/events/activity":                                               "events.read",
 	"GET /api/events/stream":                                                 "events.read",
+	"GET /api/events/subscribe":                                              "events.subscribe",
 	"GET /api/from-classic":                                                  "nodes.read",
 	"GET /api/harness-sessions":                                              "harness.read",
 	"GET /api/me/agent-pause-settings":                                       "harness.read",

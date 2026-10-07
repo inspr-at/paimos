@@ -3371,6 +3371,26 @@ paths:
                 type: string
         '400':
           $ref: '#/components/responses/Error'
+  /events/subscribe:
+    get:
+      operationId: subscribeAgentEvents
+      description: 'Read-only agent SSE change hints. Requires an explicit events.subscribe key scope and a custom workspace role granting it; built-in agent roles exclude it. Topic reads also require their live resource permissions. Plan hints are restricted to the key creator’s canonical person. Data contains only id, type, topic and at, never snapshots, actor identities, secrets or resource values. Fetch current values through their authorized APIs. LISTEN/NOTIFY wakes durable replay after commit. Numeric cursors replay without a backlog cutoff; Last-Event-ID wins over after. after defaults to latest. A cursor ahead of the tenant log is rejected, never reset. Changing topics requires replaying from the earlier cursor. stream.ready and stream.cursor name the exclusive resume cursor; stream.ping has no id. Persist cursor ids only after processing earlier frames. Heartbeats occur every 15 seconds. Two connections per key across server processes and at most 64 subscriptions per server; excess gets 429 and Retry-After. Reads and writes have 10-second deadlines, replay batches have at most 200 hints, and slow clients disconnect to resume from their last processed cursor. Current key, creator and topic authority is checked on every replay and heartbeat; revoked subscription authority closes the stream.'
+      security: *auth
+      parameters:
+        - {name: Last-Event-ID, in: header, description: 'Exclusive resume cursor; takes precedence over after.', schema: {type: string, pattern: '^[0-9]{1,19}$', maxLength: 19}}
+        - {name: after, in: query, description: 'latest or an exclusive numeric resume cursor. No automatic backlog skip.', schema: {type: string, default: latest, pattern: '^(latest|[0-9]{1,19})$', maxLength: 19}}
+        - {name: topics, in: query, description: 'Comma-separated distinct topics; omitted means all. Unknown or repeated topics are rejected.', schema: {type: string, maxLength: 128, example: 'plan,policies,delivery'}}
+      responses:
+        '200':
+          description: 'SSE change hints and cursor checkpoints. Topics are plan, settings, preferences, policies, approvals, decisions and delivery.'
+          content:
+            text/event-stream:
+              schema: {type: string}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '429':
+          description: 'Subscription connection limit reached; Retry-After is 15 seconds.'
+        '503': {$ref: '#/components/responses/Error'}
   /events/{eventId}/undo:
     parameters: [{$ref: '#/components/parameters/EventId'}]
     post:
