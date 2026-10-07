@@ -8360,11 +8360,29 @@
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionApplyDismissUndoAndSuppression","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkAllKindsAndReleaseUndo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkBeyondSelectionCapReplayAuditAndPartialUndo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkCapExpiryAndTenantIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkFrozenPreviewExclusionsAndOwnership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkInterruptedCommitResumesWithoutRepeating","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkMissedReleaseSharesCapturedRevision","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkReturnsPartialResultsAndGuardsUndo","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkScopeConcurrencyAndFinalAuthorityFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkUnavailableProposalsAndAgentReleaseRights","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkUndoOwnershipAndAuthenticationGuard","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionChecksRevocationUnderFinalWriteFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionGroupsAndKindTimePagination","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionMissedReleaseApplyUndoApplyRefreshesIdentity","tier":"ESSENTIAL"}
     ,
