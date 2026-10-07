@@ -33,7 +33,7 @@ CREATE FUNCTION aeon_clear_delivery_alerts() RETURNS trigger LANGUAGE plpgsql AS
 BEGIN
     UPDATE delivery_alerts SET cleared_at=clock_timestamp()
     WHERE tenant_id=OLD.tenant_id AND item_id=OLD.id AND cleared_at IS NULL
-        AND (state,state_since) IS DISTINCT FROM (NEW.state,NEW.state_since);
+        AND state=OLD.state AND state_since=OLD.state_since;
     RETURN NEW;
 END;
 $$;

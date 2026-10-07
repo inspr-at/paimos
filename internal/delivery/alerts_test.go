@@ -74,6 +74,7 @@ func TestDeliveryAlertsEpisodesIsolationAndSettings(t *testing.T) {
 	f.call(t, f.person, "PUT", "/api/settings/delivery", map[string]any{"deadlines": map[string]int{"reviewed": 2, "pushed": 3}}, 200, &settings)
 	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/delivery-settings", map[string]any{"deadlines": map[string]int{"reviewed": 1}}, 200, &settings)
 	o := alertObservation(f)
+	reviewedObservation := o
 	i := saveAlertObservation(t, f, o)
 	if i.State != Reviewed {
 		t.Fatal("fixture did not establish reviewed state")
@@ -142,6 +143,30 @@ func TestDeliveryAlertsEpisodesIsolationAndSettings(t *testing.T) {
 	f.call(t, f.person, "GET", "/api/delivery/alerts?limit=1&after="+url.QueryEscape(*page.Next), nil, 200, &page)
 	if len(page.Items) != 1 || page.Next != nil || page.Items[0].State == first.State {
 		t.Fatal("episode keyset skipped/repeated a row")
+	}
+	// Rebuild's intermediate historical states must not clear the final
+	// episode's open alert. Exercise its projection replay inside one tx.
+	f.tx(t, func(tx pgx.Tx) error {
+		if err := db.LockTenant(t.Context(), tx, f.person.TenantID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `DELETE FROM delivery_items WHERE id=$1`, i.ID); err != nil {
+			return err
+		}
+		for _, historical := range []Observation{reviewedObservation, o} {
+			if _, _, err := saveTx(t.Context(), tx, f.person.TenantID, historical); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	sweepAlerts(t, f, 0)
+	f.call(t, f.person, "GET", "/api/delivery/alerts?open=true", nil, 200, &page)
+	if len(page.Items) != 1 || page.Items[0].State != Pushed {
+		t.Fatal("historical replay cleared the final episode alert")
+	}
+	if a, m, e := alertCounts(t, f); a != 2 || m != 2 || e != 2 {
+		t.Fatalf("projection replay duplicated/lost alerts: %d %d %d", a, m, e)
 	}
 	f.call(t, f.foreign, "GET", "/api/delivery/alerts", nil, 200, &page)
 	if len(page.Items) != 0 {
