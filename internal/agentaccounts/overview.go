@@ -170,14 +170,15 @@ func (m *Module) overview(w http.ResponseWriter, r *http.Request) {
 				route.Wait = &wait
 			}
 			item := overviewAccount{AccountID: a.ID, Provider: overviewProvider(a), Harness: a.Harness, Label: a.Label, HostLabel: a.HostLabel, DaemonID: a.DaemonID, OwnerPersonID: a.OwnerPersonID, OwnerPersonName: a.OwnerPersonName, State: a.State, BillingMode: a.BillingMode, Windows: []overviewWindow{}, Routable: route.AvailableSlots > 0, Wait: route.Wait, DetailsRedacted: !policy[a.ID]}
-			if !item.Routable && item.Wait == nil {
-				item.Wait = waitFor("capacity")
-			}
 			if !policy[a.ID] {
-				if item.Wait != nil {
-					item.Wait = waitFor("state")
-				}
+				// Available slots and a missing or capacity wait are quota
+				// headroom. A private row has one constant shape.
+				item.Routable = false
+				item.Wait = waitFor("state")
 			} else {
+				if !item.Routable && item.Wait == nil {
+					item.Wait = waitFor("capacity")
+				}
 				item.QuotaPool, item.Routing = a.QuotaPoolFingerprint, &route
 				schedule, err := routingSchedule(ctx, tx, a)
 				if err != nil {

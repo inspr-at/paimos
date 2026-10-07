@@ -542,6 +542,8 @@
     ,
     {"kind":"go","package":"internal/accountprivacy","name":"TestReadinessRedactionDoesNotPretendMeasuredZero","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/accountprivacy","name":"TestRedactionForcesRoutableFalse","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/activity","name":"TestAuthorsSayWhetherTheyHaveAPicture","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/activity","name":"TestCommentLifecycleAuthorizationIsolationAndConcurrency","tier":"ESSENTIAL"}
@@ -826,6 +828,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestReadinessWaitSnapshotAndNewWaitReset","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRedactedOverviewHidesRoutableHeadroom","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRenameKeepsModelGrants","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRepeatPreservesOriginalAndExistingCaps","tier":"GATED-FULL"}
@@ -903,6 +907,8 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestUseAccountIDRetainsLabelAndOwnership","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestUseAccountPayloadHasNoPath","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestVendorStopAdviceRejectsUnenrolledDaemonSquatter","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestVendorStopAdviceUsesOtherRegistrarOnSameDaemon","tier":"ESSENTIAL"}
     ,

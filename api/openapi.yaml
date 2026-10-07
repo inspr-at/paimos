@@ -12370,9 +12370,9 @@ components:
         limit: {$ref: '#/components/schemas/AccountLimitRule'}
         quota_pool_fingerprint: {type: string, description: "Confirmed shared-pool membership only; matching vendor signals alone do not join accounts."}
         routing: {$ref: '#/components/schemas/CapacityRouting'}
-        routable: {type: boolean, description: "Advisory admission and slot eligibility, never launch authority or proof of measured room."}
+        routable: {type: boolean, description: "Advisory admission and slot eligibility, never launch authority or proof of measured room. A redacted row is always false and is not quota headroom."}
         wait: {$ref: '#/components/schemas/CapacityWait'}
-        details_redacted: {type: boolean, description: "Windows, schedule, limit, pool membership and routing withheld by current owner-sharing policy."}
+        details_redacted: {type: boolean, description: "Windows, schedule, limit, pool membership and routing withheld by current owner-sharing policy. A redacted row also reports routable false and a wait whose code is state."}
     AccountOverviewLearning:
       type: object
       additionalProperties: false

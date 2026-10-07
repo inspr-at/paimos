@@ -280,6 +280,11 @@ func mask(obj map[string]any) {
 	if _, ok := obj["cost_limit_supported"]; ok {
 		obj["cost_limit_supported"] = false
 	}
+	// routable is quota headroom. Later account routes cannot reintroduce it
+	// once this boundary has withheld the account.
+	if _, ok := obj["routable"]; ok {
+		obj["routable"] = false
+	}
 	// CapacitySchedule has required timezone/week. Keep a valid neutral
 	// placeholder and mark the containing projection, never expose its owner
 	// calendar/reserve. Consumers must ignore schedule when details are masked.

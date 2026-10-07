@@ -253,6 +253,9 @@ func TestVendorStopAdviceUsesOtherRegistrarOnSameDaemon(t *testing.T) {
 		}
 		accounts = append(accounts, a)
 	}
+	// The spare was registered by another agent. A connected enrollment on
+	// this computer is what lets the run's agent claim it.
+	enrollComputerAccount(t, person, runner, accounts[1].ID, "daemon-a", profile, issueKey(t, runner, []string{"account.probe"}))
 	run := insertRun(t, person, runner, profile)
 	ctx := context.WithValue(t.Context(), clockKey{}, now)
 	if err := db.InTenant(ctx, appPool, person.TenantID, func(tx pgx.Tx) error {
@@ -270,6 +273,128 @@ func TestVendorStopAdviceUsesOtherRegistrarOnSameDaemon(t *testing.T) {
 		if err == nil && len(next.Accounts) != 0 {
 			t.Fatal("handoff bypassed the person's original pin")
 		}
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Risk: daemon_id is a caller-chosen string visible to other principals.
+// Vendor-stop advice must not pin a retry the computer cannot claim.
+func TestVendorStopAdviceRejectsUnenrolledDaemonSquatter(t *testing.T) {
+	reset(t)
+	person := makePrincipal(t, "squatter-daemon", "person", "Owner", []string{"admin"})
+	runner := addPrincipal(t, person.TenantID, "agent", "runner", nil)
+	squatter := addPrincipal(t, person.TenantID, "agent", "squatter", nil)
+	profile := codexProfile(t, person)
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	var stopped, intruder string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		for _, agent := range []struct {
+			id, label string
+			used      int
+		}{{runner.ID, "Stopped", 100}, {squatter.ID, "Squatter", 10}} {
+			var id string
+			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,$2,'codex','daemon-a',$3,$2,$4,true,'g1',$5) RETURNING id::text`, person.TenantID, agent.label, agent.id, now, person.ID).Scan(&id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model) VALUES($1,$2,$3,$4,'requests',100,$5,'unrestricted')`, person.TenantID, id, now.Add(-time.Hour), now.Add(time.Hour), agent.used); err != nil {
+				return err
+			}
+			if agent.label == "Stopped" {
+				stopped = id
+			} else {
+				intruder = id
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	run := insertRun(t, person, runner, profile)
+	ctx := context.WithValue(t.Context(), clockKey{}, now)
+	if err := db.InTenant(ctx, appPool, person.TenantID, func(tx pgx.Tx) error {
+		next, err := NextForRun(ctx, tx, run, "daemon-a", "", stopped, now)
+		if err != nil {
+			return err
+		}
+		for _, choice := range next.Accounts {
+			if choice.AccountID == intruder {
+				t.Fatalf("unenrolled same-daemon account became a vendor retry: %+v", next)
+			}
+		}
+		if len(next.Accounts) != 0 {
+			t.Fatalf("vendor-stop advice kept an unbound account: %+v", next)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Risk: a redacted overview row discloses quota headroom through routable,
+// or by omitting wait when slots remain. Private rows keep one constant shape.
+func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
+	reset(t)
+	person := makePrincipal(t, "overview-routable", "person", "Owner", []string{"admin"})
+	other := addPrincipal(t, person.TenantID, "person", "Other", nil)
+	runner := addPrincipal(t, person.TenantID, "agent", "runtime", nil)
+	codexProfile(t, person)
+	now := time.Now().UTC()
+	var own, private string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		for _, row := range []struct{ label, owner string }{{"Own", person.ID}, {"Private", other.ID}} {
+			var id string
+			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,owner_person_id,linked_at) VALUES($1,$2,'codex','daemon-a',$3,$2,$4,true,'g1',$5,$6,$4) RETURNING id::text`, person.TenantID, row.label, runner.ID, now, person.ID, row.owner).Scan(&id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model) VALUES($1,$2,$3,$4,'requests',100,10,'unrestricted')`, person.TenantID, id, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+				return err
+			}
+			if row.label == "Own" {
+				own = id
+			} else {
+				private = id
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var page overviewPage
+	callStatus(t, accountsMod(), &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
+	seen := map[string]overviewAccount{}
+	for _, a := range page.Accounts {
+		seen[a.AccountID] = a
+	}
+	shared, privateRow := seen[own], seen[private]
+	if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil {
+		t.Fatalf("owned account with open slots was not routable: %+v", shared)
+	}
+	if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
+		t.Fatalf("redacted overview disclosed headroom: %+v", privateRow)
+	}
+}
+
+func enrollComputerAccount(t *testing.T, owner, host tenant.Principal, accountID, daemonID, profile, token string) {
+	t.Helper()
+	parts := strings.Split(token, "_")
+	if len(parts) < 2 || parts[1] == "" {
+		t.Fatal("enrollment fixture needs an agent key")
+	}
+	hash := strings.Repeat("ab", 32)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, owner.TenantID, func(tx pgx.Tx) error {
+		var request, computer string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state,approved_by)
+ VALUES($1,gen_random_uuid(),'864864864',$2,$2,$2,'{}','daemon-spare','redeemed',$3) RETURNING id::text`, owner.TenantID, hash, owner.ID).Scan(&request); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,state)
+ SELECT $1,gen_random_uuid(),$2,$3,id,$4,$5,'connected' FROM agent_keys WHERE prefix=$6 RETURNING id::text`, owner.TenantID, request, host.ID, daemonID, hash, parts[1]).Scan(&computer); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,state,verification_expires_at,ongoing_approved_at)
+ VALUES($1,$2,$3,$4,$5,'connected',now()+interval '1 day',now())`, owner.TenantID, accountID, computer, request, profile)
 		return err
 	}); err != nil {
 		t.Fatal(err)

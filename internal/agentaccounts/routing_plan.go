@@ -186,8 +186,10 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 }
 
 // NextForRun is also used by the vendor-stop handoff. It preserves the original
-// requested-account fence and the enrolled daemon; it writes nothing. The
-// registering principal is not the quota identity of an account on that daemon.
+// requested-account fence and writes nothing. A daemon_id string is chosen by
+// the caller and is visible to other principals, so it is not authority.
+// Keep a candidate only when the daemon and harness match and this run's agent
+// registered the account or a connected enrollment binds it to that agent.
 func NextForRun(ctx context.Context, tx pgx.Tx, runID, daemonID, only, exclude string, now time.Time, residency ...string) (CapacityNext, error) {
 	run, err := loadWaitRun(ctx, tx, runID)
 	if err != nil {
@@ -208,9 +210,16 @@ func NextForRun(ctx context.Context, tx pgx.Tx, runID, daemonID, only, exclude s
 	if err != nil {
 		return CapacityNext{}, err
 	}
+	bound, err := computerAccountIDs(ctx, tx, run.AgentID)
+	if err != nil {
+		return CapacityNext{}, err
+	}
 	kept := []Account{}
 	for _, a := range accounts {
 		if a.DaemonID != daemonID || a.Harness != harness || a.ID == exclude || only != "" && a.ID != only {
+			continue
+		}
+		if a.RegisteredBy != run.AgentID && !bound[a.ID] {
 			continue
 		}
 		kept = append(kept, a)

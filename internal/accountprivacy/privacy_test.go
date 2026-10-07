@@ -102,3 +102,21 @@ func TestFix2MixedShapesAndLegacyEnums(t *testing.T) {
 		t.Fatalf("legacy enum or quota boundary violated: %s", body)
 	}
 }
+
+// Risk: a later account route reintroduces quota headroom through routable
+// after the owner-sharing boundary has already decided the row is private.
+func TestRedactionForcesRoutableFalse(t *testing.T) {
+	id := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	raw := []byte(`{"account_id":"` + id + `","routable":true,"state":"available"}`)
+	body, err := Redact(raw, Policy{}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"routable":false`) || strings.Contains(string(body), `"routable":true`) {
+		t.Fatalf("redacted routable still discloses headroom: %s", body)
+	}
+	own, err := Redact(raw, Policy{id: true}, "", false)
+	if err != nil || !strings.Contains(string(own), `"routable":true`) {
+		t.Fatalf("shared account lost routable: %s %v", own, err)
+	}
+}
