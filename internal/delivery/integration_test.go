@@ -218,6 +218,10 @@ func TestDeliveryWebhookSequenceRebuildIsolationAndHolds(t *testing.T) {
 	if i.State != Pushed || i.Owner != "ci" || i.LinkSource == nil || *i.LinkSource != "title_key" {
 		t.Fatalf("wrong pushed link: %+v", i)
 	}
+	f.call(t, f.person, "GET", "/api/delivery?project=AEON&state=pushed&limit=1", nil, 200, &page)
+	if len(page.Items) != 1 || page.Items[0].ID != i.ID {
+		t.Fatal("canonical project key filter missed delivery")
+	}
 	f.webhook(t, "pull_request", "opened", "open-1", 204)
 	if f.fanouts != 1 {
 		t.Fatal("replay repeated completed fan-out")

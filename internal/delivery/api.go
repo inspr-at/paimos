@@ -97,11 +97,33 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		project := (*string)(nil)
 		if key != "" {
-			var id string
-			if err := tx.QueryRow(r.Context(), `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE n.key=$1 AND k.slug='project' AND n.deleted_at IS NULL`, key).Scan(&id); err != nil {
+			rows, err := tx.Query(r.Context(), `SELECT n.id::text FROM nodes n JOIN node_kinds k ON k.id=n.kind_id
+    WHERE k.slug='project' AND n.deleted_at IS NULL AND
+    (n.key=$1 OR coalesce(nullif(n.fields->>'project_key',''),nullif(n.fields->'classic'->>'key',''),split_part(n.key,'-',1))=$1)
+    ORDER BY n.id LIMIT 2`, key)
+			if err != nil {
 				return err
 			}
-			project = &id
+			ids := []string{}
+			for rows.Next() {
+				var id string
+				if err = rows.Scan(&id); err != nil {
+					rows.Close()
+					return err
+				}
+				ids = append(ids, id)
+			}
+			rows.Close()
+			if err = rows.Err(); err != nil {
+				return err
+			}
+			if len(ids) == 0 {
+				return pgx.ErrNoRows
+			}
+			if len(ids) > 1 {
+				return fail(400, "ambiguous project key")
+			}
+			project = &ids[0]
 		}
 		if ticket != "" {
 			var id string
