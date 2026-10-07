@@ -3152,6 +3152,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyRotationConcurrentConfirmation","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestKeyScopeCeilingFixtureMatchesBuiltinRoles","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestKeyScopeCeilingParityCreateEditRotate","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestKeyScopeChangesImmediateAuditedAndBounded","tier":"GATED-FULL"}
@@ -3289,6 +3291,8 @@
     {"kind":"go","package":"internal/auth","name":"TestReadinessProbeIsPublic","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestRecurrenceAgentScopeIsExplicitAndBounded","tier":"NIGHTLY"}
+    ,
+    {"kind":"go","package":"internal/auth","name":"TestReviewPolicyAgentScopeIsExplicitAndBounded","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestRotationAcceptsProjectGrantsWithoutPromotingWorkspace","tier":"GATED-FULL"}
     ,
@@ -4765,6 +4769,8 @@
     {"kind":"go","package":"internal/crossreview","name":"TestCompletionReviewValidationSavepointDiscardsPartialResources","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestCompositeBoundariesAcquireNoResourceAfterEvent","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/crossreview","name":"TestGitHubPublishPostsGateReason","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestGitHubStatusExactHeadAndNarrowAuthority","tier":"GATED-FULL"}
     ,

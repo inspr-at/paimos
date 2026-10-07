@@ -34,9 +34,11 @@ func statusState(v Review) string {
 	}
 }
 
-// statusDescription is shared with the GitHub publisher (owned by AEON-848).
-// The current gate reason includes the effective family policy and recorded
-// identities. Never publish unbounded finding text as a status description.
+// statusDescription is the aeon/review text GitHubApp.Publish posts. The
+// publisher's stale-binding branch keeps its own sentence when the pull
+// request moved before GitHubStatus is stale. The current gate reason
+// includes the effective family policy and recorded identities. Never
+// publish unbounded finding text as a status description.
 func statusDescription(v Review, state string) string {
 	if v.GitHubStatus == "stale" {
 		return "Review binding differs from the pull request"

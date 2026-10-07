@@ -227,3 +227,69 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 		})
 	}
 }
+
+// Builtin role lists in the shared fixture must match the live catalog before
+// any database ceiling is built. reviewpolicy.manage stays on the person role
+// and out of the agent want; reviewpolicy.read stays in both.
+func TestKeyScopeCeilingFixtureMatchesBuiltinRoles(t *testing.T) {
+	var fixture struct {
+		Registry []authz.Permission `json:"registry"`
+		Cases    []struct {
+			Name                string     `json:"name"`
+			Workspace           []string   `json:"workspace"`
+			Projects            [][]string `json:"projects"`
+			Want                []string   `json:"want"`
+			BuiltinRole         string     `json:"builtin_role"`
+			ProjectBuiltinRoles []string   `json:"project_builtin_roles"`
+		} `json:"cases"`
+	}
+	data, err := os.ReadFile("testdata/key_scope_ceiling.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if json.Unmarshal(data, &fixture) != nil || len(fixture.Registry) != len(authz.Registry) {
+		t.Fatal("ceiling fixture registry drifted from the live catalog")
+	}
+	for _, permission := range fixture.Registry {
+		actual, ok := authz.Lookup(permission.Key)
+		if !ok || actual.AgentGrantable != permission.AgentGrantable || !slices.Equal(actual.GrantableAt, permission.GrantableAt) {
+			t.Fatalf("ceiling fixture registry drift: %s", permission.Key)
+		}
+	}
+	sawRead, sawManage := false, false
+	for _, tc := range fixture.Cases {
+		if tc.BuiltinRole != "" {
+			permissions, ok := authz.BuiltinPermissions(tc.BuiltinRole)
+			if !ok || !slices.Equal(permissions, tc.Workspace) {
+				t.Fatalf("%s workspace drifted from built-in %s", tc.Name, tc.BuiltinRole)
+			}
+		}
+		for i, role := range tc.ProjectBuiltinRoles {
+			permissions, ok := authz.BuiltinPermissions(role)
+			if !ok || !slices.Equal(permissions, tc.Projects[i]) {
+				t.Fatalf("%s project drifted from built-in %s", tc.Name, role)
+			}
+		}
+		if tc.BuiltinRole == "" && len(tc.ProjectBuiltinRoles) == 0 {
+			continue
+		}
+		if !slices.Contains(tc.Want, "reviewpolicy.read") || slices.Contains(tc.Want, "reviewpolicy.manage") {
+			t.Fatalf("%s agent ceiling must read review policy without managing it", tc.Name)
+		}
+		sawRead = true
+		person := tc.Workspace
+		if len(tc.ProjectBuiltinRoles) > 0 {
+			person = tc.Projects[0]
+		}
+		if slices.Contains(person, "reviewpolicy.manage") {
+			sawManage = true
+		}
+	}
+	if !sawRead || !sawManage {
+		t.Fatal("fixture lost the built-in review-policy split")
+	}
+	manage, ok := authz.Lookup("reviewpolicy.manage")
+	if !ok || !manage.AgentGrantable {
+		t.Fatal("reviewpolicy.manage must stay agent-grantable for a custom role")
+	}
+}
