@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -60,15 +61,18 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin, _ := authz.BuiltinPermissions("admin")
-	if !slices.Contains(admin, "recurrences.manage") || !slices.Contains(admin, "reviewpolicy.manage") {
-		t.Fatal("fixture requires the person Admin recurrence and review-policy permissions")
+	if !slices.Contains(admin, "recurrences.manage") || !slices.Contains(admin, "delivery.manage") || !slices.Contains(admin, "reviewpolicy.manage") {
+		t.Fatal("fixture requires the person Admin recurrence, delivery and review-policy permissions")
+	}
+	excluded := builtinAgentExclusions(t)
+	if !excluded["recurrences.manage"] || !excluded["delivery.manage"] || !excluded["reviewpolicy.manage"] {
+		t.Fatal("built-in agents must keep recurrence, delivery and review-policy management explicit")
 	}
 	full := []string{}
 	for _, perm := range authz.Registry {
-		// Built-in agent roles require an explicit custom-role grant for
-		// recurrence automation and review-policy management (authz.readGrants),
-		// unlike person Admin.
-		if perm.Key == "recurrences.manage" || perm.Key == "reviewpolicy.manage" {
+		// Built-in agent roles require an explicit custom-role grant for these
+		// permissions (authz.readGrants), unlike person Admin.
+		if excluded[perm.Key] {
 			continue
 		}
 		if perm.AgentGrantable && slices.Contains(admin, perm.Key) {
@@ -174,6 +178,25 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func builtinAgentExclusions(t *testing.T) map[string]bool {
+	t.Helper()
+	raw, err := os.ReadFile("../authz/builtin_agent_exclusions.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var definition struct {
+		Permissions []string `json:"permissions"`
+	}
+	if json.Unmarshal(raw, &definition) != nil || len(definition.Permissions) == 0 {
+		t.Fatal("built-in agent exclusions unreadable")
+	}
+	out := make(map[string]bool, len(definition.Permissions))
+	for _, key := range definition.Permissions {
+		out[key] = true
+	}
+	return out
 }
 
 func TestKeyScopeExpiryPermissionsAndAtomicFailure(t *testing.T) {
