@@ -4,6 +4,7 @@ package crossreview
 import (
 	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -330,4 +331,33 @@ func (f *fixture) seedPolicyReview(t *testing.T, authorRun, reviewer string) Rev
 		return err
 	})
 	return v
+}
+
+func TestReviewPolicyUIRegistryAndRevisionFence(t *testing.T) {
+	// Risk: the editor invents families or a stale save/Undo overwrites a newer rule.
+	f := newFixture(t)
+	var settings reviewgate.FamilyPolicySettings
+	f.call(t, f.person, "PUT", "/api/settings/review-policy", reviewgate.FamilyPolicy{Mode: "off", AllowedFamilies: []string{}}, 200, &settings)
+	if settings.Workspace.Mode != "off" || len(settings.ValidFamilies) != 6 {
+		t.Fatalf("missing UI registry/default: %+v", settings)
+	}
+	for _, family := range settings.ValidFamilies {
+		if !reviewgate.ValidFamily(family) {
+			t.Fatalf("invalid advertised family %s", family)
+		}
+	}
+	revision := settings.UpdatedAt.Format(time.RFC3339Nano)
+	f.call(t, f.person, "PUT", "/api/settings/review-policy", reviewgate.DefaultFamilyPolicy(), 200, &settings)
+	r := httptest.NewRequest("PUT", "/api/settings/review-policy", strings.NewReader(`{"mode":"off","allowed_families":[]}`))
+	r.Header.Set("If-Unmodified-Since", revision)
+	r = r.WithContext(tenant.WithPrincipal(r.Context(), f.person))
+	w := httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	if w.Code != 412 || !strings.Contains(w.Body.String(), "review policy changed") {
+		t.Fatalf("stale policy save: %d %s", w.Code, w.Body.String())
+	}
+	f.call(t, f.person, "GET", "/api/settings/review-policy", nil, 200, &settings)
+	if settings.Effective.Mode != "other_family" {
+		t.Fatal("stale policy overwrote newer choice")
+	}
 }

@@ -63,7 +63,12 @@ func ValidRepository(s string) bool {
 	return true
 }
 func ValidFamily(s string) bool {
-	return s == "openai" || s == "anthropic" || s == "xai" || s == "cursor" || s == "google" || s == "local"
+	for _, family := range ValidFamilies() {
+		if s == family {
+			return true
+		}
+	}
+	return false
 }
 
 // Parse accepts only the final nonempty verdict line. Earlier verdicts in
@@ -171,4 +176,9 @@ func ModelMatches(requested, effective string) bool {
 		return strings.HasPrefix(effective, "claude-"+requested+"-")
 	}
 	return false
+}
+
+// ValidFamilies is the server registry shared by policy validation and editors.
+func ValidFamilies() []string {
+	return []string{"openai", "anthropic", "xai", "cursor", "google", "local"}
 }

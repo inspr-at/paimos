@@ -326,7 +326,9 @@ type ProjectCheck func(permission, projectID string) bool
 
 // GrantedProjectIDsTx resolves a bounded set from the caller's bindings,
 // including linked identities and key ceilings, rather than from resource logs.
-// Callers handle workspace authority before requesting this project-only set.
+// A workspace-bound agent also offers projects its key creator can grant;
+// ProjectsTx keeps only that intersection. Callers still apply an effective
+// workspace grant before treating this set as the whole tenant.
 func GrantedProjectIDsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, permission string) ([]string, error) {
 	own, err := readGrants(ctx, tx, p)
 	if errors.Is(err, ErrForbidden) {
@@ -339,9 +341,24 @@ func GrantedProjectIDsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal, per
 	if err != nil {
 		return nil, err
 	}
-	ids := []string{}
+	candidates := map[string]struct{}{}
 	for id := range own.projects {
-		if check(permission, id) {
+		candidates[id] = struct{}{}
+	}
+	if p.Kind == tenant.Agent && p.KeyCreatorID != "" && own.allows(permission, "") {
+		creator, err := readGrants(ctx, tx, tenant.Principal{ID: p.KeyCreatorID, TenantID: p.TenantID, Kind: tenant.Person})
+		if err != nil && !errors.Is(err, ErrForbidden) {
+			return nil, err
+		}
+		if err == nil {
+			for id := range creator.projects {
+				candidates[id] = struct{}{}
+			}
+		}
+	}
+	ids := make([]string, 0, len(candidates))
+	for id := range candidates {
+		if id != "" && check(permission, id) {
 			ids = append(ids, id)
 		}
 	}

@@ -3220,7 +3220,7 @@ paths:
   /delivery:
     get:
       operationId: listDelivery
-      description: 'Observe-only delivery rows visible to the caller. Requires delivery.read; bounded UUID keyset pagination.'
+      description: 'Observe-only delivery rows the caller may read. A project or ticket filter requires delivery.read on that project. An unscoped list is allowed when delivery.read is held on the workspace or on any project, and returns only projects where this caller holds delivery.read. Rows with no project are included only when the workspace grant holds. Bounded UUID keyset pagination.'
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: project, in: query, schema: {type: string, maxLength: 64}}
@@ -3236,19 +3236,25 @@ paths:
       - {name: itemId, in: path, required: true, schema: {type: string, format: uuid}}
     post:
       operationId: holdDelivery
+      parameters:
+        - {in: header, name: If-Unmodified-Since, required: false, schema: {type: string, maxLength: 64}, description: 'Current delivery updated_at as RFC3339. A mismatch returns 412.'}
       description: 'Requires delivery.manage on the current project. Records a hold with a reason; makes no GitHub write.'
       security: [{session: []}, {agentKey: []}]
       requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [reason], properties: {reason: {type: string, minLength: 1, maxLength: 1000}}}}}}
       responses:
+        '412': {description: 'The current revision changed; reload before writing.'}
         '200': {description: 'Held row', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryItem'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
     delete:
       operationId: releaseDeliveryHold
+      parameters:
+        - {in: header, name: If-Unmodified-Since, required: false, schema: {type: string, maxLength: 64}, description: 'Current delivery updated_at as RFC3339. A mismatch returns 412.'}
       description: 'Requires delivery.manage on the current project. Recomputes the observed state and records the release.'
       security: [{session: []}, {agentKey: []}]
       responses:
+        '412': {description: 'The current revision changed; reload before writing.'}
         '200': {description: 'Released row', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryItem'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -8456,6 +8462,8 @@ paths:
         "409": {description: "Project is unavailable for policy changes"}
     put:
       operationId: putProjectReviewPolicy
+      parameters:
+        - {in: header, name: If-Unmodified-Since, required: false, schema: {type: string, maxLength: 64}, description: 'Current scope updated_at as RFC3339; none asserts that no local override exists. A mismatch returns 412.'}
       description: "Requires reviewpolicy.manage in the current scope, rechecked inside the final tenant and tree fence. Built-in agent roles exclude manage; an explicit custom role and key scope may grant it. Replaces the policy and appends review_policy.changed with Before/After."
       requestBody:
         required: true
@@ -8463,6 +8471,7 @@ paths:
           application/json:
             schema: {$ref: "#/components/schemas/ReviewPolicy"}
       responses:
+        '412': {description: 'The current revision changed; reload before writing.'}
         "200":
           description: "Current local and effective review policy"
           content:
@@ -8474,8 +8483,11 @@ paths:
         "409": {description: "Project is unavailable for policy changes"}
     delete:
       operationId: deleteProjectReviewPolicy
+      parameters:
+        - {in: header, name: If-Unmodified-Since, required: false, schema: {type: string, maxLength: 64}, description: 'Current scope updated_at as RFC3339; none asserts that no local override exists. A mismatch returns 412.'}
       description: "Requires reviewpolicy.manage in the current project inside the final tenant and tree fence. Deletes the project override, falls back to the tenant default and appends review_policy.changed with Before/After."
       responses:
+        '412': {description: 'The current revision changed; reload before writing.'}
         "200":
           description: "Current local and effective review policy"
           content:
@@ -11275,6 +11287,8 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
     put:
       operationId: putTenantReviewPolicy
+      parameters:
+        - {in: header, name: If-Unmodified-Since, required: false, schema: {type: string, maxLength: 64}, description: 'Current scope updated_at as RFC3339; none asserts that no local override exists. A mismatch returns 412.'}
       description: "Requires reviewpolicy.manage in the current scope, rechecked inside the final tenant and tree fence. Built-in agent roles exclude manage; an explicit custom role and key scope may grant it. Replaces the policy and appends review_policy.changed with Before/After."
       requestBody:
         required: true
@@ -11282,6 +11296,7 @@ paths:
           application/json:
             schema: {$ref: "#/components/schemas/ReviewPolicy"}
       responses:
+        '412': {description: 'The current revision changed; reload before writing.'}
         "200":
           description: "Current local and effective review policy"
           content:
@@ -14342,12 +14357,16 @@ components:
         owner: {type: string, enum: [coordinator, ci, queue, builder, person, '']}
         deadline_at: {type: [string, 'null'], format: date-time}
         held_reason: {type: [string, 'null']}
+        held_from_state: {type: [string, 'null'], description: 'Observed state when the hold started; unchanged while held.'}
+        required_checks_passed: {type: integer, minimum: 0, description: 'Successful configured checks in the stored observation for this head.'}
+        required_checks_total: {type: integer, minimum: 0, description: 'Configured required checks in the stored observation.'}
         link_source: {type: [string, 'null'], enum: [review_row, title_key, branch_key, null]}
         updated_at: {type: string, format: date-time}
     DeliveryPage:
       type: object
       required: [items, next_cursor]
       properties:
+        available: {type: boolean, description: 'Whether a GitHub App is configured for the current tenant.'}
         items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeliveryItem'}}
         next_cursor: {type: [string, 'null'], format: uuid}
     DeliveryRating:
@@ -19371,6 +19390,8 @@ components:
             - {type: 'null'}
           description: "The policy stored at this scope; null means inherited."
         effective: {$ref: '#/components/schemas/ReviewPolicy'}
+        workspace: {$ref: '#/components/schemas/ReviewPolicy', description: 'Current workspace default before the project override.'}
+        valid_families: {type: array, maxItems: 6, uniqueItems: true, items: {type: string}, description: 'The server registry of eligible model families.'}
         source: {type: string, enum: [default, tenant, project]}
         updated_by: {type: [string, 'null'], format: uuid}
         updated_at: {type: [string, 'null'], format: date-time}

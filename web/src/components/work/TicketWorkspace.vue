@@ -40,6 +40,7 @@ import RelationPicker from './RelationPicker.vue'
 import TicketAgentWork from './TicketAgentWork.vue'
 import TicketOutcomes from './TicketOutcomes.vue'
 import TicketReviews from './TicketReviews.vue'
+import TicketDelivery from './TicketDelivery.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 import TicketBenefits from './TicketBenefits.vue'
@@ -761,6 +762,7 @@ defineExpose({
           <TicketAgentWork v-if="['work','ticket','epic','task'].includes(item.kind_slug)" class="ws-block" :node-id="item.id" :kind="item.kind_slug" :level-name="workLabel(item, vocabulary.value)" />
           <TicketOutcomes v-if="['work', 'ticket'].includes(item.kind_slug)" class="ws-block" :node-id="item.id" />
           <TicketReviews v-if="['work', 'ticket', 'task'].includes(item.kind_slug)" :key="item.id" class="ws-block" :node-id="item.id" :project-id="project.id" />
+          <TicketDelivery v-if="['work', 'ticket', 'task'].includes(item.kind_slug)" :key="`delivery-${item.id}`" class="ws-block" :node-id="item.id" :project-id="project.id" :ticket-key="item.key" />
           <ChildList
             v-if="hasChildren" class="ws-block" :children="ticket.children.value" :loading="ticket.childrenLoading.value" :editable="editable"
             :child-label="item.kind_slug === 'work' ? workNoun(vocabulary.leaf.name) : item.kind_slug === 'epic' ? 'ticket' : 'task'" :parent-label="workNoun(workLabel(item, vocabulary.value))" :progress="ticket.childProgress()" :progress-error="ticket.progressError.value" :add="title => ticket.addChild(title, project.routeKey)"

@@ -62,7 +62,8 @@
         "updated_at": "metadata",
         "branch": "review",
         "held_reason": "review",
-        "observation": "review"
+        "observation": "review",
+        "held_from_state": "metadata"
       }
     },
     {

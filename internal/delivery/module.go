@@ -48,6 +48,7 @@ func (m *Module) observationTx(ctx context.Context, tx pgx.Tx, p Pull, at time.T
 	if before != nil {
 		o.Ticket, o.Project, o.LinkSource = before.Ticket, before.Project, before.LinkSource
 		o.HoldReason = before.HeldReason
+		o.HeldFrom = before.HeldFrom
 		if before.Head == o.Head {
 			o.QueueFailure = before.Observation.QueueFailure
 		}
@@ -68,6 +69,7 @@ func (m *Module) observationTx(ctx context.Context, tx pgx.Tx, p Pull, at time.T
 		}
 		if pre != nil && o.HoldReason == nil {
 			o.HoldReason = pre.HeldReason
+			o.HeldFrom = pre.HeldFrom
 		}
 	}
 	return o, err
