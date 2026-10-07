@@ -1,12 +1,12 @@
 {
   "product": "PAIMOS AEON",
   "version_scheme": "inspr-calver-3",
-  "version": "261005070923.0.0",
+  "version": "261007035250.0.0",
   "release_channel": "stable",
-  "release_sequence": 123,
-  "codename": "Coral Cargo",
-  "reserved_at": "2026-10-05T07:09:23Z",
-  "ticket": "AEON-684",
+  "release_sequence": 124,
+  "codename": "Direct Dome",
+  "reserved_at": "2026-10-07T03:52:50Z",
+  "ticket": "AEON-744",
   "unpublished_reservations": [
     "260923134337.0.0",
     "260925231350.0.0",
