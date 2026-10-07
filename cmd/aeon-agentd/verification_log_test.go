@@ -21,16 +21,22 @@ func TestVerificationLogPrivateBoundedAndRejectsLinkedFiles(t *testing.T) {
 	}
 	defer store.Close()
 	log := verificationLog(store)
+	log("", "", "daemon_ready", "")
+	initial, err := store.Read("verification.log", 256<<10)
+	if err != nil || !bytes.Contains(initial, []byte("daemon_ready")) {
+		t.Fatal("startup did not create the diagnostic destination", err)
+	}
 	// A full valid history drops complete old lines, and a second logger retains
 	// it across restart. Unknown reasons cannot become a payload log.
-	if err := store.Write("verification.log", bytes.Repeat([]byte("old\n"), (256<<10)/4), true); err != nil {
+	if err := store.Write("verification.log", bytes.Repeat([]byte("old\n"), (256<<10)/4), false); err != nil {
 		t.Fatal(err)
 	}
+	log("", "", "poll_blocked", "probe_failed")
 	log("run", "account", "refused", "account_not_ready")
 	verificationLog(store)("run-2", "account", "completed", "")
 	log("run", "account", "failed", "fixture-private-payload")
 	raw, err := store.Read("verification.log", 256<<10)
-	if err != nil || !bytes.Contains(raw, []byte("account_not_ready")) || !bytes.Contains(raw, []byte("run-2")) || bytes.Contains(raw, []byte("fixture-private-payload")) {
+	if err != nil || !bytes.Contains(raw, []byte("probe_failed")) || !bytes.Contains(raw, []byte("account_not_ready")) || !bytes.Contains(raw, []byte("run-2")) || bytes.Contains(raw, []byte("fixture-private-payload")) {
 		t.Fatal("private bounded log lost evidence", err)
 	}
 	info, err := os.Stat(filepath.Join(store.Path(), "verification.log"))
