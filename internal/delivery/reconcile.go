@@ -318,3 +318,67 @@ func normalizedEqual(a, b Observation) bool {
 	y, _ := json.Marshal(b)
 	return string(x) == string(y)
 }
+
+// Current platform rows remain authoritative even when no GitHub event arrives.
+// Record newly observed run/review/settings facts so subsequent rebuilds retain
+// their state_since instead of starting a new deadline at each rebuild.
+func (m *Module) refreshExistingFacts(ctx context.Context, tid string) error {
+	var cursor string
+	for {
+		count := 0
+		err := db.InTenant(db.AllProjects(ctx, "delivery rebuild current platform facts"), m.pool, tid, func(tx pgx.Tx) error {
+			if err := db.LockTenant(ctx, tx, tid); err != nil {
+				return err
+			}
+			rows, err := tx.Query(ctx, `SELECT `+columns+` FROM delivery_items WHERE ($1::uuid IS NULL OR id>$1) ORDER BY id LIMIT 100`, nullable(cursor))
+			if err != nil {
+				return err
+			}
+			items := []Item{}
+			for rows.Next() {
+				i, err := scan(rows)
+				if err != nil {
+					rows.Close()
+					return err
+				}
+				items = append(items, i)
+			}
+			rows.Close()
+			if err = rows.Err(); err != nil {
+				return err
+			}
+			count = len(items)
+			os := []Observation{}
+			at := m.now()
+			for _, i := range items {
+				o := i.Observation
+				cursor = i.ID
+				if i.State == Merged {
+					continue
+				}
+				if err = platformTx(ctx, tx, &o); err != nil {
+					return err
+				}
+				o.Settings, err = settingsTx(ctx, tx, o.Project)
+				if err != nil {
+					return err
+				}
+				if !normalizedEqual(o, i.Observation) {
+					o.At = at
+					os = append(os, o)
+				}
+			}
+			if len(os) == 0 {
+				return nil
+			}
+			_, err = recordTx(ctx, tx, tid, internalRecord("platform", at, os))
+			return err
+		})
+		if err != nil {
+			return err
+		}
+		if count < 100 {
+			return nil
+		}
+	}
+}

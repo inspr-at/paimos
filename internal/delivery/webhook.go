@@ -265,7 +265,7 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if e.Action == "checks_requested" {
-			pulls, err = m.github.Group(ctx, head, e.Group.Base)
+			pulls, err = m.github.Group(ctx, head, e.Group.Base, e.Group.Ref)
 		} else {
 			err = db.InTenant(db.AllProjects(ctx, "delivery queue destroy subjects"), m.pool, m.config.TenantID, func(tx pgx.Tx) error {
 				rows, err := tx.Query(ctx, `SELECT observation FROM delivery_items WHERE observation->>'queue_head'=$1 ORDER BY id LIMIT 101`, head)
@@ -325,7 +325,7 @@ func (m *Module) webhook(w http.ResponseWriter, r *http.Request) {
 			if name == "pull_request" && e.Pull.Head.SHA == o.Head {
 				switch e.Action {
 				case "enqueued":
-					o.Queued = true
+					o.Queued = p.Queued
 				case "dequeued":
 					o.Queued = false
 					o.QueueHead = ""

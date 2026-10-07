@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/reviewgate"
@@ -236,7 +237,7 @@ type GitHubCheck struct {
 
 // ReadInstallation mints a separate token with read permissions only. Callers
 // never receive it. The existing publisher's token and writes are unchanged.
-func (g *GitHubApp) ReadInstallation(ctx context.Context, read func(func(string, any) error) error) error {
+func (g *GitHubApp) ReadInstallation(ctx context.Context, read func(func(string, any) error, func(int64, string) (bool, string, error)) error) error {
 	if !g.Configured(g.Config.TenantID, g.Config.Repository) {
 		return errGitHub
 	}
@@ -278,5 +279,46 @@ func (g *GitHubApp) ReadInstallation(ctx context.Context, read func(func(string,
 	}
 	return read(func(path string, out any) error {
 		return g.request(ctx, token.Token, "GET", "/repos/"+g.Config.Repository+path, nil, out)
+	}, func(number int64, head string) (bool, string, error) {
+		if number <= 0 || number > 2147483647 || !reviewgate.ValidSHA(head) {
+			return false, "", errGitHub
+		}
+		owner, name, _ := strings.Cut(g.Config.Repository, "/")
+		var response struct {
+			Data struct {
+				Repository struct {
+					Pull *struct {
+						Number int64  `json:"number"`
+						Head   string `json:"headRefOid"`
+						Entry  *struct {
+							ID   string `json:"id"`
+							Head *struct {
+								OID string `json:"oid"`
+							} `json:"headCommit"`
+						} `json:"mergeQueueEntry"`
+					} `json:"pullRequest"`
+				} `json:"repository"`
+			} `json:"data"`
+			Errors []json.RawMessage `json:"errors"`
+		}
+		query := `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number headRefOid mergeQueueEntry{id headCommit{oid}}}}}`
+		if err := g.request(ctx, token.Token, "POST", "/graphql", map[string]any{"query": query, "variables": map[string]any{"owner": owner, "name": name, "number": number}}, &response); err != nil {
+			return false, "", err
+		}
+		pull := response.Data.Repository.Pull
+		if len(response.Errors) > 0 || pull == nil || pull.Number != number || pull.Head != head {
+			return false, "", errGitHub
+		}
+		if pull.Entry == nil {
+			return false, "", nil
+		}
+		queueHead := ""
+		if pull.Entry.Head != nil {
+			queueHead = pull.Entry.Head.OID
+			if !reviewgate.ValidSHA(queueHead) {
+				return false, "", errGitHub
+			}
+		}
+		return true, queueHead, nil
 	})
 }

@@ -14,9 +14,10 @@ import (
 )
 
 type Pull struct {
+	QueueHead                 string
 	Number                    int64
 	Title, Branch, Head, Base string
-	Open, Merged              bool
+	Open, Merged, Queued      bool
 	Checks                    []Check
 }
 
@@ -24,7 +25,7 @@ type Pull struct {
 type GitHub interface {
 	Pull(context.Context, int64) (Pull, error)
 	OpenPulls(context.Context) ([]Pull, error)
-	Group(context.Context, string, string) ([]Pull, error)
+	Group(context.Context, string, string, string) ([]Pull, error)
 }
 type AppReader struct{ App *crossreview.GitHubApp }
 
@@ -108,7 +109,7 @@ func (g AppReader) Pull(ctx context.Context, n int64) (Pull, error) {
 	if n <= 0 {
 		return out, errRead
 	}
-	err := g.App.ReadInstallation(ctx, func(get func(string, any) error) error {
+	err := g.App.ReadInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
 		var p crossreview.GitHubPull
 		if err := get("/pulls/"+strconv.FormatInt(n, 10), &p); err != nil {
 			return err
@@ -123,6 +124,9 @@ func (g AppReader) Pull(ctx context.Context, n int64) (Pull, error) {
 		}
 		if out.Open {
 			out.Checks, err = checks(get, out.Head)
+			if err == nil {
+				out.Queued, out.QueueHead, err = queue(out.Number, out.Head)
+			}
 		}
 		return err
 	})
@@ -150,7 +154,7 @@ func openPulls(get func(string, any) error, repo string) ([]Pull, error) {
 }
 func (g AppReader) OpenPulls(ctx context.Context) ([]Pull, error) {
 	var out []Pull
-	err := g.App.ReadInstallation(ctx, func(get func(string, any) error) error {
+	err := g.App.ReadInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
 		var err error
 		out, err = openPulls(get, g.App.Config.Repository)
 		if err != nil {
@@ -158,6 +162,9 @@ func (g AppReader) OpenPulls(ctx context.Context) ([]Pull, error) {
 		}
 		for i := range out {
 			out[i].Checks, err = checks(get, out[i].Head)
+			if err == nil {
+				out[i].Queued, out[i].QueueHead, err = queue(out[i].Number, out[i].Head)
+			}
 			if err != nil {
 				return err
 			}
@@ -166,12 +173,28 @@ func (g AppReader) OpenPulls(ctx context.Context) ([]Pull, error) {
 	})
 	return out, err
 }
-func (g AppReader) Group(ctx context.Context, head, base string) ([]Pull, error) {
+func (g AppReader) Group(ctx context.Context, head, base, ref string) ([]Pull, error) {
 	if !reviewgate.ValidSHA(head) || !reviewgate.ValidSHA(base) {
 		return nil, errRead
 	}
 	var out []Pull
-	err := g.App.ReadInstallation(ctx, func(get func(string, any) error) error {
+	err := g.App.ReadInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
+		var live struct {
+			Ref    string `json:"ref"`
+			Object struct {
+				SHA  string `json:"sha"`
+				Type string `json:"type"`
+			} `json:"object"`
+		}
+		if !queueRef.MatchString(ref) || strings.Contains(ref, "..") {
+			return errRead
+		}
+		if err := get("/git/ref/"+url.PathEscape(strings.TrimPrefix(ref, "refs/")), &live); err != nil {
+			return err
+		}
+		if live.Ref != ref || live.Object.SHA != head || live.Object.Type != "commit" {
+			return errRead
+		}
 		ps, err := openPulls(get, g.App.Config.Repository)
 		if err != nil {
 			return err

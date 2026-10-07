@@ -232,7 +232,7 @@ func internalRecord(kind string, at time.Time, os []Observation) record {
 // without duplicating public events. The tenant fence serializes live ingestion.
 func (m *Module) Rebuild(ctx context.Context, tid string) error {
 	ctx = db.AllProjects(ctx, "delivery projection rebuild")
-	return db.InTenant(ctx, m.pool, tid, func(tx pgx.Tx) error {
+	err := db.InTenant(ctx, m.pool, tid, func(tx pgx.Tx) error {
 		if err := db.LockTenant(ctx, tx, tid); err != nil {
 			return err
 		}
@@ -281,6 +281,13 @@ func (m *Module) Rebuild(ctx context.Context, tid string) error {
 		}
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	if err = m.refreshExistingFacts(ctx, tid); err != nil {
+		return err
+	}
+	return m.refreshPlatform(ctx, tid)
 }
 func subject(pr *int64, ticket *string) string {
 	if pr != nil {

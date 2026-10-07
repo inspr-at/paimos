@@ -39,7 +39,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 }
 func (m *Module) observationTx(ctx context.Context, tx pgx.Tx, p Pull, at time.Time) (Observation, error) {
 	pr := p.Number
-	o := Observation{Repository: m.config.Repository, PR: &pr, Branch: p.Branch, Head: p.Head, Base: p.Base, Open: p.Open, Merged: p.Merged, Checks: p.Checks, At: at}
+	o := Observation{Repository: m.config.Repository, PR: &pr, Branch: p.Branch, Head: p.Head, Base: p.Base, Open: p.Open, Merged: p.Merged, Queued: p.Queued, QueueHead: p.QueueHead, Checks: p.Checks, At: at}
 	o.ID = stableID(m.config.TenantID, o.Repository, subject(o.PR, nil))
 	before, err := load(ctx, tx, o.ID)
 	if err != nil {
@@ -49,8 +49,6 @@ func (m *Module) observationTx(ctx context.Context, tx pgx.Tx, p Pull, at time.T
 		o.Ticket, o.Project, o.LinkSource = before.Ticket, before.Project, before.LinkSource
 		o.HoldReason = before.HeldReason
 		if before.Head == o.Head {
-			o.Queued = before.Observation.Queued
-			o.QueueHead = before.Observation.QueueHead
 			o.QueueFailure = before.Observation.QueueFailure
 		}
 	}

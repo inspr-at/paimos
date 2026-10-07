@@ -48,7 +48,7 @@ func (g *fakeGitHub) OpenPulls(context.Context) ([]Pull, error) {
 	}
 	return out, nil
 }
-func (g *fakeGitHub) Group(context.Context, string, string) ([]Pull, error) {
+func (g *fakeGitHub) Group(context.Context, string, string, string) ([]Pull, error) {
 	return g.OpenPulls(context.Background())
 }
 
@@ -85,7 +85,7 @@ func newFixture(t *testing.T) *fixture {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Delivery agent') RETURNING id::text`, f.person.TenantID).Scan(&f.agent.ID); err != nil {
 			return err
 		}
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'AEON',id,'Delivery project' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.person.TenantID).Scan(&f.project); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'AEON-1',id,'Delivery project' FROM node_kinds WHERE slug='project' RETURNING id::text`, f.person.TenantID).Scan(&f.project); err != nil {
 			return err
 		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,key,kind_id,title) SELECT $1,$2,'AEON-848',id,'Delivery ticket' FROM node_kinds WHERE slug='work' RETURNING id::text`, f.person.TenantID, f.project).Scan(&f.ticket); err != nil {
@@ -346,6 +346,26 @@ func TestDeliveryReconciliationHealsMissedWebhooksAndFanoutRetry(t *testing.T) {
 	}
 	if !f.item(t, 7).Since.Equal(since) {
 		t.Fatal("poll extended deadline")
+	}
+	p.Queued = true
+	p.QueueHead = strings.Repeat("e", 40)
+	f.gh.pulls[7] = p
+	f.at = f.at.Add(time.Minute)
+	if err := f.m.Reconcile(t.Context(), f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if f.item(t, 7).State != InQueue {
+		t.Fatal("missed enqueue webhook not healed")
+	}
+	p.Queued = false
+	p.QueueHead = ""
+	f.gh.pulls[7] = p
+	f.at = f.at.Add(time.Minute)
+	if err := f.m.Reconcile(t.Context(), f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	if f.item(t, 7).State != CIGreen {
+		t.Fatal("missed dequeue webhook not healed")
 	}
 	f.gh.err = errRead
 	if err := f.m.Reconcile(t.Context(), f.person.TenantID); !errors.Is(err, errRead) {
