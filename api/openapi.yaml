@@ -2395,87 +2395,6 @@ paths:
       responses:
         '200': {description: Capability-authorized HTML or CSS with exact host-owned headers}
         '404': {description: Preview unavailable; no existence oracle}
-  /api/engine/admission:
-    post:
-      summary: Evaluate shadow admission without starting or reserving work
-      description: "Requires engine.admission and agents.plan.read, plus account.read for people or explicit account.overview.read for agents when capacity is evaluated. The live person's plan, two-slot first-build finishing reserve, work PR WIP ceiling, fresh host signals and account capacity floors decide. Missing inputs deny. Every successful evaluation is an event. The result grants no launch, claim, merge or deployment authority."
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EngineAdmissionRequest'
-      responses:
-        '200':
-          description: "Durable advisory decision; enforced is always false."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EngineAdmissionDecision'
-        '400':
-          description: "Invalid or oversized input."
-        '403':
-          description: "Missing explicit authority or live person owner."
-        '404':
-          description: "Project not visible or not found."
-        '409':
-          description: "Request ID was reused with different input."
-        '503':
-          description: "Decision could not be durably recorded."
-  /api/projects/{projectId}/admission-settings:
-    parameters:
-      - in: path
-        name: projectId
-        required: true
-        schema:
-          type: string
-          format: uuid
-    get:
-      summary: Read the project shadow admission switch
-      description: "Requires engine.read on the visible project. Missing settings mean off at revision zero."
-      responses:
-        '200':
-          description: "Current project switch."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EngineAdmissionSettings'
-        '403':
-          description: "Permission denied."
-        '404':
-          description: "Project not found."
-    put:
-      summary: Change the project shadow admission switch
-      description: "Person-only engine.manage authority, checked in the final tenant-fenced write. Revision must match. This switch never enables consultation or execution."
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              additionalProperties: false
-              required: [expected_revision, shadow_enabled]
-              properties:
-                expected_revision:
-                  type: integer
-                  minimum: 0
-                shadow_enabled:
-                  type: boolean
-      responses:
-        '200':
-          description: "Updated and audited project switch."
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/EngineAdmissionSettings'
-        '400':
-          description: "Invalid request."
-        '403':
-          description: "Person management authority required."
-        '404':
-          description: "Project not found."
-        '409':
-          description: "Settings revision changed."
   /approvals:
     get:
       operationId: listApprovals
@@ -3386,6 +3305,34 @@ paths:
         '200': {description: 'Released row', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryItem'}}}}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /engine/admission:
+    post:
+      summary: Evaluate shadow admission without starting or reserving work
+      description: "Requires engine.admission and agents.plan.read, plus account.read for people or explicit account.overview.read for agents when capacity is evaluated. The live person's plan, two-slot first-build finishing reserve, work PR WIP ceiling, fresh host signals and account capacity floors decide. Missing inputs deny. Every successful evaluation is an event. The result grants no launch, claim, merge or deployment authority."
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EngineAdmissionRequest'
+      responses:
+        '200':
+          description: "Durable advisory decision; enforced is always false."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineAdmissionDecision'
+        '400':
+          description: "Invalid or oversized input."
+        '403':
+          description: "Missing explicit authority or live person owner."
+        '404':
+          description: "Project not visible or not found."
+        '409':
+          description: "Request ID was reused with different input."
+        '503':
+          description: "Decision could not be durably recorded."
   /events:
     get:
       operationId: listEvents
@@ -6794,6 +6741,62 @@ paths:
         '403': {description: Permission denied}
         '404': {description: No such project or binding}
         '409': {description: Access comes from the workspace role (code via_workspace)}
+  /projects/{projectId}/admission-settings:
+    parameters:
+      - in: path
+        name: projectId
+        required: true
+        schema:
+          type: string
+          format: uuid
+    get:
+      summary: Read the project shadow admission switch
+      description: "Requires engine.read on the visible project. Missing settings mean off at revision zero."
+      security: *auth
+      responses:
+        '200':
+          description: "Current project switch."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineAdmissionSettings'
+        '403':
+          description: "Permission denied."
+        '404':
+          description: "Project not found."
+    put:
+      summary: Change the project shadow admission switch
+      description: "Person-only engine.manage authority, checked in the final tenant-fenced write. Revision must match. This switch never enables consultation or execution."
+      security: *auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [expected_revision, shadow_enabled]
+              properties:
+                expected_revision:
+                  type: integer
+                  minimum: 0
+                shadow_enabled:
+                  type: boolean
+      responses:
+        '200':
+          description: "Updated and audited project switch."
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EngineAdmissionSettings'
+        '400':
+          description: "Invalid request."
+        '403':
+          description: "Person management authority required."
+        '404':
+          description: "Project not found."
+        '409':
+          description: "Settings revision changed."
   /projects/{projectId}/aithema/sessions:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}

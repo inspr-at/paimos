@@ -7672,6 +7672,8 @@
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestDeployTargetProducerSchemas","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/reportercontract","name":"TestEngineAdmissionPathsAreServerRelativeAndAuthenticated","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/reportercontract","name":"TestFix3AvailabilitySchemaEnums","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/reportercontract","name":"TestFix3ReadinessPackageComment","tier":"GATED-FULL"}
