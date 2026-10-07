@@ -52,6 +52,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	handle("POST /api/agent-accounts/{accountId}/quota-key", m.quotaKey)
 	handle("GET /api/agent-accounts", m.list)
 	handle("GET /api/agent-accounts/catalog", m.catalog)
+	handle("GET /api/agent-accounts/overview", m.overview)
 	handle("GET /api/agent-accounts/groups", m.groups)
 	handle("POST /api/agent-accounts/groups", m.groups)
 	handle("PATCH /api/agent-accounts/groups/{id}", m.group)

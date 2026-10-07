@@ -542,6 +542,10 @@
     ,
     {"kind":"go","package":"internal/accountprivacy","name":"TestReadinessRedactionDoesNotPretendMeasuredZero","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/accountprivacy","name":"TestRedactionForcesRoutableFalse","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/accountprivacy","name":"TestRedactionNormalizesRevokedOverview","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/activity","name":"TestAuthorsSayWhetherTheyHaveAPicture","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/activity","name":"TestCommentLifecycleAuthorizationIsolationAndConcurrency","tier":"ESSENTIAL"}
@@ -762,6 +766,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestOldManualWindowCapsOnTopOfReadings","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestOverviewValuesMaskingExplicitScopeAndTenantIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestPaceFormulas","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestPercentLimitSurvivesVendorResetAndRefresh","tier":"GATED-FULL"}
@@ -823,6 +829,8 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestReadinessRoutesAuthenticateAndBoundQuery","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestReadinessWaitSnapshotAndNewWaitReset","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRedactedOverviewHidesRoutableHeadroom","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRenameKeepsModelGrants","tier":"GATED-FULL"}
     ,
@@ -901,6 +909,10 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestUseAccountIDRetainsLabelAndOwnership","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestUseAccountPayloadHasNoPath","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestVendorStopAdviceRejectsUnenrolledDaemonSquatter","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestVendorStopAdviceUsesOtherRegistrarOnSameDaemon","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentactivity","name":"TestCurrentRevalidatesStoredActivity","tier":"ESSENTIAL"}
     ,
@@ -2050,6 +2062,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestComputerCompatibilityUsesItsReportedAgent","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestComputerReadinessProjectsActualConfirmationPin","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestConsentProofVersionUpgradeKeepsPairingKeyAndRejectsV1","tier":"GATED-FULL"}
@@ -2173,6 +2187,8 @@
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingLocksTenantBeforeAdvisory","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingProgressPublishesOneEventPerChange","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestPairingRejectsUnisolatedAndReusedHomesAcrossRequests","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestPairingRepairRetiresOnlyTheApproversOwnReplacedComputer","tier":"GATED-FULL"}
     ,

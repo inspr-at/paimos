@@ -310,6 +310,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/agent-accounts/{accountId}/check":                             "account.manage",
 	"PUT /api/agent-accounts/{accountId}/sharing":                            "account.manage",
 	"GET /api/agent-accounts":                                                "account.read",
+	"GET /api/agent-accounts/overview":                                       "account.read|account.overview.read",
 	"GET /api/agent-accounts/catalog":                                        "account.read",
 	"PUT /api/agent-accounts/{accountId}/model":                              "account.manage",
 	"PUT /api/agent-accounts/quota-pool":                                     "account.manage",

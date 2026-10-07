@@ -102,3 +102,72 @@ func TestFix2MixedShapesAndLegacyEnums(t *testing.T) {
 		t.Fatalf("legacy enum or quota boundary violated: %s", body)
 	}
 }
+
+// Risk: a later account route reintroduces quota headroom through routable
+// after the owner-sharing boundary has already decided the row is private.
+func TestRedactionForcesRoutableFalse(t *testing.T) {
+	id := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	raw := []byte(`{"account_id":"` + id + `","routable":true,"state":"available"}`)
+	body, err := Redact(raw, Policy{}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"routable":false`) || strings.Contains(string(body), `"routable":true`) {
+		t.Fatalf("redacted routable still discloses headroom: %s", body)
+	}
+	own, err := Redact(raw, Policy{id: true}, "", false)
+	if err != nil || !strings.Contains(string(own), `"routable":true`) {
+		t.Fatalf("shared account lost routable: %s %v", own, err)
+	}
+}
+
+// Risk: sharing revoked after a visible overview projection still discloses
+// quota headroom. The final boundary must use the constant redacted shape:
+// routable false, a state wait, and no routing details.
+func TestRedactionNormalizesRevokedOverview(t *testing.T) {
+	id := "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	shared := "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
+	raw := []byte(`{"accounts":[{"account_id":"` + id + `","routable":true,"routing":{"rank":1,"available_slots":3,"cap_percent":80,"resets_at":"2026-10-08T00:00:00Z"},"state":"available","details_redacted":false},{"account_id":"` + shared + `","routable":true,"routing":{"rank":2,"available_slots":1},"state":"available","details_redacted":false}]}`)
+	body, err := Redact(raw, Policy{shared: true}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var page struct {
+		Accounts []struct {
+			AccountID       string `json:"account_id"`
+			Routable        bool   `json:"routable"`
+			DetailsRedacted bool   `json:"details_redacted"`
+			Wait            *struct {
+				Code          string  `json:"code"`
+				Until         *string `json:"until"`
+				RunNowAllowed bool    `json:"run_now_allowed"`
+			} `json:"wait"`
+			Routing *struct {
+				AvailableSlots int `json:"available_slots"`
+			} `json:"routing"`
+		} `json:"accounts"`
+	}
+	if err = json.Unmarshal(body, &page); err != nil {
+		t.Fatal(err)
+	}
+	var denied, allowed bool
+	for _, row := range page.Accounts {
+		switch row.AccountID {
+		case id:
+			denied = true
+			if row.Routable || row.Wait == nil || row.Wait.Code != "state" || row.Wait.Until != nil || row.Wait.RunNowAllowed || row.Routing != nil || !row.DetailsRedacted || strings.Contains(string(body), `"available_slots":3`) || strings.Contains(string(body), "2026-10-08T00:00:00Z") {
+				t.Fatalf("revoked overview still discloses headroom: %s", body)
+			}
+		case shared:
+			allowed = true
+			if !row.Routable || row.Wait != nil || row.DetailsRedacted || row.Routing == nil || row.Routing.AvailableSlots != 1 {
+				t.Fatalf("shared overview was redacted: %s", body)
+			}
+		default:
+			t.Fatalf("unexpected overview row: %s", body)
+		}
+	}
+	if !denied || !allowed {
+		t.Fatalf("overview rows missing: %s", body)
+	}
+}
