@@ -13,7 +13,7 @@ const now = Date.parse('2026-09-29T06:00:00Z')
 const longUrl = 'https://ci.example.test/inspr-at/paimos/actions/runs/18446744073709551615/jobs/9223372036854775807/logs?attempt=3&filter=playwright-session-chat-overflow-check'
 const longId = 'sha256:4f9c2a7be1d04c55a3a6c7f1d2e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6'
 
-async function setup(page: Page, options: { admin?: boolean; theme?: 'light' | 'dark'; count?: number; storage?: Record<string, string>; readMark?: { event: number; id: string }; failReadMarks?: number } = {}) {
+async function setup(page: Page, options: { admin?: boolean; theme?: 'light' | 'dark'; count?: number; storage?: Record<string, string>; readMark?: { event: number; id: string }; failReadMarks?: number; pendingForbidden?: boolean } = {}) {
   await page.clock.install({ time: now })
   const work = fixtures(); work.preferences.theme = { choice: options.theme ?? 'light' }
   await mockWork(page, work, { admin: options.admin ?? true })
@@ -50,6 +50,7 @@ async function setup(page: Page, options: { admin?: boolean; theme?: 'light' | '
   const calls = await mockAgents(page, data, {
     ...(options.readMark ? { readMark: { sessionId: worker.id, ...options.readMark } } : {}),
     ...(options.failReadMarks ? { failReadMarks: options.failReadMarks } : {}),
+    ...(options.pendingForbidden ? { pendingForbidden: true } : {}),
   })
   // AEON-280: one batched, sender-only status read replaces the per-message receipt.
   const receipts: string[] = []
@@ -637,3 +638,40 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     } finally { release() }
   })
 }
+
+test('a held-request 403 keeps the session composer (AEON-942)', async ({ page }) => {
+  const { worker, calls } = await setup(page, { admin: false, count: 5, storage: { 'aeon.session-tab': 'messages' }, pendingForbidden: true })
+  await page.setViewportSize({ width: 1280, height: 900 })
+  await page.goto(`/agents/${worker.id}`)
+  const panel = panelOf(page)
+  const field = panel.getByRole('textbox', { name: 'Message to release-lead' })
+  const send = panel.getByRole('button', { name: 'Send', exact: true })
+  const denied = panel.getByText('Reading this session requires access to its project and permission to read agent sessions.')
+  const unread = panel.getByText('Messages could not be loaded right now. Close and reopen the session to try again.')
+  const pendingReads = () => calls.filter(call => call.method === 'GET' && call.path.endsWith('/messages') && call.query?.get('pending') === 'true').length
+  const threadReads = () => calls.filter(call => call.method === 'GET' && call.path.endsWith('/messages') && call.query?.get('session') === worker.id).length
+  await expect(field).toBeVisible()
+  await expect(panel.locator('.msg')).toHaveCount(5)
+  await expect(denied).toHaveCount(0)
+  await expect.poll(pendingReads).toBeGreaterThan(0)
+  await expect.poll(threadReads).toBeGreaterThan(0)
+  // The agents poll re-reads held requests once the 30s hold expires. That 403 is not the thread.
+  const pendingBeforePoll = pendingReads()
+  await page.clock.runFor(40_000)
+  await expect.poll(pendingReads).toBeGreaterThan(pendingBeforePoll)
+  await expect(field).toBeVisible()
+  await expect(denied).toHaveCount(0)
+  await expect(unread).toHaveCount(0)
+  await expect(panel.locator('.msg')).toHaveCount(5)
+  // Send re-reads held requests at once. The composer stays and the message lands.
+  await field.fill('Still here')
+  const pendingBeforeSend = pendingReads()
+  await send.click()
+  await page.clock.runFor(1_000)
+  await expect.poll(pendingReads).toBeGreaterThan(pendingBeforeSend)
+  await expect(field).toBeVisible()
+  await expect(field).toHaveValue('')
+  await expect(denied).toHaveCount(0)
+  await expect(unread).toHaveCount(0)
+  await expect(panel.getByText('Still here', { exact: true })).toBeVisible()
+})

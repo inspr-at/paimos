@@ -740,6 +740,8 @@
     ,
     "browser:tests/service-tier.spec.ts:390: phone Change tier menu opens and restores its actual trigger"
     ,
+    "browser:tests/session-chat.spec.ts:a held-request 403 keeps the session composer (AEON-942)"
+    ,
     "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 1024"
     ,
     "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 1440"
@@ -10373,6 +10375,8 @@
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"Messages is its own tab with an unread badge; seeing the posts clears it and the tab is remembered","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a failed read marker is sent again on the next flush, without an error","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a held-request 403 keeps the session composer (AEON-942)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a late read marker never moves a reader who scrolled up","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

@@ -966,7 +966,7 @@
         ,
         {"file":"tests/session-chat-cli.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/session-chat.spec.ts","listedTests":34,"weightSeconds":75.463414,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/session-chat.spec.ts","listedTests":35,"weightSeconds":77.682926,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/session-ended.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}
         ,
