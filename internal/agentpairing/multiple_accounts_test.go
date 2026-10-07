@@ -57,6 +57,14 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	schedule := capacity.DefaultSchedule()
+	schedule.Reserve = capacity.ReserveOff
+	for i := range schedule.Week {
+		schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	for _, e := range v.Enrollments {
+		f.call("PUT", "/api/agent-accounts/capacity/schedule", map[string]any{"scope": "account", "account_id": e.AccountID, "schedule": schedule}, true, "", 204)
+	}
 	for _, harness := range []string{"claude", "codex"} {
 		var next agentaccounts.CapacityNext
 		decodeResult(t, f.call("GET", "/api/agent-accounts/capacity/next?harness="+harness+"&daemon_id="+*v.DaemonID, nil, false, key, 200), &next)
@@ -99,8 +107,8 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 			t.Fatalf("overview leaked %s", forbidden)
 		}
 	}
-	// Exercise the terminal vendor-stop lifecycle through the real auth/mux,
-	// including reservation and claim on an account with another registrar.
+	// Prove paired advice includes another registrar's account before exercising
+	// the terminal vendor-stop reservation and claim through the real auth/mux.
 	codex := []agentpairing.Enrollment{}
 	for _, e := range v.Enrollments {
 		if e.Harness == "codex" {
@@ -120,14 +128,6 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
-	}
-	schedule := capacity.DefaultSchedule()
-	schedule.Reserve = capacity.ReserveOff
-	for i := range schedule.Week {
-		schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
-	}
-	for _, e := range codex[:2] {
-		f.call("PUT", "/api/agent-accounts/capacity/schedule", map[string]any{"scope": "account", "account_id": e.AccountID, "schedule": schedule}, true, "", 204)
 	}
 	var next agentaccounts.CapacityNext
 	decodeResult(t, f.call("GET", "/api/agent-accounts/capacity/next?harness=codex", nil, false, key, 200), &next)
