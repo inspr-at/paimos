@@ -120,8 +120,8 @@ func TestOverviewValuesMaskingExplicitScopeAndTenantIsolation(t *testing.T) {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'account.overview.read')`, person.TenantID, role); err != nil {
 			return err
 		}
-		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) VALUES($1,$2,$3,'workspace')`, person.TenantID, runner.ID, role)
-		return err
+		var bound string
+		return tx.QueryRow(t.Context(), `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace' RETURNING principal_id::text`, runner.ID, role).Scan(&bound)
 	}); err != nil {
 		t.Fatal(err)
 	}
