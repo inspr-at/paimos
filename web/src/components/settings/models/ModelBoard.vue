@@ -14,7 +14,7 @@ import { useProjects } from '../../../stores/projects'
 import { useModelsBoard } from '../../../lib/useModelsBoard'
 import { rememberBoardPosition } from '../../../lib/modelsBoardNavigation'
 import { boardText, canMove, lineName, localizeColumn, stepTarget, zonesFor, type BoardCard, type BoardColumn as Column, type BoardContext, type BoardZone, type ModelBoardDocument } from '../../../lib/modelsBoard'
-const props = withDefaults(defineProps<{ full?: boolean; german?: boolean; context?: BoardContext; projects?: { id: string; name: string }[] }>(), { full: false, german: false })
+const props = withDefaults(defineProps<{ full?: boolean; german?: boolean; context?: BoardContext; projects?: { id: string; name: string }[]; controller?: ReturnType<typeof useModelsBoard> }>(), { full: false, german: false })
 const emit = defineEmits<{ change: [board: ModelBoardDocument]; context: [context: BoardContext] }>()
 const router = useRouter(), route = useRoute(), session = useSession(), projectStore = useProjects()
 const root = ref<HTMLElement>(), german = computed(() => props.german)
@@ -27,10 +27,10 @@ function fromURL(): BoardContext {
 const context = ref<BoardContext>(props.context ?? fromURL())
 watch(() => props.context, value => { if (value) context.value = { ...value } }, { deep: true })
 watch(() => route.query, () => { if (!props.context) context.value = fromURL() })
-const editor = useModelsBoard(context, german)
+const editor = props.controller ?? useModelsBoard(context, german)
 const { document: board, busy, loading, error, announcement, editable } = editor
 const discovered = ref<BoardCard[]>([])
-watch(board, value => { if (value) { const known = new Map(discovered.value.map(card => [card.line, card])); for (const card of value.tray) known.set(card.line, card); discovered.value = [...known.values()] } }, { flush: 'sync' })
+watch(board, value => { if (value) { const known = new Map(discovered.value.map(card => [card.line, card])); for (const card of value.tray) known.set(card.line, card); discovered.value = [...known.values()] } }, { flush: 'sync', immediate: true })
 const newCards = computed(() => discovered.value.filter(card => !board.value?.profile.dismissed_lines.includes(card.line)))
 const columns = computed(() => board.value?.columns.filter(column => !column.hidden).map(column => localizeColumn(column, german.value)) ?? [])
 const projects = computed(() => props.projects ?? projectStore.projects.filter(project => !project.archived).map(project => ({ id: project.id, name: project.title })))

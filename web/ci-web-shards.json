@@ -520,7 +520,9 @@
         ,
         {"file":"tests/model-refresh.spec.ts","listedTests":1,"tierTiming":{"caseSeconds":{"max":4.248,"median":4.248,"min":4.248},"seconds":7.561739,"selectedTests":1},"weightSeconds":3.5,"weightSource":"e2e-4"}
         ,
-        {"file":"tests/policy-editors.spec.ts","listedTests":64,"weightSeconds":114.485,"weightSource":"local-chromium-single-worker-AEON-633-fix6"}
+        {"file":"tests/models-board.spec.ts","listedTests":9,"weightSeconds":15,"weightSource":"local-single-worker-AEON-879-11.2s-plus-margin"}
+        ,
+        {"file":"tests/policy-editors.spec.ts","listedTests":32,"weightSeconds":73,"weightSource":"local-single-worker-AEON-879-60.8s-plus-margin"}
       ]
     }
     ,
@@ -614,7 +616,7 @@
         ,
         {"file":"tests/key-trim.spec.ts","listedTests":7,"tierTiming":{"caseSeconds":{"max":3.607,"median":2.179,"min":1.115},"seconds":17.02266,"selectedTests":7},"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/model-prefs.spec.ts","listedTests":42,"tierTiming":{"caseSeconds":{"max":25.747,"median":3.2395,"min":2.114},"seconds":200.889631,"selectedTests":42},"weightSeconds":93.219512,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/model-prefs.spec.ts","listedTests":3,"weightSeconds":29,"weightSource":"local-single-worker-AEON-879-23.8s-plus-margin"}
       ]
     }
     ,
