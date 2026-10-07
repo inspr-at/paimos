@@ -214,10 +214,10 @@ test('sign-in and offline pools pause with the one fixing step', () => {
   assert.deepEqual(todayCell(quiet.rows[0], accountPlan(quiet.rows[0], now)), { kind: 'quiet', text: 'reading unavailable' })
   assert.equal(sourceLine(quiet.rows[0], now), 'Codex reported · 2 min ago'.replace('Codex', 'Grok'))
   const [none] = pools([acct('p', 'Pi on hsb1', 'pi')], [])
-  assert.equal(plainText(poolSentence(none, now, TZ)), "Pi doesn't show its limit · one run at a time by day")
+  assert.equal(plainText(poolSentence(none, now, TZ)), 'Usage unknown · reserve not enforceable')
   assert.equal(sourceLine(none.rows[0], now), '')
   const [next] = pools([acct('p', 'Pi on hsb1', 'pi')], [{ ...cap('p', []), awaiting_reading: true }])
-  assert.equal(plainText(poolSentence(next, now, TZ)), "Pi doesn't show its limit · one run at a time by day")
+  assert.equal(plainText(poolSentence(next, now, TZ)), 'Usage unknown · reserve not enforceable')
   assert.equal(sourceLine(next.rows[0], now), '')
 })
 
@@ -422,7 +422,7 @@ test('AEON-623: unsupported quota readers say so before learning or first work',
   for (const harness of ['cursor', 'grok', 'pi']) {
     for (const awaiting_reading of [false, true]) {
       const [pool] = pools([acct(harness, harness, harness)], [{ ...cap(harness, []), awaiting_reading }])
-      assert.match(plainText(poolSentence(pool, now, TZ)), /doesn't show its limit · one run at a time by day/)
+      assert.equal(plainText(poolSentence(pool, now, TZ)), 'Usage unknown · reserve not enforceable')
       assert.doesNotMatch(plainText(poolSentence(pool, now, TZ)), /first run|next run|No reading yet/)
     }
   }

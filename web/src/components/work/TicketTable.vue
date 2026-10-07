@@ -73,7 +73,7 @@ const props = defineProps<{
   // Phone selection with nothing chosen yet: round checks show before the first tap.
   picking?: boolean
   canAssignRelease?: boolean
-  // Native journey membership for the visible tickets. Imported fields.release is not this.
+  // Native release membership for the visible tickets. Imported fields.release is not this.
   nativeReleases?: Map<string, NativeReleaseView>
   // Live updates (AEON-326): rows waiting for Show carry a label ("Closed",
   // "Deleted", ...) and stay dimmed; rows someone else just changed tint briefly.

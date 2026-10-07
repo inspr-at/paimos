@@ -3,8 +3,8 @@
 import { onBeforeUnmount, ref, watch } from 'vue'
 import { APIError } from '../../lib/api'
 import { can } from '../../lib/authz'
-import { getIntake, type IntakeDraft } from '../../lib/journey'
-import ExtensionData from '../journey/ExtensionData.vue'
+import { getIntake, type IntakeDraft } from '../../lib/releaseData'
+import ExtensionData from './ExtensionData.vue'
 
 const props = defineProps<{ projectId: string; nodeId: string }>()
 const drafts = ref<IntakeDraft[]>([])

@@ -52,7 +52,7 @@ func TestLeadSettingsProductionMiddleware(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	session := func(name, role string, projectOnly bool) string {
+	session := func(name, role string, projectOnly bool) (string, tenant.Principal) {
 		t.Helper()
 		id, identity := signinPerson(t, tid, name, name, name+"@example.com", name+"@example.com", "guest")
 		if projectOnly {
@@ -70,14 +70,17 @@ func TestLeadSettingsProductionMiddleware(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		return token
+		return token, tenant.Principal{TenantID: tid, ID: id, Kind: tenant.Person}
 	}
-	owner := session("owner", "admin", false)
-	manager := session("manager", "admin", true)
-	member := session("member", "member", false)
-	key, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tid}, "lead-reader", "", []string{"nodes.read"}, nil)
+	owner, creator := session("owner", "admin", false)
+	manager, _ := session("manager", "admin", true)
+	member, _ := session("member", "member", false)
+	key, err := m.createAgentKey(t.Context(), creator, "lead-reader", "", []string{"nodes.read"}, nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if key.CreatedByPrincipalID == nil || *key.CreatedByPrincipalID != creator.ID {
+		t.Fatal("lead reader key must retain its person owner")
 	}
 	request := func(t *testing.T, method, path, body, token string, agent bool, want int) []byte {
 		t.Helper()

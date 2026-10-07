@@ -28,8 +28,8 @@ for (const theme of ['light', 'dark'] as const) {
       for (const value of ['AEON-221', '/Code/aeon-sc1', 'sc1.state-colours', 'abc1234', 'Integrate session states']) await expect(work).toContainText(value)
       await page.getByRole('button', { name: 'Close session details' }).click()
     }
-    // The live line carries each state's mark (AEON-299 replaced the tiles).
-    for (const state of ['working', 'waiting', 'throttled', 'problem']) await expect(page.locator(`.live-line [data-mark="${state}"]`).first()).toBeVisible()
+    // The head counts carry each state's mark (AEON-780 replaced the live line).
+    for (const state of ['working', 'waiting', 'throttled', 'problem']) await expect(page.locator(`.page-head .head-counts [data-mark="${state}"]`).first()).toBeVisible()
     await page.goto('/')
     for (const layout of ['Cards', 'List']) {
       await page.getByRole('radio', { name: `${layout} view`, exact: true }).click()
@@ -80,7 +80,7 @@ test('saved theme palette/opacity and personal heartbeat thresholds persist acro
   const palette = (name: string) => page.getByRole('radiogroup', { name: 'State colours' }).getByRole('radio', { name, exact: true })
   await palette('Deutan').click()
   const preview = page.locator('#agents .light [data-preview-state="working"] .live-bot')
-  expect(await preview.evaluate(el => getComputedStyle(el).getPropertyValue('--agent-state-color').trim())).toBe('#1767c4')
+  expect(await preview.evaluate(el => getComputedStyle(el.querySelector('.agent-state-mark')!).color)).toBe('rgb(0, 117, 204)')
   const opacity = page.getByRole('slider', { name: 'Opacity', exact: true })
   await opacity.press('Home')
   for (let step = 0; step < 30; step++) await opacity.press('ArrowRight')
@@ -104,12 +104,12 @@ test('saved theme palette/opacity and personal heartbeat thresholds persist acro
   await expect(page.locator('[data-project-id="p-sc1-unresponsive"] .live-bot')).toHaveAttribute('data-state', 'awaiting')
   for (const view of ['Cards', 'List']) {
     await page.getByRole('radio', { name: `${view} view`, exact: true }).click()
-    await expect(page.locator('[data-project-id="p-sc1-working"] .live-bot')).toHaveCSS('--agent-state-color', '#1767c4')
+    await expect(page.locator('[data-project-id="p-sc1-working"] .agent-state-mark')).toHaveCSS('color', 'rgb(0, 117, 204)')
   }
   await page.goto('/settings/theme#agents')
   await page.getByRole('switch', { name: 'Dim inactive' }).uncheck()
-  await palette('Monochrome').click()
-  const colours = await page.locator('#agents .light .states .live-bot').evaluateAll(bots => bots.slice(0, 4).map(bot => getComputedStyle(bot).getPropertyValue('--agent-state-color').trim()))
+  await palette('One colour').click()
+  const colours = await page.locator('#agents .light .states .live-bot').evaluateAll(bots => bots.slice(0, 4).map(bot => getComputedStyle(bot.querySelector('.agent-state-mark')!).color))
   expect(new Set(colours).size).toBe(1)
   await saveAgentTheme(page)
   expect(appearance.saved.values.agents).toMatchObject({ palette: 'monochrome', dim_inactive: false })
@@ -127,8 +127,8 @@ test('a migrated colour-blind choice uses Deutan while legacy appearance and hea
   await page.goto('/settings/theme#agents')
   const palettes = page.getByRole('radiogroup', { name: 'State colours' })
   await expect(palettes.getByRole('radio', { name: 'Deutan', exact: true })).toBeChecked()
-  expect(await palettes.getByRole('radio').allTextContents()).toEqual(['Standard', 'Protan', 'Deutan', 'Tritan', 'Monochrome'])
-  await expect(page.locator('#agents .light [data-preview-state="problem"] .live-bot')).toHaveCSS('--agent-state-color', '#7d2537')
+  expect(await palettes.getByRole('radio').allTextContents()).toEqual(['Standard', 'Focus', 'Errors only', 'One colour', 'Deutan', 'Protan', 'Tritan'])
+  await expect(page.locator('#agents .light [data-preview-state="problem"] .agent-state-mark')).toHaveCSS('color', 'rgb(177, 61, 9)')
   for (const state of ['working', 'waiting', 'problem', 'idle']) {
     await expect(page.locator(`#agents .light [data-preview-state="${state}"] .agent-state-mark`)).toHaveAttribute('data-mark', state)
   }
@@ -173,7 +173,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     await page.goto('/agents')
     await expect(page.locator('.row[data-state="awaiting"] .agent-state-label')).toHaveText('Awaiting heartbeat')
     await expect(page.locator('.group-row').filter({ hasText: 'Needs attention' })).toBeVisible()
-    await expect(page.getByRole('group', { name: 'Live sessions' })).toContainText('live')
+    await expect(page.getByRole('group', { name: 'Show sessions by state' })).toContainText('working')
     // Closing a session retains the page keyboard cursor and returns to the list.
     await page.locator('[data-state="working"] .agent-link').click()
     await page.getByRole('button', { name: 'Close session details' }).click()
@@ -183,17 +183,17 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390])
     expect(Math.abs(main.width - layout.width)).toBeLessThan(2)
     // Accounts sit above the sessions now (AEON-299); account management is in Settings.
     const sessions = (await page.locator('.sessions').boundingBox())!
-    const accounts = (await page.locator('.ac').boundingBox())!
+    const accounts = (await page.locator('.acc-section').boundingBox())!
     expect(accounts.y + accounts.height).toBeLessThanOrEqual(sessions.y)
     await page.locator('h1').scrollIntoViewIfNeeded()
     await page.mouse.move(0, 0)
-    // State counts in the live line share one neutral surface; the colour is in the mark.
-    const counts = page.locator('.live-line .state-count')
+    // Head counts share one neutral surface and the colour is in the mark; only a problem or a request is tinted.
+    const counts = page.locator('.page-head .head-counts .count:not(.hot):not(.ask)')
     const surfaces = await counts.evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor))
     expect(new Set(surfaces).size).toBe(1)
     const rows = page.locator('.row[data-state]:not(.active):not(.selected)')
     expect(new Set(await rows.evaluateAll(elements => elements.map(el => getComputedStyle(el).backgroundColor))).size).toBe(1)
-    await expect(page.locator('.live-line [data-mark="problem"]').first()).toBeVisible()
+    await expect(page.locator('.page-head .head-counts [data-mark="problem"]').first()).toBeVisible()
     await page.screenshot({ path: testInfo.outputPath(`sc2-${theme}-${width}-agents.png`), fullPage: true })
     const problem = page.locator('.row[data-state="problem"]').first()
     await problem.locator('.agent-link').click()

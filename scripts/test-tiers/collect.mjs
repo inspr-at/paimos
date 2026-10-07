@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { resolve, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
 import { formatManifest } from './manifests.mjs'
 import { goFailures } from './failures.mjs'
 export const root = fileURLToPath(new URL('../../', import.meta.url))
@@ -19,7 +20,7 @@ export function command(bin, args, { cwd = root, env = process.env, timeout = 18
       } catch { /* Interrupted JSON falls back to the captured output tail. */ }
     }
     const diagnostic = [output, result.stderr].map(text => text?.slice(-2000)).filter(Boolean).join('\n')
-    throw new Error(`${bin} ${args.slice(0,4).join(' ')} failed (${result.status ?? result.error?.code}); ${diagnostic}`)
+    throw Object.assign(new Error(`${bin} ${args.slice(0,4).join(' ')} failed (${result.status ?? result.error?.code}); ${diagnostic}`), { stdout: result.stdout ?? '' })
   }
   return result.stdout
 }
@@ -49,7 +50,50 @@ export function flattenBrowser(report, config) {
   visit(report.suites)
   return rows
 }
-export function collectWeb() {
+// Web collection launches Vitest, one Node process per native test file and
+// two Playwright lists; a planner process may ask for the same inventory
+// several times (AEON-724 fix 6: the aeon-681 planning regression exceeded the
+// static self-check budget). The inventory is reused while the stamp of the web
+// tree is unchanged, so an edited test, source or config file re-collects.
+export const collections = { web: 0 }
+const webMemo = {}
+// Top-level web files plus the trees that registration code can import.
+export const webStampEntries = ['.', 'src', 'tests']
+export function treeStamp(base, entries) {
+  const parts = []
+  const visit = (directory, recurse) => {
+    for (const entry of readdirSync(directory, { withFileTypes: true })) {
+      if (entry.name === 'node_modules') continue
+      const path = resolve(directory, entry.name)
+      if (entry.isDirectory()) { if (recurse) visit(path, true) }
+      else if (entry.isFile()) {
+        const stat = statSync(path)
+        parts.push(`${relative(base, path)}\t${stat.size}\t${stat.mtimeMs}`)
+      }
+    }
+  }
+  for (const entry of entries) {
+    const path = resolve(base, entry)
+    let stat
+    try { stat = statSync(path) } catch { parts.push(`${entry}\tabsent`); continue }
+    if (stat.isDirectory()) visit(path, entry !== '.')
+    else parts.push(`${relative(base, path)}\t${stat.size}\t${stat.mtimeMs}`)
+  }
+  return createHash('sha256').update(parts.sort().join('\n')).digest('hex')
+}
+// Returns a private copy of memo.value, recomputing when the stamp changed or
+// fresh is requested. Callers can mutate the copy without poisoning the memo.
+export function reuse(memo, stamp, compute, { fresh = false } = {}) {
+  if (fresh || memo.value === undefined || memo.stamp !== stamp) {
+    memo.value = compute()
+    memo.stamp = stamp
+  }
+  return structuredClone(memo.value)
+}
+export function collectWeb({ fresh = false } = {}) {
+  return reuse(webMemo, treeStamp(web, webStampEntries), () => { collections.web += 1; return collectWebNow() }, { fresh })
+}
+function collectWebNow() {
   mkdirSync(evidence,{recursive:true})
   // Native Vitest collection expands it.each. Static parsing would miss wire
   // vectors and parameter loops, so explicitly disable it.

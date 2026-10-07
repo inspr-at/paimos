@@ -29,6 +29,8 @@ import { onAccessChange, permissionsRevoked } from '../../lib/authz'
 import { appendPendingChanges, getPendingChanges, pendingLine, type PendingChanges } from '../../lib/releasePending'
 import { plainSubject, shortCommit } from '../../lib/releases'
 import { TICKET_PEEK } from '../../lib/ticketPeek'
+import { atRisk, planned, releasesFooter } from '../../lib/footerProviders'
+import { useFooterSummary } from '../../lib/footerSummary'
 
 // The release history: a full-screen sheet over the page. Releases by day on the
 // left, the selected one (or a comparison of two) on the right; on phones the
@@ -190,6 +192,21 @@ const behindLine = computed(() => {
   return `${Math.max(0, behind)} ${behind === 1 ? 'release' : 'releases'} behind live · back to ${liveName}`
 })
 const optionId = (v: string) => `release-${v.replace(/\./g, '-')}`
+
+// While the sheet is open it speaks in the footer: releases on their way (reserved or
+// tagged, not yet published) and the one whose checks failed. Hidden reservations stay uncounted (AEON-785).
+// The page footer sits under this full-screen dialog, so the same summary is pinned inside the sheet.
+const releaseSummary = computed(() => {
+  if (!history.value && store.error) return null
+  const coming = eligible.value.filter(planned)
+  return releasesFooter({
+    loaded: !!history.value, planned: coming.length, atRisk: coming.filter(atRisk).length,
+    // Choose the row. Publishing the address alone is treated as an echo and leaves the cursor where it was.
+    act: { risk: () => { const version = eligible.value.filter(planned).filter(atRisk)[0]?.version; if (version) choose(version) } },
+  })
+})
+useFooterSummary(() => releaseSummary.value)
+function openRisk() { releaseSummary.value?.action?.() }
 
 // ---------- Selection ----------
 // `releases=all` (the header) stays on the list with nothing selected. `releases=current`
@@ -677,9 +694,19 @@ const KINDS = [
         </section>
       </div>
 
-      <footer v-if="phone" class="mobile-footer" :inert="covered">
-        <button type="button" :aria-pressed="!showDetail" @click="showDetail = false"><AppIcon name="chevron-left" :size="13" />All releases</button>
-        <button type="button" :aria-pressed="showDetail" :disabled="!selected" @click="showDetail = true">Release notes<AppIcon name="chevron-right" :size="13" /></button>
+      <footer class="sheet-foot" :inert="covered">
+        <p v-if="!releaseSummary" class="sheet-sum" aria-hidden="true"></p>
+        <p v-else-if="releaseSummary.loading" class="sheet-sum" role="status" aria-label="Loading"><span class="sum-dot" aria-hidden="true" /><span class="sum-skel skeleton" aria-hidden="true" /></p>
+        <button v-else-if="releaseSummary.action" type="button" class="sheet-sum" :data-tone="releaseSummary.tone" :aria-label="releaseSummary.aria" @click="openRisk">
+          <span class="sum-dot" aria-hidden="true" /><span><template v-for="(part, index) in releaseSummary.full" :key="index"><b v-if="part.as === 'count'">{{ part.text }}</b><span v-else-if="part.as === 'exception'" class="x">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></span>
+        </button>
+        <p v-else class="sheet-sum" role="status" :data-tone="releaseSummary.tone" :aria-label="releaseSummary.aria">
+          <span class="sum-dot" aria-hidden="true" /><span><template v-for="(part, index) in releaseSummary.full" :key="index"><b v-if="part.as === 'count'">{{ part.text }}</b><span v-else-if="part.as === 'exception'" class="x">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></span>
+        </p>
+        <div v-if="phone" class="mobile-footer">
+          <button type="button" :aria-pressed="!showDetail" @click="showDetail = false"><AppIcon name="chevron-left" :size="13" />All releases</button>
+          <button type="button" :aria-pressed="showDetail" :disabled="!selected" @click="showDetail = true">Release notes<AppIcon name="chevron-right" :size="13" /></button>
+        </div>
       </footer>
 
       <div v-if="help" class="help-scrim" @click.self="help = false">
@@ -707,7 +734,20 @@ const KINDS = [
 :root[data-theme="dark"] .releases { --aurora-1: color-mix(in srgb, var(--primary-tint) 20%, transparent); --aurora-2: color-mix(in srgb, var(--primary-tint) 8%, transparent); --aurora-3: color-mix(in srgb, var(--secondary-tint) 12%, transparent); }
 @media(prefers-color-scheme:dark) { :root:not([data-theme="light"]) .releases { --aurora-1: color-mix(in srgb, var(--primary-tint) 20%, transparent); --aurora-2: color-mix(in srgb, var(--primary-tint) 8%, transparent); --aurora-3: color-mix(in srgb, var(--secondary-tint) 12%, transparent); } }
 /* Toolbar labels may wrap; their intrinsic width must never enlarge the sheet. */
-.shell { position:relative; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr); height:100%; max-width:1640px; margin:0 auto; padding:0 var(--gutter); }
+.shell { position:relative; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; height:100%; max-width:1640px; margin:0 auto; padding:0 var(--gutter); }
+.sheet-foot { background: var(--canvas); }
+.sheet-sum { display: flex; align-items: center; gap: 8px; box-sizing: border-box; width: 100%; min-height: 44px; margin: 0; padding: 0 2px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--ink-2); font: 400 13px/1.3 var(--font); font-variant-numeric: tabular-nums; text-align: left; --tone: var(--ok); }
+button.sheet-sum { cursor: pointer; }
+.sheet-sum b { color: var(--ink); font-weight: 650; }
+.sheet-sum .x { color: var(--tone-ink, var(--ink)); font-weight: 650; }
+.sheet-sum[data-tone="problem"] { --tone: var(--agent-problem); --tone-ink: var(--agent-problem); }
+.sheet-sum[data-tone="attention"] { --tone: var(--gold); --tone-ink: var(--warn-ink); }
+.sheet-sum[data-tone="deliberate"] { --tone: var(--teal); --tone-ink: var(--teal-ink); }
+.sheet-sum[data-tone="idle"] { --tone: var(--st-backlog); }
+.sheet-sum .sum-dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--tone); }
+.sheet-sum .sum-skel { display: inline-block; width: 150px; height: 8px; border-radius: 4px; }
+.sheet-sum:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+@media (hover: hover) { button.sheet-sum:hover { color: var(--ink); } }
 .head { display:grid; min-width:0; gap:18px; padding:18px 0 20px; }
 .title-row { display:flex; flex-wrap:wrap; align-items:flex-start; gap:12px; min-width:0; }
 .mark-backing { display:grid; place-items:center; flex:none; width:52px; height:52px; border-radius:15px; background:var(--glass); box-shadow:0 0 0 1px var(--glass-rim),0 6px 16px -10px var(--line-2); }

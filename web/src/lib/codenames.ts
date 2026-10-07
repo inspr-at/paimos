@@ -6,7 +6,7 @@ import type { ToastRelease } from './toast.ts'
 // codename; the calendar version ("26·09·30 11:53") is revealed on hover and
 // numbers stay in the release notes. The names reach the page with the release
 // history and /api/version; this map lets any surface that only has a version
-// (a journey release, a settings line) name it.
+// (a release control, a settings line) name it.
 const names = shallowReactive(new Map<string, string>())
 
 const canonical = (version: string) => version.replace(/^v/, '')

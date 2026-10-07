@@ -68,6 +68,8 @@ const fullTicket = computed(() => typeof route.params.ticketKey === 'string' && 
 // Knowledge: Projects / PHAROS Pharos / Knowledge / deploy-flow, and Projects / Knowledge across projects.
 const projectKnowledge = computed(() => !!projectKey.value && route.path.includes('/knowledge'))
 const knowledgeSlug = computed(() => projectKnowledge.value && typeof route.params.slug === 'string' ? route.params.slug : '')
+const allTickets = computed(() => route.path === '/tickets')
+const ticketScope = computed(() => typeof route.query.project_id === 'string' ? projects.byId(route.query.project_id) : undefined)
 const allKnowledge = computed(() => route.path === '/knowledge')
 const pageTitle = computed(() => !activePlace.value && !route.path.startsWith('/settings') && route.path !== '/signin' ? String(route.meta.title ?? '') : '')
 // The three places, in order of use; the active one is where this page lives.
@@ -99,7 +101,7 @@ function typing(target: EventTarget | null) {
   return target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
 // Pages with their own list search keep '/'; everywhere else it opens the palette.
-const pageOwnsSlash = computed(() => route.path === '/' || route.path === '/business/customers' || route.path === '/business/quotes' || route.path === '/knowledge' || (!!projectKey.value && route.query.view !== 'full' && !knowledgeSlug.value))
+const pageOwnsSlash = computed(() => route.path === '/' || route.path === '/business/customers' || route.path === '/business/quotes' || route.path === '/knowledge' || route.path === '/tickets' || (!!projectKey.value && route.query.view !== 'full' && !knowledgeSlug.value))
 function shortcut(event: KeyboardEvent) {
   if (!globalSearch.value) return
   const isK = event.key.toLowerCase() === 'k' || event.code === 'KeyK'
@@ -259,7 +261,7 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
         <span v-if="place.id === 'agents' && agents.needsCount" class="needs-badge" aria-hidden="true">{{ agents.needsCount > 99 ? '99+' : agents.needsCount }}</span>
       </RouterLink>
     </nav>
-    <nav v-if="session.identity && !fatal && navReady && (projectKey || businessCrumbs.length || settingsSection || pageTitle || allKnowledge)" class="crumbs" :class="{ lead: !activePlace }" aria-label="Breadcrumb">
+    <nav v-if="session.identity && !fatal && navReady && (projectKey || businessCrumbs.length || settingsSection || pageTitle || allKnowledge || allTickets)" class="crumbs" :class="{ lead: !activePlace }" aria-label="Breadcrumb">
       <template v-if="projectKey">
         <span class="sep" aria-hidden="true">/</span>
         <button v-if="headerTickets" type="button" class="phone-header-fold" :aria-expanded="headerDensity !== 'collapsed'" aria-controls="project-header-fold"
@@ -284,6 +286,10 @@ onBeforeUnmount(() => { resized.disconnect(); crumbsChanged.disconnect(); narrow
             <span class="crumb current mono-crumb slug-crumb" aria-current="page" :data-tip="knowledgeSlug.length > 28 ? knowledgeSlug : undefined">{{ knowledgeSlug }}</span>
           </template>
         </template>
+      </template>
+      <template v-else-if="allTickets">
+        <span class="sep" aria-hidden="true">/</span>
+        <RouterLink class="crumb current" :to="{ path: '/tickets', query: { view: 'needs-attention' } }" aria-current="page">{{ ticketScope?.routeKey ?? 'All projects' }}</RouterLink>
       </template>
       <template v-else-if="allKnowledge">
         <span class="sep" aria-hidden="true">/</span>

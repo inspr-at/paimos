@@ -2,18 +2,19 @@
 <script lang="ts">
 // One inline SVG set: 16×16 grid, stroke 1.8, round caps and joins, currentColor.
 export type IconName =
+  | 'flag' | 'square'
   | 'queue' | 'queue-add' | 'queue-on' | 'queue-off' | 'to-top' | 'repeat'
   | 'sun' | 'moon' | 'user' | 'chevron' | 'chevron-right' | 'chevron-left' | 'chevron-up' | 'arrow' | 'arrow-up' | 'arrow-down'
   | 'logout' | 'tree' | 'compass' | 'search' | 'list' | 'plus' | 'close' | 'edit' | 'copy' | 'external' | 'filter' | 'check'
   | 'rows-comfortable' | 'rows-compact' | 'keyboard' | 'epic' | 'ticket' | 'task' | 'alert' | 'refresh' | 'sliders' | 'enter'
   | 'inbox' | 'folder' | 'layers' | 'archive' | 'clock' | 'expand' | 'collapse' | 'more' | 'link' | 'trash' | 'agent' | 'outline' | 'expand-all' | 'collapse-all' | 'arrow-left' | 'eye' | 'eye-off' | 'monitor' | 'key'
-  | 'pause' | 'play' | 'stop' | 'shield' | 'send' | 'bolt' | 'gauge' | 'interrupt' | 'halt'
+  | 'pause' | 'play' | 'winddown' | 'stop' | 'shield' | 'send' | 'bolt' | 'gauge' | 'interrupt' | 'halt'
   | 'minus' | 'compare' | 'download' | 'paperclip' | 'image' | 'upload' | 'info' | 'journey'
   | 'users' | 'history' | 'sparkle' | 'wrench' | 'bug' | 'gear' | 'commit' | 'tag' | 'box' | 'rollback'
   | 'command' | 'option' | 'backspace'
   | 'book' | 'runbook' | 'guideline' | 'memory' | 'server' | 'folders' | 'terminal' | 'hash' | 'graph'
   | 'bookmark' | 'pin' | 'lock' | 'star' | 'calendar' | 'coin' | 'not' | 'sort' | 'select' | 'shift' | 'thumbs-down'
-  | 'person-check' | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
+  | 'merge' | 'person-check' | 'cards' | 'columns' | 'grip' | 'sort-name' | 'progress' | 'help' | 'pulse' | 'message'
 </script>
 <script setup lang="ts">
 withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
@@ -21,7 +22,9 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
 
 <template>
   <svg :width="size" :height="size" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
-    <path v-if="name === 'queue'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h7.8M2.4 12h7.8" />
+    <path v-if="name === 'flag'" d="M3.5 14V2.6M3.5 3h8.2l-1.8 3 1.8 3H3.5" />
+    <rect v-else-if="name === 'square'" x="2.2" y="2.2" width="11.6" height="11.6" rx="2" />
+    <path v-else-if="name === 'queue'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h7.8M2.4 12h7.8" />
     <path v-else-if="name === 'queue-add'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M11.6 8.8v5.4M8.9 11.5h5.4" />
     <path v-else-if="name === 'queue-on'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M8.6 11.6l1.9 1.9 3.6-3.9" />
     <path v-else-if="name === 'queue-off'" d="M2.4 4h10.4M10.8 1.9 12.9 4l-2.1 2.1M2.4 8h5.4M2.4 12h3.6M8.9 11.5h5.4" />
@@ -83,6 +86,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <template v-else-if="name === 'agent'"><rect x="2.6" y="5" width="10.8" height="8.2" rx="2.4" /><path d="M8 5V2.6M6 9h.01M10 9h.01M1 8.4v2M15 8.4v2" /><circle cx="8" cy="2.2" r=".6" fill="currentColor" stroke="none" /></template>
     <path v-else-if="name === 'trash'" d="M2.8 4.2h10.4M6.2 4.2V2.8h3.6v1.4M4.2 4.2l.7 8.6c.1.7.6 1.2 1.3 1.2h3.6c.7 0 1.2-.5 1.3-1.2l.7-8.6M6.8 7v4.2M9.2 7v4.2" />
     <path v-else-if="name === 'pause'" d="M6 3.8v8.4M10 3.8v8.4" />
+    <path v-else-if="name === 'winddown'" d="M1.6 13.6h12.8M4.8 13.6a3.2 3.2 0 0 1 6.4 0M8 1.8v5.2M5.8 4.9 8 7.1l2.2-2.2" />
     <path v-else-if="name === 'play'" d="M5.4 3.6v8.8l7-4.4z" stroke-linejoin="round" />
     <rect v-else-if="name === 'stop'" x="3.8" y="3.8" width="8.4" height="8.4" rx="1.6" />
     <template v-else-if="name === 'shield'"><path d="M8 1.9 13 3.8v3.9c0 3-2.1 5.4-5 6.4-2.9-1-5-3.4-5-6.4V3.8Z" /><path d="m5.9 8 1.5 1.5 2.8-2.9" /></template>
@@ -104,6 +108,7 @@ withDefaults(defineProps<{ name: IconName; size?: number }>(), { size: 16 })
     <path v-else-if="name === 'wrench'" d="M13.75 5.01A3.4 3.4 0 1 1 10.99 2.25l.61 2.15ZM8 8 2.6 13.4" />
     <template v-else-if="name === 'gear'"><path d="M12.4 6.2 14.2 6.8 14.2 9.2 12.4 9.8 13.2 11.5 11.5 13.2 9.8 12.4 9.2 14.2 6.8 14.2 6.2 12.4 4.5 13.2 2.8 11.5 3.6 9.8 1.8 9.2 1.8 6.8 3.6 6.2 2.8 4.5 4.5 2.8 6.2 3.6 6.8 1.8 9.2 1.8 9.8 3.6 11.5 2.8 13.2 4.5Z" /><circle cx="8" cy="8" r="1.9" /></template>
     <template v-else-if="name === 'bug'"><path d="M4.8 8.4a3.2 3.2 0 0 1 6.4 0v2.2a3.2 3.2 0 0 1-6.4 0Z" /><path d="M6.7 5.4 5.9 3.2M9.3 5.4l.8-2.2M4.8 9.6H2.3M11.2 9.6h2.5M5.2 12.4l-1.9 1.2M10.8 12.4l1.9 1.2" /></template>
+    <template v-else-if="name === 'merge'"><circle cx="4.4" cy="3.6" r="1.6" /><circle cx="4.4" cy="12.4" r="1.6" /><circle cx="11.6" cy="8" r="1.6" /><path d="M4.4 5.2v5.6M4.4 5.4c0 1.8 1.6 2.6 5.6 2.6" /></template>
     <template v-else-if="name === 'commit'"><circle cx="8" cy="8" r="2.5" /><path d="M1.6 8h3.9M10.5 8h3.9" /></template>
     <template v-else-if="name === 'tag'"><path d="M2.2 2.9v4.3c0 .3.1.6.4.8l5.6 5.6c.4.4 1 .4 1.4 0l3.9-3.9c.4-.4.4-1 0-1.4L7.9 2.7a1.1 1.1 0 0 0-.8-.3H2.7a.5.5 0 0 0-.5.5Z" /><circle cx="5.2" cy="5.4" r=".6" fill="currentColor" stroke="none" /></template>
     <template v-else-if="name === 'box'"><path d="M8 1.8 13.6 4.9v6.2L8 14.2l-5.6-3.1V4.9Z" /><path d="M2.4 4.9 8 8l5.6-3.1M8 8v6.2" /></template>

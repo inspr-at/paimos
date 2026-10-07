@@ -91,14 +91,8 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
     await page.emulateMedia({ colorScheme: theme })
     const { calls, spare } = await desk(page, theme)
     await page.goto('/agents')
-    const card = page.getByRole('region', { name: 'Accounts and computers' })
-    // One quota, one bar: the other door names where its gauge is.
-    await expect(card.locator(`[data-account="${studioId}"]`)).toContainText('Shares quota with Spare on mbp2607')
-    await expect(card.locator(`[data-account="${spare.id}"] [role="meter"]`)).toHaveCount(1)
-    await expect(card.locator(`[data-account="${studioId}"] [role="meter"]`)).toHaveCount(0)
-    await expect(card.locator('.vendor-name', { hasText: 'Claude · Client' })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-    await card.scrollIntoViewIfNeeded()
+    // AEON-782: the pools' rows live in Settings now; the queued run's Move to… stays here.
     await shot(page, `pools-${width}-${theme}`)
 
     const queue = page.getByRole('region', { name: 'Runs awaiting a session' })
@@ -174,26 +168,6 @@ for (const width of [1600, 390]) for (const theme of ['light', 'dark'] as const)
     await page.emulateMedia({ colorScheme: theme })
     const { spare } = await desk(page, theme, true)
     spare.label = "Spare's account; (false) $HOME"
-    await page.goto('/agents')
-    const card = page.getByRole('region', { name: 'Accounts and computers' })
-    const grouped = card.locator(`[data-account="${spare.id}"]`)
-    const general = card.locator(`[data-account="${studioId}"]`)
-    await expect(grouped).toBeVisible()
-    await expect(general).toBeVisible()
-    // Both doors of one login stay listed, each in its own pool; the quota has one bar.
-    await expect(grouped.locator('.vendor-name')).toHaveText('Codex · Client login')
-    await expect(card.locator(`[data-account="${spare.id}"] [role="meter"], [data-account="${studioId}"] [role="meter"]`)).toHaveCount(1)
-    await expect(general).toContainText(`Shares quota with ${spare.label} on mbp2607`)
-    await expect(grouped.locator('.identity')).toHaveText(spare.label)
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
-    if (shots) {
-      mkdirSync(shots, { recursive: true })
-      // The app scrolls inside its shell. Fit the complete card for capture.
-      await page.setViewportSize({ width, height: width === 390 ? 3400 : 1400 })
-      await card.scrollIntoViewIfNeeded()
-      await card.screenshot({ path: join(shots, `shared-pools-${width}-${theme}.png`) })
-      await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
-    }
     await page.goto('/settings/accounts')
     await page.locator(`.list-row[data-accounts~="${spare.id}"]`).click()
     const row = page.locator('section.pane').getByRole('listitem').filter({ hasText: `aeon use codex ${spare.id}` })

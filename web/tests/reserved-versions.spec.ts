@@ -101,8 +101,8 @@ for (const width of [1440, 390]) {
 test('Settings opt-in persists, preserves flow controls and keeps both switches under the pointer', async ({ page }) => {
   const { data } = await setup(page, { show_flow_controls: true })
   await page.goto('/settings/developer#reserved-versions')
-  const flow = page.getByRole('switch', { name: 'Show the flow controls (not yet tested end to end)' })
-  await expect(flow).toBeChecked()
+  await expect(page.getByRole('switch', { name: 'Show the flow controls (not yet tested end to end)' })).toHaveCount(0)
+  await expect(page.getByRole('switch', { name: 'Start agents manually (expert)', exact: true })).not.toBeChecked()
   await expect(toggle(page)).not.toBeChecked()
   await page.evaluate(() => document.fonts.ready)
   const switches = page.getByRole('switch')

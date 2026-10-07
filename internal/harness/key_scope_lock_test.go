@@ -24,7 +24,9 @@ func TestKeyScopeUsageRegistrationVersusMoveLockOrder(t *testing.T) {
 				 SELECT $1,$2,'HTS-3',id,'Destination epic',$3 FROM node_kinds WHERE slug='work'`, f.person.TenantID, destination, f.project); err != nil {
 					return err
 				}
-				return tx.QueryRow(t.Context(), `UPDATE agent_keys SET scopes=$2 WHERE principal_id=$1 RETURNING id::text`, f.agent.ID, f.agent.Scopes).Scan(&f.agent.KeyID)
+				// A keyed request carries the creator captured at authentication;
+				// admission rejects a snapshot that no longer matches the key.
+				return tx.QueryRow(t.Context(), `UPDATE agent_keys SET scopes=$2 WHERE principal_id=$1 RETURNING id::text,coalesce(created_by_principal_id::text,'')`, f.agent.ID, f.agent.Scopes).Scan(&f.agent.KeyID, &f.agent.KeyCreatorID)
 			})
 			// The registration holds its usage grant before CapturePlanningStart
 			// locks the ticket; the move holds that ticket before RequireInProjects.

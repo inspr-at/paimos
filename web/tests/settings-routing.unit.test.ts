@@ -5,15 +5,16 @@ import { defineComponent } from 'vue'
 import { sourceModule } from './record-source'
 
 const empty = defineComponent({ render: () => null })
-let router: Router
+let router: Router, loadVocabulary: ReturnType<typeof vi.fn>
 beforeEach(() => {
+  loadVocabulary = vi.fn(async () => {})
   vi.stubGlobal('sessionStorage', { getItem: () => null, removeItem() {} })
   const session = { identity: { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } }, requiresSignIn: false, error: '', refresh: vi.fn(async () => {}) }
   // Keep the real route records and guards; lazy views are outside this routing test.
   const views = (routes: RouteRecordRaw[]): RouteRecordRaw[] => routes.map(route => ({ ...route, ...(route.component ? { component: empty } : {}), ...(route.children ? { children: views(route.children) } : {}) })) as RouteRecordRaw[]
   router = sourceModule<{ router: Router }>('router.ts', {
     'vue-router': { createWebHistory: createMemoryHistory, createRouter: (options: Parameters<typeof createRouter>[0]) => createRouter({ ...options, routes: views(options.routes) }) },
-    './lib/brand': { setPageTitle() {} }, './stores/projects': {}, './stores/session': { useSession: () => session }, './stores/workVocabulary': {},
+    './lib/brand': { setPageTitle() {} }, './stores/projects': {}, './stores/session': { useSession: () => session }, './stores/workVocabulary': { useWorkVocabulary: () => ({ load: loadVocabulary }) },
     './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': {},
     './lib/attachLink': { hasAttachFragment: () => false, announceAttachCode() {} }, './lib/identityScope': {}, './lib/signInReturn': {},
     './lib/knowledge': {}, './components/work/projectNavigation': {}, './lib/ticketPeek': {},
@@ -75,8 +76,11 @@ it('current cards and unknown bookmarks keep their section', async () => {
 it('retired briefing bookmarks open Agents and keep request links', async () => {
   for (const path of ['/briefing', '/briefing/', '/briefing?needs=a:00000000-0000-4000-8000-000000000001#request']) {
     await router.push('/settings/personal')
+    loadVocabulary.mockClear()
     await router.push(path)
     expect(router.currentRoute.value.path).toBe('/agents')
+    // The Agents page names leads in the workspace word (AEON-791).
+    expect(loadVocabulary).toHaveBeenCalledOnce()
     expect(router.currentRoute.value.meta.title).toBe('Agents')
     expect(router.currentRoute.value.redirectedFrom?.path).toBe(path.split('?')[0])
     if (path.includes('?')) {

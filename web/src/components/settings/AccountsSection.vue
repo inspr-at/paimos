@@ -10,8 +10,9 @@ import { can, myPermissions } from '../../lib/authz'
 import { overviewAccounts, type OverviewAccount, type SignInReference } from '../../lib/accountsOverview'
 import { computerRemoval, describeEnrollmentStatus, describeComputerStatus, disconnectComputer, disconnectEnrollment, pairingPermissions, platformCaption, removeComputer, type PairingView } from '../../lib/agentPairing'
 import { machinesForAdd } from '../../lib/addAccount'
+import { isProblemSignin, quotaWindowWarns } from '../../lib/accountsGlance'
 import { hostCapacityReason } from '../../lib/hostCapacity'
-import { when, type CapacityWindow } from '../../lib/capacity'
+import { daysSummary, holdOptions, ownOverride, overrideDone, poolOfRow, reserveLevel, timeLabel, when, type CapacityWindow, type HoldOption, type Override, type PoolView } from '../../lib/capacity'
 import { toast } from '../../lib/toast'
 import { usePoller } from '../../lib/usePolledData'
 import { useAgents } from '../../stores/agents'
@@ -19,10 +20,12 @@ import { useCapacity } from '../../stores/capacity'
 import { useSession } from '../../stores/session'
 import { vClipTip } from '../../directives/clipTip'
 import AppIcon from '../AppIcon.vue'
+import { settingsNeeds } from '../../lib/footerProviders'
 import AccountsCard from '../agents/AccountsCard.vue'
 import HarnessMark from '../agents/HarnessMark.vue'
 import AddAccountPanel from './AddAccountPanel.vue'
 import HostCapacitySettings from './HostCapacitySettings.vue'
+import PacingSettings from './PacingSettings.vue'
 import NeedsYouList, { type NeedsYouItem } from './NeedsYouList.vue'
 import QuotaWarningCard from './QuotaWarningCard.vue'
 import SettingsDockedPanel from './SettingsDockedPanel.vue'
@@ -66,16 +69,19 @@ function references(a: OverviewAccount, c: PairingView) { return a.signins.filte
 function mayVerify(s: SignInReference) { return manage.value && s.enrollment.can_verify === true && s.computer.computer_state === 'connected' && s.enrollment.state === 'connected' && s.computer.verification_capabilities?.[s.enrollment.harness]?.supported === true }
 function verificationBusy(s: SignInReference) { return ['queued', 'starting', 'running', 'waiting', 'ownership_lost'].includes(s.enrollment.verification_state ?? '') }
 const expired = (s: SignInReference) => s.enrollment.verification_state === 'expired' && !s.enrollment.verification_expired_ready
-const problemSignins = computed(() => accounts.value.flatMap(a => a.signins.filter(s => s.computer.computer_state === 'connected' && s.enrollment.state === 'connected' && (expired(s) || /failed|sign in|unavailable/i.test(status(s.computer, s.enrollment.account_id)))).map(s => ({ account: a, signin: s }))))
+// One definition of what blocks a sign-in, shared with the Agents page's status line (AEON-782).
+const problemSignins = computed(() => accounts.value.flatMap(a => a.signins.filter(isProblemSignin).map(s => ({ account: a, signin: s }))))
 const attention = computed<NeedsYouItem[]>(() => {
   const items: NeedsYouItem[] = problemSignins.value.map(({ account: a, signin: s }) => ({ id: `verify:${s.enrollment.account_id}`, name: `${a.vendor} needs verifying on ${s.computer.computer_name}`, detail: expired(s) ? 'Verification expired. New agents wait until the sign-in passes again.' : status(s.computer, s.enrollment.account_id), count: 1, icon: 'alert', action: { label: manage.value && mayVerify(s) ? 'Verify again' : 'Details', fixesProblem: manage.value && mayVerify(s), disabled: verificationBusy(s) || busy.value } }))
   for (const c of computers.value.filter(c => c.computer_state === 'revoked' && c.local_cleanup === 'pending')) items.push({ id: `cleanup:${c.computer_id}`, name: `${c.computer_name} removed · cleanup pending`, detail: 'New work is blocked. Local sign-ins are deleted when the computer comes back online.', count: 1, icon: 'shield', tone: 'waiting', action: { label: manage.value ? 'Finish cleanup…' : 'Details' } })
   for (const a of accounts.value) {
-    const low = a.windows.find(w => w.freshness === 'fresh' && w.remaining_percent <= thresholds.value.early_percent)
+    const low = a.windows.find(w => quotaWindowWarns(w, thresholds.value, agents.now))
     if (low && !items.some(i => a.records.some(r => i.id === `verify:${r.id}`))) items.push({ id: `quota:${a.id}`, name: `${a.vendor} quota is low`, detail: `${Math.round(low.remaining_percent)}% left · ${windowLabel(low)}`, count: 1, icon: 'gauge', action: { label: 'Details' } })
   }
   return items
 })
+// The footer on Settings says how many of these need you while this section is open (AEON-785).
+watch(() => attention.value.reduce((total, item) => total + Math.max(0, item.count), 0), total => { settingsNeeds.value = total }, { immediate: true })
 function windowLabel(w: CapacityWindow) { return w.reading.window_kind === '5h' ? '5-hour window' : w.reading.window_kind === 'weekly' ? 'Weekly' : w.reading.window_kind === 'monthly' ? 'Monthly allowance' : w.reading.bucket || 'Quota window' }
 function accountSummary(a: OverviewAccount) {
   const problem = problemSignins.value.find(p => p.account.id === a.id)
@@ -107,14 +113,34 @@ const poller = usePoller(refresh, 20_000)
 // shows up); the poller coalesces it with a read already in flight.
 function onFocus() { poller.tick(true) }
 onMounted(() => { poller.start(true); window.addEventListener('focus', onFocus) })
-onBeforeUnmount(() => { generation++; poller.stop(); window.removeEventListener('focus', onFocus) })
-watch(() => route.hash, hash => { if (hash === '#add-account' && manage.value) { add.value = true; void router.replace({ path: route.path, query: route.query, hash: '' }) } }, { immediate: true })
+onBeforeUnmount(() => { generation++; poller.stop(); window.removeEventListener('focus', onFocus); settingsNeeds.value = 0 })
+watch(() => route.hash, async hash => {
+  if (hash === '#add-account' && manage.value) { add.value = true; void router.replace({ path: route.path, query: route.query, hash: '' }) }
+  // The Agents page's pacing line links here (AEON-721).
+  if (hash === '#capacity-and-load') { await nextTick(); pacing.value?.reveal(); void router.replace({ path: route.path, query: route.query, hash: '' }) }
+}, { immediate: true })
 watch(() => route.query.verify_account, id => {
   if (typeof id !== 'string') return
   const s = accounts.value.flatMap(a => a.signins).find(s => s.enrollment.account_id === id)
   if (s) void show('computer', s.computer.computer_id!, undefined, id)
 }, { immediate: true })
 watch(accounts, () => { const id = route.query.verify_account; if (!open.value && typeof id === 'string') { const s = accounts.value.flatMap(a => a.signins).find(s => s.enrollment.account_id === id); if (s) void show('computer', s.computer.computer_id!, undefined, id) } })
+// The Agents page's status line, Needs you rows and grid open a panel here (AEON-782):
+// ?computer=<id>[&signin=<account id>] or ?account=<id>. The link is spent once it opened.
+function openFromLink() {
+  const { computer: c, account: a, signin: sg, ...rest } = route.query
+  const computerId = typeof c === 'string' ? c : '', accountId = typeof a === 'string' ? a : ''
+  if (!computerId && !accountId) return
+  const found = computerId ? computers.value.some(x => x.computer_id === computerId) : !!accountOf(accountId)
+  if (!found && !(capacity.loaded && capacity.computersLoaded)) return
+  void router.replace({ path: route.path, query: rest, hash: route.hash })
+  if (!found) return
+  if (computerId) void show('computer', computerId, undefined, typeof sg === 'string' ? sg : undefined)
+  else void show('account', accountOf(accountId)!.id)
+}
+watch([() => route.query.computer, () => route.query.account, accounts, computers, () => capacity.loaded, () => capacity.computersLoaded], openFromLink, { immediate: true })
+/** "I'm away…" from a learned suggestion: the panel closes and the pacing editors take focus. */
+async function goPacing() { open.value = false; await nextTick(); pacing.value?.reveal() }
 async function verify(s: SignInReference) {
   if (!mayVerify(s) || verificationBusy(s) || busy.value) return
   const identity = owner.value, turn = generation, screen = selectedKey.value, c = s.computer, e = s.enrollment, revision = c.revision, prior = e.verification_run_id
@@ -141,7 +167,15 @@ function cleanupRemoval(c: PairingView) {
 }
 const renameOpen = ref(false), renameName = ref('')
 const menuOpen = ref(false), menuAnchor = ref<HTMLElement | null>(null), menuTarget = ref<MenuTarget | null>(null), menuItems = ref<SettingsMenuItem[]>([]), menuContext = ref(''), menuError = ref('')
-function menuKey(t: MenuTarget) { return `${selectedKey.value}/${t.kind}/${t.kind === 'account' ? t.account.signins.map(s => `${s.computer.computer_id}:${s.computer.revision}:${s.enrollment.account_id}`).join(',') : t.kind === 'signin' ? `${t.signin.computer.computer_id}:${t.signin.computer.revision}:${t.signin.enrollment.account_id}` : `${t.computer.computer_id}:${t.computer.revision}`}` }
+function currentTarget(t: MenuTarget): MenuTarget | undefined {
+  if (t.kind === 'account') { const account = accounts.value.find(a => a.id === t.account.id); return account && { kind: 'account', account } }
+  const computer = computers.value.find(c => c.computer_id === (t.kind === 'signin' ? t.signin.computer.computer_id : t.computer.computer_id))
+  if (!computer) return undefined
+  if (t.kind !== 'signin') return { kind: t.kind, computer }
+  const enrollment = computer.enrollments.find(e => e.account_id === t.signin.enrollment.account_id)
+  return enrollment && { kind: 'signin', signin: { computer, enrollment } }
+}
+function menuKey(t: MenuTarget) { return `${selectedKey.value}/${t.kind}/${t.kind === 'account' ? `${t.account.records.map(r => `${r.id}:${r.link_revision ?? ''}`).join(',')}|${paceKey(poolOf(t.account))}|${t.account.signins.map(s => `${s.computer.computer_id}:${s.computer.revision}:${s.enrollment.account_id}`).join(',')}` : t.kind === 'signin' ? `${t.signin.computer.computer_id}:${t.signin.computer.revision}:${t.signin.enrollment.account_id}` : `${t.computer.computer_id}:${t.computer.revision}`}` }
 async function openMenu(t: MenuTarget, event: Event) {
   if (!manage.value) return
   menuTarget.value = t; menuAnchor.value = event.currentTarget as HTMLElement; menuContext.value = menuKey(t); menuError.value = ''
@@ -154,7 +188,7 @@ async function openMenu(t: MenuTarget, event: Event) {
     menuItems.value = [{ id: 'cleanup', label: 'Finish cleanup…', disabled: !cleanupRemoval(t.computer).allowed, detail: cleanupRemoval(t.computer).reason || 'Use only after vendor sign-out or wiping the computer.', confirmation: { title: `Finish cleanup without ${t.computer.computer_name}?`, effect: 'Do this only after signing out of all devices at the vendors, or wiping the computer. PAIMOS then forgets it from this list.', keeps: 'Accounts on other computers are unaffected. Unsettled run accounting is kept and cannot be bypassed.', action: 'Finish cleanup' } }]
   } else {
     const reader = quotaReader(t.account)
-    menuItems.value = [{ id: 'read', label: 'Read quota now', icon: 'refresh', disabled: !reader, detail: reader ? `Ask ${reader.computer.computer_name} for a fresh reading.` : 'Needs a verified sign-in with a quota reader.' }, { id: 'everywhere', label: 'Sign out everywhere…', icon: 'logout', disabled: !t.account.signins.some(s => s.enrollment.state !== 'revoked'), confirmation: { title: `Sign out of ${t.account.vendor} everywhere?`, effect: 'PAIMOS blocks this account on every paired computer at once. Local sign-ins are deleted as the computers reconnect.', keeps: 'Other accounts, the vendor subscription and vendor sessions outside PAIMOS are untouched.', action: 'Sign out everywhere' } }]
+    menuItems.value = [...paceItems(t.account), { id: 'read', label: 'Read quota now', icon: 'refresh', separated: !!menuPool.value, disabled: !reader, detail: reader ? `Ask ${reader.computer.computer_name} for a fresh reading.` : 'Needs a verified sign-in with a quota reader.' }, { id: 'everywhere', label: 'Sign out everywhere…', icon: 'logout', disabled: !t.account.signins.some(s => s.enrollment.state !== 'revoked'), confirmation: { title: `Sign out of ${t.account.vendor} everywhere?`, effect: 'PAIMOS blocks this account on every paired computer at once. Local sign-ins are deleted as the computers reconnect.', keeps: 'Other accounts, the vendor subscription and vendor sessions outside PAIMOS are untouched.', action: 'Sign out everywhere' } }, removeItem(t.account)]
   }
   // Publish the captured record before opening. The shared popover closes on
   // context changes; changing its context and opening in one render would
@@ -180,9 +214,15 @@ async function renameComputer() {
 }
 async function menuAction(id: string, context: string | undefined) {
   const t = menuTarget.value, identity = owner.value, turn = generation, screen = selectedKey.value
-  if (!t || context !== menuContext.value || context !== menuKey(t) || busy.value || !manage.value) return
-  const current = t.kind === 'account' ? accounts.value.find(a => a.id === t.account.id) : computers.value.find(c => c.computer_id === (t.kind === 'signin' ? t.signin.computer.computer_id : t.computer.computer_id))
-  if (!current || (t.kind !== 'account' && 'revision' in current && current.revision !== (t.kind === 'signin' ? t.signin.computer.revision : t.computer.revision))) { menuError.value = 'This record changed. Reopen its menu.'; return }
+  if (!t || busy.value || !manage.value) return
+  // A record that changed since its menu opened (a poll, another tab) is said, never acted on.
+  if (context !== menuContext.value || context !== menuKey(t)) { fail('This record changed. Reopen its menu.'); return }
+  // The key of the record as it is now, not as captured: a regrouped account
+  // (other logins), a newer computer revision or a gone sign-in all differ.
+  const current = currentTarget(t)
+  if (!current || menuKey(current) !== context) { fail('This record changed. Reopen its menu.'); return }
+  if (t.kind === 'account' && (id === 'plan' || id === 'sprint' || id.startsWith('hold:'))) { await pace(t.account, id); return }
+  if (t.kind === 'account' && id === 'remove-account') { await removeAccount(t.account); return }
   if (id === 'rename' && t.kind === 'computer') { renameName.value = t.computer.computer_name; await nextTick(); renameOpen.value = true; return }
   if (id === 'verify' && t.kind === 'signin') { menuOpen.value = false; await verify(t.signin); return }
   busy.value = true
@@ -204,8 +244,108 @@ async function menuAction(id: string, context: string | undefined) {
     menuOpen.value = false
     toast(id === 'read' ? 'Quota reading requested. The computer will report the result.' : id === 'cleanup' ? 'Computer removed from the list. History stays.' : 'New work is blocked. Local cleanup remains pending until confirmed.')
     await refresh()
-  } catch (error) { if (identity === owner.value && turn === generation && screen === selectedKey.value) menuError.value = error instanceof Error ? error.message : 'The action failed.' }
+  } catch (error) { if (identity === owner.value && turn === generation && screen === selectedKey.value) fail(error instanceof Error ? error.message : 'The action failed.') }
   finally { if (identity === owner.value && turn === generation && screen === selectedKey.value) busy.value = false }
+}
+/** A plain menu item closes before it runs: its failure is a toast, a confirmation's stays in place. */
+function fail(message: string) { if (menuOpen.value) menuError.value = message; else toast(message, { tone: 'error' }) }
+
+// ---------- Pacing per account: Back to the plan, Sprint, Hold (AEON-786) ----------
+// The same choices and words as the Agents page menu; they act on the pool the
+// account paces with (its harness, or its group).
+const menuPool = ref<PoolView>(), menuHolds = ref<HoldOption[]>([])
+function poolOf(a: OverviewAccount) {
+  const row = a.rows[0] ?? (a.records[0] ? { id: a.records[0].id, groupId: a.records[0].group_id ?? '', harness: a.records[0].harness } : undefined)
+  return row ? poolOfRow(capacity.pools, row) : undefined
+}
+const paceKey = (pool: PoolView | undefined) => (pool ? `${pool.id}:${ownOverride(pool)}:${pool.overrideUntil}` : '')
+function paceItems(a: OverviewAccount): SettingsMenuItem[] {
+  const pool = poolOf(a), own: Override = ownOverride(pool)
+  menuPool.value = pool; menuHolds.value = []
+  if (!pool) return []
+  const items: SettingsMenuItem[] = []
+  if (own) items.push({ id: 'plan', label: 'Back to the plan', icon: 'play', detail: `${pool.name} paces by your work week again.` })
+  if (own !== 'sprint') items.push({ id: 'sprint', label: `Sprint ${pool.name} until reset`, icon: 'bolt', detail: pool.sprintEnd ? `Agents may use everything left until ${when(pool.sprintEnd, agents.now)}.` : 'Agents may use everything left until the next reset.' })
+  if (own !== 'hold') {
+    // The times shown are the times saved: the choices are fixed when the menu opens.
+    menuHolds.value = holdOptions(capacity.schedule, agents.now)
+    items.push({ id: 'hold', label: `Hold ${pool.name}`, icon: 'pause', detail: `Agents leave ${pool.name} alone. Running steps finish.`, options: menuHolds.value.map((h, i) => ({ id: `hold:${i}`, label: h.label, hint: h.hint, name: h.name })) })
+  }
+  return items
+}
+async function pace(a: OverviewAccount, id: string) {
+  const pool = menuPool.value, identity = owner.value, turn = generation
+  if (!pool || paceKey(pool) !== paceKey(poolOf(a)) || busy.value) { fail('This account changed. Reopen its menu.'); return }
+  const hold = id.startsWith('hold:') ? menuHolds.value[Number(id.slice(5))] : undefined
+  if (id.startsWith('hold:') && !hold) return
+  const value: Override = id === 'sprint' ? 'sprint' : hold ? 'hold' : ''
+  busy.value = true
+  try {
+    await capacity.setPoolOverride(pool.id, value, hold?.until)
+    if (identity === owner.value && turn === generation) toast(overrideDone(pool, value, hold?.until, agents.now))
+  } catch (error) { if (identity === owner.value && turn === generation) toast(error instanceof Error ? error.message : 'That did not save. Please try again.', { tone: 'error' }) }
+  finally { if (identity === owner.value && turn === generation) busy.value = false }
+}
+
+// ---------- Remove an account (AEON-402, moved here in AEON-786): named, history stays ----------
+function removeItem(a: OverviewAccount): SettingsMenuItem {
+  const ids = new Set(a.records.map(r => r.id))
+  const queued = Object.values(agents.runs).filter(r => r.status === 'queued' && (ids.has(r.account_id ?? '') || ids.has(r.requested_account_id ?? ''))).length
+  const hosts = [...new Set(a.signins.filter(s => s.enrollment.state !== 'revoked').map(s => s.computer.computer_name))]
+  const effect = [
+    'It leaves Accounts and agents stop using it.',
+    a.records.length > 1 ? `All ${a.records.length} logins that share this quota are removed.` : '',
+    hosts.length ? `Its binding on ${hosts.join(', ')} is disconnected.` : '',
+    queued ? `${queued === 1 ? 'One queued run' : `${queued} queued runs`} for it ${queued === 1 ? 'is' : 'are'} cancelled.` : '',
+  ].filter(Boolean).join(' ')
+  return { id: 'remove-account', label: 'Remove account…', icon: 'trash', separated: true, detail: 'Agents stop using it. Its runs and history stay.', confirmation: { title: `Remove ${a.vendor} · ${a.identity}?`, effect, keeps: 'Its runs and history stay. Other accounts and the vendor subscription are untouched.', action: 'Remove account' } }
+}
+async function removeAccount(a: OverviewAccount) {
+  const identity = owner.value, turn = generation, screen = selectedKey.value
+  if (busy.value || !manage.value) return
+  busy.value = true
+  let removed = 0
+  try {
+    for (const record of a.records) { await agents.removeAccount(record); removed++ }
+    if (identity !== owner.value || turn !== generation) return
+    menuOpen.value = false
+    toast(`Removed ${a.vendor} · ${a.identity}. Its runs and history stay.`)
+  } catch (error) {
+    if (identity !== owner.value || turn !== generation) return
+    const reason = error instanceof Error && /still working/i.test(error.message) ? `A run is still working on ${a.identity}. Remove it once that run ends.` : error instanceof Error ? error.message : 'The account was not removed. Please try again.'
+    // Partial removals are said as such; the list refreshes to what the server has.
+    fail(removed ? `Removed ${removed} of ${a.records.length} logins. ${reason}` : reason)
+  } finally { if (identity === owner.value && turn === generation && screen === selectedKey.value) busy.value = false }
+}
+
+// ---------- The one-time plan card (moved here from the Agents page, AEON-786) ----------
+const pacing = ref<InstanceType<typeof PacingSettings>>()
+const cardClosed = ref(false), planBusy = ref(false)
+watch(owner, () => { cardClosed.value = false; planBusy.value = false })
+const planCard = computed(() => {
+  if (!manage.value || cardClosed.value || !capacity.loaded || !capacity.schedulesLoaded || !capacity.pools.length || capacity.reserveConfirmed) return null
+  const s = capacity.schedule
+  const on = s.week.filter(d => d.on)
+  const hours = on.length && on.every(d => d.start === on[0].start && d.end === on[0].end) ? `${timeLabel(on[0].start)}–${timeLabel(on[0].end)}` : 'in your hours'
+  const level = reserveLevel(s)
+  return capacity.hasUserSchedule
+    ? { title: 'New:', text: `agents now leave you room while you work, about ${level}% of every limit.`, secondary: 'Turn off', primary: 'Keep' }
+    : { title: "Here's the plan.", text: `Agents work alongside you ${daysSummary(s.week)}, ${hours}, pace each account to its reset, and leave you about ${level}% of every limit while you work.`, secondary: 'Change', primary: 'Looks right' }
+})
+async function confirmPlan(mode: 'auto' | 'off') {
+  const identity = owner.value
+  if (planBusy.value || !manage.value) return
+  planBusy.value = true
+  try {
+    await capacity.confirmReserve(mode)
+    if (identity === owner.value) toast(mode === 'auto' ? 'Saved. Agents leave you room while you work.' : 'Turned off. Agents may use everything.')
+  } catch (e) { if (identity === owner.value) toast(e instanceof Error ? e.message : 'That did not save. Please try again.', { tone: 'error' }) }
+  finally { if (identity === owner.value) planBusy.value = false }
+}
+function cardSecondary() {
+  if (capacity.hasUserSchedule) { void confirmPlan('off'); return }
+  cardClosed.value = true
+  pacing.value?.reveal()
 }
 // Pause, resume and first approval stay with each login (AccountsCard). Resume
 // approves ongoing use first, as the Agents desk does.
@@ -234,6 +374,13 @@ function quotaSource(a: OverviewAccount, w: CapacityWindow) { const row = a.rows
   <div ref="root" id="agent-accounts" class="accounts-computers">
     <SettingsDockedPanel v-model:open="open" :title="title" :fact="fact" :icon="computer ? 'monitor' : 'gauge'" :opener="opener" :context-key="owner" :record-key="selectedKey" layout-frame-selector=".settings-page">
       <header class="page-head"><h2>Accounts and computers</h2><p>Which vendor accounts your agents use, the computers they run on, and how much each one can still take on.</p></header>
+      <div v-if="planCard" class="plan-card" role="region" aria-label="The plan">
+        <p><b>{{ planCard.title }}</b> {{ planCard.text }}</p>
+        <span class="pc-actions">
+          <button class="btn" type="button" :disabled="planBusy" @click="cardSecondary">{{ planCard.secondary }}</button>
+          <button class="btn primary" type="button" :disabled="planBusy" @click="confirmPlan('auto')">{{ planCard.primary }}</button>
+        </span>
+      </div>
       <p v-if="!manage" class="member-note">Only account owners with management permission can act. This view shows the status available to you.</p>
       <div class="loading-state" role="status"><template v-if="agents.accountsState === 'forbidden'">Accounts are visible to workspace admins.</template><template v-else-if="agents.accountsState === 'error' || capacity.computersState === 'error'">Accounts or computers could not be loaded. <button type="button" class="btn sm" @click="refresh">Try again</button></template><template v-else-if="!capacity.loaded">Loading accounts and computers…</template><template v-else-if="capacity.stale || capacity.computersStale">Some readings may be out of date. <button type="button" class="btn sm" @click="refresh">Refresh</button></template></div>
       <NeedsYouList :items="attention" :aside="capacity.loaded && capacity.computersLoaded && !capacity.stale && !capacity.computersStale && accounts.every(a => a.signins.every(s => status(s.computer, s.enrollment.account_id) === 'Ready')) ? 'Everything else is working.' : 'Based on the last available reports.'" @action="actAttention" />
@@ -241,7 +388,8 @@ function quotaSource(a: OverviewAccount, w: CapacityWindow) { const row = a.rows
         <div class="zone-head"><h3 id="signin-grid-title" class="eyebrow">Sign-ins at a glance</h3><p>Each cell is one account on one computer</p></div>
         <div class="matrix-scroll" tabindex="0" aria-label="Sign-ins table; scroll horizontally for more computers"><table class="matrix"><thead><tr><th scope="col" class="corner">Account · quota left</th><th v-for="c in computers" :key="c.computer_id!" scope="col"><button class="mx-head" type="button" @click="show('computer', c.computer_id!, $event)"><AppIcon name="monitor" /><b v-clip-tip>{{ c.computer_name }}</b><small>{{ c.computer_state === 'revoked' ? 'Removed' : c.host_capacity ? `${c.host_capacity.running} agents${c.host_capacity.policy.maximum_agents ? ` of ${c.host_capacity.policy.maximum_agents}` : ''}` : computerState(c) }}</small></button></th></tr></thead><tbody><tr v-for="a in accounts" :key="a.id"><th scope="row"><button class="mx-head" type="button" @click="show('account', a.id, $event)"><HarnessMark :harness="a.harness" /><b>{{ a.vendor }}</b><small>{{ a.windows[0] ? `${Math.round(a.windows[0].remaining_percent)}% · ${windowLabel(a.windows[0])}` : 'Quota not reported' }}</small></button></th><td v-for="c in computers" :key="c.computer_id!"><button v-for="s in references(a, c)" :key="s.enrollment.account_id" class="mx-cell" type="button" :aria-label="`${a.vendor} on ${c.computer_name}: ${status(c, s.enrollment.account_id)}`" @click="show('computer', c.computer_id!, $event, s.enrollment.account_id)"><span class="dot" :class="status(c, s.enrollment.account_id) === 'Ready' ? 'ok' : 'wait'"></span>{{ status(c, s.enrollment.account_id) }}</button><span v-if="!references(a, c).length" class="mx-none"><AppIcon name="minus" /><span class="sr-only">{{ a.vendor }} is not signed in on {{ c.computer_name }}</span></span></td></tr></tbody></table></div>
       </section>
-      <section class="zone" aria-labelledby="accounts-list-title"><div class="zone-head"><h3 id="accounts-list-title">Accounts <span class="count">{{ accounts.length }}</span></h3><p>Quota belongs to the account and is shared by its computers</p><button v-if="manage && machines.length" type="button" class="btn sm" :aria-expanded="add" @click="add = !add"><AppIcon name="plus" />Add an account</button></div><AddAccountPanel v-if="add && machines.length" :machines="machines" /><ul class="list"><li v-for="a in accounts" :key="a.id"><button class="list-row" type="button" :data-account="a.records[0]?.id" :data-accounts="a.records.map(r => r.id).join(' ')" :aria-expanded="open && account?.id === a.id" :aria-current="open && account?.id === a.id" @click="show('account', a.id, $event)"><HarnessMark :harness="a.harness" /><span class="lr-who"><b>{{ a.vendor }}</b><small>{{ a.identity }}</small></span><span class="st"><span class="dot" :class="a.signins.some(expired) || a.windows.some(w => w.freshness === 'fresh' && w.remaining_percent <= thresholds.early_percent) ? 'wait' : a.signins.some(s => status(s.computer, s.enrollment.account_id) === 'Ready') ? 'ok' : 'blocked'"></span>{{ accountSummary(a) }}</span><AppIcon name="chevron-right" /></button></li></ul><p v-if="!accounts.length && capacity.loaded" class="empty">No vendor accounts are connected yet.</p><QuotaWarningCard @changed="thresholds = $event" /></section>
+      <section class="zone" aria-labelledby="accounts-list-title"><div class="zone-head"><h3 id="accounts-list-title">Accounts <span class="count">{{ accounts.length }}</span></h3><p>Quota belongs to the account and is shared by its computers</p><button v-if="manage && machines.length" type="button" class="btn sm" :aria-expanded="add" @click="add = !add"><AppIcon name="plus" />Add an account</button></div><AddAccountPanel v-if="add && machines.length" :machines="machines" /><ul class="list"><li v-for="a in accounts" :key="a.id"><button class="list-row" type="button" :data-account="a.records[0]?.id" :data-accounts="a.records.map(r => r.id).join(' ')" :aria-expanded="open && account?.id === a.id" :aria-current="open && account?.id === a.id" @click="show('account', a.id, $event)"><HarnessMark :harness="a.harness" /><span class="lr-who"><b>{{ a.vendor }}</b><small>{{ a.identity }}</small></span><span class="st"><span class="dot" :class="a.signins.some(expired) || a.windows.some(w => quotaWindowWarns(w, thresholds, agents.now)) ? 'wait' : a.signins.some(s => status(s.computer, s.enrollment.account_id) === 'Ready') ? 'ok' : 'blocked'"></span>{{ accountSummary(a) }}</span><AppIcon name="chevron-right" /></button></li></ul><p v-if="!accounts.length && capacity.loaded" class="empty">No vendor accounts are connected yet.</p><QuotaWarningCard @changed="thresholds = $event" /></section>
+      <PacingSettings ref="pacing" :manage="manage" :owner-key="owner" />
       <section class="zone" aria-labelledby="computers-list-title"><div class="zone-head"><h3 id="computers-list-title">Computers <span class="count">{{ computers.length }}</span></h3><p>Sign-ins and capacity live with each computer</p><RouterLink v-if="manage" class="btn sm" to="/agents/register-agent"><AppIcon name="monitor" />Connect a computer</RouterLink></div><ul class="list"><li v-for="c in computers" :key="c.computer_id!"><button class="list-row" type="button" :data-computer="c.computer_id" :aria-expanded="open && computer?.computer_id === c.computer_id" :aria-current="open && computer?.computer_id === c.computer_id" @click="show('computer', c.computer_id!, $event)"><AppIcon name="monitor" /><span class="lr-who"><b v-clip-tip>{{ c.computer_name }}</b><small>{{ computerState(c) }}<template v-if="c.last_seen_at"> · last seen {{ when(c.last_seen_at, agents.now) }}</template></small></span><span class="st"><span class="dot" :class="c.computer_state === 'revoked' ? 'blocked' : c.computer_state === 'connected' && c.connectivity === 'online' && !c.host_capacity?.reason ? 'ok' : 'wait'"></span>{{ computerSummary(c) }}</span><AppIcon name="chevron-right" /></button></li></ul><p v-if="!computers.length && capacity.computersLoaded" class="empty">No paired computers yet.</p><p v-if="computers.length === 100" class="footnote">First 100 computers shown.</p></section>
       <p class="footnote"><AppIcon name="shield" /><span>Every sign-in stays on its computer. PAIMOS stores status and timestamps, never the vendor credential.</span></p>
       <template #overflow><button v-if="manage && (computer || account)" class="icon-btn" type="button" :aria-label="`More actions for ${title}`" @click="openMenu(computer ? { kind: 'computer', computer } : { kind: 'account', account: account! }, $event)"><AppIcon name="more" /></button></template>
@@ -258,7 +406,7 @@ function quotaSource(a: OverviewAccount, w: CapacityWindow) { const row = a.rows
           <div v-if="primarySignin" class="needs"><AppIcon name="alert" /><strong>Needs verifying on {{ primarySignin.computer.computer_name }}</strong><p>New starts with this sign-in wait until verification passes.</p></div>
           <section class="p-sec"><div class="p-head"><h3>Shared quota</h3><span>Shared by {{ new Set(account.signins.map(s => s.computer.computer_id)).size }} computers</span></div><div class="quota"><div v-for="w in account.windows" :key="w.reading.window_kind + w.reading.bucket" class="q-row"><span>{{ windowLabel(w) }}</span><b>{{ Math.round(w.remaining_percent) }}% left</b><div class="gauge" role="meter" :aria-label="`${account.vendor} ${windowLabel(w)} remaining`" aria-valuemin="0" aria-valuemax="100" :aria-valuenow="w.remaining_percent"><i :style="{ width: `${w.remaining_percent}%` }"></i></div><small>Resets {{ when(w.reading.resets_at, agents.now) }}</small><small :class="{ stale: w.freshness !== 'fresh' }">Read {{ when(w.reading.read_at, agents.now) }} on {{ quotaSource(account, w) }}<template v-if="w.freshness !== 'fresh'"> · may be out of date</template></small></div><p v-if="!account.windows.length">Quota has not been reported. No remaining allowance is inferred.</p></div><p class="q-note">Every computer signed in with this account draws from the same quota.</p></section>
           <section class="p-sec"><div class="p-head"><h3>Signed in on</h3><span>Details and actions live with each computer</span></div><button v-for="s in account.signins" :key="`${s.computer.computer_id}:${s.enrollment.account_id}`" type="button" class="ref-row" @click="show('computer', s.computer.computer_id!, undefined, s.enrollment.account_id)"><AppIcon name="monitor" /><span><b>{{ s.computer.computer_name }}</b><small>{{ computerState(s.computer) }}</small></span><span class="st">{{ status(s.computer, s.enrollment.account_id) }}</span><AppIcon name="chevron-right" /></button><p v-if="!account.signins.length">No paired computer is associated with this account.</p></section>
-          <section class="p-sec use-sec"><div class="p-head"><h3>Use and limits</h3><span>{{ account.records.length === 1 ? 'One login' : `${account.records.length} logins share this quota` }}</span></div><AccountsCard :accounts="account.records" :all="agents.accounts" state="ready" :now="agents.now" :admin="manage" :set="setAccount" /></section>
+          <section class="p-sec use-sec"><div class="p-head"><h3>Use and limits</h3><span>{{ account.records.length === 1 ? 'One login' : `${account.records.length} logins share this quota` }}</span></div><AccountsCard :accounts="account.records" :all="agents.accounts" state="ready" :now="agents.now" :admin="manage" :set="setAccount" @away="goPacing" /></section>
           <RouterLink class="models-link" to="/agents/models" aria-label="Agents, Models">Agents<AppIcon name="chevron-right" :size="12" />Models</RouterLink>
         </template>
       </template>
@@ -271,6 +419,10 @@ function quotaSource(a: OverviewAccount, w: CapacityWindow) { const row = a.rows
 
 <style scoped>
 .rename-field { display: grid; gap: 8px; font-size: 13px; }.rename-field input { min-width: 0; min-height: 36px; padding: 4px 8px; background: var(--field-bg); color: var(--ink); border: 1px solid var(--line-2); border-radius: var(--radius-s); }.accounts-computers { min-width: 0; }.page-head h2 { font-size: 26px; font-weight: 500; letter-spacing: -.025em; margin: 0 0 8px; }.page-head p { color: var(--ink-2); font-size: 13.5px; max-width: 66ch; }.member-note { margin: 14px 0; color: var(--ink-3); font-size: 12.5px; }.loading-state { min-height: 34px; font-size: 13px; color: var(--ink-3); }.zone { margin-top: 30px; }.zone-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 10px; }.zone-head h3 { font-size: 18px; font-weight: 600; }.zone-head p, .count { font-size: 12px; color: var(--ink-3); }.count { margin-left: 6px; }.eyebrow { font: 500 11px var(--mono); text-transform: uppercase; letter-spacing: .1em; }.matrix-scroll { max-width: 100%; overflow-x: auto; }.matrix { width: 100%; border-collapse: collapse; table-layout: fixed; min-width: 320px; }.matrix th, .matrix td { padding: 2px 0; border-bottom: 1px solid var(--line); text-align: left; font-weight: inherit; vertical-align: middle; }.matrix .corner { width: 38%; font: 500 11px var(--mono); color: var(--ink-3); }.mx-head { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: 0 10px; width: 100%; min-height: 54px; padding: 6px 10px; border: 0; background: transparent; text-align: left; color: var(--ink); border-radius: var(--radius-row); }.mx-head > svg, .mx-head > :deep(.harness-mark) { grid-row: span 2; }.mx-head b { font-size: 13.5px; min-width: 0; overflow-wrap: anywhere; }.mx-head small { grid-column: 2; font-size: 12px; color: var(--ink-3); overflow-wrap: anywhere; }.mx-cell, .mx-none { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 46px; padding: 6px 10px; border: 0; background: transparent; text-align: left; font-size: 12px; color: var(--ink-2); border-radius: var(--radius-row); }.mx-cell:hover,.mx-head:hover,.list-row:hover,.ref-row:hover { background: var(--row-hover); }.list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }.list-row { display: grid; grid-template-columns: 36px minmax(0,1fr) minmax(0,1fr) 16px; align-items: center; gap: 2px 14px; width: 100%; min-height: 64px; padding: 10px; border: 0; border-bottom: 1px solid var(--line); background: transparent; text-align: left; color: var(--ink); }.list-row[aria-current=true] { background: var(--row-selected); }.lr-who { display: grid; min-width: 0; }.lr-who b { font-size: 14px; font-weight: 650; }.lr-who small { color: var(--ink-2); font-size: 12.5px; overflow-wrap: anywhere; }.st { display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); }.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--track); }.dot.ok { background: var(--ok); }.dot.wait { box-shadow: inset 0 0 0 1.8px var(--gold); }.dot.blocked { box-shadow: inset 0 0 0 1.8px var(--ink-3); }.footnote { display: flex; gap: 8px; margin-top: 22px; font-size: 12.5px; color: var(--ink-3); }.footnote svg { flex: none; }.empty { color: var(--ink-3); font-size: 13px; padding: 14px 0; }.p-sec { padding: 18px 0 20px; border-top: 1px solid var(--line); }.p-sec:first-child { padding-top: 0; border: 0; }.p-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 12px; }.p-head h3 { font-size: 14px; }.p-head span { color: var(--ink-3); font-size: 12px; }.now-line { font-size: 14px; font-weight: 600; }.now-copy,.q-note { margin-top: 6px; font-size: 12.5px; color: var(--ink-3); }.spark { margin: 14px 0 0; }.spark svg { width: 100%; height: 52px; }.spark path { fill: none; stroke: var(--teal); stroke-width: 1.6; vector-effect: non-scaling-stroke; }.spark line { stroke: var(--warn-ink); stroke-width: 1.2; stroke-dasharray: 4 4; }.spark figcaption,.spark p { font-size: 12px; color: var(--ink-3); }.facts { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 14px 12px; margin-top: 16px; }.facts dt { font: 500 10.5px var(--mono); text-transform: uppercase; color: var(--ink-3); }.facts dd { margin: 3px 0 0; font-size: 16px; font-weight: 600; }.facts small { font-size: 12px; font-weight: 400; }.facts p { font-size: 12px; color: var(--ink-3); }.si-row { display: grid; grid-template-columns: 28px minmax(0,1fr) auto 34px; gap: 2px 12px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }.si-row.is-target { background: var(--row-selected); border-radius: var(--radius-row); }.si-who { display: grid; min-width: 0; }.si-who small { font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }.name-link { padding: 0; border: 0; background: transparent; color: var(--ink); font-weight: 600; text-align: left; }.si-meta { grid-column: 2/5; font-size: 12px; color: var(--ink-3); }.icon-btn { display: inline-grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); flex: none; }.icon-btn:hover { background: var(--row-hover); }.quota { display: grid; gap: 14px; }.q-row { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 4px 12px; align-items: baseline; }.q-row > span { font-size: 13px; color: var(--ink-2); }.q-row b { font-size: 18px; }.q-row small { grid-column: 1/-1; font-size: 12px; color: var(--ink-3); }.q-row small.stale { color: var(--warn-ink); }.gauge { grid-column: 1/-1; height: 6px; background: var(--track); border-radius: 999px; overflow: hidden; }.gauge i { display: block; height: 100%; background: color-mix(in srgb,var(--teal) 42%,transparent); }.ref-row { display: grid; grid-template-columns: 28px minmax(0,1fr) auto 16px; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 6px 0; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--ink); text-align: left; }.ref-row > span:nth-child(2) { display: grid; }.ref-row small { font-size: 12px; color: var(--ink-3); }.needs { display: grid; grid-template-columns: 18px 1fr; gap: 4px 10px; padding: 12px; margin-bottom: 20px; background: var(--surface-sunken); outline: 1px solid var(--line-2); border-radius: 12px; }.needs p { grid-column: 2; font-size: 12px; color: var(--ink-2); }.steps,.vendor-steps { list-style: none; padding: 0; }.steps li,.vendor-steps li { display: flex; align-items: center; gap: 10px; min-height: 40px; border-top: 1px solid var(--line); font-size: 13px; }.p-sec h4 { margin: 18px 0 6px; }.models-link { display: inline-flex; align-items: center; gap: 8px; color: var(--teal-ink); font-size: 13px; }
-@media(max-width:720px) { .list-row { grid-template-columns: 28px minmax(0,1fr) 16px; gap: 4px 10px; }.list-row > .st { grid-column: 2; }.list-row > svg:last-child { grid-column: 3; grid-row: 1/3; }.facts { grid-template-columns: repeat(2,minmax(0,1fr)); }.matrix .corner { width: 34%; }.mx-head { gap: 6px; padding: 6px; }.mx-cell { gap: 6px; padding: 6px; }.si-row { grid-template-columns: 24px minmax(0,1fr) auto 34px; gap: 4px 8px; } }
+.plan-card { display: flex; align-items: center; gap: 12px 18px; flex-wrap: wrap; margin: 18px 0 4px; padding: 12px 14px 12px 16px; border-radius: 14px; background: color-mix(in srgb, var(--teal) 7%, var(--surface-raised)); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
+.plan-card p { flex: 1 1 420px; margin: 0; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; text-wrap: pretty; }
+.plan-card b { color: var(--ink); font-weight: 650; }
+.pc-actions { display: inline-flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
+@media(max-width:720px) { .plan-card p { flex-basis: 100%; }.pc-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; margin: 0; }.pc-actions .btn { min-height: 44px; }.list-row { grid-template-columns: 28px minmax(0,1fr) 16px; gap: 4px 10px; }.list-row > .st { grid-column: 2; }.list-row > svg:last-child { grid-column: 3; grid-row: 1/3; }.facts { grid-template-columns: repeat(2,minmax(0,1fr)); }.matrix .corner { width: 34%; }.mx-head { gap: 6px; padding: 6px; }.mx-cell { gap: 6px; padding: 6px; }.si-row { grid-template-columns: 24px minmax(0,1fr) auto 34px; gap: 4px 8px; } }
 @media(pointer:coarse) { .btn,.icon-btn,.name-link { min-height: 44px; }.icon-btn { width: 44px; }.si-row { grid-template-columns: 24px minmax(0,1fr) auto 44px; } }
 </style>

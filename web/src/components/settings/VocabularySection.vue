@@ -4,10 +4,11 @@ import { computed, onMounted, ref } from 'vue'
 import { getKinds, type Kind } from '../../lib/api'
 import { WORK_KINDS } from '../../lib/ticketList'
 import AppIcon from '../AppIcon.vue'
+import AgentNamesCard from './AgentNamesCard.vue'
 import SettingsCard from './SettingsCard.vue'
 import WorkVocabularyCard from './WorkVocabularyCard.vue'
 
-// Vocabulary: shared workspace names and the configured ticket types.
+// Vocabulary: agent names, shared workspace names and the configured ticket types.
 const kinds = ref<Kind[] | null>(null)
 const error = ref('')
 const work = computed(() => (kinds.value ?? []).filter(kind => (WORK_KINDS as readonly string[]).includes(kind.slug)))
@@ -23,6 +24,7 @@ onMounted(load)
 
 <template>
   <div class="section">
+    <AgentNamesCard />
     <WorkVocabularyCard />
     <SettingsCard title="Ticket types" icon="layers" anchor="ticket-types">
       <template #lead>The kinds of work in every project, with the key prefix each one gets.</template>

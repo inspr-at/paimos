@@ -21,6 +21,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 )
@@ -89,7 +90,7 @@ func (f *fixture) key(t *testing.T, p tenant.Principal, scopes []string) string 
 	secret := uuid()
 	sum := sha256.Sum256([]byte(secret))
 	f.tx(t, p, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1,$2,'test',$3,$4,$5)`, p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]), scopes)
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'test',$3,$4,$5,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:]), scopes)
 		return err
 	})
 	return "aeon_" + prefix + "_" + secret
@@ -374,7 +375,7 @@ func TestTelemetryFencesAndAtomicRollback(t *testing.T) {
 	}
 	original := f.mux
 	f.mux = http.NewServeMux()
-	agentruns.New(f.d.App, func(context.Context, pgx.Tx, tenant.Principal, agentruns.Run, agentruns.Telemetry) error {
+	agentruns.New(f.d.App, func(context.Context, pgx.Tx, tenant.Principal, agentruns.Run, agentruns.Telemetry, *[]events.Change) error {
 		return errors.New("settlement unavailable")
 	}).Mount(f.mux)
 	n := f.count(t, f.person, `SELECT count(*) FROM events`)
@@ -539,7 +540,7 @@ func TestTelemetryHookRunsOnceAndCountersCannotOverflow(t *testing.T) {
 	path := "/api/runs/" + v.ID + "/telemetry"
 	calls := 0
 	f.mux = http.NewServeMux()
-	agentruns.New(f.d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, report agentruns.Telemetry) error {
+	agentruns.New(f.d.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, run agentruns.Run, report agentruns.Telemetry, _ *[]events.Change) error {
 		calls++
 		var total int64
 		if err := tx.QueryRow(ctx, `SELECT cost_micros FROM agent_runs WHERE id=$1`, run.ID).Scan(&total); err != nil {

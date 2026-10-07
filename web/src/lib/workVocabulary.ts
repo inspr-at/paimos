@@ -4,7 +4,9 @@ import type { IconName } from '../components/AppIcon.vue'
 import { kindLabel } from './work.ts'
 export const WORK_ICONS = ['ticket', 'epic', 'task', 'layers', 'tree', 'folder', 'check', 'box'] as const
 export interface WorkLevel { name: string; icon: string }
-export interface WorkVocabulary { revision: number; leaf: WorkLevel; levels: WorkLevel[] }
+export interface LeadNames { singular: string; plural: string }
+/** `lead` is absent while the workspace uses Lead/Leads (AEON-791). */
+export interface WorkVocabulary { revision: number; leaf: WorkLevel; levels: WorkLevel[]; lead?: LeadNames }
 // Keep custom spelling (including capitalized German nouns) in sentences.
 export function workNoun(name: string): string { return ['Ticket', 'Epic', 'Task', 'Story'].includes(name) ? name.toLowerCase() : name }
 export function workLevel(v: WorkVocabulary, leaf: boolean, depth: number): WorkLevel {

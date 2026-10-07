@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 
 export interface ToastAction { label: string; run: () => void }
 // A release named inside a toast's sentence: `message` is the whole sentence in
@@ -8,6 +8,8 @@ export interface ToastAction { label: string; run: () => void }
 export interface ToastRelease { version: string; name?: string; before: string; after?: string }
 export interface Toast { id: number; message: string; tone: 'info' | 'error'; actions: ToastAction[]; sticky: boolean; key?: string; release?: ToastRelease }
 export const toasts = reactive<Toast[]>([])
+// A fixed action bar reports its measured height and gap above the shell footer.
+export const toastBottomClearance = ref(0)
 let next = 1
 let ownerEpoch = 0
 export function resetToasts() { ownerEpoch++; toasts.splice(0) }

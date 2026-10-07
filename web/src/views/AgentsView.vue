@@ -18,6 +18,7 @@ import { useCapacity } from '../stores/capacity'
 import { useProjects } from '../stores/projects'
 import { useSession } from '../stores/session'
 import AppIcon from '../components/AppIcon.vue'
+import KeyCap from '../components/KeyCap.vue'
 import ApprovalQueue from '../components/agents/ApprovalQueue.vue'
 import SessionList from '../components/agents/SessionList.vue'
 import ChangeTierPopover from '../components/agents/ChangeTierPopover.vue'
@@ -25,26 +26,32 @@ import TierToast from '../components/agents/TierToast.vue'
 import { useServiceTiers } from '../stores/serviceTiers'
 import { controlPermitted } from '../lib/managedControl'
 import SessionPanel from '../components/agents/SessionPanel.vue'
-import LiveLine from '../components/agents/LiveLine.vue'
+import HeadCounts from '../components/agents/HeadCounts.vue'
+import { FILTER_LABEL, matchesFilter, type HeadFilter } from '../components/agents/headCounts'
 import AccountsComputers from '../components/agents/AccountsComputers.vue'
 import { openModelPrefs } from '../lib/modelPrefsCommand'
 import AgentsWorking from '../components/agents/AgentsWorking.vue'
 import StartAgentDialog from '../components/agents/StartAgentDialog.vue'
+import LeadsList from '../components/lead/LeadsList.vue'
+import { openStartLead } from '../lib/leadOverlay'
+import { LEAD_WORDS } from '../lib/lead'
+import { useDeveloperSettings } from '../lib/developerSettings'
 import RunQueue from '../components/agents/RunQueue.vue'
-import QuotaWarnings from '../components/agents/QuotaWarnings.vue'
 import AttachApproval from '../components/agents/AttachApproval.vue'
 import AttachPending from '../components/agents/AttachPending.vue'
-import WindDownPanel from '../components/agents/WindDownPanel.vue'
+import WindDownControl from '../components/agents/WindDownControl.vue'
 import FloatingPanel from '../components/work/FloatingPanel.vue'
 import { useAgentPause } from '../stores/agentPause'
+import { agentsFooter } from '../lib/footerProviders'
+import { countedLive, jumpTarget } from '../components/agents/sessionTree'
+import { useFooterSummary } from '../lib/footerSummary'
+import { clockTime, liveSession } from '../lib/agentPause'
 
-// Markus's desk for agents: a compact live line under the title, what waits on him
-// (only when something does), the accounts with today's plan, then every session
-// grouped by state. A session opens in the docked panel.
+// Markus's desk for agents: one head line whose counts filter Sessions, what waits
+// on him (only when something does), the accounts with today's plan, then every
+// session grouped by state. A session opens in the docked panel.
 const agents = useAgents()
 const pause = useAgentPause()
-const windDown = ref<InstanceType<typeof WindDownPanel>>()
-const sessionList = ref<InstanceType<typeof SessionList>>()
 const headerMenu = ref<{ type: 'add' | 'more'; anchor: HTMLElement } | null>(null)
 function headerAction(type: 'add' | 'more', event: Event) { headerMenu.value = headerMenu.value?.type === type ? null : { type, anchor: event.currentTarget as HTMLElement } }
 function menuAction(action: () => void) {
@@ -67,6 +74,10 @@ const session = useSession()
 const route = useRoute()
 const router = useRouter()
 const cursor = ref('')
+const runQueue = ref<InstanceType<typeof RunQueue>>()
+const windDown = ref<InstanceType<typeof WindDownControl>>()
+const sessionList = ref<InstanceType<typeof SessionList>>()
+const filter = ref<HeadFilter | null>(null)
 // Decision Desk and notification links focus the existing request card.
 watch([() => route.query.needs, () => agents.loaded], async ([id, loaded]) => {
   if (!loaded || typeof id !== 'string' || !/^[am]:[0-9a-f-]{36}$/i.test(id)) return
@@ -81,6 +92,8 @@ watch([() => route.query.run, () => agents.loaded, () => agents.sessions, () => 
   if (linked) { void router.replace({ path: `/agents/${linked.id}`, query: { ...route.query, run: undefined } }); return }
   await nextTick()
   if (route.query.run !== id) return
+  // A folded Queued section opens for this visit to show the linked run.
+  if (runQueue.value?.reveal()) await nextTick()
   const queued = document.getElementById(`run-${id}`)
   if (queued) { queued.focus(); queued.scrollIntoView({ block: 'nearest' }); void router.replace({ query: { ...route.query, run: undefined } }) }
 }, { immediate: true })
@@ -99,8 +112,15 @@ const pairingAccess = computed(() => pairingPermissions({
 }))
 const showConnect = computed(() => !!session.identity && session.identity.principal.kind !== 'agent')
 const canAttach = computed(() => session.identity?.principal.kind === 'person' && pairingAccess.value.canLookup)
-const showNew = computed(() => canStart.value || canAttach.value || showConnect.value)
-watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => { headerMenu.value = null })
+// AEON-741: leads start workers; the manual Start agent is an expert opt-in.
+const { showExpertStart } = useDeveloperSettings()
+const leadsList = ref<InstanceType<typeof LeadsList>>()
+const manualStart = computed(() => canStart.value && showExpertStart.value)
+const leadless = computed(() => leadsList.value?.withoutLead ?? [])
+const canStartLead = computed(() => !!leadsList.value?.mayStart && leadless.value.length > 0)
+const leadlessNote = computed(() => leadless.value.length === 1 ? `${projects.byId(leadless.value[0]!)?.routeKey ?? 'One project'} has none. One per project.` : `${leadless.value.length} projects have none. One per project.`)
+const showNew = computed(() => manualStart.value || canStartLead.value || canAttach.value || showConnect.value)
+watch(() => `${session.identity?.tenant.id}/${session.identity?.principal.id}`, () => { headerMenu.value = null; filter.value = null })
 
 const ticketPeek = inject(TICKET_PEEK, null)
 const ticketPeekOpen = computed(() => !!ticketPeek?.openKey.value)
@@ -218,20 +238,87 @@ async function control(view: SessionView, kind: SessionControl['kind']) {
     toast(kind === 'stop' ? `Stop sent to ${view.name}.` : `Interrupt sent to ${view.name}.`)
   } catch (e) { toast(message(e), { tone: 'error' }) }
 }
-// The live line's counts jump to the first session in that state.
-function jump(state: AgentState) {
-  const states = state === 'problem' ? ['problem', 'unresponsive'] : state === 'waiting' ? ['waiting'] : [state]
-  const el = [...document.querySelectorAll<HTMLElement>('.agents-page .row[data-state]')].find(row => states.includes(row.dataset.state ?? ''))
-  if (!el?.dataset.row) return
-  cursor.value = el.dataset.row
-  el.focus({ preventScroll: true })
-  el.scrollIntoView({ block: 'center', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+// A head count filters Sessions to its state (AEON-780); pressing it again, the
+// chip's × or Esc shows all again. The filter is a look, never a setting.
+// A folded Sessions section opens for this visit (AEON-784). The reveal is
+// recorded even when Sessions shows open, so a preference read that lands
+// after the filter cannot fold the rows away.
+async function setFilter(next: HeadFilter) {
+  filter.value = filter.value === next ? null : next
+  if (!filter.value) return
+  if (sessionList.value?.reveal()) await nextTick()
+  await nextTick()
+  // The cursor starts on the first match; Sessions scroll into view only when out of view.
+  const first = document.querySelector<HTMLElement>('.agents-page .sessions .row[data-row]:not(.filter-context)')
+  if (first?.dataset.row) cursor.value = first.dataset.row
+  const list = document.querySelector<HTMLElement>('.agents-page .sessions')
+  const box = list?.getBoundingClientRect()
+  if (list && box && (box.top < 0 || box.top > window.innerHeight - 160)) list.scrollIntoView({ block: 'start', behavior: reducedMotion() ? 'auto' : 'smooth' })
+}
+function clearFilter() {
+  const was = filter.value
+  filter.value = null
+  // The chip is gone; focus goes back to the count that set it.
+  if (was) document.querySelector<HTMLElement>(`.agents-page .page-head [data-filter="${was}"]`)?.focus({ preventScroll: true })
+}
+// The footer's counts jump to the first session in that state. The row may be
+// a folded descendant: pick it from the sessions, open its ancestors, then focus it.
+async function jump(state: AgentState) {
+  const target = jumpTarget(agents.views, state)
+  if (!target) return
+  // An active Sessions filter that hides the row moves to the footer's own state: the chip stays where it is and only its word changes.
+  const view = agents.views.find(v => v.session.id === target.id)
+  if (filter.value && view && !matchesFilter(view, filter.value)) {
+    filter.value = matchesFilter(view, state as HeadFilter) ? state as HeadFilter : null
+    announce(filter.value ? `Sessions now show ${FILTER_LABEL[filter.value].toLowerCase()} only` : 'Sessions now show all')
+  }
+  sessionList.value?.revealSession(target.id)
+  await nextTick()
+  cursor.value = `s:${target.id}`
+  focusRow(cursor.value)
 }
 function review(approval: Approval) {
   if (window.innerWidth < 1100) void closePanel()
   cursor.value = `a:${approval.id}`
   void nextTick(() => focusRow(cursor.value))
 }
+
+// ---------- Footer summary (AEON-785): count · state · the one exception ----------
+const footerWind = computed(() => {
+  const by = pause.report?.deadline_at
+  if (!by) return null
+  const left = pause.reportIds.filter(id => { const s = agents.sessionById(id); return !!s && liveSession(s) }).length
+  return { left, by: clockTime(by) }
+})
+// What this screen lists: live sessions, plus those paused on purpose.
+useFooterSummary(() => {
+  // A first read that failed shows its own error; the footer does not wait for it.
+  if (!session.identity || (!agents.loaded && agents.sessionsError)) return null
+  const live = agents.views.filter(countedLive)
+  const states = (groups: string[]) => live.filter(v => groups.includes(v.status.group)).length
+  const paused = agents.views.filter(v => v.status.state === 'paused').length
+  const top = () => document.querySelector('main')?.scrollTo({ top: 0, behavior: reducedMotion() ? 'auto' : 'smooth' })
+  return agentsFooter({
+    loaded: agents.loaded,
+    total: live.length + paused,
+    working: states(['working']),
+    idle: states(['idle']),
+    throttled: states(['throttled']),
+    awaiting: states(['awaiting']),
+    pausing: states(['pausing']),
+    problems: states(['problem', 'unresponsive']),
+    asks: agents.needsCount,
+    paused,
+    wind: footerWind.value,
+    act: {
+      problem: () => void jump('problem'),
+      ask: () => { const first = agents.pending[0] ? `a:${agents.pending[0].id}` : agents.held[0] ? `m:${agents.held[0].id}` : ''; if (first) { cursor.value = first; focusRow(first) } },
+      wind: () => windDown.value?.openStatus(),
+      paused: () => void jump('paused'),
+      top,
+    },
+  })
+}, () => session.identity ? { updatedAt: agents.sessionsUpdatedAt, paused: stale.value } : null)
 
 // ---------- Panel ----------
 // Like the ticket panel: opening from the list adds one history entry, switching
@@ -260,7 +347,8 @@ async function closePanel() {
 }
 
 // ---------- Keyboard: j/k move, a approve, d deny, Enter opens, Esc closes ----------
-function rows() { return [...document.querySelectorAll<HTMLElement>('.agents-page [data-row]')] }
+// A folded section's rows stay in the page but inert; the cursor skips them.
+function rows() { return [...document.querySelectorAll<HTMLElement>('.agents-page [data-row]')].filter(el => !el.closest('[inert]')) }
 function focusRow(id: string) {
   const el = document.querySelector<HTMLElement>(`.agents-page [data-row="${CSS.escape(id)}"]`)
   el?.focus({ preventScroll: true })
@@ -305,6 +393,7 @@ function keydown(event: KeyboardEvent) {
     case 'Escape':
       if (ticketPeekOpen.value) return
       if (sessionId.value) { event.preventDefault(); void closePanel() }
+      else if (filter.value) { event.preventDefault(); filter.value = null }
       break
   }
 }
@@ -352,36 +441,38 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 
 <template>
   <section class="agents-page" :class="{ 'panel-open': !!sessionId && !ticketPeekOpen }" aria-labelledby="agents-title">
+    <!-- One line (AEON-780): title, the counts as filters, then the controls. -->
     <header class="page-head">
-      <div class="head-main">
-        <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
-        <div class="title-row">
-          <h1 id="agents-title" ref="pageTitle" tabindex="-1">Agents</h1>
-          <div class="head-side">
-            <p class="freshness" :class="{ on: live && !stale, stale }" :data-tip="freshnessTip"><span class="live-mark" aria-hidden="true" /><span>{{ stale ? 'Update delayed' : live ? 'Live' : 'Connecting…' }}</span></p>
-            <button v-if="showNew" type="button" class="btn primary add-agent" aria-label="New: start an agent, attach a session or connect a machine" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'add'" @click="headerAction('add', $event)"><AppIcon name="plus" :size="17" /></button>
-            <button type="button" class="icon-btn flat" aria-label="More agent actions" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'more'" @click="headerAction('more', $event)"><AppIcon name="more" /></button>
-          </div>
-        </div>
-        <LiveLine :views="agents.views" :now="agents.now" :loaded="agents.loaded" @open="openSession" @jump="jump" />
+      <h1 id="agents-title" ref="pageTitle" tabindex="-1">Agents</h1>
+      <HeadCounts :views="agents.views" :now="agents.now" :loaded="agents.loaded" :filter="filter" @filter="setFilter">
+        <!-- No "Live" in the head; only a delay is worth saying, at the line end (AEON-785 moves freshness to the footer). -->
+        <p v-if="stale" class="freshness" role="status" :data-tip="freshnessTip"><span class="live-mark" aria-hidden="true" />Update delayed</p>
+      </HeadCounts>
+      <div class="head-side">
+        <!-- Wind down is a head control (AEON-783): ghost button, then a teal chip while it runs. -->
+        <WindDownControl v-if="agents.loaded" ref="windDown" />
+        <button v-if="showNew" type="button" class="btn primary add-agent" aria-label="New: start a lead, attach a session or connect a machine" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'add'" @click="headerAction('add', $event)"><AppIcon name="plus" :size="17" /></button>
+        <button type="button" class="icon-btn flat more-agent" aria-label="More agent actions" aria-haspopup="menu" :aria-expanded="headerMenu?.type === 'more'" @click="headerAction('more', $event)"><AppIcon name="more" /></button>
       </div>
       <AttachApproval ref="attachDialog" hide-trigger :now="agents.now" @changed="(result, declined) => attachPending?.settle(result, declined)" />
       <FloatingPanel v-if="headerMenu" :anchor="headerMenu.anchor" align="end" :width="300" :label="headerMenu.type === 'add' ? 'Add agent or computer' : 'More agent actions'" @close="restore => { if (restore) headerMenu?.anchor.focus(); headerMenu = null }">
         <div role="menu" class="header-menu" @keydown="menuKeys">
           <template v-if="headerMenu.type === 'add'">
-            <button v-if="canStart" type="button" role="menuitem" class="menu-item" @click="menuAction(() => startDialog?.open())"><AppIcon name="agent" /><span>Start agent…<small>Pick a ticket and a harness.</small></span></button>
+            <button v-if="canStartLead" type="button" role="menuitem" class="menu-item" @click="menuAction(() => openStartLead(leadless, headerMenu?.anchor ?? null, true))"><AppIcon name="play" /><span>Start {{ LEAD_WORDS.l }}…<small>{{ leadlessNote }}</small></span></button>
             <button v-if="canAttach" type="button" role="menuitem" class="menu-item" @click="menuAction(() => attachDialog?.open())"><AppIcon name="link" /><span>Attach a running session…<small>Bring in a session started in a terminal.</small></span></button>
             <RouterLink v-if="showConnect" role="menuitem" class="menu-item" to="/agents/register-agent" @click="headerMenu = null"><AppIcon name="monitor" /><span>Connect your machine…<small>Install agentd so it can run agents.</small></span></RouterLink>
+            <template v-if="manualStart">
+              <div class="menu-sep" role="separator" /><p class="eyebrow menu-eyebrow">Expert</p>
+              <button type="button" role="menuitem" class="menu-item" @click="menuAction(() => startDialog?.open())"><AppIcon name="agent" /><span>Start agent manually…<small>Pick ticket, host, harness, account, model and thinking yourself. Same checks apply.</small></span></button>
+            </template>
           </template>
+          <!-- Pause all, Resume all and Wind down live in the Wind down popover; History in the Sessions head (AEON-780). -->
           <template v-else>
-            <button v-if="pause.person && can('harness.control')" type="button" role="menuitem" class="menu-item" @click="menuAction(() => windDown?.openBulk('pause-all'))"><AppIcon name="pause" /><span>Pause all…<small>Choose one level, with per-agent overrides.</small></span></button>
-            <button v-if="pause.person && can('harness.control')" type="button" role="menuitem" class="menu-item" @click="menuAction(() => windDown?.openBulk('resume-all'))"><AppIcon name="play" /><span>Resume all…<small>Continue from saved handovers, leads first.</small></span></button>
-            <button v-if="pause.person && can('harness.control')" type="button" role="menuitem" class="menu-item" @click="menuAction(() => windDown?.focusWindDown())"><AppIcon name="clock" /><span>Wind down…<small>Starts on confirm, done by the deadline.</small></span></button>
             <button role="menuitem" type="button" class="menu-item" aria-label="Model preferences" @click="menuAction(() => openModelPrefs())"><AppIcon name="gear" /><span>Model preferences<small>Which models do which work.</small></span></button>
-            <RouterLink role="menuitem" class="menu-item" to="/decision-desk" @click="headerMenu = null"><AppIcon name="inbox" /><span>Decision Desk</span></RouterLink>
             <RouterLink role="menuitem" class="menu-item" to="/agents/usage" @click="headerMenu = null"><AppIcon name="pulse" /><span>Usage<small>Tokens and cost per agent, account and day.</small></span></RouterLink>
+            <RouterLink role="menuitem" class="menu-item" to="/decision-desk" aria-label="Decision Desk" @click="headerMenu = null"><AppIcon name="inbox" /><span>Decision Desk<small>Everything agents ask of people.</small></span></RouterLink>
             <RouterLink v-if="can('keys.manage')" role="menuitem" class="menu-item" to="/settings/access/agents" @click="headerMenu = null"><AppIcon name="key" /><span>Agent keys<small>Scoped API keys for agents.</small></span></RouterLink>
-            <button role="menuitem" type="button" class="menu-item" @click="menuAction(() => sessionList?.toggleHistory())"><AppIcon name="history" /><span>History<small>Ended sessions and saved handovers.</small></span></button>
+            <div class="menu-sep" role="separator" />
             <RouterLink role="menuitem" class="menu-item" to="/settings/personal#agents" @click="headerMenu = null"><AppIcon name="gear" /><span>Agent settings<small>Default pause level and indicators.</small></span></RouterLink>
           </template>
         </div>
@@ -403,14 +494,14 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
         </Transition>
         </AttachPending>
         <AgentsWorking v-if="showSetup && session.identity?.principal.kind === 'person'" />
+        <LeadsList v-if="agents.loaded" ref="leadsList" />
         <AccountsComputers v-if="showSetup" :permissions="pairingAccess" :show-accounts="showCapacity" />
         <p v-if="agents.approvalsHardError" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Permission requests could not be loaded: {{ agents.approvalsError }} <button type="button" class="btn sm" @click="agents.refreshApprovals()">Try again</button></p>
-        <WindDownPanel v-if="agents.loaded" ref="windDown" />
         <SessionList
           v-if="agents.loaded" ref="sessionList"
           :groups="agents.grouped" :history="agents.historyViews" :history-state="agents.historyState" :history-more="agents.historyMore" :now="agents.now" :cursor="cursor" :selected="sessionId" :state="agents.sessionsUpdatedAt !== null ? 'ready' : agents.sessionsState" :error="agents.sessionsError"
-          :loaded="agents.loaded" :controls="agents.controls" :can-start="canStart"
-          @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()" @history="agents.loadHistory(true)" @older="agents.loadOlderHistory()"
+          :loaded="agents.loaded" :controls="agents.controls" :can-start="manualStart" :can-lead="canStart" :filter="filter"
+          @open="openSession" @control="control" @focus-row="id => cursor = id" @retry="agents.loadAll()" @start="startDialog?.open()" @history="agents.loadHistory(true)" @older="agents.loadOlderHistory()" @clear-filter="clearFilter"
         />
         <p v-if="agents.sessionsUpdatedAt !== null && agents.sessionsState === 'error'" class="inline-error" role="alert"><AppIcon name="alert" :size="14" />Sessions could not be refreshed: {{ agents.sessionsError }} <button type="button" class="btn sm" @click="agents.loadAll()">Try again</button></p>
         <ApprovalQueue
@@ -418,10 +509,9 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
           :pending="[]" :held="[]" :history="history" :now="agents.now" :loaded="agents.loaded" cursor="" :can-decide="false" :can-decide-approval="() => false" :can-resolve="false"
           :can-revoke="canRevoke" :asker="agents.askerName" :resource="resource" :decide="agents.decide" :revoke="agents.revoke" :resolve="resolveHeld"
         />
-        <QuotaWarnings v-if="agents.loaded && showCapacity" :sessions="agents.views" />
-        <RunQueue v-if="agents.loaded" @emptied="pageTitle?.focus()" />
+        <RunQueue v-if="agents.loaded" ref="runQueue" @emptied="pageTitle?.focus()" />
         <p v-if="agents.loaded && (agents.views.length || agents.pending.length)" class="hint" aria-hidden="true">
-          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
+          <kbd class="keycap">j</kbd><kbd class="keycap">k</kbd> move · <KeyCap k="left" /><KeyCap k="right" /> fold · <kbd class="keycap"><AppIcon name="enter" /></kbd> open · <kbd class="keycap">p</kbd> pause · <kbd class="keycap">r</kbd> resume · <kbd class="keycap">a</kbd> approve · <kbd class="keycap">d</kbd> deny
         </p>
       </div>
     </div>
@@ -439,21 +529,23 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 
 <style scoped>
 .agents-page { width: 100%; margin: 0; padding: 22px var(--gutter) 24px; }
-.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 18px; }
-.page-head h1 { margin-top: 6px; }
-.head-side { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-.start-agent { min-height: 40px; }
-.connect, .head-side :deep(.attach-session) { min-height: 40px; }
-/* In-context links to the matching places: quiet text, no arrows. */
-.context-link { display: inline-flex; align-items: center; height: 40px; padding: 0 10px; border-radius: 999px; color: var(--ink-2); font-size: 13px; font-weight: 550; white-space: nowrap; text-decoration: none; }
-@media (hover: hover) { .context-link:hover { background: var(--row-hover); color: var(--ink); } }
-.context-link:focus-visible { box-shadow: var(--focus-ring); }
-/* One quiet freshness element: a dot and a word, details on hover. */
-.freshness { display: inline-flex; align-items: center; gap: 7px; height: 40px; padding: 0 8px 0 4px; margin-right: 4px; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.freshness.stale { color: var(--warn-ink); }
-.live-mark { width: 7px; height: 7px; border-radius: 50%; background: var(--st-backlog); flex: none; }
-.freshness.on .live-mark { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent); }
-.freshness.stale .live-mark { background: var(--gold); }
+/* One 48 px line: title, counts, then the controls at the right (AEON-780). */
+.page-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 22px; min-height: 48px; margin-bottom: 14px; container: agents-head / inline-size; }
+.page-head h1 { margin: 0; font-size: 30px; white-space: nowrap; }
+.page-head .head-counts { flex: 0 1 auto; }
+.head-side { display: flex; align-items: center; flex-wrap: nowrap; gap: 6px; margin-left: auto; flex: none; }
+/* The page's one primary button, without the glow (base.css glows are retired here). */
+.add-agent { width: 36px; height: 36px; min-height: 0; padding: 0; border-radius: 50%; }
+.add-agent:not(:focus-visible) { box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 50%, transparent), inset 0 1px 0 color-mix(in srgb, var(--surface-highlight) 35%, transparent); }
+/* Only a delay is said in the head; a dot and a word, details on hover. */
+.freshness { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 8px; color: var(--warn-ink); font-size: 12px; white-space: nowrap; }
+.live-mark { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); flex: none; }
+.header-menu .menu-sep { height: 1px; margin: 4px 8px; background: var(--line); }
+.header-menu .menu-eyebrow { margin: 0; padding: 8px 10px 2px; }
+.header-menu .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); font-size: 13px; text-align: left; text-decoration: none; }
+.header-menu .menu-item:hover { background: var(--row-hover); }
+.header-menu .menu-item span { display: grid; gap: 3px; }
+.header-menu small { font-size: 11px; color: var(--ink-3); }
 .layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; align-items: start; container: agents-layout / inline-size; }
 /* Reports and live groups grow below the controls without changing the viewport offset. */
 .agents-page { overflow-anchor: none; }
@@ -466,31 +558,15 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 @media (min-width: 1100px) {
   .agents-page.panel-open { margin: 0; padding-right: calc(var(--panel-w) + 22px); }
 }
-@media (max-width: 1100px) {
-  .page-head { flex-direction: column; align-items: stretch; gap: 10px; }
-  .head-side { justify-content: flex-start; }
-  .head-links { order: 9; margin-left: auto; }
-}
-.head-links { display: flex; align-items: center; gap: 4px; }
 @media (max-width: 720px) {
   .agents-page { padding: 16px 12px 20px; }
   .hint { display: none; }
+  /* Phones: title and controls on line 1 (44 px), the counts on line 2. */
+  .page-head { gap: 2px 8px; }
+  .page-head h1 { font-size: 26px; }
+  .page-head .head-counts { order: 3; flex: 1 1 100%; }
+  .add-agent, .more-agent { width: 44px; height: 44px; }
+  .header-menu .menu-item { min-height: 52px; }
+  .freshness { height: 44px; }
 }
-/* Phones: fixed cells, so a button that appears after permissions load moves nothing. */
-@media (max-width: 600px) {
-  .head-side { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "start connect" "attach attach" "links links"; gap: 6px 8px; }
-  .head-side :deep(.attach-session) { grid-area: attach; min-height: 44px; justify-content: center; }
-  .start-agent { grid-area: start; }
-  .connect { grid-area: connect; }
-  .start-agent, .connect { min-height: 44px; justify-content: center; }
-  .connect { height: auto; line-height: 1.2; white-space: normal; padding-top: 8px; padding-bottom: 8px; }
-  .head-links { grid-area: links; margin: 0 0 0 -10px; }
-  .context-link { height: 36px; }
-  .freshness { order: 9; margin: 0 0 0 auto; height: 36px; padding-right: 0; }
-}
-</style>
-
-<style scoped>
-.head-main{width:100%;min-width:0}.title-row{display:flex;align-items:center;justify-content:space-between;gap:12px}.title-row .head-side{display:flex;flex-wrap:nowrap;align-items:center;gap:6px}.title-row h1{margin:6px 0 0}.title-row .freshness{height:36px;font-size:12px;padding:0}.add-agent{width:36px;height:36px;padding:0}.header-menu .menu-item{display:flex;align-items:center;gap:10px;width:100%;min-height:48px;padding:8px 10px;border:0;border-radius:6px;background:transparent;color:var(--ink);font-size:13px;text-align:left;text-decoration:none}.header-menu .menu-item:hover{background:var(--row-hover)}.header-menu .menu-item span{display:grid;gap:3px}.header-menu small{font-size:11px;color:var(--ink-3)}
-@media(max-width:600px){.title-row .head-side{display:flex}.title-row .freshness{margin:0}.title-row .icon-btn,.title-row .add-agent{width:40px;height:40px}}
 </style>

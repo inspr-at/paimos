@@ -1,30 +1,20 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
 import { brand } from '../lib/brand'
 import { footerReleaseContent } from '../lib/footerRelease'
+import { footerLive, footerSource, footerSummary, landed, PAUSED_FULL, PAUSED_SHORT, phoneRoom, pingGate, said, type FooterPart, type FooterSummary } from '../lib/footerSummary'
 import { codenameOf, releaseAria } from '../lib/codenames'
-import { useDeveloperSettings } from '../lib/developerSettings'
-import { flowNameBudget, placeFlowPill } from '../lib/flowPill'
-import { flowPillContext } from '../lib/flowPillContext'
 import { useReleases } from '../stores/releases'
 import { useSession } from '../stores/session'
 import { useVersion } from '../stores/version'
 import AppIcon from './AppIcon.vue'
 import CalendarVersion from './CalendarVersion.vue'
-import JourneyChip from './journey/JourneyChip.vue'
 
 // The product mark stays left; the running release's name, Pretty version and
-// new count share the history control on the right. The opt-in flow sits between
-// them, taking the wordmark's room when needed.
+// new count share the history control on the right.
 const props = defineProps<{ hidden?: boolean }>()
-const emit = defineEmits<{ releases: []; pill: [shown: boolean] }>()
-const route = useRoute()
-const onProject = computed(() => typeof route.params.projectKey === 'string' && route.params.projectKey !== '')
-const { showFlowControls } = useDeveloperSettings()
-const pill = computed(() => showFlowControls.value && onProject.value ? flowPillContext.value : null)
-const root = ref<HTMLElement>()
+const emit = defineEmits<{ releases: [] }>()
 const releaseControl = ref<HTMLButtonElement>()
 const card = ref<HTMLElement>()
 const cardShown = ref(false)
@@ -67,102 +57,40 @@ function focusCard() {
 }
 function blurCard() { cardFocused = false; if (!cardHovered) hideCard() }
 function openReleases() { hideCard(); emit('releases') }
-const slotEl = ref<HTMLElement>()
-const pillOn = ref(false)
-const placed = ref(false)
-const tight = ref(false)
-const GAP = 8
-let resize: ResizeObserver | undefined
-let mutations: MutationObserver | undefined
-let raf = 0
-let epoch = 0
-
-function naturalWidth(el: HTMLElement): number {
-  const clone = el.cloneNode(true) as HTMLElement
-  clone.setAttribute('aria-hidden', 'true')
-  if (clone instanceof HTMLButtonElement) clone.tabIndex = -1
-  clone.style.cssText = 'position:absolute;left:0;top:0;visibility:hidden;pointer-events:none;height:auto;width:max-content;max-width:none;container-type:normal;'
-  for (const part of clone.querySelectorAll<HTMLElement>('.face, .next')) {
-    part.style.maxWidth = 'none'
-    part.style.width = 'max-content'
-    part.style.overflow = 'visible'
-    part.style.textOverflow = 'clip'
-  }
-  el.ownerDocument.body.appendChild(clone)
-  const width = Math.ceil(clone.getBoundingClientRect().width)
-  clone.remove()
-  return width
-}
-
-async function place() {
-  const token = ++epoch
-  await nextTick()
-  if (token !== epoch) return
-  const footer = root.value
-  const slot = slotEl.value
-  const chip = slot?.querySelector<HTMLElement>('.journey-chip')
-  const name = footer?.querySelector<HTMLElement>('.footer-name')
-  const version = footer?.querySelector<HTMLElement>('.version-pill, .version-plain')
-  if (!footer || !slot || !chip || !name || !version || !pillOn.value) { placed.value = false; return }
-  const style = getComputedStyle(footer)
-  const padL = parseFloat(style.paddingLeft) || 0
-  const padR = parseFloat(style.paddingRight) || 0
-  const content = footer.clientWidth - padL - padR
-  const leading = naturalWidth(name)
-  const want = naturalWidth(chip)
-  const budget = flowNameBudget(content, version.offsetWidth, leading, want, GAP)
-  const nextCap = budget === null ? '' : '0px'
-  if (name.style.maxWidth !== nextCap) name.style.maxWidth = nextCap
-  const placedBox = placeFlowPill(footer.getBoundingClientRect(), name.getBoundingClientRect(), version.getBoundingClientRect(), want, GAP)
-  const left = `${Math.round(placedBox.left)}px`
-  const width = `${Math.round(placedBox.width)}px`
-  if (footer.style.getPropertyValue('--flow-left') !== left) footer.style.setProperty('--flow-left', left)
-  if (footer.style.getPropertyValue('--flow-width') !== width) footer.style.setProperty('--flow-width', width)
-  if (footer.style.getPropertyValue('--flow-shift') !== 'none') footer.style.setProperty('--flow-shift', 'none')
-  tight.value = placedBox.width + 1 < want
-  placed.value = placedBox.width > 0
-}
-
-function schedule() {
-  cancelAnimationFrame(raf)
-  raf = requestAnimationFrame(() => { void place() })
-}
-
-function onShown(shown: boolean) {
-  pillOn.value = shown
-  emit('pill', shown)
-  if (!shown) {
-    placed.value = false
-    tight.value = false
-    root.value?.querySelector<HTMLElement>('.footer-name')?.style.removeProperty('max-width')
-    return
-  }
-  schedule()
-}
-
-function openPill() { pill.value?.open() }
-
-function watchSize() {
-  const footer = root.value
-  if (!footer) return
-  resize?.disconnect()
-  resize = new ResizeObserver(() => schedule())
-  resize.observe(footer)
-  for (const el of footer.querySelectorAll<HTMLElement>('.version-pill, .version-plain')) resize.observe(el)
-}
-
 onMounted(() => {
   window.addEventListener('resize', hideCard)
   document.addEventListener('scroll', hideCard, true)
-  watchSize()
-  const footer = root.value
-  if (!footer) return
-  mutations = new MutationObserver(() => { watchSize(); schedule() })
-  mutations.observe(footer, { childList: true, subtree: true, characterData: true })
-  void document.fonts?.ready.then(() => schedule())
 })
-onBeforeUnmount(() => { hideCard(); window.removeEventListener('resize', hideCard); document.removeEventListener('scroll', hideCard, true); resize?.disconnect(); mutations?.disconnect(); cancelAnimationFrame(raf); emit('pill', false) })
-watch(pill, value => { if (!value) onShown(false) })
+onBeforeUnmount(() => { hideCard(); window.removeEventListener('resize', hideCard); document.removeEventListener('scroll', hideCard, true) })
+
+// ---------- The centre: what this screen says (AEON-785) ----------
+// Offline reads the same on every screen: a hollow amber dot and no action.
+const paused = computed(() => !!footerLive.value?.paused)
+const pausedSummary = computed<FooterSummary>(() => ({
+  tone: 'attention', full: [said(PAUSED_FULL)], short: [said(PAUSED_SHORT)],
+  aria: `Live updates paused, retrying.${lastUpdate.value ? ` The page shows the state of ${lastUpdate.value}.` : ''}`,
+}))
+const lastUpdate = computed(() => { const at = footerLive.value?.updatedAt; return at ? new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '' })
+const summary = computed(() => paused.value ? pausedSummary.value : footerSummary.value)
+const parts = (list: readonly FooterPart[]) => list.map((part, i) => ({ ...part, key: `${i}:${part.text}` }))
+const fullParts = computed(() => parts(summary.value?.full ?? []))
+const shortParts = computed(() => parts(summary.value?.short ?? []))
+// A changed number gets a short highlight; a new screen's first numbers do not.
+const countsText = computed(() => summary.value?.loading || paused.value ? '' : (summary.value?.full ?? []).filter(part => part.as === 'count').map(part => part.text).join('|'))
+const highlight = ref(false)
+watch([footerSource, countsText], ([source, text], [before, was]) => { highlight.value = source === before && !!was && !!text && text !== was })
+// The dot rings once when fresh data lands, at most once per 2 s; never while paused or loading.
+const ping = ref(0)
+const gate = pingGate()
+let seen: { source: symbol | null; at: number | null } | null = null
+watch(() => ({ source: footerSource.value, at: footerLive.value?.updatedAt ?? null }), next => {
+  if (landed(seen, next) && !paused.value && !summary.value?.loading && gate()) ping.value++
+  seen = next
+}, { flush: 'sync', immediate: true })
+// Polite announcement only when the tone turns problem.
+const announcement = ref('')
+watch(() => summary.value?.tone, (tone, before) => { announcement.value = tone === 'problem' && before !== 'problem' ? summary.value?.aria ?? '' : '' })
+function activate() { if (!paused.value) summary.value?.action?.() }
 const version = useVersion()
 const releases = useReleases()
 const session = useSession()
@@ -184,31 +112,41 @@ const label = computed(() => {
 </script>
 
 <template>
-  <footer ref="root" class="app-footer" :class="{ hidden }" :inert="hidden || undefined">
+  <footer class="app-footer" :class="{ hidden, speaking: phoneRoom(summary) }" :inert="hidden || undefined">
     <span class="footer-name"><span class="footer-wordmark">{{ brand.wordmark }}</span></span>
-    <div v-if="pill" ref="slotEl" class="flow-slot" :class="{ placed: placed && pillOn, tight: tight && pillOn }" v-show="pillOn">
-      <JourneyChip :key="pill.projectId" :project-id="pill.projectId" :active="pill.active" @go="openPill" @shown="onShown" />
+    <div class="foot-c">
+      <component :is="summary.action && !paused ? 'button' : 'span'" v-if="summary" class="sum" :class="{ loading: summary.loading }" :type="summary.action && !paused ? 'button' : undefined"
+        :data-tone="summary.tone" :data-conn="paused ? 'off' : 'on'" :role="summary.action && !paused ? undefined : 'status'" :aria-label="summary.aria" :data-tip="summary.loading ? undefined : summary.aria" @click="activate">
+        <span :key="ping" class="sum-dot" :class="{ ping: ping > 0 }" aria-hidden="true" />
+        <span v-if="summary.loading" class="sum-skel skeleton" aria-hidden="true" />
+        <template v-else>
+          <span class="full" aria-hidden="true"><template v-for="part in fullParts" :key="part.key"><b v-if="part.as === 'count'" :class="{ flash: highlight }">{{ part.text }}</b><span v-else-if="part.as === 'exception'" class="x">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></span>
+          <span class="short" aria-hidden="true"><template v-for="part in shortParts" :key="part.key"><b v-if="part.as === 'count'">{{ part.text }}</b><span v-else-if="part.as === 'exception'" class="x">{{ part.text }}</span><template v-else>{{ part.text }}</template></template></span>
+        </template>
+      </component>
+      <span class="sr-only" aria-live="polite">{{ announcement }}</span>
     </div>
-    <span class="spacer" />
-    <button v-if="session.identity" ref="releaseControl" type="button" class="version-pill" :aria-label="label"
-      @pointerenter="enterCard" @pointerleave="leaveCard" @focus="focusCard" @blur="blurCard" @keydown.esc="hideCard" @click="openReleases">
-      <span class="pill-face">
-        <AppIcon name="history" :size="13" />
-        <span v-if="codename || (!value && !version.failed)" class="footer-codename" lang="en"><template v-if="codename">{{ codename }}</template><span v-else class="skeleton name-skeleton" aria-hidden="true" /></span>
-        <span v-if="codename || (!value && !version.failed)" class="release-divider" aria-hidden="true" />
-        <span v-if="!version.failed" class="version-value">
-          <CalendarVersion :value="value || sizingVersion" :scheme="version.value?.scheme" rest :aria-hidden="!value || undefined" class="pill-version" :class="{ pending: !value }" />
-          <span v-if="!value" class="skeleton pill-skeleton" aria-hidden="true" />
+    <div class="foot-r">
+      <button v-if="session.identity" ref="releaseControl" type="button" class="version-pill" :aria-label="label"
+        @pointerenter="enterCard" @pointerleave="leaveCard" @focus="focusCard" @blur="blurCard" @keydown.esc="hideCard" @click="openReleases">
+        <span class="pill-face">
+          <AppIcon name="history" :size="13" />
+          <span v-if="codename || (!value && !version.failed)" class="footer-codename" lang="en"><template v-if="codename">{{ codename }}</template><span v-else class="skeleton name-skeleton" aria-hidden="true" /></span>
+          <span v-if="codename || (!value && !version.failed)" class="release-divider" aria-hidden="true" />
+          <span v-if="!version.failed" class="version-value">
+            <CalendarVersion :value="value || sizingVersion" :scheme="version.value?.scheme" rest :aria-hidden="!value || undefined" class="pill-version" :class="{ pending: !value }" />
+            <span v-if="!value" class="skeleton pill-skeleton" aria-hidden="true" />
+          </span>
+          <span v-else class="fallback">Version unavailable</span>
+          <span v-if="count !== null && count > 0" class="new-badge" aria-hidden="true"><span class="new-dot" />{{ count }} new</span>
         </span>
-        <span v-else class="fallback">Version unavailable</span>
-        <span v-if="count !== null && count > 0" class="new-badge" aria-hidden="true"><span class="new-dot" />{{ count }} new</span>
+      </button>
+      <span v-else class="version-plain">
+        <CalendarVersion :value="value || sizingVersion" :rest="!value" :aria-hidden="!value || undefined" :class="{ pending: !value }" />
+        <span v-if="version.failed" class="fallback">Version unavailable</span>
+        <span v-else-if="!value" class="skeleton pill-skeleton" aria-hidden="true" />
       </span>
-    </button>
-    <span v-else class="version-plain">
-      <CalendarVersion :value="value || sizingVersion" :rest="!value" :aria-hidden="!value || undefined" :class="{ pending: !value }" />
-      <span v-if="version.failed" class="fallback">Version unavailable</span>
-      <span v-else-if="!value" class="skeleton pill-skeleton" aria-hidden="true" />
-    </span>
+    </div>
   </footer>
   <Teleport to="body">
     <div v-if="cardShown" ref="card" class="release-hover-card" :style="cardPosition" aria-hidden="true">
@@ -224,24 +162,46 @@ const label = computed(() => {
 <style scoped>
 /* Same glass language as the header rail, mirrored: a hairline on top. */
 .app-footer {
-  position: relative; z-index: 18; display: flex; align-items: center; gap: 12px; height: var(--footer-h); min-height: 0; padding: 0 var(--gutter); overflow: clip;
+  position: relative; z-index: 18; display: flex; align-items: center; gap: 12px; height: var(--footer-h); min-height: 0; padding: 0 var(--gutter); overflow: clip; container: foot / inline-size;
   background: var(--glass-2); box-shadow: inset 0 1px 0 var(--glass-edge), 0 -1px 0 var(--line);
   -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2);
   color: var(--ink-2);
 }
-.footer-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 600 10px/16px var(--mono); letter-spacing: .24em; color: var(--ink-3); white-space: nowrap; font-variant-ligatures: none; }
-.spacer { flex: 1 1 0; }
-/* Centred on the page when the sides allow it; the version pill stays in its slot. */
-.flow-slot {
-  position: absolute; z-index: 1; top: 0; left: var(--flow-left, 50%); width: var(--flow-width, max-content); max-width: calc(100% - 24px); height: 100%;
-  transform: var(--flow-shift, translateX(-50%)); display: flex; align-items: center; justify-content: center; min-width: 0; visibility: hidden; pointer-events: none;
+.footer-name { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font: 600 10px/16px var(--mono); letter-spacing: .24em; color: var(--ink-3); white-space: nowrap; font-variant-ligatures: none; }
+/* The centre holds only the summary. It never changes the size of its neighbours: the mark and the release sit in their own tracks. */
+.foot-c { flex: 0 1 auto; display: flex; align-items: center; justify-content: center; gap: 10px; min-width: 0; height: 100%; }
+.foot-r { flex: 1 1 0; display: flex; align-items: center; justify-content: flex-end; min-width: 0; height: 100%; }
+.sum { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 28px; padding: 0 10px 0 9px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font: 400 12.5px/16px var(--font); white-space: nowrap; font-variant-numeric: tabular-nums; --tone: var(--ok); }
+.sum > .full, .sum > .short { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+button.sum { cursor: pointer; }
+@media (hover: hover) { button.sum:hover { background: var(--row-hover); color: var(--ink); } }
+button.sum:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+button.sum:active { background: var(--row-selected); }
+.sum b { color: var(--ink); font-weight: 650; }
+.sum .x { color: var(--tone-ink, var(--ink)); font-weight: 650; }
+.sum[data-tone="problem"] { --tone: var(--agent-problem); --tone-ink: var(--agent-problem); }
+.sum[data-tone="attention"] { --tone: var(--gold); --tone-ink: var(--warn-ink); }
+.sum[data-tone="deliberate"] { --tone: var(--teal); --tone-ink: var(--teal-ink); }
+.sum[data-tone="idle"] { --tone: var(--st-backlog); }
+.sum .short { display: none; }
+.sum-dot { position: relative; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--tone); }
+.sum[data-conn="off"] { color: var(--ink-3); }
+.sum[data-conn="off"] .sum-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--gold); }
+/* Live: one soft ring each time fresh data lands. No glow, no word. */
+.sum-dot::after { content: ''; position: absolute; inset: -4px; border-radius: 50%; box-shadow: 0 0 0 1px var(--tone); opacity: 0; }
+.sum-skel { display: inline-block; flex: none; width: 150px; height: 8px; border-radius: 4px; }
+@media (prefers-reduced-motion: no-preference) {
+  .sum-dot.ping::after { animation: sum-ping 1.4s ease-out 1; }
+  .sum .flash { animation: sum-tick 1.6s ease-out 1; border-radius: 4px; }
 }
-.flow-slot.placed { visibility: visible; }
-.flow-slot :deep(.journey-chip) { pointer-events: auto; }
-/* The dot and arrow go when the full line does not fit. The stage and the next action stay. */
-.flow-slot.tight :deep(.led),
-.flow-slot.tight :deep(.go) { display: none; }
-.flow-slot.tight :deep(.face) { gap: 6px; padding-right: 10px; }
+@keyframes sum-ping { 0% { transform: scale(.55); opacity: .85; } 100% { transform: scale(1.9); opacity: 0; } }
+@keyframes sum-tick { 0% { background: var(--mark-hl); } 100% { background: transparent; } }
+/* Narrower footers say the short form. */
+@container foot (max-width: 1000px) {
+  .sum .full { display: none; }
+  .sum .short { display: inline; }
+}
+@media (pointer: coarse) { .sum { height: 100%; min-height: 28px; } }
 /* The face uses natural widths; hover and focus never resize the target. */
 .version-pill { display: inline-flex; align-items: center; height: 100%; min-width: 0; max-width: 100%; flex: 0 1 auto; margin-right: -8px; padding: 0; border: 0; background: transparent; color: var(--ink-2); }
 .version-pill:focus-visible { box-shadow: none; }
@@ -275,10 +235,17 @@ const label = computed(() => {
 .version-plain { position: relative; display: inline-flex; align-items: center; flex-shrink: 0; min-width: 112px; font-size: 12px; color: var(--ink); }
 @media (max-width: 600px) {
   .app-footer { gap: 8px; padding: 0 12px; transition: transform .22s ease; }
+  .footer-name { flex: 0 1 auto; }
+  .foot-c { flex: 1 1 0; }
+  /* The pull toward the edge sits on the wrapper: a percentage max-width on the pill would resolve against its own size. */
+  .foot-r { flex: 0 0 auto; max-width: calc(100% - 8px); margin-right: -6px; }
+  /* With a summary in the middle the release keeps its name and new count; its time makes room (the design's phone footer). */
+  .app-footer.speaking .version-value, .app-footer.speaking .release-divider { display: none; }
+  .sum-skel { width: 64px; }
+  .sum { height: 44px; padding: 0 8px; }
   .app-footer.hidden { transform: translateY(100%); }
   .footer-name { font-size: 9px; letter-spacing: .18em; }
-  /* Let the name shrink on narrow phones while retaining room for the flow. */
-  .version-pill { flex-shrink: 0; margin-right: -6px; max-width: calc(100% - 8px); }
+  .version-pill { flex-shrink: 0; margin-right: 0; }
   .pill-face { height: 32px; padding: 0 6px; }
   .release-divider { margin: 0 7px; }
   .footer-codename { max-width: 104px; font-size: 12px; }

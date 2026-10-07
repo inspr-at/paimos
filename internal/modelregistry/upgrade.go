@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -24,23 +25,23 @@ func catalogLock(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
-func upgradeCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
+func prepareCatalogUpgrade(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]events.Change, error) {
 	if err := catalogLock(ctx, tx); err != nil {
-		return err
+		return nil, err
 	}
 	if _, err := tx.Exec(ctx, `INSERT INTO model_refresh_settings(tenant_id) VALUES($1) ON CONFLICT DO NOTHING`, p.TenantID); err != nil {
-		return err
+		return nil, err
 	}
 	var version string
 	if err := tx.QueryRow(ctx, `SELECT catalog_version FROM model_refresh_settings`).Scan(&version); err != nil {
-		return err
+		return nil, err
 	}
 	if version == CatalogVersion {
-		return nil
+		return nil, nil
 	}
 	existing, err := listProfiles(ctx, tx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	ids := map[string]string{}
 	for _, profile := range existing {
@@ -59,27 +60,32 @@ func upgradeCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 		// A conflicting tenant-created v3 pin must not acquire default authority.
 		var conflict bool
 		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE slug=$1 AND version=$2)`, seed.Slug, CatalogVersion).Scan(&conflict); err != nil {
-			return err
+			return nil, err
 		}
 		if conflict {
 			continue
 		}
 		profile, err := insertProfile(ctx, tx, p.TenantID, profileWrite{Slug: seed.Slug, Version: seed.Version, Harness: seed.Harness, Family: seed.Family, Model: seed.Model, Effort: seed.Effort, Tier: seed.Tier})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		ids[seed.Slug] = profile.ID
 		added = append(added, profile)
 	}
 	now, err := dbNow(ctx, tx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	changed := []string{}
 	for _, role := range roleLadder {
-		steps, err := loadLadder(ctx, tx, role.name)
+		steps, mode, err := loadLadderSnapshot(ctx, tx, role.name, 0)
 		if err != nil {
-			return err
+			return nil, err
+		}
+		// An explicit ordinary review save remains tenant policy even when
+		// its rows happen to match the historical default byte-for-byte.
+		if role.name == "review-gate" && mode == reviewOrderSaved {
+			continue
 		}
 		if !matchesV2(role.name, steps) {
 			continue
@@ -121,19 +127,19 @@ func upgradeCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal) error {
 			continue
 		}
 		if _, err := tx.Exec(ctx, `DELETE FROM `+roleRoutesTable(role.name)+` WHERE role=$1`, role.name); err != nil {
-			return err
+			return nil, err
 		}
 		for _, r := range replacements {
 			if err := insertRoute(ctx, tx, p.TenantID, r); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		changed = append(changed, role.name)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE model_refresh_settings SET catalog_version=$1`, CatalogVersion); err != nil {
-		return err
+		return nil, err
 	}
-	return writeEvent(ctx, tx, p, "model.catalog_upgraded", nil, map[string]any{"version": CatalogVersion, "added": added, "roles": changed})
+	return []events.Change{{Type: "model.catalog_upgraded", After: map[string]any{"version": CatalogVersion, "added": added, "roles": changed}}}, nil
 }
 
 func samePin(p Profile, s seedProfile) bool {

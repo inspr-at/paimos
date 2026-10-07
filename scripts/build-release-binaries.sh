@@ -130,7 +130,7 @@ linux_agentd() {
 
 cli_bins() {
   local pair os arch out
-  for pair in darwin/arm64 darwin/amd64 linux/amd64 linux/arm64; do
+  for pair in ${1:-darwin/arm64 darwin/amd64 linux/amd64 linux/arm64}; do
     os="${pair%/*}"
     arch="${pair#*/}"
     out="dist/aeon-cli-${os}-${arch}"
@@ -156,6 +156,8 @@ case "$mode" in
   darwin-agentd) prepare_go; darwin_agentd ;;
   linux-agentd) prepare_go; linux_agentd ;;
   cli) prepare_go; cli_bins ;;
+  cli-linux) prepare_go; cli_bins "linux/amd64 linux/arm64" ;;
+  cli-darwin) prepare_go; cli_bins "darwin/${AEON_DARWIN_ARCH:?set AEON_DARWIN_ARCH}" ;;
   verify-darwin) verify_darwin ;;
   host)
     prepare_go

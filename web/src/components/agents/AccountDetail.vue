@@ -9,6 +9,7 @@ import {
 } from '../../lib/accountLimits'
 import { putQuotaPool, type AgentAccount, type AllowanceWindow } from '../../lib/agents'
 import { pct, when, type AccountCapacity, type AccountRow, type CapacityReading } from '../../lib/capacity'
+import { learnedUseText } from '../../lib/computerAccounts'
 import { confirmAction, type ConfirmRequest } from '../../lib/confirm'
 import AppIcon from '../AppIcon.vue'
 import PiAccountModel from '../settings/PiAccountModel.vue'
@@ -26,6 +27,8 @@ const emit = defineEmits<{ changed: [] }>()
 const name = computed(() => accountName(props.account))
 const host = computed(() => props.row?.host || props.account.host_label || '')
 const windows = computed(() => sortWindows(props.cap?.windows ?? []))
+// Spend already observed when this vendor reported no window (AEON-792). The Agents page no longer draws that capacity cell.
+const learnedSpend = computed(() => props.row ? learnedUseText(props.row) : '')
 const primary = computed(() => windows.value[0] ?? null)
 const offline = computed(() => props.row?.state === 'offline')
 const use = computed(() => props.cap?.limit)
@@ -232,7 +235,7 @@ async function drop(w: AllowanceWindow) {
       </template>
       <div v-else class="fact">
         <dt>Limits</dt>
-        <dd class="quiet">{{ noWindowLine(account.harness, host) }}</dd>
+        <dd class="quiet">{{ noWindowLine(account.harness, host) }}<p v-if="learnedSpend" class="learned-use">{{ learnedSpend }}</p></dd>
       </div>
 
       <div v-if="recent.length" class="fact">
@@ -310,6 +313,7 @@ dd { min-width: 0; margin: 0; padding-top: 4px; font-size: 13px; line-height: 1.
 .num { font-variant-numeric: tabular-nums; }
 b.num { font-weight: 650; }
 .sep, .src, .by, .quiet { color: var(--ink-2); }
+.learned-use { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.4; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .src { font-size: 12.5px; }
 .window.frozen dd { color: var(--ink-2); }
 .name-line { display: flex; align-items: flex-start; gap: 4px; min-height: 28px; padding-top: 0; }

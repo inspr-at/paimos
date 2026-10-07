@@ -33,11 +33,11 @@ func TestInstructionProvenanceQueryScopeAtMiddleware(t *testing.T) {
 		return res.Code
 	}
 
-	reader, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "provenance-reader", "", []string{"harness.read"}, nil)
+	reader, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, "provenance-reader", "", []string{"harness.read"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	workerOnly, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID}, "provenance-worker", "", []string{"harness.worker"}, nil)
+	workerOnly, err := m.createAgentKey(t.Context(), tenant.Principal{TenantID: tenantID, KeyCreatorID: keyTestPerson(t, m.pool, tenantID)}, "provenance-worker", "", []string{"harness.worker"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

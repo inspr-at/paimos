@@ -225,7 +225,8 @@ func (m *Module) getEtaInterval(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 
 func (m *Module) putEtaInterval(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
 	var in struct {
-		Minutes int `json:"interval_minutes"`
+		Minutes  int  `json:"interval_minutes"`
+		Expected *int `json:"expected_interval_minutes,omitempty"`
 	}
 	if err := workorders.Decode(r, &in); err != nil {
 		return nil, err
@@ -233,11 +234,25 @@ func (m *Module) putEtaInterval(r *http.Request, tx pgx.Tx, p tenant.Principal) 
 	if in.Minutes < 1 || in.Minutes > 240 {
 		return nil, workorders.Fail(400, "interval must be from 1 to 240 minutes")
 	}
+	if in.Expected != nil && (*in.Expected < 1 || *in.Expected > 240) {
+		return nil, workorders.Fail(400, "expected value outside allowed range")
+	}
+	if err := lockAgentWorkSettings(r.Context(), tx, p); err != nil {
+		return nil, err
+	}
+	before, err := etaInterval(r.Context(), tx)
+	if err != nil {
+		return nil, err
+	}
+	if in.Expected != nil && *in.Expected != int(before/time.Minute) {
+		return nil, workorders.Fail(409, "agent settings changed; reload before undoing")
+	}
 	if _, err := tx.Exec(r.Context(), `INSERT INTO eta_settings(tenant_id,interval_minutes) VALUES($1,$2)
 		ON CONFLICT (tenant_id) DO UPDATE SET interval_minutes=EXCLUDED.interval_minutes, updated_at=now()`, p.TenantID, in.Minutes); err != nil {
 		return nil, err
 	}
-	return map[string]int{"interval_minutes": in.Minutes}, nil
+	err = recordAgentWorkSetting(r.Context(), tx, p, "interval_minutes", int(before/time.Minute), in.Minutes)
+	return map[string]int{"interval_minutes": in.Minutes}, err
 }
 
 func (m *Module) setLiveEta(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {

@@ -65,7 +65,7 @@ export function workingAccountRoom(accounts: AccountRow[], now: number, current:
     reasons[harness] = [...new Set(notes)].join('; ')
   }
   const slots = Object.values(room).reduce<number>((n, value) => n + (value ?? 0), 0)
-  return { room, reasons, total: incomplete && slots === 0 ? null : slots, incomplete,
+  return { room, reasons, total: (incomplete || accounts.length === 0) && slots === 0 ? null : slots, incomplete,
     full: current && accounts.length > 0 && accounts.every(a => a.routing?.wait?.code === 'capacity'),
     noAccounts: current && accounts.length === 0 }
 }

@@ -5,7 +5,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
-import { mockReleases, releaseHistory, RELEASE_HISTORY_NAME } from './releases-fixtures'
+import { mockReleases, releaseHistory, RELEASE_HISTORY_NAME, type History } from './releases-fixtures'
 
 // AEON-309: the CalVer3 renderer names a version by its canonical value and UTC
 // time; an interactive one adds its copy action.
@@ -20,8 +20,10 @@ const options = (page: Page) => page.getByRole('grid', { name: 'Releases, newest
 const pill = (page: Page) => page.getByRole('button', { name: RELEASE_HISTORY_NAME })
 const escaped = (v: string) => v.replace(/\./g, '\\.')
 
-async function setup(page: Page, options: { lastSeen?: string; running?: string; bigProject?: number } = {}) {
-  const history = releaseHistory()
+// Versions come from the clock at second precision: a test that names versions
+// passes its own history, so a second boundary cannot split test and mock.
+async function setup(page: Page, options: { history?: History; lastSeen?: string; running?: string; bigProject?: number } = {}) {
+  const history = options.history ?? releaseHistory()
   const data = fixtures({ bigProject: options.bigProject })
   // These existing history interactions exercise the complete, opted-in rail.
   data.preferences['developer-ui'] = { show_reserved_versions: true }
@@ -333,7 +335,7 @@ test('filters follow the feature and fix blocks, and still keep releases with ti
 
 test('new since the last visit: a badge on the pill, highlighted releases, and the visit is remembered', async ({ page }) => {
   const history = releaseHistory()
-  const { data } = await setup(page, { lastSeen: history.releases[4].version })
+  const { data } = await setup(page, { history, lastSeen: history.releases[4].version })
   await page.goto('/')
   await expect(page.locator('.new-badge')).toHaveText('4 new')
   await expect(pill(page)).toHaveAccessibleName(/, 4 new since your last visit$/)
@@ -409,7 +411,7 @@ test('a build without history says so', async ({ page }) => {
 
 test('a newer version on the server: a toast offers what is new and a reload', async ({ page }) => {
   const history = releaseHistory()
-  const { state } = await setup(page, { running: history.releases[1].version })
+  const { state } = await setup(page, { history, running: history.releases[1].version })
   await page.goto('/')
   await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
   await expect(pill(page)).toHaveAccessibleName(new RegExp(`version ${escaped(history.releases[1].version)}`))
@@ -453,7 +455,7 @@ test('the palette and the account menu open the history too', async ({ page }) =
 
 test('rows show live and rollback badges, a warm new tint and a full selected ring', async ({ page }) => {
   const history = releaseHistory()
-  await setup(page, { lastSeen: history.releases[4].version })
+  await setup(page, { history, lastSeen: history.releases[4].version })
   await page.goto(`/releases/${history.releases[5].version}`)
   const look = (i: number) => options(page).nth(i).evaluate(el => {
     const c = getComputedStyle(el)

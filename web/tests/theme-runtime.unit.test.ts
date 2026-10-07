@@ -20,7 +20,7 @@ beforeEach(() => {
   const boot = new Element(); boot.id = 'aeon-theme-boot'; boot.nonce = 'server-nonce'
   children = [tokens, boot]
   document = { head: { append(node) { node.remove(); children.push(node); node.parent = children } }, getElementById: id => children.find(node => node.id === id) ?? null }
-  vi.stubGlobal('document', { ...document, createElement: () => new Element() })
+  vi.stubGlobal('document', { ...document, documentElement: { dataset: {} }, createElement: () => new Element() })
   vi.stubGlobal('localStorage', { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) })
 })
 afterEach(() => vi.unstubAllGlobals())
@@ -32,6 +32,7 @@ it('one runtime writer updates CSS and agent appearance and caches only owner pl
   const style = document.getElementById('aeon-theme')!
   expect(style.textContent).toBe(themeCss(selected.theme.values)); expect(style.nonce).toBe('server-nonce')
   expect(children.at(-1)).toBe(style)
+  expect(globalThis.document.documentElement.dataset).toMatchObject({ agentRing: 'off', agentFloat: 'false' })
   expect(agents.agentTheme.value).toEqual(selected.theme.values.agents)
   expect(JSON.parse(storage.get(runtime.THEME_CACHE_KEY)!)).toEqual({ principal: 'tenant/person', css: style.textContent })
   runtime.applyTheme(PORCELAIN)
@@ -56,6 +57,7 @@ it('another authenticated person and sign-out clear boot CSS and cache synchrono
   runtime.publishTheme('tenant/new', active('#3a5fc4'))
   runtime.resetTheme()
   expect(document.getElementById('aeon-theme')).toBeNull(); expect(storage.size).toBe(0)
+  expect(globalThis.document.documentElement.dataset).toEqual({})
   expect(runtime.publishTheme('tenant/new', active('#8547b0'))).toBe(false)
 })
 it('late answers from a previous tenant or person cannot change CSS, cache or agent appearance', async () => {

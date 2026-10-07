@@ -4,7 +4,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import { generatedBlock } from '../../scripts/theme-tokens.mjs'
-import { CARD_COLOURS, colourContrast, deriveDark, fromOklch, markerValue, modeValue, oklch, PORCELAIN, roles, themeCss, themeTokens, validColour } from '../src/lib/themeEngine.ts'
+import { AGENT_PALETTES, AGENT_STATES } from '../src/lib/agentPalettes.ts'
+import { indicatorVariants, nativeIconSize } from '../src/lib/indicatorVariants.ts'
+import { agentTokens, agentPreviewTokens, CARD_COLOURS, colourContrast, deriveDark, fromOklch, markerValue, modeValue, oklch, PORCELAIN, roles, themeCss, themeTokens, validColour } from '../src/lib/themeEngine.ts'
 
 const source = readFileSync(new URL('../index.html', import.meta.url), 'utf8')
 const boot = source.match(/<script id="aeon-theme-boot"[^>]*>([\s\S]*?)<\/script>/)![1]!
@@ -75,6 +77,29 @@ test('token aliases follow both accents and every marker source without theming 
     const edited = { ...PORCELAIN, primary: { light: '#3a5fc4', dark: null } }
     assert.notEqual(themeTokens(edited, mode)['--primary'], tokens['--primary'])
     assert.equal(themeTokens(edited, mode)['--secondary'], tokens['--secondary'])
+  }
+})
+test('agent tokens preserve approved looks, Custom dark derivation, fading and drawn geometry', () => {
+  for (const preset of AGENT_PALETTES) for (const mode of ['light', 'dark'] as const) {
+    const agents = { ...PORCELAIN.agents, palette: preset.id }
+    const tokens = themeTokens({ ...PORCELAIN, agents }, mode)
+    for (const [i, state] of AGENT_STATES.entries()) assert.equal(tokens[`--agent-${state}`], preset[mode][i])
+  }
+  const custom_states = Object.fromEntries(AGENT_STATES.map((state, i) => [state, { light: AGENT_PALETTES[0]!.light[i]!, dark: state === 'problem' ? '#aabbcc' : null }])) as NonNullable<typeof PORCELAIN.agents.custom_states>
+  const agents = { ...PORCELAIN.agents, palette: 'custom' as const, custom_states, dim_inactive: true, inactive_opacity: 72 }
+  for (const mode of ['light', 'dark'] as const) for (const state of AGENT_STATES) {
+    const accent = custom_states[state]
+    const expected = mode === 'light' ? accent.light : accent.dark ?? deriveDark(accent.light)
+    assert.equal(agentTokens(agents, mode)[`--agent-${state}`], expected)
+    assert.equal(agentPreviewTokens(agents)[`--agent-${state}`], `light-dark(${accent.light}, ${accent.dark ?? deriveDark(accent.light)})`)
+  }
+  assert.equal(agentTokens(agents, 'light')['--agent-idle-opacity'], '0.72')
+  assert.equal(agentTokens({ ...agents, dim_inactive: false }, 'light')['--agent-idle-opacity'], '1')
+  assert.equal(agentTokens(PORCELAIN.agents, 'dark')['--agent-idle-opacity'], '0.55')
+  assert.throws(() => agentTokens({ ...agents, custom_states: null }, 'light'), /five accents/)
+  for (const variant of indicatorVariants) {
+    assert.equal(agentTokens({ ...agents, avatar: variant.id, size: null }, 'light')['--agent-art-scale'], '1')
+    assert.equal(agentTokens({ ...agents, avatar: variant.id, size: 70 }, 'dark')['--agent-art-scale'], String(Math.round(70 / nativeIconSize(variant.id) * 1000) / 1000))
   }
 })
 test('keyboard focus is a solid contrast-safe ring for extreme primary accents', () => {

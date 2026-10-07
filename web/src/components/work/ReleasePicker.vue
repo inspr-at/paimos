@@ -2,8 +2,7 @@
 <script setup lang="ts">
 import { vClipTip } from '../../directives/clipTip'
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { getJourney, listReleases, releaseName, releaseRefs } from '../../lib/journey'
-import { canOpenRelease, nextReleaseTitle, planningRelease } from '../../lib/releaseMembership'
+import { listPlanningReleases, releaseName } from '../../lib/releaseData'
 import type { ReleaseTarget } from '../../lib/releaseAssign'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from './FloatingPanel.vue'
@@ -32,15 +31,16 @@ async function load() {
   loading.value = true
   failed.value = ''
   try {
-    const [journey, nodes] = await Promise.all([getJourney(props.projectId), listReleases(props.projectId)])
+    const data = await listPlanningReleases(props.projectId)
     if (request !== generation) return
-    const releases = releaseRefs(nodes)
-    const planning = planningRelease(journey, releases)
-    const fresh = nextReleaseTitle(releases)
-    const open = canOpenRelease(journey, planning)
+    if (data.truncated) throw new Error('Older releases were omitted. Release availability could not be confirmed.')
+    const releases = data.releases
+    const planning = releases.find(release => release.state === 'planning')
+    const activeRelease = releases.some(release => !['released', 'superseded'].includes(release.state))
+    const fresh = `Release ${releases.reduce((max, release) => Math.max(max, release.number), 0) + 1}`
     const next: Row[] = []
     if (planning) { const title = planning.title.trim() || releaseName(planning); next.push({ id: planning.id, title, detail: 'In planning', disabled: false, target: { kind: 'existing', id: planning.id, title } }) }
-    next.push({ id: 'new', title: fresh, detail: open.ok ? 'New release' : open.reason, disabled: !open.ok, target: open.ok ? { kind: 'new', title: fresh } : null })
+    next.push({ id: 'new', title: fresh, detail: activeRelease ? 'Finish the current release first' : 'New release', disabled: activeRelease, target: activeRelease ? null : { kind: 'new', title: fresh } })
     rows.value = next
     active.value = Math.max(0, next.findIndex(row => !row.disabled))
   } catch (error) {

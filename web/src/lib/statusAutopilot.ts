@@ -6,17 +6,27 @@ export interface AutopilotSettings { enabled: boolean; rules: Record<RuleKey, Ru
 export interface ProjectOverride { mode: 'inherit' | 'on' | 'off'; effective_enabled: boolean; revision: number }
 export interface AutomaticChange { event_id: number; node_id: string; key: string; title: string; actor: 'Status autopilot'; rule: RuleKey; reason: string; from: string; to: string; at: string; undone: boolean; undoable: boolean; changed_since?: boolean }
 export interface AutopilotProposal { event_id: number; node_id: string; key: string; title: string; rule: RuleKey; reason: string; from: string; to: string; at: string; changed_since: boolean; applicable: boolean }
-async function request<T>(path: string, body?: unknown): Promise<T> {
-  const response = await api(path, body === undefined ? {} : { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+async function request<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+  const response = await api(path, body === undefined ? { signal } : { signal, method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
   if (!response.ok) throw new Error(response.status === 409 ? 'Another admin changed these settings. Reload to see their changes.' : 'Status autopilot could not be saved or loaded. Try again.')
   return response.json() as Promise<T>
 }
-export const getStatusAutopilot = () => request<AutopilotSettings>('/settings/status-autopilot')
-export const saveStatusAutopilot = (s: AutopilotSettings, confirmUpgrade = false) => request<AutopilotSettings>('/settings/status-autopilot', { enabled: s.enabled, rules: s.rules, expected_revision: s.revision, ...(confirmUpgrade ? { confirm_upgrade: true } : {}) })
+export const getStatusAutopilot = (signal?: AbortSignal) => request<AutopilotSettings>('/settings/status-autopilot', undefined, signal)
+export const saveStatusAutopilot = (s: AutopilotSettings, confirmUpgrade = false, signal?: AbortSignal) => request<AutopilotSettings>('/settings/status-autopilot', { enabled: s.enabled, rules: s.rules, expected_revision: s.revision, ...(confirmUpgrade ? { confirm_upgrade: true } : {}) }, signal)
 export const getAutopilotProposals = () => request<{ items: AutopilotProposal[] }>('/status-autopilot/proposals')
 export const resolveAutopilotProposal = (id: number, action: 'apply' | 'dismiss') => request<Record<string, never>>(`/status-autopilot/proposals/${id}`, { action })
 export const getProjectAutopilot = (id: string) => request<ProjectOverride>(`/projects/${encodeURIComponent(id)}/status-autopilot`)
-export const saveProjectAutopilot = (id: string, mode: ProjectOverride['mode'], revision: number) => request<ProjectOverride>(`/projects/${encodeURIComponent(id)}/status-autopilot`, { mode, expected_revision: revision })
+export const saveProjectAutopilot = (id: string, mode: ProjectOverride['mode'], revision: number, signal?: AbortSignal) => request<ProjectOverride>(`/projects/${encodeURIComponent(id)}/status-autopilot`, { mode, expected_revision: revision }, signal)
 export const getAutomaticChanges = (nodeId?: string) => request<{ items: AutomaticChange[] }>(`/status-autopilot/changes${nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : ''}`)
 export const getAutopilotSuggestions = () => request<{ items: AutomaticChange[] }>('/status-autopilot/changes?suggestions=true')
 export const automaticTarget = (value: string) => ({ triage_list: 'Triage list', cancel_suggested: 'Cancel suggested', blocked_reminder: 'Reminder', missed_release: 'Missed release' } as Record<string, string>)[value] ?? ''
+
+export interface AutopilotProject { id: string; key: string; title: string; override: ProjectOverride }
+export interface AutopilotProjectPage { items: AutopilotProject[]; next_cursor: string | null; inherited_count: number }
+export const listAutopilotProjects = (mode: 'overrides' | 'inherit', signal: AbortSignal, q = '', after = '') => {
+  const query = new URLSearchParams({ mode })
+  if (q) query.set('q', q)
+  if (after) query.set('after', after)
+  return request<AutopilotProjectPage>(`/status-autopilot/projects?${query}`, undefined, signal)
+}
+export const getLatestAutomaticChanges = (signal: AbortSignal) => request<{ items: AutomaticChange[] }>('/status-autopilot/changes?limit=5', undefined, signal)

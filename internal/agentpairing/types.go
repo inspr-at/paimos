@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/jackc/pgx/v5/pgconn"
 	"io"
 	"log/slog"
 	"net/http"
@@ -28,8 +27,10 @@ import (
 	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/hookcap"
 	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // CoordinatorPermissions is the CLI coordinator key ceiling (AEON-327).
@@ -83,13 +84,14 @@ type SetupProgress struct {
 }
 
 type proofRequest struct {
-	Progress        *SetupProgress `json:"progress,omitempty"`
-	TenantID        string         `json:"tenant_id"`
-	RequestID       string         `json:"request_id"`
-	DeviceSecret    string         `json:"device_secret,omitempty"`
-	LifecycleSecret string         `json:"lifecycle_secret,omitempty"`
-	Cleaned         []string       `json:"cleanup_confirmed_account_ids,omitempty"`
-	ComputerCleaned bool           `json:"computer_cleanup_confirmed,omitempty"`
+	HookCapabilities []hookcap.Capability `json:"hook_capabilities,omitempty"`
+	Progress         *SetupProgress       `json:"progress,omitempty"`
+	TenantID         string               `json:"tenant_id"`
+	RequestID        string               `json:"request_id"`
+	DeviceSecret     string               `json:"device_secret,omitempty"`
+	LifecycleSecret  string               `json:"lifecycle_secret,omitempty"`
+	Cleaned          []string             `json:"cleanup_confirmed_account_ids,omitempty"`
+	ComputerCleaned  bool                 `json:"computer_cleanup_confirmed,omitempty"`
 }
 type Verification struct {
 	Policy         string    `json:"policy"`
@@ -106,6 +108,7 @@ type Enrollment struct {
 	VerifiedAt               *time.Time `json:"verified_at,omitempty"`
 	VerificationExpiresAt    *time.Time `json:"verification_expires_at,omitempty"`
 	LastUsedAt               *time.Time `json:"last_used_at,omitempty"`
+	VerificationStalled      bool       `json:"verification_stalled"`
 	CanVerify                bool       `json:"can_verify"`
 	LocalProcesses           string     `json:"local_processes"`
 	AccountingState          string     `json:"accounting_state"`
@@ -124,6 +127,7 @@ type Enrollment struct {
 	ActiveRunIDs             []string   `json:"active_run_ids"`
 }
 type View struct {
+	HookCapabilities          []hookcap.Capability                `json:"hook_capabilities,omitempty"`
 	HostCapacity              *hostcapacity.View                  `json:"host_capacity,omitempty"`
 	LocalAuthPinned           *bool                               `json:"local_auth_pinned,omitempty"`
 	AgentRelease              agentcompat.Release                 `json:"agent_release"`
