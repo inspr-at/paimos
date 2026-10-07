@@ -5038,6 +5038,22 @@
     ,
     {"kind":"go","package":"internal/decisiondesk","name":"TestUndecidableQuestionDoesNotStarveAuthorizedQuestion","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestAuthenticatedDeliveryEnvelope","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryManageExplicitAgentGrant","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryReconciliationHealsMissedWebhooksAndFanoutRetry","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliverySettingsAndIngressBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookSequenceRebuildIsolationAndHolds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestProjectionReplayAndInheritedSettings","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestProjectionStatesOwnersAndDeadlines","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestTicketHintsOnlyCanonicalPrefixes","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/deliveryvote","name":"TestDeliveryRoutesArePersonRead","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/deliveryvote","name":"TestFormatAverage","tags":["delete-candidate"],"tier":"GATED-FULL"}

@@ -70,7 +70,8 @@
         "internal/phoneapprovals/**",
         "internal/features/**",
         "internal/hookcap/**",
-        "internal/hostcapacity/**"
+        "internal/hostcapacity/**",
+        "internal/dsar/**"
       ]
     },
     {
@@ -105,7 +106,8 @@
         "internal/crossreview/**",
         "internal/reviewgate/**",
         "internal/agents/**",
-        "internal/hooknote/**"
+        "internal/hooknote/**",
+        "internal/delivery/**"
       ]
     },
     {

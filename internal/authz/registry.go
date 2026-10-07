@@ -26,6 +26,7 @@ func makeRegistry() []Permission {
 	groups := []struct{ group, actions string }{
 		{"nodes", "read write delete move restore configure"},
 		{"recurrences", "manage"},
+		{"delivery", "read manage"},
 		{"rules", "read write publish"},
 		{"kinds", "read manage"}, {"tags", "read write manage"},
 		{"relations", "read write delete"}, {"comments", "read write delete"},
@@ -165,7 +166,7 @@ func builtinPermissions(key string) []string {
 
 func productReadGroup(group string) bool {
 	switch group {
-	case "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "stage_handoffs", "harness", "work_orders", "runs", "run", "approvals", "inbox", "models", "views", "events", "search", "hours", "quotes", "crm", "cost_units", "project_groups", "profile", "outcome":
+	case "delivery", "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "stage_handoffs", "harness", "work_orders", "runs", "run", "approvals", "inbox", "models", "views", "events", "search", "hours", "quotes", "crm", "cost_units", "project_groups", "profile", "outcome":
 		return true
 	}
 	return false
@@ -173,7 +174,7 @@ func productReadGroup(group string) bool {
 
 func guestReadGroup(group string) bool {
 	switch group {
-	case "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "views", "events", "search", "profile", "outcome":
+	case "delivery", "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "views", "events", "search", "profile", "outcome":
 		return true
 	}
 	return false

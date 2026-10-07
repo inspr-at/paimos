@@ -208,3 +208,75 @@ func (g *GitHubApp) Publish(ctx context.Context, tenantID string, v Review, stat
 	}
 	return state, nil
 }
+
+// GitHubPull and GitHubCheck carry bounded observation data, never a write API.
+type GitHubPull struct {
+	Number int64  `json:"number"`
+	Title  string `json:"title"`
+	State  string `json:"state"`
+	Merged bool   `json:"merged"`
+	Head   struct {
+		SHA string `json:"sha"`
+		Ref string `json:"ref"`
+	} `json:"head"`
+	Base struct {
+		Ref  string `json:"ref"`
+		SHA  string `json:"sha"`
+		Repo struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
+	} `json:"base"`
+}
+type GitHubCheck struct {
+	ID         int64  `json:"id"`
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion"`
+}
+
+// ReadInstallation mints a separate token with read permissions only. Callers
+// never receive it. The existing publisher's token and writes are unchanged.
+func (g *GitHubApp) ReadInstallation(ctx context.Context, read func(func(string, any) error) error) error {
+	if !g.Configured(g.Config.TenantID, g.Config.Repository) {
+		return errGitHub
+	}
+	jwt, err := g.jwt()
+	if err != nil {
+		return err
+	}
+	var token struct {
+		Token        string            `json:"token"`
+		Permissions  map[string]string `json:"permissions"`
+		Repositories []struct {
+			FullName string `json:"full_name"`
+		} `json:"repositories"`
+	}
+	scopes := map[string]string{"pull_requests": "read", "checks": "read", "contents": "read", "metadata": "read", "statuses": "read"}
+	if err = g.request(ctx, jwt, "POST", "/app/installations/"+g.Config.InstallationID+"/access_tokens", map[string]any{"repositories": []string{filepath.Base(g.Config.Repository)}, "permissions": scopes}, &token); err != nil {
+		return err
+	}
+	if !appToken.MatchString(token.Token) {
+		return errGitHub
+	}
+	defer func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = g.request(cleanup, token.Token, "DELETE", "/installation/token", nil, nil)
+	}()
+	if len(token.Repositories) != 1 || token.Repositories[0].FullName != g.Config.Repository {
+		return errGitHub
+	}
+	for name, level := range token.Permissions {
+		if scopes[name] != "read" || level != "read" {
+			return errGitHub
+		}
+	}
+	for name := range scopes {
+		if token.Permissions[name] != "read" {
+			return errGitHub
+		}
+	}
+	return read(func(path string, out any) error {
+		return g.request(ctx, token.Token, "GET", "/repos/"+g.Config.Repository+path, nil, out)
+	})
+}

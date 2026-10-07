@@ -3217,6 +3217,41 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '422': {description: Decision Desk coverage exceeds 1000 projects, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '500': {$ref: '#/components/responses/Error'}
+  /delivery:
+    get:
+      operationId: listDelivery
+      description: 'Observe-only delivery rows visible to the caller. Requires delivery.read; bounded UUID keyset pagination.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: project, in: query, schema: {type: string, maxLength: 64}}
+        - {name: state, in: query, schema: {$ref: '#/components/schemas/DeliveryState'}}
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: 'Delivery page', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+  /delivery/{itemId}/hold:
+    parameters:
+      - {name: itemId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: holdDelivery
+      description: 'Requires delivery.manage on the current project. Records a hold with a reason; makes no GitHub write.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [reason], properties: {reason: {type: string, minLength: 1, maxLength: 1000}}}}}}
+      responses:
+        '200': {description: 'Held row', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryItem'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+    delete:
+      operationId: releaseDeliveryHold
+      description: 'Requires delivery.manage on the current project. Recomputes the observed state and records the release.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Released row', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryItem'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /events:
     get:
       operationId: listEvents
@@ -3419,6 +3454,23 @@ paths:
                 properties:
                   error: {type: string, const: moved}
                   location: {type: string, example: 'https://work.example.org'}
+  /github/webhook:
+    post:
+      operationId: deliveryGitHubWebhook
+      description: 'Public ingress authenticated solely by the host-owned GitHub App HMAC, delivery ID, installation and repository binding. Retains normalized facts only; deduplicates retries.'
+      security: []
+      parameters:
+        - {name: X-Hub-Signature-256, in: header, required: true, schema: {type: string}}
+        - {name: X-GitHub-Delivery, in: header, required: true, schema: {type: string, maxLength: 128}}
+        - {name: X-GitHub-Event, in: header, required: true, schema: {type: string, enum: [pull_request, check_run, check_suite, merge_group, push, status]}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        '204': {description: 'Processed or duplicate delivery'}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '413': {$ref: '#/components/responses/Error'}
+        '502': {$ref: '#/components/responses/Error'}
   /harness-recoveries/claim:
     post:
       operationId: claimAgentRecoveries
@@ -5313,6 +5365,19 @@ paths:
           $ref: '#/components/responses/Error'
         '404':
           $ref: '#/components/responses/Error'
+  /nodes/{id}/delivery:
+    get:
+      operationId: nodeDelivery
+      description: 'Observe-only delivery rows for a visible ticket. Requires delivery.read; same bounded pagination as the delivery list.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: 'Ticket delivery page', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPage'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /nodes/{nodeId}:
     parameters: [{$ref: '#/components/parameters/NodeId'}]
     get:
@@ -6756,6 +6821,24 @@ paths:
         '400': {description: Invalid bounded request}
         '408': {description: Request body did not arrive before the deadline}
         '404': {description: Disabled or unauthorized target}
+  /projects/{projectId}/delivery-settings:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectDeliverySettings
+      description: 'Reads effective settings with project overrides over tenant defaults. Requires delivery.read.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putProjectDeliverySettings
+      description: 'Sets required checks and deadline durations in minutes. Requires delivery.manage; empty project settings inherit tenant defaults. Does not change GitHub behaviour.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+      responses:
+        '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/harness-sessions:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -10842,6 +10925,22 @@ paths:
         '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
         '200': {description: Brand settings, content: {application/json: {schema: {$ref: '#/components/schemas/BrandSettings'}}}}
         '403': {description: 'Not a person, or settings.manage missing'}
+  /settings/delivery:
+    get:
+      operationId: getTenantDeliverySettings
+      description: 'Reads effective settings with project overrides over tenant defaults. Requires delivery.read.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putTenantDeliverySettings
+      description: 'Sets required checks and deadline durations in minutes. Requires delivery.manage; empty project settings inherit tenant defaults. Does not change GitHub behaviour.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+      responses:
+        '200': {description: 'Effective settings', content: {application/json: {schema: {$ref: '#/components/schemas/DeliverySettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
   /settings/eta-interval:
     get:
       operationId: getEtaInterval
@@ -14152,6 +14251,30 @@ components:
         has_more: {type: boolean}
         next_cursor: {type: string}
         as_of: {type: string, format: date-time}
+    DeliveryItem:
+      type: object
+      required: [id, project_id, ticket_node_id, repository, pull_request, branch, head_sha, state, state_since, owner, deadline_at, held_reason, link_source, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        ticket_node_id: {type: [string, 'null'], format: uuid}
+        repository: {type: string}
+        pull_request: {type: [integer, 'null']}
+        branch: {type: string}
+        head_sha: {type: string}
+        state: {$ref: '#/components/schemas/DeliveryState'}
+        state_since: {type: string, format: date-time}
+        owner: {type: string, enum: [coordinator, ci, queue, builder, person, '']}
+        deadline_at: {type: [string, 'null'], format: date-time}
+        held_reason: {type: [string, 'null']}
+        link_source: {type: [string, 'null'], enum: [review_row, title_key, branch_key, null]}
+        updated_at: {type: string, format: date-time}
+    DeliveryPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeliveryItem'}}
+        next_cursor: {type: [string, 'null'], format: uuid}
     DeliveryRating:
       type: object
       description: One visible session. A missing mine means this person has not marked it. harness, model and account_label are current session metadata.
@@ -14193,6 +14316,21 @@ components:
         rework_rate: {type: [string, 'null'], pattern: '^[1-9][0-9]*/[1-9][0-9]*$', description: exceptions/deliveries. Null when there are no exceptions.}
         by_model: {type: array, items: {$ref: '#/components/schemas/DeliveryRatingGroup'}}
         by_harness: {type: array, items: {$ref: '#/components/schemas/DeliveryRatingGroup'}}
+    DeliverySettings:
+      type: object
+      additionalProperties: false
+      properties:
+        required_checks: {type: array, maxItems: 64, items: {type: string, minLength: 1, maxLength: 200}}
+        deadlines:
+          type: object
+          additionalProperties: false
+          description: 'Durations in minutes; omitted state keys inherit defaults. Zero disables that deadline.'
+          properties:
+            reviewed: {type: integer, minimum: 0, maximum: 10080}
+            pushed: {type: integer, minimum: 0, maximum: 10080}
+            ci_green: {type: integer, minimum: 0, maximum: 10080}
+            in_queue: {type: integer, minimum: 0, maximum: 10080}
+            queue_failed: {type: integer, minimum: 0, maximum: 10080}
     DeliverySignals:
       type: object
       description: Counts from ticket events (review.verdict, review.round, gate.finding, gate.verdict, ci.failed, ci.failure, check.failed, undone events, change.reverted, node.reverted, delivery.reverted). Zero means none of that kind were recorded. AEON-286 outcome events will replace this source.
@@ -14201,6 +14339,9 @@ components:
         review_rounds: {type: integer, minimum: 0, description: 'Distinct rounds of review.verdict, review.round, gate.finding or gate.verdict.'}
         ci_failures: {type: integer, minimum: 0, description: 'Events of type ci.failed, ci.failure or check.failed.'}
         reverts: {type: integer, minimum: 0, description: 'Undone events, or change.reverted, node.reverted or delivery.reverted. A delivery.rated event is not a signal.'}
+    DeliveryState:
+      type: string
+      enum: [built, reviewed, pushed, ci_green, in_queue, merged, queue_failed, held]
     DeliveryVote:
       type: object
       required: [score, tags, comment, updated_at]
