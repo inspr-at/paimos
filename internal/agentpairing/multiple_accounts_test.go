@@ -57,6 +57,7 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Account eligibility must not depend on the weekday or owner's office hours.
 	schedule := capacity.DefaultSchedule()
 	schedule.Reserve = capacity.ReserveOff
 	for i := range schedule.Week {
