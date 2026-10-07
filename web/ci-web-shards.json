@@ -1099,7 +1099,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/phone-approvals.spec.ts","listedTests":7,"weightSeconds":15.536586,"weightSource":"unmeasured-test-rate"}
+        {"file":"tests/phone-approvals.spec.ts","listedTests":7,"weightSeconds":7.48,"weightSource":"aeon-903-local-serial-wall"}
       ]
     }
     ,
@@ -1350,6 +1350,8 @@
     "OPS-257 fix1: hosted per-case tierTiming replaces serial historical allocations for 58 measured files. aeon-632b-clip has 39 cases / 432.3 seconds including group overhead: keep one worker and schedule it alone; no gated membership or launch flags change. Unmeasured files keep explicit historical estimates; the next hosted run must validate runner and native collection costs."
     ,
     "AEON-697: Needs attention gates once in its own serial, trace-preserving group. listedTests comes from native collection; weightSeconds uses the existing unmeasured seconds/test estimate, not hosted runtime evidence."
+    ,
+    "AEON-903: Phone approvals has seven native cases. The local one-worker run passed all seven in 7.480 seconds including browser/server startup; aeon-903-local-serial-wall records that observation as a scheduling estimate, not a hosted-runtime promise."
     ,
     "OPS-257 round 4 L3: refresh measured per-case browser and per-owner Go/unit costs from full PR run 37377299349 (b2f9935a4264e932eae0fa2acd07c71e8d1fc417). The 39 clip cases split into planning/touch (27) and settings/rules (12), with shared imported fixtures and unchanged policies/tiers. Browser costs include group and tier execution residuals; each clip half conservatively retains the full original launch overhead. Go costs include terminal package elapsed plus each shard's residual native enumeration/launch time shared equally by its owners. Unit costs include Vitest elapsed or top-level Node durations plus shared residual launch time. Runner setup and unit shard 1's separate safety checks are excluded; hosted CI must validate total wall time. Exact-spec weightSeconds retain their historical allocation model; only the old clip allocation is divided proportionally between the two new files. The full-gate tier scheduler uses the refreshed tierTiming costs. Unit tie preference assigns shard 1 last on equal loads, moving the largest file to shard 2 without estimating the separate safety-check duration."
   ]

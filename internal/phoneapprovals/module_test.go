@@ -551,6 +551,9 @@ func TestPhonePushCommittedEventsAndRecoveryTick(t *testing.T) {
 	receive("approval", first) // No tick has been sent: only the committed event can wake this.
 	waitScan()
 	attach := f.attachRequest(t)
+	// Retain a real enrollment/ticket and prove the owner is eligible before
+	// exercising dispatch. A permission failure cannot masquerade as no push.
+	status(t, f.call(t, f.p, "GET", "/api/phone-approvals/attach/"+attach, nil, ""), 200)
 	emit("harness.attach_requested", attach)
 	receive("attach", attach)
 	waitScan()
