@@ -28,7 +28,7 @@
     "go-test": {
       "kind": "not-static",
       "reason": "Database-backed tier execution; property lint is a supplement.",
-      "runs_sha256": "8d2ee7a5280e716a86adb19100a477ab41b0c81be95db2421db3004f1fb928d1"
+      "runs_sha256": "21cd9e4291603a714200886a29cd7cbf80f319aeadbee8b666bcd81f52103036"
     },
     "go-timing": {
       "kind": "not-static",
@@ -52,7 +52,7 @@
     "web-shard": {
       "kind": "not-static",
       "reason": "Browser tier execution and infrastructure preparation.",
-      "runs_sha256": "bbe9bd9c51a7b4a1d8665eda611fdb1334c895c648ca2ac8a807359199774f81"
+      "runs_sha256": "550b37dcfde6ae973b811ac0e53f9e3a25d6c7f5dd726ba7417031b40087e81c"
     },
     "web": {
       "kind": "not-static",
@@ -75,7 +75,7 @@
     "e2e-run": {
       "kind": "not-static",
       "reason": "Build, database and browser end-to-end execution.",
-      "runs_sha256": "62ae1990fe28604e8325a5dee018268fc2b1064b8eb8eac1c13c117ec5e13648"
+      "runs_sha256": "7ff501220e2e64e6edf22311844e7e0b6d8b0001fafeb674171d2bf83b02060a"
     },
     "migration-compat": {
       "kind": "static"
@@ -133,7 +133,7 @@
       "job": "web-unit",
       "step": "Install shells used by command round-trip unit tests",
       "cwd": ".",
-      "command": "sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh",
+      "command": "command -v fish && command -v zsh || {\n  for i in 1 2 3; do\n    timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq && timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq fish zsh && break\n  done\n}",
       "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
     },
     {
@@ -783,6 +783,16 @@
       ],
       "timeout_seconds": 30,
       "local_only": "AEON-752: component colour-literal guard belongs to ci-static only; artwork and documents are explicitly exempted."
+    },
+    {
+      "id": "apt-step-bounds",
+      "command": "node scripts/check-apt-bounds.mjs",
+      "cwd": ".",
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30,
+      "local_only": "AEON-933: every apt and Playwright install-deps step must carry a step timeout and a bounded retry. This guard only reads workflow files."
     }
   ]
 }

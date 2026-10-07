@@ -277,6 +277,7 @@ jobs:
             go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-${{ github.head_ref || github.ref_name }}-
             go-test-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.setup-go.outputs.go-version }}-${{ hashFiles('go.sum') }}-${{ strategy.job-total }}-${{ matrix.shard }}-main-
       - name: Install shells when this shard runs pairing path-proof tests
+        timeout-minutes: 4
         env:
           AEON_TEST_TIER_MODE: ${{ needs.tier-plan.outputs.mode }}
           AEON_TEST_TIER_LAYOUT: ${{ needs.tier-plan.outputs.layout }}
@@ -295,7 +296,11 @@ jobs:
             console.log(tests.some(row => row.package === "internal/agentpairing" && row.name === "TestPathProofCommandsRunInShells") ? "yes" : "no");
           ')"
           if [ "$need" = yes ] || [ "$tier_need" = yes ]; then
-            sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+            command -v fish && command -v zsh || {
+              for i in 1 2 3; do
+                timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq && timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq zsh fish && break
+              done
+            }
           fi
       - name: Test this shard (essential plus changed area, or full on main)
         env:
@@ -582,7 +587,13 @@ jobs:
       - name: Restore web runtime
         run: tar -xf "$RUNNER_TEMP/web-runtime/web-runtime.tar"
       - name: Install shells used by command round-trip unit tests
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh
+        timeout-minutes: 4
+        run: |
+          command -v fish && command -v zsh || {
+            for i in 1 2 3; do
+              timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq && timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq fish zsh && break
+            done
+          }
       - name: Run selected web units without retries
         env:
           CI_LANE: ${{ needs.tier-plan.outputs.lane }}
@@ -650,8 +661,12 @@ jobs:
           fail-on-cache-miss: true
       # OS libraries are per runner; browser downloads and npm ci are shared.
       - name: Install Chromium system dependencies
+        timeout-minutes: 13
         working-directory: web
-        run: npx playwright install-deps chromium
+        run: |
+          for i in 1 2 3; do
+            timeout 240 npx playwright install-deps chromium && break
+          done
       - name: Run selected UI cases without retries
         env:
           CI_LANE: ${{ needs.tier-plan.outputs.lane }}
@@ -963,8 +978,12 @@ jobs:
       - name: Build server
         run: go build -tags webembed -o bin/paimos ./cmd/aeon
       - name: Install Playwright
+        timeout-minutes: 13
         working-directory: web
-        run: npx playwright install --with-deps --only-shell chromium
+        run: |
+          for i in 1 2 3; do
+            timeout 240 npx playwright install --with-deps --only-shell chromium && break
+          done
       - name: Measure Chromium shell cleanup on success, failure and interruption
         env:
           AEON_BROWSER_LIFECYCLE: '1'

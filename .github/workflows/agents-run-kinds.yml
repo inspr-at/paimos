@@ -38,11 +38,22 @@ jobs:
       - run: npm ci
         working-directory: web
       - name: Install shells required by existing unit tests
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq zsh fish
+        timeout-minutes: 4
+        run: |
+          command -v fish && command -v zsh || {
+            for i in 1 2 3; do
+              timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq && timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq zsh fish && break
+            done
+          }
       - run: npm run test:unit
         working-directory: web
-      - run: npx playwright install --with-deps chromium
+      - name: Install Playwright system dependencies
+        timeout-minutes: 13
         working-directory: web
+        run: |
+          for i in 1 2 3; do
+            timeout 240 npx playwright install --with-deps chromium && break
+          done
       - name: Capture the base table and test the candidate table
         working-directory: web
         env:

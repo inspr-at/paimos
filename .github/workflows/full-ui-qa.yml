@@ -65,8 +65,12 @@ jobs:
         working-directory: web
         run: npm ci
       - name: Install Chromium
+        timeout-minutes: 13
         working-directory: web
-        run: npx playwright install --with-deps chromium
+        run: |
+          for i in 1 2 3; do
+            timeout 240 npx playwright install --with-deps chromium && break
+          done
       - name: Run the complete UI inventory, without retries or selection filters
         working-directory: web
         env:

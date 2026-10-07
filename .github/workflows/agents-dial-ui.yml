@@ -31,8 +31,13 @@ jobs:
       - name: Dial persistence and projection regressions
         run: npx vitest run tests/agents-working.unit.test.ts tests/agents-plan-save.unit.test.ts --maxWorkers=1 --no-file-parallelism
         working-directory: web
-      - run: npx playwright install --with-deps chromium
+      - name: Install Playwright system dependencies
+        timeout-minutes: 13
         working-directory: web
+        run: |
+          for i in 1 2 3; do
+            timeout 240 npx playwright install --with-deps chromium && break
+          done
       - name: Approved five-state matrix, accounts and stability regressions
         run: npm test -- tests/agents-dial.spec.ts tests/accounts-computers.spec.ts tests/no-shift.spec.ts --workers=1
         working-directory: web

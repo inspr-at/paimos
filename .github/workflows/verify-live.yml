@@ -77,10 +77,13 @@ jobs:
           } catch { console.error('Rollout evidence refused; lead must inspect the source record.'); process.exit(1); }
           JS
       - name: Install isolated browser smoke dependencies
+        timeout-minutes: 18
         working-directory: web
         run: |
           npm ci
-          npx playwright install --with-deps chromium
+          for i in 1 2 3; do
+            timeout 240 npx playwright install --with-deps chromium && break
+          done
       - name: Verify live and optionally finalize distribution
         env:
           RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}

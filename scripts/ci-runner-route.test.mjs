@@ -287,7 +287,8 @@ test("CI expressions honor the router switch, fork boundary and attempt for runn
 test("key dialog CI uses the hosted shards and covers the shared access markup", () => {
   const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
   const units = workflow.split("  web-unit:\n")[1].split("\n  web-shard:")[0];
-  assert.match(units, /sudo apt-get install -y -qq fish zsh/);
+  assert.match(units, /timeout-minutes: 4\n\s+run: \|\n\s+command -v fish && command -v zsh \|\| \{/);
+  assert.match(units, /timeout 150 sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y -qq fish zsh/);
   const install = units.indexOf("Install shells used by command round-trip unit tests");
   const execute = units.indexOf("Run selected web units without retries");
   assert.ok(install >= 0 && execute > install, 'Unit runners must install shells before running tests');
