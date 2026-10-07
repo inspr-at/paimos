@@ -27,7 +27,11 @@ func TestGitHubReaderUsesReadOnlyScopesAndFreshQueueHead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keyFile := filepath.Join(t.TempDir(), "fixture.pem")
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyFile := filepath.Join(dir, "fixture.pem")
 	if err = os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0600); err != nil {
 		t.Fatal(err)
 	}
