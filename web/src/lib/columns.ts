@@ -132,6 +132,15 @@ export function visibleColumns(tableWidth: number, options: { phone: boolean; pr
 }
 
 const sumWidths = (widths: Partial<Record<string, number>>) => Object.values(widths).reduce<number>((sum, w) => sum + (w ?? 0), 0)
+// A loaded measurement can be narrower than the column's designed width, and
+// the exact pixels move with the platform font (the model slot measured 152px
+// here and 156px in CI, both inside the 176px design, with nothing clipped).
+// Keep the design until the value is wider. Title's minimum may still shrink
+// the result later; a saved or dragged width never comes through here.
+export function loadedFitWidth(def: { width: number; min: number; max: number }, measured: number): number {
+  if (!Number.isFinite(measured)) return def.width
+  return Math.max(def.width, Math.min(def.max, Math.max(def.min, measured)))
+}
 // The column after Title first, then the rest toward the left, so Title's edge
 // resizes its neighbour before it touches a column further away.
 function besideTitle(ids: string[]): string[] {

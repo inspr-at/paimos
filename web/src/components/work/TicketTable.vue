@@ -4,7 +4,7 @@ import { vClipTip } from '../../directives/clipTip'
 import { formatEstimate, estimateDisplay } from '../../lib/estimates'
 import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { ListItem } from '../../lib/api'
-import { COLUMN_BY_ID, costUnitLabel, layoutWidths, releaseLabel, tagList, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
+import { COLUMN_BY_ID, costUnitLabel, layoutWidths, loadedFitWidth, releaseLabel, tagList, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnId, type ListPrefs, type TagRef } from '../../lib/columns'
 import { releaseCell, type NativeReleaseView } from '../../lib/releaseMembership'
 import { ticketWorkers, withServerLead, type LiveAgent } from '../../lib/liveAgents'
 import { useLiveAgents } from '../../stores/liveAgents'
@@ -210,7 +210,7 @@ async function fitLoaded() {
   for (const id of ids.value) {
     if (id === 'title' || Number.isFinite(props.prefs?.widths?.[id]) || dragWidths.value[id] !== undefined) continue
     if (!newRows && fittedColumns.has(id)) continue
-    next[id] = Math.max(next[id] ?? 0, fittedWidth(id))
+    next[id] = loadedFitWidth(definitions.value.get(id)!, Math.max(next[id] ?? 0, fittedWidth(id)))
     fittedColumns.add(id)
   }
   fittedRows = rows

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { automaticColumns, COLUMN_BY_ID, layoutWidths, moveColumn, orderOf, releaseLabel, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnId } from '../src/lib/columns.ts'
+import { automaticColumns, COLUMN_BY_ID, layoutWidths, loadedFitWidth, moveColumn, orderOf, releaseLabel, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnId } from '../src/lib/columns.ts'
 import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
@@ -237,6 +237,18 @@ test('AEON-913: automatic fits give width back until Title keeps its minimum', (
   const dragged = layoutWidths(['key', 'title', 'status', 'assignee'], table, null, { assignee: 800 }, COLUMN_BY_ID, { key: 84, status: 84 })
   assert.deepEqual(dragged, { key: 84, status: 84, assignee: 800 })
   assert.equal(titleOf(dragged), 32)
+})
+
+// The model column's designed 176px slot already holds its marks and name.
+// A loaded measurement of that row is narrower, and the pixels move with the
+// font (152 here, 156 in CI). Keep 176 until the value is wider.
+test('AEON-913: a loaded fit keeps the designed width until the value is wider', () => {
+  const model = COLUMN_BY_ID.get('model')!
+  assert.equal(loadedFitWidth(model, 152), 176)
+  assert.equal(loadedFitWidth(model, 156), 176)
+  assert.equal(loadedFitWidth(model, 200), 200)
+  assert.equal(loadedFitWidth(model, 400), model.max)
+  assert.equal(loadedFitWidth(model, Number.NaN), model.width)
 })
 
 test('AEON-913: group selection caps loaded rows at 100 and preserves other groups', () => {
