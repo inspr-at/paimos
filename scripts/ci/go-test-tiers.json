@@ -1392,6 +1392,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestGrokVerificationPlatformGate","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestHarnessHintsDrainAndStopWithoutHeartbeatOrPoll","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestHarnessHoldDoesNotBlockClaimRecovery","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestHarnessHoldReleaseRestartsProbeClockOnlyOnce","tier":"GATED-FULL"}
@@ -1615,6 +1617,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestRemoteDeployApprovalBinding","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteHarnessMetadataOmitsUnknownAndUnchangedFields","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRemoteHarnessNotificationsBoundFramesAndCredentials","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteHeartbeatExposesDurablePause","tier":"GATED-FULL"}
     ,
@@ -5329,6 +5333,8 @@
     {"kind":"go","package":"internal/harness","name":"TestHarnessGenerationAndOwnedControls","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHarnessInboxLeaseAndExactAck","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/harness","name":"TestHarnessNotificationsCommitWakeLeaseAndRevocation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/harness","name":"TestHarnessPluginConstructor","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,

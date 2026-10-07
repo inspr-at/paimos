@@ -10378,6 +10378,18 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"displacement before a late read marker preserves the reader's position before scroll dispatch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat dark 1024: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat dark 1440: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat dark 390: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat light 1024: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat light 1440: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat light 390: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"focusing the window picks up a read from another device","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"keydown before a late read marker preserves the reader's position before scroll dispatch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

@@ -303,14 +303,26 @@ export const useAgents = defineStore('agents', () => {
     if (!order) orders.set(key, order = createReadOrder())
     return order
   }
-  async function refreshThread(projectId: string, sessionId: string) {
-    try {
-      await readOrdered(orderFor(threadOrders, sessionId), () => listMessages(projectId, { session: sessionId, limit: 200 }), page => {
-        threads.value = { ...threads.value, [sessionId]: page.items }
-        learnAddresses(page.items)
-        if (messagingState.value !== 'ready') messagingState.value = 'ready'
-      })
-    } catch (e) { if (messagingState.value !== 'ready') messagingState.value = availability(e) }
+  const threadFlights = new Map<string, { again: boolean; promise: Promise<void> }>()
+  function refreshThread(projectId: string, sessionId: string): Promise<void> {
+    const pending = threadFlights.get(sessionId)
+    if (pending) { pending.again = true; return pending.promise }
+    const flight = { again: false, promise: Promise.resolve() }
+    threadFlights.set(sessionId, flight)
+    flight.promise = (async () => {
+      do {
+        flight.again = false
+        try {
+          await readOrdered(orderFor(threadOrders, sessionId), () => listMessages(projectId, { session: sessionId, limit: 200 }), page => {
+            threads.value = { ...threads.value, [sessionId]: page.items }
+            learnAddresses(page.items)
+            if (messagingState.value !== 'ready') messagingState.value = 'ready'
+          })
+        } catch (e) { if (messagingState.value !== 'ready') messagingState.value = availability(e) }
+        // A hint during the read needs a trailing read to see the newest post.
+      } while (flight.again)
+    })().finally(() => threadFlights.delete(sessionId))
+    return flight.promise
   }
   async function refreshAgentRuns(principalId: string) {
     try {
@@ -545,11 +557,13 @@ export const useAgents = defineStore('agents', () => {
   // Bumped by delivery events (AEON-280); an open chat re-reads its message status.
   const deliveryPulse = ref(0)
   function deliveryChanged() { deliveryPulse.value++ }
+  const threadPulse = ref(0)
+  function threadChanged() { threadPulse.value++ }
 
   return {
     now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, models, eventPulseFor,
     loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordSession, loadSessionDetail, admitSessions, sessionById, admitRun, admitRuns, grouped,
-    loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshAccounts, refreshSessions, refreshThread, refreshAgentRuns, tick, deliveryPulse, deliveryChanged,
+    loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshAccounts, refreshSessions, refreshThread, refreshAgentRuns, tick, deliveryPulse, deliveryChanged, threadPulse, threadChanged,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount, removeAccount, cancelQueuedRun,
     invalidatePolls, afterWrite, onWrite,
   }
