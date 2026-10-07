@@ -2,10 +2,12 @@
 package delivery
 
 import (
+	"context"
 	"encoding/base64"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -24,6 +26,9 @@ func (m *Module) auditList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	q := r.URL.Query()
 	key := q.Get("project")
 	rawCursor := q.Get("after")

@@ -74,8 +74,59 @@ func auditLink(ctx context.Context, tx pgx.Tx, repo string, f MergeFact) (Observ
 		if o.Ticket != nil {
 			return o, nil
 		}
+	} else {
+		// Direct pushes can match a tracked delivery head. Preserve 848's
+		// authoritative ticket association only when it is unambiguous.
+		rows, err := tx.Query(ctx, `SELECT DISTINCT ticket_node_id::text,project_id::text FROM delivery_items WHERE repository=$1 AND head_sha=$2 AND ticket_node_id IS NOT NULL ORDER BY ticket_node_id::text,project_id::text LIMIT 2`, repo, f.Head)
+		if err != nil {
+			return o, err
+		}
+		matches := []Observation{}
+		for rows.Next() {
+			candidate := o
+			if err = rows.Scan(&candidate.Ticket, &candidate.Project); err != nil {
+				rows.Close()
+				return o, err
+			}
+			matches = append(matches, candidate)
+		}
+		rows.Close()
+		if rows.Err() != nil {
+			return o, rows.Err()
+		}
+		if len(matches) == 1 {
+			return matches[0], nil
+		}
 	}
-	return o, linkTx(ctx, tx, &o, f.Title)
+	if err := linkTx(ctx, tx, &o, f.Title); err != nil {
+		return o, err
+	}
+	if o.Project == nil {
+		// Repository-to-project association is itself a delivery platform fact.
+		// Use it for lead routing only when exactly one live project owns the
+		// repository; never choose between projects or invent a ticket link.
+		rows, err := tx.Query(ctx, `SELECT DISTINCT d.project_id::text FROM delivery_items d JOIN nodes n ON n.id=d.project_id WHERE d.repository=$1 AND n.deleted_at IS NULL ORDER BY d.project_id::text LIMIT 2`, repo)
+		if err != nil {
+			return o, err
+		}
+		ids := []string{}
+		for rows.Next() {
+			var id string
+			if err = rows.Scan(&id); err != nil {
+				rows.Close()
+				return o, err
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if rows.Err() != nil {
+			return o, rows.Err()
+		}
+		if len(ids) == 1 {
+			o.Project = &ids[0]
+		}
+	}
+	return o, nil
 }
 
 func auditReview(ctx context.Context, tx pgx.Tx, o Observation) (bool, error) {

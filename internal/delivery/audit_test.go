@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -23,6 +24,7 @@ type auditFake struct {
 	checks     map[string][]Check
 	checksErr  error
 	checkReads int
+	onCheck    func()
 }
 
 func (g *auditFake) AuditCommits(context.Context) ([]string, error) { return g.commits, g.err }
@@ -31,6 +33,9 @@ func (g *auditFake) AuditCommit(_ context.Context, sha string) (*MergeFact, erro
 }
 func (g *auditFake) AuditChecks(_ context.Context, sha string) ([]Check, error) {
 	g.checkReads++
+	if g.onCheck != nil {
+		g.onCheck()
+	}
 	return g.checks[sha], g.checksErr
 }
 func auditGreen() []Check {
@@ -152,8 +157,8 @@ func TestMergeAuditWebhookReconciliationAndIsolation(t *testing.T) {
 	direct := MergeFact{SHA: strings.Repeat("f", 40), Head: strings.Repeat("f", 40), MergedBy: "admin", At: f.at}
 	g.facts[direct.SHA] = &direct
 	auditSend(t, f, "push", "audit-direct", map[string]any{"ref": "refs/heads/main", "after": direct.SHA}, 204)
-	if a = auditRead(t, f, direct.SHA); !slices.Contains(a.Flags, "direct_push") || !slices.Contains(a.Flags, "checks_missing") || a.PR != nil || a.AlertedAt != nil {
-		t.Fatalf("direct push hidden or guessed a lead: %+v", a)
+	if a = auditRead(t, f, direct.SHA); !slices.Contains(a.Flags, "direct_push") || !slices.Contains(a.Flags, "checks_missing") || a.PR != nil || a.Ticket != nil || a.AlertedAt == nil {
+		t.Fatalf("direct push hidden or invented a ticket: %+v", a)
 	}
 	// A push of an already audited PR merge must not become a direct push.
 	g.facts[queue.SHA] = &queue
@@ -211,6 +216,23 @@ func TestMergeAuditWebhookReconciliationAndIsolation(t *testing.T) {
 	if len(page.Items) != 0 {
 		t.Fatal("other tenant saw audit")
 	}
+	guest := tenant.Principal{TenantID: f.person.TenantID, Kind: tenant.Person}
+	f.tx(t, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Other project reader') RETURNING id::text`, guest.TenantID).Scan(&guest.ID); err != nil {
+			return err
+		}
+		var other string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,key,kind_id,title) SELECT $1,'OTHER-1',id,'Other project' FROM node_kinds WHERE slug='project' RETURNING id::text`, guest.TenantID).Scan(&other); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) SELECT $1,$2,id,'project',$3 FROM roles WHERE key='guest'`, guest.TenantID, guest.ID, other)
+		return err
+	})
+	f.call(t, guest, "GET", "/api/delivery/audit", nil, 200, &page)
+	if len(page.Items) != 0 {
+		t.Fatal("other project reader saw linked or workspace audit rows")
+	}
+	f.call(t, guest, "GET", "/api/delivery/audit?project=AEON", nil, 404, nil)
 	if err := db.InTenant(db.AllProjects(t.Context(), "audit RLS guard"), f.d.App, f.foreign.TenantID, func(tx pgx.Tx) error {
 		var n int
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_merge_audit WHERE tenant_id=$1`, f.person.TenantID).Scan(&n); err != nil {
@@ -270,7 +292,7 @@ func TestMergeAuditPendingAlertsAndAtomicFailure(t *testing.T) {
 	}
 
 	// An inbox failure rolls back the audit row AND bypass event. Fail the
-	// message insert with a transaction-local, reversible test trigger.
+	// message insert with a reversible trigger in this test's private database.
 	f.tx(t, func(tx pgx.Tx) error {
 		_, err := tx.Exec(t.Context(), `CREATE FUNCTION audit_test_refuse_message() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected inbox failure'; END; $$; CREATE TRIGGER audit_test_refuse_message BEFORE INSERT ON inbox_messages FOR EACH ROW EXECUTE FUNCTION audit_test_refuse_message()`)
 		return err
@@ -289,5 +311,23 @@ func TestMergeAuditPendingAlertsAndAtomicFailure(t *testing.T) {
 	auditSend(t, f, "pull_request", "audit-inbox-fail", auditPRBody(f, next), 204)
 	if rows, events, alerts := auditCounts(t, f); rows != 2 || events != 2 || alerts != 2 {
 		t.Fatal("replay did not recover failed inbox acceptance")
+	}
+	// Revoke recipient access during the external lookup. The final write must
+	// evaluate the current recipient ACL rather than an earlier read.
+	g.onCheck = func() {
+		f.tx(t, func(tx pgx.Tx) error {
+			if err := db.LockTenant(t.Context(), tx, f.person.TenantID); err != nil {
+				return err
+			}
+			_, err := tx.Exec(t.Context(), `DELETE FROM role_bindings WHERE principal_id=$1`, f.person.ID)
+			return err
+		})
+	}
+	revoked := fact
+	revoked.SHA = strings.Repeat("f", 40)
+	g.checks[revoked.SHA] = auditGreen()
+	auditSend(t, f, "pull_request", "audit-revoked-lead", auditPRBody(f, revoked), 204)
+	if rows, events, alerts := auditCounts(t, f); rows != 3 || events != 3 || alerts != 2 || auditRead(t, f, revoked.SHA).AlertedAt != nil {
+		t.Fatal("revoked lead received an alert")
 	}
 }
