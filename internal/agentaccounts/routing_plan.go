@@ -288,8 +288,15 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		accounts := []Account{}
+		bound := map[string]bool{}
+		if ownOnly {
+			bound, err = computerAccountIDs(r.Context(), tx, p.ID)
+			if err != nil {
+				return err
+			}
+		}
 		for _, a := range all {
-			if a.Harness == harness && (daemon == "" || a.DaemonID == daemon) && (!ownOnly || a.RegisteredBy == p.ID) {
+			if a.Harness == harness && (daemon == "" || a.DaemonID == daemon) && (!ownOnly || a.RegisteredBy == p.ID || bound[a.ID]) {
 				accounts = append(accounts, a)
 			}
 		}
@@ -309,6 +316,32 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, 200, out)
+}
+
+// A daemon string alone is not authority over another registrar's account.
+// Connected pairing enrollments bind all of the computer's accounts to its
+// runtime principal, including accounts enrolled by a different registrar.
+func computerAccountIDs(ctx context.Context, tx pgx.Tx, principal string) (map[string]bool, error) {
+	rows, err := tx.Query(ctx, `SELECT e.account_id::text FROM agent_pairing_enrollments e
+ JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
+ JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id
+ WHERE c.principal_id=$1 AND c.state='connected' AND e.state='connected' AND a.daemon_id=c.daemon_id LIMIT 1025`, principal)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+		if len(out) > 1024 {
+			return nil, fail(503, "too many enrolled computer accounts")
+		}
+	}
+	return out, rows.Err()
 }
 
 // VendorRetryAt returns vendor truth when a stop includes a reset, otherwise a

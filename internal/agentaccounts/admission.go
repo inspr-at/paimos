@@ -340,8 +340,12 @@ func waitForRun(ctx context.Context, tx pgx.Tx, run runRow) (*CapacityWait, erro
 		return nil, err
 	}
 	same := []Account{}
+	bound, err := computerAccountIDs(ctx, tx, run.AgentID)
+	if err != nil {
+		return nil, err
+	}
 	for _, a := range accounts {
-		if a.RegisteredBy == run.AgentID && a.Harness == harness && (run.AccountID == nil || a.ID == *run.AccountID) {
+		if (a.RegisteredBy == run.AgentID || bound[a.ID]) && a.Harness == harness && (run.AccountID == nil || a.ID == *run.AccountID) {
 			same = append(same, a)
 		}
 	}

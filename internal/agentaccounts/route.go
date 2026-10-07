@@ -372,6 +372,10 @@ func authorizeRoute(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Pr
 }
 
 func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemonID string, enrolled map[string]bool) (RouteResult, bool, error) {
+	bound, err := computerAccountIDs(ctx, tx, principalID)
+	if err != nil {
+		return RouteResult{}, false, err
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT r.id::text, r.window_id::text, w.unit, a.id::text, a.account_key, a.daemon_id,
 		       a.registered_by_principal_id::text, a.label, a.billing_mode, a.plan, w.pairing_verification, w.ends_at, w.allowance
@@ -393,7 +397,7 @@ func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemon
 		if err := rows.Scan(&item.ReservationID, &item.WindowID, &item.Unit, &accountID, &key, &ownerDaemonID, &ownerID, &label, &billing, &plan, &window.pairingVerification, &window.EndsAt, &window.Allowance); err != nil {
 			return RouteResult{}, false, err
 		}
-		if ownerDaemonID != daemonID || ownerID != principalID || !enrolled[accountID] {
+		if ownerDaemonID != daemonID || ownerID != principalID && !bound[accountID] || !enrolled[accountID] {
 			return RouteResult{}, false, fail(http.StatusConflict, "run is routed outside daemon enrollment")
 		}
 		window.AccountID, window.Unit = accountID, item.Unit

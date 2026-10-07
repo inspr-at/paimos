@@ -238,7 +238,8 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 }
 
 // Check the complete live enrollment, not just this Add harness request. A
-// second request cannot evade the config-home isolation or computer-size bound.
+// isolated request cannot evade the config-home isolation or computer-size
+// bound. Legacy Add harness reenrollment retains its existing protocol.
 // Immutable reviewed details retain the opaque home binding without a migration.
 func validateAdditionalAccounts(ctx context.Context, tx pgx.Tx, computer string, chosen []Choice) error {
 	rows, err := tx.Query(ctx, `SELECT q.details,a.account_key FROM agent_pairing_enrollments e
@@ -269,6 +270,12 @@ func validateAdditionalAccounts(ctx context.Context, tx pgx.Tx, computer string,
 	}
 	if err := rows.Err(); err != nil {
 		return err
+	}
+	if len(all) > maxComputerAccounts {
+		return fail(400, "invalid_request", "at most 32 accounts per computer")
+	}
+	if !slices.ContainsFunc(all, func(a Choice) bool { return a.ConfigHomeID != "" }) {
+		return nil
 	}
 	return validateAccountChoices(all)
 }

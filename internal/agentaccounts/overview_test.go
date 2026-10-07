@@ -22,10 +22,10 @@ func TestOverviewValuesMaskingExplicitScopeAndTenantIsolation(t *testing.T) {
 	runner := addPrincipal(t, person.TenantID, "agent", "runtime", nil)
 	otherPerson := addPrincipal(t, person.TenantID, "person", "Other owner", nil)
 	foreign := makePrincipal(t, "overview-foreign", "person", "Foreign", []string{"admin"})
-	codexProfile(t, person)
+	profile := codexProfile(t, person)
 	token := issueKey(t, runner, []string{"account.manage", "account.probe"})
 	mod := accountsMod()
-	now := time.Now().UTC().Add(-time.Second)
+	now := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
 	accounts := []Account{}
 	for i, label := range []string{"First", "Private"} {
 		var a Account
@@ -45,8 +45,17 @@ func TestOverviewValuesMaskingExplicitScopeAndTenantIsolation(t *testing.T) {
 			owner = otherPerson.ID
 		}
 		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
-			_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2 WHERE id=$1`, a.ID, owner)
-			return err
+			if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=now() WHERE id=$1`, a.ID, owner); err != nil {
+				return err
+			}
+			if i == 0 {
+				learning := capacityLearning{Windows: []capacity.LearnedWindow{{Kind: "weekly", Minutes: 10080,
+					Runs: []capacity.RunSample{{At: now, Profile: profile, Percent: 10, Tokens: 2_000_000}, {At: now, Profile: profile, Percent: 10, Tokens: 2_000_000}, {At: now, Profile: profile, Percent: 10, Tokens: 2_000_000}},
+					Burn: []capacity.UseSample{{At: now, Percent: 5, Hours: 1}},
+				}}}
+				return saveLearning(t.Context(), tx, a.ID, learning)
+			}
+			return nil
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -70,6 +79,9 @@ func TestOverviewValuesMaskingExplicitScopeAndTenantIsolation(t *testing.T) {
 				want := 10.0
 				if w.Kind == "weekly" {
 					want = 20
+				}
+				if w.Kind == "weekly" && (w.Learned == nil || w.Learned.LimitTokens == nil || *w.Learned.LimitTokens != 20_000_000 || w.Learned.Burn != 5 || w.Learned.Samples != 3) {
+					t.Fatalf("learned capacity or burn lost: %+v", w.Learned)
 				}
 				if w.UsedPercent == nil || *w.UsedPercent != want || w.Freshness != "fresh" || w.Source != "vendor_reported" || w.ReadAt == nil || !w.ReadAt.Equal(now) || w.ResetsAt.IsZero() || w.Pacing == nil || w.Learned == nil {
 					t.Fatalf("incorrect window: %+v", w)
@@ -141,7 +153,7 @@ func TestVendorStopAdviceUsesOtherRegistrarOnSameDaemon(t *testing.T) {
 	profile := codexProfile(t, person)
 	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 	accounts := []Account{}
-	for i, agent := range []struct{ id, daemon, label string }{{runner.ID, "daemon-a", "Stopped"}, {registrar.ID, "daemon-a", "Spare"}, {registrar.ID, "daemon-b", "Other computer"}} {
+	for i, agent := range []struct{ id, daemon, label string }{{runner.ID, "daemon-a", "Stopped"}, {registrar.ID, "daemon-a", "Spare"}, {registrar.ID, "daemon-b", "OtherComputer"}} {
 		var a Account
 		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
 			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,$2,'codex',$3,$4,$2,$5,true,'g1',$6) RETURNING id::text`, person.TenantID, agent.label, agent.daemon, agent.id, now, person.ID).Scan(&a.ID); err != nil {

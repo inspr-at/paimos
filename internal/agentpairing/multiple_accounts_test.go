@@ -3,15 +3,18 @@ package agentpairing_test
 
 import (
 	"fmt"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -22,6 +25,8 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 	p := f.propose("claude")
 	p.id = uuid(t, f.db)
 	p.request["request_id"] = p.id
+	p.device = nonce()
+	p.request["device_hash"] = hash(p.device)
 	accounts := []map[string]string{}
 	for i, h := range []string{"claude", "claude", "codex", "codex", "codex"} {
 		key := fmt.Sprintf("%s-%d", h, i)
@@ -34,18 +39,19 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 		t.Fatalf("got %d enrollments, want 2 Claude and 3 Codex", len(v.Enrollments))
 	}
 	v = f.redeem(p)
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	now := time.Now().UTC().Add(-time.Second)
 	for i, e := range v.Enrollments {
 		f.call("POST", "/api/agent-accounts/"+e.AccountID+"/capacity/approve", nil, true, "", 204)
-		f.probe(v, e, p.runtime, 200)
+		f.probe(v, e, key, 200)
 		readings := []capacity.Reading{
 			{WindowKind: "5h", WindowMinutes: 300, UsedPercent: float64(i + 10), ResetsAt: now.Add(time.Duration(i+1) * time.Hour), ReadAt: now, Source: "harness"},
 			{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: float64(i + 20), ResetsAt: now.Add(time.Duration(i+24) * time.Hour), ReadAt: now, Source: "harness"},
 		}
-		f.call("POST", "/api/agent-accounts/"+e.AccountID+"/readings", map[string]any{"readings": readings}, false, p.runtime, 204)
+		f.call("POST", "/api/agent-accounts/"+e.AccountID+"/readings", map[string]any{"readings": readings}, false, key, 204)
 	}
 	err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2 WHERE daemon_id=$1`, *v.DaemonID, f.person)
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET owner_person_id=$2,linked_at=now() WHERE daemon_id=$1`, *v.DaemonID, f.person)
 		return err
 	})
 	if err != nil {
@@ -53,7 +59,7 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 	}
 	for _, harness := range []string{"claude", "codex"} {
 		var next agentaccounts.CapacityNext
-		decodeResult(t, f.call("GET", "/api/agent-accounts/capacity/next?harness="+harness+"&daemon_id="+*v.DaemonID, nil, false, p.runtime, 200), &next)
+		decodeResult(t, f.call("GET", "/api/agent-accounts/capacity/next?harness="+harness+"&daemon_id="+*v.DaemonID, nil, false, key, 200), &next)
 		want := 2
 		if harness == "codex" {
 			want = 3
@@ -93,6 +99,76 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 			t.Fatalf("overview leaked %s", forbidden)
 		}
 	}
+	// Exercise the terminal vendor-stop lifecycle through the real auth/mux,
+	// including reservation and claim on an account with another registrar.
+	codex := []agentpairing.Enrollment{}
+	for _, e := range v.Enrollments {
+		if e.Harness == "codex" {
+			codex = append(codex, e)
+		}
+	}
+	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		var registrar string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'agent','Other enrollment registrar','{}') RETURNING id::text`, f.tenantID).Scan(&registrar); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET registered_by_principal_id=$2 WHERE id=$1`, codex[1].AccountID, registrar); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET state='unavailable' WHERE id=$1`, codex[2].AccountID)
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	schedule := capacity.DefaultSchedule()
+	schedule.Reserve = capacity.ReserveOff
+	for i := range schedule.Week {
+		schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	for _, e := range codex[:2] {
+		f.call("PUT", "/api/agent-accounts/capacity/schedule", map[string]any{"scope": "account", "account_id": e.AccountID, "schedule": schedule}, true, "", 204)
+	}
+	var next agentaccounts.CapacityNext
+	decodeResult(t, f.call("GET", "/api/agent-accounts/capacity/next?harness=codex", nil, false, key, 200), &next)
+	if len(next.Accounts) != 2 {
+		t.Fatal("paired advice lost the differently registered account")
+	}
+	// Runtime reporting still belongs to the enrolling runtime principal; the
+	// actual pairing writer enrolls every account with that same principal.
+	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET registered_by_principal_id=$2 WHERE id=$1`, codex[1].AccountID, *v.PrincipalID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var order workorders.Order
+	decodeResult(t, f.call("POST", "/api/work-orders", map[string]any{"title": "Account handoff", "criteria": []string{"Continue on the spare"}, "assignee_principal_id": *v.PrincipalID}, true, "", 201), &order)
+	decodeResult(t, f.call("PATCH", "/api/work-orders/"+order.NodeID, map[string]any{"expected_revision": order.Revision, "status": "ready"}, true, "", 200), &order)
+	var run agentruns.Run
+	decodeResult(t, f.call("POST", "/api/work-orders/"+order.NodeID+"/runs", map[string]any{"agent_principal_id": *v.PrincipalID, "model_profile_id": codex[0].ProfileID}, true, "", 201), &run)
+	route := routeWithUnits(t, f, v, codex[0], key, run.ID, map[string]int{"requests": 1}, 200)
+	f.call("POST", "/api/runs/"+run.ID+"/claim", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "reservation_ids": reservationIDs(route)}, false, key, 200)
+	stop := capacity.Reading{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 100, ResetsAt: now.Add(2 * time.Hour), ReadAt: now.Add(time.Second), Source: "harness", RunID: run.ID, Phase: "end"}
+	f.call("POST", "/api/agent-accounts/"+codex[0].AccountID+"/readings", map[string]any{"readings": []capacity.Reading{stop}}, false, key, 204)
+	r := f.request("POST", "/api/runs/"+run.ID+"/telemetry", map[string]any{"sequence": 1, "kind": "finished", "status": "failed", "error_code": "vendor_limit"}, false, key)
+	r.Header.Set(agentruns.DaemonHeader, *v.DaemonID)
+	r.Header.Set(agentruns.GenerationHeader, "test-generation")
+	w := httptest.NewRecorder()
+	f.h.ServeHTTP(w, r)
+	if w.Code != 200 {
+		t.Fatalf("vendor stop failed: %d %s", w.Code, w.Body.String())
+	}
+	var queued []agentruns.Run
+	decodeResult(t, f.call("GET", "/api/runs/queued", nil, false, key, 200), &queued)
+	if len(queued) != 1 || queued[0].RetryOfRunID == nil || *queued[0].RetryOfRunID != run.ID || queued[0].Wait != nil {
+		t.Fatalf("terminal stop did not queue a routable handoff: %+v", queued)
+	}
+	route = routeWithUnits(t, f, v, codex[1], key, queued[0].ID, map[string]int{"requests": 1}, 200)
+	if route.AccountID != codex[1].AccountID {
+		t.Fatal("handoff did not reserve the spare account")
+	}
+	f.call("POST", "/api/runs/"+queued[0].ID+"/claim", map[string]any{"daemon_id": *v.DaemonID, "daemon_generation": "test-generation", "reservation_ids": reservationIDs(route)}, false, key, 200)
 }
 
 func TestPairingRejectsUnisolatedAndReusedHomesAcrossRequests(t *testing.T) {
@@ -118,6 +194,10 @@ func TestPairingRejectsUnisolatedAndReusedHomesAcrossRequests(t *testing.T) {
 	additional := f.propose("claude")
 	additional.id = uuid(t, f.db)
 	additional.request["request_id"] = additional.id
+	additional.device = nonce()
+	additional.request["device_hash"] = hash(additional.device)
+	additional.request["runtime_hash"] = hash(p.runtime)
+	additional.request["lifecycle_hash"] = hash(p.lifecycle)
 	additional.request["existing_computer_id"] = *v.ComputerID
 	additional.request["existing_lifecycle_secret"] = p.lifecycle
 	additional.request["accounts"] = []map[string]string{{"account_key": "claude-second", "harness": "claude", "label": "Second", "config_home_id": hash("separate")}}
