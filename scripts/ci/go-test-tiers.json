@@ -4824,6 +4824,8 @@
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestReviewHistoryAndActionsAfterWorkMigration","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/crossreview","name":"TestReviewPolicyChangeDuringPublicationRemainsDirty","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/crossreview","name":"TestReviewPolicyExplicitAgentGrantAndTenantIsolation","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestReviewPolicyUsesRunIdentityAndLiveProjectOverride","tier":"ESSENTIAL"}

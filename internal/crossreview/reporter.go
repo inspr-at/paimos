@@ -256,7 +256,22 @@ func (m *Module) publishReview(ctx context.Context, conn *pgxpool.Conn, tid stri
 		} // Publish confirms the revocation post.
 	}
 	writeErr := db.InTenant(service, m.pool, tid, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE work_order_reviews SET github_status=$2,github_reported_state=$3 WHERE work_order_id=$1`, v.OrderID, published, recorded)
+		// Policy writes take the tenant fence too. If one committed during
+		// network I/O, do not erase its dirty marker with the old publication.
+		if err := db.LockTenant(ctx, tx, tid); err != nil {
+			return err
+		}
+		current, err := load(ctx, tx, v.OrderID)
+		if err != nil {
+			return err
+		}
+		if statusState(current) != state || statusDescription(current, statusState(current)) != statusDescription(v, state) {
+			recorded = ""
+			if published == "success" {
+				published = "pending"
+			}
+		}
+		_, err = tx.Exec(ctx, `UPDATE work_order_reviews SET github_status=$2,github_reported_state=$3 WHERE work_order_id=$1`, v.OrderID, published, recorded)
 		return err
 	})
 	if writeErr != nil {
