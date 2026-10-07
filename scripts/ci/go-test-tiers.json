@@ -830,6 +830,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestReadinessWaitSnapshotAndNewWaitReset","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestRedactedOverviewHeadroomFollowsWorkBand","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRedactedOverviewHidesRoutableHeadroom","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestRenameKeepsModelGrants","tier":"GATED-FULL"}

@@ -4,6 +4,7 @@ package agentaccounts
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -334,13 +335,55 @@ func TestVendorStopAdviceRejectsUnenrolledDaemonSquatter(t *testing.T) {
 
 // Risk: a redacted overview row discloses quota headroom through routable,
 // or by omitting wait when slots remain. Private rows keep one constant shape.
+// Unknown usage follows the default Mon–Fri 08–22 band, so the owned account
+// is pinned inside that band. Wall-clock overview at 2026-10-07T22:18:00Z
+// reported this open manual budget as not routable.
 func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
+	now := time.Date(2026, 10, 7, 14, 0, 0, 0, time.UTC) // Wednesday, inside 08–22.
+	person, own, privateID := overviewHeadroomPair(t, "overview-routable", now)
+	shared, privateRow := overviewHeadroomRows(t, person, now, own, privateID)
+	if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil {
+		t.Fatalf("owned account with open slots was not routable: %s", overviewHeadroomText(shared))
+	}
+	if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
+		t.Fatalf("redacted overview disclosed headroom: %s", overviewHeadroomText(privateRow))
+	}
+}
+
+// Risk: the privacy assertion above follows the machine clock. CI after the
+// default band closed treated an owned manual budget with 90 requests left as
+// not routable, and a fix that dropped the assertion would hide a redacted row.
+// Outside the band the owned row waits on schedule and still shows its window.
+// The private row keeps the constant shape at both clocks.
+func TestRedactedOverviewHeadroomFollowsWorkBand(t *testing.T) {
+	outside := time.Date(2026, 10, 7, 22, 18, 0, 0, time.UTC) // The CI instant.
+	person, own, privateID := overviewHeadroomPair(t, "overview-routable-band", outside)
+	shared, privateRow := overviewHeadroomRows(t, person, outside, own, privateID)
+	wantUntil := time.Date(2026, 10, 8, 8, 0, 0, 0, time.UTC)
+	if shared.DetailsRedacted || shared.Routable || shared.Wait == nil || shared.Wait.Code != "schedule" || !shared.Wait.RunNowAllowed || shared.Wait.Timezone != "" || shared.Wait.Until == nil || !shared.Wait.Until.Equal(wantUntil) || len(shared.Windows) != 1 || shared.Windows[0].Allowance != 100 || shared.Windows[0].Used != 10 {
+		t.Fatalf("outside the work band the owned budget was not an explicit schedule wait: %s", overviewHeadroomText(shared))
+	}
+	if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
+		t.Fatalf("redacted overview disclosed headroom: %s", overviewHeadroomText(privateRow))
+	}
+	inside := time.Date(2026, 10, 7, 14, 0, 0, 0, time.UTC)
+	person, own, privateID = overviewHeadroomPair(t, "overview-routable-day", inside)
+	shared, privateRow = overviewHeadroomRows(t, person, inside, own, privateID)
+	if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil || shared.Routing == nil || shared.Routing.AvailableSlots < 1 {
+		t.Fatalf("owned account with open slots was not routable: %s", overviewHeadroomText(shared))
+	}
+	if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
+		t.Fatalf("redacted overview disclosed headroom: %s", overviewHeadroomText(privateRow))
+	}
+}
+
+func overviewHeadroomPair(t *testing.T, slug string, now time.Time) (tenant.Principal, string, string) {
+	t.Helper()
 	reset(t)
-	person := makePrincipal(t, "overview-routable", "person", "Owner", []string{"admin"})
+	person := makePrincipal(t, slug, "person", "Owner", []string{"admin"})
 	other := addPrincipal(t, person.TenantID, "person", "Other", nil)
 	runner := addPrincipal(t, person.TenantID, "agent", "runtime", nil)
 	codexProfile(t, person)
-	now := time.Now().UTC()
 	var own, private string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
 		for _, row := range []struct{ label, owner string }{{"Own", person.ID}, {"Private", other.ID}} {
@@ -361,19 +404,37 @@ func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	return person, own, private
+}
+
+func overviewHeadroomRows(t *testing.T, person tenant.Principal, now time.Time, own, privateID string) (overviewAccount, overviewAccount) {
+	t.Helper()
 	var page overviewPage
-	callStatus(t, accountsMod(), &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
+	callStatusAt(t, accountsMod(), &person, "", "GET", "/api/agent-accounts/overview", "", now, 200, &page)
 	seen := map[string]overviewAccount{}
 	for _, a := range page.Accounts {
 		seen[a.AccountID] = a
 	}
-	shared, privateRow := seen[own], seen[private]
-	if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil {
-		t.Fatalf("owned account with open slots was not routable: %+v", shared)
+	return seen[own], seen[privateID]
+}
+
+func overviewHeadroomText(a overviewAccount) string {
+	slots := "<nil>"
+	if a.Routing != nil {
+		slots = fmt.Sprintf("rank=%d slots=%d", a.Routing.Rank, a.Routing.AvailableSlots)
 	}
-	if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
-		t.Fatalf("redacted overview disclosed headroom: %+v", privateRow)
+	return fmt.Sprintf("id=%s redacted=%t routable=%t wait=%s routing={%s} windows=%d", a.AccountID, a.DetailsRedacted, a.Routable, overviewWaitText(a.Wait), slots, len(a.Windows))
+}
+
+func overviewWaitText(w *CapacityWait) string {
+	if w == nil {
+		return "<nil>"
 	}
+	until := "<nil>"
+	if w.Until != nil {
+		until = w.Until.UTC().Format(time.RFC3339)
+	}
+	return fmt.Sprintf("code=%s until=%s run_now=%t tz=%q", w.Code, until, w.RunNowAllowed, w.Timezone)
 }
 
 func enrollComputerAccount(t *testing.T, owner, host tenant.Principal, accountID, daemonID, profile, token string) {

@@ -156,6 +156,13 @@ func issueKey(t *testing.T, p tenant.Principal, scopes []string) string {
 
 func call(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, path, body string) (int, []byte) {
 	t.Helper()
+	return callAt(t, mod, p, token, method, path, body, time.Time{})
+}
+
+// callAt is call with the in-process clock pinned. A zero time leaves the
+// handler on transaction time. The clock cannot be set through HTTP.
+func callAt(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, path, body string, now time.Time) (int, []byte) {
+	t.Helper()
 	mux := http.NewServeMux()
 	mod.Mount(mux)
 	var r *http.Request
@@ -164,9 +171,14 @@ func call(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, 
 	} else {
 		r = httptest.NewRequest(method, path, nil)
 	}
+	ctx := r.Context()
 	if p != nil {
-		r = r.WithContext(tenant.WithPrincipal(r.Context(), *p))
+		ctx = tenant.WithPrincipal(ctx, *p)
 	}
+	if !now.IsZero() {
+		ctx = context.WithValue(ctx, clockKey{}, now)
+	}
+	r = r.WithContext(ctx)
 	if token != "" {
 		r.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -250,7 +262,12 @@ func windowBody(start, end time.Time, unit string, allowance int64, pace string)
 
 func callStatus(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, path, body string, want int, dst any) {
 	t.Helper()
-	status, raw := call(t, mod, p, token, method, path, body)
+	callStatusAt(t, mod, p, token, method, path, body, time.Time{}, want, dst)
+}
+
+func callStatusAt(t *testing.T, mod httpapi.Module, p *tenant.Principal, token, method, path, body string, now time.Time, want int, dst any) {
+	t.Helper()
+	status, raw := callAt(t, mod, p, token, method, path, body, now)
 	if status != want {
 		t.Fatalf("%s %s status %d, want %d: %s", method, path, status, want, raw)
 	}
