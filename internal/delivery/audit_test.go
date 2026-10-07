@@ -156,8 +156,8 @@ func TestMergeAuditWebhookReconciliationAndIsolation(t *testing.T) {
 
 	direct := MergeFact{SHA: strings.Repeat("f", 40), Head: strings.Repeat("f", 40), MergedBy: "admin", At: f.at}
 	g.facts[direct.SHA] = &direct
-	auditSend(t, f, "push", "audit-direct", map[string]any{"ref": "refs/heads/main", "after": direct.SHA}, 204)
-	if a = auditRead(t, f, direct.SHA); !slices.Contains(a.Flags, "direct_push") || !slices.Contains(a.Flags, "checks_missing") || a.PR != nil || a.Ticket != nil || a.AlertedAt == nil {
+	auditSend(t, f, "push", "audit-direct", map[string]any{"ref": "refs/heads/main", "after": direct.SHA, "sender": map[string]string{"login": "actual-pusher"}}, 204)
+	if a = auditRead(t, f, direct.SHA); !slices.Contains(a.Flags, "direct_push") || !slices.Contains(a.Flags, "checks_missing") || a.PR != nil || a.Ticket != nil || a.AlertedAt == nil || a.MergedBy != "actual-pusher" {
 		t.Fatalf("direct push hidden or invented a ticket: %+v", a)
 	}
 	// A push of an already audited PR merge must not become a direct push.

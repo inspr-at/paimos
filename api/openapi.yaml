@@ -14276,7 +14276,7 @@ components:
         pull_request: {type: [integer, 'null'], format: int64}
         ticket_node_id: {type: [string, 'null'], format: uuid}
         project_id: {type: [string, 'null'], format: uuid}
-        merged_by: {type: string}
+        merged_by: {type: string, maxLength: 100, description: 'GitHub merged_by for a PR or the authenticated push sender. Empty when reconciliation cannot prove the direct pusher.'}
         via_queue: {type: boolean}
         checks_passed: {type: boolean}
         review_ok: {type: boolean}

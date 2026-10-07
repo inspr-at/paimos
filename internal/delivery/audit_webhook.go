@@ -61,12 +61,15 @@ func (m *Module) auditWebhook(w http.ResponseWriter, r *http.Request) {
 	// Authentication, duplicate-key validation and installation binding have
 	// already succeeded. Extract only content-free audit facts.
 	var e struct {
-		Action     string `json:"action"`
-		Ref        string `json:"ref"`
-		After      string `json:"after"`
-		SHA        string `json:"sha"`
-		State      string `json:"state"`
-		Context    string `json:"context"`
+		Action  string `json:"action"`
+		Ref     string `json:"ref"`
+		After   string `json:"after"`
+		SHA     string `json:"sha"`
+		State   string `json:"state"`
+		Context string `json:"context"`
+		Sender  struct {
+			Login string `json:"login"`
+		} `json:"sender"`
 		Repository struct {
 			Default string `json:"default_branch"`
 		} `json:"repository"`
@@ -91,6 +94,13 @@ func (m *Module) auditWebhook(w http.ResponseWriter, r *http.Request) {
 	case "push":
 		if e.Repository.Default != "" && e.Ref == "refs/heads/"+e.Repository.Default {
 			f, err = reader.AuditCommit(ctx, e.After)
+			if err == nil && f != nil && f.PR == nil {
+				// The authenticated push actor is not necessarily the commit
+				// author/committer. Only the webhook can prove the pusher login.
+				copy := *f
+				copy.MergedBy = e.Sender.Login
+				f = &copy
+			}
 		}
 	case "check_run", "status":
 		sha := e.CheckRun.Head

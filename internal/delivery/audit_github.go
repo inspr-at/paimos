@@ -140,10 +140,7 @@ func (g AppReader) AuditCommit(ctx context.Context, sha string) (*MergeFact, err
 			return err
 		}
 		var c struct {
-			SHA       string `json:"sha"`
-			Committer *struct {
-				Login string `json:"login"`
-			} `json:"committer"`
+			SHA    string `json:"sha"`
 			Commit struct {
 				Committer struct {
 					Date time.Time `json:"date"`
@@ -196,16 +193,9 @@ func (g AppReader) AuditCommit(ctx context.Context, sha string) (*MergeFact, err
 		if out != nil || constituent {
 			return nil
 		}
-		login := ""
-		if c.Committer != nil {
-			login = c.Committer.Login
-		}
-		if len(login) > 100 {
-			return errRead
-		}
-		// An unmapped committer is left unknown, never guessed from the
-		// untrusted commit author name or message.
-		out = &MergeFact{SHA: sha, Head: sha, MergedBy: login, At: c.Commit.Committer.Date}
+		// A commit document cannot prove who directly pushed it. A missed
+		// push's actor stays unknown; signed ingress supplies the sender.
+		out = &MergeFact{SHA: sha, Head: sha, At: c.Commit.Committer.Date}
 		return nil
 	})
 	return out, err
