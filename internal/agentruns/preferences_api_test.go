@@ -247,7 +247,7 @@ func TestPinnedBottomEvidenceOnlyWhenPlannedRunStarts(t *testing.T) {
 			}
 			report := map[string]any{"sequence": 1, "kind": "started"}
 			f.call(t, f.agent, "POST", path+"/telemetry", report, 200, &v)
-			want := 0
+			want := int64(0)
 			if matches {
 				want = 1
 			}

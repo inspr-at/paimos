@@ -429,7 +429,10 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 	// The same-family rule is visible even when a template omitted that line.
 	if strings.HasPrefix(d.Column, "review:") {
 		for _, l := range s.Lines {
-			if l.Family == strings.TrimPrefix(d.Column, "review:") && !slices.Contains(d.Not, l.ID) {
+			known := slices.Contains(TemplateRank("balanced","concept"),l.ID)
+			for _,o := range s.Orders { known = known || (o.Column==d.Column && (slices.Contains(o.Rank,l.ID)||slices.Contains(o.Not,l.ID))) }
+			for _,r := range s.Rules { known = known || (r.Column==d.Column && r.Line==l.ID) }
+			if known && l.Family == strings.TrimPrefix(d.Column, "review:") && !slices.Contains(d.Not, l.ID) {
 				d.Not = append(d.Not, l.ID)
 				d.Locks[l.ID] = &BoardLock{Kind: "cross_family", Value: "not", Why: "A model never reviews its own family", Scope: "workspace"}
 			}

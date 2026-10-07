@@ -6284,6 +6284,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardKindsFieldsAndSituationLimits","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestBoardMigrationAllTenantsKeepsReceiptsAndEventsIsolated","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardMigrationLineNormalizationMatchesCatalog","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardMigrationPreservesRowsAndExplainsDroppedCells","tier":"ESSENTIAL"}

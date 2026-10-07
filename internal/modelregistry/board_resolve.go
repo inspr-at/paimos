@@ -193,6 +193,9 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		}
 	} else {
 		out.Trace.Blocked = "no model in the ranked order can run now"
+		if roleName == "review-gate-security" {
+			out.Trace.Blocked = "no qualified security review profile/account"
+		}
 		if q.Situation == "stuck" && admissionWait {
 			out.Trace.Blocked = "admission_wait"
 		}

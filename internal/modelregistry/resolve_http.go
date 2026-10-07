@@ -187,8 +187,11 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		out.Trace.Hard = append(out.Trace.Hard, "residency")
-		if q.Role == "review-gate" || q.Role == "review-gate-security" {
+		if out.Role == "review-gate" || out.Role == "review-gate-security" {
 			out.Trace.Hard = append(out.Trace.Hard, "cross_family", "review_qualification")
+		}
+		if out.Role == "review-gate-security" {
+			out.Trace.Hard = append(out.Trace.Hard, "security_review")
 		}
 		out.Trace.Role = out.Role
 		out.Trace.ProjectID = q.ProjectID

@@ -242,7 +242,7 @@ func TestBoardMigrationPreservesRowsAndExplainsDroppedCells(t *testing.T) {
 }
 func TestBoardKindsFieldsAndSituationLimits(t *testing.T) {
 	admin, member := boardFixture(t)
-	boardError(t, boardCall(t, member, "PUT", "/api/model-preferences/situations", map[string]any{"small_hours": 3, "fix_rounds": 4, "revision": 0}, ""), 403, "permission_denied")
+	boardError(t, boardCall(t, member, "PUT", "/api/model-preferences/situations", map[string]any{"small_hours": 3, "fix_rounds": 4, "revision": 0}, ""), 403, "forbidden")
 	limits := boardDecode[modelprefs.SituationLimits](t, boardCall(t, admin, "PUT", "/api/model-preferences/situations", map[string]any{"small_hours": 3, "fix_rounds": 4, "revision": 0}, ""), 200)
 	if limits.Revision != 1 || limits.SmallHours != 3 || limits.FixRounds != 4 {
 		t.Fatal(limits)
@@ -343,7 +343,7 @@ func TestBoardDispatchTraceResidencyAndNewLineExclusion(t *testing.T) {
 		}
 	}
 	if !inTray {
-		t.Fatal("new line did not stay in the tray")
+		t.Fatalf("new line did not stay in the tray: %+v", doc.Tray)
 	}
 	var placement WorkPlacement
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
@@ -444,5 +444,43 @@ func TestBoardMigrationLineNormalizationMatchesCatalog(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// Risk: a tenant-wide bootstrap could leak or omit a receipt/event, or replay it.
+func TestBoardMigrationAllTenantsKeepsReceiptsAndEventsIsolated(t *testing.T) {
+	reset(t)
+	first := makePrincipal(t, "board-migrate-one", "person", "First", []string{"admin"})
+	second := makePrincipal(t, "board-migrate-two", "person", "Second", []string{"admin"})
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, first.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `SELECT aeon_migrate_all_model_boards()`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []tenant.Principal{first, second} {
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+			var receipts, profiles, events int
+			if err := tx.QueryRow(t.Context(), `SELECT (SELECT count(*) FROM model_pref_migrations),(SELECT count(*) FROM model_pref_profiles),(SELECT count(*) FROM events WHERE type='model.preferences_migrated')`).Scan(&receipts, &profiles, &events); err != nil {
+				return err
+			}
+			if receipts != 1 || profiles != 1 || events != 1 {
+				t.Fatal("tenant migration was incomplete or leaked", receipts, profiles, events)
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, first.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `SELECT aeon_migrate_all_model_boards()`)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []tenant.Principal{first, second} {
+		if eventCount(t, p, "model.preferences_migrated") != 1 {
+			t.Fatal("migration replay appended another event")
+		}
 	}
 }

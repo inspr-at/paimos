@@ -162,11 +162,18 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 		// Distinct DTOs reject irrelevant fields before any mutation.
 		if thinking {
 			var body struct {
-				Thinking *string `json:"thinking"`
-				Revision *int64  `json:"revision"`
+				Thinking json.RawMessage `json:"thinking"`
+				Revision *int64          `json:"revision"`
 			}
 			err = decodeJSON(w, r, &body)
-			in.Thinking, in.Revision = body.Thinking, body.Revision
+			in.Revision = body.Revision
+			if err == nil {
+				if len(body.Thinking) == 0 {
+					err = prefFail(422, "thinking_required")
+				} else if json.Unmarshal(body.Thinking, &in.Thinking) != nil {
+					err = prefFail(422, "invalid_thinking")
+				}
+			}
 		} else {
 			var body struct {
 				Rank     []string `json:"rank"`

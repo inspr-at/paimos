@@ -276,12 +276,7 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		if board, boardErr := resolveBoardWork(r.Context(), tx, current, WorkQuery{Role: q.Role, AuthorFamily: q.AuthorFamily, Harness: q.Harness, ProjectID: project}, now, nil); boardErr != nil {
-			return boardErr
-		} else if board != nil {
-			out.Resolution, out.Trace = board.Resolution, board.Trace
-			return nil
-		}
+
 		out.Resolution, err = resolveRole(r.Context(), tx, q, now)
 		if err != nil {
 			return err

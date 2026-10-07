@@ -180,20 +180,20 @@ func PrepareCatalog(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal,
 		if err != nil {
 			return err
 		}
-		// Fresh workspaces receive the same closed Balanced board as migrated ones.
-		// Old in-process writers retain compatibility until their migration receipt.
-		var initialize bool
-		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM model_pref_profiles WHERE scope='workspace') AND NOT EXISTS(SELECT 1 FROM model_pref_scopes)`).Scan(&initialize); err != nil {
-			return err
+		// Initialize a closed board at its production boundaries; role-only CLI
+		// and the read-only legacy editor keep their established contracts.
+		placement := in.Operation == CatalogReview || in.Operation == CatalogCompletion || in.Request.URL.Path == "/api/model-preferences/board"
+		if in.Request.URL.Path == "/api/models/resolve" {
+			for _, key := range []string{"mode", "ticket", "area", "complexity", "person_id", "situation", "fix_round", "estimate_hours", "concept"} {
+				placement = placement || in.Request.URL.Query().Has(key)
+			}
 		}
-		if initialize {
-			if err := modelprefs.SeedKinds(ctx, tx, p.TenantID); err != nil {
+		if placement {
+			initialized, err := prepareBoardDefaults(ctx, tx, p)
+			if err != nil {
 				return err
 			}
-			if _, err := tx.Exec(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,template,thinking,usage,revision,set_by) VALUES($1,'workspace','balanced','standard','balanced',0,$2)`, p.TenantID, p.ID); err != nil {
-				return err
-			}
-			changes = append(changes, events.Change{Type: "model.board_initialized", After: map[string]any{"template": "balanced"}})
+			changes = append(changes, initialized...)
 		}
 		allowed, err = authorize()
 		if err != nil {
@@ -240,5 +240,28 @@ func BootstrapCatalogTx(ctx context.Context, tx pgx.Tx) ([]events.Change, error)
 	if err := catalogLock(ctx, tx); err != nil {
 		return nil, err
 	}
-	return prepareCatalogDeferred(ctx, tx, tenant.Principal{TenantID: tenantID})
+	actor := tenant.Principal{TenantID: tenantID}
+	changes, err := prepareCatalogDeferred(ctx, tx, actor)
+	if err != nil {
+		return nil, err
+	}
+	initialized, err := prepareBoardDefaults(ctx, tx, actor)
+	return append(changes, initialized...), err
+}
+
+func prepareBoardDefaults(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]events.Change, error) {
+	var initialize bool
+	if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM model_pref_profiles WHERE scope='workspace') AND NOT EXISTS(SELECT 1 FROM model_pref_scopes)`).Scan(&initialize); err != nil {
+		return nil, err
+	}
+	if !initialize {
+		return nil, nil
+	}
+	if err := modelprefs.SeedKinds(ctx, tx, p.TenantID); err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,template,thinking,usage,revision,set_by) VALUES($1,'workspace','balanced','standard','balanced',0,$2::uuid)`, p.TenantID, optionalUUID(p.ID)); err != nil {
+		return nil, err
+	}
+	return []events.Change{{Type: "model.board_initialized", After: map[string]any{"template": "balanced"}}}, nil
 }
