@@ -237,7 +237,7 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 	reply(w, out)
 }
 
-// Check the complete live enrollment, not just this Add harness request. A
+// Check the complete live enrollment, not just this Add harness request. An
 // isolated request cannot evade the config-home isolation or computer-size
 // bound. Legacy Add harness reenrollment retains its existing protocol.
 // Immutable reviewed details retain the opaque home binding without a migration.

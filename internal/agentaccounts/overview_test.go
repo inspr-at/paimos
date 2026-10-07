@@ -3,6 +3,7 @@ package agentaccounts
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -132,6 +133,87 @@ func TestOverviewValuesMaskingExplicitScopeAndTenantIsolation(t *testing.T) {
 	if scalar(t, person, `SELECT count(*) FROM events`) != before {
 		t.Fatal("overview mutated the event log")
 	}
+	var agentPage overviewPage
+	if err := json.Unmarshal(raw, &agentPage); err != nil {
+		t.Fatal(err)
+	}
+	if len(agentPage.Accounts) != 2 {
+		t.Fatal("explicit overview scope lost enrolled accounts")
+	}
+	for _, a := range agentPage.Accounts {
+		if a.AccountID != accounts[1].ID {
+			continue
+		}
+		if len(a.Windows) != 2 {
+			t.Fatal("agent lost its separate stale windows")
+		}
+		for _, w := range a.Windows {
+			want := "stale"
+			if w.Kind == "weekly" {
+				want = "aging"
+			}
+			if w.Freshness != want {
+				t.Fatalf("freshness was refreshed by the overview: %s, want %s", w.Freshness, want)
+			}
+		}
+	}
+	// A confirmed shared pool cannot disclose its private member through the
+	// owner's other account. Sharing the peer explicitly releases the values.
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_pool_fingerprint=repeat('ab',32) WHERE id=ANY($1::uuid[])`, []string{accounts[0].ID, accounts[1].ID})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
+	for _, a := range page.Accounts {
+		if !a.DetailsRedacted || len(a.Windows) != 0 || a.QuotaPool != "" {
+			t.Fatal("shared pool disclosed its private peer")
+		}
+	}
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET share_usage=true WHERE id=$1`, accounts[1].ID)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
+	for _, a := range page.Accounts {
+		if a.DetailsRedacted || len(a.Windows) != 2 || a.QuotaPool == "" {
+			t.Fatal("explicit sharing did not expose the confirmed pool's values")
+		}
+	}
+	// New daemon fact-only windows retain their measured precision and age,
+	// including stale observations that cannot grant routing capacity.
+	readAt, resetsAt, percent := now.Add(-time.Hour), now.Add(3*time.Hour), 18.125
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		resource, err := localReadinessResource(t.Context(), tx, accounts[0])
+		if err != nil {
+			return err
+		}
+		return storeReadinessFact(t.Context(), tx, accounts[0], ReadinessFactWrite{ResourceID: resource, WindowKey: "daily", Source: "harness", ObservedAt: now, ReadingAt: &readAt, ResetsAt: &resetsAt, UsedPercent: &percent, CreditState: "unknown"}, now)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
+	found := false
+	for _, a := range page.Accounts {
+		if a.AccountID != accounts[0].ID {
+			continue
+		}
+		for _, w := range a.Windows {
+			if w.Kind == "fact" && strings.HasSuffix(w.Bucket, ":daily") {
+				found = true
+				if w.UsedPercent == nil || *w.UsedPercent != percent || w.Freshness != "stale" || w.ReadAt == nil || !w.ReadAt.Equal(readAt) || !w.ResetsAt.Equal(resetsAt) || w.Source != "vendor_reported" {
+					t.Fatalf("stale fact-only window lost precision or age: %+v", w)
+				}
+			}
+		}
+	}
+	if !found {
+		t.Fatal("overview dropped a known stale fact-only window")
+	}
+
 	for _, forbidden := range []string{"account_key", "config_home", "identity", "registered_by_principal_id", "secret"} {
 		if strings.Contains(string(raw), forbidden) {
 			t.Fatalf("values-only overview leaked %s", forbidden)

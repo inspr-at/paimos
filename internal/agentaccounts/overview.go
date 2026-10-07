@@ -3,6 +3,7 @@ package agentaccounts
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"slices"
 	"strconv"
@@ -161,6 +162,13 @@ func (m *Module) overview(w http.ResponseWriter, r *http.Request) {
 		}
 		for _, a := range page {
 			route := advice[a.ID]
+			// The generic privacy boundary strips timing values on a later
+			// sharing change. Do not carry owner calendar metadata in advice.
+			if route.Wait != nil {
+				wait := *route.Wait
+				wait.Timezone = ""
+				route.Wait = &wait
+			}
 			item := overviewAccount{AccountID: a.ID, Provider: overviewProvider(a), Harness: a.Harness, Label: a.Label, HostLabel: a.HostLabel, DaemonID: a.DaemonID, OwnerPersonID: a.OwnerPersonID, OwnerPersonName: a.OwnerPersonName, State: a.State, BillingMode: a.BillingMode, Windows: []overviewWindow{}, Routable: route.AvailableSlots > 0, Wait: route.Wait, DetailsRedacted: !policy[a.ID]}
 			if !item.Routable && item.Wait == nil {
 				item.Wait = waitFor("capacity")
@@ -225,14 +233,28 @@ func overviewWindows(ctx context.Context, tx pgx.Tx, a Account, now time.Time, s
 	if err != nil {
 		return nil, err
 	}
-	facts, err := factWindows(ctx, tx, a, now)
+	facts, err := loadReadinessFacts(ctx, tx, a, now)
 	if err != nil {
 		return nil, err
 	}
 	windows := slices.Clone(a.Windows)
-	windows = append(windows, facts...)
 	out := []overviewWindow{}
+	seenFacts := map[string]bool{}
+	currentFacts := map[string]ReadinessFact{}
+	for _, f := range facts {
+		if f.UsedPercent != nil && f.ReadingAt != nil && f.ResetsAt != nil {
+			currentFacts[f.ResourceID+":"+f.WindowKey] = f
+		}
+	}
 	for _, w := range windows {
+		if w.capacityKind == "fact" {
+			// Use the normalized fact's precise percentage and freshness below,
+			// rather than a matching ledger's rounded routing hold. Retain old
+			// ledgers when no current observation describes their reset.
+			if f, ok := currentFacts[w.capacityBucket]; ok && f.ResetsAt.Equal(w.EndsAt) {
+				continue
+			}
+		}
 		v := overviewWindow{Kind: w.capacityKind, Bucket: w.capacityBucket, StartsAt: w.StartsAt, ResetsAt: w.EndsAt, Unit: w.Unit, Allowance: w.Allowance, Used: float64(w.Used), Reserved: w.Reserved, ReadAt: w.capacityReadAt, Freshness: "unknown", Source: "manual"}
 		if v.Kind == "" {
 			v.Kind = "manual"
@@ -257,7 +279,9 @@ func overviewWindows(ctx context.Context, tx pgx.Tx, a Account, now time.Time, s
 				v.Learned = &overviewLearning{Burn: metric.BurnRate, Samples: metric.RunCount}
 				if metric.PerMillion > 0 {
 					limit := 100_000_000 / metric.PerMillion
-					v.Learned.LimitTokens = &limit
+					if !math.IsInf(limit, 0) && !math.IsNaN(limit) {
+						v.Learned.LimitTokens = &limit
+					}
 				}
 				if now.Before(reading.ResetsAt) {
 					pace, _, err := readingPacing(ctx, tx, a.ID, reading, now, schedule)
@@ -270,6 +294,30 @@ func overviewWindows(ctx context.Context, tx pgx.Tx, a Account, now time.Time, s
 			}
 		}
 		out = append(out, v)
+	}
+	for _, f := range facts {
+		if f.UsedPercent == nil || f.ReadingAt == nil || f.ResetsAt == nil {
+			continue
+		}
+		key := f.ResourceID + ":" + f.WindowKey
+		if seenFacts[key] {
+			continue
+		}
+		seenFacts[key] = true
+		freshness := "stale"
+		if !now.Before(*f.ResetsAt) {
+			freshness = "expired"
+		} else if !f.ReadingAt.After(now) && now.Sub(*f.ReadingAt) <= 10*time.Minute {
+			freshness = "fresh"
+		}
+		var reserved int64
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(sum(reserved),0)::bigint FROM account_allowance_windows WHERE capacity_kind='fact' AND capacity_bucket=$1 AND starts_at<$2 AND ends_at>$3`, key, f.ResetsAt, f.ReadingAt).Scan(&reserved); err != nil {
+			return nil, err
+		}
+		out = append(out, overviewWindow{Kind: "fact", Bucket: key, StartsAt: *f.ReadingAt, ResetsAt: *f.ResetsAt, ReadAt: f.ReadingAt, Unit: "percent", Allowance: 100, Used: *f.UsedPercent, UsedPercent: f.UsedPercent, Reserved: reserved, Freshness: freshness, Source: "vendor_reported"})
+	}
+	if len(out) > 4096 {
+		return nil, fail(503, "too many windows for a complete account overview")
 	}
 	return out, nil
 }
