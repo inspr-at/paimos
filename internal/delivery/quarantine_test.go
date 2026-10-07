@@ -117,7 +117,7 @@ func TestQueueQuarantineBindsHeadClassifiesFailuresAndIsolates(t *testing.T) {
 	for _, conclusion := range []string{"cancelled", "timed_out", "startup_failure", "stale"} {
 		c.ID++
 		c.Conclusion = conclusion
-		queueWebhook(t, f, "check_run", "infra-"+conclusion, c, 204)
+		queueWebhook(t, f, "check_run", "infra-"+strings.ReplaceAll(conclusion, "_", "-"), c, 204)
 	}
 	out := answer(p.Head, true, 4)
 	for _, failure := range out.Failures {
