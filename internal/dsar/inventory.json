@@ -1,4 +1,5 @@
 {
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "version": 1,
   "tables": [
     {
@@ -14,6 +15,67 @@
         "mode": "metadata",
         "allowed_families": "metadata",
         "updated_by": "personal",
+        "updated_at": "metadata"
+      }
+    },
+    {
+      "table": "delivery_github_events",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "sequence": "metadata",
+        "delivery_id": "metadata",
+        "event": "metadata",
+        "action": "metadata",
+        "repository": "metadata",
+        "pull_request": "metadata",
+        "head_sha": "metadata",
+        "received_at": "metadata",
+        "payload_sha256": "metadata",
+        "fanout_done": "metadata",
+        "processed_at": "metadata",
+        "observations": "review"
+      }
+    },
+    {
+      "table": "delivery_items",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "id": "metadata",
+        "project_id": "metadata",
+        "ticket_node_id": "metadata",
+        "repository": "metadata",
+        "pull_request": "metadata",
+        "head_sha": "metadata",
+        "state": "metadata",
+        "state_since": "metadata",
+        "owner": "metadata",
+        "deadline_at": "metadata",
+        "link_source": "metadata",
+        "updated_at": "metadata",
+        "branch": "review",
+        "held_reason": "review",
+        "observation": "review"
+      }
+    },
+    {
+      "table": "delivery_settings",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "required_checks": "metadata",
+        "deadlines": "metadata",
         "updated_at": "metadata"
       }
     }
