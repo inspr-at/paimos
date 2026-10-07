@@ -18,7 +18,7 @@ import (
 // Actual contention and FK compatibility are exercised by boundary/recurrence tests.
 var sharedFenceCallers = map[string][]string{
 	"db.LockTree":               {"authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/alerts.go", "modelregistry/module.go", "modelregistry/preparation.go", "operatoractor/actor.go", "workorders/common.go"},
-	"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/module.go", "delivery/quarantine.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "engineadmission/module.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "workorders/common.go"},
+	"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/module.go", "delivery/quarantine.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "engineadmission/module.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "statusautopilot/attention_bulk.go", "workorders/common.go"},
 	"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
 	"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
 	"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go"},
@@ -147,6 +147,14 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"../engineadmission/module.go", "admit", "INSERT INTO engine_admission_decisions", "events.Append("},
 		{"../engineadmission/module.go", "settings", "db.LockTenant(", "authz.RequireTx("},
 		{"../engineadmission/module.go", "settings", "authz.RequireTx(", "events.Append("},
+		// Attention bulk (AEON-914) enters the canonical tenant fence, then the
+		// pairing advisory, then the shared tree advisory, before any batch row.
+		// Item commits lock the batch before node resolution; the summary event
+		// is appended only after that batch lock, with no later fence.
+		{"../statusautopilot/attention_bulk.go", "attentionMutationContext", "db.LockTenant(", "aeon-pairing:"},
+		{"../statusautopilot/attention_bulk.go", "attentionMutationContext", "aeon-pairing:", "return lock("},
+		{"../statusautopilot/attention_bulk.go", "processAttentionBatch", "lockAttentionBatch(", "resolveAttention("},
+		{"../statusautopilot/attention_bulk.go", "processAttentionBatch", "lockAttentionBatch(", "events.Append("},
 	}
 	for _, c := range checks {
 		raw, err := os.ReadFile(c.path)
@@ -192,6 +200,17 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 	}
 	if !strings.Contains(tail, "UPDATE delivery_alerts SET inbox_message_id") || strings.Index(tail, "events.Append(") < strings.Index(tail, "UPDATE delivery_alerts SET inbox_message_id") {
 		t.Error("delivery.alertItem must write the accepted message id before the stall event")
+	}
+	// The bulk summary is the last event in the function. Nothing after it may
+	// take a tenant, tree, pairing or batch fence.
+	bulk := functionBody(t, "../statusautopilot/attention_bulk.go", "processAttentionBatch")
+	summary := strings.LastIndex(bulk, "events.Append(")
+	if summary < 0 {
+		t.Fatal("attention bulk missing summary event")
+	}
+	afterSummary := bulk[summary:]
+	if strings.Contains(afterSummary, "db.Lock") || strings.Contains(afterSummary, "pg_advisory") || strings.Contains(afterSummary, "FOR UPDATE") || strings.Contains(afterSummary, "FOR NO KEY UPDATE") || strings.Contains(afterSummary, "lockAttentionBatch(") || strings.Contains(afterSummary, "lock(") {
+		t.Error("attention bulk must not acquire fences after the summary event")
 	}
 }
 
