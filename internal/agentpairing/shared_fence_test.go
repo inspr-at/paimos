@@ -18,8 +18,8 @@ import (
 // Actual contention and FK compatibility are exercised by boundary/recurrence tests.
 func TestSharedFenceCallerInventory(t *testing.T) {
 	expected := map[string][]string{
-		"db.LockTree":               {"authz/project_members.go", "db/fences.go", "modelregistry/module.go", "modelregistry/preparation.go", "operatoractor/actor.go", "workorders/common.go"},
-		"db.LockTenant":             {"auth/store.go", "db/fences.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "workorders/common.go"},
+		"db.LockTree":               {"authz/project_members.go", "crossreview/policy.go", "db/fences.go", "modelregistry/module.go", "modelregistry/preparation.go", "operatoractor/actor.go", "workorders/common.go"},
+		"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "workorders/common.go"},
 		"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
 		"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
 		"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go"},
@@ -117,6 +117,16 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"../statusautopilot/settings.go", "settings", "INSERT INTO status_autopilot_settings", "events.Append("},
 		{"../statusautopilot/settings.go", "project", "authz.LockProjectMutation(", "INSERT INTO status_autopilot_projects"},
 		{"../statusautopilot/settings.go", "project", "INSERT INTO status_autopilot_projects", "events.Append("},
+		// Review policy (AEON-851) enters the shared tree fence before the
+		// project row and re-checks authority there. Review rows are marked
+		// dirty before the event counter.
+		{"../crossreview/policy.go", "writePolicy", "db.LockTree(", "policyProject("},
+		{"../crossreview/policy.go", "writePolicy", "db.LockTree(", "authz.RequireTx("},
+		{"../crossreview/policy.go", "writePolicy", "UPDATE work_order_reviews", "events.Append("},
+		// Publication re-reads under the tenant fence after network I/O, before
+		// it writes the review row. The binding invalidation commits earlier,
+		// in its own transaction, and does not hold this fence across the post.
+		{"../crossreview/reporter.go", "publishReview", "db.LockTenant(", "github_status=$2"},
 	}
 	for _, c := range checks {
 		raw, err := os.ReadFile(c.path)
