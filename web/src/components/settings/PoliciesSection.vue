@@ -7,6 +7,7 @@ import { permissionLabel } from '../../lib/access'
 import { scopeOwner } from '../../lib/identityScope'
 import { createPoliciesReader, deniedPolicy, ELSEWHERE_RULES, keyLimits, ownerLinks, POLICY_ROLES, POLICY_TABS, truncatedLadder, type PolicyRole, type PolicyTab } from '../../lib/policies'
 import AppIcon from '../AppIcon.vue'
+import CrossFamilyReviewCard from './CrossFamilyReviewCard.vue'
 import PolicyLadderEditor from './PolicyLadderEditor.vue'
 import PolicyPreferencesEditor from './PolicyPreferencesEditor.vue'
 
@@ -107,6 +108,7 @@ function tabKey(event: KeyboardEvent, index: number) {
         </div>
       </div>
     </div>
+    <CrossFamilyReviewCard class="review-card" />
     <dialog ref="sheet" class="policy-sheet" aria-labelledby="policy-sheet-title" @cancel.prevent="closeDetails">
       <header><p class="eyebrow">Policy source</p><h2 id="policy-sheet-title">About these rules</h2></header>
       <div class="sheet-body">
@@ -130,6 +132,7 @@ function tabKey(event: KeyboardEvent, index: number) {
 </template>
 
 <style scoped>
+.review-card { margin-top:30px; }
 .policies { min-width: 0; color: var(--ink); }
 .policy-head { margin-bottom: 22px; }
 .policy-head h2 { font-size: 28px; letter-spacing: -.035em; margin: 5px 0 8px; }

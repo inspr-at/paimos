@@ -55,12 +55,14 @@ func (p FamilyPolicy) Decision(author, reviewer string) (bool, string) {
 }
 
 type FamilyPolicySettings struct {
-	ProjectID *string       `json:"project_id"`
-	Policy    *FamilyPolicy `json:"policy"`
-	Effective FamilyPolicy  `json:"effective"`
-	Source    string        `json:"source"`
-	UpdatedBy *string       `json:"updated_by"`
-	UpdatedAt *time.Time    `json:"updated_at"`
+	ValidFamilies []string      `json:"valid_families"`
+	Workspace     FamilyPolicy  `json:"workspace"`
+	ProjectID     *string       `json:"project_id"`
+	Policy        *FamilyPolicy `json:"policy"`
+	Effective     FamilyPolicy  `json:"effective"`
+	Source        string        `json:"source"`
+	UpdatedBy     *string       `json:"updated_by"`
+	UpdatedAt     *time.Time    `json:"updated_at"`
 }
 
 func localFamilyPolicy(ctx context.Context, tx pgx.Tx, project *string) (*FamilyPolicy, *string, *time.Time, error) {
@@ -85,7 +87,7 @@ func localFamilyPolicy(ctx context.Context, tx pgx.Tx, project *string) (*Family
 // default under the caller's tenant/project RLS. Callers own authorization and
 // write fences; this read never grants authority or caches a policy snapshot.
 func LoadFamilyPolicyTx(ctx context.Context, tx pgx.Tx, project *string) (FamilyPolicySettings, error) {
-	out := FamilyPolicySettings{ProjectID: project, Effective: DefaultFamilyPolicy(), Source: "default"}
+	out := FamilyPolicySettings{ProjectID: project, Effective: DefaultFamilyPolicy(), Source: "default", ValidFamilies: ValidFamilies()}
 	workspace, _, _, err := localFamilyPolicy(ctx, tx, nil)
 	if err != nil {
 		return out, err
@@ -93,6 +95,7 @@ func LoadFamilyPolicyTx(ctx context.Context, tx pgx.Tx, project *string) (Family
 	if workspace != nil {
 		out.Effective, out.Source = *workspace, "tenant"
 	}
+	out.Workspace = out.Effective
 	out.Policy, out.UpdatedBy, out.UpdatedAt, err = localFamilyPolicy(ctx, tx, project)
 	if err != nil {
 		return out, err

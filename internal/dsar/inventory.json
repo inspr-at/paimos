@@ -62,7 +62,8 @@
         "updated_at": "metadata",
         "branch": "review",
         "held_reason": "review",
-        "observation": "review"
+        "observation": "review",
+        "held_from_state": "metadata"
       }
     },
     {
@@ -77,6 +78,19 @@
         "required_checks": "metadata",
         "deadlines": "metadata",
         "updated_at": "metadata"
+      }
+    },
+    "delivery_alerts": {
+      "locator": "delivery_alerts WHERE tenant_id = :tenant_id",
+      "columns": {
+        "tenant_id": "metadata",
+        "item_id": "metadata",
+        "state": "metadata",
+        "state_since": "metadata",
+        "alerted_at": "metadata",
+        "recipient_principal_id": "personal",
+        "inbox_message_id": "metadata",
+        "cleared_at": "metadata"
       }
     }
   ]

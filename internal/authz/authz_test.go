@@ -67,6 +67,18 @@ func TestRegistryAndBuiltins(t *testing.T) {
 	}
 }
 
+func TestViewerReadsStoredReviewPolicy(t *testing.T) {
+	// Risk: Policies is open to viewers, and an unread rule looks like the stored default.
+	viewer, ok := BuiltinPermissions("viewer")
+	if !ok || !contains(viewer, "reviewpolicy.read") || contains(viewer, "reviewpolicy.manage") {
+		t.Fatal("viewers load the stored review rule and cannot manage it")
+	}
+	guest, ok := BuiltinPermissions("guest")
+	if !ok || contains(guest, "reviewpolicy.read") || contains(guest, "reviewpolicy.manage") {
+		t.Fatal("guests do not receive the review rule")
+	}
+}
+
 func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
 	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage", "delivery.manage", "reviewpolicy.manage", "account.overview.read"}) {
 		t.Fatal("built-in agent exclusions drifted from the explicit recurrence, delivery, review and overview policies")

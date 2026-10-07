@@ -3480,6 +3480,8 @@
     ,
     {"kind":"go","package":"internal/authz","name":"TestStatusHelpAgentReadRequiresAuthentication","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/authz","name":"TestViewerReadsStoredReviewPolicy","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/brand","name":"TestLoadOverride","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/business","name":"TestR4QuoteAcceptanceIsVersionBoundAndTenantScoped","tier":"ESSENTIAL"}
@@ -4854,6 +4856,8 @@
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestReviewPolicyExplicitAgentGrantAndTenantIsolation","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/crossreview","name":"TestReviewPolicyUIRegistryAndRevisionFence","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/crossreview","name":"TestReviewPolicyUsesRunIdentityAndLiveProjectOverride","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/crossreview","name":"TestReviewPreferencesStayWithinQualifiedSet","tier":"GATED-FULL"}
@@ -5074,11 +5078,17 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestAuthenticatedDeliveryEnvelope","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryAlertsAcceptanceRollbackAndLeadAuthority","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryAlertsEpisodesIsolationAndSettings","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryManageExplicitAgentGrant","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryReconciliationHealsMissedWebhooksAndFanoutRetry","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliverySettingsAndIngressBinding","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryUIFactsHoldReplayAndAvailability","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookSequenceRebuildIsolationAndHolds","tier":"ESSENTIAL"}
     ,
@@ -5093,6 +5103,10 @@
     {"kind":"go","package":"internal/delivery","name":"TestReconcileContinuesAfterConfirmedMissingPull","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestTicketHintsOnlyCanonicalPrefixes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryIncludesCreatorProjectForWorkspaceAgent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryOmitsProjectsWithoutDeliveryRead","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/deliveryvote","name":"TestDeliveryRoutesArePersonRead","tier":"GATED-FULL"}
     ,

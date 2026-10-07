@@ -29,6 +29,7 @@ func New(pool *pgxpool.Pool, config crossreview.AppConfig, secret []byte, github
 func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/github/webhook", m.webhook)
 	mux.HandleFunc("GET /api/delivery", m.list)
+	mux.HandleFunc("GET /api/delivery/alerts", m.listAlerts)
 	mux.HandleFunc("GET /api/nodes/{id}/delivery", m.list)
 	mux.HandleFunc("POST /api/delivery/{itemId}/hold", m.hold)
 	mux.HandleFunc("DELETE /api/delivery/{itemId}/hold", m.hold)
@@ -48,6 +49,7 @@ func (m *Module) observationTx(ctx context.Context, tx pgx.Tx, p Pull, at time.T
 	if before != nil {
 		o.Ticket, o.Project, o.LinkSource = before.Ticket, before.Project, before.LinkSource
 		o.HoldReason = before.HeldReason
+		o.HeldFrom = before.HeldFrom
 		if before.Head == o.Head {
 			o.QueueFailure = before.Observation.QueueFailure
 		}
@@ -68,6 +70,7 @@ func (m *Module) observationTx(ctx context.Context, tx pgx.Tx, p Pull, at time.T
 		}
 		if pre != nil && o.HoldReason == nil {
 			o.HoldReason = pre.HeldReason
+			o.HeldFrom = pre.HeldFrom
 		}
 	}
 	return o, err
