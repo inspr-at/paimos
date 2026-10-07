@@ -62,6 +62,7 @@
         "internal/agentverification/**",
         "internal/attachments/**",
         "internal/db/**",
+        "internal/dsar/**",
         "internal/dbtest/**",
         "internal/config/**",
         "internal/httpapi/**",

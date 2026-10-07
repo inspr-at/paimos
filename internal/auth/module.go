@@ -449,6 +449,17 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			if len(parts) == 3 && read {
 				return "releases.read", true
 			}
+		case "review-policy":
+			// Explicit agent allowlist. Built-in roles still exclude
+			// reviewpolicy.manage; a custom role and key scope may grant it.
+			if len(parts) == 3 && validRouteUUID(parts[1]) {
+				if read {
+					return "reviewpolicy.read", true
+				}
+				if r.Method == http.MethodPut || r.Method == http.MethodDelete {
+					return "reviewpolicy.manage", true
+				}
+			}
 		case "messages", "message-targets", "message-deliveries":
 			if read {
 				return "inbox.read", true
@@ -536,6 +547,15 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "search":
 		if read {
 			return "search.read", true
+		}
+	case "settings":
+		if len(parts) == 2 && parts[1] == "review-policy" {
+			if read {
+				return "reviewpolicy.read", true
+			}
+			if r.Method == http.MethodPut {
+				return "reviewpolicy.manage", true
+			}
 		}
 	case "views", "preferences", "project-groups":
 		return scope("views")

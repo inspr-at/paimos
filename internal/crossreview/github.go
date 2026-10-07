@@ -204,16 +204,10 @@ func (g *GitHubApp) Publish(ctx context.Context, tenantID string, v Review, stat
 	if state == "success" && v.GitHubStatus == "success" {
 		return state, nil
 	}
-	description := "Independent review pending"
-	switch state {
-	case "success":
-		description = "Pinned commit range passed cross-family review"
-	case "failure":
-		description = "Independent review requires changes"
-	case "error":
-		description = "Independent review unavailable; gate closed"
-	}
-	err = g.request(ctx, token.Token, "POST", "/repos/"+v.Repository+"/statuses/"+v.HeadSHA, map[string]string{"context": "aeon/review", "state": state, "description": description}, nil)
+	// The stale branch above keeps its own binding sentence, including when the
+	// pull request moved and GitHubStatus is not yet stale. Every other post
+	// uses the same bounded gate reason the local reporter compares.
+	err = g.request(ctx, token.Token, "POST", "/repos/"+v.Repository+"/statuses/"+v.HeadSHA, map[string]string{"context": "aeon/review", "state": state, "description": statusDescription(v, state)}, nil)
 	if err != nil {
 		return "error", err
 	}

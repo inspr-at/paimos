@@ -37,6 +37,7 @@ func New(pool *pgxpool.Pool, publisher StatusPublisher) *Module {
 	return &Module{pool: pool, publisher: publisher}
 }
 func (m *Module) Mount(mux *http.ServeMux) {
+	m.mountPolicy(mux)
 	mux.HandleFunc("POST /api/reviews/github", m.pullChanged)
 	mux.HandleFunc("GET /api/nodes/{nodeId}/reviews", workorders.Endpoint(m.pool, "work_orders.read", false, 200, m.list))
 	mux.HandleFunc("POST /api/nodes/{nodeId}/reviews", workorders.EndpointPrepared(m.pool, "work_orders.write", false, 201, m.prepareCreate, m.create))
@@ -52,6 +53,7 @@ type CreateInput struct {
 	PullRequest  *int64  `json:"pull_request"`
 }
 type Review struct {
+	policyDenied bool
 	reviewgate.Binding
 	OrderID        string                    `json:"work_order_id"`
 	RequestID      string                    `json:"request_id"`
@@ -353,19 +355,19 @@ func load(ctx context.Context, tx pgx.Tx, id string) (Review, error) {
 	var v Review
 	var raw, ladder json.RawMessage
 	var orderStatus string
-	var reviewerHarness, reviewerFamily, authorHarness, authorModel, authorFamily *string
+	var reviewerHarness, reviewerFamily, authorHarness, authorModel, authorFamily, authorStatus *string
 	err := tx.QueryRow(ctx, `SELECT v.work_order_id::text,v.ticket_node_id::text,v.request_id::text,v.repository,v.base_sha,v.head_sha,v.author_run_id::text,v.author_family,v.reviewer_profile_id::text,v.reviewer_family,v.pull_request,
         v.run_id::text,coalesce(r.status,'blocked'),p.model,p.effort,p.version,r.effective_model,coalesce(r.model_evidence,''),v.result,v.ladder,v.created_at,v.github_status,w.status,
         CASE WHEN EXISTS(SELECT 1 FROM run_telemetry t WHERE t.tenant_id=r.tenant_id AND t.run_id=r.id AND t.cost_micros_delta>0) THEN r.cost_micros END,
         CASE WHEN r.started_at IS NOT NULL THEN greatest(0,extract(epoch FROM(coalesce(r.ended_at,clock_timestamp())-r.started_at)))::bigint END,v.trace,
-        p.harness,p.family,ap.harness,ap.model,ap.family
+        p.harness,p.family,ap.harness,ap.model,ap.family,ar.status
         FROM work_order_reviews v JOIN work_orders w ON w.tenant_id=v.tenant_id AND w.node_id=v.work_order_id
         LEFT JOIN agent_runs r ON r.tenant_id=v.tenant_id AND r.id=v.run_id
-        LEFT JOIN model_profiles p ON p.tenant_id=v.tenant_id AND p.id=v.reviewer_profile_id
+        LEFT JOIN model_profiles p ON p.tenant_id=v.tenant_id AND p.id=v.reviewer_profile_id AND p.id=r.model_profile_id
         LEFT JOIN agent_runs ar ON ar.tenant_id=v.tenant_id AND ar.id=v.author_run_id
         LEFT JOIN model_profiles ap ON ap.tenant_id=ar.tenant_id AND ap.id=ar.model_profile_id WHERE v.work_order_id=$1`, id).Scan(
 		&v.OrderID, &v.TicketID, &v.RequestID, &v.Repository, &v.BaseSHA, &v.HeadSHA, &v.AuthorRunID, &v.AuthorFamily, &v.ProfileID, &v.ReviewerFamily, &v.PullRequest, &v.RunID, &v.Status, &v.Model, &v.Effort, &v.ProfileVersion, &v.EffectiveModel, &v.modelEvidence, &raw, &ladder, &v.CreatedAt, &v.GitHubStatus, &orderStatus, &v.Cost, &v.Duration, &v.Trace,
-		&reviewerHarness, &reviewerFamily, &authorHarness, &authorModel, &authorFamily)
+		&reviewerHarness, &reviewerFamily, &authorHarness, &authorModel, &authorFamily, &authorStatus)
 	if err != nil {
 		return v, err
 	}
@@ -375,18 +377,38 @@ func load(ctx context.Context, tx pgx.Tx, id string) (Review, error) {
 	if err = json.Unmarshal(ladder, &v.Ladder); err != nil {
 		return v, err
 	}
-	v.GateOpen, v.GateReason = reviewgate.Gate(v.Status, v.modelEvidence, v.EffectiveModel, v.Binding, v.Result)
+	var project *string
+	if err = tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1`, v.TicketID).Scan(&project); err != nil {
+		return v, err
+	}
+	policy, err := reviewgate.LoadFamilyPolicyTx(ctx, tx, project)
+	if err != nil {
+		return v, err
+	}
+	// A stored/client family claim never outranks the author run's immutable
+	// profile. Validate the harness/provider before using the recorded family.
+	if v.AuthorRunID != nil && authorHarness != nil && authorModel != nil && authorFamily != nil && harnesslaunch.FamilyMatches(*authorHarness, *authorModel, *authorFamily) {
+		v.AuthorFamily = *authorFamily
+	}
+	v.GateOpen, v.GateReason = reviewgate.Gate(v.Status, v.modelEvidence, v.EffectiveModel, v.Binding, v.Result, policy.Effective)
+	if v.ReviewerFamily != nil {
+		eligible, _ := policy.Effective.Decision(v.AuthorFamily, *v.ReviewerFamily)
+		v.policyDenied = !eligible
+	}
 	if v.GateOpen && (v.Model == nil || v.EffectiveModel == nil || !reviewgate.ModelMatches(*v.Model, *v.EffectiveModel)) {
 		v.GateOpen = false
 		v.GateReason = "The effective reviewer model differs from its pinned profile."
+		v.policyDenied = false
 	}
 	if v.ProfileID != nil && (reviewerHarness == nil || reviewerFamily == nil || v.Model == nil || v.ReviewerFamily == nil || *reviewerFamily != *v.ReviewerFamily || !harnesslaunch.FamilyMatches(*reviewerHarness, *v.Model, *reviewerFamily)) {
 		v.GateOpen = false
 		v.GateReason = "The reviewer profile does not establish its provider family."
+		v.policyDenied = false
 	}
-	if v.AuthorRunID != nil && (authorHarness == nil || authorModel == nil || authorFamily == nil || *authorFamily != v.AuthorFamily || !harnesslaunch.FamilyMatches(*authorHarness, *authorModel, *authorFamily)) {
+	if v.AuthorRunID != nil && (authorStatus == nil || *authorStatus != "completed" || authorHarness == nil || authorModel == nil || authorFamily == nil || *authorFamily != v.AuthorFamily || !harnesslaunch.FamilyMatches(*authorHarness, *authorModel, *authorFamily)) {
 		v.GateOpen = false
 		v.GateReason = "The author profile does not establish its provider family."
+		v.policyDenied = false
 	}
 	if v.GitHubStatus == "stale" {
 		v.GateOpen = false
@@ -395,6 +417,7 @@ func load(ctx context.Context, tx pgx.Tx, id string) (Review, error) {
 	if orderStatus == "cancelled" {
 		v.GateOpen = false
 		v.GateReason = "Review was cancelled; request a new review."
+		v.policyDenied = false
 	}
 	return v, nil
 }
