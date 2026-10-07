@@ -12,7 +12,7 @@ func rankedFixture() BoardState {
 	workspace.ID = "workspace"
 	own := EmptyBoardProfile("person", &person)
 	own.ID = "person"
-	return BoardState{Workspace: workspace, Person: &own, SmallHours: 2, FixRounds: 3, Kinds: []Kind{{Slug: "backend", Labels: []string{"api"}}, {Slug: "other"}}, Lines: []BoardLine{{"openai:sol", "openai", true, true}, {"openai:astra", "openai", true, true}, {"anthropic:opus", "anthropic", true, true}, {"anthropic:sonnet", "anthropic", true, false}, {"anthropic:fable", "anthropic", true, true}, {"xai:grok", "xai", false, true}, {"openai:terra", "openai", true, true}}}
+	return BoardState{Workspace: workspace, Person: &own, SmallHours: 2, FixRounds: 3, Kinds: []Kind{{Slug: "backend", Labels: []string{"api"}}, {Slug: "other"}}, Lines: []BoardLine{{"openai:sol", "openai", true, true, nil}, {"openai:astra", "openai", true, true, nil}, {"anthropic:opus", "anthropic", true, true, nil}, {"anthropic:sonnet", "anthropic", true, false, nil}, {"anthropic:fable", "anthropic", true, true, nil}, {"xai:grok", "xai", false, true, nil}, {"openai:terra", "openai", true, true, nil}}}
 }
 
 // Risk: preference inheritance or pins could silently bypass a hard restriction

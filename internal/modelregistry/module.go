@@ -204,7 +204,7 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 	}
 	// project_id predates placement resolution: it adds residency evidence to
 	// the CLI ladder without changing review ordering or account requirements.
-	for _, name := range []string{"ticket", "area", "complexity", "person_id"} {
+	for _, name := range []string{"ticket", "area", "complexity", "person_id", "situation", "fix_round", "estimate_hours", "concept", "previous_family"} {
 		if r.URL.Query().Has(name) {
 			boundedPreferenceHandler(m.resolvePreferences)(w, r)
 			return

@@ -198,6 +198,41 @@ func boardResidency(ctx context.Context, tx pgx.Tx, s modelprefs.BoardState, per
 	}
 	return effective, nil
 }
+
+// Residency is a hard route restriction, independent of temporary capacity.
+func (c boardCatalog) residencyCounts(ctx context.Context, tx pgx.Tx, project, requirement string) (map[string]int, error) {
+	profiles := map[string]string{}
+	for _, ps := range c.profiles {
+		for _, p := range ps {
+			profiles[p.ID] = p.Harness
+		}
+	}
+	now, err := dbNow(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	return agentaccounts.ResidencyProfileRouteCounts(ctx, tx, profiles, project, requirement, now)
+}
+func (c boardCatalog) residencyLines(lines []modelprefs.BoardLine, counts map[string]int, d modelprefs.BoardDecision, requirement string) []modelprefs.BoardLine {
+	out := slices.Clone(lines)
+	if modelprefs.Strictness(requirement) == 0 {
+		return out
+	}
+	for i := range out {
+		allowed := false
+		for _, p := range c.candidates(out[i].ID, d.EffortLevel, strings.HasPrefix(d.Column, "review:")) {
+			if counts[p.ID] > 0 {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			out[i].Residency = &modelprefs.BoardLock{Kind: "residency", Value: "not", Why: "No qualifying route for the effective " + requirement + " residency", Scope: "effective"}
+		}
+	}
+	return out
+}
+
 func (c boardCatalog) card(id string, d modelprefs.BoardDecision) boardCard {
 	level := d.EffortLevel
 	if level == 0 {
@@ -221,19 +256,31 @@ func boardDocumentFor(ctx context.Context, tx pgx.Tx, s modelprefs.BoardState, c
 	if layer == "mine" && s.Person != nil {
 		out.Profile = *s.Person
 	}
+	residencyPerson := person
 	if layer != "mine" {
 		s.Person = nil
+		residencyPerson = nil
 	}
 	out.Revision = out.Profile.Revision
 	out.Residency.Own = out.Profile.Residency
-	effective, err := boardResidency(ctx, tx, s, person, project, "")
+	effective, err := boardResidency(ctx, tx, s, residencyPerson, project, "")
 	if err != nil {
 		return out, err
 	}
 	out.Residency.Effective = effective
+	counts := map[string]int{}
+	if modelprefs.Strictness(effective) > 0 {
+		counts, err = c.residencyCounts(ctx, tx, project, effective)
+		if err != nil {
+			return out, err
+		}
+	}
 	placed := map[string]bool{}
 	for _, k := range boardColumns(s) {
 		d := modelprefs.ResolveBoard(s, modelprefs.BoardQuery{Column: k.Slug, Situation: situation}, nil)
+		columnState := s
+		columnState.Lines = c.residencyLines(s.Lines, counts, d, effective)
+		d = modelprefs.ResolveBoard(columnState, modelprefs.BoardQuery{Column: k.Slug, Situation: situation}, nil)
 		col := boardColumn{Column: k.Slug, Label: k.Label, Short: k.Label, Sentence: k.Hint, Fixed: k.Slug == "other" || k.Slug == "concept" || strings.HasPrefix(k.Slug, "review:"), Hidden: slices.Contains(out.Profile.HiddenKinds, k.Slug), Source: d.Source, List: []boardCard{}, Top: []boardCard{}, Free: []boardCard{}, Bottom: []boardCard{}, Not: []boardCard{}, Cant: d.Cant}
 		col.Thinking.Word, col.Thinking.Source = d.Thinking, d.ThinkingSource
 		for _, id := range d.Rank {
@@ -260,10 +307,24 @@ func boardDocumentFor(ctx context.Context, tx pgx.Tx, s modelprefs.BoardState, c
 		if layer == "rules" { // Rules remain visible when capability prevents execution.
 			col.Top, col.Bottom = []boardCard{}, []boardCard{}
 			for _, id := range d.Top {
-				col.Top = append(col.Top, c.card(id, d))
+				card := c.card(id, d)
+				for _, rule := range s.Rules {
+					if rule.Column == k.Slug && rule.Line == id && rule.Lock == "top" {
+						card.Lock = rule.BoardLock()
+						break
+					}
+				}
+				col.Top = append(col.Top, card)
 			}
 			for _, id := range d.Bottom {
-				col.Bottom = append(col.Bottom, c.card(id, d))
+				card := c.card(id, d)
+				for _, rule := range s.Rules {
+					if rule.Column == k.Slug && rule.Line == id && rule.Lock == "bottom" {
+						card.Lock = rule.BoardLock()
+						break
+					}
+				}
+				col.Bottom = append(col.Bottom, card)
 			}
 		}
 		out.Columns = append(out.Columns, col)

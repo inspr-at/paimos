@@ -5,11 +5,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/httpapi"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
@@ -182,6 +186,10 @@ func TestBoardMigrationPreservesRowsAndExplainsDroppedCells(t *testing.T) {
 				return err
 			}
 		}
+		// Recreate the pre-expansion state: no ranked workspace existed yet.
+		if _, err := tx.Exec(ctx, `DELETE FROM model_pref_profiles WHERE scope='workspace'`); err != nil {
+			return err
+		}
 		var original []byte
 		if err := tx.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(c) ORDER BY scope_id,bucket) FROM model_pref_cells c`).Scan(&original); err != nil {
 			return err
@@ -256,5 +264,185 @@ func TestBoardKindsFieldsAndSituationLimits(t *testing.T) {
 		if k.Position != i {
 			t.Fatal("kind positions did not follow request", ordered)
 		}
+	}
+}
+
+// Risk: body decoding can outlive an admin grant; the final write must recheck.
+func TestBoardMutationRechecksRevokedGrant(t *testing.T) {
+	admin, _ := boardFixture(t)
+	barrier := &mutationBarrier{entered: make(chan struct{}), release: make(chan struct{}), reader: strings.NewReader(`{"revision":0,"thinking":"deep"}`)}
+	request := httptest.NewRequest("PUT", "/api/model-preferences/profile?for=default", barrier)
+	request = request.WithContext(tenant.WithPrincipal(request.Context(), admin))
+	recorder := httptest.NewRecorder()
+	done := make(chan struct{})
+	mux := http.NewServeMux()
+	(&Module{pool: appPool}).Mount(mux)
+	go func() {
+		defer close(done)
+		if err := authz.Require(authz.BindPool(request.Context(), appPool), "model_prefs.manage", authz.Scope{}); err != nil {
+			httpapi.WriteError(recorder, 403, err.Error())
+			return
+		}
+		mux.ServeHTTP(recorder, request)
+	}()
+	<-barrier.entered
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		if err := preferenceFence(t.Context(), tx, admin); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE role_bindings SET role_id=(SELECT id FROM roles WHERE key='member') WHERE principal_id=$1 AND scope_type='workspace'`, admin.ID)
+		return err
+	}); err != nil {
+		close(barrier.release)
+		<-done
+		t.Fatal(err)
+	}
+	close(barrier.release)
+	<-done
+	if recorder.Code != 403 {
+		t.Fatal("revoked write committed", recorder.Code, recorder.Body.String())
+	}
+	if eventCount(t, admin, "model.preferences_changed") != 0 {
+		t.Fatal("revoked write emitted an event")
+	}
+}
+
+// Risk: the board display and dispatch might disagree about residency, new lines,
+// account limits, or a bottom pin. Exercise the same persisted orders in both.
+func TestBoardDispatchTraceResidencyAndNewLineExclusion(t *testing.T) {
+	admin, member := boardFixture(t)
+	runner := addPrincipal(t, admin.TenantID, "agent", "Board runner", []string{"admin"})
+	var account string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		ctx := t.Context()
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner) VALUES($1,'board-claude','claude','board-runner',$2,'Board',now(),true,'board-generation',$3) RETURNING id::text`, admin.TenantID, runner.ID, admin.ID).Scan(&account); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,pace_model) VALUES($1,$2,now()-interval '1 hour',now()+interval '1 day','requests',1000,'unrestricted')`, admin.TenantID, account); err != nil {
+			return err
+		}
+		schedule := capacity.DefaultSchedule()
+		schedule.Override = "sprint"
+		schedule.Reserve = capacity.ReserveOff
+		raw, _ := json.Marshal(schedule)
+		if _, err := tx.Exec(ctx, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3,$4)`, admin.TenantID, admin.ID, account, raw); err != nil {
+			return err
+		}
+		_, err := insertProfile(ctx, tx, admin.TenantID, profileWrite{Slug: "board-new-line", Version: "1", Harness: "claude", Family: "anthropic", Model: "claude-terra-1.0", Effort: "high", Tier: "strong"})
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/orders/backend/first", map[string]any{"rank": []string{"openai:sol"}, "not": []string{}, "revision": 0}, member.ID), 200)
+	boardDecode[rulesDocument](t, boardCall(t, admin, "PUT", "/api/model-rules/workspace/backend", map[string]any{"top": []rulePin{}, "bottom": []rulePin{{"anthropic:opus", "Approved fallback"}}, "not": map[string]string{}, "revision": 0}, ""), 200)
+	doc := boardDecode[boardDocument](t, boardCall(t, member, "GET", "/api/model-preferences/board", nil, ""), 200)
+	inTray := false
+	for _, card := range doc.Tray {
+		if card.Line == "anthropic:terra" {
+			inTray = true
+		}
+	}
+	if !inTray {
+		t.Fatal("new line did not stay in the tray")
+	}
+	var placement WorkPlacement
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		now := time.Now()
+		got, err := PlacementFor(t.Context(), tx, member, WorkQuery{Role: "build", Area: "backend"}, now)
+		if err != nil {
+			return err
+		}
+		placement = got
+		if got.PlannedProfileID == nil || got.Column != "backend" || got.Situation != "first" || got.CardIndex != 2 || got.Lock == nil || got.Lock.Value != "bottom" || got.PreferenceOf.Person == nil || *got.PreferenceOf.Person != member.ID || len(got.Held) == 0 {
+			t.Fatalf("board trace disagreed: %+v", got)
+		}
+		ps, err := listProfiles(t.Context(), tx)
+		if err != nil {
+			return err
+		}
+		var selected Profile
+		for _, p := range ps {
+			if p.ID == *got.PlannedProfileID {
+				selected = p
+			}
+		}
+		family, line, _ := ProfileLine(selected)
+		if family+":"+line != "anthropic:opus" {
+			t.Fatal("new line or wrong fallback ran", selected)
+		}
+		raw, err := got.JSON()
+		if err != nil {
+			return err
+		}
+		_, used, err := PinnedBottomUsed(raw, selected.ID)
+		if err != nil {
+			return err
+		}
+		if !used {
+			t.Fatal("actual bottom selection did not produce evidence")
+		}
+		_, used, err = PinnedBottomUsed(raw, "11111111-1111-4111-8111-111111111111")
+		if err != nil {
+			return err
+		}
+		if used {
+			t.Fatal("different actual profile counted as the bottom pin")
+		}
+		_, err = tx.Exec(t.Context(), `UPDATE account_allowance_windows SET allowance=0 WHERE account_id=$1`, account)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if placement.PlannedProfileID == nil {
+		t.Fatal("no initial selection")
+	}
+	var blocked WorkResolution
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		var err error
+		blocked, err = ResolveWork(t.Context(), tx, member, WorkQuery{Role: "build", Area: "backend"}, time.Now())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if blocked.Profile != nil || blocked.Trace.Blocked == "" {
+		t.Fatal("exhausted allowance escaped", blocked)
+	}
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/profile", map[string]any{"revision": 1, "residency": "eu"}, member.ID), 200)
+	doc = boardDecode[boardDocument](t, boardCall(t, member, "GET", "/api/model-preferences/board", nil, ""), 200)
+	for _, col := range doc.Columns {
+		if col.Column == "backend" {
+			if len(col.List) != 0 {
+				t.Fatal("residency did not remove routes", col)
+			}
+			found := false
+			for _, card := range col.Not {
+				if card.Line == "anthropic:opus" && card.Lock != nil && card.Lock.Kind == "residency" {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatal("missing residency lock", col)
+			}
+		}
+	}
+}
+
+func TestBoardMigrationLineNormalizationMatchesCatalog(t *testing.T) {
+	admin, _ := boardFixture(t)
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
+		cases := []Profile{{Family: "openai", Harness: "codex", Model: "gpt-6.1-sol"}, {Family: "anthropic", Harness: "claude", Model: "claude-opus-5-5"}, {Family: "anthropic", Harness: "pi", Model: "anthropic/claude-sonnet-5-5"}, {Family: "openai", Harness: "cursor", Model: "sol-6.1-high-fast"}, {Family: "google", Harness: "opencode", Model: "google/gemini-3.1-pro"}, {Family: "anthropic", Harness: "claude", Model: "opus"}, {Family: "anthropic", Harness: "cursor", Model: "opus-5.5-xhigh"}}
+		for _, p := range cases {
+			family, line, _ := ProfileLine(p)
+			var got string
+			if err := tx.QueryRow(t.Context(), `SELECT aeon_model_board_line($1,$2,$3)`, p.Family, p.Harness, p.Model).Scan(&got); err != nil {
+				return err
+			}
+			if got != family+":"+line {
+				t.Fatalf("migration line %s; catalog %s:%s", got, family, line)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

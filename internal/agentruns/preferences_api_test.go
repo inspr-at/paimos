@@ -221,3 +221,43 @@ func containsRun(ids []string, id string) bool {
 	}
 	return false
 }
+
+// Risk: a planned bottom pin could be reported as used before a real start,
+// or a telemetry replay could count it twice.
+func TestPinnedBottomEvidenceOnlyWhenPlannedRunStarts(t *testing.T) {
+	for _, matches := range []bool{true, false} {
+		t.Run(fmt.Sprint(matches), func(t *testing.T) {
+			f := setup(t)
+			o := f.order(t, nil)
+			v := f.run(t, o)
+			path := "/api/runs/" + v.ID
+			ids := f.reserve(t, v)
+			f.call(t, f.agent, "POST", path+"/claim", claimBody(ids), 200, &v)
+			planned := f.profile
+			if !matches {
+				planned = uuid()
+			}
+			raw, _ := json.Marshal(map[string]any{"work_placement": map[string]any{"planned_profile_id": planned, "column": "backend", "situation": "first", "preference_of": map[string]any{"person": f.person.ID, "source": "person"}, "lock": map[string]any{"kind": "rule", "value": "bottom", "scope": "workspace", "why": "Fallback"}}})
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=$2::jsonb WHERE id=$1`, v.ID, raw)
+				return err
+			})
+			if f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.pinned_bottom_used'`) != 0 {
+				t.Fatal("claim counted as a real start")
+			}
+			report := map[string]any{"sequence": 1, "kind": "started"}
+			f.call(t, f.agent, "POST", path+"/telemetry", report, 200, &v)
+			want := 0
+			if matches {
+				want = 1
+			}
+			if v.Status != "running" || f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.pinned_bottom_used'`) != want {
+				t.Fatal("actual start evidence mismatch")
+			}
+			f.call(t, f.agent, "POST", path+"/telemetry", report, 200, nil)
+			if f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.pinned_bottom_used'`) != want {
+				t.Fatal("replay counted the bottom pin again")
+			}
+		})
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -178,6 +179,21 @@ func PrepareCatalog(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal,
 		changes, err := prepareCatalogDeferred(ctx, tx, p)
 		if err != nil {
 			return err
+		}
+		// Fresh workspaces receive the same closed Balanced board as migrated ones.
+		// Old in-process writers retain compatibility until their migration receipt.
+		var initialize bool
+		if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM model_pref_profiles WHERE scope='workspace') AND NOT EXISTS(SELECT 1 FROM model_pref_scopes)`).Scan(&initialize); err != nil {
+			return err
+		}
+		if initialize {
+			if err := modelprefs.SeedKinds(ctx, tx, p.TenantID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,template,thinking,usage,revision,set_by) VALUES($1,'workspace','balanced','standard','balanced',0,$2)`, p.TenantID, p.ID); err != nil {
+				return err
+			}
+			changes = append(changes, events.Change{Type: "model.board_initialized", After: map[string]any{"template": "balanced"}})
 		}
 		allowed, err = authorize()
 		if err != nil {

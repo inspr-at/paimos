@@ -5284,7 +5284,7 @@ paths:
       description: Requires models.refresh. Runs the deterministic refresh with tenant settings and vault credentials. All callers and the scheduler share interval_minutes. Vendor requests run after the reservation transaction commits, with a shared 30-second deadline, at most 5 pages and 500 identifiers per vendor, and 200 observations/profile additions per run. Accepts no profile, route, URL or credential writes. Optional API calls stay disabled until a person enables them. Every completed run writes one audit event; outages keep the last good catalog and mark that source stale.
       security: *auth
       responses:
-        '200': {description: Refresh result, content: {application/json: {schema: {type: object, additionalProperties: true}}}}
+        '200': {description: Refresh result, content: {application/json: {schema: {type: object, additionalProperties: true, properties: {new_lines: {type: array, maxItems: 200, items: {type: string}}}}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
         '429': {$ref: '#/components/responses/Error'}
@@ -5343,6 +5343,11 @@ paths:
         - {name: mode, in: query, description: Explicitly enable placement resolution when only role and project_id are supplied., schema: {type: string, enum: [placement]}}
         - {name: ticket, in: query, schema: {type: string, maxLength: 80}, description: Visible work item or legacy ticket or task key or UUID. Supplies placement and project; an explicit role overrides its role.}
         - {name: area, in: query, schema: {type: string, maxLength: 48}}
+        - {name: situation, in: query, schema: {type: string, enum: [first, fix, stuck]}}
+        - {name: fix_round, in: query, schema: {type: integer, minimum: 0, maximum: 1000}}
+        - {name: estimate_hours, in: query, schema: {type: number, minimum: 0, maximum: 100000}}
+        - {name: concept, in: query, schema: {type: boolean}, description: 'Explicit request for a concept or ADR; uses the Concepts column.'}
+        - {name: previous_family, in: query, schema: {type: string}, description: 'Previous author family for a Stuck fallback.'}
         - {name: complexity, in: query, schema: {type: string, enum: [S, M, L]}}
         - {name: person_id, in: query, schema: {type: string, format: uuid}, description: Must map to the canonical caller or key creator. Operator keys cannot supply it.}
       responses:
@@ -12360,7 +12365,7 @@ paths:
         - {name: project_id, in: query, schema: {type: string, format: uuid}}
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindOrderWrite'}}}}
       responses:
-        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindPage'}}}}
+        '200': {description: 'Result', content: {application/json: {schema: {$ref: '#/components/schemas/WorkKindOrderedPage'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
@@ -17117,7 +17122,7 @@ components:
         profile: {$ref: '#/components/schemas/ModelBoardProfile'}
         dry_run: {type: boolean}
         moved: {type: array, items: {type: object, required: [column, before, after], properties: {column: {type: string}, before: {type: array, items: {type: string}}, after: {type: array, items: {type: string}}}}}
-        running_outside: {type: array, maxItems: 1000, items: {type: string, format: uuid}, description: 'Starting or running turns outside a newly tightened residency floor.'}
+        running_outside: {type: array, maxItems: 10000, items: {type: string, format: uuid}, description: 'Starting or running turns outside a newly tightened residency floor.'}
     ModelColumnThinkingWrite:
       type: object
       additionalProperties: false
@@ -21946,6 +21951,12 @@ components:
       required: [slugs]
       properties:
         slugs: {type: array, maxItems: 256, uniqueItems: true, items: {type: string, maxLength: 48}}
+    WorkKindOrderedPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 256, items: {$ref: '#/components/schemas/WorkKind'}}
+        next_cursor: {type: 'null'}
     WorkKindPage:
       type: object
       required: [items, next_cursor]

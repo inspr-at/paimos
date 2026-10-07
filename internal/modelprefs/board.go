@@ -54,10 +54,11 @@ func (r Rule) BoardLock() *BoardLock {
 }
 
 type BoardLine struct {
-	ID     string
-	Family string
-	Tools  bool
-	Review bool
+	ID        string
+	Family    string
+	Tools     bool
+	Review    bool
+	Residency *BoardLock
 }
 type BoardState struct {
 	Workspace  BoardProfile
@@ -213,7 +214,6 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 	d.PreferenceOf.Source = "default"
 	if s.Person != nil {
 		d.PreferenceOf.Person = s.Person.PersonID
-		d.PreferenceOf.Source = "person"
 	}
 	d.Column = q.Column
 	if d.Column == "" {
@@ -276,6 +276,9 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 			template = *chosen.Template
 		}
 		d.Rank = TemplateRank(template, d.Column)
+	}
+	if chosen.Scope == "person" && (found || chosen.Template != nil) {
+		d.PreferenceOf.Source = "person"
 	}
 	// An order containing only thinking still inherits its rank.
 	if s.Workspace.Thinking != nil {
@@ -400,6 +403,12 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 		l, ok := lines[id]
 		if !ok {
 			d.Held = append(d.Held, HeldLine{id, "line is not in the catalog"})
+			continue
+		}
+		if l.Residency != nil {
+			d.Not = append(d.Not, id)
+			d.Locks[id] = l.Residency
+			d.Held = append(d.Held, HeldLine{id, l.Residency.Why})
 			continue
 		}
 		if strings.HasPrefix(d.Column, "review:") && l.Family == strings.TrimPrefix(d.Column, "review:") {

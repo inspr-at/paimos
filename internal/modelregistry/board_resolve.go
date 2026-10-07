@@ -72,8 +72,18 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if err != nil {
 		return nil, err
 	}
+	query := modelprefs.BoardQuery{Area: q.Area, Labels: q.Labels, Situation: q.Situation, Review: review, Concept: q.Concept, AuthorFamily: q.AuthorFamily, PreviousFamily: q.PreviousFamily, EstimateHours: q.EstimateHours, FixRound: q.FixRound}
+	initial := modelprefs.ResolveBoard(s, query, nil)
+	if modelprefs.Strictness(requirement) > 0 {
+		counts, err := c.residencyCounts(ctx, tx, q.ProjectID, requirement)
+		if err != nil {
+			return nil, err
+		}
+		s.Lines = c.residencyLines(s.Lines, counts, initial, requirement)
+	}
 	var callbackErr error
-	d := modelprefs.ResolveBoard(s, modelprefs.BoardQuery{Area: q.Area, Labels: q.Labels, Situation: q.Situation, Review: review, Concept: q.Concept, AuthorFamily: q.AuthorFamily, PreviousFamily: q.PreviousFamily, EstimateHours: q.EstimateHours, FixRound: q.FixRound}, func(line string, level int) (bool, string) {
+	admissionWait := false
+	d := modelprefs.ResolveBoard(s, query, func(line string, level int) (bool, string) {
 		ps := c.candidates(line, level, review)
 		reasons := []string{}
 		for _, profile := range ps {
@@ -90,6 +100,9 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 				skipped = append(skipped, "not a stronger route for this work area")
 			}
 			ids := []string{}
+			if len(skipped) == 0 {
+				admissionWait = true
+			}
 			if review && len(skipped) == 0 {
 				capability := agentverification.For(profile.Harness, "darwin", "arm64")
 				if !capability.Supported {
@@ -160,7 +173,7 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		out.Trace.KindSource = "fallback"
 	}
 	out.Trace.PrefsRevision = s.Workspace.Revision
-	if s.Person != nil {
+	if s.Person != nil && d.PreferenceOf.Source == "person" {
 		out.Trace.PrefsRevision = s.Person.Revision
 		out.Trace.SetBy = "person"
 	}
@@ -180,6 +193,9 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		}
 	} else {
 		out.Trace.Blocked = "no model in the ranked order can run now"
+		if q.Situation == "stuck" && admissionWait {
+			out.Trace.Blocked = "admission_wait"
+		}
 	}
 	if len(d.Cant) > 0 {
 		out.Trace.Held = append(out.Trace.Held, d.Cant...)

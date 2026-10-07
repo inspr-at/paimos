@@ -182,6 +182,13 @@ func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 			return *escalated, nil
 		}
 	}
+	if strings.HasPrefix(q.Role, "review-gate") {
+		var err error
+		q.AuthorFamily, err = NormalizeAuthorFamily(q.AuthorFamily)
+		if err != nil || q.AuthorFamily == "" {
+			return WorkResolution{}, fail(400, "review-gate requires a known author_family")
+		}
+	}
 	if board, err := resolveBoardWork(ctx, tx, p, q, now, nil); err != nil {
 		return WorkResolution{}, err
 	} else if board != nil {

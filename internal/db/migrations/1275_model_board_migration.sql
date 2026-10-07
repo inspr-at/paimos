@@ -4,22 +4,24 @@ SET LOCAL lock_timeout = '5s';
 CREATE FUNCTION aeon_model_board_line(family text, harness text, model text) RETURNS text
 LANGUAGE sql IMMUTABLE AS $$
  WITH normalized AS (
-  SELECT CASE WHEN harness='codex' THEN model
-   WHEN harness IN ('claude','pi') THEN regexp_replace(model,'^(anthropic/)?(claude-)?','')
+  SELECT CASE WHEN harness='pi' THEN regexp_replace(model,'^(anthropic/)?(claude-)?','')
+   WHEN harness='claude' THEN regexp_replace(model,'^(claude-)?','')
    WHEN harness='opencode' THEN regexp_replace(model,'^(google/|ollama/)','') ELSE model END AS id
+ ), cursor AS (
+  SELECT id,CASE WHEN harness='cursor' THEN regexp_match(id,'^(.+?)(-(low|medium|high|xhigh|max|ultra))?(-fast)?$') END AS parts FROM normalized
  ), parts AS (
-  SELECT id,regexp_match(id,'^gpt-[0-9]+(?:[.][0-9]+)*-(.+)$') AS codex,
-   regexp_match(id,'^([a-z][a-z-]*?)-?[0-9]+(?:[.-][0-9]+)*(.*)$') AS concrete FROM normalized
- ) SELECT family||':'||CASE WHEN harness='codex' AND codex IS NOT NULL THEN codex[1]
+  SELECT id,parts,regexp_match(id,'^gpt-([0-9]+(?:[.][0-9]+)*)-(.+)$') AS codex,
+   regexp_match(CASE WHEN parts IS NULL THEN id ELSE parts[1] END,'^([a-z][a-z-]*?)-?([0-9]+(?:[.-][0-9]+)*)(.*)$') AS concrete FROM cursor
+ ) SELECT family||':'||CASE WHEN harness='codex' THEN coalesce(codex[2],model)
    WHEN harness IN ('claude','pi') AND id IN ('opus','sonnet','haiku','fable') THEN id
-   WHEN concrete IS NOT NULL THEN concrete[1]||concrete[2] ELSE id END FROM parts;
+   WHEN concrete IS NOT NULL THEN concrete[1]||concrete[3]||coalesce(parts[4],'') ELSE model END FROM parts;
 $$;
 -- Retain full old snapshots and every nonrepresentable decision in the audit.
 -- No source row is changed or deleted. Migration is idempotent per tenant.
 CREATE FUNCTION aeon_migrate_model_board(p_tenant uuid) RETURNS jsonb LANGUAGE plpgsql AS $$
 DECLARE prior text := current_setting('aeon.tenant_id',true); visible text := current_setting('aeon.visible_projects',true);
  audit jsonb; actor uuid; scope_row record; cell_row record; profile uuid; chosen_line text; word text; col text; columns text[];
- baseline text[] := ARRAY['openai:sol','anthropic:sonnet','anthropic:opus','openai:astra','anthropic:fable']; ranked text[];
+ balanced text[]; snapshot_size bigint; baseline text[] := ARRAY['openai:sol','anthropic:sonnet','anthropic:opus','openai:astra','anthropic:fable']; ranked text[];
 BEGIN
  PERFORM set_config('aeon.tenant_id',p_tenant::text,true);
  PERFORM set_config('aeon.visible_projects','*',true);
@@ -29,6 +31,11 @@ BEGIN
   PERFORM set_config('aeon.visible_projects',coalesce(visible,''),true);
   RETURN audit;
  END IF;
+ -- Bound the complete retained snapshot before aggregation or conversion.
+ SELECT coalesce((SELECT sum(octet_length(to_jsonb(s)::text)) FROM model_pref_scopes s),0)
+  +coalesce((SELECT sum(octet_length(to_jsonb(r)::text)) FROM model_pref_rows r),0)
+  +coalesce((SELECT sum(octet_length(to_jsonb(c)::text))*2 FROM model_pref_cells c),0) INTO snapshot_size;
+ IF snapshot_size>786432 THEN RAISE EXCEPTION 'model preference migration snapshot exceeds audit bound'; END IF;
  SELECT jsonb_build_object('scopes',coalesce((SELECT jsonb_agg(to_jsonb(s)) FROM model_pref_scopes s),'[]'::jsonb),
   'rows',coalesce((SELECT jsonb_agg(to_jsonb(r)) FROM model_pref_rows r),'[]'::jsonb),
   'cells',coalesce((SELECT jsonb_agg(to_jsonb(c)) FROM model_pref_cells c),'[]'::jsonb),
@@ -69,10 +76,11 @@ BEGIN
         ELSE 'Migrated project model preference ('||coalesce(cell_row.model,chosen_line)||' '||coalesce(cell_row.pinned_effort,cell_row.effort,'')||')' END,actor);
      INSERT INTO model_rule_revisions(tenant_id,scope,scope_key) SELECT p_tenant,'project',scope_row.project_id::text WHERE NOT EXISTS(SELECT 1 FROM model_rule_revisions WHERE scope='project' AND scope_key=scope_row.project_id::text);
     ELSE
-     ranked := ARRAY[chosen_line]||array_remove(CASE WHEN col LIKE 'review:%' THEN ARRAY['openai:sol','xai:grok','anthropic:opus','anthropic:fable']
-      WHEN col='design' THEN ARRAY['anthropic:opus','anthropic:sonnet','openai:sol','anthropic:fable','openai:astra'] ELSE baseline END,chosen_line);
+     balanced := CASE WHEN col LIKE 'review:%' THEN ARRAY['openai:sol','xai:grok','anthropic:opus','anthropic:fable']
+      WHEN col='design' THEN ARRAY['anthropic:opus','anthropic:sonnet','openai:sol','anthropic:fable','openai:astra'] ELSE baseline END;
+     ranked := ARRAY[chosen_line]||array_remove(balanced,chosen_line);
      INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,thinking,set_by,set_at)
-      VALUES(p_tenant,profile,col,'first',CASE WHEN scope_row.level='default' AND ranked=baseline THEN NULL ELSE ranked END,word,scope_row.updated_by,scope_row.updated_at)
+      VALUES(p_tenant,profile,col,'first',CASE WHEN scope_row.level='default' AND ranked=balanced THEN NULL ELSE ranked END,word,scope_row.updated_by,scope_row.updated_at)
      ;
     END IF;
    END LOOP;
@@ -86,18 +94,21 @@ BEGIN
 END;
 $$;
 CREATE FUNCTION aeon_migrate_all_model_boards() RETURNS SETOF model_pref_migrations LANGUAGE plpgsql AS $$
-DECLARE t record; prior text := current_setting('aeon.tenant_id',true); result jsonb; audits jsonb := '[]'::jsonb;
+DECLARE t record; prior text := current_setting('aeon.tenant_id',true); result jsonb; migrated uuid[] := '{}'; tenant_key uuid;
 BEGIN
  PERFORM id FROM tenants ORDER BY id FOR NO KEY UPDATE;
  FOR t IN SELECT id FROM tenants ORDER BY id LOOP
+  PERFORM set_config('aeon.tenant_id',t.id::text,true);
+  IF EXISTS(SELECT 1 FROM model_pref_migrations WHERE tenant_id=t.id) THEN CONTINUE; END IF;
   result:=aeon_migrate_model_board(t.id);
-  audits:=audits||jsonb_build_array(jsonb_build_object('tenant',t.id,'audit',result));
+  migrated:=array_append(migrated,t.id);
  END LOOP;
  -- All resource writes and locks precede every event counter.
- FOR t IN SELECT value FROM jsonb_array_elements(audits) LOOP
-  PERFORM set_config('aeon.tenant_id',t.value->>'tenant',true);
+ FOREACH tenant_key IN ARRAY migrated LOOP
+  PERFORM set_config('aeon.tenant_id',tenant_key::text,true);
+  SELECT audit INTO result FROM model_pref_migrations WHERE tenant_id=tenant_key;
   INSERT INTO events(tenant_id,actor_principal_id,type,after)
-   VALUES((t.value->>'tenant')::uuid,(t.value->'audit'->>'migration_actor')::uuid,'model.preferences_migrated',t.value->'audit');
+   VALUES(tenant_key,(result->>'migration_actor')::uuid,'model.preferences_migrated',result);
  END LOOP;
  PERFORM set_config('aeon.tenant_id',coalesce(prior,''),true);
  RETURN;

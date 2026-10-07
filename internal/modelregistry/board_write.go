@@ -260,6 +260,17 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 	httpapi.WriteJSON(w, 200, out)
 }
 func profilePatch(profile modelprefs.BoardProfile, raw map[string]json.RawMessage) (modelprefs.BoardProfile, bool, error) {
+	// Preserve the comparison snapshot: json.Unmarshal reuses existing pointers
+	// and array capacity when decoding into a shallow struct copy.
+	clone := func(v *string) *string {
+		if v == nil {
+			return nil
+		}
+		value := *v
+		return &value
+	}
+	profile.Template, profile.Thinking, profile.Usage, profile.Residency = clone(profile.Template), clone(profile.Thinking), clone(profile.Usage), clone(profile.Residency)
+	profile.HiddenKinds, profile.DismissedLines = slices.Clone(profile.HiddenKinds), slices.Clone(profile.DismissedLines)
 	replace := false
 	for key, value := range raw {
 		var err error

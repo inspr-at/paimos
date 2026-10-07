@@ -189,7 +189,7 @@ func TestWorkKindLifecyclePaginationAndTenantIsolation(t *testing.T) {
 		expectPrefError(t, admin, method, path, body, 422, "system_kind")
 	}
 	renamed := decode[workKind](t, &admin, "PATCH", "/api/work-kinds/"+kindID(t, doc, "security"), `{"label":"Security checks"}`, 200)
-	if renamed.Slug != "security" || !renamed.System || renamed.Label != "Security checks" {
+	if renamed.Slug != "security" || renamed.System == nil || renamed.Label != "Security checks" {
 		t.Fatal("system identity changed", renamed)
 	}
 	expectPrefError(t, other, "PATCH", "/api/work-kinds/"+first.ID, `{"hint":"foreign"}`, 404, "not found")

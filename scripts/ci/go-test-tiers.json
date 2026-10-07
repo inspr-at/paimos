@@ -2364,6 +2364,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotTraversalBounds","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestPinnedBottomEvidenceOnlyWhenPlannedRunStarts","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestPooledSiblingLocalRecoveryThroughClaim","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestProjectWritesSerializeWithPairingTenantBeforeTree","tier":"GATED-FULL"}
@@ -6278,9 +6280,15 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestAutomaticallyObservedProfilesRequirePersonGrant","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestBoardDispatchTraceResidencyAndNewLineExclusion","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardKindsFieldsAndSituationLimits","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestBoardMigrationLineNormalizationMatchesCatalog","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardMigrationPreservesRowsAndExplainsDroppedCells","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestBoardMutationRechecksRevokedGrant","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardPersonRevisionIdentityAndLegacyRetirement","tier":"ESSENTIAL"}
     ,
