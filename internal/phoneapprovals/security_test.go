@@ -93,7 +93,7 @@ func (f *fixture) attachRequest(t *testing.T) string {
 		args []any
 		id   *string
 	}{
-		{`INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'PHONE-3-1','Phone attach ticket',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, []any{f.p.TenantID, project}, &ticket},
+		{`INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'PHONE-4','Phone attach ticket',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, []any{f.p.TenantID, project}, &ticket},
 		{`INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'phone-codex','1','codex','openai','test-model','low','fast') RETURNING id::text`, []any{f.p.TenantID}, &profile},
 		{`INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label) VALUES($1,'phone-codex','codex','phone-fixture',$2,'Phone fixture') RETURNING id::text`, []any{f.p.TenantID, f.agent.ID}, &account},
 	} {
