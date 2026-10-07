@@ -12,6 +12,7 @@ import (
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -191,7 +192,7 @@ func TestOverviewValuesMaskingExplicitScopeAndTenantIsolation(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		return storeReadinessFact(t.Context(), tx, accounts[0], ReadinessFactWrite{ResourceID: resource, WindowKey: "daily", Source: "harness", ObservedAt: now, ReadingAt: &readAt, ResetsAt: &resetsAt, UsedPercent: &percent, CreditState: "unknown"}, now)
+		return storeReadinessFact(tenant.WithPrincipal(t.Context(), runner), tx, accounts[0], ReadinessFactWrite{ResourceID: resource, WindowKey: "daily", Source: "harness", ObservedAt: now, ReadingAt: &readAt, ResetsAt: &resetsAt, UsedPercent: &percent, CreditState: "unknown"}, now)
 	}); err != nil {
 		t.Fatal(err)
 	}
