@@ -8300,6 +8300,8 @@
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"an unavailable queue shows an honest error and Retry without moving its controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"attention keys select a range, preserve native field shortcuts, skip inapplicable Apply and retain confirmed Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"bulk Apply has no glow and keeps visible keyboard focus at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"bulk Apply has no glow and keeps visible keyboard focus at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -8346,9 +8348,13 @@
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"person switch clears previous facets while the replacement read waits and fails","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"project groups page independently, remember folds per grouping and keep the clicked header still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"read-only rows and unavailable release targets explain their permissions before acting","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"release receipts refresh the retained row and siblings for subsequent Apply and Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"shared attention columns keep long keys whole and Since exposes the exact flag time","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"workspace switch clears previous facets while the replacement read waits and fails","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -13916,7 +13922,11 @@
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"ignores failed or incomplete release receipts","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"orders every group by open flags and every row by kind then newest without mutating the visit","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"refreshes matching sibling identities and sends both resource revisions on the next action","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"uses saved per-group folds before big-list defaults and opens search matches without changing saved folds","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/auth-tabs.unit.test.ts","name":"a delayed storage event uses the latest generation instead of rolling back a newer local sign-in","tier":"ESSENTIAL"}
     ,

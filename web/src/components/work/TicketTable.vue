@@ -72,6 +72,13 @@ const props = defineProps<{
   costAllowed?: boolean
   // Multi-select for bulk changes: checkboxes lead each row.
   selectable?: boolean
+  // A host may keep resolved/read-only rows visible without making them selectable.
+  rowSelectable?: (row: ListItem) => boolean
+  label?: string
+  retryLabel?: string
+  emptyText?: string
+  selectionDisabled?: boolean
+  sortDisabled?: boolean
   selected?: Set<string>
   // Phone selection with nothing chosen yet: round checks show before the first tap.
   picking?: boolean
@@ -479,7 +486,10 @@ function rowClick(event: MouseEvent, row: ListItem) {
 }
 const selecting = computed(() => !!props.picking || !!props.selected?.size)
 const loadedRows = computed(() => entries.value.filter((entry): entry is Extract<Entry, { type: 'row' }> => entry.type === 'row' && !('measuring' in entry && entry.measuring) && !('repeat' in entry && entry.repeat)))
-const allChecked = computed(() => !!props.selected?.size && loadedRows.value.length > 0 && loadedRows.value.every(entry => props.selected!.has(entry.row.id)))
+const allChecked = computed(() => {
+  const rows = loadedRows.value.filter(entry => props.rowSelectable?.(entry.row) ?? true)
+  return !!props.selected?.size && rows.length > 0 && rows.every(entry => props.selected!.has(entry.row.id))
+})
 function checkClick(event: MouseEvent, row: ListItem) {
   event.stopPropagation()
   if (event.shiftKey) { event.preventDefault(); emit('select', row, 'range') }
@@ -530,8 +540,9 @@ function linkClick(event: MouseEvent) {
   if (event.metaKey || event.ctrlKey || event.shiftKey || event.button === 1) return // let the browser open a tab
   event.preventDefault()
 }
-function groupChecked(group: RowGroup) { return group.rows.length > 0 && group.rows.every(row => props.selected?.has(row.id)) }
-function groupMixed(group: RowGroup) { return !groupChecked(group) && group.rows.some(row => props.selected?.has(row.id)) }
+const selectableRows = (group: RowGroup) => group.rows.filter(row => props.rowSelectable?.(row) ?? true)
+function groupChecked(group: RowGroup) { const rows = selectableRows(group); return rows.length > 0 && rows.every(row => props.selected?.has(row.id)) }
+function groupMixed(group: RowGroup) { return !groupChecked(group) && selectableRows(group).some(row => props.selected?.has(row.id)) }
 async function selectGroup(event: Event, group: RowGroup) {
   const input = event.target as HTMLInputElement
   const on = input.checked && !(groupMixed(group) && (props.selected?.size ?? 0) >= 100)
@@ -596,7 +607,7 @@ defineExpose({
 
 <template>
   <div ref="card" class="table-card" :class="[density, { selectable, selecting, customised, overflowing: !phone && layoutWidth > width + 1 }]">
-    <table :style="!phone && customised ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="outline ? 'Ticket outline' : 'Tickets'" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
+    <table :style="!phone && customised ? { minWidth: `${layoutWidth}px` } : undefined" ref="grid" class="tickets" :class="{ outline: !!outline }" :role="outline ? 'treegrid' : 'grid'" :aria-label="label ?? (outline ? 'Ticket outline' : 'Tickets')" :aria-busy="loading" tabindex="0" :aria-activedescendant="cursorId ? `row-${cursorId}` : undefined" @focus="emit('gridFocus')">
       <colgroup>
         <col v-for="column in columns" :key="column.id" :class="column.cls" :style="colWidth(column.id) ? { width: `${colWidth(column.id)}px` } : undefined" />
       </colgroup>
@@ -605,10 +616,10 @@ defineExpose({
           <th v-for="column in columns" :key="column.id" scope="col" :data-column-id="column.id" :class="[column.cls, { end: column.end }]" :aria-sort="ariaSort(column.field)">
             <input
               v-if="column.id === 'key' && selectable" type="checkbox" class="row-check head-check" :class="{ shown: selecting }" :checked="allChecked"
-              :indeterminate="selecting && !allChecked" :aria-label="allChecked ? 'Clear the selection' : 'Select all loaded tickets'" aria-keyshortcuts="Control+A Meta+A"
+              :indeterminate="!!selected?.size && !allChecked" :disabled="selectionDisabled" :aria-label="allChecked ? 'Clear the selection' : 'Select all loaded tickets'" aria-keyshortcuts="Control+A Meta+A"
               @change="emit('selectAll', ($event.target as HTMLInputElement).checked)"
             />
-            <button v-if="column.field" type="button" class="th-sort" :class="{ on: sortOf(column.field) }" :data-tip="'Sort by ' + column.label.toLowerCase() + '\nShift-click adds a secondary sort'" @click="event => emit('sort', column.field!, event.shiftKey)">
+            <button v-if="column.field && !sortDisabled" type="button" class="th-sort" :class="{ on: sortOf(column.field) }" :data-tip="'Sort by ' + column.label.toLowerCase() + '\nShift-click adds a secondary sort'" @click="event => emit('sort', column.field!, event.shiftKey)">
               <span>{{ column.label }}</span>
               <span class="sort-mark" aria-hidden="true">
                 <template v-if="sortOf(column.field)">
@@ -657,7 +668,7 @@ defineExpose({
                   <AppIcon name="chevron" :size="14" />
                 </button>
                 <label v-if="selectable" class="group-check-target">
-                  <input type="checkbox" class="group-check" :checked="groupChecked(entry.group)" :indeterminate="groupMixed(entry.group)" :disabled="!entry.group.rows.length" :aria-label="german ? `Alle Vorschläge in ${groupName(entry.group)} auswählen` : `Select every loaded ticket in ${groupName(entry.group)}`" @change="selectGroup($event, entry.group)" />
+                  <input type="checkbox" class="group-check" :checked="groupChecked(entry.group)" :indeterminate="groupMixed(entry.group)" :disabled="selectionDisabled || !selectableRows(entry.group).length" :aria-label="german ? `Alle Vorschläge in ${groupName(entry.group)} auswählen` : `Select every loaded ticket in ${groupName(entry.group)}`" @change="selectGroup($event, entry.group)" />
                 </label>
                 <template v-if="entry.group.project">
                   <AppIcon v-if="entry.group.icon" :name="entry.group.icon as IconName" :size="14" class="group-icon" />
@@ -815,7 +826,7 @@ defineExpose({
           >
             <td v-if="phone && selecting" class="c-check">
               <button
-                type="button" class="phone-check" role="checkbox" :aria-checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`"
+                type="button" class="phone-check" role="checkbox" :aria-checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" :disabled="selectionDisabled || (rowSelectable ? !rowSelectable(entry.row) : false)"
                 @click.stop="emit('select', entry.row, 'toggle')"
               >
                 <span class="mark" aria-hidden="true"><AppIcon v-if="selected?.has(entry.row.id)" name="check" :size="13" /></span>
@@ -824,7 +835,7 @@ defineExpose({
             <td class="c-key" data-column-id="key">
               <div class="cell">
                 <input
-                  v-if="selectable" type="checkbox" class="row-check" :checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" tabindex="-1"
+                  v-if="selectable" type="checkbox" class="row-check" :checked="!!selected?.has(entry.row.id)" :aria-label="`Select ${entry.row.key}`" tabindex="-1" :disabled="selectionDisabled || (rowSelectable ? !rowSelectable(entry.row) : false)"
                   @click="checkClick($event, entry.row)" @change="emit('select', entry.row, 'toggle')"
                 />
                 <button type="button" class="key key-btn" :aria-label="`Copy ${entry.row.key}`" :data-tip="`Copy ${entry.row.key}`" @click.stop="emit('copy', entry.row)">{{ entry.row.key }}</button>
@@ -832,6 +843,7 @@ defineExpose({
             </td>
             <td class="c-title" data-column-id="title">
               <div class="cell title-cell">
+                <slot name="cell-title" :row="entry.row">
                 <span v-if="entry.tree" class="tree" :style="{ width: `${(entry.tree.depth + 1) * INDENT}px` }">
                   <span v-for="i in entry.tree.depth" :key="i" class="guide" :class="guideClass(i - 1, entry.tree.depth, entry.tree.guides, entry.tree.last)" :style="{ left: `${(i - 1) * INDENT}px` }" />
                   <button
@@ -856,6 +868,7 @@ defineExpose({
                   <span class="bar"><i :style="{ width: `${Math.round(entry.tree.stats.done / entry.tree.stats.scope * 100)}%` }" /></span>
                   <span class="mono">{{ entry.tree.stats.done }}/{{ entry.tree.stats.scope }}</span>
                 </span>
+                </slot>
               </div>
               <span class="row-actions">
                 <QueueAction v-if="entry.row.is_leaf !== false && projectOf(entry.row)" :row="entry.row" :project-id="projectOf(entry.row)!" />
@@ -943,11 +956,14 @@ defineExpose({
       <span class="state-icon danger"><AppIcon name="alert" :size="18" /></span>
       <h2>Tickets could not be loaded</h2>
       <p>{{ error }}</p>
-      <button type="button" class="btn" @click="emit('retry')"><AppIcon name="refresh" :size="14" />Try again</button>
+      <button type="button" class="btn" @click="emit('retry')"><AppIcon name="refresh" :size="14" />{{ retryLabel ?? 'Try again' }}</button>
     </div>
     <div v-else-if="!loading && !entries.length" class="state">
       <span class="state-icon"><AppIcon :name="filtered ? 'filter' : 'inbox'" :size="18" /></span>
-      <template v-if="filtered">
+      <template v-if="emptyText">
+        <h2>{{ emptyText }}</h2>
+      </template>
+      <template v-else-if="filtered">
         <h2>No tickets match these filters</h2>
         <div class="state-actions">
           <button type="button" class="btn" @click="emit('clearFilters')">Clear filters</button>

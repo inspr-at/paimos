@@ -55,6 +55,16 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [['e']], label: 'Show or hide the evidence' },
     { keys: [['/']], label: 'Search names, changes and ticket keys' },
   ] },
+  { title: 'Needs attention', rows: [
+    { keys: [['j'], [{ icon: 'arrow-down', label: 'Down arrow' }], ['k'], [{ icon: 'arrow-up', label: 'Up arrow' }]], label: 'Next or previous row or group' },
+    { keys: [['Space'], ['x']], label: 'Select the row; Shift-click selects a range' },
+    { keys: [[MOD, 'A']], label: 'In the grid: select up to 100 loaded editable rows' },
+    { keys: [['a'], ['d']], label: 'Apply or dismiss the row or selection' },
+    { keys: [[{ icon: 'arrow-left', label: 'Left arrow' }], [{ icon: 'arrow', label: 'Right arrow' }]], label: 'On a group: collapse or expand' },
+    { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Open the ticket; toggle a group' },
+    { keys: [['/']], label: 'Search this list' },
+    { keys: [['Esc']], label: 'Leave a field, then clear the selection or close the menu' },
+  ] },
   { title: 'Ticket list', rows: [
     { keys: [['j'], [{ icon: 'arrow-down', label: 'Down arrow' }]], label: 'Next ticket' },
     { keys: [['k'], [{ icon: 'arrow-up', label: 'Up arrow' }]], label: 'Previous ticket' },
