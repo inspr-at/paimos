@@ -355,6 +355,11 @@ func TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation(t *testing.T) {
 	f.call(t, f.agent, "POST", path+"/"+notes.ID+"/verdict", verdict, 403, nil)
 	// Even an original receipt is hidden after its current ticket is deleted.
 	f.tx(t, func(tx pgx.Tx) error {
+		// Retain the execution row and run evidence while respecting the
+		// repository's parent-deletion guard: retire its child first.
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=clock_timestamp() WHERE id=$1`, f.buildOrder); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=clock_timestamp() WHERE id=$1`, f.ticket)
 		return err
 	})
