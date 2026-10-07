@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -66,8 +68,9 @@ func scope(project *string) authz.Scope {
 }
 
 type Page struct {
-	Items []Item  `json:"items"`
-	Next  *string `json:"next_cursor"`
+	Available bool    `json:"available"`
+	Items     []Item  `json:"items"`
+	Next      *string `json:"next_cursor"`
 }
 
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +96,8 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		respondError(w, fail(400, "invalid delivery filter"))
 		return
 	}
-	out := Page{Items: []Item{}}
+	app := crossreview.GitHubApp{Config: m.config}
+	out := Page{Items: []Item{}, Available: app.Configured(p.TenantID, m.config.Repository)}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		project := (*string)(nil)
 		if key != "" {
@@ -270,8 +274,8 @@ func (m *Module) hold(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("itemId")
-	if !workorders.UUID(id) {
-		respondError(w, fail(400, "invalid delivery item"))
+	if !workorders.UUID(id) || len(r.Header.Get("If-Unmodified-Since")) > 64 {
+		respondError(w, fail(400, "invalid delivery item or revision"))
 		return
 	}
 	var reason *string
@@ -306,11 +310,23 @@ func (m *Module) hold(w http.ResponseWriter, r *http.Request) {
 		if err = authz.RequireTx(ctx, tx, p, "delivery.manage", scope(current.Project)); err != nil {
 			return err
 		}
+		if revision := r.Header.Get("If-Unmodified-Since"); revision != "" {
+			at, parseErr := time.Parse(time.RFC3339Nano, revision)
+			if parseErr != nil || !at.Equal(current.Updated) {
+				return fail(412, "delivery changed; reload before lifting the hold")
+			}
+		}
 		if current.State == Merged {
 			return fail(409, "merged delivery is terminal")
 		}
 		o := current.Observation
 		o.HoldReason = reason
+		if reason == nil {
+			o.HeldFrom = nil
+		} else if current.State != Held {
+			from := current.State
+			o.HeldFrom = &from
+		}
 		o.At = m.now()
 		if err = platformTx(ctx, tx, &o); err != nil {
 			return err

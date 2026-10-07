@@ -7044,6 +7044,34 @@
     ,
     {"kind":"browser","file":"tests/delivery-rating.spec.ts","name":"usage shows the rework rate by harness","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1024 dark de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1024 dark en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1024 light de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1024 light en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1440 dark de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1440 dark en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1440 light de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1440 light en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 390 dark de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 390 dark en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 390 light de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 390 light en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery loading, empty, unavailable and error replace one slot; readers have no management actions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"failed writes stay honest; project reset offers scope-bound Undo and uses captured revisions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/deploy-target.spec.ts","name":"Needs you names destinations and keeps target-less approvals usable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retired Flow bookmarks open tickets and saved opt-ins cannot revive it","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
@@ -14643,6 +14671,16 @@
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"Decision Desk selected-answer scrolling > retains choice navigation outside the summary and Escape inside it","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"retired Release Walker > is not opened by this scrolling suite","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a failed hold lift preserves the held row and reports its real error","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a pending ticket read and lift result are discarded after ticket or person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a policy save cannot report success after the person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"family eligibility comes from the server; empty allowlists never save and failed writes keep the draft","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"the paused step and configured check progress are shown without inventing a completed step","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/edit-key-scopes.unit.test.ts","name":"adoption confirmation is bound to the acting person and key","tier":"ESSENTIAL"}
     ,
