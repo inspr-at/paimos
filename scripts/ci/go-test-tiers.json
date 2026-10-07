@@ -5058,6 +5058,10 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestProjectionStatesOwnersAndDeadlines","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestQueueQuarantineBindsHeadClassifiesFailuresAndIsolates","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestQueueWorkflowReadRejectsWrongSubjectAndPartialSuite","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestReconcileContinuesAfterConfirmedMissingPull","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestTicketHintsOnlyCanonicalPrefixes","tier":"ESSENTIAL"}

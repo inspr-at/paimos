@@ -48,7 +48,23 @@
         "project_id": "metadata",
         "required_checks": "metadata",
         "deadlines": "metadata",
-        "updated_at": "metadata"
+        "updated_at": "metadata",
+        "required_workflow": "metadata"
+      }
+    },
+    "delivery_queue_failures": {
+      "locator": "delivery_queue_failures WHERE tenant_id = :tenant_id",
+      "columns": {
+        "tenant_id": "metadata",
+        "repository": "metadata",
+        "pull_request": "metadata",
+        "head_sha": "metadata",
+        "check_name": "metadata",
+        "workflow": "metadata",
+        "conclusion": "metadata",
+        "kind": "metadata",
+        "check_run_id": "metadata",
+        "at": "metadata"
       }
     }
   }

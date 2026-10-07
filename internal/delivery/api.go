@@ -173,6 +173,9 @@ func nullable(s string) any {
 	return s
 }
 func validateSettings(s Settings) error {
+	if s.RequiredWorkflow != nil && (strings.TrimSpace(*s.RequiredWorkflow) != *s.RequiredWorkflow || len(*s.RequiredWorkflow) == 0 || len(*s.RequiredWorkflow) > 200) {
+		return fail(400, "invalid required workflow")
+	}
 	if s.RequiredChecks != nil {
 		if len(*s.RequiredChecks) > 64 {
 			return fail(400, "too many required checks")
@@ -250,7 +253,7 @@ func (m *Module) settings(w http.ResponseWriter, r *http.Request) {
 				input.Deadlines = map[State]int{}
 			}
 			raw, _ := json.Marshal(input.Deadlines)
-			_, err = tx.Exec(ctx, `INSERT INTO delivery_settings(tenant_id,project_id,required_checks,deadlines) VALUES($1,$2,$3,$4) ON CONFLICT(tenant_id,(coalesce(project_id,'00000000-0000-0000-0000-000000000000'::uuid))) DO UPDATE SET required_checks=EXCLUDED.required_checks,deadlines=EXCLUDED.deadlines,updated_at=clock_timestamp()`, p.TenantID, project, checks, raw)
+			_, err = tx.Exec(ctx, `INSERT INTO delivery_settings(tenant_id,project_id,required_checks,deadlines,required_workflow) VALUES($1,$2,$3,$4,$5) ON CONFLICT(tenant_id,(coalesce(project_id,'00000000-0000-0000-0000-000000000000'::uuid))) DO UPDATE SET required_checks=EXCLUDED.required_checks,deadlines=EXCLUDED.deadlines,required_workflow=EXCLUDED.required_workflow,updated_at=clock_timestamp()`, p.TenantID, project, checks, raw, input.RequiredWorkflow)
 			if err != nil {
 				return err
 			}

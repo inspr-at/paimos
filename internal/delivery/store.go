@@ -43,15 +43,16 @@ func settingsTx(ctx context.Context, tx pgx.Tx, project *string) (Settings, erro
 			continue
 		}
 		var checks []string
+		var workflow *string
 		var raw []byte
-		err := tx.QueryRow(ctx, `SELECT required_checks,deadlines FROM delivery_settings WHERE project_id IS NOT DISTINCT FROM $1::uuid`, scope).Scan(&checks, &raw)
+		err := tx.QueryRow(ctx, `SELECT required_checks,deadlines,required_workflow FROM delivery_settings WHERE project_id IS NOT DISTINCT FROM $1::uuid`, scope).Scan(&checks, &raw, &workflow)
 		if errors.Is(err, pgx.ErrNoRows) {
 			continue
 		}
 		if err != nil {
 			return out, err
 		}
-		row := Settings{}
+		row := Settings{RequiredWorkflow: workflow}
 		if checks != nil {
 			row.RequiredChecks = &checks
 		}

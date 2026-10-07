@@ -43,16 +43,21 @@ func owner(s State) string {
 }
 
 type Settings struct {
-	RequiredChecks *[]string     `json:"required_checks,omitempty"`
-	Deadlines      map[State]int `json:"deadlines,omitempty"`
+	RequiredWorkflow *string       `json:"required_workflow,omitempty"`
+	RequiredChecks   *[]string     `json:"required_checks,omitempty"`
+	Deadlines        map[State]int `json:"deadlines,omitempty"`
 }
 
 func defaults() Settings {
 	checks := []string{"go", "web", "release-check", "e2e", "migration-compat"}
-	return Settings{&checks, map[State]int{Reviewed: 30, Pushed: 60, CIGreen: 20, InQueue: 60, QueueFailed: 120}}
+	workflow := "CI"
+	return Settings{RequiredWorkflow: &workflow, RequiredChecks: &checks, Deadlines: map[State]int{Reviewed: 30, Pushed: 60, CIGreen: 20, InQueue: 60, QueueFailed: 120}}
 }
 func effective(parent, child Settings) Settings {
-	out := Settings{parent.RequiredChecks, map[State]int{}}
+	out := Settings{RequiredWorkflow: parent.RequiredWorkflow, RequiredChecks: parent.RequiredChecks, Deadlines: map[State]int{}}
+	if child.RequiredWorkflow != nil {
+		out.RequiredWorkflow = child.RequiredWorkflow
+	}
 	for k, v := range parent.Deadlines {
 		out.Deadlines[k] = v
 	}
