@@ -160,7 +160,7 @@ func TestOverviewValuesMaskingExplicitScopeAndTenantIsolation(t *testing.T) {
 	// A confirmed shared pool cannot disclose its private member through the
 	// owner's other account. Sharing the peer explicitly releases the values.
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_pool_fingerprint=repeat('ab',32) WHERE id=ANY($1::uuid[])`, []string{accounts[0].ID, accounts[1].ID})
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=repeat('ab',32),quota_pool_fingerprint=repeat('ab',32) WHERE id=ANY($1::uuid[])`, []string{accounts[0].ID, accounts[1].ID})
 		return err
 	}); err != nil {
 		t.Fatal(err)
