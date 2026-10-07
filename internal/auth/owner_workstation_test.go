@@ -53,10 +53,12 @@ func newWorkstationFixture(t *testing.T) *workstationFixture {
 	t.Helper()
 	m, owner := keyFixture(t)
 	scopes := []string{}
+	excluded := builtinAgentExclusions(t)
 	for _, p := range authz.Registry {
-		// The fixture switches to built-in Admin below. Recurrence automation
-		// requires an explicit custom-role grant, even for workstation keys.
-		if p.AgentGrantable && p.Key != "recurrences.manage" {
+		// The fixture switches to built-in Admin below. Excluded permissions
+		// (recurrence, delivery and review-policy management) require an
+		// explicit custom-role grant, even for workstation keys.
+		if p.AgentGrantable && !excluded[p.Key] {
 			scopes = append(scopes, p.Key)
 		}
 	}

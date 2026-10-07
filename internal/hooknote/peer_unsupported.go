@@ -9,4 +9,4 @@ import "net"
 // requires are not implemented. A missing check is not a successful match.
 func Snapshot(net.Conn) (Process, error) { return Process{}, ErrPeer }
 
-func Observe(int) (Process, error) { return Process{}, ErrPeer }
+func observe(int, bool) (Process, error) { return Process{}, ErrPeer }

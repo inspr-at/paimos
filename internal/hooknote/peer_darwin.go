@@ -66,7 +66,7 @@ func peerAudit(fd int) (pid, uid int, pidVersion uint32, err error) {
 	return int(raw[5]), int(raw[1]), raw[7], nil
 }
 
-func Observe(pid int) (Process, error) {
+func observe(pid int, requireProjectCWD bool) (Process, error) {
 	fail := ErrPeer
 	if pid < 1 {
 		return Process{}, fail
@@ -100,7 +100,7 @@ func Observe(pid int) (Process, error) {
 		return Process{}, fail
 	}
 	cwd, err := filepath.EvalSymlinks(string(cwdBytes[:end]))
-	if err != nil || len(cwd) < 2 || cwd[0] != '/' {
+	if err != nil || !filepath.IsAbs(cwd) || (requireProjectCWD && cwd == "/") {
 		return Process{}, fail
 	}
 	// The mapped vnode, not a stat of the pathname. Replacing the directory
