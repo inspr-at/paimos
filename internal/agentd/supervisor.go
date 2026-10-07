@@ -913,9 +913,14 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		// of leaving it queued until its allowance expires. Local dependency or
 		// profile repairs retain their existing queued recovery path.
 		if reason == "" && !held && !s.accountAvailable(run.requestedAccount()) {
+			accountID := run.requestedAccount()
 			s.mu.Lock()
-			knownFailure := s.probePendingSince[run.requestedAccount()].IsZero() && s.blockedAccounts[run.requestedAccount()] && !s.blockedAccounts[""] &&
-				s.dependencyErrors[run.requestedAccount()] == "" && !s.harnessFailed[run.requestedAccount()] && !s.profilePermissions[run.requestedAccount()]
+			localRepair := s.dependencyErrors[accountID] != "" || s.harnessFailed[accountID] || s.profilePermissions[accountID]
+			switch s.probeReasonDetails[accountID] {
+			case agentsetup.ProbeProfileMissing, agentsetup.ProbeProfilePhysical, agentsetup.ProbeProfilePrivate, agentsetup.ProbeClaudeDefaultPrivate:
+				localRepair = true
+			}
+			knownFailure := !localRepair && s.probePendingSince[accountID].IsZero() && s.blockedAccounts[accountID] && !s.blockedAccounts[""]
 			s.mu.Unlock()
 			if knownFailure && s.dispatchAllowed(run.requestedAccount()) {
 				reason = "account_not_ready"
