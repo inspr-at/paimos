@@ -192,13 +192,27 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
 test('verification errors stay honest and changing computer discards pending feedback', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 1000 })
   const { c, world } = await setup(page, 'dark')
+  const other = world.computers[1]! as unknown as PairingView
+  other.revision = 7
+  other.enrollments.push({ ...c.enrollments.find(e => e.account_id === ACCOUNTS.claude)! })
+  const targets: string[] = []
   let reject = true, release!: () => void
   const barrier = new Promise<void>(resolve => { release = resolve })
   await page.route('**/api/agent-pairing/computers/*/enrollments/*/verify', async route => {
+    targets.push(new URL(route.request().url()).pathname)
     if (reject) { await route.fulfill({ status: 409, json: { code: 'revision_conflict' } }); return }
     await barrier
     await route.fulfill({ json: { account_id: ACCOUNTS.claude, run_id: run } })
   })
+  // The same approved account can be enrolled on multiple computers. The
+  // clicked attention row must request only its own computer's verification.
+  await page.goto('/settings/accounts')
+  const attention = page.locator(`[data-need="verify:${other.computer_id}:${ACCOUNTS.claude}"]`)
+  const attentionVerify = attention.locator('.verify-button')
+  const attentionGuard = await controlStability(page, { attentionVerify })
+  await attentionGuard.check(async () => { await attentionVerify.click(); await expect(attention.getByRole('status')).toContainText('account or verification changed') })
+  attentionGuard.done()
+  expect(targets).toEqual([`/api/agent-pairing/computers/${other.computer_id}/enrollments/${ACCOUNTS.claude}/verify`])
   await page.goto(`/settings/accounts?computer=${c.computer_id}`)
   const pane = page.locator('section.pane'), verify = pane.locator('.pane-foot .verify-button')
   const guard = await controlStability(page, { verify, close: pane.getByRole('button', { name: 'Close details' }) })
