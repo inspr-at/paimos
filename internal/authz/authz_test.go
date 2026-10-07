@@ -80,8 +80,8 @@ func TestViewerReadsStoredReviewPolicy(t *testing.T) {
 }
 
 func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
-	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage", "delivery.manage", "reviewpolicy.manage"}) {
-		t.Fatal("built-in agent exclusions drifted from the explicit recurrence, delivery and review policies")
+	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage", "delivery.manage", "reviewpolicy.manage", "account.overview.read"}) {
+		t.Fatal("built-in agent exclusions drifted from the explicit recurrence, delivery, review and overview policies")
 	}
 	for _, key := range builtinAgentExclusions {
 		permission, ok := Lookup(key)

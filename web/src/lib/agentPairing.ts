@@ -61,6 +61,7 @@ export interface RequestedAccount {
   label: string
   model_profile_id?: string
   provider?: string
+  config_home_id?: string
 }
 
 /** Server-derived. A missing entry is not a claim that verification works. */
@@ -472,7 +473,7 @@ export function registerAgentUrl(guide: PairingGuide): string {
 export function defaultSelectedAccountKeys(accounts: readonly RequestedAccount[]): string[] {
   const keys: string[] = []
   for (const group of groupAccounts(accounts).values()) {
-    if (group.length === 1) keys.push(group[0]!.account_key)
+    if (group.length === 1 || group.every(account => !!account.config_home_id) && new Set(group.map(account => account.config_home_id)).size === group.length) keys.push(...group.map(account => account.account_key))
   }
   return keys
 }
@@ -1833,6 +1834,11 @@ function accounts(value: unknown): RequestedAccount[] {
       harness: token(record.harness, 'harness'),
       label: bounded(record.label, 'label', 128),
     }
+    if (record.config_home_id != null) {
+      const home = bounded(record.config_home_id, 'config_home_id', 64)
+      if (!/^[0-9a-f]{64}$/.test(home)) invalid('config_home_id')
+      account.config_home_id = home
+    }
     if (record.model_profile_id != null) account.model_profile_id = uuid(record.model_profile_id, 'model_profile_id')
     if (record.provider != null) {
       const provider = bounded(record.provider, 'provider', 64)
@@ -1909,15 +1915,20 @@ function groupAccounts(accounts: readonly RequestedAccount[]): Map<string, Reque
 function orderedSelection(accounts: readonly RequestedAccount[], selected: readonly string[]): { ok: true; keys: string[] } | { ok: false; message: string; next: string } {
   const known = new Map(accounts.map(account => [account.account_key, account]))
   const keys: string[] = []
-  const harnesses = new Set<string>()
+  const harnesses = new Map<string, string | undefined>()
+  const homes = new Set<string>()
   for (const account of accounts) {
     if (!selected.includes(account.account_key) || keys.includes(account.account_key)) continue
     const match = known.get(account.account_key)
     if (!match) continue
-    if (harnesses.has(match.harness)) {
-      return { ok: false, message: `Choose one ${match.harness} account.`, next: 'A pairing approves one account for each harness you include.' }
+    if (harnesses.has(match.harness) && (!harnesses.get(match.harness) || !match.config_home_id)) {
+      return { ok: false, message: `Choose one ${match.harness} account without isolation.`, next: 'Several accounts for the same harness require a separate isolated config home for each account.' }
     }
-    harnesses.add(match.harness)
+    if (match.config_home_id && homes.has(match.config_home_id)) {
+      return { ok: false, message: 'Selected accounts share a config home.', next: 'Give each account a separate isolated config home.' }
+    }
+    harnesses.set(match.harness, match.config_home_id)
+    if (match.config_home_id) homes.add(match.config_home_id)
     keys.push(account.account_key)
   }
   if (selected.some(key => !known.has(key))) {

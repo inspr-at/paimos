@@ -280,6 +280,15 @@ func mask(obj map[string]any) {
 	if _, ok := obj["cost_limit_supported"]; ok {
 		obj["cost_limit_supported"] = false
 	}
+	// routable is quota headroom. A visible overview can reach this boundary
+	// after sharing is revoked. Normalize that row to the constant redacted
+	// shape: never routable, a state wait, and no routing advice.
+	if _, ok := obj["routable"]; ok {
+		obj["routable"] = false
+		obj["wait"] = map[string]any{"code": "state", "run_now_allowed": false}
+		delete(obj, "routing")
+		obj["details_redacted"] = true
+	}
 	// CapacitySchedule has required timezone/week. Keep a valid neutral
 	// placeholder and mark the containing projection, never expose its owner
 	// calendar/reserve. Consumers must ignore schedule when details are masked.
