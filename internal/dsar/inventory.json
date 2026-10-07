@@ -80,8 +80,12 @@
         "required_workflow": "metadata"
       }
     },
-    "delivery_queue_failures": {
-      "locator": "delivery_queue_failures WHERE tenant_id = :tenant_id",
+    {
+      "table": "delivery_queue_failures",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
       "columns": {
         "tenant_id": "metadata",
         "repository": "metadata",

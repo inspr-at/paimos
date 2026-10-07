@@ -5114,6 +5114,8 @@
     ,
     {"kind":"go","package":"internal/deploytarget","name":"TestNormalizeRequiresDestinationAndChange","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/dsar","name":"TestQuarantineInventoryParsesWithWorkflowColumn","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/embedding","name":"TestContentHashAndVector","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/embedding","name":"TestFromEnvAndHTTPProvider","tier":"GATED-FULL"}
