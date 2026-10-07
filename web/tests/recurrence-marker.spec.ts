@@ -464,8 +464,13 @@ test('theme token consumers recolour while fixed warnings and controls stay stil
         expect(await colour('#sample-warning', 'color')).toBe(baseline.warning)
         expect(await colour('#sample-categories svg:first-child circle', 'fill')).toBe(baseline.category)
         expect(await colour('#sample-categories svg:nth-child(2) circle', 'fill')).toBe(baseline.status)
-        const tick = await check.evaluate(el => getComputedStyle(el, '::after').borderBottomColor)
-        expect(tick).toBe(await colour('#sample-action', 'color'))
+        const tick = await check.evaluate(el => {
+          const mark = getComputedStyle(el, '::after')
+          return { ink: mark.backgroundColor, left: mark.borderLeftStyle, top: mark.borderTopStyle }
+        })
+        expect(tick.left).toBe('none')
+        expect(tick.top).toBe('none')
+        expect(tick.ink).toBe(await colour('#sample-action', 'color'))
       } },
       { name: 'hover primary action', run: () => action.hover() },
       { name: 'toggle shared switch', run: () => toggle.uncheck() },

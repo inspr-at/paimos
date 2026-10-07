@@ -190,7 +190,9 @@ export function clearedFilters(): Partial<ListFilters> {
 export interface ViewShape { filters: Record<string, string>; sort_keys: string[]; group_by: GroupBy; columns: ColumnId[]; mode: ListFilters['mode'] }
 export function viewShape(filters: ListFilters): ViewShape {
   const { sort, group: _group, cols: _cols, v: _v, view: _mode, ...rest } = filtersToQuery(filters)
-  return { filters: rest, sort_keys: sort ? sort.split(',') : [], group_by: filters.group, columns: [...PINNED, ...(filters.cols ?? [])], mode: filters.mode }
+  // No column choice stays empty and reloads as automatic. An explicit set, including
+  // pinned-only, keeps Key and Title so it does not collapse back into the person's columns.
+  return { filters: rest, sort_keys: sort ? sort.split(',') : [], group_by: filters.group, columns: filters.cols == null ? [] : [...PINNED, ...filters.cols], mode: filters.mode }
 }
 export function filtersFromView(view: { id: string; filters: Record<string, unknown>; sort_keys: string[]; group_by: string; columns: string[]; mode?: ListFilters['mode'] }): ListFilters {
   const query: Record<string, unknown> = {}

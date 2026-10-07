@@ -13926,6 +13926,8 @@
     ,
     {"kind":"node","file":"tests/theme-control-geometry.test.ts","name":"every canvas token has a darker canvas-lo beside it and the stage gradient falls back to canvas","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/theme-control-geometry.test.ts","name":"the shared checkbox tick is primary-on ink and not a left or top edge","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/theme-control-geometry.test.ts","name":"the shared switch sizes its knob from the track and the agents label keeps the 44px hit target","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/ticket-agent-work.test.ts","name":"a numeric cost in the payload is unknown, not displayed","tier":"GATED-FULL"}

@@ -25,6 +25,13 @@ test('every canvas token has a darker canvas-lo beside it and the stage gradient
   assert.doesNotMatch(rule[1], /var\(--canvas-lo\)(?!,)/)
 })
 
+test('the shared checkbox tick is primary-on ink and not a left or top edge', () => {
+  const tick = base.slice(base.indexOf('.check-box:checked::after'), base.indexOf('.check-box:focus-visible'))
+  assert.match(tick, /background:\s*var\(--primary-on\)/)
+  assert.match(tick, /mask-image:/)
+  assert.doesNotMatch(tick, /border-(?:left|top)/)
+})
+
 test('the shared switch sizes its knob from the track and the agents label keeps the 44px hit target', () => {
   const shared = base.slice(base.indexOf('/* Switch */'), base.indexOf('/* Segmented control */'))
   assert.match(shared, /\.switch input \{[^}]*container-type:\s*inline-size/)

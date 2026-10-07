@@ -299,7 +299,7 @@ onBeforeUnmount(() => { close(); stopAccess(); stopLink() })
 .desk-acts.at-bottom { display: none; }
 .desk-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 42px; padding: 0 18px; border: 0; border-radius: 999px; font-size: 13.5px; font-weight: 650; white-space: nowrap; }
 .desk-btn.ghost { width: 128px; border: 1px solid var(--glass-edge); background: var(--btn-bg); box-shadow: var(--shadow-btn); }
-.desk-btn.primary { width: 212px; background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo)); color: var(--primary-on); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--surface-highlight) 55%, transparent), 0 8px 18px -10px var(--scrim); }
+.desk-btn.primary { width: 212px; background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo)); color: var(--primary-on); box-shadow: inset 0 1px 0 var(--glass-edge), 0 8px 18px -10px var(--scrim); }
 .desk-btn.primary .keycap { color: var(--primary-on); background: color-mix(in srgb, var(--primary-on) 16%, transparent); }
 .desk-btn:disabled { opacity: .4; }
 .desk-x { display: grid; place-items: center; flex: none; width: 40px; height: 40px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); }
