@@ -161,7 +161,9 @@ func TestMergeAuditWebhookReconciliationAndIsolation(t *testing.T) {
 	stale := queue
 	stale.SHA = strings.Repeat("e", 40)
 	stale.Head = strings.Repeat("a", 40)
-	g.checks[stale.Head] = auditGreen()
+	// This merge is still the queue bot, so its checks are on the merge
+	// commit. The unreviewed head must not satisfy the review on its own.
+	g.checks[stale.SHA] = auditGreen()
 	auditSend(t, f, "pull_request", "audit-stale-head", auditPRBody(f, stale), 204)
 	if a = auditRead(t, f, stale.SHA); !reflect.DeepEqual(a.Flags, []string{"no_review"}) {
 		t.Fatalf("wrong head satisfied review: %+v", a)
