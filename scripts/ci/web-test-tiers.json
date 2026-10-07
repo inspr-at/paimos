@@ -100,11 +100,23 @@
     ,
     "browser:tests/agent-pause.spec.ts:1440 dark: scope, preview, levels and report controls stay under the pointer"
     ,
+    "browser:tests/agent-pause.spec.ts:1440 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
+    ,
+    "browser:tests/agent-pause.spec.ts:1440 dark: the head stays on one line beside the session panel while a stop is requested"
+    ,
     "browser:tests/agent-pause.spec.ts:1440 light: scope, preview, levels and report controls stay under the pointer"
+    ,
+    "browser:tests/agent-pause.spec.ts:1440 light: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
+    ,
+    "browser:tests/agent-pause.spec.ts:1440 light: the head stays on one line beside the session panel while a stop is requested"
     ,
     "browser:tests/agent-pause.spec.ts:390 dark: scope, preview, levels and report controls stay under the pointer"
     ,
+    "browser:tests/agent-pause.spec.ts:390 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
+    ,
     "browser:tests/agent-pause.spec.ts:390 light: scope, preview, levels and report controls stay under the pointer"
+    ,
+    "browser:tests/agent-pause.spec.ts:390 light: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
     ,
     "browser:tests/agent-pause.spec.ts:AEON-783: chosen agents keeps Done in, By, Cancel and Submit still"
     ,
@@ -118,11 +130,19 @@
     ,
     "browser:tests/agent-pause.spec.ts:AEON-783: progress distinguishes handover, confirmed stop and lost contact"
     ,
+    "browser:tests/agent-pause.spec.ts:AEON-783: the footer summary of a running wind-down opens the head chip status"
+    ,
     "browser:tests/agent-pause.spec.ts:State groups running agents, idle hosts and offline hosts in that order"
+    ,
+    "browser:tests/agent-pause.spec.ts:Where lists computers without running agents and refuses them instead of starting nothing"
+    ,
+    "browser:tests/agent-pause.spec.ts:a failed status read says so with a Retry instead of hiding the wind-down"
     ,
     "browser:tests/agent-pause.spec.ts:deadline alone never announces completion; reload shows durable handovers and resume remains a request"
     ,
     "browser:tests/agent-pause.spec.ts:dismissing a completed report before its deadline has no withdrawal toast or Undo"
+    ,
+    "browser:tests/agent-pause.spec.ts:wind-down previews only owned work and a reloaded all-computer report leaves new agents untouched"
     ,
     "browser:tests/agent-pause.spec.ts:wind-down previews only owned work and a reloaded all-host report leaves new agents unticked"
     ,
@@ -5356,17 +5376,29 @@
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 dark: the head stays on one line beside the session panel while a stop is requested","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"1440 light: the head stays on one line beside the session panel while a stop is requested","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 dark: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 dark: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 light: scope, preview, levels and report controls stay under the pointer","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 light: stop request stays visible until the worker confirms stopped","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"390 light: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"AEON-783: chosen agents keeps Done in, By, Cancel and Submit still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -5380,11 +5412,19 @@
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"AEON-783: progress distinguishes handover, confirmed stop and lost contact","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"AEON-783: the footer summary of a running wind-down opens the head chip status","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"State groups running agents, idle hosts and offline hosts in that order","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"Where lists computers without running agents and refuses them instead of starting nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"a failed status read says so with a Retry instead of hiding the wind-down","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"deadline alone never announces completion; reload shows durable handovers and resume remains a request","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"dismissing a completed report before its deadline has no withdrawal toast or Undo","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"wind-down previews only owned work and a reloaded all-computer report leaves new agents untouched","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/agent-pause.spec.ts","name":"wind-down previews only owned work and a reloaded all-host report leaves new agents unticked","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
