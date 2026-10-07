@@ -479,15 +479,20 @@ test.describe('screenshots', () => {
 
 // AEON-886: opt-in, honest errors and stable controls in the existing account detail.
 test('owner login usage switch stays put and failed saves preserve consent', async ({ page }) => {
-  const { capacity } = await setup(page)
+  const { capacity } = await setup(page, { apiKey: true })
   const account = capacity.accounts.find(a => a.id === ACCOUNTS.main)!
   Object.assign(account, { owner_person_id: me.id, link_revision: 3, usage_probe_enabled: false })
+  const pi = capacity.accounts.find(a => a.id === ACCOUNTS.pi)!
+  Object.assign(pi, { provider: 'openrouter', owner_person_id: me.id, link_revision: 3, usage_probe_enabled: false, usage_budget: {
+    currency: 'USD', source: 'agentd', read_at: new Date(NOW).toISOString(), key_usage_usd: 12.5, key_limit_usd: 50, key_remaining_usd: 37.5, balance_usd: null,
+  } })
   let fail = false
   const writes: unknown[] = []
   await page.route('**/api/agent-accounts/*/usage-probe', async route => {
     const body = route.request().postDataJSON(); writes.push(body)
     if (fail) return route.fulfill({ status: 403, json: { error: 'owner permission revoked' } })
-    Object.assign(account, { usage_probe_enabled: body.enabled })
+    const id = new URL(route.request().url()).pathname.split('/')[3]
+    Object.assign(capacity.accounts.find(a => a.id === id)!, { usage_probe_enabled: body.enabled })
     return route.fulfill({ status: 204 })
   })
   await open(page)
@@ -517,4 +522,18 @@ test('owner login usage switch stays put and failed saves preserve consent', asy
     await expect(toggle).toHaveAttribute('aria-checked', before!)
   })
   guard.done()
+  fail = false
+  const piDetail = await details(page, ACCOUNTS.pi)
+  await expect(piDetail).toContainText('Dollar budget')
+  await expect(piDetail).toContainText('$12.50 used · $50.00 key limit · $37.50 key remaining · Account balance unknown')
+  await expect(piDetail.locator('.fact.window')).toHaveCount(0)
+  const piToggle = piDetail.getByRole('switch', { name: "Read usage with this CLI's own login" })
+  const piGuard = await controlStability(page, { toggle: piToggle })
+  await piGuard.check(async () => {
+    await piToggle.click()
+    await expect(piToggle).toHaveAttribute('aria-checked', 'true')
+  })
+  piGuard.done()
+  expect(await noScroll(page)).toBe(true)
+  await page.screenshot({ path: test.info().outputPath('usage-probe-dollar-budget.png'), fullPage: true })
 })

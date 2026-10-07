@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math"
 	"net/http"
 	"path/filepath"
 	"sort"
@@ -314,6 +315,9 @@ func (c Client) openrouter(ctx context.Context, home string, now time.Time) Resu
 	b := &capacity.Budget{Currency: "USD", Source: "agentd", ReadAt: now, KeyUsageUSD: *v.Usage, KeyLimitUSD: v.Limit, KeyRemainingUSD: v.Remaining}
 	if b.KeyLimitUSD == nil {
 		b.KeyRemainingUSD = nil
+	} else if *b.KeyLimitUSD == 0 {
+		zero := 0.0
+		b.KeyRemainingUSD = &zero
 	}
 	if b.Validate(now) != nil {
 		return Result{Cause: "protocol"}
@@ -330,6 +334,11 @@ func (c Client) openrouter(ctx context.Context, home string, now time.Time) Resu
 	}
 	// /credits can require a management key. Do not create one or invent balance.
 	if cause == "" && credits.Data != nil && credits.Data.Total != nil && credits.Data.Used != nil {
+		for _, v := range []float64{*credits.Data.Total, *credits.Data.Used} {
+			if v < 0 || v > 1e12 || math.IsNaN(v) || math.IsInf(v, 0) {
+				return Result{Cause: "protocol"}
+			}
+		}
 		remaining := *credits.Data.Total - *credits.Data.Used
 		if remaining < 0 {
 			remaining = 0

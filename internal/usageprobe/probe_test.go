@@ -139,4 +139,27 @@ func TestOpenRouterUnknownBalanceDoesNotInventCredit(t *testing.T) {
 	if got.Cause != "" || got.Budget == nil || got.Budget.KeyRemainingUSD != nil || got.Budget.BalanceUSD != nil {
 		t.Fatal("unknown cap or balance inferred from unrelated field")
 	}
+	for _, tc := range []struct {
+		key, credits, cause string
+		wantZero            bool
+	}{
+		{`{"data":{"usage":0,"limit":0}}`, "", "", true},
+		{`{"data":{"usage":0,"limit":10,"limit_remaining":5}}`, `{"data":{"total_credits":-1,"total_usage":-2}}`, "protocol", false},
+		{`{"data":{"usage":0,"limit":10,"limit_remaining":5}}`, `{"data":{"total_credits":1000000000001,"total_usage":1000000000000}}`, "protocol", false},
+	} {
+		client.HTTP.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+			status, body := 200, tc.key
+			if r.URL.Path == "/api/v1/credits" {
+				status, body = 403, ""
+				if tc.credits != "" {
+					status, body = 200, tc.credits
+				}
+			}
+			return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		})
+		got := client.Capture(t.Context(), Target{Harness: "pi", Home: home, Provider: "openrouter"}, now)
+		if got.Cause != tc.cause || tc.wantZero && (got.Budget == nil || got.Budget.KeyRemainingUSD == nil || *got.Budget.KeyRemainingUSD != 0) {
+			t.Fatal("zero cap lost or invalid balance accepted")
+		}
+	}
 }

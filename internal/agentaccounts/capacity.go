@@ -15,6 +15,7 @@ import (
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -91,7 +92,7 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 				if a.Harness != "pi" || a.Provider != "openrouter" || in.Budget.Validate(now) != nil {
 					return fail(400, "invalid capacity budget")
 				}
-				if _, err := tx.Exec(r.Context(), `UPDATE agent_accounts SET usage_budget=$2 WHERE id=$1 AND (usage_budget IS NULL OR (usage_budget->>'read_at')::timestamptz<$3)`, id, in.Budget, in.Budget.ReadAt); err != nil {
+				if err := ingestUsageBudget(tenant.WithPrincipal(r.Context(), p), tx, a, *in.Budget, now); err != nil {
 					return err
 				}
 			}
@@ -124,6 +125,25 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// The budget display and existing key-cap admission facts share the same
+// observation. A delayed probe cannot replace a newer stream credit snapshot.
+func ingestUsageBudget(ctx context.Context, tx pgx.Tx, a Account, b capacity.Budget, now time.Time) error {
+	tag, err := tx.Exec(ctx, `UPDATE agent_accounts SET usage_budget=$2 WHERE id=$1 AND (usage_budget IS NULL OR (usage_budget->>'read_at')::timestamptz<$3)`, a.ID, b, b.ReadAt)
+	if err != nil || tag.RowsAffected() == 0 {
+		return err
+	}
+	if a.OpenRouterCredits != nil && !b.ReadAt.After(a.OpenRouterCredits.ObservedAt) {
+		return nil
+	}
+	a.OpenRouterCredits = &openrouter.Credits{ObservedAt: b.ReadAt, Usage: &b.KeyUsageUSD, Limit: b.KeyLimitUSD, Remaining: b.KeyRemainingUSD}
+	a.OpenRouterCredits.Remaining = a.OpenRouterCredits.KeyRemaining()
+	if err := storeLegacyKeyFact(ctx, tx, a, now); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE agent_accounts SET openrouter_credits=$2 WHERE id=$1`, a.ID, a.OpenRouterCredits)
+	return err
 }
 
 func ingestReadings(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, readings []capacity.Reading) error {

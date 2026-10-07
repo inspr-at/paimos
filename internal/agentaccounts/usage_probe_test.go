@@ -4,6 +4,8 @@ package agentaccounts
 import (
 	"encoding/json"
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/openrouter"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -32,9 +34,11 @@ func TestUsageProbeOwnerConsentFencesReadingsAndBinding(t *testing.T) {
 	if c := f.capacity(t); len(c.Windows) != 1 || c.Windows[0].Reading.Source != "agentd" || c.Windows[0].Reading.UsedPercent != 17 {
 		t.Fatal("idle reading did not project a live window")
 	}
-	var ready []AccountReadiness
+	var ready struct {
+		Items []AccountReadiness `json:"items"`
+	}
 	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/readiness", "", 200, &ready)
-	if len(ready) != 1 || ready[0].DisplayReason == UsageUnknownReason {
+	if len(ready.Items) != 1 || ready.Items[0].DisplayReason == UsageUnknownReason {
 		t.Fatal("idle reading remained usage unknown")
 	}
 	callStatus(t, f.mod, &f.admin, "", "PUT", path+"/usage-probe", `{"binding_revision":0,"enabled":false}`, 204, nil)
@@ -61,8 +65,15 @@ func TestUsageProbeOwnerConsentFencesReadingsAndBinding(t *testing.T) {
 // the existing private-owner boundary applied to accounts and capacity alike.
 func TestUsageProbeDollarBudgetStorageAndPrivacy(t *testing.T) {
 	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
-	f := readinessWorld(t, "usage-probe-budget", now)
-	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET harness='pi',provider='openrouter' WHERE id=$1`, f.account.ID); err != nil {
+	reset(t)
+	f := limitFixture{admin: makePrincipal(t, "usage-probe-budget", "person", "Owner", []string{"admin"})}
+	f.runner = addPrincipal(t, f.admin.TenantID, "agent", "runner", []string{"admin"})
+	f.token = issueKey(t, f.runner, []string{"account.manage", "account.probe"})
+	f.mod = fixedClockModule{Module: accountsMod(), at: now}
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"main","harness":"pi","daemon_id":"daemon-a","label":"Main"}`, 201, &f.account)
+	ownFixtureAccount(t, f.admin, &f.account)
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET provider='openrouter' WHERE id=$1`, f.account.ID); err != nil {
 		t.Fatal(err)
 	}
 	path := "/api/agent-accounts/" + f.account.ID
@@ -84,6 +95,29 @@ func TestUsageProbeDollarBudgetStorageAndPrivacy(t *testing.T) {
 	if f.capacity(t).Budget.KeyUsageUSD != 12.5 {
 		t.Fatal("older budget replaced latest")
 	}
+	// A zero cap is a durable stop. A later unknown cap cannot erase it;
+	// only a later positive observation clears the key-specific stop.
+	checkCap := func(at time.Time, cap, left *float64, wantTry bool) {
+		t.Helper()
+		input.Budget = &capacity.Budget{Currency: "USD", Source: "agentd", ReadAt: at, KeyUsageUSD: 12.5, KeyLimitUSD: cap, KeyRemainingUSD: left}
+		callStatus(t, f.mod, &f.runner, f.token, "POST", path+"/readings", encoded(t, input), 204, nil)
+		var ready struct {
+			Items []AccountReadiness `json:"items"`
+		}
+		callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/readiness", "", 200, &ready)
+		if len(ready.Items) != 1 || ready.Items[0].CanTry != wantTry {
+			t.Fatal("usage probe key cap did not fence readiness")
+		}
+		if !wantTry && !slices.Contains(ready.Items[0].ReasonCodes, "key_cap_exhausted") {
+			t.Fatal("readiness blocked for a different reason")
+		}
+	}
+	zeroCap := 0.0
+	checkCap(now.Add(time.Second), &zeroCap, nil, false)
+	checkCap(now.Add(2*time.Second), nil, nil, false)
+	checkCap(now.Add(3*time.Second), &limit, &remaining, true)
+	callStatus(t, f.mod, &f.runner, f.token, "POST", path+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, OpenRouterCredits: &openrouter.Credits{ObservedAt: now.Add(10 * time.Second), Limit: &zeroCap}}), 200, nil)
+	checkCap(now.Add(4*time.Second), &limit, &remaining, false)
 	other := addPrincipal(t, f.admin.TenantID, "person", "Other admin", []string{"admin"})
 	for _, route := range []string{"/api/agent-accounts", "/api/agent-accounts/capacity"} {
 		status, raw := call(t, f.mod, &other, "", "GET", route, "")
