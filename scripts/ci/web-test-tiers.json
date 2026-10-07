@@ -18660,6 +18660,8 @@
     ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"failed limit writes retain the last server values and stale revisions are explained","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"kinds of work does not link to an unregistered Models board","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"paginates with explicit bounds and reports truncation instead of a complete list","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"pins Everything else last, excludes review and preserves the hidden review row in an order write","tier":"ESSENTIAL"}

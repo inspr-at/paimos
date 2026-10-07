@@ -136,7 +136,6 @@ function newKind(event: MouseEvent) { edit(null, event.currentTarget as HTMLElem
     <p class="who"><AppIcon :name="editable ? 'shield' : 'eye'" :size="14" /><span>{{ t(editable ? 'intro' : 'introRead') }}</span></p>
     <SettingsCard :title="t('title')" icon="list" anchor="k-kinds">
       <template #lead>{{ t('lead') }}</template>
-      <template #aside><RouterLink class="go-link" to="/settings/models">{{ t('openModels') }}<AppIcon name="arrow" :size="14" /></RouterLink></template>
       <div v-if="editable || kindsError" class="kind-toolbar"><button v-if="editable" class="btn" type="button" :disabled="busy || loadingKinds || loadingLimits || !loaded" @click="newKind"><AppIcon name="plus" :size="14" />{{ t('newKind') }}</button><button v-if="kindsError" class="btn sm" type="button" :disabled="busy || loadingKinds" @click="loadKinds">{{ t('retry') }}</button></div>
       <p v-if="loadingKinds && !loaded" role="status">{{ t('loading') }}</p>
       <p v-else-if="kindsError" class="err" role="alert">{{ kindsError }}</p>
@@ -152,8 +151,8 @@ function newKind(event: MouseEvent) { edit(null, event.currentTarget as HTMLElem
 </template>
 <style scoped>
 .kinds-section { gap: 16px; }.who { display: flex; align-items: flex-start; gap: 8px; font-size: 12.5px; color: var(--ink-2); }.who svg { flex: none; margin-top: 3px; }
-.kind-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }.go-link { display: inline-flex; align-items: center; gap: 6px; color: var(--teal-ink); font-size: 12px; text-decoration: none; min-height: 32px; }
+.kind-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }
 .kinds { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }.kind-arch { display: flex; flex-wrap: wrap; gap: 8px 16px; margin-top: 12px; font-size: 12px; color: var(--ink-3); }.archived-kind { overflow-wrap: anywhere; }.err { color: var(--danger); }.faint { color: var(--ink-3); }
-@media (pointer: coarse), (max-width: 720px) { button, .go-link { min-height: 44px; } }
+@media (pointer: coarse), (max-width: 720px) { button { min-height: 44px; } }
 </style>
 <style scoped src="../../styles/settingsButtons.css"></style>

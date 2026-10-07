@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { afterEach, expect, it, vi } from 'vitest'
-import { computed, onScopeDispose, reactive, watch } from 'vue'
+import { computed, defineComponent, onScopeDispose, reactive, watch } from 'vue'
+import { createMemoryHistory, createRouter, type RouteRecordRaw, type Router } from 'vue-router'
+import { parse as parseSFC } from '@vue/compiler-sfc'
+import { NodeTypes, parse as parseTemplate, type AttributeNode, type DirectiveNode, type ElementNode, type TemplateChildNode } from '@vue/compiler-dom'
 import { createScope, scopeOwner } from '../src/lib/identityScope'
 import * as kinds from '../src/lib/workKinds'
 import { textForKinds } from '../src/lib/workKindsCopy'
-import { deferred, flush, setupSource, sourceModule } from './record-source'
+import { deferred, flush, setupSource, sourceModule, sourceText } from './record-source'
 
 const kind = (id = 'design', extra: Partial<kinds.WorkKind> = {}): kinds.WorkKind => ({ id, slug: id, label: id, hint: 'A plain sentence.', position: 0, examples: ['An example'], labels: ['ui'], ticket_count: 2, ...extra })
 const limits: kinds.SituationLimits = { small_hours: 2, fix_rounds: 3, revision: 7, set_by: null, set_at: null }
@@ -103,6 +106,70 @@ it('system kind wording is editable while its immutable ticket area is preserved
   await flush(); state.edit(state.kinds.value[1], {}); state.save(words); await flush()
   expect(update).toHaveBeenCalledWith('security', words, expect.any(AbortSignal))
   expect(state.kinds.value.find((item: kinds.WorkKind) => item.id === 'security')?.slug).toBe('security')
+})
+
+function literalTarget(source: string): string {
+  const match = /^(['"])([\s\S]*)\1$/.exec(source.trim())
+  if (!match) throw new Error(`Navigation target is not a literal: ${source}`)
+  return match[2]
+}
+function navigationTarget(prop: AttributeNode | DirectiveNode, tag: string): string | null {
+  if (prop.type === NodeTypes.ATTRIBUTE) {
+    if ((prop.name !== 'to' && prop.name !== 'href') || !prop.value) return prop.name === 'to' || prop.name === 'href' ? '' : null
+    return prop.value.content
+  }
+  if (prop.name !== 'bind' || prop.arg?.type !== NodeTypes.SIMPLE_EXPRESSION || (prop.arg.content !== 'to' && prop.arg.content !== 'href')) return null
+  if (prop.exp?.type !== NodeTypes.SIMPLE_EXPRESSION) throw new Error(`${tag} binds ${prop.arg.content} dynamically`)
+  return literalTarget(prop.exp.content)
+}
+function navigationTargets(source: string): string[] {
+  const parsed = parseSFC(source)
+  if (parsed.errors.length || !parsed.descriptor.template) throw new Error('Kinds of work template did not parse')
+  const targets: string[] = []
+  const visit = (nodes: TemplateChildNode[]) => {
+    for (const node of nodes) {
+      if (node.type === NodeTypes.ELEMENT) {
+        const element: ElementNode = node
+        if (element.tag === 'RouterLink' || element.tag === 'router-link' || element.tag === 'a') {
+          for (const prop of element.props) {
+            const target = navigationTarget(prop, element.tag)
+            if (target !== null) targets.push(target)
+          }
+        }
+        visit(element.children)
+      } else if (node.type === NodeTypes.IF) for (const branch of node.branches) visit(branch.children)
+      else if (node.type === NodeTypes.FOR) visit(node.children)
+    }
+  }
+  visit(parseTemplate(parsed.descriptor.template.content).children)
+  return targets
+}
+function settingsRouter(): Router {
+  vi.stubGlobal('sessionStorage', { getItem: () => null, removeItem() {}, setItem() {} })
+  const empty = defineComponent({ render: () => null })
+  const session = { identity: { tenant: { id: 'tenant' }, principal: { id: 'person', kind: 'person' } }, requiresSignIn: false, error: '', refresh: vi.fn(async () => {}) }
+  const views = (routes: RouteRecordRaw[]): RouteRecordRaw[] => routes.map(route => ({ ...route, ...(route.component ? { component: empty } : {}), ...(route.children ? { children: views(route.children) } : {}) })) as RouteRecordRaw[]
+  return sourceModule<{ router: Router }>('router.ts', {
+    'vue-router': { createWebHistory: createMemoryHistory, createRouter: (options: Parameters<typeof createRouter>[0]) => createRouter({ ...options, routes: views(options.routes) }) },
+    './lib/brand': { setPageTitle() {} }, './stores/projects': {}, './stores/session': { useSession: () => session }, './stores/workVocabulary': { useWorkVocabulary: () => ({ load: vi.fn(async () => {}) }) },
+    './lib/api': { sessionEnded: {} }, './lib/authz': {}, './lib/toast': {},
+    './lib/attachLink': { hasAttachFragment: () => false, announceAttachCode() {} }, './lib/identityScope': {}, './lib/signInReturn': {},
+    './lib/knowledge': {}, './components/work/projectNavigation': {}, './lib/ticketPeek': {},
+    './views/ProjectsView.vue': { default: empty }, './views/SignInView.vue': { default: empty }, './views/NotFoundView.vue': { default: empty },
+  }).router
+}
+
+it('kinds of work does not link to an unregistered Models board', async () => {
+  const router = settingsRouter()
+  await router.push('/settings/models')
+  expect(router.currentRoute.value.meta.title).toBe('Page not found')
+  const source = sourceText('components/settings/KindsOfWorkSection.vue')
+  expect(source).toContain('anchor="k-kinds"')
+  expect(navigationTargets(source)).toEqual([])
+  await router.push('/settings/workspace#models')
+  expect(router.currentRoute.value.fullPath).toBe('/settings/agents#models')
+  expect(textForKinds(false)('lead')).toContain('Settings › Models')
+  expect(textForKinds(true)('lead')).toContain('Einstellungen › Modelle')
 })
 
 it('bounds response bytes before JSON decoding and rejects repeated pagination cursors', async () => {
