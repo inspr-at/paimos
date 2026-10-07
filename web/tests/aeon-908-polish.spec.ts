@@ -144,6 +144,15 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
       return { centre: fold.x + fold.width / 2, stem: stem.x + stem.width / 2, y: fold.y + fold.height / 2, start: stem.y }
     }))
     for (const joint of joints) expect(Math.abs(joint.centre - joint.stem), 'stem centred under chevron').toBeLessThanOrEqual(.5)
+    // The elbow is the child's connector. Its border box ends on that row's fold centre (AEON-908).
+    const elbows = await tree.locator('.row:has(.tree-guide.elbow)').evaluateAll(rows => rows.map(row => {
+      const slot = row.querySelector('.tree-fold, .tree-fold-space')!.getBoundingClientRect()
+      const guide = row.querySelector('.tree-guide.elbow')!
+      const box = guide.getBoundingClientRect()
+      const stroke = getComputedStyle(guide, '::after')
+      return { centre: slot.x + slot.width / 2, end: box.x + parseFloat(stroke.left) + parseFloat(stroke.width) }
+    }))
+    for (const joint of elbows) expect(Math.abs(joint.centre - joint.end), 'elbow meets fold centre').toBeLessThanOrEqual(.5)
     const rows = await tree.locator('.row').evaluateAll(rows => rows.map(row => { const r = row.getBoundingClientRect(); return { y: r.y, bottom: r.bottom } }))
     for (let i = 1; i < rows.length; i++) expect(rows[i]!.y - rows[i - 1]!.bottom).toBeGreaterThanOrEqual(0)
     const fold = tree.locator('.tree-fold').first()

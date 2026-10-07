@@ -732,12 +732,16 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 .row.worker .c-agent { padding-left: calc(8px + var(--depth) * var(--tree-step)); }
 /* The track hangs from each parent's fold button (AEON-784). Each visible
    descendant carries its ancestors' tracks across row boundaries; the elbow
-   ends at the child's own fold slot, and the last child closes its track. */
+   ends on the child's fold centre, and the last child closes its track.
+   The name column starts after the state column. The row's 6px margin and the
+   name cell's 8px padding put the 24px fold's centre at state-width + 14px,
+   which is where the 1px stem sits (its centre stays within half a pixel).
+   One tree step reaches the next fold's centre. */
 .row > .tree-lines { position: absolute; inset: 0 0 0 calc(var(--state-width) + 14px); padding: 0; pointer-events: none; color: var(--ink-3); }
 .tree-guide, .tree-stem { position: absolute; left: calc(var(--level) * var(--tree-step)); top: 0; bottom: 0; width: var(--tree-step); }
 .tree-guide.continues::before, .tree-guide.elbow::before { content: ''; position: absolute; top: 0; bottom: 0; width: 1px; background: currentColor; }
 .tree-guide.last::before { bottom: auto; height: calc(var(--tree-joint) - 4px); }
-.tree-guide.elbow::after { content: ''; position: absolute; top: calc(var(--tree-joint) - 4px); left: 0; width: calc(var(--tree-step) - 15px); height: 5px; border: solid currentColor; border-width: 0 0 1px 1px; border-radius: 0 0 0 5px; }
+.tree-guide.elbow::after { content: ''; position: absolute; top: calc(var(--tree-joint) - 4px); left: 0; width: var(--tree-step); height: 5px; border: solid currentColor; border-width: 0 0 1px 1px; border-radius: 0 0 0 5px; }
 .tree-stem { top: calc(var(--tree-joint) + 9px); bottom: 0; width: 1px; background: currentColor; }
 /* Every row keeps the fold slot, so names stay on one edge when a parent appears. */
 .tree-fold, .tree-fold-space { flex: none; width: 24px; height: 24px; }
@@ -884,9 +888,11 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
   .session-context { margin-top: 2px; }
   .ctx-beat { display: inline; }
   .ctx-beat::before { content: '·'; margin-right: 6px; }
-  /* Lines run beside the fold buttons: 16 px per level, the elbow ends at the child's fold slot. */
+  /* Lines run beside the fold buttons: 16 px per level. Content inset 10px and a
+     44px fold put its centre at 32px, on the stem. The elbow is one step long,
+     so it ends on the child fold's centre. */
   .row > .tree-lines { left: 32px; }
-  .tree-guide.elbow::after { width: calc(var(--tree-step) - 8px); }
+  .tree-guide.elbow::after { width: var(--tree-step); }
   .tree-stem { top: calc(var(--tree-joint) + 22px); }
   .row:has(.lineage) { grid-template-rows: auto auto auto auto auto; }
   .row:has(.lineage) > .c-agent { grid-row: 1 / 6; }
