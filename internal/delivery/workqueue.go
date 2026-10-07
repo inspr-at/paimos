@@ -303,10 +303,12 @@ func (m *Module) claimQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 				}
 				if reason == "" {
 					var active, merged, held bool
+					// start-queue.sh drops a fix or merge round only for this slug's
+					// head, work/<slug>, or for this round's own pull request.
 					if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_work_rounds WHERE project_id=$1 AND slug=$2 AND state IN ('claimed','running')),
-					 (EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (ticket_node_id=$3 OR ($4::bigint IS NOT NULL AND pull_request=$4)) AND state='merged')
-					 AND NOT EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (ticket_node_id=$3 OR ($4::bigint IS NOT NULL AND pull_request=$4)) AND pull_request IS NOT NULL AND state<>'merged')),
-					 EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (ticket_node_id=$3 OR ($4::bigint IS NOT NULL AND pull_request=$4)) AND state='held')`, project, r.Slug, r.Ticket, r.PR).Scan(&active, &merged, &held); err != nil {
+					 (EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (branch=('work/'||$2) OR ($3::bigint IS NOT NULL AND pull_request=$3)) AND state='merged')
+					 AND NOT EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (branch=('work/'||$2) OR ($3::bigint IS NOT NULL AND pull_request=$3)) AND pull_request IS NOT NULL AND state<>'merged')),
+					 EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (branch=('work/'||$2) OR ($3::bigint IS NOT NULL AND pull_request=$3)) AND state='held')`, project, r.Slug, r.PR).Scan(&active, &merged, &held); err != nil {
 						return out, err
 					}
 					switch {

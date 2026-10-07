@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -138,22 +139,80 @@ func TestDeliveryWorkQueueShadowRotationFreezeReplayAndIsolation(t *testing.T) {
 	if len(denied.Decisions) != 1 || denied.Decisions[0].Reason != "round_hold" {
 		t.Fatal("round hold bypassed")
 	}
-	// An older merged PR must not drop a round when another PR is still open.
-	merged := f.pull()
-	merged.Open, merged.Merged = false, true
-	f.gh.pulls[7] = merged
-	f.webhook(t, "pull_request", "closed", "queue-old-merged", 204)
-	live := f.pull()
-	live.Number = 8
-	f.gh.pulls[8] = live
-	if err := f.m.Reconcile(t.Context(), f.person.TenantID); err != nil {
-		t.Fatal(err)
+	// Merged, open, and held delivery rows decide only work/<slug>, plus this
+	// round's own pull request. A merged or open row on another branch of the
+	// same ticket must not park or keep this slug.
+	insertDelivery := func(branch, state string, pr int64) {
+		t.Helper()
+		f.tx(t, func(tx pgx.Tx) error {
+			_, err := tx.Exec(t.Context(), `INSERT INTO delivery_items(tenant_id,id,project_id,ticket_node_id,repository,pull_request,branch,head_sha,state,state_since,owner,observation,updated_at)
+				VALUES($1,gen_random_uuid(),$2,$3,'example/delivery',$4,$5,$6,$7,timestamptz '2026-10-07T00:00:00Z','person','{}'::jsonb,timestamptz '2026-10-07T00:00:00Z')`,
+				f.person.TenantID, f.project, f.ticket, pr, branch, strings.Repeat("d", 40), state)
+			return err
+		})
 	}
-	var next Round
-	f.call(t, f.person, "POST", path, roundInput(f, "ready-branch", "fix", 2), 201, &next)
+	decision := func(claim QueueClaim, id string) (QueueDecision, bool) {
+		t.Helper()
+		var found QueueDecision
+		n := 0
+		for _, d := range claim.Decisions {
+			if d.Round == id {
+				found = d
+				n++
+			}
+		}
+		return found, n == 1
+	}
+	insertDelivery("work/other-branch", "merged", 21)
+	var fresh Round
+	f.call(t, f.person, "POST", path, roundInput(f, "fresh-branch", "fix", 2), 201, &fresh)
 	f.call(t, f.agent, "POST", path+"/claim", ClaimInput{Request: requestID(8)}, 200, &replay)
-	if replay.Round == nil || replay.Round.ID != next.ID {
-		t.Fatal("old merged PR parked work for an open PR", replay)
+	if replay.Execute || replay.Round == nil || replay.Round.ID != fresh.ID || replay.Round.State != "claimed" {
+		t.Fatal("merged PR on another branch parked this slug", replay)
+	}
+	insertDelivery("work/ready-branch", "merged", 22)
+	insertDelivery("work/other-branch", "pushed", 23)
+	var mergedSlug Round
+	f.call(t, f.person, "POST", path, roundInput(f, "ready-branch", "fix", 3), 201, &mergedSlug)
+	f.call(t, f.agent, "POST", path+"/claim", ClaimInput{Request: requestID(9)}, 200, &replay)
+	mergedDecision, ok := decision(replay, mergedSlug.ID)
+	if replay.Round != nil || !ok || mergedDecision.Action != "park" || mergedDecision.Reason != "already_merged" {
+		t.Fatal("open PR on another branch kept a merged slug", replay)
+	}
+	var stillOpen Round
+	own := roundInput(f, "open-own", "fix", 4)
+	f.call(t, f.person, "POST", path, own, 201, &stillOpen)
+	insertDelivery("work/open-own", "merged", 24)
+	insertDelivery("work/open-own", "pushed", 25)
+	f.call(t, f.agent, "POST", path+"/claim", ClaimInput{Request: requestID(10)}, 200, &replay)
+	if replay.Execute || replay.Round == nil || replay.Round.ID != stillOpen.ID {
+		t.Fatal("open PR on this slug's branch did not keep it", replay)
+	}
+	insertDelivery("work/other-branch", "held", 26)
+	var clear Round
+	f.call(t, f.person, "POST", path, roundInput(f, "clear-branch", "fix", 5), 201, &clear)
+	f.call(t, f.agent, "POST", path+"/claim", ClaimInput{Request: requestID(11)}, 200, &replay)
+	if replay.Execute || replay.Round == nil || replay.Round.ID != clear.ID {
+		t.Fatal("held row on another branch rotated this slug", replay)
+	}
+	insertDelivery("work/branch-held", "held", 27)
+	var heldSlug Round
+	f.call(t, f.person, "POST", path, roundInput(f, "branch-held", "fix", 6), 201, &heldSlug)
+	f.call(t, f.agent, "POST", path+"/claim", ClaimInput{Request: requestID(12)}, 200, &replay)
+	heldDecision, ok := decision(replay, heldSlug.ID)
+	if replay.Round != nil || !ok || heldDecision.Action != "rotate" || heldDecision.Reason != "delivery_hold" {
+		t.Fatal("held row on this slug's branch did not rotate it", replay)
+	}
+	bound := roundInput(f, "pr-bound", "fix", 7)
+	pr := int64(30)
+	bound.PR = &pr
+	var boundRound Round
+	f.call(t, f.person, "POST", path, bound, 201, &boundRound)
+	insertDelivery("work/not-pr-bound", "merged", 30)
+	f.call(t, f.agent, "POST", path+"/claim", ClaimInput{Request: requestID(13)}, 200, &replay)
+	boundDecision, ok := decision(replay, boundRound.ID)
+	if replay.Round != nil || !ok || boundDecision.Action != "park" || boundDecision.Reason != "already_merged" {
+		t.Fatal("this round's merged pull request stayed claimable", replay)
 	}
 	f.call(t, f.person, "GET", path, nil, 200, &page)
 	before := page
