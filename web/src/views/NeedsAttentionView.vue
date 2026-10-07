@@ -309,8 +309,8 @@ function refreshStats() {
   }), { failed: () => toast(words('The changes were saved, but counts could not be refreshed. Reload this view.', 'Die Änderungen wurden gespeichert, aber die Zahlen konnten nicht aktualisiert werden. Die Ansicht neu laden.'), { tone: 'error' }) })
 }
 // Each identity is checked again in the same scope continuation as its update.
-// Four history reads at a time, one bounded page per loaded row; never infer row
-// success from an aggregate count or a sampled skip list.
+// Four history reads at a time, one bounded page of resolution events per loaded
+// row. A missing match is a row failure, never a silent Apply.
 function reconcile(group: Group, action: 'apply' | 'dismiss' | 'undo', snapshot: Row[], batchId: string, signal: AbortSignal, after: import('../lib/identityScope').After): Promise<unknown> {
   const actor = session.identity!.principal.id
   const step = (index: number): Promise<unknown> => {
@@ -320,9 +320,10 @@ function reconcile(group: Group, action: 'apply' | 'dismiss' | 'undo', snapshot:
       answers.forEach((answer, n) => {
         const captured = slice[n]!, row = group.items.find(row => row.event_id === captured.event_id && row.node_id === captured.node_id && row.revision === captured.revision && row.resolution_event_id === captured.resolution_event_id)
         if (!row) return
-        if (answer.status === 'rejected') { row.failure = words('The row could not be refreshed. Reload before trying again.', 'Die Zeile konnte nicht aktualisiert werden. Vor einem neuen Versuch neu laden.'); return }
-        const result = answer.value
-        if (!result?.revision) return
+        const result = answer.status === 'fulfilled' ? answer.value : null
+        // A server failure already names the row. Do not replace it. A write that
+        // history cannot bind is a refresh failure; a skipped row is not in this set.
+        if (!result?.revision) { if (!row.failure) row.failure = words('The row could not be refreshed. Reload before trying again.', 'Die Zeile konnte nicht aktualisiert werden. Vor einem neuen Versuch neu laden.'); return }
         row.revision = result.revision; row.resolution_event_id = result.resolution_event_id; row.failure = ''
         row.resolved = action === 'undo' ? undefined : action; row.batchId = action === 'undo' ? undefined : batchId
         // Bulk membership Undo verifies its own revisions on the server. A row
@@ -359,7 +360,7 @@ function runGroup(group: Group, attempt: Attempt) {
     if (result.completed) group.retry = undefined
     markBatchFailures(group, result)
     undoToast.value = toast(batchMessage(group, attempt.action, result), { key: `attention-result-${group.id}`, timeout: 10000, tone: result.failed.length || !result.completed ? 'error' : 'info', ...(result.changed ? { action: { label: words('Undo all', 'Alle rückgängig'), run: () => { if (generation === visit) undoGroup(group, result.batch_id) } } } : {}) })
-    return after(reconcile(group, attempt.action, attempt.snapshot.filter(row => !attempt.exclude.includes(attentionMoveId(row))), result.batch_id, signal, after), () => { refreshStats() })
+    return after(reconcile(group, attempt.action, attempt.snapshot.filter(row => !attempt.exclude.includes(attentionMoveId(row)) && row.editable && (attempt.action === 'dismiss' || row.applicable)), result.batch_id, signal, after), () => { refreshStats() })
   }), { failed: e => { toast(e instanceof Error ? e.message : 'The change could not be confirmed. Retry uses the same batch.', { tone: 'error' }) }, settled: () => {
     running.value.delete(group.id)
     void nextTick(() => { if (generation === visit) document.getElementById(`group-${group.batch ? 'undo' : 'apply'}-${group.id}`)?.focus({ preventScroll: true }) })
@@ -409,7 +410,7 @@ function projectChange(mode: 'off' | 'inherit', also = false) {
       group.batch = result.changed ? { id: result.batch_id, action: 'dismiss', changed: result.changed, undoKey: crypto.randomUUID(), undoChanged: 0 } : undefined
       if (result.completed) group.retry = undefined
       markBatchFailures(group, result); notify(' ' + batchMessage(group, 'dismiss', result), result.failed.length || !result.completed ? 'error' : 'info')
-      return after(reconcile(group, 'dismiss', snapshot, result.batch_id, signal, after), () => { refreshStats() })
+      return after(reconcile(group, 'dismiss', snapshot.filter(row => row.editable), result.batch_id, signal, after), () => { refreshStats() })
     })
   })), { failed: e => { toast(e instanceof Error ? e.message : 'The project setting or dismiss could not be confirmed.', { tone: 'error' }) }, settled: () => { running.value.delete(group.id) } })
 }

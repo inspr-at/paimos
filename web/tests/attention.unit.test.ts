@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest'
 import { h, reactive, ref } from 'vue'
 import { attentionFolds, attentionGrouping, orderAttentionGroups, orderAttentionRows, attentionIdentity, refreshAttentionRelease, mergeAttentionRows, collectAttentionGroups, finishAttentionGroups, foldAttentionGroups, ATTENTION_GROUP_CAP, ATTENTION_GROUP_PAGE_CAP, type AttentionGroup, type AttentionItem, type AttentionIdentity, type AttentionPage, type AttentionResult, type AttentionFilters } from '../src/lib/attention'
 import * as attention from '../src/lib/attention'
+import * as apiClient from '../src/lib/api.ts'
 import * as statusAutopilot from '../src/lib/statusAutopilot'
 import * as identityScope from '../src/lib/identityScope'
 import { mountView, settle, textOf } from './webcore-view-harness'
@@ -214,4 +215,70 @@ it('a resolved fallback group scan cannot restore groups, counts or facets after
  expect(visit.text).not.toContain('17')
  expect(visit.text).not.toContain('Old Project')
  expect(visit.text).not.toContain('Previous assignee')
+})
+
+type ResolutionEvent = { id: number; actor_principal_id: string; node_id: string; type: string; before?: { updated_at?: string }; after?: { updated_at?: string }; undo_of?: number }
+// Production history is oldest-first and stops at 200. Without the resolution-type
+// filter the resolution event is past that page; the snapshot spells the same
+// instant with a numeric offset.
+function resolutionPage(path: string, events: ResolutionEvent[]) {
+ const url = new URL(path, 'http://aeon.local')
+ const after = Number(url.searchParams.get('after'))
+ const node = url.searchParams.get('node_id')
+ const requested = (url.searchParams.get('type') ?? '').split(',').filter(Boolean)
+ const typed = ['status_autopilot.attention_apply', 'status_autopilot.attention_dismiss', 'status_autopilot.attention_undone'].every(type => requested.includes(type))
+ const noise: ResolutionEvent[] = typed ? [] : Array.from({ length: 201 }, (_, index) => ({
+  id: after + 1 + index, actor_principal_id: 'person', node_id: node ?? '', type: 'node.updated',
+  before: { updated_at: '2026-10-01T00:00:00+00:00' }, after: { updated_at: '2026-10-01T00:00:01+00:00' },
+ }))
+ const pool = [...noise, ...events].filter(event => event.id > after && event.node_id === node && (requested.length === 0 || requested.includes(event.type))).sort((a, b) => a.id - b.id)
+ const items = pool.slice(0, 200)
+ return { items, next_after: pool.length > 200 ? items.at(-1)!.id : null }
+}
+async function withHistory<T>(events: ResolutionEvent[], run: (calls: string[]) => Promise<T>) {
+ const calls: string[] = []
+ const spy = vi.spyOn(apiClient, 'api').mockImplementation(async (path: string) => {
+  calls.push(path)
+  return new Response(JSON.stringify(resolutionPage(path, events)), { status: 200 })
+ })
+ try { return await run(calls) } finally { spy.mockRestore() }
+}
+const resolutionTypes = 'status_autopilot.attention_apply,status_autopilot.attention_dismiss,status_autopilot.attention_undone'
+
+it('binds an offset snapshot on a resolution-type page when ticket history is longer than 200 events', async () => {
+ const revision = '2026-10-04T08:00:00.000001Z'
+ const events: ResolutionEvent[] = [
+  { id: 507, actor_principal_id: 'person', node_id: 'node-7', type: 'status_autopilot.attention_apply', before: { updated_at: '2026-10-04T08:00:00.000001+00:00' }, after: { updated_at: '2026-10-07T21:00:00.000004+00:00' } },
+  { id: 508, actor_principal_id: 'person', node_id: 'node-7', type: 'status_autopilot.attention_apply', before: { updated_at: '2026-10-04T10:00:00.000002+02:00' }, after: { updated_at: '2026-10-07T21:00:00.000005+00:00' } },
+  { id: 509, actor_principal_id: 'other', node_id: 'node-7', type: 'status_autopilot.attention_apply', before: { updated_at: '2026-10-04T08:00:00.000001+00:00' }, after: { updated_at: '2026-10-07T21:00:00.000006+00:00' } },
+ ]
+ const bound = await withHistory(events, async calls => {
+  const result = await attention.attentionResolution({ event_id: 7, node_id: 'node-7', revision }, 'apply', 'person', new AbortController().signal)
+  expect(decodeURIComponent(calls[0] ?? '')).toContain(`type=${resolutionTypes}`)
+  expect(calls[0]).toContain('after=7')
+  expect(calls[0]).toContain('limit=200')
+  return result
+ })
+ expect(bound).toEqual({ event_id: 7, ok: true, resolution_event_id: 507, revision: '2026-10-07T21:00:00.000004+00:00' })
+})
+
+it('returns no row identity when the resolution page has no event for this revision', async () => {
+ const events: ResolutionEvent[] = [
+  { id: 507, actor_principal_id: 'person', node_id: 'node-7', type: 'status_autopilot.attention_dismiss', before: { updated_at: '2026-10-04T08:00:00.000002+00:00' }, after: { updated_at: '2026-10-07T21:00:00.000004+00:00' } },
+ ]
+ const missed = await withHistory(events, () => attention.attentionResolution({ event_id: 7, node_id: 'node-7', revision: '2026-10-04T08:00:00.000001Z' }, 'dismiss', 'person', new AbortController().signal))
+ expect(missed).toBeNull()
+})
+
+it('binds undo from undo_of on the resolution-type page', async () => {
+ const events: ResolutionEvent[] = [
+  { id: 80, actor_principal_id: 'person', node_id: 'node-7', type: 'status_autopilot.attention_undone', before: { updated_at: '2026-10-07T23:00:00+02:00' }, after: { updated_at: '2026-10-04T08:00:00+00:00' }, undo_of: 42 },
+  { id: 81, actor_principal_id: 'person', node_id: 'node-7', type: 'status_autopilot.attention_undone', before: { updated_at: '2026-10-04T08:00:00Z' }, after: { updated_at: '1999-01-01T00:00:00Z' }, undo_of: 41 },
+ ]
+ const undone = await withHistory(events, async calls => {
+  const result = await attention.attentionResolution({ event_id: 7, node_id: 'node-7', revision: '2026-10-04T08:00:00Z', resolution_event_id: 42 }, 'undo', 'person', new AbortController().signal)
+  expect(decodeURIComponent(calls[0] ?? '')).toContain('after=42')
+  return result
+ })
+ expect(undone).toEqual({ event_id: 7, ok: true, revision: '2026-10-04T08:00:00+00:00' })
 })

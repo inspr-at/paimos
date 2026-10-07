@@ -68,10 +68,24 @@ async function groupActions(page: Page, items: AttentionItem[]) {
   const batches = new Map<string, { action: string; rows: AttentionItem[]; result: AttentionBulkResult }>()
   const history: { id: number; actor_principal_id: string; node_id: string; type: string; before: { updated_at: string }; after: { updated_at: string }; undo_of?: number }[] = []
   let counter = 1000, token = 0
-  const control = { failEvent: 118, held: undefined as Promise<void> | undefined, received: undefined as (() => void) | undefined, failOverride: false }
+  const control = { failEvent: 118, held: undefined as Promise<void> | undefined, received: undefined as (() => void) | undefined, failOverride: false, noise: true, foreign: false }
+  const eventQueries: URLSearchParams[] = []
+  const offsetSnapshot = (revision: string) => revision.endsWith('Z') ? `${revision.slice(0, -1)}+00:00` : revision
   await page.route('**/api/events?**', route => {
     const q = new URL(route.request().url()).searchParams
-    return route.fulfill({ json: { items: history.filter(event => event.node_id === q.get('node_id') && event.id > Number(q.get('after'))), next_after: null } })
+    eventQueries.push(new URLSearchParams(q))
+    const after = Number(q.get('after'))
+    const types = (q.get('type') ?? '').split(',').filter(Boolean)
+    const node = q.get('node_id')
+    const real = history.filter(event => event.node_id === node && event.id > after && (types.length === 0 || types.includes(event.type)))
+    // A busy ticket has more than one oldest-first page before the resolution event.
+    const noise = control.noise && types.length === 0 ? Array.from({ length: 201 }, (_, index) => ({
+      id: after + 1 + index, actor_principal_id: me.id, node_id: node ?? '', type: 'node.updated',
+      before: { updated_at: '2026-10-01T00:00:00+00:00' }, after: { updated_at: '2026-10-01T00:00:01+00:00' },
+    })) : []
+    const merged = [...noise, ...real].sort((a, b) => a.id - b.id)
+    const items = merged.slice(0, 200)
+    return route.fulfill({ json: { items, next_after: merged.length > 200 ? items.at(-1)!.id : null } })
   })
   await page.route('**/api/status-autopilot/attention/bulk**', async route => {
     const request = route.request(), path = new URL(request.url()).pathname, body = request.postDataJSON(), key = request.headers()['idempotency-key']
@@ -79,7 +93,7 @@ async function groupActions(page: Page, items: AttentionItem[]) {
     if (path.endsWith('/undo')) {
       const batch = batches.get(path.split('/').at(-2)!)!
       for (const item of batch.rows) {
-        const resolution = [...history].reverse().find(event => event.node_id === item.node_id && event.type === `status_autopilot.attention_${batch.action}` && event.before.updated_at === item.revision)!
+        const resolution = [...history].reverse().find(event => event.node_id === item.node_id && event.type === `status_autopilot.attention_${batch.action}`)!
         const revision = `2026-10-07T22:00:00.${String(++counter).padStart(6, '0')}Z`
         history.push({ id: counter, actor_principal_id: me.id, node_id: item.node_id, type: 'status_autopilot.attention_undone', before: { updated_at: resolution.after.updated_at }, after: { updated_at: revision }, undo_of: resolution.id })
         data.live.set(item.event_id, { ...item, revision })
@@ -107,7 +121,7 @@ async function groupActions(page: Page, items: AttentionItem[]) {
     const changed = candidates.filter(row => row.event_id !== control.failEvent)
     for (const item of changed) {
       const revision = `2026-10-07T21:00:00.${String(++counter).padStart(6, '0')}Z`
-      history.push({ id: counter, actor_principal_id: me.id, node_id: item.node_id, type: `status_autopilot.attention_${body.action}`, before: { updated_at: item.revision }, after: { updated_at: revision } })
+      history.push({ id: counter, actor_principal_id: me.id, node_id: item.node_id, type: `status_autopilot.attention_${body.action}`, before: { updated_at: control.foreign ? '1999-01-01T00:00:00+00:00' : offsetSnapshot(item.revision) }, after: { updated_at: revision } })
       data.live.delete(item.event_id)
     }
     const result: AttentionBulkResult = { batch_id: body.preview_token, changed: changed.length, skipped: preview.value.skipped, failed: candidates.filter(row => row.event_id === control.failEvent).map(row => ({ event_id: row.event_id, key: row.key, error: 'The ticket changed. Reload before trying again.' })), completed: true }
@@ -133,7 +147,7 @@ async function groupActions(page: Page, items: AttentionItem[]) {
     }
     return route.fulfill({ json: settings })
   })
-  return { ...data, calls, control }
+  return { ...data, calls, control, eventQueries }
 }
 // A phone tap opens the ticket. Selection starts with a hold, and only then
 // do the round checkboxes exist for the remaining rows.
@@ -785,4 +799,26 @@ test('a held group run cannot write a new visit or leave its Undo active there',
   await expect(page.locator('#row-group-p-pharos')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Undo all', exact: true })).toHaveCount(0)
   await expect(page.locator('#row-attention-2 .action-stack')).not.toHaveAttribute('data-resolved', 'apply')
+})
+
+test('a group apply binds an offset snapshot after more than 200 later events and offers Undo', async ({ page }) => {
+  const data = await groupActions(page, [row(0)])
+  await page.goto('/tickets?view=needs-attention')
+  await page.locator('#row-group-p-aeon').getByRole('button', { name: 'Apply all in AEON' }).click()
+  await page.getByRole('dialog', { name: 'Apply all in AEON' }).locator('.run').click()
+  await expect(first(page).locator('.action-stack')).toHaveAttribute('data-resolved', 'apply')
+  await expect(first(page).getByRole('button', { name: 'Undo for AEON-10' })).toBeVisible()
+  expect(data.eventQueries.some(query => query.get('type') === 'status_autopilot.attention_apply,status_autopilot.attention_dismiss,status_autopilot.attention_undone' && query.get('limit') === '200')).toBe(true)
+})
+
+test('a group row with no matching resolution reports the refresh failure instead of staying on Apply', async ({ page }) => {
+  const data = await groupActions(page, [row(0)])
+  data.control.noise = false
+  data.control.foreign = true
+  await page.goto('/tickets?view=needs-attention')
+  await page.locator('#row-group-p-aeon').getByRole('button', { name: 'Apply all in AEON' }).click()
+  await page.getByRole('dialog', { name: 'Apply all in AEON' }).locator('.run').click()
+  await expect(first(page)).toContainText('could not be refreshed')
+  await expect(first(page).locator('.action-stack')).not.toHaveAttribute('data-resolved', 'apply')
+  await expect(first(page).getByRole('button', { name: 'Undo for AEON-10' })).toBeHidden()
 })

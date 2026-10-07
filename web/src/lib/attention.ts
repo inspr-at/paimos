@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { api } from './api.ts'
+import { compareRevision } from './liveUpdates.ts'
 export const ATTENTION_KINDS = [
   { id: 'proposed', label: 'Proposed changes', labelDe: 'Vorgeschlagene Änderungen', one: 'Proposed change', oneDe: 'Vorgeschlagene Änderung', icon: 'sparkle' },
   { id: 'triage', label: 'Triage list', labelDe: 'Triage-Liste', one: 'Triage list', oneDe: 'Triage-Liste', icon: 'list' },
@@ -189,14 +190,19 @@ export const previewAttentionBulk = (action: AttentionBulkAction, scope: Attenti
 export const runAttentionBulk = (action: AttentionBulkAction, scope: AttentionFilters, preview: AttentionBulkPreview, exclude: string[], idempotencyKey: string, signal: AbortSignal) => bulkRequest<AttentionBulkResult>('/status-autopilot/attention/bulk', { action, scope, exclude, through_event_id: preview.through_event_id, preview_token: preview.preview_token, dry_run: false }, signal, idempotencyKey)
 export const undoAttentionBulk = (batchId: string, idempotencyKey: string, signal: AbortSignal) => bulkRequest<AttentionBulkResult>(`/status-autopilot/attention/bulk/${encodeURIComponent(batchId)}/undo`, {}, signal, idempotencyKey)
 
+// List revisions are Go RFC3339Nano (Z). Event snapshots are PostgreSQL jsonb
+// timestamps (numeric offset, up to microseconds). Compare the instant.
+const sameInstant = (left: string | undefined, right: string | undefined) => !!left && !!right && compareRevision(left, right) === 0
+const resolutionTypes = ['status_autopilot.attention_apply', 'status_autopilot.attention_dismiss', 'status_autopilot.attention_undone']
+
 // Aggregate batch answers are not row identities. Confirm each loaded row from
-// bounded, node-scoped history before offering its existing /actions Undo.
+// one bounded page of resolution events before offering its existing /actions Undo.
+// No matching event returns null; the caller must show a row failure.
 export async function attentionResolution(item: AttentionIdentity, action: 'apply' | 'dismiss' | 'undo', actorId: string, signal: AbortSignal): Promise<AttentionResult | null> {
-  const query = new URLSearchParams({ node_id: item.node_id, after: String(action === 'undo' ? item.resolution_event_id : item.event_id), limit: '200' })
+  const query = new URLSearchParams({ node_id: item.node_id, after: String(action === 'undo' ? item.resolution_event_id : item.event_id), limit: '200', type: resolutionTypes.join(',') })
   type Event = { id: number; actor_principal_id: string; node_id: string; type: string; before?: { updated_at?: string }; after?: { updated_at?: string }; undo_of?: number }
   const page = await read<{ items: Event[]; next_after: number | null }>(`/events?${query}`, signal)
-  if (page.next_after) throw new Error('Ticket history was truncated. Reload before trying again.')
-  const event = [...page.items].reverse().find(event => event.node_id === item.node_id && event.actor_principal_id === actorId && event.type === `status_autopilot.attention_${action === 'undo' ? 'undone' : action}` && (action === 'undo' ? event.undo_of === item.resolution_event_id : event.before?.updated_at === item.revision))
+  const event = [...(page.items ?? [])].reverse().find(event => event.node_id === item.node_id && event.actor_principal_id === actorId && event.type === `status_autopilot.attention_${action === 'undo' ? 'undone' : action}` && (action === 'undo' ? event.undo_of === item.resolution_event_id : sameInstant(event.before?.updated_at, item.revision)))
   if (!event?.after?.updated_at) return null
   return { event_id: item.event_id, ok: true, revision: event.after.updated_at, ...(action !== 'undo' ? { resolution_event_id: event.id } : {}) }
 }

@@ -8300,6 +8300,10 @@
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a filtered empty queue says nothing matches and keeps Clear filters","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a group apply binds an offset snapshot after more than 200 later events and offers Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a group row with no matching resolution reports the refresh failure instead of staying on Apply","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a held group run cannot write a new visit or leave its Undo active there","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a missing groups route still groups the list and leaves Group by None on the list endpoint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -13940,6 +13944,10 @@
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a resolved fallback group scan cannot restore groups, counts or facets after an identity change","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"binds an offset snapshot on a resolution-type page when ticket history is longer than 200 events","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"binds undo from undo_of on the resolution-type page","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"builds capped groups from the list cursor and stops at the page cap","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"fills kind totals from the list counts and project names from facets","tier":"ESSENTIAL"}
@@ -13951,6 +13959,8 @@
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"orders every group by open flags and every row by kind then newest without mutating the visit","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"refreshes matching sibling identities and sends both resource revisions on the next action","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"returns no row identity when the resolution page has no event for this revision","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"uses saved per-group folds before big-list defaults and opens search matches without changing saved folds","tier":"ESSENTIAL"}
     ,
