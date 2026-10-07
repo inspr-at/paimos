@@ -1618,3 +1618,103 @@ test('web collection is reused within a process only while the stamped tree is u
   assert.equal(runs.length, 3, 'fresh recomputes')
   assert.equal(memo.stamp, 'two')
 })
+
+// AEON-642: nightly `check web --strict` rejects a manifest name Vitest no
+// longer emits. The state model generates its titles from these objects, and
+// comments in that fixture contain apostrophes, so the scan has to skip
+// comments before it treats a quote as a string.
+function themeEditorObjectBody(source, constName) {
+  const start = source.indexOf(`const ${constName}`)
+  if (start < 0) throw new Error(`missing ${constName}`)
+  const eq = source.indexOf('= {', start)
+  if (eq < 0 || eq - start > 500) throw new Error(`no object for ${constName}`)
+  let depth = 0, end = -1
+  for (let p = eq + 2; p < source.length; p++) {
+    if (source.startsWith('//', p)) { p = source.indexOf('\n', p); if (p < 0) break; continue }
+    if (source.startsWith('/*', p)) { const stop = source.indexOf('*/', p + 2); p = stop < 0 ? source.length : stop + 1; continue }
+    const c = source[p]
+    if (c === "'" || c === '"' || c === '`') {
+      p++
+      while (p < source.length && source[p] !== c) { if (source[p] === '\\') p++; p++ }
+      continue
+    }
+    if (c === '{') depth++
+    else if (c === '}') { depth--; if (depth === 0) { end = p; break } }
+  }
+  if (end < 0) throw new Error(`unclosed ${constName}`)
+  return source.slice(eq + 3, end)
+}
+function themeEditorObjectKeys(body) {
+  const keys = []
+  let i = 0, depth = 0
+  while (i < body.length) {
+    while (i < body.length && /\s/.test(body[i])) i++
+    if (i >= body.length) break
+    if (body.startsWith('//', i)) { const n = body.indexOf('\n', i); i = n < 0 ? body.length : n + 1; continue }
+    if (body.startsWith('/*', i)) { const stop = body.indexOf('*/', i + 2); i = stop < 0 ? body.length : stop + 2; continue }
+    if (depth === 0) {
+      const match = /^('([^']*)'|"([^"]*)"|([A-Za-z_][A-Za-z0-9_]*))\s*:/.exec(body.slice(i))
+      if (match) { keys.push(match[2] ?? match[3] ?? match[4]); i += match[0].length; continue }
+    }
+    const c = body[i]
+    if (c === "'" || c === '"' || c === '`') {
+      i++
+      while (i < body.length && body[i] !== c) { if (body[i] === '\\') i++; i++ }
+      i++
+      continue
+    }
+    if (c === '{') depth++
+    else if (c === '}') depth--
+    i++
+  }
+  return keys
+}
+function themeEditorStateModelNames(unit, editor) {
+  if (!/const STATES\b[^=]*=\s*\{\s*\.\.\.IDLE,\s*\.\.\.PENDING\s*\}/.test(unit)) throw new Error('theme editor states are no longer IDLE plus PENDING')
+  if (!/const OUTCOME_NAMES = \['resolved', \.\.\.ERROR_CLASSES\]/.test(unit)) throw new Error('theme editor outcome names changed')
+  const begin = unit.indexOf("describe('theme editor state model'")
+  const end = unit.indexOf("describe('theme editor runner'", begin)
+  if (begin < 0 || end < 0) throw new Error('theme editor state model block moved')
+  const region = unit.slice(begin, end)
+  const cell = region.match(/it\.each\(cells\)\('(%s[^']*)'/)
+  const outcomeFormats = [...region.matchAll(/it\.each\(outcomes\)\('(%s[^']*)'/g)].map(match => match[1])
+  if (!cell || outcomeFormats.length !== 3) throw new Error('theme editor matrix titles changed')
+  const fill = (fmt, args) => { let n = 0; return fmt.replace(/%s/g, () => args[n++]) }
+  const idle = themeEditorObjectKeys(themeEditorObjectBody(unit, 'IDLE'))
+  const pending = themeEditorObjectKeys(themeEditorObjectBody(unit, 'PENDING'))
+  const events = themeEditorObjectKeys(themeEditorObjectBody(unit, 'EVENTS'))
+  for (const [label, keys] of [['IDLE', idle], ['PENDING', pending], ['EVENTS', events]]) {
+    if (new Set(keys).size !== keys.length || !keys.length) throw new Error(`duplicate or empty ${label} keys`)
+  }
+  const classes = [...editor.match(/export const ERROR_CLASSES = \[([^\]]+)\]/)[1].matchAll(/'([^']+)'/g)].map(match => match[1])
+  if (new Set(classes).size !== classes.length || !classes.length) throw new Error('ERROR_CLASSES changed shape')
+  const states = [...idle, ...pending.filter(name => !idle.includes(name))]
+  const outcomes = ['resolved', ...classes]
+  const prefix = 'theme editor state model > '
+  const names = new Set()
+  for (const state of states) for (const event of events) names.add(prefix + fill(cell[1], [state, event]))
+  for (const name of pending) for (const outcome of outcomes) for (const fmt of outcomeFormats) names.add(prefix + fill(fmt, [name, outcome]))
+  if (names.size !== states.length * events.length + pending.length * outcomes.length * outcomeFormats.length) throw new Error('theme editor case generation collided')
+  return names
+}
+
+test('AEON-642 theme editor state model registrations are exactly the cases the suite emits', () => {
+  const unit = readFileSync(new URL('../../web/tests/theme-editor.unit.test.ts', import.meta.url), 'utf8')
+  const editor = readFileSync(new URL('../../web/src/stores/themeEditor.ts', import.meta.url), 'utf8')
+  const expected = themeEditorStateModelNames(unit, editor)
+  const manifest = JSON.parse(readFileSync(new URL('../ci/web-test-tiers.json', import.meta.url)))
+  const prefix = 'theme editor state model > '
+  const declared = manifest.tests.filter(row => row.kind === 'vitest' && row.file === 'tests/theme-editor.unit.test.ts' && row.name.startsWith(prefix))
+  const declaredNames = new Set(declared.map(row => row.name))
+  const stale = [...declaredNames].filter(name => !expected.has(name)).sort()
+  const missing = [...expected].filter(name => !declaredNames.has(name)).sort()
+  assert.deepEqual({ stale: stale.length, missing: missing.length, staleSample: stale.slice(0, 3), missingSample: missing.slice(0, 3) },
+    { stale: 0, missing: 0, staleSample: [], missingSample: [] })
+  for (const row of declared) {
+    assert.equal(row.tier, 'NIGHTLY', row.name)
+    assert.equal(manifest.postGateCases.includes(key(row)), true, row.name)
+  }
+  const ids = new Set(declared.map(key))
+  const extraPostGate = manifest.postGateCases.filter(id => id.includes(prefix) && !ids.has(id))
+  assert.deepEqual(extraPostGate, [])
+})
