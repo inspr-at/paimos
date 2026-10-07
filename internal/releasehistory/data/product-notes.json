@@ -4846,32 +4846,16 @@
     "261007035250.0.0": {
       "release_channel": "stable",
       "release_sequence": 124,
-      "snapshot_sha256": "0dcec1140626c939057908aaf0ad29c1f8d568e227481f32fb78cec38fdf33cc",
-      "captured_at": "2026-10-07T04:01:17Z",
+      "snapshot_sha256": "cb141119fbe82d49af14e7e38b7748c6b7a92a8f0468912eb3b130e40ccab6ff",
+      "captured_at": "2026-10-07T04:19:39Z",
       "release_revision": 1,
       "items": [
         {
-          "key": "AEON-391",
-          "pill_en": "Verified hook",
-          "pill_de": "Geprüfter Hook",
-          "benefit_en": "Pairing installs one verified Aeon hook for your harness, and anything unverified stays watch-only.",
-          "benefit_de": "Das Koppeln installiert einen geprüften Aeon-Hook für dein Harness; alles Ungeprüfte bleibt beim Zusehen.",
-          "group": "features"
-        },
-        {
-          "key": "AEON-392",
-          "pill_en": "Owner-only notes",
-          "pill_de": "Nur der Eigentümer",
-          "benefit_en": "Only you can send a note to a session on your computer, and the note text is never stored in Aeon.",
-          "benefit_de": "Nur du kannst einer Sitzung auf deinem Rechner eine Notiz schicken, und der Text wird in Aeon nie gespeichert.",
-          "group": "features"
-        },
-        {
           "key": "AEON-449",
-          "pill_en": "Always current",
-          "pill_de": "Immer aktuell",
-          "benefit_en": "What you see on /agents never jumps back to an older state after you act.",
-          "benefit_de": "Was du auf /agents siehst, springt nach einer Aktion nie auf einen älteren Stand zurück.",
+          "pill_en": "Older replies guarded",
+          "pill_de": "Ältere Antworten abgefangen",
+          "benefit_en": "The Agents page guards newer session and run rows against stale concurrent replies.",
+          "benefit_de": "Die Agentenseite schützt neuere Sitzungs- und Ausführungsstände vor veralteten Antworten gleichzeitig laufender Anfragen.",
           "group": "fixes"
         },
         {
@@ -4884,26 +4868,26 @@
         },
         {
           "key": "AEON-541",
-          "pill_en": "Nothing jumps around",
-          "pill_de": "Nichts springt mehr",
-          "benefit_en": "Controls stay where they are while you choose, so you never have to chase a button with the mouse.",
-          "benefit_de": "Bedienelemente bleiben beim Auswählen an ihrem Platz, du musst keinem Knopf mit der Maus hinterherjagen.",
+          "pill_en": "Steadier dialog controls",
+          "pill_de": "Stabile Dialogsteuerung",
+          "benefit_en": "Updated lead and confirmation dialogs keep controls in place while you choose.",
+          "benefit_de": "In überarbeiteten Lead- und Bestätigungsdialogen bleiben Bedienelemente beim Auswählen an ihrem Platz.",
           "group": "features"
         },
         {
           "key": "AEON-588",
           "pill_en": "Clearer planning totals",
           "pill_de": "Klarere Planungssummen",
-          "benefit_en": "Release planning excludes deleted tickets, and capped completion totals are labelled incomplete. People with the required permission can renew expired release access.",
-          "benefit_de": "Die Release-Planung zählt gelöschte Tickets nicht mit; begrenzte Erledigungssummen sind als unvollständig markiert. Mit der nötigen Berechtigung lässt sich ein abgelaufener Release-Zugriff erneuern.",
+          "benefit_en": "Release planning excludes deleted tickets, and capped completion totals are labelled incomplete.",
+          "benefit_de": "Die Release-Planung zählt gelöschte Tickets nicht mit; begrenzte Erledigungssummen sind als unvollständig markiert.",
           "group": "features"
         },
         {
           "key": "AEON-616",
           "pill_en": "Policies at a glance",
           "pill_de": "Regeln auf einen Blick",
-          "benefit_en": "One page shows who may do what and when, read from the rules that already apply, so nothing has to be looked up elsewhere.",
-          "benefit_de": "Eine Seite zeigt, wer was wann darf, gelesen aus den bereits geltenden Regeln, sodass nichts mehr woanders nachgeschlagen werden muss.",
+          "benefit_en": "One page summarizes existing rules and links to where they are managed.",
+          "benefit_de": "Eine Seite fasst bestehende Regeln zusammen und verlinkt auf die zuständigen Bereiche.",
           "group": "features"
         },
         {
@@ -4926,16 +4910,16 @@
           "key": "AEON-652",
           "pill_en": "Agents on real work",
           "pill_de": "Agenten an echter Arbeit",
-          "benefit_en": "Agents only ever work on actual tickets, and splitting or cancelling work never cuts a running agent off.",
-          "benefit_de": "Agenten arbeiten nur an echten Tickets, und Aufteilen oder Abbrechen unterbricht nie einen laufenden Agenten.",
+          "benefit_en": "Splitting or cancelling ticket work waits for running agents to hand over and stop.",
+          "benefit_de": "Aufteilen oder Abbrechen von Ticket-Arbeit wartet darauf, dass laufende Agenten ihre Arbeit übergeben und anhalten.",
           "group": "features"
         },
         {
           "key": "AEON-686",
           "pill_en": "Agents respect your computer",
           "pill_de": "Agenten schonen den Rechner",
-          "benefit_en": "Agents automatically slow down new work when your computer is busy, on battery or in use, so it stays responsive.",
-          "benefit_de": "Agenten starten automatisch weniger neue Arbeit, wenn der Rechner ausgelastet, im Akkubetrieb oder in Benutzung ist, damit er reaktionsschnell bleibt.",
+          "benefit_en": "With smart host limits enabled, reported load and optional battery or activity checks can hold back new agent starts.",
+          "benefit_de": "Bei aktivierten intelligenten Rechnerlimits können gemeldete Last und optionale Akku- oder Aktivitätsprüfungen neue Agentenstarts zurückhalten.",
           "group": "features"
         },
         {
@@ -5006,8 +4990,8 @@
           "key": "AEON-718",
           "pill_en": "Views keep their columns",
           "pill_de": "Ansichten behalten Spalten",
-          "benefit_en": "A saved view now looks the same every time and for everyone: its columns and its list, outline or graph mode are part of it.",
-          "benefit_de": "Eine gespeicherte Ansicht sieht jetzt jedes Mal und für alle gleich aus: Spalten und Listen-, Gliederungs- oder Graphmodus gehören dazu.",
+          "benefit_en": "Saved views retain explicitly chosen columns and their list, outline or graph mode.",
+          "benefit_de": "Gespeicherte Ansichten behalten ausdrücklich gewählte Spalten und ihren Listen-, Gliederungs- oder Graphmodus.",
           "group": "fixes"
         },
         {
@@ -5030,8 +5014,8 @@
           "key": "AEON-724",
           "pill_en": "Adopt agent keys",
           "pill_de": "Agentenschlüssel übernehmen",
-          "benefit_en": "Agents can follow your 'agents at once' setting without replacing their key.",
-          "benefit_de": "Agenten folgen deiner Einstellung zur Agentenzahl, ohne neuen Schlüssel.",
+          "benefit_en": "After an ownerless key is adopted, agents can follow its owner’s ‘agents at once’ setting without replacing the key.",
+          "benefit_de": "Nach der Übernahme eines eigentümerlosen Schlüssels können Agenten der Einstellung zur Agentenzahl des Eigentümers folgen, ohne den Schlüssel zu ersetzen.",
           "group": "fixes"
         },
         {
@@ -5044,10 +5028,10 @@
         },
         {
           "key": "AEON-729",
-          "pill_en": "Unstuck automatically",
-          "pill_de": "Automatisch entklemmt",
-          "benefit_en": "Work stops getting stuck on one model: PAIMOS notices and switches to a better one.",
-          "benefit_de": "Arbeit bleibt nicht mehr an einem Modell hängen: PAIMOS erkennt es und wechselt.",
+          "pill_en": "Bounded model retries",
+          "pill_de": "Begrenzte Modellwechsel",
+          "benefit_en": "Repeated recorded failures can trigger bounded retries with another eligible model.",
+          "benefit_de": "Wiederholt protokollierte Fehler können begrenzte Neuversuche mit einem anderen zulässigen Modell auslösen.",
           "group": "features"
         },
         {
@@ -5062,8 +5046,8 @@
           "key": "AEON-731",
           "pill_en": "One-click agent recovery",
           "pill_de": "Agenten per Klick erholen",
-          "benefit_en": "Stuck or stale agents come back with one click, no terminal needed.",
-          "benefit_de": "Hängende Agenten starten mit einem Klick neu, ohne Terminal.",
+          "benefit_en": "Eligible sessions offer one-click reconnect or restart requests. A confirmed restart queues a continuation for normal dispatch.",
+          "benefit_de": "Bei geeigneten Sitzungen lassen sich Wiederverbindung oder Neustart per Klick anfordern. Ein bestätigter Neustart reiht eine Fortsetzung für die reguläre Ausführung ein.",
           "group": "features"
         },
         {
@@ -5086,8 +5070,8 @@
           "key": "AEON-750",
           "pill_en": "Clear agent states",
           "pill_de": "Klare Agentenzustände",
-          "benefit_en": "Agent states are easy to tell apart, with ready-made looks and your own colours.",
-          "benefit_de": "Agentenzustände sind leicht zu unterscheiden, mit fertigen Looks und eigenen Farben.",
+          "benefit_en": "Agent states are easy to tell apart, with ready-made colour sets.",
+          "benefit_de": "Agentenzustände sind leicht zu unterscheiden, mit fertigen Farbschemata.",
           "group": "features"
         },
         {
@@ -5100,42 +5084,34 @@
         },
         {
           "key": "AEON-756",
-          "pill_en": "Reliable session recovery",
-          "pill_de": "Zuverlässige Sitzungswiederherstellung",
-          "benefit_en": "Recovering a session finishes cleanly even when the escalation budget says no, and the Decision Desk keeps your decision.",
-          "benefit_de": "Das Wiederherstellen einer Sitzung schließt sauber ab, auch wenn das Eskalationsbudget ablehnt, und der Decision Desk behält Ihre Entscheidung.",
+          "pill_en": "Clean recovery refusals",
+          "pill_de": "Saubere Ablehnung bei Wiederherstellung",
+          "benefit_en": "A recovery the escalation budget refuses now ends as rejected instead of failing, and the pending escalation decision stays recorded.",
+          "benefit_de": "Eine vom Eskalationsbudget abgelehnte Wiederherstellung endet jetzt als abgelehnt statt mit einem Fehler, und die ausstehende Eskalationsentscheidung bleibt gespeichert.",
           "group": "fixes"
-        },
-        {
-          "key": "AEON-761",
-          "pill_en": "Agent rules updated",
-          "pill_de": "Agentenregeln aktualisiert",
-          "benefit_en": "New agent sessions start with the current PAIMOS design and doctrine rules.",
-          "benefit_de": "Neue Agenten-Sitzungen starten mit den aktuellen PAIMOS-Design- und Doktrin-Regeln.",
-          "group": "features"
         },
         {
           "key": "AEON-780",
           "pill_en": "Compact Agents header",
           "pill_de": "Kompakter Agenten-Kopf",
-          "benefit_en": "The Agents page shows what matters in one line, and the counts filter the sessions.",
-          "benefit_de": "Die Agentenseite zeigt das Wichtige in einer Zeile, die Zahlen filtern die Sitzungen.",
+          "benefit_en": "On wider screens, the Agents header fits on one line, and its counts filter the sessions.",
+          "benefit_de": "Auf breiteren Bildschirmen passt der Kopf der Agentenseite in eine Zeile; seine Zahlen filtern die Sitzungen.",
           "group": "features"
         },
         {
           "key": "AEON-781",
           "pill_en": "Faster dial",
           "pill_de": "Schnellere Regler",
-          "benefit_en": "Sections fold the same way everywhere, and holding − or + changes values quickly and safely.",
-          "benefit_de": "Bereiche klappen überall gleich, und Halten von − oder + ändert Werte schnell und sicher.",
+          "benefit_en": "Sections on the Agents page fold consistently, and holding − or + changes the working dial quickly and safely.",
+          "benefit_de": "Bereiche auf der Agentenseite klappen einheitlich; Halten von − oder + ändert den Arbeitsregler schnell und sicher.",
           "group": "features"
         },
         {
           "key": "AEON-782",
           "pill_en": "Accounts at a glance",
           "pill_de": "Konten auf einen Blick",
-          "benefit_en": "The Agents page shows at once what blocks agents, with the fix one click away.",
-          "benefit_de": "Die Agentenseite zeigt sofort, was Agenten blockiert, mit der Lösung einen Klick entfernt.",
+          "benefit_en": "The Agents page shows what blocks agents, with the relevant action or Settings details one click away.",
+          "benefit_de": "Die Agentenseite zeigt, was Agenten blockiert; die passende Aktion oder die Details in den Einstellungen sind einen Klick entfernt.",
           "group": "features"
         },
         {
@@ -5158,8 +5134,8 @@
           "key": "AEON-785",
           "pill_en": "Footer that tells you",
           "pill_de": "Fußzeile mit Überblick",
-          "benefit_en": "The footer says in one short line what the screen shows and pulses when fresh data arrives.",
-          "benefit_de": "Die Fußzeile sagt in einer kurzen Zeile, was der Bildschirm zeigt, und pulsiert bei neuen Daten.",
+          "benefit_en": "Updated screens show a short footer summary and can pulse on live-data updates.",
+          "benefit_de": "Überarbeitete Ansichten zeigen eine kurze Zusammenfassung in der Fußzeile und können bei aktualisierten Live-Daten pulsieren.",
           "group": "features"
         },
         {
@@ -5174,24 +5150,24 @@
           "key": "AEON-788",
           "pill_en": "Learnings in one confirm",
           "pill_de": "Erkenntnisse mit einer Bestätigung",
-          "benefit_en": "Agents recommend what to do with each method learning; you review the list and apply it with one confirmation.",
-          "benefit_de": "Agenten empfehlen, was mit jeder Methoden-Erkenntnis geschehen soll; Sie prüfen die Liste und übernehmen sie mit einer Bestätigung.",
+          "benefit_en": "Agents can recommend what to do with method learnings; selected recommendations can be reviewed and applied with one confirmation.",
+          "benefit_de": "Agenten können Maßnahmen für Methoden-Erkenntnisse empfehlen; ausgewählte Empfehlungen lassen sich prüfen und mit einer Bestätigung übernehmen.",
           "group": "features"
         },
         {
           "key": "AEON-790",
-          "pill_en": "Stop that really stops",
-          "pill_de": "Stopp, der wirklich stoppt",
-          "benefit_en": "Stop on the Agents page also ends sessions started outside PAIMOS, and a stopped session no longer shows as working.",
-          "benefit_de": "Stopp auf der Agentenseite beendet auch Sitzungen, die außerhalb von PAIMOS gestartet wurden, und eine gestoppte Sitzung erscheint nicht mehr als aktiv.",
+          "pill_en": "Honest stop status",
+          "pill_de": "Klarer Stopp-Status",
+          "benefit_en": "Stop ends heartbeat reporting for sessions started outside PAIMOS, and a stopped session no longer shows as working; the external process itself may keep running.",
+          "benefit_de": "Stopp beendet die Heartbeat-Meldungen von Sitzungen, die außerhalb von PAIMOS gestartet wurden, und eine gestoppte Sitzung erscheint nicht mehr als aktiv; der externe Prozess selbst kann weiterlaufen.",
           "group": "fixes"
         },
         {
           "key": "AEON-791",
           "pill_en": "Your word for lead",
           "pill_de": "Eigenes Wort für Lead",
-          "benefit_en": "Choose what PAIMOS calls the lead, singular and plural, in Settings; the word appears everywhere the lead does.",
-          "benefit_de": "Legen Sie in den Einstellungen fest, wie PAIMOS den Lead nennt, in Einzahl und Mehrzahl; das Wort erscheint überall, wo der Lead vorkommt.",
+          "benefit_en": "With the required permission, choose singular and plural lead names in Settings; updated lead displays and session-list roles use them.",
+          "benefit_de": "Mit der nötigen Berechtigung lassen sich in den Einstellungen Einzahl und Mehrzahl für den Lead festlegen; überarbeitete Lead-Anzeigen und Rollen in der Sitzungsliste verwenden diese Namen.",
           "group": "features"
         },
         {
