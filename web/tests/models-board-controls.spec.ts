@@ -103,7 +103,11 @@ test('failed writes are honest, old Undo cannot overwrite a later edit, and an i
 
 test('template preview writes no settings, shows Now to After, keeps personal columns and applies with guarded Undo', async ({ page }) => {
   const state = await mockBoard(page); await open(page)
-  await page.locator('[data-template]').click(); await expect(page.getByRole('dialog')).toContainText('Now → After')
+  await page.locator('[data-template]').click()
+  const heading = page.getByRole('dialog').locator('.order-then')
+  await expect(heading).toContainText('Now to After')
+  await expect(heading.locator('svg')).toHaveCount(1)
+  await expect(page.locator('.bhelp .keycap')).toHaveCount(3)
   expect(state.writes).toHaveLength(1); expect(state.writes[0]!.body).toEqual({ template: 'best', revision: 3 }); expect(state.writes[0]!.path).toBe('/model-preferences/profile')
   await expect(page.getByRole('dialog')).toContainText('Columns you ordered yourself stay.')
   const guard = await controlStability(page, { apply: page.getByRole('button', { name: /^Apply/ }), head: page.locator('.bhead') })
@@ -150,6 +154,10 @@ test('full screen is a route with inert surroundings; popovers own Esc and Done 
   const top = await main.evaluate(element => element.scrollTop)
   await page.locator('[data-models-fullscreen]').click(); await expect(page).toHaveURL(/\/settings\/models\/board/)
   await expect(page.locator('.fullboard')).toBeVisible(); await expect(page.locator('dialog')).toHaveCount(0)
+  const crumb = page.locator('.fullboard .crumb')
+  await expect(crumb).toContainText('Settings')
+  await expect(crumb).toContainText('Models')
+  await expect(crumb.locator('svg')).toHaveCount(1)
   expect(await main.evaluate(element => (element as HTMLElement).inert)).toBe(true)
   const guard = await controlStability(page, { done: page.locator('[data-board-done]'), selectors: page.locator('.fullboard .bhead'), frame: page.locator('.fullboard') })
   await guard.check(async () => { await card(page, 'openai:sol').press('Enter'); await expect(page.getByRole('menu')).toBeVisible(); await page.keyboard.press('Escape'); await expect(page.getByRole('menu')).toHaveCount(0) }); guard.done()
