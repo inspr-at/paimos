@@ -304,11 +304,13 @@ func (m *Module) claimQueueTx(ctx context.Context, tx pgx.Tx, p tenant.Principal
 				}
 				if reason == "" {
 					var active, merged, held bool
-					// start-queue.sh drops a fix or merge round only for this slug's
-					// head, work/<slug>, or for this round's own pull request.
+					// start-queue.sh drops a fix or merge round when this slug's
+					// head, work/<slug>, or this round's own pull request has merged
+					// and GitHub has no open pull request. A closed pull request is
+					// stored as built or reviewed; only observation.open true is open.
 					if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_work_rounds WHERE project_id=$1 AND slug=$2 AND state IN ('claimed','running')),
 					 (EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (branch=('work/'||$2) OR ($3::bigint IS NOT NULL AND pull_request=$3)) AND state='merged')
-					 AND NOT EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (branch=('work/'||$2) OR ($3::bigint IS NOT NULL AND pull_request=$3)) AND pull_request IS NOT NULL AND state<>'merged')),
+					 AND NOT EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (branch=('work/'||$2) OR ($3::bigint IS NOT NULL AND pull_request=$3)) AND pull_request IS NOT NULL AND state<>'merged' AND observation->>'open' = 'true')),
 					 EXISTS(SELECT 1 FROM delivery_items WHERE project_id=$1 AND (branch=('work/'||$2) OR ($3::bigint IS NOT NULL AND pull_request=$3)) AND state='held')`, project, r.Slug, r.PR).Scan(&active, &merged, &held); err != nil {
 						return out, err
 					}
