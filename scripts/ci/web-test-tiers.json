@@ -7946,6 +7946,30 @@
     ,
     {"kind":"browser","file":"tests/lead-flow.spec.ts","name":"working lead: the line opens the docked panel, questions go to the Decision Desk, Pause is revision-bound","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: automatic fitting, saved widths and resize controls preserve host columns","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: grouped host remains stable at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: grouped host remains stable at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: grouped host remains stable at 1280px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: grouped host remains stable at 1280px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: grouped host remains stable at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: grouped host remains stable at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: grouped host remains stable at 390px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: grouped host remains stable at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: grouped host remains stable at 400px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: grouped host remains stable at 400px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/list-columns.spec.ts","name":"AEON-913: host groups select loaded rows, paginate, link across projects and keep controls still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/list-columns.spec.ts","name":"assignee sort uses the live worker when nobody is stored, and progress and ETA stay compact","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/list-columns.spec.ts","name":"progress and ETA columns at 1600px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -12407,6 +12431,16 @@
     {"kind":"node","file":"tests/codenames.test.ts","name":"the accessible line is the name, then the version, and never a release number","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/codenames.test.ts","name":"the release history fills the lookup, skipping releases without a name","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: a loaded fit keeps the designed width until the value is wider","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: automatic fits give width back until Title keeps its minimum","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: group selection caps loaded rows at 100 and preserves other groups","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: host column definitions preserve the picker and size within their bounds","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: project grouping retains metadata, loaded totals, held placement and URL state","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"a saved choice fixes order and visibility across desktop and phone widths","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
