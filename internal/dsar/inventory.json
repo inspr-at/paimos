@@ -50,6 +50,17 @@
         "deadlines": "metadata",
         "updated_at": "metadata"
       }
+    },
+    "cross_family_policies": {
+      "locator": "cross_family_policies WHERE tenant_id = :tenant_id",
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "mode": "metadata",
+        "allowed_families": "metadata",
+        "updated_by": "personal",
+        "updated_at": "metadata"
+      }
     }
   }
 }

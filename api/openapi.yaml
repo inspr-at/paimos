@@ -8438,6 +8438,53 @@ paths:
         '200': {description: Agreed requirements, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/JourneyRequirement'}}}}}
         '403': {$ref: '#/components/responses/Error'}
         '409': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/review-policy:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectReviewPolicy
+      description: "Requires reviewpolicy.read. Returns the local policy and effective project override over tenant default; absent rows use other_family."
+      responses:
+        "200":
+          description: "Current local and effective review policy"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReviewPolicySettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "Project is unavailable for policy changes"}
+    put:
+      operationId: putProjectReviewPolicy
+      description: "Requires reviewpolicy.manage in the current scope, rechecked inside the final tenant and tree fence. Built-in agent roles exclude manage; an explicit custom role and key scope may grant it. Replaces the policy and appends review_policy.changed with Before/After."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ReviewPolicy"}
+      responses:
+        "200":
+          description: "Current local and effective review policy"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReviewPolicySettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "Project is unavailable for policy changes"}
+    delete:
+      operationId: deleteProjectReviewPolicy
+      description: "Requires reviewpolicy.manage in the current project inside the final tenant and tree fence. Deletes the project override, falls back to the tenant default and appends review_policy.changed with Before/After."
+      responses:
+        "200":
+          description: "Current local and effective review policy"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReviewPolicySettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {description: "Project is unavailable for policy changes"}
   /projects/{projectId}/status-autopilot:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -11214,6 +11261,34 @@ paths:
               schema: {$ref: '#/components/schemas/QuotaWarningSettings'}
         '400': {description: Both integer thresholds must be 1–50 and urgent must be lower than early}
         '403': {description: Person with settings management permission required}
+  /settings/review-policy:
+    get:
+      operationId: getTenantReviewPolicy
+      description: "Requires reviewpolicy.read. Returns the local policy and effective project override over tenant default; absent rows use other_family."
+      responses:
+        "200":
+          description: "Current local and effective review policy"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReviewPolicySettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    put:
+      operationId: putTenantReviewPolicy
+      description: "Requires reviewpolicy.manage in the current scope, rechecked inside the final tenant and tree fence. Built-in agent roles exclude manage; an explicit custom role and key scope may grant it. Replaces the policy and appends review_policy.changed with Before/After."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ReviewPolicy"}
+      responses:
+        "200":
+          description: "Current local and effective review policy"
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ReviewPolicySettings"}
+        "400": {$ref: "#/components/responses/BadRequest"}
+        "403": {$ref: "#/components/responses/Forbidden"}
   /settings/status-autopilot:
     get:
       operationId: getStatusAutopilot
@@ -19272,6 +19347,33 @@ components:
         file: {type: string}
         line: {type: integer, minimum: 1}
         message: {type: string}
+    ReviewPolicy:
+      type: object
+      additionalProperties: false
+      required: [mode, allowed_families]
+      description: "Only the family requirement is configurable; completed run, vendor_reported model evidence and an ok verdict remain mandatory."
+      properties:
+        mode: {type: string, enum: [off, other_family, allowlist]}
+        allowed_families:
+          type: array
+          maxItems: 6
+          uniqueItems: true
+          description: "Nonempty only for allowlist; other modes require an empty list."
+          items: {type: string, enum: [openai, anthropic, xai, cursor, google, local]}
+    ReviewPolicySettings:
+      type: object
+      required: [project_id, policy, effective, source, updated_by, updated_at]
+      properties:
+        project_id: {type: [string, 'null'], format: uuid}
+        policy:
+          oneOf:
+            - {$ref: '#/components/schemas/ReviewPolicy'}
+            - {type: 'null'}
+          description: "The policy stored at this scope; null means inherited."
+        effective: {$ref: '#/components/schemas/ReviewPolicy'}
+        source: {type: string, enum: [default, tenant, project]}
+        updated_by: {type: [string, 'null'], format: uuid}
+        updated_at: {type: [string, 'null'], format: date-time}
     ReviewResult:
       type: object
       required: [verdict, findings, reason]
