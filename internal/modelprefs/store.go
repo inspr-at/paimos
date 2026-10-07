@@ -131,7 +131,10 @@ func LookupKind(ctx context.Context, tx pgx.Tx, area, projectID string) (Kind, b
 	return kind, kind.Slug != area, err
 }
 func SeedKinds(ctx context.Context, tx pgx.Tx, tenantID string) error {
-	_, err := tx.Exec(ctx, `SELECT aeon_seed_model_board_kinds($1::uuid)`, tenantID)
+	// Replays that stop before 1276 still have aeon_seed_work_kinds. A fresh
+	// schema uses the eight-kind board catalog. CASE evaluates only one branch.
+	_, err := tx.Exec(ctx, `SELECT CASE WHEN to_regprocedure('aeon_seed_model_board_kinds(uuid)') IS NULL
+ THEN aeon_seed_work_kinds($1::uuid) ELSE aeon_seed_model_board_kinds($1::uuid) END`, tenantID)
 	return err
 }
 func Requirement(ctx context.Context, tx pgx.Tx, personID *string, projectID, ticketRequirement string) (string, error) {

@@ -21,6 +21,16 @@ type preferenceOwner struct {
 	Source string  `json:"source"`
 }
 
+// boardDispatchAdopted reports whether dispatch should leave the legacy ladder.
+// Opening the board inserts a revision-0 workspace profile and no orders.
+// That initializer is not an adoption. A migrated profile keeps revision 1.
+func boardDispatchAdopted(s modelprefs.BoardState) bool {
+	if len(s.Orders) > 0 || len(s.Rules) > 0 || s.Workspace.Revision > 0 {
+		return true
+	}
+	return s.Person != nil && s.Person.Revision > 0
+}
+
 func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, excluded []string) (*WorkResolution, error) {
 	if q.Role == "scout" || q.Role == "mechanical" {
 		return nil, nil
@@ -43,9 +53,10 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	if err != nil {
 		return nil, err
 	}
-	// During the read-only legacy release, unconverted in-memory callers retain
-	// their old selector semantics. Migrated tenants and saved boards use this path.
-	if s.Workspace.ID == "" && (s.Person == nil || s.Person.ID == "") {
+	// A revision-0 workspace row is the closed initializer. It must not replace
+	// saved role routes. Migrated profiles use the default revision, and a save
+	// or a rule adopts the board.
+	if !boardDispatchAdopted(s) {
 		return nil, nil
 	}
 	c, err := loadBoardCatalog(ctx, tx)
