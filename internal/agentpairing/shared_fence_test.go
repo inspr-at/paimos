@@ -18,8 +18,8 @@ import (
 // Actual contention and FK compatibility are exercised by boundary/recurrence tests.
 func TestSharedFenceCallerInventory(t *testing.T) {
 	expected := map[string][]string{
-		"db.LockTree":               {"authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/audit.go", "delivery/audit_store.go", "modelregistry/module.go", "modelregistry/preparation.go", "operatoractor/actor.go", "workorders/common.go"},
-		"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/api.go", "delivery/audit_store.go", "delivery/audit_webhook.go", "delivery/module.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "workorders/common.go"},
+		"db.LockTree":               {"authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/alerts.go", "delivery/audit.go", "delivery/audit_store.go", "modelregistry/module.go", "modelregistry/preparation.go", "operatoractor/actor.go", "workorders/common.go"},
+		"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/audit_store.go", "delivery/audit_webhook.go", "delivery/module.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "workorders/common.go"},
 		"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
 		"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
 		"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go"},
@@ -127,6 +127,15 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		// it writes the review row. The binding invalidation commits earlier,
 		// in its own transaction, and does not hold this fence across the post.
 		{"../crossreview/reporter.go", "publishReview", "db.LockTenant(", "github_status=$2"},
+		// Stall alerts (AEON-849) prepare System under the tenant fence in a
+		// separate transaction, then enter the shared tree fence before rows,
+		// lead authority and inbox acceptance. Acceptance is the first event.
+		{"../delivery/alerts.go", "alertItem", "db.LockTenant(", "systemactor.Ensure("},
+		{"../delivery/alerts.go", "alertItem", "db.LockTree(", "authz.RequireTx("},
+		{"../delivery/alerts.go", "alertItem", "db.LockTree(", "FOR KEY SHARE"},
+		{"../delivery/alerts.go", "alertItem", "FOR KEY SHARE", "inbox.AcceptMessageTx("},
+		{"../delivery/alerts.go", "alertItem", "INSERT INTO delivery_alerts", "inbox.AcceptMessageTx("},
+		{"../delivery/alerts.go", "alertItem", "inbox.AcceptMessageTx(", "events.Append("},
 		// Merge audit (AEON-852) prepares the System actor in its own fenced
 		// transaction. Writes and retries take tenant/tree before audit and
 		// recipient rows; recipient authorization and writes precede events.
@@ -170,6 +179,20 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		if lock < 0 || !strings.Contains(body[lock:], "admin(") {
 			t.Errorf("statusautopilot.%s must re-check admin after LockProjectMutation", fn)
 		}
+	}
+	// The message-id writeback touches only the row inserted before acceptance.
+	// It must not take a fence, advisory lock or FK share lock after that event.
+	body := functionBody(t, "../delivery/alerts.go", "alertItem")
+	accept := strings.Index(body, "inbox.AcceptMessageTx(")
+	if accept < 0 {
+		t.Fatal("delivery.alertItem missing inbox acceptance")
+	}
+	tail := body[accept:]
+	if strings.Contains(tail, "FOR KEY SHARE") || strings.Contains(tail, "db.Lock") || strings.Contains(tail, "pg_advisory") || strings.Contains(tail, "FOR UPDATE") || strings.Contains(tail, "FOR NO KEY UPDATE") {
+		t.Error("delivery.alertItem must not acquire fences or row locks after inbox acceptance")
+	}
+	if !strings.Contains(tail, "UPDATE delivery_alerts SET inbox_message_id") || strings.Index(tail, "events.Append(") < strings.Index(tail, "UPDATE delivery_alerts SET inbox_message_id") {
+		t.Error("delivery.alertItem must write the accepted message id before the stall event")
 	}
 }
 

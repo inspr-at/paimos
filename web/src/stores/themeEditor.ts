@@ -21,32 +21,48 @@
 //   2. Actions bind to the record on screen. Save sends the captured draft and
 //      revision; Delete sends the revision captured when the confirmation
 //      opened; edit() rejects a draft for another record or revision.
-//   3. Conflicts are recoveries per record. A 409 (or 404) stores a recovery
-//      under the affected theme id, or under SELECTION for the person's theme
-//      choice. Recoveries are never cleared by unrelated work (pagination,
-//      another record's success or failure); they resolve only through fresh
-//      state for that record: a reload, installing it as the active theme,
-//      or a successful write on it. `failure` holds only transient errors and
-//      clears when the next operation starts.
-//   4. A conflict on the active record or the selection blocks edit, rename
+//   3. Every failure has an explicit outcome. errorClass() sorts an API
+//      failure into one of ERROR_CLASSES (missing 404/410, conflict 409,
+//      precondition 412, rejected other 4xx, server 5xx, network), and
+//      FAILURES maps every operation × class to exactly one outcome; the type
+//      makes a missing pair a compile error. An outcome is a recovery, a
+//      transient failure, or either plus an unfinished entry.
+//   4. Stale state is a recovery per record. A missing, conflicting or
+//      precondition-failed write stores a recovery under the affected theme
+//      id, or under SELECTION for the person's theme choice. Recoveries are
+//      never cleared by unrelated work (pagination, another record's success
+//      or failure); they resolve only through fresh state for that record: a
+//      reload, installing it as the active theme, or a successful write on it.
+//      `failure` holds only transient errors and clears when the next
+//      operation starts.
+//   5. Partial completion is never hidden. When a duplicate was created but
+//      could not be selected, `unfinished` records the copy until it is
+//      selected, deleted or a reload brings fresh state. feedback() always
+//      shows unfinished work next to any recovery or failure.
+//   6. A conflict on the active record or the selection blocks edit, rename
 //      and save; a selection conflict also blocks choosing, duplicating and
-//      New theme (they would reuse the stale selection revision). Discard
-//      resolves an active conflict by reloading.
-//   5. Confirmations and rename are reconciled after every event: a delete
+//      New theme (they would reuse the stale selection revision), and a stale
+//      workspace default blocks New theme. Discard resolves an active conflict
+//      by reloading.
+//   7. Confirmations and rename are reconciled after every event: a delete
 //      confirmation closes as soon as its record disappears or changes
 //      revision, so a retry always needs a fresh confirmation.
-//   6. Reload and re-entering the section refresh only while nothing is
+//   8. Reload and re-entering the section refresh only while nothing is
 //      unsaved; unsaved edits are never replaced behind the person's back.
-//   7. Personal themes need profile write; the workspace default and
+//   9. Personal themes need profile write; the workspace default and
 //      workspace themes need settings.manage. The default is never deletable.
-//   8. Every server-confirmed active theme (a load, a choice, a save, a
+//  10. Every server-confirmed active theme (a load, a choice, a save, a
 //      selected copy, the fallback after deleting the active theme) is
 //      published as accent CSS and agent appearance (lib/themeRuntime) by the
 //      runner, for the identity it was loaded for. Results land in the shared
 //      editor whether or not a settings card is mounted, so navigation can
 //      never strand a committed change; drafts are never published.
-//   9. Session restoration uses this same model. It supersedes an older load
+//  11. Session restoration uses this same model. It supersedes an older load
 //      with a fresh token, but never interrupts a write or an unsaved draft.
+//
+// Enumerations (EVENT_TYPES, OPERATION_KINDS, ERROR_CLASSES, PHASES) are
+// exported so the unit test generates its matrix from them: adding an event,
+// operation, error class or phase without covering it fails the test.
 //
 // Adopting it (AEON-643): read `draft`, gate controls with canEdit, and send
 // changes with editor.update(draft => { draft.values.agents.ring = 'pulse' }).
@@ -64,7 +80,9 @@ import type { ActiveTheme, ThemeRecord, ThemesPage } from '../lib/themes'
 export const SELECTION = '#selection'
 
 export interface Rights { selfWrite: boolean; manage: boolean }
-export interface Recovery { key: string; operation: 'selection' | 'save' | 'delete' | 'duplicate'; feedback: string }
+export interface Recovery { key: string; operation: 'selection' | 'save' | 'delete' | 'duplicate' | 'create'; feedback: string }
+/** Work that partly happened: a copy that exists but is not the person's theme yet. */
+export interface Unfinished { id: string; name: string; feedback: string }
 export interface Confirmation { id: string; revision: number; name: string }
 
 export type Operation =
@@ -78,6 +96,19 @@ export type Operation =
   | { kind: 'delete'; target: Confirmation; wasActive: boolean }
   | { kind: 'fallback' }
 export interface Pending { token: number; op: Operation }
+export const OPERATION_KINDS = ['load', 'more', 'choose', 'save', 'readDefault', 'duplicate', 'selectCopy', 'delete', 'fallback'] as const satisfies readonly Operation['kind'][]
+
+/** How an API failure is classified; see errorClass(). */
+export const ERROR_CLASSES = ['missing', 'conflict', 'precondition', 'rejected', 'server', 'network'] as const
+export type ErrorClass = typeof ERROR_CLASSES[number]
+/** Sorts a failed request by HTTP status; `null` means no response arrived. */
+export function errorClass(status: number | null): ErrorClass {
+  if (status === null) return 'network'
+  if (status === 404 || status === 410) return 'missing'
+  if (status === 409) return 'conflict'
+  if (status === 412) return 'precondition'
+  return status >= 500 ? 'server' : 'rejected'
+}
 
 export interface ThemeEditorState {
   /** `tenant/principal`; empty when signed out. */
@@ -93,6 +124,8 @@ export interface ThemeEditorState {
   /** Last token handed out; never reused, even across identities. */
   token: number
   recoveries: Recovery[]
+  /** Partly completed work that must stay visible until fresh state resolves it. */
+  unfinished: Unfinished[]
   failure: string
   message: string
   confirming: Confirmation | null
@@ -120,16 +153,23 @@ export type ThemeEvent =
   | { type: 'delete' }
   | { type: 'resolved'; token: number; result: unknown }
   | { type: 'failed'; token: number; status: number | null; message: string }
+export const EVENT_TYPES = [
+  'identity', 'rights', 'enter', 'leave', 'reload', 'restore', 'more', 'choose', 'edit', 'rename', 'renameEnd', 'save', 'discard',
+  'duplicate', 'newTheme', 'confirmDelete', 'cancelDelete', 'delete', 'resolved', 'failed',
+] as const satisfies readonly ThemeEvent['type'][]
+// Compile-time completeness: each list above names every member of its union.
+type Missing<All, Listed> = [Exclude<All, Listed>] extends [never] ? true : Exclude<All, Listed>
+const complete: [Missing<ThemeEvent['type'], typeof EVENT_TYPES[number]>, Missing<Operation['kind'], typeof OPERATION_KINDS[number]>] = [true, true]
+void complete
 
 export const initialState = (): ThemeEditorState => ({
   identity: '', rights: { selfWrite: false, manage: false }, items: [], cursor: null, active: null, draft: null,
-  pending: null, token: 0, recoveries: [], failure: '', message: '', confirming: null, renaming: null,
+  pending: null, token: 0, recoveries: [], unfinished: [], failure: '', message: '', confirming: null, renaming: null,
 })
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T
 const content = (theme: ThemeRecord) => JSON.stringify({ name: theme.name, values: theme.values })
 const recoveryFor = (state: ThemeEditorState, key: string) => state.recoveries.find(item => item.key === key)
-const stale = (status: number | null) => status === 409 || status === 404
 
 // ---- Selectors: everything the UI may ask. All are pure. -----------------
 
@@ -143,7 +183,7 @@ export const isConflicted = (state: ThemeEditorState) => !!state.active && (!!re
 const ready = (state: ThemeEditorState) => !!state.active && !state.pending
 const canWriteSelection = (state: ThemeEditorState) => ready(state) && !isDirty(state) && state.rights.selfWrite && !recoveryFor(state, SELECTION)
 export const canChoose = canWriteSelection
-export const canCreate = canWriteSelection
+export const canCreate = (state: ThemeEditorState) => canWriteSelection(state) && !recoveryFor(state, state.active!.default_theme_id)
 export const canDuplicate = (state: ThemeEditorState, theme: ThemeRecord) => canWriteSelection(state) && !recoveryFor(state, theme.id)
 export const canEdit = (state: ThemeEditorState) => !!state.draft && ready(state) && isEditable(state, state.draft) && !isConflicted(state)
 export const canRename = (state: ThemeEditorState, theme: ThemeRecord) => canEdit(state) && state.draft!.id === theme.id
@@ -156,11 +196,34 @@ export const canDelete = (state: ThemeEditorState) => {
   return !!target && target.revision === state.confirming!.revision && canConfirmDelete(state, target)
 }
 export const canReload = (state: ThemeEditorState) => !!state.identity && !state.pending && !isDirty(state)
-/** Feedback for the status line: a transient failure, else the most relevant unresolved recovery. */
-export function feedback(state: ThemeEditorState) {
-  if (state.failure) return state.failure
-  const own = state.active ? recoveryFor(state, state.active.theme.id) : undefined
-  return (own ?? recoveryFor(state, SELECTION) ?? state.recoveries[state.recoveries.length - 1])?.feedback ?? ''
+export const UNAVAILABLE = 'Your current theme could not be loaded. Reload themes.'
+/**
+ * Everything the status line must say, in order: unfinished work, the
+ * transient failure, then every unresolved recovery (the active record's and
+ * the selection's first, the rest newest first). Nothing that partly happened
+ * or still needs a reload is ever hidden behind another message.
+ */
+export function notices(state: ThemeEditorState): string[] {
+  const first = [state.active?.theme.id, SELECTION]
+  const rank = (item: Recovery) => { const at = first.indexOf(item.key); return at < 0 ? first.length : at }
+  const recoveries = [...state.recoveries].reverse().sort((a, b) => rank(a) - rank(b))
+  const lines = [...state.unfinished.map(item => item.feedback), state.failure, ...recoveries.map(item => item.feedback)]
+  if (state.identity && !state.active && !state.pending && !state.failure) lines.push(UNAVAILABLE)
+  return [...new Set(lines.filter(Boolean))]
+}
+/** The status line: every notice in one string; empty when all is well. */
+export const feedback = (state: ThemeEditorState) => notices(state).join(' ')
+export const PHASES = ['signedOut', 'unavailable', 'clean', 'dirty', 'renaming', 'confirming', 'conflicted', ...OPERATION_KINDS] as const
+export type Phase = typeof PHASES[number]
+/** The coarse phase: the pending operation, else what the person sees. */
+export function phase(state: ThemeEditorState): Phase {
+  if (!state.identity) return 'signedOut'
+  if (state.pending) return state.pending.op.kind
+  if (!state.active) return 'unavailable'
+  if (isConflicted(state)) return 'conflicted'
+  if (state.confirming) return 'confirming'
+  if (state.renaming) return 'renaming'
+  return isDirty(state) ? 'dirty' : 'clean'
 }
 export function ownership(state: ThemeEditorState, theme: ThemeRecord) {
   const label = isDefault(state, theme) ? 'Workspace default' : theme.scope === 'workspace' ? 'Workspace' : 'Yours'
@@ -179,12 +242,14 @@ function merge(items: ThemeRecord[], theme: ThemeRecord) {
 }
 const without = (recoveries: Recovery[], ...keys: string[]) => recoveries.filter(item => !keys.includes(item.key))
 const recover = (recoveries: Recovery[], recovery: Recovery) => [...without(recoveries, recovery.key), recovery]
-/** Fresh active state resolves that record's and the selection's recovery. */
+const unfinish = (unfinished: Unfinished[], item: Unfinished) => [...unfinished.filter(entry => entry.id !== item.id), item]
+/** Fresh active state resolves that record's and the selection's recovery, and finishes it if it was unfinished. */
 function install(state: ThemeEditorState, fresh: ActiveTheme, message: string): ThemeEditorState {
   const notice = fresh.fallback_notice ? `${fresh.fallback_notice.deleted_theme_name} was deleted. You are using the workspace default.` : ''
   return {
     ...state, pending: null, active: clone(fresh), draft: clone(fresh.theme), items: merge(state.items, fresh.theme),
-    recoveries: without(state.recoveries, fresh.theme.id, SELECTION), failure: '', message: notice || message, renaming: null,
+    recoveries: without(state.recoveries, fresh.theme.id, SELECTION), unfinished: state.unfinished.filter(item => item.id !== fresh.theme.id),
+    failure: '', message: notice || message, renaming: null,
   }
 }
 /** Drop a confirmation or rename that no longer matches the record on screen. */
@@ -204,7 +269,7 @@ function settle(state: ThemeEditorState, op: Operation, result: unknown): ThemeE
     case 'load': {
       // A full snapshot: every listed record and the selection are fresh.
       const { page, active } = result as { page: ThemesPage; active: ActiveTheme }
-      return install({ ...done, items: clone(page.items), cursor: page.next_cursor, recoveries: [] }, active, state.message)
+      return install({ ...done, items: clone(page.items), cursor: page.next_cursor, recoveries: [], unfinished: [] }, active, state.message)
     }
     case 'more': {
       // Pagination only adds rows. It never touches the active record, its
@@ -227,7 +292,10 @@ function settle(state: ThemeEditorState, op: Operation, result: unknown): ThemeE
     }
     case 'selectCopy': return install(done, result as ActiveTheme, 'Duplicated.')
     case 'delete': {
-      const next = { ...done, items: state.items.filter(item => item.id !== op.target.id), recoveries: without(state.recoveries, op.target.id), confirming: null, message: 'Deleted.' }
+      const next = {
+        ...done, items: state.items.filter(item => item.id !== op.target.id), recoveries: without(state.recoveries, op.target.id),
+        unfinished: state.unfinished.filter(item => item.id !== op.target.id), confirming: null, message: 'Deleted.',
+      }
       // The person's choice falls back on the server; read it before editing again.
       return op.wasActive ? { ...start({ ...next, active: null, draft: null }, { kind: 'fallback' }), message: 'Deleted.' } : next
     }
@@ -235,34 +303,89 @@ function settle(state: ThemeEditorState, op: Operation, result: unknown): ThemeE
   }
 }
 
+// ---- Failures: every operation × every error class -------------------------
+
+/** What a failure leaves behind. `failure` is transient; the others persist. */
+interface FailureOutcome { recovery?: Recovery; failure?: string; unfinished?: Unfinished }
+type Handler<K extends Operation['kind']> = (op: Extract<Operation, { kind: K }>, state: ThemeEditorState, reason: string) => FailureOutcome
+type FailureTable = { [K in Operation['kind']]: Record<ErrorClass, Handler<K>> }
+
+const OFFLINE = 'The theme service could not be reached. Check your connection and try again.'
+const transient = (reason: string): FailureOutcome => ({ failure: reason })
+/** A transient failure that shows the server's (or the offline) reason. */
+const relay = (_: unknown, __: unknown, reason: string) => transient(reason)
+/** The same handler for every class: reads have no record to recover. */
+const everyClass = <K extends Operation['kind']>(handle: Handler<K>) => Object.fromEntries(ERROR_CLASSES.map(kind => [kind, handle])) as Record<ErrorClass, Handler<K>>
+const stale = (key: string, operation: Recovery['operation'], feedback: string): FailureOutcome => ({ recovery: { key, operation, feedback } })
+const created = (copy: ThemeRecord, outcome: FailureOutcome): FailureOutcome =>
+  ({ ...outcome, unfinished: { id: copy.id, name: copy.name, feedback: `${copy.name} was created, but could not be selected.` } })
+const deleted = 'Deleted, but your current theme could not be loaded. Reload themes.'
+
+/**
+ * The explicit outcome of every failed operation. Reads (load, more,
+ * fallback) have no record to recover, so every class is transient. Writes
+ * turn missing, conflict and precondition into a recovery on the record they
+ * were bound to, and rejected, server and network into a transient failure.
+ */
+const FAILURES: FailureTable = {
+  load: everyClass(relay),
+  more: everyClass(relay),
+  choose: {
+    missing: (op, state) => stale(op.themeID, 'selection', `${nameOf(state, op.themeID)} no longer exists. Reload themes.`),
+    conflict: () => stale(SELECTION, 'selection', 'Your theme choice changed elsewhere. Reload themes, then choose again.'),
+    precondition: () => stale(SELECTION, 'selection', 'Your theme choice changed elsewhere. Reload themes, then choose again.'),
+    rejected: relay, server: relay, network: relay,
+  },
+  save: {
+    missing: (op, state) => stale(op.theme.id, 'save', `${nameOf(state, op.theme.id)} no longer exists. Discard your edits to continue.`),
+    conflict: (op, state) => stale(op.theme.id, 'save', `${nameOf(state, op.theme.id)} changed elsewhere. Discard your edits to load the current version.`),
+    precondition: (op, state) => stale(op.theme.id, 'save', `${nameOf(state, op.theme.id)} changed elsewhere. Discard your edits to load the current version.`),
+    rejected: relay, server: relay, network: relay,
+  },
+  readDefault: {
+    missing: op => stale(op.themeID, 'create', 'The workspace default changed elsewhere. Reload themes, then create a new theme again.'),
+    conflict: op => stale(op.themeID, 'create', 'The workspace default changed elsewhere. Reload themes, then create a new theme again.'),
+    precondition: op => stale(op.themeID, 'create', 'The workspace default changed elsewhere. Reload themes, then create a new theme again.'),
+    rejected: (_, __, reason) => transient(`The workspace default could not be read. ${reason}`),
+    server: (_, __, reason) => transient(`The workspace default could not be read. ${reason}`),
+    network: (_, __, reason) => transient(`The workspace default could not be read. ${reason}`),
+  },
+  duplicate: {
+    missing: op => stale(op.source.id, 'duplicate', `${op.source.name} no longer exists. Reload themes.`),
+    conflict: op => stale(op.source.id, 'duplicate', `${op.source.name} changed elsewhere. Reload themes, then duplicate it again.`),
+    precondition: op => stale(op.source.id, 'duplicate', `${op.source.name} changed elsewhere. Reload themes, then duplicate it again.`),
+    rejected: relay, server: relay, network: relay,
+  },
+  // The copy exists in every case; never let the failure hide that.
+  selectCopy: {
+    missing: op => created(op.copy, stale(op.copy.id, 'selection', `${op.copy.name} was deleted elsewhere. Reload themes.`)),
+    conflict: op => created(op.copy, stale(SELECTION, 'selection', `Your theme choice changed elsewhere. Reload themes, then choose ${op.copy.name}.`)),
+    precondition: op => created(op.copy, stale(SELECTION, 'selection', `Your theme choice changed elsewhere. Reload themes, then choose ${op.copy.name}.`)),
+    rejected: (op, _, reason) => created(op.copy, transient(reason)),
+    server: (op, _, reason) => created(op.copy, transient(reason)),
+    network: (op, _, reason) => created(op.copy, transient(reason)),
+  },
+  // The confirmation stays open to show what failed; after a recovery Delete
+  // stays disabled until a reload brings the record back fresh.
+  delete: {
+    missing: op => stale(op.target.id, 'delete', `${op.target.name} was already deleted elsewhere. Reload themes.`),
+    conflict: op => stale(op.target.id, 'delete', `${op.target.name} changed elsewhere. Reload themes, then delete it again if you still want to.`),
+    precondition: op => stale(op.target.id, 'delete', `${op.target.name} changed elsewhere. Reload themes, then delete it again if you still want to.`),
+    rejected: relay, server: relay, network: relay,
+  },
+  fallback: everyClass(() => transient(deleted)),
+}
+
 function fail(state: ThemeEditorState, op: Operation, status: number | null, message: string): ThemeEditorState {
-  const done = { ...state, pending: null }
-  const reason = message || 'The theme operation failed. Please try again.'
-  const recovery = (key: string, operation: Recovery['operation'], text: string) => ({ ...done, recoveries: recover(state.recoveries, { key, operation, feedback: text }) })
-  switch (op.kind) {
-    case 'choose':
-      if (status === 409) return recovery(SELECTION, 'selection', 'Your theme choice changed elsewhere. Reload themes, then choose again.')
-      if (status === 404) return recovery(op.themeID, 'selection', `${nameOf(state, op.themeID)} no longer exists. Reload themes.`)
-      break
-    case 'save':
-      if (stale(status)) return recovery(op.theme.id, 'save', status === 404 ? `${nameOf(state, op.theme.id)} no longer exists. Discard your edits to continue.` : `${nameOf(state, op.theme.id)} changed elsewhere. Discard your edits to load the current version.`)
-      break
-    case 'readDefault': return { ...done, failure: `The workspace default could not be read. ${reason}` }
-    case 'duplicate':
-      if (stale(status)) return recovery(op.source.id, 'duplicate', status === 404 ? `${op.source.name} no longer exists. Reload themes.` : `${op.source.name} changed elsewhere. Reload themes, then duplicate it again.`)
-      break
-    case 'selectCopy':
-      // The copy exists either way; never let the failure hide that.
-      if (status === 409) return recovery(SELECTION, 'selection', `The copy was created, but could not be selected: your theme choice changed elsewhere. Reload themes, then choose ${op.copy.name}.`)
-      return { ...done, failure: `The copy was created, but could not be selected. ${reason}` }
-    case 'delete':
-      // The confirmation stays open to show what failed; Delete stays
-      // disabled until a reload brings the record back fresh.
-      if (stale(status)) return recovery(op.target.id, 'delete', status === 404 ? `${op.target.name} was already deleted elsewhere. Reload themes.` : `${op.target.name} changed elsewhere. Reload themes, then delete it again if you still want to.`)
-      break
-    case 'fallback': return { ...done, failure: 'Deleted, but your current theme could not be loaded. Reload themes.' }
+  const kind = errorClass(status)
+  const reason = kind === 'network' ? OFFLINE : message || 'The theme operation failed. Please try again.'
+  // FAILURES[op.kind] is keyed by op.kind, so its handler accepts this op.
+  const outcome = (FAILURES[op.kind][kind] as (op: Operation, state: ThemeEditorState, reason: string) => FailureOutcome)(op, state, reason)
+  return {
+    ...state, pending: null, failure: outcome.failure ?? '',
+    recoveries: outcome.recovery ? recover(state.recoveries, outcome.recovery) : state.recoveries,
+    unfinished: outcome.unfinished ? unfinish(state.unfinished, outcome.unfinished) : state.unfinished,
   }
-  return { ...done, failure: reason }
 }
 
 const copyName = (theme: ThemeRecord) => `${[...theme.name].slice(0, 73).join('')} copy`
@@ -282,7 +405,8 @@ function apply(state: ThemeEditorState, event: ThemeEvent): ThemeEditorState {
       return event.identity && event.identity === state.identity && !isDirty(state) && (!state.pending || state.pending.op.kind === 'load')
         ? start({ ...state, confirming: null }, { kind: 'load' }) : state
     case 'leave': return state.confirming || state.renaming ? { ...state, confirming: null, renaming: null } : state
-    case 'more': return state.cursor && !state.pending && state.identity ? start(state, { kind: 'more', after: state.cursor }) : state
+    // Pagination extends a loaded list; without an active theme, Reload is the way on.
+    case 'more': return state.cursor && ready(state) ? start(state, { kind: 'more', after: state.cursor }) : state
     case 'choose':
       if (!canChoose(state) || event.id === state.active!.theme.id || !state.items.some(item => item.id === event.id)) return state
       return start(state, { kind: 'choose', themeID: event.id, selectionRevision: state.active!.revision })
@@ -413,6 +537,10 @@ export function createThemeEditor() {
     valid: view(current => !!current.draft && isValidName(current.draft.name)),
     conflict: view(isConflicted),
     error: view(feedback),
+    /** The status line split into its separate notices (see notices()). */
+    notices: view(notices),
+    unfinished: view(current => current.unfinished),
+    phase: view(phase),
     selfWrite: view(current => current.rights.selfWrite),
     canEdit: view(canEdit),
     canSave: view(canSave),

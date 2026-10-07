@@ -100,7 +100,7 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 	beforeKeys, beforeEvents := keyCounts(t, m, owner)
 	// Full access must not smuggle these custom-role-only scopes through an
 	// expiry edit. Each rejected combined write must leave the key intact.
-	for _, scope := range []string{"recurrences.manage", "reviewpolicy.manage"} {
+	for _, scope := range []string{"recurrences.manage", "delivery.manage", "reviewpolicy.manage"} {
 		deniedBody, _ := json.Marshal(map[string]any{"add": []string{scope}, "expires_at": time.Now().UTC().Add(24 * time.Hour)})
 		if w := scopesRequest(m, owner, key.ID, http.MethodPatch, string(deniedBody)); w.Code != http.StatusForbidden {
 			t.Fatalf("built-in agent %s grant status %d, want 403", scope, w.Code)
@@ -108,10 +108,10 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 	}
 	view, err = m.agentKeyScopes(tenant.WithPrincipal(ctx, owner), owner, key.ID, nil)
 	if err != nil || view.Key.ID != key.ID || view.Key.Prefix != key.Prefix || view.Key.ExpiresAt != nil || view.Key.RevokedAt != nil || !slices.Equal(view.Key.Scopes, key.Scopes) {
-		t.Fatal("rejected recurrence grant changed the key")
+		t.Fatal("rejected automation grant changed the key")
 	}
 	if keys, events := keyCounts(t, m, owner); keys != beforeKeys || events != beforeEvents {
-		t.Fatal("rejected recurrence grant wrote a key or audit event")
+		t.Fatal("rejected automation grant wrote a key or audit event")
 	}
 	for i, days := range []int{30, 90, 365, 0} {
 		var expiry *time.Time
