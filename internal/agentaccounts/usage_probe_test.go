@@ -145,3 +145,84 @@ func TestUsageProbeDollarBudgetStorageAndPrivacy(t *testing.T) {
 		t.Fatal("unallowlisted data persisted")
 	}
 }
+
+// Risk: a delayed dollar probe must not publish a figure that disagrees with a
+// newer credit snapshot, and must not clear the key-cap stop that snapshot set.
+func TestUsageProbeOlderThanCreditSnapshotDoesNotStoreBudget(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	reset(t)
+	f := limitFixture{admin: makePrincipal(t, "usage-probe-stale-budget", "person", "Owner", []string{"admin"})}
+	f.runner = addPrincipal(t, f.admin.TenantID, "agent", "runner", []string{"admin"})
+	dbtest.BindRole(t, testDB, f.runner.TenantID, f.runner.ID, "admin")
+	f.token = issueKey(t, f.runner, []string{"account.manage", "account.probe"})
+	f.mod = fixedClockModule{Module: accountsMod(), at: now}
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"main","harness":"pi","daemon_id":"daemon-a","label":"Main"}`, 201, &f.account)
+	ownFixtureAccount(t, f.admin, &f.account)
+	seed(t, f.admin, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'usage-pi','1','pi','openai','test','high','strong')`, f.admin.TenantID)
+		return err
+	})
+	path := "/api/agent-accounts/" + f.account.ID
+	callStatus(t, f.mod, &f.runner, f.token, "POST", path+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
+	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET provider='openrouter' WHERE id=$1`, f.account.ID); err != nil {
+		t.Fatal(err)
+	}
+	callStatus(t, f.mod, &f.admin, "", "PUT", path+"/usage-probe", `{"binding_revision":0,"enabled":true}`, 204, nil)
+	zero := int64(0)
+	limit, remaining := 50.0, 37.5
+	postBudget := func(at time.Time, usage float64) {
+		t.Helper()
+		input := usageReadingsWrite{readingsWrite: readingsWrite{[]capacity.Reading{}}, Budget: &capacity.Budget{Currency: "USD", Source: "agentd", ReadAt: at, KeyUsageUSD: usage, KeyLimitUSD: &limit, KeyRemainingUSD: &remaining}, UsageProbe: true, Revision: &zero}
+		callStatus(t, f.mod, &f.runner, f.token, "POST", path+"/readings", encoded(t, input), 204, nil)
+	}
+	assertBudget := func(want bool, at time.Time, usage float64) {
+		t.Helper()
+		var raw []byte
+		if err := adminPool.QueryRow(t.Context(), `SELECT usage_budget FROM agent_accounts WHERE id=$1`, f.account.ID).Scan(&raw); err != nil {
+			t.Fatal(err)
+		}
+		if !want {
+			if len(raw) != 0 && string(raw) != "null" {
+				t.Fatalf("stale probe stored usage_budget (%d bytes)", len(raw))
+			}
+			return
+		}
+		var b capacity.Budget
+		if json.Unmarshal(raw, &b) != nil || !b.ReadAt.Equal(at) || b.KeyUsageUSD != usage {
+			t.Fatalf("usage_budget read_at %s usage %v", b.ReadAt.UTC().Format(time.RFC3339), b.KeyUsageUSD)
+		}
+	}
+	assertStop := func() {
+		t.Helper()
+		var ready struct {
+			Items []AccountReadiness `json:"items"`
+		}
+		callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/readiness", "", 200, &ready)
+		if len(ready.Items) != 1 || ready.Items[0].CanTry || !slices.Contains(ready.Items[0].ReasonCodes, "key_cap_exhausted") {
+			t.Fatal("key-cap stop changed")
+		}
+	}
+	zeroCap := 0.0
+	callStatus(t, f.mod, &f.runner, f.token, "POST", path+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, OpenRouterCredits: &openrouter.Credits{ObservedAt: now.Add(10 * time.Second), Limit: &zeroCap}}), 200, nil)
+	assertBudget(false, time.Time{}, 0)
+	assertStop()
+	postBudget(now.Add(4*time.Second), 99)
+	assertBudget(false, time.Time{}, 0)
+	assertStop()
+	var observed time.Time
+	if err := adminPool.QueryRow(t.Context(), `SELECT (openrouter_credits->>'observed_at')::timestamptz FROM agent_accounts WHERE id=$1`, f.account.ID).Scan(&observed); err != nil {
+		t.Fatal(err)
+	}
+	postBudget(observed, 77)
+	assertBudget(false, time.Time{}, 0)
+	assertStop()
+	storedAt := now.Add(20 * time.Second)
+	postBudget(storedAt, 12.5)
+	assertBudget(true, storedAt, 12.5)
+	callStatus(t, f.mod, &f.runner, f.token, "POST", path+"/probe", encoded(t, probeWrite{DaemonID: "daemon-a", DaemonGeneration: "g1", Available: true, OpenRouterCredits: &openrouter.Credits{ObservedAt: now.Add(40 * time.Second), Limit: &zeroCap}}), 200, nil)
+	assertBudget(true, storedAt, 12.5)
+	assertStop()
+	postBudget(now.Add(30*time.Second), 99)
+	assertBudget(true, storedAt, 12.5)
+	assertStop()
+}

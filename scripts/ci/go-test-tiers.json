@@ -908,6 +908,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestUsageProbeDollarBudgetStorageAndPrivacy","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestUsageProbeOlderThanCreditSnapshotDoesNotStoreBudget","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestUsageProbeOwnerConsentFencesReadingsAndBinding","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestUseAccountIDRetainsLabelAndOwnership","tier":"GATED-FULL"}
@@ -8667,6 +8669,8 @@
     {"kind":"go","package":"internal/usagedashboard","name":"TestTrimSessionsDropsOnlyTheLastSession","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/usagedashboard","name":"TestWasteKindNamesOnlyRealWaste","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/usageprobe","name":"TestClaudeUnusableFileUsesKeychainWindow","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/usageprobe","name":"TestHostLoginProbesNormalizeFixturesWithoutLeakingCredentials","tier":"ESSENTIAL"}
     ,

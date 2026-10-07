@@ -172,31 +172,40 @@ func (c Client) grok(ctx context.Context, home string, now time.Time) Result {
 	return Result{Readings: []capacity.Reading{r}}
 }
 
-func (c Client) claude(ctx context.Context, home string, now time.Time) Result {
-	var root struct {
-		OAuth *struct {
-			Token   string   `json:"accessToken"`
-			Expires float64  `json:"expiresAt"`
-			Scopes  []string `json:"scopes"`
-		} `json:"claudeAiOauth"`
+type claudeOAuth struct {
+	Token   string   `json:"accessToken"`
+	Expires float64  `json:"expiresAt"`
+	Scopes  []string `json:"scopes"`
+}
+
+// A file login stays ahead of Keychain only while it is usable and unexpired.
+// Missing, unreadable, empty, and stale files fall through. The rejected file
+// token is never sent.
+func claudeSessionUsable(o *claudeOAuth, now time.Time) bool {
+	if o == nil || !usable(o.Token) {
+		return false
 	}
-	if !readLogin(home, ".credentials.json", &root) {
-		raw, err := claudeKeychain(home)
-		if err != nil || json.Unmarshal(raw, &root) != nil {
-			return Result{Cause: "authentication_failed"}
-		}
-	}
-	if root.OAuth == nil || !usable(root.OAuth.Token) {
-		return Result{Cause: "authentication_failed"}
-	}
-	o := root.OAuth
 	profile := false
 	for _, s := range o.Scopes {
 		profile = profile || s == "user:profile"
 	}
 	if !profile || o.Expires > 0 && !now.Before(time.UnixMilli(int64(o.Expires))) {
-		return Result{Cause: "authentication_failed"}
+		return false
 	}
+	return true
+}
+
+func (c Client) claude(ctx context.Context, home string, now time.Time) Result {
+	var root struct {
+		OAuth *claudeOAuth `json:"claudeAiOauth"`
+	}
+	if !readLogin(home, ".credentials.json", &root) || !claudeSessionUsable(root.OAuth, now) {
+		raw, err := loadClaudeKeychain(home)
+		if err != nil || json.Unmarshal(raw, &root) != nil || !claudeSessionUsable(root.OAuth, now) {
+			return Result{Cause: "authentication_failed"}
+		}
+	}
+	o := root.OAuth
 	var windows map[string]json.RawMessage
 	if cause := c.get(ctx, "https://api.anthropic.com/api/oauth/usage", o.Token, map[string]string{"anthropic-beta": "oauth-2025-04-20"}, &windows); cause != "" {
 		return Result{Cause: cause}
@@ -352,3 +361,8 @@ func (c Client) openrouter(ctx context.Context, home string, now time.Time) Resu
 }
 
 var errLogin = errors.New("local usage login unavailable")
+
+// loadClaudeKeychain reads the default Claude login item. Tests replace it so
+// fixtures never open the operator keychain. Every other home stays refused
+// inside claudeKeychain.
+var loadClaudeKeychain = claudeKeychain

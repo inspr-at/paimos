@@ -127,15 +127,16 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// The budget display and existing key-cap admission facts share the same
-// observation. A delayed probe cannot replace a newer stream credit snapshot.
+// The dollar figure and the key-cap admission fact share one observation.
+// A probe that is not strictly newer than the credit snapshot changes neither.
+// The snapshot is never copied into the dollar column.
 func ingestUsageBudget(ctx context.Context, tx pgx.Tx, a Account, b capacity.Budget, now time.Time) error {
+	if a.OpenRouterCredits != nil && !b.ReadAt.After(a.OpenRouterCredits.ObservedAt) {
+		return nil
+	}
 	tag, err := tx.Exec(ctx, `UPDATE agent_accounts SET usage_budget=$2 WHERE id=$1 AND (usage_budget IS NULL OR (usage_budget->>'read_at')::timestamptz<$3)`, a.ID, b, b.ReadAt)
 	if err != nil || tag.RowsAffected() == 0 {
 		return err
-	}
-	if a.OpenRouterCredits != nil && !b.ReadAt.After(a.OpenRouterCredits.ObservedAt) {
-		return nil
 	}
 	a.OpenRouterCredits = &openrouter.Credits{ObservedAt: b.ReadAt, Usage: &b.KeyUsageUSD, Limit: b.KeyLimitUSD, Remaining: b.KeyRemainingUSD}
 	a.OpenRouterCredits.Remaining = a.OpenRouterCredits.KeyRemaining()

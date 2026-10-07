@@ -125,6 +125,72 @@ func TestProbeFailuresAreBoundedAndNeverRefreshOrFollowRedirects(t *testing.T) {
 	}
 }
 
+// Risk: a parseable but expired or unusable Claude file must not hide a live
+// default-home keychain login, and the file token must not be sent or stored.
+func TestClaudeUnusableFileUsesKeychainWindow(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	const fileToken = "expired-file-token"
+	const keyToken = "keychain-login-value"
+	payload := []byte(`{"claudeAiOauth":{"accessToken":"keychain-login-value","scopes":["user:profile"],"expiresAt":2000000000000}}`)
+	var calls int
+	previous := loadClaudeKeychain
+	t.Cleanup(func() { loadClaudeKeychain = previous })
+	loadClaudeKeychain = func(string) ([]byte, error) {
+		calls++
+		return append([]byte(nil), payload...), nil
+	}
+	capture := func(t *testing.T, home, login, wantAuth string) Result {
+		t.Helper()
+		path := filepath.Join(home, ".credentials.json")
+		before, statErr := os.Stat(path)
+		client := Client{HTTP: &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method != http.MethodGet || r.URL.Host != "api.anthropic.com" || r.Header.Get("Authorization") != "Bearer "+wantAuth || r.Header.Get("anthropic-beta") != "oauth-2025-04-20" {
+				t.Fatal("request did not use the selected login")
+			}
+			raw, err := os.ReadFile(filepath.Join("testdata", "claude.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(raw))), Header: make(http.Header)}, nil
+		})}}
+		result := client.Capture(t.Context(), Target{Harness: "claude", Home: home}, now)
+		if login != "" {
+			after, err := os.Stat(path)
+			stored, readErr := os.ReadFile(path)
+			if statErr != nil || err != nil || readErr != nil || string(stored) != login || !before.ModTime().Equal(after.ModTime()) {
+				t.Fatal("probe rewrote the credentials file")
+			}
+		}
+		return result
+	}
+	for _, tc := range []struct{ name, login string }{
+		{"expired", `{"claudeAiOauth":{"accessToken":"` + fileToken + `","scopes":["user:profile"],"expiresAt":1}}`},
+		{"empty", `{}`},
+		{"short", `{"claudeAiOauth":{"accessToken":"short","scopes":["user:profile"],"expiresAt":2000000000000}}`},
+		{"no-profile", `{"claudeAiOauth":{"accessToken":"` + fileToken + `","scopes":["user:inference"],"expiresAt":2000000000000}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls = 0
+			home := fixtureHome(t, ".credentials.json", tc.login)
+			got := capture(t, home, tc.login, keyToken)
+			raw, _ := json.Marshal(got)
+			if calls != 1 || got.Cause != "" || len(got.Readings) != 4 || strings.Contains(string(raw), fileToken) || strings.Contains(string(raw), keyToken) {
+				t.Fatalf("keychain window missing: calls %d cause %s readings %d", calls, got.Cause, len(got.Readings))
+			}
+		})
+	}
+	t.Run("valid-file-stays-ahead", func(t *testing.T) {
+		calls = 0
+		login := `{"claudeAiOauth":{"accessToken":"synthetic-login-value","scopes":["user:profile"],"expiresAt":2000000000000}}`
+		home := fixtureHome(t, ".credentials.json", login)
+		got := capture(t, home, login, "synthetic-login-value")
+		raw, _ := json.Marshal(got)
+		if calls != 0 || got.Cause != "" || len(got.Readings) != 4 || strings.Contains(string(raw), "synthetic-login-value") || strings.Contains(string(raw), keyToken) {
+			t.Fatal("valid file login did not stay ahead of keychain")
+		}
+	})
+}
+
 func TestOpenRouterUnknownBalanceDoesNotInventCredit(t *testing.T) {
 	now := time.Now().UTC()
 	home := fixtureHome(t, "auth.json", `{"openrouter":{"type":"api_key","key":"synthetic-login-value"}}`)
