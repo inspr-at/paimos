@@ -100,7 +100,7 @@ export const router = createRouter({
     { path: '/settings', redirect: '/settings/personal' },
     { path: '/settings/projects', redirect: to => ({ path: '/settings/vocabulary', query: to.query, hash: to.hash }) },
     { path: '/settings/business/profiles/:profileId?', component: () => import('./views/settings/DocumentProfilesView.vue'), props: true, meta: { title: 'Document profiles', fill: true } },
-    { path: '/settings/:section(personal|theme|developer|policies|agent-rules|accounts|workspace|vocabulary|agents|autopilot|business|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
+    { path: '/settings/:section(personal|theme|developer|policies|agent-rules|accounts|workspace|vocabulary|kinds|agents|autopilot|business|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     // Access: /settings/access/<tab>/<id> (a person, a role, a project).
     { path: '/settings/:section(access)/:tab(people|invites|roles|projects|agents|audit)?/:id?', component: () => import('./views/SettingsView.vue'), meta: { title: 'Access', keepsFocus: true } },
     { path: '/link', component: () => import('./views/LinkAccountView.vue'), meta: { title: 'Link an account' } },

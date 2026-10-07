@@ -3,7 +3,7 @@
 import { api } from './api.ts'
 import { sessionGone } from './authz.ts'
 
-export type SectionId = 'personal' | 'theme' | 'developer' | 'policies' | 'workspace' | 'vocabulary' | 'access' | 'agents' | 'agent-rules' | 'accounts' | 'autopilot' | 'business' | 'portal'
+export type SectionId = 'personal' | 'theme' | 'developer' | 'policies' | 'workspace' | 'vocabulary' | 'kinds' | 'access' | 'agents' | 'agent-rules' | 'accounts' | 'autopilot' | 'business' | 'portal'
 export const SETTINGS_GROUPS = ['You', 'Workspace', 'Agents and automation', 'Business'] as const
 export type SettingsGroup = typeof SETTINGS_GROUPS[number]
 // Explicit grants keep Access, rules and accounts independent of admin role.
@@ -15,6 +15,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSection[] = [
   { id: 'developer', group: 'You', label: 'Developer', summary: 'For people working on Paimos itself', who: 'Everyone has this section. Changes apply only to you.', admin: false },
   { id: 'workspace', group: 'Workspace', label: 'Workspace', summary: 'Name, brand and in-app AI', who: 'Admins only see and change this section.', admin: true },
   { id: 'vocabulary', group: 'Workspace', label: 'Vocabulary', summary: 'Agent names, level names and ticket types', who: 'Everyone sees these names. Only admins change them.', admin: false },
+  { id: 'kinds', group: 'Workspace', label: 'Kinds of work', summary: 'What each column means', who: '', admin: false, permission: 'models.read', deniedTitle: 'Kinds of work need permission to read models', denied: 'Reading kinds of work needs the See models permission.' },
   { id: 'access', group: 'Workspace', label: 'Access', summary: 'People, roles and agents', who: 'People with See members or Read access log permission see this section. Only people with the corresponding manage permission change roles and invites.', admin: true, permission: ['members.read', 'audit.read'] },
   { id: 'policies', group: 'Agents and automation', label: 'Policies', summary: 'Who may do what, when', who: 'Everyone can read policies. Changes need the corresponding policy permission.', admin: false },
   { id: 'agents', group: 'Agents and automation', label: 'Agents', summary: 'Activity, estimates, models', who: 'Admins only change this section. It applies to every project.', admin: true },

@@ -11650,6 +11650,32 @@
     ,
     {"kind":"browser","file":"tests/work-integration.spec.ts","name":"canonical work palette and relation key/title search at 390px light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"agent reads kinds and situations with write controls absent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"failed writes retain drafts and limits; editor actions and selectors stay still","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1280 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1280 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds evidence and German control stability 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"kinds save words, create, order, archive and restore once while preserving ticket areas","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"limits save current revisions and update situation definitions without moving selectors","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/work-kinds.spec.ts","name":"member reads kinds and situations with write controls absent","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/work-lifecycle-header.spec.ts","name":"work actions fit the ticket panel at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -15498,6 +15524,8 @@
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"Back returns to the previous section after following a legacy bookmark","tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"Kinds of work resolves directly to the Settings route and retains definition deep links","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"a hash-only change on Workspace redirects and keeps its query","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"a trailing slash on a legacy Workspace bookmark still redirects","tier":"GATED-FULL"}
@@ -18617,6 +18645,26 @@
     {"kind":"vitest","file":"tests/work-history-visibility.unit.test.ts","name":"TicketReviews preserves ticket access","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/work-history-visibility.unit.test.ts","name":"TicketReviews preserves work access","tier":"NIGHTLY"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"Undo cannot send an inverse write after identity changes during its freshness read","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"Undo refuses to replace kind words changed elsewhere after the original save","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"bounds kind wording without silently dropping extra examples or duplicate labels","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"bounds response bytes before JSON decoding and rejects repeated pagination cursors","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"drops a pending kind response and its toast when the person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"failed kind writes keep the editor and saved words; revoked permissions cannot write or archive system kinds","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"failed limit writes retain the last server values and stale revisions are explained","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"paginates with explicit bounds and reports truncation instead of a complete list","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"pins Everything else last, excludes review and preserves the hidden review row in an order write","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"system kind wording is editable while its immutable ticket area is preserved","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-queue-store.unit.test.ts","name":"accepts authoritative relation-blocker readiness, coalesces checks and fences revisions and tenant resets","tier":"GATED-FULL"}
     ,

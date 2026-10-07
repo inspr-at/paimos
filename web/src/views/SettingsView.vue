@@ -11,6 +11,7 @@ import PersonalSection from '../components/settings/PersonalSection.vue'
 import ThemeSection from '../components/settings/ThemeSection.vue'
 import DeveloperSection from '../components/settings/DeveloperSection.vue'
 import VocabularySection from '../components/settings/VocabularySection.vue'
+import KindsOfWorkSection from '../components/settings/KindsOfWorkSection.vue'
 import AgentsSection from '../components/settings/AgentsSection.vue'
 import AutopilotSection from '../components/settings/AutopilotSection.vue'
 import PortalSection from '../components/settings/PortalSection.vue'
@@ -19,8 +20,10 @@ import AccessSection from '../components/access/AccessSection.vue'
 import AgentRulesSection from '../components/rules/AgentRulesSection.vue'
 import AccountsSection from '../components/settings/AccountsSection.vue'
 import PoliciesSection from '../components/settings/PoliciesSection.vue'
-import { SETTINGS_GROUPS, SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId } from '../lib/settings'
+import { SETTINGS_GROUPS, SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId, type SettingsSection } from '../lib/settings'
 import { useSession } from '../stores/session'
+import { useProfile } from '../stores/profile'
+import { textForKinds } from '../lib/workKindsCopy'
 import { doctrineInbox } from '../lib/doctrineInbox'
 import { scopeOwner } from '../lib/identityScope'
 import { settingsFooter, settingsNeeds } from '../lib/footerProviders'
@@ -32,6 +35,10 @@ import { preferenceSaves, retryFailedPreferences } from '../lib/preferences'
 const route = useRoute()
 const router = useRouter()
 const session = useSession()
+const profile = useProfile()
+const kindsText = computed(() => textForKinds(profile.profile?.principal_id === session.identity?.principal.id && /^de\b/i.test(profile.profile?.locale ?? '')))
+const sectionLabel = (section: SettingsSection) => section.id === 'kinds' ? kindsText.value('title') : section.label
+const sectionSummary = (section: SettingsSection) => section.id === 'kinds' ? kindsText.value('summary') : section.summary
 const admin = computed(() => can('settings.manage'))
 // A session that ends (401) revokes every grant; what is on screen stays as it
 // was, inert, so typed input and a join link shown once are not lost.
@@ -75,8 +82,8 @@ const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
 // Which sections show depends on my permissions: the layout waits for them, so
 // the nav never re-flows under the pointer (usually a few milliseconds).
 void refreshPermissions()
-const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, policies: PoliciesSection, workspace: WorkspaceSection, vocabulary: VocabularySection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
-const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', policies: 'shield', workspace: 'building', vocabulary: 'tag', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'monitor', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
+const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, policies: PoliciesSection, workspace: WorkspaceSection, vocabulary: VocabularySection, kinds: KindsOfWorkSection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
+const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', policies: 'shield', workspace: 'building', vocabulary: 'tag', kinds: 'list', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'monitor', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
 const groups = computed(() => SETTINGS_GROUPS.map(label => ({ label, sections: sections.value.filter(section => section.group === label) })).filter(group => group.sections.length))
 const pickerOpen = ref(false)
 const picker = ref<HTMLButtonElement>()
@@ -144,9 +151,9 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
     <div v-if="!permissionsKnown()" class="layout waiting" role="status" aria-label="Loading settings"><span class="skeleton nav-skeleton" /><span class="skeleton body-skeleton" /></div>
     <div v-else class="layout" :class="{ 'nav-open': pickerOpen }">
       <div ref="navColumn" class="nav-col" @keydown="navKeys">
-        <button ref="picker" type="button" class="nav-picker" :aria-expanded="pickerOpen" aria-controls="settings-section-nav" :aria-label="`Section: ${meta.label}. Choose another section`" @click="pickerOpen = !pickerOpen">
+        <button ref="picker" type="button" class="nav-picker" :aria-expanded="pickerOpen" aria-controls="settings-section-nav" :aria-label="`Section: ${sectionLabel(meta)}. Choose another section`" @click="pickerOpen = !pickerOpen">
           <span class="link-icon" aria-hidden="true"><BizIcon :name="ICON[current]" :size="15" /></span>
-          <span class="link-text"><span class="link-label">{{ meta.label }}</span><span class="link-summary">{{ meta.group }} · {{ sections.length }} sections</span></span>
+          <span class="link-text"><span class="link-label">{{ sectionLabel(meta) }}</span><span class="link-summary">{{ meta.group }} · {{ sections.length }} sections</span></span>
           <AppIcon name="chevron" :size="14" />
         </button>
         <nav id="settings-section-nav" class="section-nav" aria-label="Settings sections">
@@ -154,7 +161,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
             <p class="nav-group">{{ group.label }}</p>
             <RouterLink v-for="section in group.sections" :key="section.id" :to="`/settings/${section.id}`" class="section-link" :aria-current="section.id === current ? 'page' : undefined" @click="sectionClick">
               <span class="link-icon" aria-hidden="true"><BizIcon :name="ICON[section.id]" :size="15" /></span>
-              <span class="link-text"><span class="link-label">{{ section.label }}</span><span v-clip-tip="section.summary" class="link-summary">{{ section.summary }}</span></span>
+              <span class="link-text"><span class="link-label">{{ sectionLabel(section) }}</span><span v-clip-tip="sectionSummary(section)" class="link-summary">{{ sectionSummary(section) }}</span></span>
               <span v-if="section.admin && !section.permission" class="admin-mark" role="img" aria-label="Admins only" data-tip="Only workspace admins see this"><AppIcon name="shield" :size="12" /></span>
               <span v-else-if="section.id === 'agent-rules' && doctrineInbox.pending" class="waiting-dot" role="img" :aria-label="`${doctrineInbox.pending} doctrine ${doctrineInbox.pending === 1 ? 'proposal waits' : 'proposals wait'}`" :data-tip="`${doctrineInbox.pending} doctrine proposals wait for review`" />
             </RouterLink>
@@ -162,7 +169,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
         </nav>
       </div>
       <div class="body" :class="{ wide: current === 'access' || current === 'agent-rules' }">
-        <p v-if="allowed" class="who"><AppIcon :name="meta.admin && !meta.permission ? 'shield' : 'eye'" :size="14" /><span>{{ meta.who }}</span></p>
+        <p v-if="allowed && current !== 'kinds'" class="who"><AppIcon :name="meta.admin && !meta.permission ? 'shield' : 'eye'" :size="14" /><span>{{ meta.who }}</span></p>
         <nav v-if="allowed && current === 'theme'" class="theme-links" aria-label="Theme cards"><RouterLink to="/settings/theme#themes">Themes</RouterLink><RouterLink to="/settings/theme#colours">Colours</RouterLink><RouterLink to="/settings/theme#agents">Agents</RouterLink></nav>
         <component :is="VIEW[current]" v-if="allowed" :key="`${mountedOwner}/${current}`" />
         <div v-else-if="deciding" class="set-skeleton" role="status" aria-label="Loading"><span class="skeleton" /><span class="skeleton" /></div>
