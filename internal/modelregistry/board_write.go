@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/inspr-at/paimos/internal/agentaccounts"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
@@ -24,11 +25,12 @@ type boardMoved struct {
 	After  []string `json:"after"`
 }
 type boardWriteResult struct {
-	PersonID *string                 `json:"person_id"`
-	Revision int64                   `json:"revision"`
-	Profile  modelprefs.BoardProfile `json:"profile"`
-	DryRun   bool                    `json:"dry_run"`
-	Moved    []boardMoved            `json:"moved"`
+	PersonID       *string                 `json:"person_id"`
+	Revision       int64                   `json:"revision"`
+	Profile        modelprefs.BoardProfile `json:"profile"`
+	DryRun         bool                    `json:"dry_run"`
+	Moved          []boardMoved            `json:"moved"`
+	RunningOutside []string                `json:"running_outside"`
 }
 type boardOrderWrite struct {
 	Rank     []string `json:"rank"`
@@ -122,7 +124,7 @@ func putBoardOrder(ctx context.Context, tx pgx.Tx, p tenant.Principal, profile m
 	return err
 }
 func boardResult(profile modelprefs.BoardProfile, person *string) boardWriteResult {
-	return boardWriteResult{PersonID: person, Profile: profile, Revision: profile.Revision, Moved: []boardMoved{}}
+	return boardWriteResult{PersonID: person, Profile: profile, Revision: profile.Revision, Moved: []boardMoved{}, RunningOutside: []string{}}
 }
 func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
@@ -347,6 +349,9 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if level == "default" {
+			s.Person = nil
+		}
 		before := targetBoardProfile(s, level)
 		if err := checkBoardRevision(before, revision); err != nil {
 			return err
@@ -400,6 +405,14 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 		if dry {
 			return nil
 		}
+		scope := modelprefs.Scope{Level: level, PersonID: profile.PersonID}
+		var prior map[string]string
+		if !reflect.DeepEqual(before.Residency, profile.Residency) {
+			prior, err = modelprefs.SnapshotRunRequirements(ctx, tx, scope)
+			if err != nil {
+				return err
+			}
+		}
 		profile, err = persistBoardProfile(ctx, tx, p, profile)
 		if err != nil {
 			return err
@@ -409,8 +422,31 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		var restamped []events.Change
+		if prior != nil {
+			runs, changes, err := modelprefs.RestampAfterDeferred(ctx, tx, scope, prior)
+			if err != nil {
+				return err
+			}
+			restamped = changes
+			now, err := dbNow(ctx, tx)
+			if err != nil {
+				return err
+			}
+			for _, run := range runs {
+				if (run.Status == "starting" || run.Status == "running") && run.AccountID != nil && run.ProfileID != nil {
+					meets, err := agentaccounts.AccountMeetsResidency(ctx, tx, *run.AccountID, *run.ProfileID, run.Residency, now)
+					if err != nil {
+						return err
+					}
+					if !meets {
+						out.RunningOutside = append(out.RunningOutside, run.ID)
+					}
+				}
+			}
+		}
 		out.Profile, out.Revision = profile, profile.Revision
-		_, err = events.Append(ctx, tx, p, events.Change{Type: "model.preferences_changed", Before: map[string]any{"profile": before, "orders": s.Orders}, After: map[string]any{"profile": profile, "orders": after.Orders, "moved": out.Moved}})
+		_, err = events.Append(ctx, tx, p, events.Change{Type: "model.preferences_changed", Before: map[string]any{"profile": before, "orders": s.Orders}, After: map[string]any{"profile": profile, "orders": after.Orders, "moved": out.Moved, "restamped": restamped, "running_outside": out.RunningOutside}})
 		return err
 	})
 	if err != nil {

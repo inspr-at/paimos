@@ -17117,6 +17117,7 @@ components:
         profile: {$ref: '#/components/schemas/ModelBoardProfile'}
         dry_run: {type: boolean}
         moved: {type: array, items: {type: object, required: [column, before, after], properties: {column: {type: string}, before: {type: array, items: {type: string}}, after: {type: array, items: {type: string}}}}}
+        running_outside: {type: array, maxItems: 1000, items: {type: string, format: uuid}, description: 'Starting or running turns outside a newly tightened residency floor.'}
     ModelColumnThinkingWrite:
       type: object
       additionalProperties: false

@@ -180,16 +180,17 @@ func TestWorkKindLifecyclePaginationAndTenantIsolation(t *testing.T) {
 	if eventCount(t, admin, "work_kind.restored") != 1 {
 		t.Fatal("restore did not record its own event")
 	}
-	for _, method := range []string{"DELETE", "PATCH", "POST"} {
+	for _, method := range []string{"DELETE", "POST"} {
 		path := "/api/work-kinds/" + kindID(t, doc, "security")
 		body := ""
-		if method == "PATCH" {
-			body = `{"label":"Renamed"}`
-		}
 		if method == "POST" {
 			path += "/restore"
 		}
 		expectPrefError(t, admin, method, path, body, 422, "system_kind")
+	}
+	renamed := decode[workKind](t, &admin, "PATCH", "/api/work-kinds/"+kindID(t, doc, "security"), `{"label":"Security checks"}`, 200)
+	if renamed.Slug != "security" || !renamed.System || renamed.Label != "Security checks" {
+		t.Fatal("system identity changed", renamed)
 	}
 	expectPrefError(t, other, "PATCH", "/api/work-kinds/"+first.ID, `{"hint":"foreign"}`, 404, "not found")
 	page := decode[workKindPage](t, &admin, "GET", "/api/work-kinds?limit=1", "", 200)

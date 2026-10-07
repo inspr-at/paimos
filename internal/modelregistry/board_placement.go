@@ -15,7 +15,7 @@ func boardTicketFields(ctx context.Context, tx pgx.Tx, q WorkQuery, raw []byte) 
 		return q, prefFail(413, "ticket_fields_limit")
 	}
 	var fields struct {
-		EstimateHours float64         `json:"estimate_hours"`
+		EstimateHours json.RawMessage `json:"estimate_hours"`
 		FixRound      int             `json:"fix_round"`
 		Labels        []string        `json:"labels"`
 		Assignee      json.RawMessage `json:"assignee"`
@@ -24,7 +24,12 @@ func boardTicketFields(ctx context.Context, tx pgx.Tx, q WorkQuery, raw []byte) 
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return q, err
 	}
-	if fields.EstimateHours < 0 || math.IsNaN(fields.EstimateHours) || math.IsInf(fields.EstimateHours, 0) || fields.FixRound < 0 || fields.FixRound > 1000 || len(fields.Labels) > 64 {
+	// Historical estimates are advisory; malformed values mean no estimate.
+	var estimate float64
+	if json.Unmarshal(fields.EstimateHours, &estimate) != nil || estimate < 0 || math.IsNaN(estimate) || math.IsInf(estimate, 0) {
+		estimate = 0
+	}
+	if fields.FixRound < 0 || fields.FixRound > 1000 || len(fields.Labels) > 64 {
 		return q, prefFail(422, "invalid_board_placement")
 	}
 	for _, label := range fields.Labels {
@@ -32,7 +37,7 @@ func boardTicketFields(ctx context.Context, tx pgx.Tx, q WorkQuery, raw []byte) 
 			return q, prefFail(422, "invalid_board_placement")
 		}
 	}
-	q.EstimateHours, q.FixRound, q.Labels = fields.EstimateHours, fields.FixRound, fields.Labels
+	q.EstimateHours, q.FixRound, q.Labels = estimate, fields.FixRound, fields.Labels
 	if q.TicketID != "" && q.FixRound == 0 {
 		var round *int
 		if err := tx.QueryRow(ctx, `SELECT (SELECT (state->>'fix_rounds')::int FROM work_escalations WHERE ticket_node_id=$1)`, q.TicketID).Scan(&round); err != nil {

@@ -27,7 +27,7 @@ func (f *fixture) prefsCall(t *testing.T, p tenant.Principal, body any, status i
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := httptest.NewRequest("PUT", "/api/model-preferences/levels/person", strings.NewReader(string(raw)))
+	r := httptest.NewRequest("PUT", "/api/model-preferences/profile?for=me", strings.NewReader(string(raw)))
 	r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 	r.Header.Set("If-Prefs-Person", f.person.ID)
 	w := httptest.NewRecorder()
@@ -62,17 +62,17 @@ func TestAliasResidencyOverHTTPAndActiveRunRestamp(t *testing.T) {
 	})
 	f.prefsCall(t, alias, map[string]any{"revision": 0, "residency": "eu"}, 200, nil)
 	var aliasDoc, canonicalDoc struct {
-		PersonID string                     `json:"person_id"`
-		Levels   map[string]json.RawMessage `json:"levels"`
+		PersonID string          `json:"person_id"`
+		Profile  json.RawMessage `json:"profile"`
 	}
-	f.call(t, alias, "GET", "/api/model-preferences", nil, 200, &aliasDoc)
-	f.call(t, f.person, "GET", "/api/model-preferences", nil, 200, &canonicalDoc)
-	if aliasDoc.PersonID != f.person.ID || canonicalDoc.PersonID != f.person.ID || string(aliasDoc.Levels["person"]) != string(canonicalDoc.Levels["person"]) {
+	f.call(t, alias, "GET", "/api/model-preferences/board", nil, 200, &aliasDoc)
+	f.call(t, f.person, "GET", "/api/model-preferences/board", nil, 200, &canonicalDoc)
+	if aliasDoc.PersonID != f.person.ID || canonicalDoc.PersonID != f.person.ID || string(aliasDoc.Profile) != string(canonicalDoc.Profile) {
 		t.Fatal("alias selected a different You slice")
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		var person, actor string
-		if err := tx.QueryRow(t.Context(), `SELECT person_id::text,updated_by::text FROM model_pref_scopes WHERE level='person'`).Scan(&person, &actor); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT person_id::text,set_by::text FROM model_pref_profiles WHERE scope='person'`).Scan(&person, &actor); err != nil {
 			return err
 		}
 		if person != f.person.ID || actor != alias.ID {
@@ -185,7 +185,7 @@ func TestAliasResidencyOverHTTPAndActiveRunRestamp(t *testing.T) {
 		}
 		return nil
 	})
-	count := f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.residency_restamped'`)
+	count := f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.preferences_changed' AND jsonb_array_length(coalesce(after->'restamped','[]'::jsonb))>0`)
 	// Simulate a pre-link stale stamp. A local-to-EU loosening must not catch it
 	// up to EU; dispatch still reads the live requirement independently.
 	f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -204,7 +204,7 @@ func TestAliasResidencyOverHTTPAndActiveRunRestamp(t *testing.T) {
 		return nil
 	})
 	f.prefsCall(t, alias, map[string]any{"revision": 3, "residency": "any"}, 200, &written)
-	if len(written.RunningOutside) != 0 || f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.residency_restamped'`) != count {
+	if len(written.RunningOutside) != 0 || f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.preferences_changed' AND jsonb_array_length(coalesce(after->'restamped','[]'::jsonb))>0`) != count {
 		t.Fatal("loosening restamped runs")
 	}
 	// The alias-scope guard remains authoritative for non-HTTP store clients.
