@@ -24,6 +24,20 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/model-preferences/board":                                "models.read",
+	"PUT /api/model-preferences/orders/{column}/{situation}":          "models.read|model_prefs.manage",
+	"DELETE /api/model-preferences/orders/{column}/{situation}":       "models.read|model_prefs.manage",
+	"PUT /api/model-preferences/orders/{column}/{situation}/thinking": "models.read|model_prefs.manage",
+	"PUT /api/model-preferences/profile":                              "models.read|model_prefs.manage",
+	"POST /api/model-preferences/tray/{line}/dismiss":                 "models.read|model_prefs.manage",
+	"GET /api/model-preferences/situations":                           "models.read",
+	"PUT /api/model-preferences/situations":                           "model_prefs.manage",
+	"GET /api/model-preferences/evidence":                             "models.read",
+	"GET /api/model-preferences/coverage":                             "models.read",
+	"GET /api/model-rules":                                            "models.read",
+	"PUT /api/model-rules/{scope}/{column}":                           "model_prefs.manage",
+	"PUT /api/work-kinds/order":                                       "model_prefs.manage",
+
 	"POST /api/github/webhook":                        "public",
 	"GET /api/delivery/enqueue-allowed":               "delivery.read",
 	"GET /api/delivery":                               "delivery.read",

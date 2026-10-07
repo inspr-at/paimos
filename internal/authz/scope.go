@@ -116,6 +116,8 @@ var ProjectDecidedRoutes = map[string]bool{
 	"POST /api/status-autopilot/attention/actions":               true,
 	"POST /api/chat-threads/{id}/binding":                        true,
 	"POST /api/chat-deliveries/binding/resolve":                  true,
+	"PUT /api/model-rules/{scope}/{column}":                      true,
+	"PUT /api/work-kinds/order":                                  true,
 	"PUT /api/model-preferences/levels/{level}":                  true,
 	"DELETE /api/model-preferences/levels/{level}":               true,
 	"PUT /api/model-preferences/levels/{level}/rows/{kindId}":    true,

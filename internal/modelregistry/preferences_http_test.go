@@ -339,7 +339,7 @@ func TestPreferenceMutationRechecksRevokedGrant(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	done := make(chan struct{})
 	mux := http.NewServeMux()
-	New(appPool).Mount(mux)
+	(&Module{pool: appPool}).mount(mux, (&Module{pool: appPool}).writePreferences)
 	go func() {
 		defer close(done)
 		if err := authz.Require(authz.BindPool(request.Context(), appPool), "model_prefs.manage", authz.Scope{}); err != nil {
