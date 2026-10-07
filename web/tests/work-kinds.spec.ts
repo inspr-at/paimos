@@ -78,6 +78,7 @@ test('kinds save words, create, order, archive and restore once while preserving
   await editor(page).locator('[name="hint"]').fill('Screens approved before implementation.')
   await page.keyboard.press(await page.evaluate(() => /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) ? 'Meta+Enter' : 'Control+Enter')
   await expect(editor(page)).toHaveCount(0); await expect(row(page)).toContainText('Screens approved before implementation.')
+  await expect(page.locator('.toast').first()).toContainText('UI design saved. Its column on Models shows the new words.')
   expect(data.writes).toHaveLength(1); expect(data.writes[0]!.body).not.toHaveProperty('slug')
   await page.locator('.toast').getByRole('button', { name: 'Undo', exact: true }).click()
   await expect(row(page)).toContainText('Screens and interaction, designed as an HTML mock before any code.')
@@ -98,6 +99,7 @@ test('kinds save words, create, order, archive and restore once while preserving
   await create.click(); await editor(page).locator('[name="label"]').fill('Data analysis'); await editor(page).locator('[name="hint"]').fill('Analyse the data behind a decision.')
   await editor(page).getByRole('button', { name: /^Create/ }).click()
   await expect(row(page, 'data-analysis')).toContainText('Data analysis')
+  await expect(page.locator('.toast').filter({ hasText: 'Data analysis is a kind of work now, and a column on Models.' })).toBeVisible()
   expect(data.writes.filter(write => write.method === 'POST' && write.path === '/api/work-kinds')).toHaveLength(1)
 })
 

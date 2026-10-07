@@ -31,7 +31,7 @@ test('the account menu opens Settings on Personal: theme, greeting and keys', as
   await page.getByRole('menuitem', { name: 'Personal settings' }).click()
   await expect(page).toHaveURL('/settings/personal')
   await expect(page).toHaveTitle(/^Settings · /)
-  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Kinds of work/, /^Access/, /^Policies/, /^Agents/, /^Autopilot/, /^Business/, /^Product portal/])
+  await expect(sections(page).getByRole('link')).toHaveText([/^Personal/, /^Theme/, /^Developer/, /^Workspace/, /^Vocabulary/, /^Arten von Arbeit/, /^Access/, /^Policies/, /^Agents/, /^Autopilot/, /^Business/, /^Product portal/])
   await expect(sections(page).getByRole('link', { name: /^Personal/ })).toHaveAttribute('aria-current', 'page')
 
   await page.getByRole('radio', { name: 'Dark' }).click()

@@ -15524,7 +15524,7 @@
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"Back returns to the previous section after following a legacy bookmark","tier":"GATED-FULL"}
     ,
-    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"Kinds of work resolves directly to the Settings route and retains definition deep links","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"Kinds of work resolves directly to the Settings route and retains definition deep links","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/settings-routing.unit.test.ts","name":"a hash-only change on Workspace redirects and keeps its query","tier":"GATED-FULL"}
     ,

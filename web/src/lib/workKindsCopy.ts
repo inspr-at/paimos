@@ -17,7 +17,7 @@ export const kindsCopy = {
   invalid: ['Use a name (up to 40 characters), a sentence (up to 120), up to 3 examples (120 each) and up to 32 distinct labels (48 each).', 'Einen Namen (bis 40 Zeichen), einen Satz (bis 120), bis zu 3 Beispiele (je 120) und bis zu 32 verschiedene Labels (je 48) verwenden.'],
   invalidLimit: ['Use whole hours from 1 to 8 and fix rounds from 1 to 6.', 'Ganze Stunden von 1 bis 8 und Korrekturrunden von 1 bis 6 verwenden.'],
   truncated: ['Only part of the kinds list could be loaded. Reordering is unavailable until the complete list is loaded.', 'Nur ein Teil der Arten konnte geladen werden. Die Reihenfolge kann erst mit der vollständigen Liste geändert werden.'], empty: ['No kinds of work yet.', 'Noch keine Arten von Arbeit.'],
-  generatedArea: ['Assigned when created', 'Wird beim Anlegen vergeben'], areaHint: ['The ticket area value stays the same when its words change.', 'Der Ticket-Bereich bleibt beim Ändern der Texte gleich.'], saved: ['Saved.', 'Gespeichert.'], limitsSaved: ['Situation limits saved.', 'Situationsgrenzen gespeichert.'], undone: ['Change undone.', 'Änderung rückgängig gemacht.'],
+  generatedArea: ['Assigned when created', 'Wird beim Anlegen vergeben'], areaHint: ['The ticket area value stays the same when its words change.', 'Der Ticket-Bereich bleibt beim Ändern der Texte gleich.'], undone: ['Change undone.', 'Änderung rückgängig gemacht.'],
 } as const
 export type KindsText = (key: keyof typeof kindsCopy) => string
 export const textForKinds = (german: boolean): KindsText => key => kindsCopy[key][german ? 1 : 0]

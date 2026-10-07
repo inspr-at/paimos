@@ -84,7 +84,10 @@ function save(words: KindWords) {
   if (target.kind && (!current || fingerprint(current) !== target.stamp)) { editorError.value = t.value('stale'); return }
   const position = Math.max(-1, ...kinds.value.filter(kind => !kind.archived_at && kind.system !== 'other').map(kind => kind.position)) + 1
   const before = target.kind
-  void change(signal => before ? updateKind(before.id, words, signal) : createKind(words, position, signal), result => { adoptKind(result); editor.value = null }, t.value('saved'), (result, signal) => kindUndo(result, undoSignal => before ? updateKind(before.id, kindWords(before), undoSignal) : archiveKind(result.id, undoSignal), signal), message => { editorError.value = message })
+  const message = before
+    ? german.value ? `${words.label} gespeichert. Die Spalte unter Modelle zeigt die neuen Worte.` : `${words.label} saved. Its column on Models shows the new words.`
+    : german.value ? `${words.label} ist jetzt eine Art von Arbeit und eine Spalte unter Modelle.` : `${words.label} is a kind of work now, and a column on Models.`
+  void change(signal => before ? updateKind(before.id, words, signal) : createKind(words, position, signal), result => { adoptKind(result); editor.value = null }, message, (result, signal) => kindUndo(result, undoSignal => before ? updateKind(before.id, kindWords(before), undoSignal) : archiveKind(result.id, undoSignal), signal), message => { editorError.value = message })
 }
 function askArchive(kind: WorkKind, anchor: HTMLElement) {
   if (!editable.value || busy.value || kind.system) return
@@ -121,7 +124,10 @@ function setLimit(key: 'small_hours' | 'fix_rounds', value: number) {
   if (!limits.value || !validLimit(value, key === 'small_hours' ? 8 : 6)) return
   const before = { ...limits.value }
   limitsError.value = ''
-  void change(signal => putSituationLimits({ small_hours: before.small_hours, fix_rounds: before.fix_rounds, revision: before.revision, [key]: value }, signal), result => { limits.value = result }, t.value('limitsSaved'), (result, signal) => writeScope.run(({ after }) => after(putSituationLimits({ small_hours: before.small_hours, fix_rounds: before.fix_rounds, revision: result.revision }, signal), restored => { limits.value = restored; toast(t.value('undone')) })).then(() => {}), message => { limitsError.value = message; limits.value = { ...before } })
+  const message = key === 'small_hours'
+    ? german.value ? `Kleine Arbeit: ${value} h oder weniger.` : `Small work: ${value} h or less.`
+    : german.value ? `Festgefahren nach ${value} Korrekturrunden.` : `Stuck after ${value} fix rounds.`
+  void change(signal => putSituationLimits({ small_hours: before.small_hours, fix_rounds: before.fix_rounds, revision: before.revision, [key]: value }, signal), result => { limits.value = result }, message, (result, signal) => writeScope.run(({ after }) => after(putSituationLimits({ small_hours: before.small_hours, fix_rounds: before.fix_rounds, revision: result.revision }, signal), restored => { limits.value = restored; toast(t.value('undone')) })).then(() => {}), message => { limitsError.value = message; limits.value = { ...before } })
 }
 function newKind(event: MouseEvent) { edit(null, event.currentTarget as HTMLElement) }
 </script>
