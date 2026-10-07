@@ -8624,6 +8624,8 @@
     ,
     {"kind":"browser","file":"tests/performance.spec.ts","name":"cold ticket page has bounded API requests","config":"playwright.perf.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"account pause stays available when this browser has no Web Push","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"device notifications replace Enable with state and stable Pause in both themes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"ended requests offer context without a decision button","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

@@ -7,10 +7,13 @@ import { addPhonePasskey, decodeBytes, deviceSubscriptionHash, minuteTime, phone
 
 const settings = ref<PhoneSettings | null>(null)
 const busy = ref(false), error = ref(''), message = ref(''), platform = ref<boolean | null>(null), deviceHash = ref('')
-const notificationsOn = computed(() => !!settings.value?.preferences.enabled && !!settings.value.passkeys.length && !!deviceHash.value && settings.value.subscriptions.some(sub => sub.endpoint_hash === deviceHash.value))
+const accountEnabled = computed(() => settings.value?.preferences.enabled === true)
+const deviceOn = computed(() => accountEnabled.value && !!deviceHash.value && !!settings.value?.subscriptions.some(sub => sub.endpoint_hash === deviceHash.value))
+const showDeviceEnable = computed(() => accountEnabled.value && !deviceOn.value)
 const start = ref('22:00'), end = ref('07:00'), quiet = ref(false), zone = ref('UTC'), escalation = ref(15)
 const scope = useIdentityScope(() => can('profile.read')), reads = scope.lane()
 const pushSupported = typeof window !== 'undefined' && 'Notification' in window && 'PushManager' in window && 'serviceWorker' in navigator
+const enableReady = computed(() => pushSupported && !!settings.value?.push_available && !!settings.value.passkeys.length)
 function applySettings(value: PhoneSettings) {
     settings.value = value
     const prefs = value.preferences
@@ -61,10 +64,8 @@ const revoke = (group: 'passkeys' | 'subscriptions', id: string) => act(signal =
 function addPasskey() {
   return act(signal => addPhonePasskey(signal, () => { message.value = 'Verify with Face ID, Touch ID or your device passkey.' }), 'Passkey added.', 'Preparing passkey verification…')
 }
-function notificationAction() {
-  return notificationsOn.value
-    ? act(signal => phoneRequest('/me/phone-approvals/settings', 'PUT', preferences(false), signal), 'Phone notifications paused.')
-    : enable()
+function pause() {
+  return act(signal => phoneRequest('/me/phone-approvals/settings', 'PUT', preferences(false), signal), 'Phone notifications paused.')
 }
 const stopAccess = onAccessChange(() => {
   scope.reset(); settings.value = null; deviceHash.value = ''; message.value = ''; busy.value = false
@@ -85,11 +86,17 @@ onBeforeUnmount(stopAccess)
     <div class="controls">
       <button class="btn" :disabled="busy || !settings?.available || !platform || !can('profile.write')" @click="addPasskey">Add device passkey</button>
       <div class="notification-control">
-        <button class="btn notification-action" :class="{ primary: !notificationsOn }" :disabled="busy || !settings || !can('profile.write') || (!notificationsOn && (!pushSupported || !settings.push_available || !settings.passkeys.length))" @click="notificationAction">
-          <span class="label-sizer" aria-hidden="true"><span>Enable notifications on this device</span><span>Pause notifications</span></span>
-          <span class="action-label">{{ notificationsOn ? 'Pause notifications' : 'Enable notifications on this device' }}</span>
-        </button>
-        <p class="notification-state" aria-live="polite">{{ notificationsOn ? 'Notifications on for this device' : settings?.preferences.enabled ? 'Notifications are enabled for registered devices. Enable this device to receive them here.' : 'Notifications paused' }}</p>
+        <div class="notification-actions">
+          <button class="btn notification-action" :class="{ primary: !accountEnabled }" :disabled="busy || !settings || !can('profile.write') || (!accountEnabled && !enableReady)" @click="accountEnabled ? pause() : enable()">
+            <span class="label-sizer" aria-hidden="true"><span>Enable notifications on this device</span><span>Pause notifications</span></span>
+            <span class="action-label">{{ accountEnabled ? 'Pause notifications' : 'Enable notifications on this device' }}</span>
+          </button>
+          <button class="btn primary device-enable" :class="{ 'is-reserved': !showDeviceEnable }" :aria-hidden="showDeviceEnable ? undefined : true" :tabindex="showDeviceEnable ? undefined : -1" :disabled="!showDeviceEnable || busy || !settings || !can('profile.write') || !enableReady" @click="enable">
+            <span class="label-sizer" aria-hidden="true"><span>Enable notifications on this device</span><span>Pause notifications</span></span>
+            <span class="action-label">Enable notifications on this device</span>
+          </button>
+        </div>
+        <p class="notification-state" aria-live="polite">{{ deviceOn ? 'Notifications on for this device' : accountEnabled ? 'Notifications are enabled for registered devices. Enable this device to receive them here.' : 'Notifications paused' }}</p>
       </div>
     </div>
     <p v-if="!settings && !error" role="status">Loading phone approvals…</p>
@@ -128,11 +135,13 @@ onBeforeUnmount(stopAccess)
 p { margin: 0; line-height: 1.6; }
 .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 19rem), 1fr)); align-items: start; gap: 10px; }
 .hours { display: flex; flex-wrap: wrap; gap: 10px; }
-.notification-control { display: grid; gap: 8px; }
-.notification-action, .label-sizer { display: grid; }
+.notification-control, .notification-actions { display: grid; gap: 8px; }
+.notification-action, .device-enable, .label-sizer { display: grid; }
 .label-sizer, .action-label { grid-area: 1 / 1; }
 .label-sizer { visibility: hidden; pointer-events: none; }
 .label-sizer > span { grid-area: 1 / 1; }
+/* The device row stays in the grid so Pause and the form below do not move. */
+.device-enable.is-reserved { visibility: hidden; pointer-events: none; }
 .notification-state { min-height: 3lh; }
 .feedback { min-height: 2lh; }
 label { display: grid; gap: 6px; }

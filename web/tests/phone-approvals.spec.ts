@@ -129,7 +129,8 @@ async function phoneDevice(page: Page) {
 }
 
 // Risk: another browser's subscription is mistaken for enabling this device,
-// or status/feedback moves the next tap. Exercise the subscription round-trip.
+// or pausing that account is unreachable until this browser subscribes.
+// Status and feedback must not move the next tap.
 test('device notifications replace Enable with state and stable Pause in both themes', async ({ page }, testInfo) => {
  await setup(page); await phoneDevice(page)
  const settings = { available: true, push_available: true, vapid_public_key: 'AQID',
@@ -154,10 +155,15 @@ test('device notifications replace Enable with state and stable Pause in both th
   const action = card.locator('.notification-action')
   const controls = { add: card.getByRole('button', { name: 'Add device passkey' }), notification: action, save: card.getByRole('button', { name: 'Save notification settings' }), quiet: card.getByRole('checkbox', { name: 'Quiet hours' }), hours: card.locator('.hours') }
   const guard = await controlStability(page, controls)
-  await expect(action).toHaveAccessibleName('Enable notifications on this device')
+  await expect(action).toHaveAccessibleName('Pause notifications')
+  await expect(action).toBeEnabled()
+  const enableDevice = card.getByRole('button', { name: 'Enable notifications on this device', exact: true })
+  await expect(enableDevice).toBeEnabled()
+  await expect(card.getByText('Notifications on for this device', { exact: true })).toHaveCount(0)
+  await expect(card.getByText('Notifications are enabled for registered devices. Enable this device to receive them here.', { exact: true })).toBeVisible()
   await page.screenshot({ path: testInfo.outputPath(`aeon-903-phonepolish/settings-${width}-${theme}.png`), fullPage: true })
   await guard.check(async () => {
-   await action.click(); await expect(action).toHaveAccessibleName('Pause notifications')
+   await enableDevice.click(); await expect(action).toHaveAccessibleName('Pause notifications')
    await expect(card.getByText('Notifications on for this device', { exact: true })).toBeVisible()
    await expect(card.getByRole('button', { name: 'Enable notifications on this device' })).toHaveCount(0)
   })
@@ -227,4 +233,45 @@ test('registration awaits one fresh options response before platform verificatio
  await page.evaluate(() => { (window as unknown as { cancelPasskey: boolean }).cancelPasskey = true })
  await guard.check(async () => { await add.click(); await expect(card.getByRole('alert')).toHaveText('Verification cancelled. No passkey was added.') })
  expect(options).toBe(2); expect(registrations).toBe(1); guard.done()
+})
+
+// Risk: Pause is offered only when this browser's endpoint hash matches, so an
+// account that is already on has no off switch in a browser without Web Push.
+test('account pause stays available when this browser has no Web Push', async ({ page }) => {
+ await setup(page)
+ await page.addInitScript(() => { delete window.Notification; delete window.PushManager })
+ const settings = { available: true, push_available: true, vapid_public_key: 'AQID',
+  preferences: { enabled: true, time_zone: 'Europe/Vienna', quiet_start: 1320, quiet_end: 420, escalation_minutes: 15 },
+  passkeys: [{ id: challenge, created_at: '2026-10-01T12:00:00Z' }], subscriptions: [{ id: 'another-device', created_at: '2026-10-01T12:00:00Z', endpoint_hash: 'b'.repeat(64) }] }
+ const puts: { enabled: boolean; time_zone: string; quiet_start: number; quiet_end: number; escalation_minutes: number }[] = []
+ let posts = 0
+ await page.route('**/api/me/phone-approvals**', route => {
+  if (route.request().method() === 'POST') { posts++; return route.fulfill({ status: 500, json: { error: 'This browser must not subscribe.' } }) }
+  if (route.request().method() === 'PUT') {
+   const body = route.request().postDataJSON(); puts.push(body); settings.preferences = body
+   return route.fulfill({ json: settings.preferences })
+  }
+  return route.fulfill({ json: settings })
+ })
+ await page.setViewportSize({ width: 390, height: 1000 })
+ await page.goto('/settings/personal#phone-approvals')
+ const card = page.getByRole('region', { name: 'Phone approvals', exact: true })
+ await expect(card.getByText('Notifications are enabled for registered devices. Enable this device to receive them here.', { exact: true })).toBeVisible()
+ expect(await page.evaluate(() => 'Notification' in window && 'PushManager' in window && 'serviceWorker' in navigator)).toBe(false)
+ const action = card.locator('.notification-action')
+ await expect(action).toHaveAccessibleName('Pause notifications')
+ await expect(action).toBeEnabled()
+ await expect(card.getByRole('button', { name: 'Enable notifications on this device', exact: true })).toBeDisabled()
+ await expect(card.getByText('Notifications on for this device', { exact: true })).toHaveCount(0)
+ const guard = await controlStability(page, { action, save: card.getByRole('button', { name: 'Save notification settings' }), add: card.getByRole('button', { name: 'Add device passkey' }) })
+ await guard.check(async () => {
+  await action.click()
+  await expect(card.getByText('Notifications paused', { exact: true })).toBeVisible()
+  await expect(action).toHaveAccessibleName('Enable notifications on this device')
+  await expect(action).toBeDisabled()
+  await expect(card.getByRole('button', { name: 'Pause notifications', exact: true })).toHaveCount(0)
+ })
+ guard.done()
+ expect(posts).toBe(0)
+ expect(puts).toEqual([{ enabled: false, time_zone: 'Europe/Vienna', quiet_start: 1320, quiet_end: 420, escalation_minutes: 15 }])
 })
