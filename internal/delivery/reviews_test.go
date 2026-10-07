@@ -157,6 +157,9 @@ func TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation(t *testing.T) {
 	if page.Settings.Mode != "off" || len(page.Items) != 0 {
 		t.Fatal("reviews were not default off")
 	}
+	// A business leaf with a build work order remains eligible for the queue;
+	// otherwise real build completions could never reach review orchestration.
+	f.call(t, f.person, "POST", queuePath(f), roundInput(f, "attached-build-ticket", "land", 12), 201, nil)
 	in, _ := reviewSource(t, f, "review-loop", "first_build", 1, strings.Repeat("b", 40))
 	var first ReviewRound
 	f.call(t, f.person, "POST", path, in, 201, &first)

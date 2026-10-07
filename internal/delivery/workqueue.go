@@ -204,7 +204,8 @@ func appendQueueChanges(ctx context.Context, tx pgx.Tx, p tenant.Principal, chan
 }
 func currentRoundTargetTx(ctx context.Context, tx pgx.Tx, r Round) error {
 	var leaf bool
-	err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM nodes c WHERE c.parent_id=n.id AND c.deleted_at IS NULL)
+	err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM nodes c WHERE c.parent_id=n.id AND c.deleted_at IS NULL
+	 AND NOT EXISTS(SELECT 1 FROM work_orders w WHERE w.node_id=c.id))
 	 FROM nodes n JOIN node_kinds k ON k.id=n.kind_id WHERE n.id=$1 AND n.project_id=$2 AND n.deleted_at IS NULL AND k.slug='work'
 	 AND NOT EXISTS(SELECT 1 FROM work_orders w WHERE w.node_id=n.id)`, r.Ticket, r.Project).Scan(&leaf)
 	if err != nil {
