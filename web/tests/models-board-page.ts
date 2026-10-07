@@ -44,7 +44,7 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
     }
     const body = request.postDataJSON() ?? {}, person = request.headers()['if-prefs-person']
     writes.push({ path, body, person, method: request.method() })
-    if (url.searchParams.get('for') === 'me' && person !== boardPerson) return route.fulfill({ status: 428, json: { error: 'person_precondition_required' } })
+    if (url.searchParams.get('for') === 'me' && person !== document.person_id) return route.fulfill({ status: 428, json: { error: 'person_precondition_required' } })
     if (hold) await hold()
     if (fail) return route.fulfill({ status: fail, json: { error: fail === 409 ? 'stale_revision' : 'looser_than_workspace' } })
     if (path.startsWith('/model-rules/')) {
@@ -54,7 +54,7 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
       rules = rules.filter(rule => rule.scope !== scope || rule.column !== column).concat(desired.filter(pin => scope !== 'project' || !rules.some(rule => rule.scope === 'workspace' && rule.column === column && rule.line === pin.line && rule.lock === pin.lock)).map(pin => ({ ...pin, column, scope, project_id: scope === 'project' ? url.searchParams.get('project_id') : null, set_by: 'Markus', set_at: '2026-10-07T13:00:00Z' }) as ModelRule))
       return route.fulfill({ json: { rules, revision: ++ruleRevision } })
     }
-    if (url.searchParams.get('dry_run') === 'true') return route.fulfill({ json: { person_id: boardPerson, revision: document.revision, profile: document.profile, dry_run: true, moved: [{ column: 'backend', before: ['openai:sol'], after: ['openai:astra'] }] } })
+    if (url.searchParams.get('dry_run') === 'true') return route.fulfill({ json: { person_id: document.person_id, revision: document.revision, profile: document.profile, dry_run: true, moved: [{ column: 'backend', before: ['openai:sol'], after: ['openai:astra'] }] } })
     if (path.startsWith('/model-preferences/orders/')) {
       const column = decodeURIComponent(path.split('/')[3]!)
       if (request.method() === 'DELETE') orders.delete(column)
@@ -64,12 +64,12 @@ export async function mockBoard(page: Page, options: { manage?: boolean; fail?: 
       document.residency.own = document.profile.residency; document.residency.effective = document.profile.residency ?? 'any'
     } else if (path.includes('/tray/')) document.profile.dismissed_lines.push(decodeURIComponent(path.split('/')[3]!))
     document.revision++; document.profile.revision = document.revision
-    return route.fulfill({ json: { person_id: boardPerson, revision: document.revision, profile: document.profile, dry_run: false, moved: [] } })
+    return route.fulfill({ json: { person_id: document.person_id, revision: document.revision, profile: document.profile, dry_run: false, moved: [] } })
   })
   return { writes, reads, getDocument: () => structuredClone(document), setFail: (status?: number) => { fail = status }, holdNext: () => {
     let release!: () => void; const barrier = new Promise<void>(resolve => { release = resolve }); hold = () => barrier
     return () => { hold = undefined; release() }
-  }, addProjectRule: (rule: ModelRule) => { rules.push(rule) }, clearTray: () => { document.tray = [] } }
+  }, setPerson: (person: string) => { document.person_id = person; document.profile.person_id = person }, addProjectRule: (rule: ModelRule) => { rules.push(rule) }, clearTray: () => { document.tray = [] } }
 }
 export async function open(page: Page, query = '') { await page.goto(`/tests/models-board-harness.html${query}`); await expect(page.locator('[data-board-ready="true"]')).toBeVisible() }
 export const col = (page: Page, column = 'backend') => page.locator(`[data-column="${column}"]`)

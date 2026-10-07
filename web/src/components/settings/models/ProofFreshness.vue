@@ -12,9 +12,9 @@ import { getBoardEvidence, getEvidenceProfiles } from '../../../lib/modelsBoardA
 import { localizeColumn, type BoardColumn } from '../../../lib/modelsBoard'
 import type { BoardEvidence } from '../../../lib/modelsSettings'
 import type { PrefProfile } from '../../../lib/modelPrefs'
-const props = defineProps<{ columns: BoardColumn[]; project?: string; german: boolean }>()
+const props = defineProps<{ columns: BoardColumn[]; person?: string | null; project?: string; german: boolean }>()
 const route = useRoute()
-const session = useSession(), owner = computed(() => scopeOwner(session.identity))
+const session = useSession(), owner = computed(() => scopeOwner(session.identity) ? `${session.identity!.tenant.id}/${props.person || session.identity!.principal.id}` : '')
 const text = (en: string, de: string) => props.german ? de : en
 const folds = ref<string[]>([]), kind = ref(''), evidence = ref<BoardEvidence | null>(null), error = ref(''), loading = ref(false)
 const profiles = ref<PrefProfile[]>([]), catalogNote = ref('')
@@ -48,7 +48,7 @@ function modelLabel(item: BoardEvidence['items'][number]) {
   const profile = profiles.value.find(profile => profile.id === item.actual_profile_id)
   return profile ? [profile.display_name || profile.model, profile.model_version, profile.effort].filter(Boolean).join(' · ') : text('Recorded model is unavailable in the catalog', 'Erfasstes Modell ist im Katalog nicht verfügbar')
 }
-function personLabel(person: string | null) { return person === session.identity?.principal.id ? session.identity.principal.name : person ? text('another person', 'eine andere Person') : text('workspace default', 'Vorgabe des Arbeitsbereichs') }
+function personLabel(person: string | null) { return person && person === (props.person || session.identity?.principal.id) ? session.identity!.principal.name : person ? text('another person', 'eine andere Person') : text('workspace default', 'Vorgabe des Arbeitsbereichs') }
 function chosenBy(item: BoardEvidence['items'][number]) { return item.preference.lock?.why || (item.preference.preference_of?.source === 'person' ? text('Personal board', 'Persönliches Board') : item.preference.preference_of?.source === 'workspace' ? text('Workspace default', 'Vorgabe des Arbeitsbereichs') : text('No preference recorded', 'Keine Präferenz erfasst')) }
 </script>
 <template>

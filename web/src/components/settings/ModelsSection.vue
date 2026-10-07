@@ -27,12 +27,18 @@ function urlContext(): BoardContext { return { layer: route.query.layer === 'def
 const context = ref<BoardContext>(urlContext())
 watch(() => [route.query.layer, route.query.project_id], () => { context.value = urlContext() })
 const editor = useModelsBoard(context, german), { document: board, loading, busy, error, editable } = editor
+// Linking can change the canonical person while the login principal stays the
+// same. Browser-only choices belong to the canonical person when known.
+const canonicalPerson = ref<string | null>(null)
+watch(owner, () => { canonicalPerson.value = null }, { flush: 'sync' })
+watch(board, value => { if (value?.layer === 'mine' && value.person_id) canonicalPerson.value = value.person_id }, { immediate: true, flush: 'sync' })
+const stateOwner = computed(() => session.identity ? `${session.identity.tenant.id}/${canonicalPerson.value || session.identity.principal.id}` : '')
 const workspace = ref<ModelBoardDocument | null>(null), coverage = ref<BoardCoverage | null>(null), coverageError = ref('')
 const managedCoverage = computed(() => coverage.value?.consumers.filter(consumer => consumer.reads_board && consumer.consumer !== 'lead_harness') ?? [])
 const coverageLabels = computed(() => managedCoverage.value.map(consumer => ({ managed_build: text('Builds', 'Builds'), managed_review: text('Reviews', 'Prüfungen'), queue: text('Queued work', 'Arbeit aus der Warteschlange') }[consumer.consumer] || text('Other managed runs', 'Andere verwaltete Läufe'))).join(' · '))
 const mode = ref<'auto' | 'simple'>('auto')
-const modeKey = computed(() => `models-page/${owner.value}/mode`)
-watch(owner, () => { mode.value = 'auto'; try { if (localStorage.getItem(modeKey.value) === 'simple') mode.value = 'simple' } catch { /* Optional browser preference. */ } }, { immediate: true, flush: 'sync' })
+const modeKey = computed(() => `models-page/${stateOwner.value}/mode`)
+watch(stateOwner, () => { mode.value = 'auto'; try { if (localStorage.getItem(modeKey.value) === 'simple') mode.value = 'simple' } catch { /* Optional browser preference. */ } }, { immediate: true, flush: 'sync' })
 function setMode(value: 'auto' | 'simple') { mode.value = value; if (owner.value) try { localStorage.setItem(modeKey.value, value) } catch { /* Optional browser preference. */ } }
 const columns = computed(() => board.value?.columns.map(column => localizeColumn(column, german.value)) ?? [])
 const inherited = computed(() => context.value.layer === 'mine' && (!board.value?.profile.template || board.value.profile.scope === 'workspace'))
@@ -108,7 +114,7 @@ onBeforeUnmount(() => scope.dispose())
         <p v-if="board?.needs_you.length" class="needs" role="status"><AppIcon name="info" :size="14" />{{ text('The migrated kinds of work need a check of their definitions.', 'Die übernommenen Arten von Arbeit brauchen eine Prüfung ihrer Definitionen.') }} <RouterLink to="/settings/kinds">{{ text('Kinds of work', 'Arten von Arbeit') }}</RouterLink></p>
       </section>
       <section class="where" :aria-label="text('Where this applies', 'Wo das gilt')"><p v-if="coverageError" role="status">{{ coverageError }}</p><template v-else-if="coverage"><p class="coverage-row"><AppIcon :name="managedCoverage.length ? 'check' : 'info'" :size="14" /><b>{{ managedCoverage.length ? text('Runs PAIMOS starts follow this page', 'Läufe, die PAIMOS startet, folgen dieser Seite') : text('No managed runs report reading this page yet', 'Noch keine verwalteten Läufe melden, diese Seite zu lesen') }}</b><span>{{ coverageLabels }}</span></p><p class="coverage-row"><AppIcon :name="coverage.consumers.find(consumer => consumer.consumer === 'lead_harness')?.reads_board ? 'check' : 'info'" :size="14" /><b>{{ coverage.consumers.find(consumer => consumer.consumer === 'lead_harness')?.reads_board ? text('The Lead’s dispatcher too, since Engine Wave 2', 'Auch der Lead-Dispatcher, seit Engine Wave 2') : text('The Lead’s dispatcher does not, until Engine Wave 2', 'Der Lead-Dispatcher nicht, bis Engine Wave 2') }}</b></p></template><p v-else>{{ text('Checking where this applies…', 'Die Geltung wird geprüft…') }}</p></section>
-      <ProofFreshness :columns="board?.columns || []" :project="context.project" :german="german" />
+      <ProofFreshness :columns="board?.columns || []" :person="canonicalPerson" :project="context.project" :german="german" />
     </section>
     <template #panel><WhyPanel :resolution="resolution" :reviewer="reviewer" :person="person" :error="resolutionError" :loading="resolving" :german="german" /></template>
   </SettingsDockedPanel>

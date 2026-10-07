@@ -14734,6 +14734,8 @@
     ,
     {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"sends the person precondition on the real HTTP order client and surfaces a server rejection","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"a canonical-person change clears proof folds and discards a held evidence page under the same login","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"binds every legacy and ranked person write, including delete and dismiss, to the captured canonical person","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"legacy refusal 409 gives a sentence and preserves the HTTP status","tier":"ESSENTIAL"}

@@ -74,7 +74,8 @@ test('Why uses the server trace, proof stays honest when empty, and full screen 
 test('person changes discard held writes and reset mode, proof folds and pending template confirmation', async ({ page }) => {
   const state = await mockModelsSettings(page); await openModelsSettings(page, '?identity=1')
   const release = state.holdNext(); await page.locator('[data-thinking="deep"]').click(); await expect.poll(() => state.writes.length).toBe(1)
-  await page.locator('[data-models-mode="simple"]').click(); await page.locator('[data-proof-fold]').click(); await page.locator('[data-change-person]').click()
+  await page.locator('[data-models-mode="simple"]').click(); await page.locator('[data-proof-fold]').click()
+  state.setPerson('22222222-2222-4222-8222-222222222222'); await page.locator('[data-change-person]').click()
   await expect(page.locator('[data-models-mode="auto"]')).toHaveAttribute('aria-pressed', 'true')
   release(); await expect(page.locator('[data-models-section]')).toHaveAttribute('aria-busy', 'false')
   await expect(page.locator('[data-proof-fold]')).toHaveAttribute('aria-expanded', 'false'); await expect(page.getByRole('button', { name: 'Undo', exact: true })).toHaveCount(0)
