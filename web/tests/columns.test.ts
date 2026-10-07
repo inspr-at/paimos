@@ -208,6 +208,37 @@ test('AEON-913: project grouping retains metadata, loaded totals, held placement
   assert.equal(filtersToQuery(filtersFromQuery({ group: 'project' })).group, 'project')
 })
 
+// AEON-913: a content fit replaces defaults. On a normal list the table stays
+// at the card width, so those fits must give width back until Title keeps its
+// minimum. A saved or dragged width stays. Reproduced at 1000px: the fit used
+// to leave Title at 188px; the same defaults leave it at 372px.
+test('AEON-913: automatic fits give width back until Title keeps its minimum', () => {
+  const shown = ['key', 'title', 'status', 'priority', 'assignee', 'updated'] as const
+  const table = 1000
+  const titleMin = COLUMN_BY_ID.get('title')!.min
+  const sum = (w: Partial<Record<string, number>>) => Object.values(w).reduce((total: number, value) => total + (value ?? 0), 0)
+  const titleOf = (w: Partial<Record<string, number>>) => table - sum(w)
+  assert.equal(titleMin, 240)
+  assert.equal(titleOf(layoutWidths([...shown], table)), 372)
+  const modest = { key: 140, status: 140, priority: 112, assignee: 160, updated: 100 }
+  assert.equal(titleOf(layoutWidths([...shown], table, null, {}, COLUMN_BY_ID, modest)), 348)
+  assert.deepEqual(layoutWidths([...shown], table, null, {}, COLUMN_BY_ID, modest), modest)
+  const fitted = { key: 180, status: 160, priority: 112, assignee: 240, updated: 120 }
+  const widths = layoutWidths([...shown], table, null, {}, COLUMN_BY_ID, fitted)
+  assert.equal(titleOf(widths), titleMin)
+  // The column after Title gives way first and stops at its own minimum.
+  assert.deepEqual(widths, { key: 180, status: 108, priority: 112, assignee: 240, updated: 120 })
+  const saved = layoutWidths(['key', 'title', 'assignee', 'status', 'updated'], table, { widths: { assignee: 300 } }, {}, COLUMN_BY_ID, { key: 200, status: 200, updated: 180 })
+  assert.equal(saved.assignee, 300)
+  assert.equal(saved.status, COLUMN_BY_ID.get('status')!.min)
+  assert.equal(saved.updated, 176)
+  assert.equal(saved.key, 200)
+  assert.equal(titleOf(saved), titleMin)
+  const dragged = layoutWidths(['key', 'title', 'status', 'assignee'], table, null, { assignee: 800 }, COLUMN_BY_ID, { key: 84, status: 84 })
+  assert.deepEqual(dragged, { key: 84, status: 84, assignee: 800 })
+  assert.equal(titleOf(dragged), 32)
+})
+
 test('AEON-913: group selection caps loaded rows at 100 and preserves other groups', () => {
   const rows = Array.from({ length: 120 }, (_, id) => ({ id: `row-${id}` }) as TicketRow)
   const group = { key: 'a', label: 'A', rows, total: 500, loaded: 120, hasMore: true }

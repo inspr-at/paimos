@@ -181,6 +181,8 @@ export function titleRoom(ids: string[], tableWidth: number, prefs?: ListPrefs |
 // saved title width, Title aims for TITLE_TARGET and spare width beyond that widens
 // Epic, Tags, Assignee and Release (not ones the person sized) up to their maximum,
 // in proportion to their normal width. What is still left goes back to Title.
+// A content fit that would leave Title under its minimum shrinks, nearest column
+// first, and never moves a saved or dragged width.
 // A width the person gives Title is kept: the unsized columns beside it grow or
 // shrink, the next column first, and stop at their own min and max.
 export function layoutWidths(ids: string[], tableWidth: number, prefs?: ListPrefs | null, live: Partial<Record<string, number>> = {}, definitions: ReadonlyMap<string, ColumnDef> = COLUMN_BY_ID, automatic: Partial<Record<string, number>> = {}): Partial<Record<string, number>> {
@@ -196,10 +198,20 @@ export function layoutWidths(ids: string[], tableWidth: number, prefs?: ListPref
     for (const id of Object.keys(out) as string[]) out[id] = Math.floor(out[id]!)
     return out
   }
+  const titleMin = definitions.get('title')!.min
+  // A content fit replaces the default visibleColumns budgeted beside Title.
+  // On a table that stays at the card width, give an unsized Title its minimum
+  // back from those fits, nearest column first. A saved or dragged width stays,
+  // and a fit that already leaves Title at least its minimum stays steady.
+  if (tableWidth > 0) {
+    const overflow = sumWidths(out) - (tableWidth - titleMin)
+    if (overflow > 0.5) shiftColumns(ids, out, overflow, 'shrink', id => !sized(id) && automatic[id] !== undefined, definitions)
+  }
   const titleTarget = TITLE_TARGET
   let spare = tableWidth - sumWidths(out) - titleTarget
-  // Loaded-content fits stay steady; an explicit Title resize may still move
-  // these unsaved widths, while the person's saved widths remain fixed.
+  // Loaded-content fits stay at the width just chosen, including a shrink that
+  // keeps Title at its minimum. An explicit Title resize may still move these
+  // unsaved widths, while the person's saved widths remain fixed.
   const growing = GROWS.filter(id => ids.includes(id) && !sized(id) && automatic[id] === undefined)
   while (spare >= 1 && growing.length) {
     const weight = growing.reduce((sum, id) => sum + definitions.get(id)!.width, 0)
