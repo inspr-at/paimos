@@ -774,7 +774,7 @@
         ,
         {"file":"tests/delivery-rating.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
         ,
-        {"file":"tests/delivery-ui.spec.ts","listedTests":14,"weightSeconds":25,"weightSource":"aeon-853-estimate"}
+        {"file":"tests/delivery-ui.spec.ts","listedTests":16,"weightSeconds":25,"weightSource":"aeon-853-estimate"}
         ,
         {"file":"tests/deploy-target.spec.ts","listedTests":7,"weightSeconds":15.536585,"weightSource":"unmeasured-test-rate"}
         ,

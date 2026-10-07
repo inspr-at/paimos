@@ -120,3 +120,27 @@ test('failed writes stay honest; project reset offers scope-bound Undo and uses 
  await policy.getByRole('button',{name:'Reset to workspace default'}).click();await policy.getByLabel('Applies to').selectOption('p-aeon')
  const writes=state.writes.length;await page.getByRole('button',{name:'Undo',exact:true}).click();expect(state.writes).toHaveLength(writes)
 })
+test('a failed refresh keeps the delivery rows and notes the failure', async ({page}) => {
+ const state=await setup(page);state.delivery.items=[row('held',0)]
+ await page.goto('/p/PHAROS/PHAROS-11');const block=ticket(page)
+ const held=block.locator('[data-delivery-id="delivery-0"]'),lift=held.getByRole('button',{name:'Lift hold'})
+ await expect(lift).toBeVisible()
+ const place=() => held.evaluate(row => { const button=row.querySelector('button')!.getBoundingClientRect(), box=row.getBoundingClientRect(); return { x:button.x-box.x, y:button.y-box.y, w:button.width, h:button.height, row:box.height } })
+ const before=await place()
+ state.setFailRead(true)
+ await block.getByRole('button',{name:'Reload delivery status'}).click()
+ await expect(block.getByRole('status').filter({hasText:'could not be loaded'})).toBeVisible()
+ await expect(held).toBeVisible();await expect(block.locator('.slot')).toHaveCount(0)
+ const after=await place()
+ for (const key of ['x','y','w','h','row'] as const) expect(Math.abs(before[key]-after[key])).toBeLessThan(0.5)
+})
+test('a later hold on a lifted row can be lifted again', async ({page}) => {
+ const state=await setup(page);state.delivery.items=[row('held',0)]
+ await page.goto('/p/PHAROS/PHAROS-11');const block=ticket(page)
+ const held=block.locator('[data-delivery-id="delivery-0"]'),lift=held.getByRole('button',{name:'Lift hold'})
+ await lift.click();await expect(lift).toBeDisabled();await expect(held.locator('.state')).toHaveText('CI green')
+ Object.assign(state.delivery.items[0],{state:'held',held_reason:'Release freeze again',held_from_state:'ci_green',owner:'person',updated_at:'2026-10-07T07:00:00Z',state_since:'2026-10-07T07:00:00Z',deadline_at:null})
+ await block.getByRole('button',{name:'Reload delivery status'}).click()
+ await expect(held.locator('.state')).toHaveText('On hold')
+ await expect(lift).toBeEnabled();await expect(held.getByRole('button',{name:'Lift hold'})).toHaveCount(1)
+})

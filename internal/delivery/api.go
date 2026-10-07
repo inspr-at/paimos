@@ -136,13 +136,34 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		permissionScope := scope(project)
-		if project == nil && ticket == "" {
+		unscoped := project == nil && ticket == ""
+		if unscoped {
 			permissionScope.AnyProject = true
 		}
 		if err := authz.RequireTx(r.Context(), tx, p, "delivery.read", permissionScope); err != nil {
 			return err
 		}
-		rows, err := tx.Query(r.Context(), `SELECT `+columns+` FROM delivery_items WHERE ($1::uuid IS NULL OR project_id=$1) AND ($2::uuid IS NULL OR ticket_node_id=$2) AND ($3='' OR state=$3) AND ($4::uuid IS NULL OR id>$4) ORDER BY id LIMIT $5`, project, nullable(ticket), s, nullable(after), limit+1)
+		// Node visibility is not delivery.read. An unscoped page keeps projects
+		// where this caller holds the grant, and rows with no project only when
+		// the workspace grant holds.
+		args := []any{project, nullable(ticket), s, nullable(after), limit + 1}
+		filter := ""
+		if unscoped {
+			check, err := authz.ProjectsTx(r.Context(), tx, p)
+			if err != nil {
+				return err
+			}
+			allowed, err := authz.GrantedProjectIDsTx(r.Context(), tx, p, "delivery.read")
+			if err != nil {
+				return err
+			}
+			if allowed == nil {
+				allowed = []string{}
+			}
+			filter = ` AND ($6::bool OR project_id = ANY($7::uuid[]))`
+			args = append(args, check("delivery.read", ""), allowed)
+		}
+		rows, err := tx.Query(r.Context(), `SELECT `+columns+` FROM delivery_items WHERE ($1::uuid IS NULL OR project_id=$1) AND ($2::uuid IS NULL OR ticket_node_id=$2) AND ($3='' OR state=$3) AND ($4::uuid IS NULL OR id>$4)`+filter+` ORDER BY id LIMIT $5`, args...)
 		if err != nil {
 			return err
 		}

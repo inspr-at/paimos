@@ -20,26 +20,29 @@ const selected = ref(props.projectId ?? ''), projects = ref<ProjectSummary[]>([]
 const de = computed(() => deliveryLanguage(profile.profile?.locale) === 'de')
 const owner = () => scopeOwner(session.identity) ? `${scopeOwner(session.identity)}/${selected.value}` : ''
 const scope = createScope(owner), reader = scope.lane(), projectScope = createScope(() => scopeOwner(session.identity))
-const base = ref<ReviewPolicySettings | null>(null), mode = ref<ReviewPolicyMode | 'inherit'>('other_family'), families = ref<ReviewFamily[]>([])
+const base = ref<ReviewPolicySettings | null>(null), mode = ref<ReviewPolicyMode | 'inherit' | ''>(''), families = ref<ReviewFamily[]>([])
 const loading = ref(true), busy = ref(false), message = ref(''), problem = ref(false), projectsError = ref(false)
 const readable = computed(() => can('reviewpolicy.read', selected.value || undefined))
 const editable = computed(() => can('reviewpolicy.manage', selected.value || undefined))
 const enabled = computed(() => editable.value && !!base.value && !loading.value && !busy.value)
-const draft = computed<ReviewPolicy | null>(() => mode.value === 'inherit' ? null : { mode: mode.value, allowed_families: mode.value === 'allowlist' ? [...families.value] : [] })
-const dirty = computed(() => !!base.value && !samePolicy(draft.value, base.value.policy ?? (selected.value ? null : base.value.effective)))
+const draft = computed<ReviewPolicy | null>(() => mode.value === 'inherit' || mode.value === '' ? null : { mode: mode.value, allowed_families: mode.value === 'allowlist' ? [...families.value] : [] })
+const dirty = computed(() => !!base.value && mode.value !== '' && !samePolicy(draft.value, base.value.policy ?? (selected.value ? null : base.value.effective)))
 const valid = computed(() => mode.value !== 'allowlist' || families.value.length > 0)
 const modes: ReviewPolicyMode[] = ['off', 'other_family', 'allowlist']
 function label(mode: ReviewPolicyMode) { return (de.value ? { off:'Aus', other_family:'Andere Modellfamilie', allowlist:'Nur diese Familien' } : { off:'Off', other_family:'Another model family', allowlist:'Only these families' })[mode] }
 function detail(mode: ReviewPolicyMode) { return (de.value ? { off:'Jede abgeschlossene Prüfung mit Ergebnis ok und gemeldetem Modell zählt, auch aus der Familie des Autors.', other_family:'Die Familie des Prüfers muss sich von der des Autors unterscheiden.', allowlist:'Eine andere Familie und eine der unten angekreuzten.' } : { off:'Any finished review with verdict ok and a reported model counts, even from the author’s own family.', other_family:'The reviewer’s family must differ from the author’s.', allowlist:'Another family, and one of those ticked below.' })[mode] }
-const feedback = computed(() => message.value || (loading.value ? de.value ? 'Prüfregel wird geladen…' : 'Loading review rule…' : !valid.value ? de.value ? 'Mindestens eine Familie für „Nur diese Familien“ ankreuzen.' : 'Tick at least one family for “Only these families”.' : dirty.value ? `${de.value ? 'Noch nicht gespeichert' : 'Not saved yet'}: ${mode.value === 'inherit' ? de.value ? 'Voreinstellung des Arbeitsbereichs' : 'Workspace default' : label(mode.value)}${mode.value === 'allowlist' ? ` (${families.value.map(familyName).join(', ')})` : ''}.` : de.value ? 'Gespeicherte Regeln gelten ab dem nächsten Prüfstatus; bereits gemeldete Status bleiben, wie sie sind.' : 'Saved rules apply from the next review status; statuses already posted stay as they are.'))
+const feedback = computed(() => message.value || (loading.value ? de.value ? 'Prüfregel wird geladen…' : 'Loading review rule…' : !base.value || mode.value === '' ? de.value ? 'Die Prüfregel ist nicht verfügbar.' : 'The review rule is unavailable.' : !valid.value ? de.value ? 'Mindestens eine Familie für „Nur diese Familien“ ankreuzen.' : 'Tick at least one family for “Only these families”.' : dirty.value ? `${de.value ? 'Noch nicht gespeichert' : 'Not saved yet'}: ${mode.value === 'inherit' ? de.value ? 'Voreinstellung des Arbeitsbereichs' : 'Workspace default' : label(mode.value as ReviewPolicyMode)}${mode.value === 'allowlist' ? ` (${families.value.map(familyName).join(', ')})` : ''}.` : de.value ? 'Gespeicherte Regeln gelten ab dem nächsten Prüfstatus; bereits gemeldete Status bleiben, wie sie sind.' : 'Saved rules apply from the next review status; statuses already posted stay as they are.'))
 const preview = computed(() => {
-  const policy = draft.value ?? base.value?.workspace
-  return policy?.mode === 'off' ? 'cross-family not required (policy off)' : policy?.mode === 'allowlist' ? `cross-family required · allowed: ${policy.allowed_families.join(', ') || '—'}` : 'cross-family required · reviewer family must differ from author'
+  if (!base.value) return de.value ? 'Prüfregel nicht verfügbar' : 'Review rule unavailable'
+  const policy = draft.value ?? base.value.workspace
+  return policy.mode === 'off' ? 'cross-family not required (policy off)' : policy.mode === 'allowlist' ? `cross-family required · allowed: ${policy.allowed_families.join(', ') || '—'}` : 'cross-family required · reviewer family must differ from author'
 })
 function adopt(value: ReviewPolicySettings) { base.value = value; mode.value = selected.value && !value.policy ? 'inherit' : value.effective.mode; families.value = [...value.effective.allowed_families] }
-function clear() { scope.reset(); base.value = null; busy.value = false; loading.value = true; mode.value = 'other_family'; families.value = []; message.value = ''; problem.value = false }
+function unavailable() { base.value = null; mode.value = ''; families.value = []; loading.value = false; problem.value = false; message.value = de.value ? 'Die Prüfregel ist nicht verfügbar.' : 'The review rule is unavailable.' }
+function clear() { scope.reset(); base.value = null; busy.value = false; loading.value = true; mode.value = ''; families.value = []; message.value = ''; problem.value = false }
 function load() {
-  if (!readable.value || busy.value) { loading.value = false; return Promise.resolve() }
+  if (busy.value) return Promise.resolve()
+  if (!readable.value) { unavailable(); return Promise.resolve() }
   loading.value = true; message.value = ''; problem.value = false
   const id = selected.value
   return reader.run(({ after, signal }) => after(readReviewPolicy(id, signal), value => { if (value.project_id === (id || null)) adopt(value) }), { failed: cause => { problem.value = true; message.value = cause instanceof Error ? cause.message : 'The review rule could not be loaded.' }, settled: () => { loading.value = false } })
@@ -89,10 +92,10 @@ onBeforeUnmount(() => { scope.dispose(); projectScope.dispose(); stopAccess() })
         <button v-if="selected" class="btn sm ghost reset" type="button" :disabled="!enabled || !base?.policy" @click="write(null, true)">{{ de ? 'Auf Voreinstellung zurücksetzen' : 'Reset to workspace default' }}</button>
       </div>
       <p v-else class="permission"><AppIcon name="lock" :size="14" /><span>{{ de ? 'Zum Ändern wird „Prüfregel verwalten“ benötigt. Agenten können diese Regel lesen, aber nur mit ausdrücklicher Freigabe ändern.' : 'Changing this needs Manage review policy. Agents can read this rule but change it only with an explicit grant.' }}</span></p>
-      <p v-if="selected" class="provenance">{{ base?.source === 'project' ? de ? 'Dieses Projekt hat eine eigene Regel.' : 'This project sets its own rule.' : de ? 'Dieses Projekt folgt dem Arbeitsbereich.' : 'This project follows the workspace.' }} <span v-if="base?.updated_at">{{ de ? 'Geändert am' : 'Changed on' }} {{ new Date(base.updated_at).toLocaleDateString(de ? 'de-AT' : 'en-GB') }}.</span></p>
+      <p v-if="selected" class="provenance"><template v-if="base">{{ base.source === 'project' ? de ? 'Dieses Projekt hat eine eigene Regel.' : 'This project sets its own rule.' : de ? 'Dieses Projekt folgt dem Arbeitsbereich.' : 'This project follows the workspace.' }} <span v-if="base.updated_at">{{ de ? 'Geändert am' : 'Changed on' }} {{ new Date(base.updated_at).toLocaleDateString(de ? 'de-AT' : 'en-GB') }}.</span></template><template v-else>{{ de ? 'Die Prüfregel ist nicht verfügbar.' : 'The review rule is unavailable.' }}</template></p>
       <fieldset class="rule-set" :disabled="!enabled" @change="changed"><legend>{{ de ? 'Prüfregel' : 'Review rule' }}</legend>
         <div class="modes">
-          <label v-if="selected" class="option" :class="{ on: mode === 'inherit' }"><input v-model="mode" type="radio" name="review-policy-mode" value="inherit" /><span><b>{{ de ? 'Voreinstellung des Arbeitsbereichs verwenden' : 'Use the workspace default' }}</b><small>{{ de ? 'Derzeit' : 'Currently' }}: {{ label(base?.workspace.mode ?? 'other_family') }}</small></span></label>
+          <label v-if="selected" class="option" :class="{ on: mode === 'inherit' }"><input v-model="mode" type="radio" name="review-policy-mode" value="inherit" /><span><b>{{ de ? 'Voreinstellung des Arbeitsbereichs verwenden' : 'Use the workspace default' }}</b><small>{{ base ? `${de ? 'Derzeit' : 'Currently'}: ${label(base.workspace.mode)}` : de ? 'Derzeit nicht verfügbar' : 'Currently unavailable' }}</small></span></label>
           <label v-for="value in modes" :key="value" class="option" :class="{ on: mode === value }"><input v-model="mode" type="radio" name="review-policy-mode" :value="value" /><span><b>{{ label(value) }} <em v-if="value === 'other_family'">{{ de ? 'Voreinstellung' : 'Default' }}</em></b><small>{{ detail(value) }}</small></span></label>
         </div>
       </fieldset>

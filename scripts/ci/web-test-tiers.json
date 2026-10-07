@@ -7044,6 +7044,10 @@
     ,
     {"kind":"browser","file":"tests/delivery-rating.spec.ts","name":"usage shows the rework rate by harness","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"a failed refresh keeps the delivery rows and notes the failure","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"a later hold on a lifted row can be lifted again","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1024 dark de","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery and review card keep controls still at 1024 dark en","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -14672,7 +14676,13 @@
     ,
     {"kind":"vitest","file":"tests/decision-scroll.unit.test.ts","name":"retired Release Walker > is not opened by this scrolling suite","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a denied or failed review-policy read selects no saved mode","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a failed hold lift preserves the held row and reports its real error","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a failed refresh keeps the previous rows out of the empty slot","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a later hold with a newer revision can be lifted again","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a pending ticket read and lift result are discarded after ticket or person changes","tier":"ESSENTIAL"}
     ,

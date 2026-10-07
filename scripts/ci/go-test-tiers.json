@@ -3460,6 +3460,8 @@
     ,
     {"kind":"go","package":"internal/authz","name":"TestStatusHelpAgentReadRequiresAuthentication","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/authz","name":"TestViewerReadsStoredReviewPolicy","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/brand","name":"TestLoadOverride","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/business","name":"TestR4QuoteAcceptanceIsVersionBoundAndTenantScoped","tier":"ESSENTIAL"}
@@ -5077,6 +5079,8 @@
     {"kind":"go","package":"internal/delivery","name":"TestReconcileContinuesAfterConfirmedMissingPull","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestTicketHintsOnlyCanonicalPrefixes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestUnscopedDeliveryOmitsProjectsWithoutDeliveryRead","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/deliveryvote","name":"TestDeliveryRoutesArePersonRead","tier":"GATED-FULL"}
     ,

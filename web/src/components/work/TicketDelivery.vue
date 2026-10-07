@@ -17,13 +17,14 @@ const read = computed(() => can('delivery.read', props.projectId)), manage = com
 const owner = () => scopeOwner(session.identity) ? `${scopeOwner(session.identity)}/${props.projectId}/${props.nodeId}` : ''
 const scope = createScope(owner), reader = scope.lane()
 const result = ref<DeliveryPage | null>(null), loading = ref(true), error = ref(''), mutationError = ref(''), busy = ref(''), now = ref(Date.now())
-const order = ref<string[]>([]), lifted = ref<string[]>([])
+const order = ref<string[]>([]), lifted = ref<string[]>([]), liftedAt = ref<Record<string, string>>({})
 const items = computed(() => {
   const list = sortDelivery(result.value?.items ?? [], now.value)
   return list.sort((a, b) => order.value.indexOf(a.id) - order.value.indexOf(b.id))
 })
+const showSlot = computed(() => items.value.length === 0)
 const updated = computed(() => items.value.reduce((latest, item) => item.updated_at > latest ? item.updated_at : latest, ''))
-function reset() { scope.reset(); result.value = null; error.value = ''; mutationError.value = ''; loading.value = true; busy.value = ''; order.value = []; lifted.value = [] }
+function reset() { scope.reset(); result.value = null; error.value = ''; mutationError.value = ''; loading.value = true; busy.value = ''; order.value = []; lifted.value = []; liftedAt.value = {} }
 function load() {
   if (!read.value || busy.value) return Promise.resolve()
   const id = props.nodeId
@@ -34,6 +35,14 @@ function load() {
 // Keep existing rows in place while refreshing or lifting a hold. New rows append; reopening applies the priority order.
     if (!order.value.length) order.value = sorted.map(item => item.id)
     else order.value = [...order.value, ...sorted.map(item => item.id).filter(id => !order.value.includes(id))]
+    const nextAt = { ...liftedAt.value }
+    lifted.value = lifted.value.filter(rowId => {
+      const row = value.items.find(item => item.id === rowId)
+      const at = nextAt[rowId]
+      if (row?.state === 'held' && at && Date.parse(row.updated_at) > Date.parse(at)) { delete nextAt[rowId]; return false }
+      return true
+    })
+    liftedAt.value = nextAt
   }), { failed: cause => { error.value = cause instanceof Error ? cause.message : 'Delivery unavailable' }, settled: () => { loading.value = false } })
 }
 function lift(item: DeliveryItem) {
@@ -43,7 +52,8 @@ function lift(item: DeliveryItem) {
   return scope.run(({ after, signal }) => after(liftDeliveryHold(snapshot, signal), value => {
     if (!manage.value || !result.value || value.id !== id || value.ticket_node_id !== props.nodeId) return
     result.value.items = result.value.items.map(item => item.id === id ? value : item)
-    lifted.value.push(id)
+    if (!lifted.value.includes(id)) lifted.value = [...lifted.value, id]
+    liftedAt.value = { ...liftedAt.value, [id]: value.updated_at }
   }), { failed: cause => { mutationError.value = cause instanceof Error ? cause.message : 'The hold could not be lifted.' }, settled: () => { busy.value = '' } })
 }
 watch([() => props.nodeId, () => props.projectId, () => scopeOwner(session.identity), read], () => { reset(); void load() }, { immediate:true, flush:'sync' })
@@ -54,7 +64,7 @@ onBeforeUnmount(() => { scope.dispose(); clearInterval(poll); stopAccess() })
 <template>
   <section v-if="read" class="delivery" :lang="lang" :aria-label="de ? 'Lieferstatus' : 'Delivery'">
     <header class="head"><h3 class="eyebrow">{{ de ? 'Lieferstatus' : 'Delivery' }}</h3><div class="head-aside"><span class="updated">{{ updated ? de ? `Vor ${minutesSince(updated, now)} Min. aktualisiert` : `Updated ${minutesSince(updated, now)} min ago` : '' }}</span><button class="icon-btn flat sm" type="button" :aria-label="de ? 'Lieferstatus neu laden' : 'Reload delivery status'" :disabled="loading || !!busy" @click="load"><AppIcon name="refresh" :size="13" /></button></div></header>
-    <div v-if="error || !result || !result.available || !items.length" class="slot" :aria-busy="loading">
+    <div v-if="showSlot" class="slot" :aria-busy="loading">
       <span class="slot-icon"><AppIcon :name="error ? 'alert' : !result ? 'clock' : !result.available ? 'link' : 'merge'" :size="18" /></span>
       <div>
         <p class="slot-title">{{ error ? de ? 'Lieferstatus konnte nicht geladen werden' : 'Delivery status could not be loaded' : !result ? de ? 'Lieferstatus wird geladen…' : 'Loading delivery status…' : !result.available ? de ? 'Lieferstatus nicht verfügbar' : 'Delivery status is not available' : de ? 'Noch kein Pull Request' : 'No pull request yet' }}</p>
@@ -62,6 +72,7 @@ onBeforeUnmount(() => { scope.dispose(); clearInterval(poll); stopAccess() })
       </div>
     </div>
     <ol v-else class="list"><DeliveryRow v-for="item in items" :key="item.id" :item="item" :can-manage="manage" :now="now" :lang="lang" :busy="busy === item.id" :lifted="lifted.includes(item.id)" @lift="lift" /></ol>
+    <p v-if="error && !showSlot" class="problem" role="status">{{ de ? 'Lieferstatus konnte nicht geladen werden. Der Rest des Tickets ist aktuell.' : 'Delivery status could not be loaded. The rest of the ticket is up to date.' }}</p>
     <p v-if="mutationError" class="problem" role="alert">{{ mutationError }}</p>
     <p v-if="result?.next_cursor" class="problem" role="status">{{ de ? 'Es werden die ersten 100 Pull Requests angezeigt. Weitere Lieferdaten sind vorhanden.' : 'Showing the first 100 pull requests. More delivery records are available.' }}</p>
     <p class="foot"><AppIcon name="eye" :size="13" /><span>{{ de ? 'PAIMOS meldet nur, was GitHub und die eigenen Läufe zeigen; es pusht, reiht ein und mergt nie selbst.' : 'PAIMOS only reports what GitHub and its own runs show; it never pushes, queues or merges.' }}</span></p>

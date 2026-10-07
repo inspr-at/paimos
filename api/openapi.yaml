@@ -3220,7 +3220,7 @@ paths:
   /delivery:
     get:
       operationId: listDelivery
-      description: 'Observe-only delivery rows visible to the caller. Requires delivery.read; bounded UUID keyset pagination.'
+      description: 'Observe-only delivery rows the caller may read. A project or ticket filter requires delivery.read on that project. An unscoped list is allowed when delivery.read is held on the workspace or on any project, and returns only projects where this caller holds delivery.read. Rows with no project are included only when the workspace grant holds. Bounded UUID keyset pagination.'
       security: [{session: []}, {agentKey: []}]
       parameters:
         - {name: project, in: query, schema: {type: string, maxLength: 64}}

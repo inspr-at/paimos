@@ -33,8 +33,8 @@ function setup<T>(file:string,props:object):T {
 }
 beforeEach(() => { vi.useFakeTimers();vi.stubGlobal('navigator',{platform:'Mac'});session.identity.principal.id='person';access.manage=true;access.read=true;http.handle=async () => json(settings()) })
 afterEach(() => {for(const stop of unmounts.splice(0))stop();for(const scope of scopes.splice(0))scope.stop();actions.splice(0);vi.useRealTimers();vi.unstubAllGlobals()})
-type Ticket = { result:Vue.Ref<delivery.DeliveryPage|null>; lift:(item:delivery.DeliveryItem) => Promise<unknown>; mutationError:Vue.Ref<string> }
-type Card = { base:Vue.Ref<policy.ReviewPolicySettings|null>; selected:Vue.Ref<string>; mode:Vue.Ref<string>; families:Vue.Ref<string[]>; save:() => Promise<unknown>; write:(policy:policy.ReviewPolicy|null,reset:boolean) => Promise<unknown>; message:Vue.Ref<string>; dirty:Vue.ComputedRef<boolean> }
+type Ticket = { result:Vue.Ref<delivery.DeliveryPage|null>; lift:(item:delivery.DeliveryItem) => Promise<unknown>; load:() => Promise<unknown>; mutationError:Vue.Ref<string>; error:Vue.Ref<string>; lifted:Vue.Ref<string[]>; showSlot:Vue.ComputedRef<boolean> }
+type Card = { base:Vue.Ref<policy.ReviewPolicySettings|null>; selected:Vue.Ref<string>; mode:Vue.Ref<string>; families:Vue.Ref<string[]>; save:() => Promise<unknown>; write:(policy:policy.ReviewPolicy|null,reset:boolean) => Promise<unknown>; message:Vue.Ref<string>; dirty:Vue.ComputedRef<boolean>; feedback:Vue.ComputedRef<string> }
 it('the paused step and configured check progress are shown without inventing a completed step', () => {
  const held=item();expect(delivery.stepIndex(held.state,held.held_from_state)).toBe(2);expect(delivery.stepIndex('held',null)).toBe(-1)
  expect(delivery.nextAction({...held,state:'pushed'},'de')).toContain('3 von 5 bestanden')
@@ -54,6 +54,28 @@ it('a pending ticket read and lift result are discarded after ticket or person c
  writing.release(json({...item(),state:'ci_green'}));await lift
  expect(ticket.result.value).toBeNull()
 })
+it('a failed refresh keeps the previous rows out of the empty slot', async () => {
+ http.handle=async () => json({items:[item()],next_cursor:null,available:true})
+ const ticket=setup<Ticket>('work/TicketDelivery.vue',{nodeId:'ticket',projectId:'project'});await settle()
+ expect(ticket.showSlot.value).toBe(false);expect(ticket.result.value?.items).toHaveLength(1)
+ http.handle=async () => json({error:'Delivery read failed'},503)
+ await ticket.load();await settle()
+ expect(ticket.error.value).toBe('Delivery read failed')
+ expect(ticket.result.value?.items[0]?.state).toBe('held')
+ expect(ticket.showSlot.value).toBe(false)
+})
+it('a later hold with a newer revision can be lifted again', async () => {
+ const held=item()
+ http.handle=async (_path,init) => init?.method==='DELETE' ? json({...held,state:'ci_green',held_reason:null,held_from_state:null,updated_at:'2026-10-07T01:00:00Z'}) : json({items:[held],next_cursor:null,available:true})
+ const ticket=setup<Ticket>('work/TicketDelivery.vue',{nodeId:'ticket',projectId:'project'});await settle();await ticket.lift(held)
+ expect(ticket.lifted.value).toContain('held')
+ http.handle=async () => json({items:[{...held,updated_at:'2026-10-07T01:00:00Z'}],next_cursor:null,available:true})
+ await ticket.load();await settle();expect(ticket.lifted.value).toContain('held')
+ http.handle=async () => json({items:[{...held,updated_at:'2026-10-07T02:00:00Z'}],next_cursor:null,available:true})
+ await ticket.load();await settle()
+ expect(ticket.result.value?.items[0]?.state).toBe('held')
+ expect(ticket.lifted.value).not.toContain('held')
+})
 it('a failed hold lift preserves the held row and reports its real error', async () => {
  http.handle=async (_path,init) => init?.method === 'DELETE' ? json({error:'Delivery changed; reload'},412) : json({items:[item()],next_cursor:null,available:true})
  const ticket=setup<Ticket>('work/TicketDelivery.vue',{nodeId:'ticket',projectId:'project'});await settle();await ticket.lift(item())
@@ -67,6 +89,20 @@ it('family eligibility comes from the server; empty allowlists never save and fa
  card.families.value=['anthropic'];await card.save();expect(writes).toHaveLength(1)
  expect(writes[0]?.headers).toMatchObject({'If-Unmodified-Since':'2026-10-07T00:00:00Z'})
  expect(card.dirty.value).toBe(true);expect(card.message.value).toBe('Permission was revoked');expect(card.base.value?.effective.mode).toBe('other_family')
+})
+it('a denied or failed review-policy read selects no saved mode', async () => {
+ access.read=false
+ const denied=setup<Card>('settings/CrossFamilyReviewCard.vue',{});await settle()
+ expect(denied.base.value).toBeNull();expect(denied.mode.value).toBe('')
+ expect(denied.message.value).toBe('The review rule is unavailable.')
+ expect(denied.feedback.value).toBe('The review rule is unavailable.')
+ for (const stop of unmounts.splice(0)) stop();for (const scope of scopes.splice(0)) scope.stop()
+ access.read=true
+ http.handle=async () => json({error:'The review rule could not be loaded.'},403)
+ const failed=setup<Card>('settings/CrossFamilyReviewCard.vue',{});await settle()
+ expect(failed.base.value).toBeNull();expect(failed.mode.value).toBe('')
+ expect(failed.message.value).toBe('The review rule could not be loaded.')
+ expect(failed.feedback.value).not.toContain('Saved rules apply')
 })
 it('a policy save cannot report success after the person changes', async () => {
  const card=setup<Card>('settings/CrossFamilyReviewCard.vue',{});await settle();card.mode.value='off'
