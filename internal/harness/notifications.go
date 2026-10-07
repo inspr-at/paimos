@@ -128,7 +128,10 @@ func (m *Module) notificationHint(r *http.Request, p tenant.Principal, eventID i
 			return err
 		}
 		if err := authz.RequireTx(ctx, tx, p, "harness.worker", authz.Scope{ProjectID: r.PathValue("projectId")}); err != nil {
-			return workorders.Fail(403, "harness.worker permission required")
+			if errors.Is(err, authz.ErrForbidden) {
+				return workorders.Fail(403, "harness.worker permission required")
+			}
+			return err
 		}
 		s, err := load(ctx, tx, r.PathValue("projectId"), r.PathValue("sessionId"), false)
 		if errors.Is(err, pgx.ErrNoRows) {

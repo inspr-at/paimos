@@ -17,6 +17,7 @@ type hintAPI struct {
 	connected  chan func()
 	deliveries chan struct{}
 	controls   chan string
+	queued     []HarnessDelivery
 }
 
 func (a *hintAPI) WatchHarness(ctx context.Context, _ HarnessSession, wake func()) error {
@@ -30,8 +31,19 @@ func (a *hintAPI) WatchHarness(ctx context.Context, _ HarnessSession, wake func(
 }
 func (a *hintAPI) CompleteHarnessDelivery(ctx context.Context, session HarnessSession, delivery HarnessDelivery) error {
 	err := a.fakeAPI.CompleteHarnessDelivery(ctx, session, delivery)
+	a.mu.Lock()
+	a.queued = a.queued[1:]
+	a.mu.Unlock()
 	a.deliveries <- struct{}{}
 	return err
+}
+func (a *hintAPI) DrainHarness(context.Context, HarnessSession) ([]HarnessDelivery, error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.queued) == 0 {
+		return nil, nil
+	}
+	return append([]HarnessDelivery(nil), a.queued[:1]...), nil
 }
 func (a *hintAPI) CompleteHarnessControl(ctx context.Context, session HarnessSession, id, outcome, reason string) error {
 	err := a.fakeAPI.CompleteHarnessControl(ctx, session, id, outcome, reason)
@@ -43,7 +55,7 @@ func TestHarnessHintsDrainAndStopWithoutHeartbeatOrPoll(t *testing.T) {
 	// Risk: a pushed hint is ignored until a timer, or becomes an unauthorized
 	// process command. No timer can fire in this loop; only queue reads act.
 	s, api, process := testSupervisor(t)
-	hints := &hintAPI{api, make(chan func(), 1), make(chan struct{}, 2), make(chan string, 2)}
+	hints := &hintAPI{fakeAPI: api, connected: make(chan func(), 1), deliveries: make(chan struct{}, 2), controls: make(chan string, 2)}
 	s.api = hints
 	entry := &owned{record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", Generation: s.generation, State: "running", PID: process.PID(), Controls: map[string]replay{}}, harness: HarnessSession{ID: "session", ProjectID: "project"}, process: process, inboxCapable: true, replies: map[string]string{}, monitorDone: make(chan struct{}), harnessWake: make(chan struct{}, 1)}
 	s.runs["run"] = entry
@@ -60,18 +72,20 @@ func TestHarnessHintsDrainAndStopWithoutHeartbeatOrPoll(t *testing.T) {
 		t.Fatal("notification watcher never connected")
 	}
 	api.mu.Lock()
-	api.harnessDeliveries = []HarnessDelivery{{ID: "delivery", MessageID: "message", SenderPrincipalID: "person", Body: "check the current work"}}
+	hints.queued = []HarnessDelivery{{ID: "delivery", MessageID: "message", SenderPrincipalID: "person", Body: "check the current work"}, {ID: "next-delivery", MessageID: "next-message", SenderPrincipalID: "person", Body: "also check the final handover"}}
 	api.mu.Unlock()
 	wake()
-	select {
-	case <-hints.deliveries:
-	case <-ctx.Done():
-		t.Fatal("hint did not drain its message")
+	for range 2 {
+		select {
+		case <-hints.deliveries:
+		case <-ctx.Done():
+			t.Fatal("one hint did not drain the full queued burst")
+		}
 	}
 	process.mu.Lock()
 	calls := process.calls
 	process.mu.Unlock()
-	if calls != 1 {
+	if calls != 2 {
 		t.Fatalf("message inserted %d times", calls)
 	}
 	api.mu.Lock()
