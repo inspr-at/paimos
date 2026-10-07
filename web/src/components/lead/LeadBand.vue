@@ -147,7 +147,7 @@ const deskLink = (id: string) => ({ path: '/decision-desk', query: { needs: `q:$
 </template>
 
 <style scoped>
-.lead { margin-top: 22px; padding: 18px 20px 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-raised-2); box-shadow: 0 24px 48px -36px rgba(32, 60, 61, .35); }
+.lead { margin-top: 22px; padding: 18px 20px 6px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-raised-2); box-shadow: 0 24px 48px -36px color-mix(in srgb, var(--shadow-color) 35%, transparent); }
 .lead-top { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto; grid-template-areas: 'bot who acts'; align-items: start; gap: 4px 14px; }
 .lead-bot { grid-area: bot; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: var(--surface-sunken); box-shadow: inset 0 0 0 1px var(--line); }
 .lead-who { grid-area: who; min-width: 0; display: grid; gap: 1px; }

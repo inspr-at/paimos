@@ -263,7 +263,7 @@ summary{cursor:pointer;width:fit-content;display:flex;align-items:center;gap:6px
 .overflow-menu:not(:has([role="menuitem"])) .menu-note{border-top:0;padding-top:0}
 .steer-sheet{position:fixed;inset:auto 0 calc(100dvh - var(--vv-top, 0px) - var(--vv-h, 100dvh)) 0;width:auto;max-width:none;height:var(--vv-h, 100dvh);max-height:var(--vv-h, 100dvh);margin:0;padding:0;border:0;background:transparent;color:var(--ink);overflow:visible}
 .steer-sheet::backdrop{background:var(--scrim)}
-.sheet-card{display:flex;flex-direction:column;height:100%;max-height:100%;border-radius:20px 20px 0 0;border-top:1px solid var(--glass-edge);background:var(--surface-raised);box-shadow:0 -18px 40px -18px rgba(0, 0, 0, .35)}
+.sheet-card{display:flex;flex-direction:column;height:100%;max-height:100%;border-radius:20px 20px 0 0;border-top:1px solid var(--glass-edge);background:var(--surface-raised);box-shadow:0 -18px 40px -18px color-mix(in srgb, var(--shadow-black) 35%, transparent)}
 .grabber{align-self:center;width:40px;height:4px;margin-top:8px;border-radius:999px;background:var(--line-2)}
 .sheet-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 10px 4px 20px}
 .sheet-head h2{font-size:17px}

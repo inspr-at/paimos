@@ -140,7 +140,8 @@ button:disabled { cursor: default; }
 .control-row:first-of-type { margin-top: 8px; }
 .seg { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .seg button { min-height: 44px; padding: 0 4px; font-size: 12px; }
-.switch { justify-self: start; }.switch span { min-width: 3ch; }.switch input { width: 44px; height: 24px; }
+/* 44px is the label's hit target. The track stays the shared switch. */
+.switch { justify-self: start; min-width: 44px; min-height: 44px; }.switch span { min-width: 3ch; }
 .range-control { display: grid; grid-template-columns: minmax(0, 1fr) 5ch; gap: 8px; align-items: center; }
 .range-control input { width: 100%; min-width: 0; height: 44px; accent-color: var(--teal); }
 output { text-align: right; font-variant-numeric: tabular-nums; }

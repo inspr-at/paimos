@@ -285,7 +285,7 @@ li + li .kp-row::before { content: ''; position: absolute; top: 0; left: 50px; r
 .kp-type { color: var(--ink-3); }
 .kp-time { width: 64px; text-align: right; font-size: 12px; color: var(--ink-2); }
 .k-status { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; font-variant-ligatures: none; }
-.k-status.proposed { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: var(--gold-ink); }
+.k-status.proposed { background: var(--gold-wash); box-shadow: inset 0 0 0 1px var(--warn-line); color: var(--warn-ink); }
 .k-status.archived { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
 .kp-more { display: block; width: calc(100% - 12px); height: 36px; margin: 0 6px 6px; border: 0; border-radius: 9px; background: transparent; color: var(--teal-ink); font-size: 12.5px; font-weight: 600; }
 .kp-more:hover { background: var(--row-hover); }

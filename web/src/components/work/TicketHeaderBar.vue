@@ -176,7 +176,7 @@ void props
 .key-chip:hover { box-shadow: inset 0 0 0 1px var(--teal); }
 .key-chip:active { filter: brightness(.97); }
 .key-chip:focus-visible { box-shadow: var(--focus-ring); }
-.key-chip .epic { color: var(--gold); }
+.key-chip .epic { color: var(--kind-parent); }
 .copy-glyph { opacity: .45; }
 .key-chip:hover .copy-glyph { opacity: .9; }
 .position { flex-shrink: 0; margin-left: 6px; font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
@@ -193,7 +193,7 @@ void props
 .trail-more { display: none; padding: 0 2px; color: var(--ink-3); }
 .trail-more.always { display: inline; }
 .edit-btn { gap: 6px; margin-right: 4px; }
-.unsaved { font-size: 12px; color: var(--gold-ink); font-weight: 600; margin-right: 4px; }
+.unsaved { font-size: 12px; color: var(--warn-ink); font-weight: 600; margin-right: 4px; }
 .more-menu { display: grid; gap: 1px; }
 .menu-item { display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font-size: 13.5px; text-align: left; }
 .menu-item svg { color: var(--ink-2); }

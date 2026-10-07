@@ -19,7 +19,7 @@ onBeforeUnmount(() => clearInterval(timer))
 
 <style scoped>
 .list-freshness { display: inline-flex; align-items: center; gap: 7px; min-height: 28px; margin: 0; color: var(--ink-3); font-size: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.list-freshness.stale { color: var(--gold-ink); }
+.list-freshness.stale { color: var(--warn-ink); }
 .live-mark { width: 7px; height: 7px; border-radius: 50%; background: var(--st-backlog); flex: none; }
 .live .live-mark { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 16%, transparent); }
 .stale .live-mark { background: var(--gold); }

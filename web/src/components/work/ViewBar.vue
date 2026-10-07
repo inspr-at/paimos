@@ -150,11 +150,11 @@ defineExpose({ openMenuFor: (anchor: HTMLElement) => { if (active.value) openMen
 .tab.active { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); }
 .tab.active .view-tab { background: transparent; box-shadow: none; padding-right: 4px; }
 .tab-menu { display: grid; place-items: center; width: 24px; height: 24px; margin-right: 3px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--teal-ink); }
-.tab-menu:hover, .tab-menu[aria-expanded="true"] { background: rgba(14, 111, 108, .12); }
+.tab-menu:hover, .tab-menu[aria-expanded="true"] { background: color-mix(in srgb, var(--primary-line) 12%, transparent); }
 .lead { flex-shrink: 0; color: var(--ink-3); }
 .view-tab[aria-current="page"] .lead { color: var(--teal-ink); }
-.star { color: var(--gold); }
-.view-tab[aria-current="page"] .star { color: var(--gold); }
+.star { color: var(--secondary-line); }
+.view-tab[aria-current="page"] .star { color: var(--secondary-line); }
 .shared { flex-shrink: 0; color: var(--ink-3); }
 .dirty { flex-shrink: 0; width: 7px; height: 7px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 0 2px var(--chip-teal-bg); }
 .changes { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }

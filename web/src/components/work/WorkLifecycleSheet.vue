@@ -135,7 +135,7 @@ onBeforeUnmount(reset)
 <style scoped>
 .work-lifecycle { position: fixed; inset: 8vh auto auto 50%; transform: translateX(-50%); margin: 0; width: min(var(--dialog-m), calc(100vw - 2rem)); max-height: 84dvh; padding: 1.5rem; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface); color: var(--ink); box-shadow: var(--shadow-lg); overflow: hidden; }
 .work-lifecycle[open] { display: flex; flex-direction: column; }
-.work-lifecycle::backdrop { background: rgb(0 0 0 / .4); }
+.work-lifecycle::backdrop { background: color-mix(in srgb, var(--shadow-black) 40%, transparent); }
 header h2 { margin: .25rem 0 1.2rem; font-size: 1.25rem; }
 .eyebrow { color: var(--ink-3); font-size: .8rem; }
 .choices { display: grid; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }

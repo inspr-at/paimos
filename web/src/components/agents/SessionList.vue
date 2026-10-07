@@ -712,7 +712,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 @media (max-width: 720px) { .sort-select { height: 44px; font-size: 16px; } .sort-dir { width: 44px; height: 44px; } }
 .group-row { margin: 10px 6px 2px; padding: 0 12px; }
 .group-label { grid-column: 1 / -1; display: inline-flex; align-items: center; gap: 8px; height: 26px; font: 500 10.5px/1 var(--mono); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); font-variant-ligatures: none; }
-.group-row.attention .group-label { color: var(--gold-ink); }
+.group-row.attention .group-label { color: var(--warn-ink); }
 .group-label .mono { letter-spacing: 0; color: var(--ink-3); }
 .group-toggle { display: inline-flex; align-items: center; gap: 8px; height: 26px; margin-left: -6px; padding: 0 8px 0 6px; border: 0; border-radius: 8px; background: transparent; font: inherit; letter-spacing: inherit; text-transform: inherit; color: inherit; }
 .group-toggle:hover { background: var(--row-hover); color: var(--ink); }
@@ -775,7 +775,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 .c-state.vendor-limit :deep(.state-word) { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
 
 .state-label { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.row.needs .state-label { color: var(--gold-ink); font-weight: 600; }
+.row.needs .state-label { color: var(--warn-ink); font-weight: 600; }
 .row > .c-agent { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; padding-block: 6px; }
 .agent-link { display: inline-flex; flex: 1 1 0; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
 .agent-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 6px; }
@@ -788,7 +788,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 /* The heartbeat has its own column on wide rows; phones say it inline here. */
 .ctx-beat { display: none; flex: none; white-space: nowrap; }
 .row:hover .result { color: var(--teal-ink); }
-.role { flex: none; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--gold-wash); color: var(--gold-ink); font: 600 9px/16px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
+.role { flex: none; height: 16px; padding: 0 5px; border-radius: 999px; background: var(--secondary-tint-3); color: var(--secondary-ink); font: 600 9px/16px var(--mono); letter-spacing: .06em; text-transform: uppercase; font-variant-ligatures: none; }
 .c-exec { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 /* Marks differ in width (Claude narrow, xAI wide): a fixed slot keeps every row's text on one left edge. */
 .exec-icon { display: grid; place-items: center; flex: none; width: 28px; height: 28px; }

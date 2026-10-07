@@ -56,7 +56,7 @@ function move(event: KeyboardEvent) {
 @media (hover: hover) { .menu-item:hover { background: var(--row-hover); } }
 .menu-item:focus-visible { background: var(--row-selected); box-shadow: inset 0 0 0 1px var(--glass-rim); }
 .lead { flex-shrink: 0; color: var(--ink-3); }
-.lead.epic { color: var(--gold); }
+.lead.epic { color: var(--kind-parent); }
 .label { flex: 1; }
 .on-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font-size: 10.5px; font-weight: 700; }
 .go { color: var(--ink-3); }

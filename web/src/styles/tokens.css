@@ -6,6 +6,8 @@
 :root, :root[data-theme="light"], .agent-theme-preview, .agent-theme-preview.light {
   /* Palette */
   --canvas: #f7f6f2;
+  /* Stage vignette. Darker than this canvas; a missing token must not blank the wash. */
+  --canvas-lo: color-mix(in srgb, var(--canvas) 88%, var(--ink));
   --ink: #203c3d;
   --ink-2: #4c6163;
   --ink-3: #5f7274;
@@ -119,7 +121,7 @@
   --brand-teal: #0e6f6c;
   --brand-gold: #d69b31;
   --light-wash: rgba(255, 255, 255, 0.9);
-  --aqua-wash: rgba(199, 239, 236, 0.6);
+  --aqua-wash: color-mix(in srgb, var(--primary-tint-2) 60%, transparent);
   --gold-wash: rgba(232, 192, 122, 0.12);
   --level-default: #8a9a9b;  --level-project: #d69b31;
   /* BEGIN GENERATED THEME light (scripts/theme-tokens.mjs) */
@@ -175,6 +177,7 @@
 
 :root[data-theme="dark"], .agent-theme-preview.dark {
   --canvas: #102327;
+  --canvas-lo: color-mix(in srgb, var(--canvas) 55%, black);
   --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #94aead; --mark-measured: rgba(237, 244, 240, 0.5);
     --eff-line: rgba(237, 244, 240, 0.42); --eff-plan: rgba(237, 244, 240, 0.42);
     --eff-1: #8fa8a7; --eff-2: #6cc4bb; --eff-3: #a4e5df; --eff-4: #e2b45a; --eff-5: #ef8f5a;
@@ -206,7 +209,7 @@
   --shadow-pop: 0 0 0 1px var(--line-2), 0 18px 40px -16px rgba(0, 0, 0, 0.7), 0 4px 10px -4px rgba(0, 0, 0, 0.4);
   --shadow-btn: 0 0 0 1px var(--line), 0 2px 6px -2px rgba(0, 0, 0, 0.35);
   --shadow-btn-hover: 0 0 0 1px var(--line-2), 0 6px 14px -6px rgba(0, 0, 0, 0.5);
-   --light-wash: transparent; --aqua-wash: rgba(164, 229, 223, 0.09); --gold-wash: rgba(214, 155, 49, 0.06);
+   --light-wash: transparent; --aqua-wash: color-mix(in srgb, var(--primary) 9%, transparent); --gold-wash: rgba(214, 155, 49, 0.06);
   --level-default: #8fa5a4;  --level-project: #e2b45a;
   /* BEGIN GENERATED THEME dark (scripts/theme-tokens.mjs) */
   --agent-working: #00d773;
@@ -262,6 +265,7 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --canvas: #102327;
+    --canvas-lo: color-mix(in srgb, var(--canvas) 55%, black);
     --ink: #edf4f0; --ink-2: #acc3c2; --ink-3: #94aead; --mark-measured: rgba(237, 244, 240, 0.5);
     --eff-line: rgba(237, 244, 240, 0.42); --eff-plan: rgba(237, 244, 240, 0.42);
     --eff-1: #8fa8a7; --eff-2: #6cc4bb; --eff-3: #a4e5df; --eff-4: #e2b45a; --eff-5: #ef8f5a;
@@ -293,7 +297,7 @@
     --shadow-pop: 0 0 0 1px var(--line-2), 0 18px 40px -16px rgba(0, 0, 0, 0.7), 0 4px 10px -4px rgba(0, 0, 0, 0.4);
     --shadow-btn: 0 0 0 1px var(--line), 0 2px 6px -2px rgba(0, 0, 0, 0.35);
     --shadow-btn-hover: 0 0 0 1px var(--line-2), 0 6px 14px -6px rgba(0, 0, 0, 0.5);
-     --light-wash: transparent; --aqua-wash: rgba(164, 229, 223, 0.09); --gold-wash: rgba(214, 155, 49, 0.06);
+     --light-wash: transparent; --aqua-wash: color-mix(in srgb, var(--primary) 9%, transparent); --gold-wash: rgba(214, 155, 49, 0.06);
     --level-default: #8fa5a4;  --level-project: #e2b45a;
     /* BEGIN GENERATED THEME dark (scripts/theme-tokens.mjs) */
     --agent-working: #00d773;
@@ -355,3 +359,32 @@
 
 /* AEON-522: full amber tint and hairline for capacity/blocker waits. */
 :root { --queue-wait-ink: color-mix(in srgb, var(--warn-ink) 75%, var(--ink) 25%); --queue-wait-bg: color-mix(in srgb, var(--gold) 12%, transparent); --queue-wait-line: color-mix(in srgb, var(--gold) 42%, transparent); }
+
+/* AEON-752: component-neutral, fixed status/category and media palettes. */
+:root {
+  --shadow-color: #203c3d;
+  --shadow-black: #000;
+  --overlay-ink: #102327;
+  --brand-plate: #f7f6f2;
+  --inverse-danger: #f3b0a8;
+  --surface-highlight: #fff;
+  --switch-knob: #fbfaf6;
+  --switch-knob-low: #eef5f3;
+  --media-stage: #0c1a1c;
+  --danger-hi: #c05650;
+  --danger-fill: #a8423c;
+  --danger-on: #fff;
+  --label-blue: #4f86c6;
+  --label-red: #d0625b;
+  --label-green: #4f9e6f;
+  --label-purple: #8a6cc2;
+  --label-pink: #c7679a;
+  --label-yellow: #d69b31;
+  --label-teal: #0e6f6c;
+  --kind-parent: #d69b31;
+  --warn-line: color-mix(in srgb, var(--gold) 45%, transparent);
+  --ok-bg: color-mix(in srgb, var(--ok) 10%, transparent);
+  --ok-line: color-mix(in srgb, var(--ok) 30%, transparent);
+}
+:root[data-theme="dark"] { --shadow-color: #000; --danger-on: #102327; --label-teal: #a4e5df; --kind-parent: #e2b45a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --shadow-color: #000; --danger-on: #102327; --label-teal: #a4e5df; --kind-parent: #e2b45a; } }

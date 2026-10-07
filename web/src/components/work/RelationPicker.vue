@@ -204,10 +204,10 @@ let lastChoice = 'relates'
 .picker { display: grid; gap: 8px; padding: 4px 4px 2px; }
 .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 2px 4px 0; }
 .head .hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: var(--ink-2); }
-.types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; border-radius: 14px; background: var(--seg-bg); box-shadow: inset 0 1px 2px rgba(32, 60, 61, .08); }
+.types { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2px; padding: 3px; border-radius: 14px; background: var(--seg-bg); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-color) 8%, transparent); }
 .type { display: inline-flex; align-items: center; justify-content: center; min-width: 0; height: 28px; padding: 0 8px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 @media (hover: hover) { .type:hover { color: var(--teal-ink); background: var(--row-hover); } }
-.type[aria-checked="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--glass-edge); }
+.type[aria-checked="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--glass-edge); }
 .type:focus-visible { box-shadow: var(--focus-ring); }
 .search { position: relative; display: flex; align-items: center; }
 .search .lead { position: absolute; left: 11px; color: var(--ink-3); pointer-events: none; }

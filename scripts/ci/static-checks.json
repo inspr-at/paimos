@@ -773,6 +773,16 @@
       ],
       "timeout_seconds": 30,
       "supplement": "AEON-747: the existing ci-static.test.mjs hosted entry imports openapi-sort.test.mjs, which executes this lint and its regression cases."
+    },
+    {
+      "id": "theme-colour-literals",
+      "command": "node scripts/check-theme-colours.mjs",
+      "cwd": ".",
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30,
+      "local_only": "AEON-752: component colour-literal guard belongs to ci-static only; artwork and documents are explicitly exempted."
     }
   ]
 }

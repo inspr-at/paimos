@@ -298,7 +298,7 @@ h2 { margin: 0; font-size: 23px; line-height: 1.25; font-weight: 550; display: -
 .stamp-line { flex: none; display: flex; align-items: center; gap: 18px; height: 46px; border-bottom: 1px solid var(--line); }
 .stamp-label { font-size: 11px; color: var(--ink-3); }
 .stamp { background: transparent; border: 0; padding: 6px 0; color: var(--ink-3); font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
-.stamp.selected.stamp-once, .large-stamp.stamp-once { color: var(--primary-ink); }.stamp.selected.stamp-always, .large-stamp.stamp-always { color: var(--ok); }.stamp.selected.stamp-requirement, .large-stamp.stamp-requirement { color: var(--gold-ink); }.stamp.selected.stamp-doctrine, .large-stamp.stamp-doctrine { color: var(--danger); }
+.stamp.selected.stamp-once, .large-stamp.stamp-once { color: var(--primary-ink); }.stamp.selected.stamp-always, .large-stamp.stamp-always { color: var(--ok); }.stamp.selected.stamp-requirement, .large-stamp.stamp-requirement { color: var(--secondary-ink); }.stamp.selected.stamp-doctrine, .large-stamp.stamp-doctrine { color: var(--danger); }
 .stamp.unavailable { opacity: .1; }.memo-status { flex: none; height: 42px; display: flex; align-items: center; font-size: 12px; color: var(--ink-2); overflow: auto; overflow-wrap: anywhere; }
 .memo-body { overflow: auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 32px; scrollbar-gutter: stable; }
 h3 { font-size: 11px; font-weight: 650; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-3); margin: 0 0 10px; }

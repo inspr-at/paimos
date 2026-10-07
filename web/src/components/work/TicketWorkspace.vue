@@ -917,7 +917,7 @@ defineExpose({
 .ticket-ws.full.editing { max-width: 1480px; }
 .full .edit-form { padding: 26px 0 40px; }
 /* Dropping files anywhere on the ticket. */
-.drop-overlay { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; border-radius: inherit; background: rgba(14, 111, 108, .12); box-shadow: inset 0 0 0 2px var(--teal); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); pointer-events: none; }
+.drop-overlay { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; border-radius: inherit; background: color-mix(in srgb, var(--primary-line) 12%, transparent); box-shadow: inset 0 0 0 2px var(--teal); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); pointer-events: none; }
 .full .drop-overlay { position: fixed; inset: calc(var(--header-h) + 8px) 8px calc(var(--footer-h) + 8px); border-radius: var(--radius); }
 .drop-card { display: grid; justify-items: center; gap: 6px; padding: 22px 28px; border-radius: 16px; background: var(--surface-raised); box-shadow: var(--shadow-pop); color: var(--ink); text-align: center; }
 .drop-card svg { color: var(--teal); }

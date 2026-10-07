@@ -100,6 +100,12 @@ export function validateRegistry(registry, jobs) {
         !Number.isInteger(check.timeout_seconds) || check.timeout_seconds < 1 || check.timeout_seconds > (check.id === 'web-shard-tests' ? 600 : 180) ||
         (check.optional !== undefined && check.optional !== true) ||
         (check.optional && !check.needs.includes('npm-installed'))) throw new SetupError(`Invalid check: ${check.id}`)
+    // A small number of explicitly local guards are not hosted CI mirrors.
+    // They must never excuse an unregistered command in the workflow below.
+    if (check.local_only !== undefined) {
+      if (typeof check.local_only !== 'string' || !check.local_only.trim() || check.ci !== undefined || check.supplement) throw new SetupError(`Invalid local-only check: ${check.id}`)
+      continue
+    }
     const ci = check.ci
     const found = jobs.get(ci?.job)?.some(step => step.name === ci.step && step.cwd === ci.cwd &&
       (normalize(step.run) === ci.command || commands(step).some(c => normalize(c) === ci.command)))
@@ -107,7 +113,7 @@ export function validateRegistry(registry, jobs) {
     if (!check.supplement && (check.command !== ci.command || check.cwd !== ci.cwd)) throw new SetupError(`Mirror differs from CI: ${check.id}`)
   }
   for (const ci of staticSteps(jobs, registry)) {
-    if (!checks.some(c => !c.supplement && c.ci.job === ci.job && c.ci.step === ci.step && c.ci.cwd === ci.cwd && c.ci.command === ci.command)) {
+    if (!checks.some(c => !c.local_only && !c.supplement && c.ci.job === ci.job && c.ci.step === ci.step && c.ci.cwd === ci.cwd && c.ci.command === ci.command)) {
       throw new SetupError(`Unregistered static CI command: ${ci.job}/${ci.step ?? '(unnamed)'}: ${ci.command}`)
     }
   }

@@ -33,7 +33,7 @@ function move(event: KeyboardEvent) {
 button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 28px; padding: 0 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-2); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 button svg { flex-shrink: 0; }
 button:hover { background: var(--row-hover); color: var(--ink); }
-button[aria-selected="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--glass-edge); }
+button[aria-selected="true"] { background: var(--seg-on); color: var(--teal-ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--glass-edge); }
 button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
 .sections { margin-top: 18px; gap: 4px; padding: 0; background: transparent; }
 .sections button { min-height: 36px; padding: 0 14px; font-size: 13.5px; }

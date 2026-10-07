@@ -60,7 +60,7 @@ onUnmounted(() => { clearInterval(timer) })
 .muted { color: var(--ink-3); }
 .more { font-size: 11.5px; color: var(--ink-3); white-space: nowrap; }
 .state { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; background: var(--surface-2); color: var(--ink-2); font-size: 11.5px; font-weight: 600; }
-.state.active { background: rgba(47, 122, 90, .12); color: color-mix(in oklab, var(--ok), var(--ink) 35%); }
+.state.active { background: color-mix(in srgb, var(--ok) 12%, transparent); color: color-mix(in oklab, var(--ok), var(--ink) 35%); }
 tr.revoked, tr.expired { color: var(--ink-2); }
 .keys-table .act { text-align: right; padding-right: 0; }
 .actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 4px; }

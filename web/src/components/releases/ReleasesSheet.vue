@@ -728,11 +728,11 @@ const KINDS = [
 </template>
 
 <style scoped>
-.releases { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; color: var(--ink); outline: none; overflow: hidden; background-color: var(--canvas); --aurora-1: rgba(127,216,207,.55); --aurora-2: rgba(14,111,108,.22); --aurora-3: rgba(232,192,122,.32); background-image: radial-gradient(ellipse 520px 230px at 25% 0%,var(--aurora-1),transparent),radial-gradient(ellipse 420px 190px at 45% 0%,var(--aurora-2),transparent),radial-gradient(ellipse 350px 200px at 60% 0%,var(--aurora-3),transparent); }
+.releases { width: 100vw; height: 100dvh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0; color: var(--ink); outline: none; overflow: hidden; background-color: var(--canvas); --aurora-1: color-mix(in srgb, var(--primary-tint) 55%, transparent); --aurora-2: color-mix(in srgb, var(--primary-line) 22%, transparent); --aurora-3: color-mix(in srgb, var(--secondary-tint) 32%, transparent); background-image: radial-gradient(ellipse 520px 230px at 25% 0%,var(--aurora-1),transparent),radial-gradient(ellipse 420px 190px at 45% 0%,var(--aurora-2),transparent),radial-gradient(ellipse 350px 200px at 60% 0%,var(--aurora-3),transparent); }
 .releases[open] { display: block; }
 .releases::backdrop { background: var(--scrim); }
-:root[data-theme="dark"] .releases { --aurora-1: rgba(127,216,207,.2); --aurora-2: rgba(164,229,223,.08); --aurora-3: rgba(232,192,122,.12); }
-@media(prefers-color-scheme:dark) { :root:not([data-theme="light"]) .releases { --aurora-1: rgba(127,216,207,.2); --aurora-2: rgba(164,229,223,.08); --aurora-3: rgba(232,192,122,.12); } }
+:root[data-theme="dark"] .releases { --aurora-1: color-mix(in srgb, var(--primary-tint) 20%, transparent); --aurora-2: color-mix(in srgb, var(--primary-tint) 8%, transparent); --aurora-3: color-mix(in srgb, var(--secondary-tint) 12%, transparent); }
+@media(prefers-color-scheme:dark) { :root:not([data-theme="light"]) .releases { --aurora-1: color-mix(in srgb, var(--primary-tint) 20%, transparent); --aurora-2: color-mix(in srgb, var(--primary-tint) 8%, transparent); --aurora-3: color-mix(in srgb, var(--secondary-tint) 12%, transparent); } }
 /* Toolbar labels may wrap; their intrinsic width must never enlarge the sheet. */
 .shell { position:relative; display:grid; grid-template-columns:minmax(0,1fr); grid-template-rows:auto minmax(0,1fr) auto; height:100%; max-width:1640px; margin:0 auto; padding:0 var(--gutter); }
 .sheet-foot { background: var(--canvas); }
@@ -791,7 +791,7 @@ button.sheet-sum { cursor: pointer; }
 .day-count { letter-spacing:0; font-weight:500; }
 .row { position:relative; display:grid; grid-template-columns:60px minmax(0,1fr) 12px; align-items:start; gap:10px; padding:12px 10px 13px; border-top:1px solid var(--line); cursor:pointer; outline-offset:-1px; }
 .day-h + .row { border-top:0; }
-.row.fresh { background:var(--gold-wash); }
+.row.fresh { background:var(--secondary-tint-3); }
 .row[aria-selected="true"],.row.from { background:var(--row-selected); box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--teal) 55%,transparent); border-radius:10px; border-top-color:transparent; }
 .row[aria-selected="true"] + .row { border-top-color:transparent; }
 .row.reserved .clock,.row.reserved .row-name { color:var(--ink-2); }
@@ -801,7 +801,7 @@ button.sheet-sum { cursor: pointer; }
 .time-badge.rollback-tag { color:var(--ink); }
 .time-badge { display:block; margin-top:6px; padding:4px 0; width:100%; text-align:center; font:650 10px/1.2 var(--mono); letter-spacing:.07em; text-transform:uppercase; color:var(--ink-2); background:var(--surface-2); border-radius:7px; }
 .current-tag { color:var(--teal-ink); background:var(--row-selected); box-shadow:inset 0 0 0 1px var(--chip-teal-line); }
-.new-tag { color:color-mix(in oklab,var(--gold-ink),var(--ink) 35%); background:var(--gold-wash); }
+.new-tag { color:color-mix(in oklab,var(--secondary-ink),var(--ink) 35%); background:var(--secondary-tint-3); }
 .main { display:grid; gap:3px; min-width:0; }
 .line1 { display:grid; grid-template-columns:minmax(0,1fr) max-content; align-items:start; gap:10px; min-width:0; }
 .row-name { font-size:14.5px; line-height:20px; font-weight:600; color:var(--ink); }

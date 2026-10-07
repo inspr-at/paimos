@@ -536,9 +536,9 @@ watch(sessionId, id => { if (id) cursor.value = `s:${id}` }, { immediate: true }
 .head-side { display: flex; align-items: center; flex-wrap: nowrap; gap: 6px; margin-left: auto; flex: none; }
 /* The page's one primary button, without the glow (base.css glows are retired here). */
 .add-agent { width: 36px; height: 36px; min-height: 0; padding: 0; border-radius: 50%; }
-.add-agent:not(:focus-visible) { box-shadow: 0 0 0 1px rgba(14, 111, 108, .5), inset 0 1px 0 rgba(255, 255, 255, .35); }
+.add-agent:not(:focus-visible) { box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary) 50%, transparent), inset 0 1px 0 var(--glass-edge); }
 /* Only a delay is said in the head; a dot and a word, details on hover. */
-.freshness { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 8px; color: var(--gold-ink); font-size: 12px; white-space: nowrap; }
+.freshness { display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 8px; color: var(--warn-ink); font-size: 12px; white-space: nowrap; }
 .live-mark { width: 7px; height: 7px; border-radius: 50%; background: var(--gold); flex: none; }
 .header-menu .menu-sep { height: 1px; margin: 4px 8px; background: var(--line); }
 .header-menu .menu-eyebrow { margin: 0; padding: 8px 10px 2px; }

@@ -397,7 +397,7 @@ const who = (item: KnowledgeItem) => item.imported ? 'imported' : item.updated_b
 .k-mode-sep { flex-shrink: 0; width: 1px; height: 22px; margin: 0 2px; background: var(--line-2); }
 .k-mode { flex-shrink: 0; }
 .k-mode button { display: flex; align-items: center; justify-content: center; gap: 6px; height: 26px; padding: 0 10px; }
-.k-mode button[aria-pressed="true"] { background: var(--seg-on); box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--glass-edge); color: var(--teal-ink); }
+.k-mode button[aria-pressed="true"] { background: var(--seg-on); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--glass-edge); color: var(--teal-ink); }
 /* ---------- Toolbar controls (teleported into the project toolbar) ---------- */
 .k-search { width: 260px; flex-shrink: 0; }
 .k-search .field { height: 32px; padding-right: 30px; font-size: 13.5px; }
@@ -490,10 +490,10 @@ li + li .k-row::before { content: ''; position: absolute; top: 0; left: 12px; ri
 .k-links-inner { display: inline-flex; align-items: center; gap: 4px; }
 .k-time { width: 64px; text-align: right; font-size: 12px; color: var(--ink-2); white-space: nowrap; }
 .k-status { display: inline-flex; align-items: center; height: 20px; padding: 0 8px; border-radius: 999px; font: 600 10px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; font-variant-ligatures: none; }
-.k-status.proposed { background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); color: var(--gold-ink); }
+.k-status.proposed { background: var(--gold-wash); box-shadow: inset 0 0 0 1px var(--warn-line); color: var(--warn-ink); }
 .k-status.archived { background: var(--chip-bg); box-shadow: inset 0 0 0 1px var(--chip-line); color: var(--ink-2); }
-.k-banner { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 10px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .35); font-size: 12.5px; color: var(--ink); }
-.k-banner svg { color: var(--gold-ink); flex-shrink: 0; }
+.k-banner { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-radius: 10px; background: var(--gold-wash); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--gold) 35%, transparent); font-size: 12.5px; color: var(--ink); }
+.k-banner svg { color: var(--warn-ink); flex-shrink: 0; }
 
 /* ---------- States ---------- */
 .k-state { display: grid; justify-items: center; gap: 8px; padding: 52px 24px 56px; text-align: center; }

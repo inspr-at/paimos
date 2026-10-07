@@ -228,7 +228,7 @@ onBeforeUnmount(() => { sizer?.disconnect(); cancelAnimationFrame(frame); poll.s
 .pq-sender { font: 600 17px/1.3 var(--serif); color: var(--ink); overflow-wrap: anywhere; }
 .pq-ref { display: flex; flex-wrap: wrap; gap: 4px 12px; font: 500 12.5px/1.4 var(--mono); color: var(--ink-2); font-variant-ligatures: none; }
 .pq-wrap { max-width: 880px; margin: 0 auto; padding: 0 20px; }
-.pq-card { margin: 24px 0; padding: 24px; border-radius: 16px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2), 0 1px 2px rgba(20, 40, 40, .04); }
+.pq-card { margin: 24px 0; padding: 24px; border-radius: 16px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2), 0 1px 2px color-mix(in srgb, var(--shadow-color) 4%, transparent); }
 .pq-card h1 { font: 650 clamp(22px, 4.2vw, 30px)/1.2 var(--serif); letter-spacing: -.01em; text-wrap: balance; overflow-wrap: anywhere; }
 .pq-card h2 { font-size: 19px; font-weight: 650; }
 .pq-card p { font-size: 14.5px; line-height: 1.55; color: var(--ink-2); }

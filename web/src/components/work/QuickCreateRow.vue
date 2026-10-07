@@ -113,7 +113,7 @@ defineExpose({ focus: () => input.value?.focus(), isDirty: () => !!draft.title.t
 .chip-text.unset { color: var(--ink-3); }
 .chev, .dash { color: var(--ink-3); }
 .kind { color: var(--ink-3); }
-.kind.epic { color: var(--gold); }
+.kind.epic { color: var(--kind-parent); }
 .c-epic { overflow: hidden; }
 .epic-cell { justify-content: flex-start; }
 .epic-chip { width: clamp(8rem, 12vw, 12rem); max-width: 100%; min-width: 0; flex-shrink: 0; }

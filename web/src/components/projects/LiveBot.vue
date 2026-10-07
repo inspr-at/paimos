@@ -70,7 +70,7 @@ onBeforeUnmount(() => clearTimeout(clear))
 <style scoped>
 .live-bot { position: relative; display: inline-grid; place-items: center; flex-shrink: 0; width: var(--size); height: var(--size); vertical-align: middle; }
 .indicator-art { display: grid; place-items: center; width: 100%; height: 100%; }
-.event-caption { position: absolute; top: calc(100% + 3px); left: 50%; translate: -50% 0; white-space: nowrap; font: 500 10px/1.2 var(--font); color: var(--gold-ink); pointer-events: none; animation: event-opacity .6s ease-out both; }
+.event-caption { position: absolute; top: calc(100% + 3px); left: 50%; translate: -50% 0; white-space: nowrap; font: 500 10px/1.2 var(--font); color: var(--secondary-ink); pointer-events: none; animation: event-opacity .6s ease-out both; }
 @media (prefers-reduced-motion: no-preference) {
   /* The original robots float their faces inside stationary disks. */
   .hovering.working.lead:not([data-style="robot-1"], [data-style="robot-5"]) .indicator-art { animation: indicator-hover 2.4s ease-in-out infinite; animation-delay: var(--lag); }

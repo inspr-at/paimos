@@ -366,7 +366,7 @@
       ]
       ,
       "specs": [
-        {"file":"tests/recurrence-marker.spec.ts","listedTests":36,"weightSeconds":45,"weightSource":"estimate"}
+        {"file":"tests/recurrence-marker.spec.ts","listedTests":37,"weightSeconds":45,"weightSource":"estimate"}
         ,
         {"file":"tests/recurrences.spec.ts","weightSeconds":45,"weightSource":"estimate"}
       ]
@@ -1070,6 +1070,8 @@
       ,
       "specs": [
         {"file":"tests/theme-agents.spec.ts","listedTests":14,"weightSeconds":31.073171,"weightSource":"unmeasured-test-rate"}
+        ,
+        {"file":"tests/theme-control-geometry.spec.ts","listedTests":2,"weightSeconds":2,"weightSource":"local-serial-runtime-estimate"}
       ]
     }
     ,
