@@ -19,7 +19,7 @@ import (
 func TestSharedFenceCallerInventory(t *testing.T) {
 	expected := map[string][]string{
 		"db.LockTree":               {"authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/alerts.go", "modelregistry/module.go", "modelregistry/preparation.go", "operatoractor/actor.go", "workorders/common.go"},
-		"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/module.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "workorders/common.go"},
+		"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/module.go", "delivery/quarantine.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "workorders/common.go"},
 		"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
 		"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
 		"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go"},
@@ -136,6 +136,10 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"../delivery/alerts.go", "alertItem", "FOR KEY SHARE", "inbox.AcceptMessageTx("},
 		{"../delivery/alerts.go", "alertItem", "INSERT INTO delivery_alerts", "inbox.AcceptMessageTx("},
 		{"../delivery/alerts.go", "alertItem", "inbox.AcceptMessageTx(", "events.Append("},
+		// Merge-queue quarantine (AEON-850) takes the shared tenant fence before
+		// failure rows and the ledger. recordTx appends the event counter after.
+		{"../delivery/quarantine.go", "quarantineEvent", "db.LockTenant(", "INSERT INTO delivery_queue_failures"},
+		{"../delivery/quarantine.go", "quarantineEvent", "INSERT INTO delivery_queue_failures", "recordTx("},
 	}
 	for _, c := range checks {
 		raw, err := os.ReadFile(c.path)

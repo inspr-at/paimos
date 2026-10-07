@@ -3248,6 +3248,22 @@ paths:
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
         '500': {$ref: '#/components/responses/Error'}
+  /delivery/enqueue-allowed:
+    get:
+      operationId: getDeliveryEnqueueAllowed
+      description: 'Requires delivery.read on the visible PR project. Observe-only answer for an exact PR head; required CI queue failures block that head, infra failures do not. Makes no GitHub write. At most 100 failures are returned; overflow is an explicit error.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: repository, in: query, required: true, schema: {type: string, maxLength: 255, pattern: '^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$'}}
+        - {name: pr, in: query, required: true, schema: {type: integer, minimum: 1, maximum: 2147483647}}
+        - {name: head, in: query, required: true, schema: {type: string, pattern: '^[0-9a-f]{40}$'}}
+      responses:
+        '200': {description: 'Observed quarantine answer', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryEnqueueAllowed'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '422': {$ref: '#/components/responses/Error'}
   /delivery/{itemId}/hold:
     parameters:
       - {name: itemId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -14375,6 +14391,17 @@ components:
       properties:
         items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeliveryAlert'}}
         next_cursor: {type: [string, 'null'], maxLength: 256}
+    DeliveryEnqueueAllowed:
+      type: object
+      additionalProperties: false
+      required: [allowed, reason, failures]
+      properties:
+        allowed: {type: boolean}
+        reason: {type: string, description: 'Plain sentence explaining this exact head.'}
+        failures:
+          type: array
+          maxItems: 100
+          items: {$ref: '#/components/schemas/DeliveryQueueFailure'}
     DeliveryItem:
       type: object
       required: [id, project_id, ticket_node_id, repository, pull_request, branch, head_sha, state, state_since, owner, deadline_at, held_reason, link_source, updated_at]
@@ -14403,6 +14430,15 @@ components:
         available: {type: boolean, description: 'Whether a GitHub App is configured for the current tenant.'}
         items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeliveryItem'}}
         next_cursor: {type: [string, 'null'], format: uuid}
+    DeliveryQueueFailure:
+      type: object
+      additionalProperties: false
+      required: [check, conclusion, kind, at]
+      properties:
+        check: {type: string}
+        conclusion: {type: string}
+        kind: {type: string, enum: [required_failure, infra]}
+        at: {type: string, format: date-time}
     DeliveryRating:
       type: object
       description: One visible session. A missing mine means this person has not marked it. harness, model and account_label are current session metadata.
@@ -14448,6 +14484,7 @@ components:
       type: object
       additionalProperties: false
       properties:
+        required_workflow: {type: string, minLength: 1, maxLength: 200, description: 'Required queue workflow name. Omitted project values inherit the tenant value; the default is CI.'}
         required_checks: {type: array, maxItems: 64, items: {type: string, minLength: 1, maxLength: 200}}
         deadlines:
           type: object
