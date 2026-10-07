@@ -852,6 +852,7 @@ jobs:
         run: |
           python3 -B -m unittest discover -s scripts/audit -p 'test_*.py'
           python3 -B scripts/audit/covcheck.py --summary
+          node scripts/check-tracked-bytecode.mjs
       - name: PR classification and exact-SHA reuse regressions
         run: node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs
       - name: Full UI QA workflow regressions
