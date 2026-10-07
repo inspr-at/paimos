@@ -334,13 +334,17 @@ func TestVendorStopAdviceRejectsUnenrolledDaemonSquatter(t *testing.T) {
 
 // Risk: a redacted overview row discloses quota headroom through routable,
 // or by omitting wait when slots remain. Private rows keep one constant shape.
+// The default schedule is weekdays 08:00–22:00 UTC with nights off, so a
+// wall-clock overview after 22:00 waits on the schedule even when the manual
+// window still has slots (CI on 9f3604f8 at 2026-10-07 22:16Z). Pin the probe,
+// the window and the overview to a Wednesday noon. The assertion is unchanged.
 func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 	reset(t)
 	person := makePrincipal(t, "overview-routable", "person", "Owner", []string{"admin"})
 	other := addPrincipal(t, person.TenantID, "person", "Other", nil)
 	runner := addPrincipal(t, person.TenantID, "agent", "runtime", nil)
 	codexProfile(t, person)
-	now := time.Now().UTC()
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
 	var own, private string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
 		for _, row := range []struct{ label, owner string }{{"Own", person.ID}, {"Private", other.ID}} {
@@ -362,14 +366,14 @@ func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 		t.Fatal(err)
 	}
 	var page overviewPage
-	callStatus(t, accountsMod(), &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
+	callStatus(t, fixedClockModule{Module: accountsMod(), at: now}, &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
 	seen := map[string]overviewAccount{}
 	for _, a := range page.Accounts {
 		seen[a.AccountID] = a
 	}
 	shared, privateRow := seen[own], seen[private]
 	if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil {
-		t.Fatalf("owned account with open slots was not routable: %+v", shared)
+		t.Fatalf("owned account with open slots was not routable: %+v wait=%+v", shared, shared.Wait)
 	}
 	if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
 		t.Fatalf("redacted overview disclosed headroom: %+v", privateRow)
