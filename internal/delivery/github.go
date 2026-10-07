@@ -31,6 +31,10 @@ type AppReader struct{ App *crossreview.GitHubApp }
 
 var errRead = errors.New("delivery GitHub observation unavailable")
 
+// errMissing is a confirmed absence of one pull request. It is not a transport
+// or partial-read failure: reconciliation leaves that row and continues.
+var errMissing = errors.New("delivery pull confirmed missing")
+
 func readPull(p crossreview.GitHubPull, repo string) (Pull, error) {
 	if p.Number < 1 || !reviewgate.ValidSHA(p.Head.SHA) || !reviewgate.ValidSHA(p.Base.SHA) || p.Base.Repo.FullName != repo || len(p.Title) > 4096 || len(p.Head.Ref) > 255 {
 		return Pull{}, errRead
@@ -109,9 +113,14 @@ func (g AppReader) Pull(ctx context.Context, n int64) (Pull, error) {
 	if n <= 0 {
 		return out, errRead
 	}
+	missing := false
 	err := g.App.ReadInstallation(ctx, func(get func(string, any) error, queue func(int64, string) (bool, string, error)) error {
 		var p crossreview.GitHubPull
 		if err := get("/pulls/"+strconv.FormatInt(n, 10), &p); err != nil {
+			// Only the pull document's 404 is absence. A 404 on checks is a partial read.
+			if errors.Is(err, crossreview.ErrNotFound) {
+				missing = true
+			}
 			return err
 		}
 		var err error
@@ -130,6 +139,9 @@ func (g AppReader) Pull(ctx context.Context, n int64) (Pull, error) {
 		}
 		return err
 	})
+	if missing {
+		return Pull{}, errMissing
+	}
 	return out, err
 }
 func openPulls(get func(string, any) error, repo string) ([]Pull, error) {
@@ -230,15 +242,27 @@ func (g AppReader) Group(ctx context.Context, head, base, ref string) ([]Pull, e
 				return errRead
 			}
 		}
+		// Load check runs the same way as Pull and OpenPulls. destroyed replays
+		// this observation, so an empty slice would project the open head as pushed.
+		matched := []Pull{}
 		for _, p := range ps {
 			if p.Base != base || !shas[p.Head] {
 				continue
 			}
-			out = append(out, p)
+			p.Checks, err = checks(get, p.Head)
+			if err != nil {
+				return err
+			}
+			p.Queued, p.QueueHead, err = queue(p.Number, p.Head)
+			if err != nil {
+				return err
+			}
+			matched = append(matched, p)
 		}
-		if len(out) == 0 {
+		if len(matched) == 0 {
 			return errRead
 		}
+		out = matched
 		return nil
 	})
 	return out, err

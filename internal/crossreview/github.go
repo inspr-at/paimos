@@ -45,6 +45,10 @@ var appNumber = regexp.MustCompile(`^[1-9][0-9]{0,18}$`)
 var appToken = regexp.MustCompile(`^[A-Za-z0-9_.-]{8,255}$`)
 var errGitHub = errors.New("GitHub review status could not be confirmed")
 
+// ErrNotFound is a confirmed absence of the requested GitHub resource.
+// Transport failures, permission failures and partial bodies stay errGitHub.
+var ErrNotFound = errors.New("GitHub resource not found")
+
 func (g *GitHubApp) Configured(tenantID, repository string) bool {
 	a := g.Config
 	return appNumber.MatchString(a.ID) && appNumber.MatchString(a.InstallationID) && filepath.IsAbs(a.KeyFile) && workorders.UUID(a.TenantID) && reviewgate.ValidRepository(a.Repository) && tenantID == a.TenantID && repository == a.Repository
@@ -82,6 +86,9 @@ func (g *GitHubApp) requestBounded(ctx context.Context, token, method, path stri
 		return errGitHub
 	}
 	defer res.Body.Close()
+	if res.StatusCode == http.StatusNotFound {
+		return ErrNotFound
+	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return errGitHub
 	}

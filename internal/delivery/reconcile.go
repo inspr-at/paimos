@@ -151,6 +151,11 @@ func (m *Module) Reconcile(ctx context.Context, tid string) error {
 		}
 		for _, n := range missing {
 			p, err := m.github.Pull(ctx, n)
+			if errors.Is(err, errMissing) {
+				// Confirmed absence cannot prove merged or closed. Leave the
+				// row and keep healing open pulls and platform facts.
+				continue
+			}
 			if err != nil {
 				return err
 			}

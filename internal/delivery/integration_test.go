@@ -3,11 +3,18 @@ package delivery
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -22,11 +29,15 @@ import (
 )
 
 type fakeGitHub struct {
-	pulls map[int64]Pull
-	err   error
+	pulls   map[int64]Pull
+	err     error
+	pullErr map[int64]error
 }
 
 func (g *fakeGitHub) Pull(_ context.Context, n int64) (Pull, error) {
+	if err := g.pullErr[n]; err != nil {
+		return Pull{}, err
+	}
 	if g.err != nil {
 		return Pull{}, g.err
 	}
@@ -419,4 +430,181 @@ func TestDeliverySettingsAndIngressBinding(t *testing.T) {
 		}
 		return nil
 	})
+}
+
+func requiredChecksStored(i Item) bool {
+	got := map[string]Check{}
+	for _, c := range i.Observation.Checks {
+		got[c.Name] = c
+	}
+	for _, name := range *defaults().RequiredChecks {
+		c, ok := got[name]
+		if !ok || c.Status != "completed" || c.Conclusion != "success" {
+			return false
+		}
+	}
+	return true
+}
+
+func TestAppReaderMergeGroupKeepsRequiredChecks(t *testing.T) {
+	// Risk: merge_group checks_requested must store the grouped pull's check
+	// runs. destroyed copies that observation, and an empty slice projects an
+	// open reviewed head as pushed.
+	f := newFixture(t)
+	f.build(t)
+	f.review(t)
+	head, base, group := strings.Repeat("b", 40), strings.Repeat("a", 40), strings.Repeat("c", 40)
+	ref := "refs/heads/gh-readonly-queue/main/pr-7-group"
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyFile := filepath.Join(dir, "fixture.pem")
+	if err = os.WriteFile(keyFile, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	pr := map[string]any{"number": 7, "title": "AEON-848: delivery", "state": "open", "head": map[string]string{"sha": head, "ref": "work/aeon-848-delivery"}, "base": map[string]any{"sha": base, "ref": "main", "repo": map[string]string{"full_name": f.m.config.Repository}}}
+	client := &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		var body any
+		switch {
+		case r.Method == "POST" && r.URL.Path == "/app/installations/456/access_tokens":
+			var in struct {
+				Permissions map[string]string `json:"permissions"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
+				t.Fatal(err)
+			}
+			body = map[string]any{"token": "delivery-fixture-token", "permissions": in.Permissions, "repositories": []any{map[string]string{"full_name": f.m.config.Repository}}}
+		case r.Method == "DELETE" && r.URL.Path == "/installation/token":
+			body = map[string]any{}
+		case r.Method == "POST" && r.URL.Path == "/graphql":
+			body = map[string]any{"data": map[string]any{"repository": map[string]any{"pullRequest": map[string]any{"number": 7, "headRefOid": head}}}}
+		case r.Method == "GET" && r.URL.Path == "/repos/"+f.m.config.Repository+"/pulls/7":
+			body = pr
+		case r.Method == "GET" && r.URL.Path == "/repos/"+f.m.config.Repository+"/pulls":
+			body = []any{pr}
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/check-runs"):
+			runs := []any{}
+			for _, n := range *defaults().RequiredChecks {
+				runs = append(runs, map[string]any{"name": n, "status": "completed", "conclusion": "success"})
+			}
+			body = map[string]any{"total_count": len(runs), "check_runs": runs}
+		case r.Method == "GET" && strings.HasSuffix(r.URL.Path, "/statuses"):
+			body = []any{}
+		case r.Method == "GET" && strings.Contains(r.URL.Path, "/git/ref/"):
+			body = map[string]any{"ref": ref, "object": map[string]string{"type": "commit", "sha": group}}
+		case r.Method == "GET" && strings.Contains(r.URL.Path, "/compare/"):
+			body = map[string]any{"total_commits": 1, "status": "ahead", "commits": []any{map[string]any{"sha": group, "parents": []any{map[string]string{"sha": head}, map[string]string{"sha": base}}}}}
+		default:
+			t.Fatalf("unexpected GitHub operation: %s %s", r.Method, r.URL.Path)
+		}
+		raw, _ := json.Marshal(body)
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(string(raw)))}, nil
+	})}
+	f.m.config.KeyFile = keyFile
+	f.m.github = AppReader{App: &crossreview.GitHubApp{Config: f.m.config, Client: client}}
+	f.gh.pulls[7] = f.pull()
+	f.webhook(t, "pull_request", "opened", "reader-open", 204)
+	if i := f.item(t, 7); i.State != CIGreen || !requiredChecksStored(i) {
+		t.Fatalf("direct read did not store required checks: %s %+v", i.State, i.Observation.Checks)
+	}
+	f.at = f.at.Add(time.Minute)
+	f.webhook(t, "merge_group", "checks_requested", "reader-queue", 204)
+	queued := f.item(t, 7)
+	if queued.State != InQueue {
+		t.Fatalf("queue group missing: %s", queued.State)
+	}
+	if !requiredChecksStored(queued) {
+		t.Errorf("checks_requested dropped required-check success: %+v", queued.Observation.Checks)
+	}
+	f.at = f.at.Add(time.Minute)
+	f.webhook(t, "merge_group", "destroyed", "reader-destroy", 204)
+	cleared := f.item(t, 7)
+	if cleared.State != CIGreen || !requiredChecksStored(cleared) {
+		t.Fatalf("destroyed projected %s without required checks: %+v", cleared.State, cleared.Observation.Checks)
+	}
+}
+
+func TestReconcileContinuesAfterConfirmedMissingPull(t *testing.T) {
+	// Risk: a deleted pull stays selected. A failed read of it must not abort
+	// the pass before open-PR heals and platform rows are written. Transport
+	// and partial reads still fail the pass and write nothing.
+	f := newFixture(t)
+	live := f.pull()
+	gone := f.pull()
+	gone.Number = 9
+	gone.Title = "notes without a key"
+	gone.Branch = "topic"
+	f.gh.pulls[7] = live
+	f.gh.pulls[9] = gone
+	if err := f.m.Reconcile(t.Context(), f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	beforeLive := f.item(t, 7)
+	beforeGone := f.item(t, 9)
+	var other string
+	f.tx(t, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,key,kind_id,title) SELECT $1,$2,'AEON-860',id,'Platform ticket' FROM node_kinds WHERE slug='work' RETURNING id::text`, f.person.TenantID, f.project).Scan(&other); err != nil {
+			return err
+		}
+		var order, profile string
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,key,kind_id,title) SELECT $1,$2,'AEON-861',id,'Platform build' FROM node_kinds WHERE slug='work_order' RETURNING id::text`, f.person.TenantID, other).Scan(&order); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,kind,status) VALUES($1,$2,$3,'build','done')`, f.person.TenantID, order, f.person.ID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'delivery-platform','test','codex','openai','gpt-6.1','high','frontier') RETURNING id::text`, f.person.TenantID).Scan(&profile); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `INSERT INTO agent_runs(tenant_id,work_order_id,agent_principal_id,model_profile_id,status) VALUES($1,$2,$3,$4,'completed')`, f.person.TenantID, order, f.agent.ID, profile)
+		return err
+	})
+	delete(f.gh.pulls, 9)
+	live.Head = strings.Repeat("d", 40)
+	for _, n := range *defaults().RequiredChecks {
+		live.Checks = append(live.Checks, Check{Name: n, Status: "completed", Conclusion: "success"})
+	}
+	f.gh.pulls[7] = live
+	platformRows := func() int {
+		t.Helper()
+		var n int
+		f.tx(t, func(tx pgx.Tx) error {
+			return tx.QueryRow(t.Context(), `SELECT count(*) FROM delivery_items WHERE ticket_node_id=$1 AND pull_request IS NULL`, other).Scan(&n)
+		})
+		return n
+	}
+	f.gh.pullErr = map[int64]error{9: errRead}
+	f.at = f.at.Add(time.Minute)
+	if err := f.m.Reconcile(t.Context(), f.person.TenantID); !errors.Is(err, errRead) {
+		t.Fatal("partial read of a missing pull reported success", err)
+	}
+	if got := f.item(t, 7); got.Head != beforeLive.Head || !reflect.DeepEqual(got, beforeLive) {
+		t.Fatal("failed pass wrote the open-PR heal")
+	}
+	if !reflect.DeepEqual(f.item(t, 9), beforeGone) {
+		t.Fatal("failed pass changed the missing row")
+	}
+	if platformRows() != 0 {
+		t.Fatal("failed pass wrote platform refresh")
+	}
+	f.gh.pullErr = map[int64]error{9: errMissing}
+	f.at = f.at.Add(time.Minute)
+	if err := f.m.Reconcile(t.Context(), f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	healed := f.item(t, 7)
+	if healed.Head != live.Head || healed.State != CIGreen {
+		t.Fatalf("open pull was not healed after a confirmed-missing pull: %s %s", healed.State, healed.Head)
+	}
+	if got := f.item(t, 9); !reflect.DeepEqual(got, beforeGone) {
+		t.Fatalf("confirmed-missing pull was rewritten: %+v", got)
+	}
+	if platformRows() != 1 {
+		t.Fatal("platform refresh did not run after the confirmed-missing pull")
+	}
 }
