@@ -447,6 +447,7 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 				index = 1
 			}
 			providerScope := chain[index]
+			providerScope.Level, providerScope.PersonID = level, profile.PersonID
 			providerScope.Residency = profile.Residency
 			if _, err := modelprefs.SaveScopeOnly(ctx, tx, p, providerScope); err != nil {
 				return err
@@ -457,7 +458,7 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		var restamped []events.Change
+		restamped := []events.Change{}
 		if prior != nil {
 			runs, changes, err := modelprefs.RestampAfterDeferred(ctx, tx, scope, prior)
 			if err != nil {
