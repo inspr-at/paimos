@@ -61,12 +61,12 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin, _ := authz.BuiltinPermissions("admin")
-	if !slices.Contains(admin, "recurrences.manage") || !slices.Contains(admin, "delivery.manage") {
-		t.Fatal("fixture requires the person Admin recurrence and delivery permissions")
+	if !slices.Contains(admin, "recurrences.manage") || !slices.Contains(admin, "delivery.manage") || !slices.Contains(admin, "reviewpolicy.manage") {
+		t.Fatal("fixture requires the person Admin recurrence, delivery and review-policy permissions")
 	}
 	excluded := builtinAgentExclusions(t)
-	if !excluded["recurrences.manage"] || !excluded["delivery.manage"] {
-		t.Fatal("built-in agents must keep recurrence and delivery management explicit")
+	if !excluded["recurrences.manage"] || !excluded["delivery.manage"] || !excluded["reviewpolicy.manage"] {
+		t.Fatal("built-in agents must keep recurrence, delivery and review-policy management explicit")
 	}
 	full := []string{}
 	for _, perm := range authz.Registry {
@@ -98,11 +98,13 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 		t.Fatal("narrow key already has history access")
 	}
 	beforeKeys, beforeEvents := keyCounts(t, m, owner)
-	// Full access must not smuggle this custom-role-only scope through an
-	// expiry edit. The rejected combined write must leave the key intact.
-	deniedBody, _ := json.Marshal(map[string]any{"add": []string{"recurrences.manage"}, "expires_at": time.Now().UTC().Add(24 * time.Hour)})
-	if w := scopesRequest(m, owner, key.ID, http.MethodPatch, string(deniedBody)); w.Code != http.StatusForbidden {
-		t.Fatalf("built-in agent recurrence grant status %d, want 403", w.Code)
+	// Full access must not smuggle these custom-role-only scopes through an
+	// expiry edit. Each rejected combined write must leave the key intact.
+	for _, scope := range []string{"recurrences.manage", "reviewpolicy.manage"} {
+		deniedBody, _ := json.Marshal(map[string]any{"add": []string{scope}, "expires_at": time.Now().UTC().Add(24 * time.Hour)})
+		if w := scopesRequest(m, owner, key.ID, http.MethodPatch, string(deniedBody)); w.Code != http.StatusForbidden {
+			t.Fatalf("built-in agent %s grant status %d, want 403", scope, w.Code)
+		}
 	}
 	view, err = m.agentKeyScopes(tenant.WithPrincipal(ctx, owner), owner, key.ID, nil)
 	if err != nil || view.Key.ID != key.ID || view.Key.Prefix != key.Prefix || view.Key.ExpiresAt != nil || view.Key.RevokedAt != nil || !slices.Equal(view.Key.Scopes, key.Scopes) {

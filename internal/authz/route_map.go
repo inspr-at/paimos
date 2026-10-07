@@ -33,6 +33,11 @@ var RoutePermissions = map[string]string{
 	"PUT /api/settings/delivery":                      "delivery.manage",
 	"GET /api/projects/{projectId}/delivery-settings": "delivery.read",
 	"PUT /api/projects/{projectId}/delivery-settings": "delivery.manage",
+	"GET /api/settings/review-policy":                 "reviewpolicy.read",
+	"PUT /api/settings/review-policy":                 "reviewpolicy.manage",
+	"GET /api/projects/{projectId}/review-policy":     "reviewpolicy.read",
+	"PUT /api/projects/{projectId}/review-policy":     "reviewpolicy.manage",
+	"DELETE /api/projects/{projectId}/review-policy":  "reviewpolicy.manage",
 	// Lead handlers retain their actor/owner checks inside the final transaction.
 	"GET /api/projects/{projectId}/lead":                            "harness.read",
 	"POST /api/projects/{projectId}/lead":                           "harness.control",

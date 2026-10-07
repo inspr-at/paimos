@@ -107,6 +107,19 @@ test('built-in agent roles exclude recurrence automation in every key mode; cust
   }
 })
 
+test('built-in ceilings keep review policy read and leave manage to an explicit custom role', () => {
+  const catalog: Permission[] = ceilingParity.registry.map(p => ({ ...P(p.key, 'Access', 'low'), ...p, grantable_at: p.grantable_at as Permission['grantable_at'] }))
+  const admin = ceilingParity.cases.find(fixture => fixture.builtin_role === 'admin')
+  if (!admin) throw new Error('admin ceiling fixture missing')
+  const workspace = role('workspace', 'admin', admin.workspace, true)
+  const ceiling = agentScopeCeiling(agent('worker', { workspace_role: workspace }), [workspace], catalog, 'existing')!
+  assert.ok(ceiling.has('reviewpolicy.read'), 'built-in agents can read the effective policy')
+  assert.equal(ceiling.has('reviewpolicy.manage'), false, 'built-in agents cannot manage review policy')
+  assert.deepEqual([...ceiling].sort(), admin.want)
+  const custom = role('custom', 'explicit-review', ['reviewpolicy.manage'], false)
+  assert.equal(agentScopeCeiling(agent('custom', { workspace_role: custom }), [custom], catalog, 'existing')!.has('reviewpolicy.manage'), true)
+})
+
 test('the Full access note names every person-only class', () => {
   for (const phrase of ['members', 'roles', 'keys', 'settings', 'reading keys', 'access audit log', 'approval decisions', 'rule publishing', 'conversation watching', 'harness force-stop', 'recovery', 'ownership transfer', 'customer portal']) {
     assert.ok(PERSON_ONLY_KEY_NOTE.includes(phrase), phrase)

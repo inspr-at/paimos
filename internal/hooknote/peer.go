@@ -29,6 +29,14 @@ type Process struct {
 	PIDVersion uint32
 }
 
+// Observe requires a non-root working directory for incoming hook processes.
+func Observe(pid int) (Process, error) { return observe(pid, true) }
+
+// ObserveDaemonSelf reads only this process for daemon pin publication. Login
+// services may start at "/"; the pin contains no cwd. All kernel identity and
+// loaded-image checks remain required, and incoming peers still use Observe.
+func ObserveDaemonSelf() (Process, error) { return observe(os.Getpid(), false) }
+
 // SameIdentity is true when both observations are the same process image.
 // A zero pid version means that observation had no audit token; when both
 // sides have one, they must match (exec and pid reuse change it on macOS).

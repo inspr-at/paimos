@@ -130,10 +130,10 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 }
 
 // publishHookPeer writes the public daemon pin the hook dials. The pin is
-// Observe of this process, so PIDVersion comes from the kernel. An unusable
-// pin fails the serve instead of being published.
+// a kernel observation of this process, including PIDVersion, independent of
+// the service's cwd. An unusable pin fails serve instead of being published.
 func publishHookPeer(store *agentsetup.Store) error {
-	self, err := hooknote.Observe(os.Getpid())
+	self, err := hooknote.ObserveDaemonSelf()
 	if err != nil {
 		return err
 	}
