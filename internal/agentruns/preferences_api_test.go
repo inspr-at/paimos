@@ -228,6 +228,7 @@ func TestPinnedBottomEvidenceOnlyWhenPlannedRunStarts(t *testing.T) {
 	for _, matches := range []bool{true, false} {
 		t.Run(fmt.Sprint(matches), func(t *testing.T) {
 			f := setup(t)
+			modelregistry.New(f.d.App).Mount(f.mux)
 			o := f.order(t, nil)
 			v := f.run(t, o)
 			path := "/api/runs/" + v.ID
@@ -237,7 +238,7 @@ func TestPinnedBottomEvidenceOnlyWhenPlannedRunStarts(t *testing.T) {
 			if !matches {
 				planned = uuid()
 			}
-			raw, _ := json.Marshal(map[string]any{"work_placement": map[string]any{"planned_profile_id": planned, "column": "backend", "situation": "first", "preference_of": map[string]any{"person": f.person.ID, "source": "person"}, "lock": map[string]any{"kind": "rule", "value": "bottom", "scope": "workspace", "why": "Fallback"}}})
+			raw, _ := json.Marshal(map[string]any{"work_placement": map[string]any{"planned_profile_id": planned, "kind": "backend", "person_id": f.person.ID, "column": "backend", "situation": "first", "preference_of": map[string]any{"person": f.person.ID, "source": "person"}, "lock": map[string]any{"kind": "rule", "value": "bottom", "scope": "workspace", "why": "Fallback"}}})
 			f.tx(t, f.person, func(tx pgx.Tx) error {
 				_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=$2::jsonb WHERE id=$1`, v.ID, raw)
 				return err
@@ -253,6 +254,21 @@ func TestPinnedBottomEvidenceOnlyWhenPlannedRunStarts(t *testing.T) {
 			}
 			if v.Status != "running" || f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.pinned_bottom_used'`) != want {
 				t.Fatal("actual start evidence mismatch")
+			}
+			var evidence struct {
+				Items []struct {
+					ID        string  `json:"id"`
+					ForPerson *string `json:"for_person"`
+					Agreement string  `json:"agreement"`
+				} `json:"items"`
+			}
+			f.call(t, f.person, "GET", "/api/model-preferences/evidence?kind=backend", nil, 200, &evidence)
+			agreement := "differs"
+			if matches {
+				agreement = "matches"
+			}
+			if len(evidence.Items) != 1 || evidence.Items[0].ID != v.ID || evidence.Items[0].ForPerson == nil || *evidence.Items[0].ForPerson != f.person.ID || evidence.Items[0].Agreement != agreement {
+				t.Fatal("recorded evidence mismatch", evidence)
 			}
 			f.call(t, f.agent, "POST", path+"/telemetry", report, 200, nil)
 			if f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.pinned_bottom_used'`) != want {

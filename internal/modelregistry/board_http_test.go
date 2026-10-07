@@ -388,7 +388,7 @@ func TestBoardDispatchTraceResidencyAndNewLineExclusion(t *testing.T) {
 		if used {
 			t.Fatal("different actual profile counted as the bottom pin")
 		}
-		_, err = tx.Exec(t.Context(), `UPDATE account_allowance_windows SET allowance=0 WHERE account_id=$1`, account)
+		_, err = tx.Exec(t.Context(), `UPDATE account_allowance_windows SET used=allowance WHERE account_id=$1`, account)
 		return err
 	}); err != nil {
 		t.Fatal(err)

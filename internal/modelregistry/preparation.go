@@ -251,7 +251,7 @@ func BootstrapCatalogTx(ctx context.Context, tx pgx.Tx) ([]events.Change, error)
 
 func prepareBoardDefaults(ctx context.Context, tx pgx.Tx, p tenant.Principal) ([]events.Change, error) {
 	var initialize bool
-	if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM model_pref_profiles WHERE scope='workspace') AND NOT EXISTS(SELECT 1 FROM model_pref_scopes)`).Scan(&initialize); err != nil {
+	if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM model_pref_profiles WHERE scope='workspace') AND (EXISTS(SELECT 1 FROM model_pref_profiles) OR NOT EXISTS(SELECT 1 FROM model_pref_scopes))`).Scan(&initialize); err != nil {
 		return nil, err
 	}
 	if !initialize {

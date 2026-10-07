@@ -246,6 +246,9 @@ func (c boardCatalog) card(id string, d modelprefs.BoardDecision) boardCard {
 	if len(ps) > 0 {
 		p := ps[0]
 		_, _, card.Version = ProfileLine(p)
+		if p.ModelVersion != "" {
+			card.Version = p.ModelVersion
+		}
 		card.Harness = p.Harness
 		card.Effort = p.Effort
 	}

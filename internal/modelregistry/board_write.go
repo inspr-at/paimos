@@ -435,6 +435,23 @@ func (m *Module) writeBoardProfile(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		// Providers remain the existing scope residency store. Keep its mutable
+		// value synchronized so a migrated personal limit can also be loosened.
+		if _, supplied := raw["residency"]; supplied {
+			chain, err := modelprefs.LoadChain(ctx, tx, profile.PersonID, "")
+			if err != nil {
+				return err
+			}
+			index := 0
+			if level == "person" {
+				index = 1
+			}
+			providerScope := chain[index]
+			providerScope.Residency = profile.Residency
+			if _, err := modelprefs.SaveScopeOnly(ctx, tx, p, providerScope); err != nil {
+				return err
+			}
+		}
 		if replace && before.ID != "" {
 			if _, err := tx.Exec(ctx, `DELETE FROM model_pref_orders WHERE profile_id=$1`, before.ID); err != nil {
 				return err
