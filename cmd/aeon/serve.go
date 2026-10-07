@@ -52,6 +52,7 @@ import (
 	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/embedding"
+	"github.com/inspr-at/paimos/internal/engineadmission"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/features"
 	"github.com/inspr-at/paimos/internal/fromclassic"
@@ -409,6 +410,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			workorders.New(pool),
 			reviewMod,
 			deliveryMod,
+			engineadmission.New(pool, engineadmission.AppReader{App: reviewApp}),
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun, reviewMod.PrepareForRun),
 			approvals.New(pool),
 			phoneMod,

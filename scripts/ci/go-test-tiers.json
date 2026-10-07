@@ -5156,6 +5156,12 @@
     ,
     {"kind":"go","package":"internal/embedding","name":"TestWorkerStoresRewritesAndIsolates","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionExplicitAuthorityFinalWriteAndIdempotentReplay","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionShadowLimitsFloorsFreshnessAndTenantIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/engineadmission","name":"TestAdmissionWIPInventoryRejectsPartialReads","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/escalation","name":"TestCICheckIdentityAndBounds","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/escalation","name":"TestDistinctFailureEvidence","tier":"ESSENTIAL"}

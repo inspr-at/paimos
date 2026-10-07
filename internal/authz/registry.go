@@ -27,6 +27,7 @@ func makeRegistry() []Permission {
 		{"nodes", "read write delete move restore configure"},
 		{"recurrences", "manage"},
 		{"delivery", "read manage"},
+		{"engine", "read admission manage"},
 		{"reviewpolicy", "read manage"},
 		{"rules", "read write publish"},
 		{"kinds", "read manage"}, {"tags", "read write manage"},

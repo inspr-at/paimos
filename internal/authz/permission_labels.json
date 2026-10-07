@@ -68,6 +68,9 @@
   "special": {
     "agents.plan.read": "See their agent start plan",
     "harness.watch": "View live conversations",
-    "account.overview.read": "See all enrolled account capacity"
+    "account.overview.read": "See all enrolled account capacity",
+    "engine.admission": "Evaluate shadow start admission",
+    "engine.read": "Read shadow admission settings",
+    "engine.manage": "Manage shadow admission settings"
   }
 }

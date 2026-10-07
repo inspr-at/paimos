@@ -108,7 +108,8 @@
         "internal/reviewgate/**",
         "internal/agents/**",
         "internal/hooknote/**",
-        "internal/delivery/**"
+        "internal/delivery/**",
+        "internal/engineadmission/**"
       ]
     },
     {
