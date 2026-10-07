@@ -154,9 +154,13 @@ function position() {
   const el = editorRef.value?.root
   if (!editor.value || !card.value || !el) return
   const box = card.value.getBoundingClientRect(), g = editor.value.gear.getBoundingClientRect(), w = el.offsetWidth
-  // Fit the room below the control (the app footer takes the last 56 px); a tall
-  // editor scrolls inside, with its footer in view.
-  editorStyle.value = { top: `${g.bottom - box.top + 8}px`, left: `${Math.max(12, Math.min(g.right - box.left - w + 10, box.width - w - 12))}px`, maxHeight: `${Math.max(160, window.innerHeight - g.bottom - 96)}px` }
+  // Choose the position on open. A low trigger opens above, keeping room
+  // above the app footer; controls stay anchored as content grows below.
+  const footerGap = 88, viewportTop = 72
+  const height = Math.min(el.offsetHeight, Math.max(0, window.innerHeight - viewportTop - footerGap))
+  const below = g.bottom + 8
+  const top = below + height <= window.innerHeight - footerGap ? below : Math.max(viewportTop, g.top - height - 8)
+  editorStyle.value = { top: `${top - box.top}px`, left: `${Math.max(12, Math.min(g.right - box.left - w + 10, box.width - w - 12))}px`, maxHeight: `${Math.max(0, window.innerHeight - top - footerGap)}px` }
 }
 // On a phone the trigger sits in the inert page. Remember it and focus only
 // after the sheet has unmounted and that inert is gone (see the sheet watch).

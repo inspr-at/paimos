@@ -42,6 +42,7 @@ async function setup(page: Page, theme: 'light' | 'dark') {
     { ...base, id: '5e000000-0000-4000-8000-000000000909', display_label: 'Nested worker', parent_harness_session_id: '5e000000-0000-4000-8000-000000000908', role: 'worker' },
   ] as typeof data.sessions
   await mockAgents(page, data, { capacity: world })
+  await page.route('**/api/agent-accounts/*/capacity/approve', route => route.fulfill({ status: 204 }))
   await page.route('**/api/me/permissions*', route => {
     const answer = mockEffectivePermissions('admin')
     answer.workspace.permissions = [...answer.workspace.permissions, 'account.read', 'account.manage', 'settings.manage']
@@ -86,6 +87,9 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     await expect(verify).toBeEnabled()
     await expect(section.getByRole('heading', { name: '1 thing needs you' })).toHaveCount(0)
     await page.screenshot({ path: info.outputPath(`agents-result-${width}-${theme}.png`), fullPage: true })
+    await section.getByRole('button', { name: 'Accounts and computers', exact: true }).click()
+    await expect(section.locator('.verification-feedback')).toHaveText('Verification passed.')
+    await page.screenshot({ path: info.outputPath(`agents-folded-result-${width}-${theme}.png`), fullPage: true })
     Object.assign(e, { verification_state: 'expired', verification_run_id: null })
     await page.goto(`/settings/accounts?computer=${c.computer_id}`)
     const pane = page.locator('section.pane')
@@ -159,15 +163,27 @@ for (const width of [1440, 1024, 390]) for (const theme of ['light', 'dark'] as 
     const editor = page.getByRole('dialog', { name: 'Agents outside your hours' })
     await expect(editor).toBeVisible()
     const modelRows = Object.fromEntries((await editor.locator('.model').all()).map((row, index) => [`model${index}`, row]))
-    const controls = { ...modelRows, save: editor.getByRole('button', { name: 'Save', exact: true }), cancel: editor.getByRole('button', { name: 'Cancel', exact: true }), options: editor.locator('.models') }
+    const controls = { ...(width === 390 ? { frame: editor } : {}), ...modelRows, save: editor.getByRole('button', { name: 'Save', exact: true }), cancel: editor.getByRole('button', { name: 'Cancel', exact: true }), options: editor.locator('.models') }
     const hoursGuard = await controlStability(page, controls)
     for (const option of await editor.locator('.model').all()) await hoursGuard.check(async () => { await option.click() })
+    await hoursGuard.check(async () => { await editor.locator('.model').nth(1).click() })
     hoursGuard.done()
+    await editor.locator('.ed-body').evaluate(el => { el.scrollTop = 0 })
     if (width > 720) {
       const box = await editor.boundingBox()
       expect(box!.y + box!.height, 'space above app footer').toBeLessThanOrEqual(944)
     }
     await page.screenshot({ path: info.outputPath(`outside-hours-${width}-${theme}.png`), fullPage: true })
+    await editor.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await page.getByRole('button', { name: 'Customize work week' }).click()
+    const week = page.getByRole('dialog', { name: 'Work week', exact: true })
+    const monday = week.getByRole('switch', { name: 'Monday', exact: true })
+    const weekGuard = await controlStability(page, { monday, row: week.locator('.wk-row').first(), save: week.getByRole('button', { name: 'Save', exact: true }), cancel: week.getByRole('button', { name: 'Cancel', exact: true }), ...(width === 390 ? { frame: week } : {}) })
+    const wasOn = await monday.getAttribute('aria-checked')
+    await weekGuard.check(async () => { await monday.click(); await expect(monday).toHaveAttribute('aria-checked', wasOn === 'true' ? 'false' : 'true') })
+    expect(await monday.evaluate(el => getComputedStyle(el, '::after').backgroundColor)).toBe('rgb(251, 250, 246)')
+    weekGuard.done()
+    await page.screenshot({ path: info.outputPath(`work-week-${width}-${theme}.png`), fullPage: true })
   })
 }
 

@@ -80,13 +80,17 @@ async function openEditor(kind: EditorKind, event: Event) {
     editorRef.value?.focusTitle()
   }
 }
-/** Under the control that opened it, kept inside the viewport. */
+/** Choose a viewport position once on open; content grows below the controls. */
 function place() {
   const el = editorRef.value?.root
   if (!el || !root.value || !opener) return
   const box = root.value.getBoundingClientRect(), anchor = opener.getBoundingClientRect(), w = el.offsetWidth
   const left = Math.max(12 - box.left, Math.min(anchor.right - box.left - w, innerWidth - 12 - w - box.left))
-  editorStyle.value = { top: `${anchor.bottom - box.top + 8}px`, left: `${left}px`, maxHeight: `${Math.max(160, innerHeight - anchor.bottom - 96)}px` }
+  const footerGap = 88, viewportTop = 72
+  const height = Math.min(el.offsetHeight, Math.max(0, innerHeight - viewportTop - footerGap))
+  const below = anchor.bottom + 8
+  const top = below + height <= innerHeight - footerGap ? below : Math.max(viewportTop, anchor.top - height - 8)
+  editorStyle.value = { top: `${top - box.top}px`, left: `${left}px`, maxHeight: `${Math.max(0, innerHeight - top - footerGap)}px` }
 }
 let sheetReturn: HTMLElement | null = null
 function closeEditor(focus = true) {
