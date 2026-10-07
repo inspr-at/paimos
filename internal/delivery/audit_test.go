@@ -112,11 +112,15 @@ func TestMergeAuditWebhookReconciliationAndIsolation(t *testing.T) {
 	pr := int64(7)
 	queue := MergeFact{SHA: strings.Repeat("c", 40), Head: p.Head, Title: p.Title, Branch: p.Branch, MergedBy: "github-merge-queue[bot]", PR: &pr, At: f.at}
 	g.checks[queue.SHA] = auditGreen()
-	auditSend(t, f, "merge_group", "audit-queue-group", map[string]any{"action": "checks_requested", "merge_group": map[string]string{"head_sha": queue.SHA, "base_sha": p.Base, "head_ref": "refs/heads/gh-readonly-queue/main/pr-7-group"}}, 204)
+	// Queue-bot identity alone selects the merge commit. A missing merge_group
+	// webhook must not judge the pull-request head instead.
 	auditSend(t, f, "pull_request", "audit-queue", auditPRBody(f, queue), 204)
 	a := auditRead(t, f, queue.SHA)
 	if len(a.Flags) != 0 || !a.ViaQueue || !a.ChecksPassed || !a.ReviewOK || a.Ticket == nil || *a.Ticket != f.ticket {
 		t.Fatalf("queue provenance failed: %+v", a)
+	}
+	if !reflect.DeepEqual(g.checkSHAs, []string{queue.SHA}) {
+		t.Fatalf("queue bot without a group event read %v", g.checkSHAs)
 	}
 	if _, events, alerts := auditCounts(t, f); events != 0 || alerts != 0 {
 		t.Fatal("clean merge produced bypass effects")
@@ -425,5 +429,44 @@ func TestMergeAuditObservationChecksOnPullHead(t *testing.T) {
 	}
 	if a := auditRead(t, f, admin.SHA); !reflect.DeepEqual(a.Flags, []string{"no_queue"}) || !a.ChecksPassed || a.ViaQueue || !a.ReviewOK {
 		t.Fatalf("observation checks did not satisfy admin merge: %+v", a)
+	}
+}
+
+func TestMergeAuditLateQueueProvenanceRetriesUnreadChecks(t *testing.T) {
+	// Risk: a merge_group event that arrives during the external check read
+	// changes the proof SHA. Committing local absence as checks_missing is
+	// permanent, because reconciliation skips an existing row, even when
+	// GitHub already has green checks for the queue SHA.
+	f := newFixture(t)
+	f.build(t)
+	f.review(t)
+	g := &auditFake{fakeGitHub: f.gh, facts: map[string]*MergeFact{}, checks: map[string][]Check{}}
+	f.m.github = g
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `INSERT INTO project_leads(tenant_id,project_id,owner_principal_id,state) VALUES($1,$2,$3,'paused')`, f.person.TenantID, f.project, f.person.ID)
+		return err
+	})
+	p := f.pull()
+	p.Open = false
+	p.Merged = true
+	f.gh.pulls[7] = p
+	pr := int64(7)
+	fact := MergeFact{SHA: strings.Repeat("d", 40), Head: p.Head, Title: p.Title, Branch: p.Branch, MergedBy: "admin", PR: &pr, At: f.at}
+	g.checks[fact.Head] = auditGreen()
+	g.checks[fact.SHA] = auditGreen()
+	g.onCheck = func() {
+		g.onCheck = nil
+		auditSend(t, f, "merge_group", "audit-late-group", map[string]any{"action": "checks_requested", "merge_group": map[string]string{"head_sha": fact.SHA, "base_sha": p.Base, "head_ref": "refs/heads/gh-readonly-queue/main/pr-7-group"}}, 204)
+	}
+	auditSend(t, f, "pull_request", "audit-late-proof", auditPRBody(f, fact), 502)
+	if rows, events, alerts := auditCounts(t, f); rows != 0 || events != 0 || alerts != 0 {
+		t.Fatalf("unread changed proof committed a bypass: %d %d %d", rows, events, alerts)
+	}
+	auditSend(t, f, "pull_request", "audit-late-proof", auditPRBody(f, fact), 204)
+	if !reflect.DeepEqual(g.checkSHAs, []string{fact.Head, fact.SHA}) {
+		t.Fatalf("retry did not read the queue SHA: %v", g.checkSHAs)
+	}
+	if a := auditRead(t, f, fact.SHA); !a.ViaQueue || !a.ChecksPassed || !a.ReviewOK || len(a.Flags) != 0 || a.AlertedAt != nil {
+		t.Fatalf("late queue provenance became a false bypass: %+v", a)
 	}
 }
