@@ -194,6 +194,7 @@ test('verification errors stay honest and changing computer discards pending fee
   const { c, world } = await setup(page, 'dark')
   const other = world.computers[1]! as unknown as PairingView
   other.revision = 7
+  other.verification_capabilities = c.verification_capabilities
   other.enrollments.push({ ...c.enrollments.find(e => e.account_id === ACCOUNTS.claude)! })
   const targets: string[] = []
   let reject = true, release!: () => void
