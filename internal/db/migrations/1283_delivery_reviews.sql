@@ -21,7 +21,8 @@ CREATE TABLE delivery_review_rounds (
  UNIQUE(tenant_id,project_id,position),
  FOREIGN KEY(tenant_id,project_id) REFERENCES nodes(tenant_id,id),
  FOREIGN KEY(tenant_id,ticket_node_id) REFERENCES nodes(tenant_id,id),
- FOREIGN KEY(tenant_id,source_round_id) REFERENCES delivery_work_rounds(tenant_id,id),
+ -- The source queue is an independently rebuildable projection. Do not pin
+ -- its physical row with a foreign key; current bindings are checked in tx.
  FOREIGN KEY(tenant_id,author_run_id) REFERENCES agent_runs(tenant_id,id)
 );
 CREATE INDEX delivery_review_order ON delivery_review_rounds(tenant_id,project_id,slug,position DESC);

@@ -198,7 +198,7 @@ func currentReviewTargetTx(ctx context.Context, tx pgx.Tx, out ReviewRound) (jso
 	// Execution work orders are children of a business leaf, not nested work
 	// items. A completed build order must not make its ticket ineligible.
 	err := tx.QueryRow(ctx, `SELECT n.fields,n.parent_id::text FROM nodes n JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
- WHERE n.id=$1 AND n.project_id=$2 AND n.deleted_at IS NULL AND n.state='active' AND k.slug='work'
+ WHERE n.id=$1 AND n.project_id=$2 AND n.deleted_at IS NULL AND k.slug='work'
  AND NOT EXISTS(SELECT 1 FROM work_orders w WHERE w.node_id=n.id)
  AND NOT EXISTS(SELECT 1 FROM nodes c WHERE c.parent_id=n.id AND c.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM work_orders w WHERE w.node_id=c.id))`, out.Ticket, out.Project).Scan(&fields, &parent)
 	return fields, parent, err
@@ -278,6 +278,13 @@ func (m *Module) queueReviewTx(ctx context.Context, tx pgx.Tx, p tenant.Principa
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return out, false, err
+	}
+	var reused bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM delivery_review_rounds WHERE project_id=$1 AND (author_run_id=$2 OR (slug=$3 AND repository=$4 AND head_sha=$5)))`, project, in.AuthorRun, out.Slug, in.Repository, in.Head).Scan(&reused); err != nil {
+		return out, false, err
+	}
+	if reused {
+		return out, false, fail(409, "build run or commit head already belongs to another review")
 	}
 	previous, err := scanReview(tx.QueryRow(ctx, `SELECT snapshot FROM delivery_review_rounds WHERE project_id=$1 AND slug=$2 ORDER BY position DESC LIMIT 1`, project, out.Slug))
 	if err == nil {

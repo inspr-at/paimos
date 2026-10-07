@@ -21,6 +21,15 @@ import (
 )
 
 func reviewsPath(f *fixture) string { return "/api/projects/" + f.project + "/delivery-reviews" }
+func newReviewFixture(t *testing.T) *fixture {
+	t.Helper()
+	f := newFixture(t)
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET state='active' WHERE id=$1`, f.project)
+		return err
+	})
+	return f
+}
 func grantReviewAgent(t *testing.T, f *fixture) {
 	t.Helper()
 	perms := []string{"delivery_reviews.read", "delivery_reviews.manage", "delivery_reviews.claim", "delivery_reviews.report"}
@@ -78,7 +87,7 @@ func seedReviewRoute(t *testing.T, f *fixture) string {
 		s.Reserve = capacity.ReserveOff
 		s.Override = "sprint"
 		raw, _ := json.Marshal(s)
-		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3,$3,$4)`, f.person.TenantID, f.person.ID, account, raw); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::text,$3::uuid,$4)`, f.person.TenantID, f.person.ID, account, raw); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance) VALUES($1,$2,$3,$4,'tokens',10000000)`, f.person.TenantID, account, f.at.Add(-time.Hour), f.at.Add(time.Hour))
@@ -140,7 +149,7 @@ func TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation(t *testing.T) {
 	// Risks: a script observation opens real approvals, a caller resets the
 	// gate cap, a replay repeats actions, revoked scopes or another tenant reads
 	// bindings/findings, or stale heads and mismatched reviewer profiles pass.
-	f := newFixture(t)
+	f := newReviewFixture(t)
 	f.build(t)
 	path := reviewsPath(f)
 	var page ReviewPage
@@ -282,6 +291,18 @@ func TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation(t *testing.T) {
 	}
 	f.call(t, f.person, "GET", path, nil, 200, &page)
 	before := page
+	// Queue projection replay deletes/re-inserts its physical rows. Review
+	// observations must not prevent that independent replay with an FK.
+	f.tx(t, func(tx pgx.Tx) error {
+		source, err := loadRoundTx(t.Context(), tx, f.project, first.SourceRound)
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(t.Context(), `DELETE FROM delivery_work_rounds WHERE id=$1`, source.ID); err != nil {
+			return err
+		}
+		return saveRoundTx(t.Context(), tx, f.person.TenantID, source)
+	})
 	if err := f.m.RebuildReviews(t.Context(), f.person, f.project); err != nil {
 		t.Fatal(err)
 	}
@@ -325,7 +346,7 @@ func TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation(t *testing.T) {
 func TestDeliveryReviewsConcurrentClaimsHaveOneOwner(t *testing.T) {
 	// Risk: concurrent launchers receive the same review. Hold the tenant/tree
 	// fence until both claim requests are visibly blocked on it; no sleeps.
-	f := newFixture(t)
+	f := newReviewFixture(t)
 	f.build(t)
 	grantReviewAgent(t, f)
 	seedReviewRoute(t, f)
