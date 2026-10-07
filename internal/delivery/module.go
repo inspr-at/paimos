@@ -27,7 +27,8 @@ func New(pool *pgxpool.Pool, config crossreview.AppConfig, secret []byte, github
 	return &Module{pool: pool, config: config, secret: append([]byte(nil), secret...), github: github, fanout: fanout, now: func() time.Time { return time.Now().UTC() }}
 }
 func (m *Module) Mount(mux *http.ServeMux) {
-	mux.HandleFunc("POST /api/github/webhook", m.webhook)
+	mux.HandleFunc("POST /api/github/webhook", m.auditWebhook)
+	mux.HandleFunc("GET /api/delivery/audit", m.auditList)
 	mux.HandleFunc("GET /api/delivery", m.list)
 	mux.HandleFunc("GET /api/nodes/{id}/delivery", m.list)
 	mux.HandleFunc("POST /api/delivery/{itemId}/hold", m.hold)

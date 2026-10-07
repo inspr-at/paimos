@@ -38,7 +38,8 @@
         "payload_sha256": "metadata",
         "fanout_done": "metadata",
         "processed_at": "metadata",
-        "observations": "review"
+        "observations": "review",
+        "audit_checks": "metadata"
       }
     },
     "delivery_settings": {
@@ -49,6 +50,24 @@
         "required_checks": "metadata",
         "deadlines": "metadata",
         "updated_at": "metadata"
+      }
+    },
+    "delivery_merge_audit": {
+      "locator": "delivery_merge_audit WHERE tenant_id = :tenant_id",
+      "columns": {
+        "tenant_id": "metadata",
+        "repository": "metadata",
+        "merge_sha": "metadata",
+        "pull_request": "metadata",
+        "ticket_node_id": "metadata",
+        "project_id": "metadata",
+        "merged_by": "personal",
+        "via_queue": "metadata",
+        "checks_passed": "metadata",
+        "review_ok": "metadata",
+        "flags": "metadata",
+        "at": "metadata",
+        "alerted_at": "metadata"
       }
     }
   }

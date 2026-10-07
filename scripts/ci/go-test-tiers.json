@@ -5054,6 +5054,10 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestGitHubReaderUsesReadOnlyScopesAndFreshQueueHead","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeAuditPendingAlertsAndAtomicFailure","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeAuditWebhookReconciliationAndIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestProjectionReplayAndInheritedSettings","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestProjectionStatesOwnersAndDeadlines","tier":"ESSENTIAL"}
