@@ -47,7 +47,8 @@
     "events": "history",
     "search": "search",
     "ownership": "ownership",
-    "chat": "agent conversations"
+    "chat": "agent conversations",
+    "delivery": "delivery status"
   },
   "actions": {
     "ask": "ask",

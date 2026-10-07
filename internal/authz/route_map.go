@@ -24,11 +24,20 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
-	"GET /api/settings/review-policy":                "reviewpolicy.read",
-	"PUT /api/settings/review-policy":                "reviewpolicy.manage",
-	"GET /api/projects/{projectId}/review-policy":    "reviewpolicy.read",
-	"PUT /api/projects/{projectId}/review-policy":    "reviewpolicy.manage",
-	"DELETE /api/projects/{projectId}/review-policy": "reviewpolicy.manage",
+	"POST /api/github/webhook":                        "public",
+	"GET /api/delivery":                               "delivery.read",
+	"GET /api/nodes/{id}/delivery":                    "delivery.read",
+	"POST /api/delivery/{itemId}/hold":                "delivery.manage",
+	"DELETE /api/delivery/{itemId}/hold":              "delivery.manage",
+	"GET /api/settings/delivery":                      "delivery.read",
+	"PUT /api/settings/delivery":                      "delivery.manage",
+	"GET /api/projects/{projectId}/delivery-settings": "delivery.read",
+	"PUT /api/projects/{projectId}/delivery-settings": "delivery.manage",
+	"GET /api/settings/review-policy":                 "reviewpolicy.read",
+	"PUT /api/settings/review-policy":                 "reviewpolicy.manage",
+	"GET /api/projects/{projectId}/review-policy":     "reviewpolicy.read",
+	"PUT /api/projects/{projectId}/review-policy":     "reviewpolicy.manage",
+	"DELETE /api/projects/{projectId}/review-policy":  "reviewpolicy.manage",
 	// Lead handlers retain their actor/owner checks inside the final transaction.
 	"GET /api/projects/{projectId}/lead":                            "harness.read",
 	"POST /api/projects/{projectId}/lead":                           "harness.control",
@@ -800,4 +809,12 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 		}
 	}
 	return denialErr
+}
+
+// Delivery entry checks admit project bindings; handlers fence and recheck
+// the live target project's permission and RLS before returning or changing it.
+func init() {
+	for _, pattern := range []string{"GET /api/delivery", "GET /api/nodes/{id}/delivery", "POST /api/delivery/{itemId}/hold", "DELETE /api/delivery/{itemId}/hold"} {
+		ProjectFilteredRoutes[pattern] = true
+	}
 }

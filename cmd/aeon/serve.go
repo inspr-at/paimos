@@ -49,6 +49,7 @@ import (
 	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/decisiondesk"
+	"github.com/inspr-at/paimos/internal/delivery"
 	"github.com/inspr-at/paimos/internal/deliveryvote"
 	"github.com/inspr-at/paimos/internal/embedding"
 	"github.com/inspr-at/paimos/internal/events"
@@ -357,6 +358,8 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 	reviewMod := crossreview.New(pool, reviewPublisher)
 	reviewMod.ConfigureWebhook(cfg.ReviewWebhookSecret)
 	go reviewMod.RunStatusReporter(ctx)
+	deliveryMod := delivery.New(pool, reviewApp.Config, cfg.ReviewWebhookSecret, delivery.AppReader{App: reviewApp}, reviewMod.HandlePullChange)
+	go deliveryMod.Run(ctx)
 	api := &httpapi.Server{
 		Pool:                    pool,
 		Brand:                   &productBrand,
@@ -404,6 +407,7 @@ func serveListener(ctx context.Context, cfg config.Config, ln net.Listener) erro
 			usagedashboard.New(pool),
 			workorders.New(pool),
 			reviewMod,
+			deliveryMod,
 			agentruns.NewWithReviews(pool, settleUsage, reviewMod.RequestForRun, reviewMod.PrepareForRun),
 			approvals.New(pool),
 			phoneMod,
