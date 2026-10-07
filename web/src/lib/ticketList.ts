@@ -15,7 +15,7 @@ import { normalizeColumnIds, PINNED, type ColumnId } from './columns.ts'
 import { DEFAULT_SORT, KINDS, PRIORITIES, kindLabel, normaliseState, parseSort, priorityLabel, serializeSort, statusMeta, statusOptions, type SortKey } from './work.ts'
 
 export type Dimension = 'status' | 'priority' | 'assignee' | 'type' | 'tag' | 'epic' | 'cost' | 'release' | 'human_check' | 'shape' | 'depth'
-export type GroupBy = 'none' | 'status' | 'assignee' | 'priority' | 'type' | 'epic' | 'tag'
+export type GroupBy = 'none' | 'status' | 'assignee' | 'priority' | 'type' | 'epic' | 'tag' | 'project'
 export type DateField = 'updated' | 'created' | 'start' | 'end' | 'accepted'
 export type DatePreset = 'today' | '7d' | '30d' | '90d' | 'month' | 'year'
 // A date filter: one field, and a relative preset (kept relative in saved views)
@@ -74,7 +74,7 @@ export const WORK_KINDS = ['work', 'ticket', 'task', 'epic']
 export const PAGE_SIZE = 200
 export const GROUPS: { value: GroupBy; label: string }[] = [
   { value: 'none', label: 'None' }, { value: 'status', label: 'Status' }, { value: 'assignee', label: 'Assignee' }, { value: 'priority', label: 'Priority' },
-  { value: 'type', label: 'Type' }, { value: 'epic', label: 'Epic' }, { value: 'tag', label: 'Label' },
+  { value: 'project', label: 'Project' }, { value: 'type', label: 'Type' }, { value: 'epic', label: 'Epic' }, { value: 'tag', label: 'Label' },
 ]
 export const DATE_FIELDS: { value: DateField; label: string }[] = [
   { value: 'updated', label: 'Updated' }, { value: 'created', label: 'Created' }, { value: 'start', label: 'Start' }, { value: 'end', label: 'End' }, { value: 'accepted', label: 'Accepted' },
@@ -515,16 +515,19 @@ export function rowTags(row: ListItem): { name: string; color: string }[] {
   })
 }
 
+export type TicketRow = ListItem & { project_key?: string }
 export interface RowGroup {
-  key: string; label: string; rows: ListItem[]; total: number
+  key: string; label: string; rows: TicketRow[]; total: number
+  project?: { id: string; key: string; title: string }; icon?: string
+  loaded?: number; hasMore?: boolean; loadingMore?: boolean; moreError?: string
   state?: string; epic?: EpicRef; person?: { id: string; name: string }; priority?: string; kind?: string; tag?: { name: string; color: string }
 }
 // Counts are the list API's facet for the grouped dimension (state, assignee,
 // priority, kind or tag), so a group shows its whole size while pages load.
 // layout gives the values a row is grouped by (a live list holds them while an
 // update waits); the group still lists the row itself.
-export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string; layout?: (row: ListItem) => ListItem; workName?: string } = {}): RowGroup[] {
-  if (group === 'none') return [{ key: 'all', label: '', rows, total: rows.length }]
+export function groupRows(rows: TicketRow[], group: GroupBy, counts: Record<string, number> = {}, options: { me?: string; layout?: (row: ListItem) => ListItem; workName?: string } = {}): RowGroup[] {
+  if (group === 'none') return [{ key: 'all', label: '', rows, total: rows.length, loaded: rows.length, hasMore: false }]
   const layout = options.layout ?? (row => row)
   if (group === 'status') {
     const groups = new Map<string, RowGroup>()
@@ -543,6 +546,22 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
       entry.total = Math.max(counted, entry.rows.length)
     }
     return [...groups.values()].sort((a, b) => statusMeta(a.state!).order - statusMeta(b.state!).order)
+  }
+  if (group === 'project') {
+    const groups = new Map<string, RowGroup>()
+    for (const row of rows) {
+      const placed = layout(row) as TicketRow
+      const project = placed.project ?? (placed.project_key ? { id: placed.project_key, key: placed.project_key, title: placed.project_key } : null)
+      const key = project?.id ?? 'none'
+      if (!groups.has(key)) groups.set(key, { key, label: project?.title ?? 'No project', ...(project ? { project } : {}), rows: [], total: 0 })
+      groups.get(key)!.rows.push(row)
+    }
+    for (const entry of groups.values()) {
+      entry.loaded = entry.rows.length
+      entry.total = Math.max(counts[entry.key] ?? 0, entry.loaded)
+      entry.hasMore = entry.loaded < entry.total
+    }
+    return [...groups.values()].sort((a, b) => Number(!a.project) - Number(!b.project) || (a.project?.key ?? '').localeCompare(b.project?.key ?? '') || a.key.localeCompare(b.key))
   }
   if (group === 'epic') {
     const byId = new Map(rows.map(row => [row.id, row]))
@@ -601,4 +620,15 @@ export function groupRows(rows: ListItem[], group: GroupBy, counts: Record<strin
 // The facet whose counts give a grouping its totals.
 export function groupFacet(group: GroupBy): string | null {
   return ({ status: 'state', assignee: 'assignee', priority: 'priority', type: 'kind', tag: 'tag' } as Partial<Record<GroupBy, string>>)[group] ?? null
+}
+
+// Hosts own selection. Use this same bounded loaded-row update for a group
+// checkbox; folded rows count, unloaded rows do not. Other groups stay selected.
+export function selectLoadedGroup(group: RowGroup, selected: ReadonlySet<string>, on: boolean): Set<string> {
+  const next = new Set(selected)
+  for (const row of group.rows) {
+    if (!on) next.delete(row.id)
+    else if (next.size < 100) next.add(row.id)
+  }
+  return next
 }
