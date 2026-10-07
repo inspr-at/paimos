@@ -114,7 +114,7 @@ func TestOverviewValuesMaskingExplicitScopeAndTenantIsolation(t *testing.T) {
 	callStatus(t, mod, &runner, overviewKey, "GET", "/api/agent-accounts/overview", "", 403, nil)
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
 		var role string
-		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'overview-reader','Overview reader') RETURNING id::text`, person.TenantID).Scan(&role); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'overview_reader','Overview reader') RETURNING id::text`, person.TenantID).Scan(&role); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'account.overview.read')`, person.TenantID, role); err != nil {

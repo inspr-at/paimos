@@ -107,8 +107,8 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 			t.Fatalf("overview leaked %s", forbidden)
 		}
 	}
-	// Prove paired advice includes another registrar's account before exercising
-	// the terminal vendor-stop reservation and claim through the real auth/mux.
+	// Exercise the terminal vendor-stop reservation and claim through the real
+	// auth/mux, retaining the immutable paired runtime identity.
 	codex := []agentpairing.Enrollment{}
 	for _, e := range v.Enrollments {
 		if e.Harness == "codex" {
@@ -116,13 +116,6 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 		}
 	}
 	err = db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
-		var registrar string
-		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name,roles) VALUES($1,'agent','Other enrollment registrar','{}') RETURNING id::text`, f.tenantID).Scan(&registrar); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET registered_by_principal_id=$2 WHERE id=$1`, codex[1].AccountID, registrar); err != nil {
-			return err
-		}
 		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET state='unavailable' WHERE id=$1`, codex[2].AccountID)
 		return err
 	})
@@ -132,15 +125,7 @@ func TestComputerEnrollsTwoClaudeAndThreeCodexIsolatedAccounts(t *testing.T) {
 	var next agentaccounts.CapacityNext
 	decodeResult(t, f.call("GET", "/api/agent-accounts/capacity/next?harness=codex", nil, false, key, 200), &next)
 	if len(next.Accounts) != 2 {
-		t.Fatal("paired advice lost the differently registered account")
-	}
-	// Runtime reporting still belongs to the enrolling runtime principal; the
-	// actual pairing writer enrolls every account with that same principal.
-	if err := db.InTenant(dbtest.Seed(t.Context()), f.db.App, f.tenantID, func(tx pgx.Tx) error {
-		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET registered_by_principal_id=$2 WHERE id=$1`, codex[1].AccountID, *v.PrincipalID)
-		return err
-	}); err != nil {
-		t.Fatal(err)
+		t.Fatal("paired advice lost an available enrolled account")
 	}
 	var order workorders.Order
 	decodeResult(t, f.call("POST", "/api/work-orders", map[string]any{"title": "Account handoff", "criteria": []string{"Continue on the spare"}, "assignee_principal_id": *v.PrincipalID}, true, "", 201), &order)
