@@ -1,9 +1,52 @@
 {
   "_license": "SPDX-License-Identifier: AGPL-3.0-only",
   "version": 1,
-  "tables": {
-    "delivery_items": {
-      "locator": "delivery_items WHERE tenant_id = :tenant_id",
+  "tables": [
+    {
+      "table": "cross_family_policies",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "updated_by"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "mode": "metadata",
+        "allowed_families": "metadata",
+        "updated_by": "personal",
+        "updated_at": "metadata"
+      }
+    },
+    {
+      "table": "delivery_github_events",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "sequence": "metadata",
+        "delivery_id": "metadata",
+        "event": "metadata",
+        "action": "metadata",
+        "repository": "metadata",
+        "pull_request": "metadata",
+        "head_sha": "metadata",
+        "received_at": "metadata",
+        "payload_sha256": "metadata",
+        "fanout_done": "metadata",
+        "processed_at": "metadata",
+        "observations": "review",
+        "audit_checks": "metadata"
+      }
+    },
+    {
+      "table": "delivery_items",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
       "columns": {
         "tenant_id": "metadata",
         "id": "metadata",
@@ -23,37 +66,12 @@
         "observation": "review"
       }
     },
-    "delivery_github_events": {
-      "locator": "delivery_github_events WHERE tenant_id = :tenant_id",
-      "columns": {
-        "tenant_id": "metadata",
-        "sequence": "metadata",
-        "delivery_id": "metadata",
-        "event": "metadata",
-        "action": "metadata",
-        "repository": "metadata",
-        "pull_request": "metadata",
-        "head_sha": "metadata",
-        "received_at": "metadata",
-        "payload_sha256": "metadata",
-        "fanout_done": "metadata",
-        "processed_at": "metadata",
-        "observations": "review",
-        "audit_checks": "metadata"
-      }
-    },
-    "delivery_settings": {
-      "locator": "delivery_settings WHERE tenant_id = :tenant_id",
-      "columns": {
-        "tenant_id": "metadata",
-        "project_id": "metadata",
-        "required_checks": "metadata",
-        "deadlines": "metadata",
-        "updated_at": "metadata"
-      }
-    },
-    "delivery_merge_audit": {
-      "locator": "delivery_merge_audit WHERE tenant_id = :tenant_id",
+    {
+      "table": "delivery_merge_audit",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
       "columns": {
         "tenant_id": "metadata",
         "repository": "metadata",
@@ -69,6 +87,20 @@
         "at": "metadata",
         "alerted_at": "metadata"
       }
+    },
+    {
+      "table": "delivery_settings",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "required_checks": "metadata",
+        "deadlines": "metadata",
+        "updated_at": "metadata"
+      }
     }
-  }
+  ]
 }

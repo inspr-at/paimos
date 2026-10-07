@@ -44,13 +44,22 @@ func VerifiedLatestTx(ctx context.Context, tx pgx.Tx, order, ticket string) (boo
 	if err != nil {
 		return false, err
 	}
-	if !current || orderStatus == "cancelled" || github == "stale" || len(raw) > MaxOutput || b.ReviewerFamily == nil || family != *b.ReviewerFamily || !harnesslaunch.FamilyMatches(harness, model, family) || authorHarness == nil || authorModel == nil || authorFamily == nil || *authorFamily != b.AuthorFamily || !harnesslaunch.FamilyMatches(*authorHarness, *authorModel, *authorFamily) || effective == nil || !ModelMatches(model, *effective) {
+	if !current || orderStatus == "cancelled" || github == "stale" || len(raw) > MaxOutput || b.ReviewerFamily == nil || family != *b.ReviewerFamily || !harnesslaunch.FamilyMatches(harness, model, family) || authorHarness == nil || authorModel == nil || authorFamily == nil || !harnesslaunch.FamilyMatches(*authorHarness, *authorModel, *authorFamily) || effective == nil || !ModelMatches(model, *effective) {
 		return false, nil
 	}
 	var result Result
 	if err := json.Unmarshal(raw, &result); err != nil {
 		return false, nil
 	}
-	ok, _ := Gate(status, evidence, effective, *b, result)
+	var project *string
+	if err := tx.QueryRow(ctx, `SELECT project_id::text FROM nodes WHERE id=$1`, ticket).Scan(&project); err != nil {
+		return false, err
+	}
+	policy, err := LoadFamilyPolicyTx(ctx, tx, project)
+	if err != nil {
+		return false, err
+	}
+	b.AuthorFamily = *authorFamily
+	ok, _ := Gate(status, evidence, effective, *b, result, policy.Effective)
 	return ok, nil
 }

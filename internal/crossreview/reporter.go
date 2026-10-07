@@ -3,6 +3,7 @@ package crossreview
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -19,7 +20,7 @@ func statusState(v Review) string {
 	if v.GateOpen {
 		return "success"
 	}
-	if v.Result.Verdict == "changes" && v.Status == "completed" {
+	if (v.Result.Verdict == "changes" || v.policyDenied) && v.Status == "completed" {
 		if v.modelEvidence != "vendor_reported" || v.Model == nil || v.EffectiveModel == nil || !reviewgate.ModelMatches(*v.Model, *v.EffectiveModel) {
 			return "error"
 		}
@@ -31,6 +32,22 @@ func statusState(v Review) string {
 	default:
 		return "error"
 	}
+}
+
+// statusDescription is the aeon/review text GitHubApp.Publish posts. The
+// publisher's stale-binding branch keeps its own sentence when the pull
+// request moved before GitHubStatus is stale. The current gate reason
+// includes the effective family policy and recorded identities. Never
+// publish unbounded finding text as a status description.
+func statusDescription(v Review, state string) string {
+	if v.GitHubStatus == "stale" {
+		return "Review binding differs from the pull request"
+	}
+	if v.GateReason != "" && (state == "success" || state == "failure" || state == "error") {
+		description := []rune(strings.ReplaceAll(strings.ReplaceAll(v.GateReason, "\n", " "), "\r", " "))
+		return string(description[:min(140, len(description))])
+	}
+	return "Independent review pending"
 }
 
 // RunStatusReporter runs publication and binding refresh independently. Each
@@ -241,7 +258,22 @@ func (m *Module) publishReview(ctx context.Context, conn *pgxpool.Conn, tid stri
 		} // Publish confirms the revocation post.
 	}
 	writeErr := db.InTenant(service, m.pool, tid, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE work_order_reviews SET github_status=$2,github_reported_state=$3 WHERE work_order_id=$1`, v.OrderID, published, recorded)
+		// Policy writes take the tenant fence too. If one committed during
+		// network I/O, do not erase its dirty marker with the old publication.
+		if err := db.LockTenant(ctx, tx, tid); err != nil {
+			return err
+		}
+		current, err := load(ctx, tx, v.OrderID)
+		if err != nil {
+			return err
+		}
+		if statusState(current) != state || statusDescription(current, statusState(current)) != statusDescription(v, state) {
+			recorded = ""
+			if published == "success" {
+				published = "pending"
+			}
+		}
+		_, err = tx.Exec(ctx, `UPDATE work_order_reviews SET github_status=$2,github_reported_state=$3 WHERE work_order_id=$1`, v.OrderID, published, recorded)
 		return err
 	})
 	if writeErr != nil {
