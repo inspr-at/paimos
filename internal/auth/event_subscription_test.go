@@ -204,14 +204,23 @@ func TestAgentSubscriptionPlanResumeAndPrivacy(t *testing.T) {
 	resp.Body.Close()
 	// Topic and live read permission filtering applies even to old replay.
 	unscoped := decodeKey(t, keyRequest(m, owner, map[string]any{"name": "scope-only", "scopes": []string{"events.subscribe"}}))
+	var expectedCursor int64
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		return tx.QueryRow(ctx, `SELECT last_id FROM event_counters WHERE tenant_id=$1`, owner.TenantID).Scan(&expectedCursor)
+	}); err != nil {
+		t.Fatal(err)
+	}
 	resp, sc, cancel = subscriptionOpen(t, srv, unscoped, strconv.FormatInt(change.id, 10), "")
 	if resp.StatusCode != 200 {
 		t.Fatalf("scope-only: %d", resp.StatusCode)
 	}
 	subscriptionFrameNext(t, sc)
 	onlyCursor := subscriptionFrameNext(t, sc)
-	if onlyCursor.name != "stream.cursor" || onlyCursor.id != want[len(want)-1] {
+	if onlyCursor.name != "stream.cursor" {
 		t.Fatal("topic read ceiling was bypassed")
+	}
+	if onlyCursor.id != expectedCursor {
+		t.Fatalf("filtered checkpoint=%d, want committed boundary %d", onlyCursor.id, expectedCursor)
 	}
 	cancel()
 	resp.Body.Close()
