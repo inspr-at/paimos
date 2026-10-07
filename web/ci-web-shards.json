@@ -328,6 +328,8 @@
         ,
         {"file":"tests/managed-controls.spec.ts","listedTests":25,"tierTiming":{"caseSeconds":{"max":3.674,"median":1.823,"min":1.574},"seconds":50.762087,"selectedTests":25},"weightSeconds":61.988304,"weightSource":"web-13"}
         ,
+        {"file":"tests/models-board-controls.spec.ts","listedTests":24,"weightSeconds":16,"weightSource":"estimate"}
+        ,
         {"file":"tests/no-shift.spec.ts","listedTests":46,"tierTiming":{"caseSeconds":{"max":19.97,"median":4.001,"min":0.151},"seconds":234.324689,"selectedTests":47},"weightSeconds":114.05848,"weightSource":"web-13"}
         ,
         {"file":"tests/record-ownership.spec.ts","listedTests":2,"weightSeconds":4.439024,"weightSource":"unmeasured-test-rate"}

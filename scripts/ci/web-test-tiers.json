@@ -8236,6 +8236,54 @@
     ,
     {"kind":"browser","file":"tests/model-refresh.spec.ts","name":"model refresh starts private, saves its interval and accepts profiles without route writes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"agent readers can inspect all layers but have no write controls or move actions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"an empty eligible list explains the provider wait and keeps held cards locked","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1024 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1024 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1280 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1280 dark en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1280 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1280 light en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1440 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1440 dark en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1440 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1440 light en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 390 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 390 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"capabilities stay separate from locks, rules may name incapable models, and reviews keep the author family excluded","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"column visibility persists and restores fixed ordering while mandatory columns stay visible","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"failed writes are honest, old Undo cannot overwrite a later edit, and an identity change discards a held result","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"full screen is a route with inert surroundings; popovers own Esc and Done restores scroll and focus","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"keyboard moves write once with person and revision, keep pins and other controls still, and cross Not allowed","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"new catalog lines stay unplaced until one order places them and the tray and board height stay still","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"pointer drag keeps a placeholder, pins and surrounding columns still and sends only the dropped order","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"project rules retain workspace pins, require a reason, preserve submit controls, and surface a server refusal","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"provider writes keep selectors still and support Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"template preview writes no settings, shows Now to After, keeps personal columns and applies with guarded Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -14779,6 +14827,28 @@
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses plain provenance, reset and summary copy","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/model-prefs.unit.test.ts","name":"model preferences presentation > uses server review evidence, including newly qualified harnesses and per-model residency","tier":"GATED-FULL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"cannot edit as an agent or use profile writes to bypass project rule ownership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"carries inherited workspace rules and reasons into project writes and never permits cross-family moves","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"deduplicates a project restriction of a workspace rule without dropping inherited locks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"discards a delayed template preview and its approval after the observed revision changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"drops a late board read across an identity boundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"expires Undo and rejects it after another revision or identity boundary","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"keeps rules out of personal writes, moves across Not allowed and retains fixed pin ownership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"refreshes a conflict without a success toast and blocks edits after a saved write whose refresh fails","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"rejects a held write and its follow-up read after a context change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"saves exactly one captured order with the person and revision then undoes an inherited order by deleting it","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"sends the person precondition on the real HTTP order client and surfaces a server rejection","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After beyond the lifetime ends the follow instead of reading later","tier":"GATED-FULL"}
     ,

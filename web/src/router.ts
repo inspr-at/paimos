@@ -99,6 +99,7 @@ export const router = createRouter({
     // Settings: grouped sections; preserve old card bookmarks after the moves.
     { path: '/settings', redirect: '/settings/personal' },
     { path: '/settings/projects', redirect: to => ({ path: '/settings/vocabulary', query: to.query, hash: to.hash }) },
+    { path: '/settings/models/board', component: () => import('./components/settings/models/ModelBoardRoute.vue'), meta: { title: 'Model board' } },
     { path: '/settings/business/profiles/:profileId?', component: () => import('./views/settings/DocumentProfilesView.vue'), props: true, meta: { title: 'Document profiles', fill: true } },
     { path: '/settings/:section(personal|theme|developer|policies|agent-rules|accounts|workspace|vocabulary|agents|autopilot|business|portal)', component: () => import('./views/SettingsView.vue'), meta: { title: 'Settings' } },
     // Access: /settings/access/<tab>/<id> (a person, a role, a project).
