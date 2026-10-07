@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -40,7 +41,7 @@ func Snapshot(c net.Conn) (Process, error) {
 	return proc, nil
 }
 
-func Observe(pid int) (Process, error) {
+func observe(pid int, requireProjectCWD bool) (Process, error) {
 	if pid < 1 {
 		return Process{}, ErrPeer
 	}
@@ -62,7 +63,7 @@ func Observe(pid int) (Process, error) {
 		return Process{}, ErrPeer
 	}
 	cwd, err := os.Readlink(root + "/cwd")
-	if err != nil || strings.HasSuffix(cwd, " (deleted)") || len(cwd) < 2 || cwd[0] != '/' {
+	if err != nil || strings.HasSuffix(cwd, " (deleted)") || !filepath.IsAbs(cwd) || (requireProjectCWD && cwd == "/") {
 		return Process{}, ErrPeer
 	}
 	// /proc/<pid>/exe is the mapped vnode. A pathname replaced on disk keeps

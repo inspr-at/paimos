@@ -462,6 +462,8 @@
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedServeContinuesAfterAttachRegistrationRefusal","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedServeFromRootWorkingDirectory","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPairedSyncTombstoneProbesAndFailureDiagnostics","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"cmd/aeon-agentd","name":"TestPendingOrFailedClaudeRepinKeepsPollingAndRetries","tier":"GATED-FULL"}
