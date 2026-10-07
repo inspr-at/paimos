@@ -503,6 +503,13 @@ test('owner login usage switch stays put and failed saves preserve consent', asy
   for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
     await page.setViewportSize({ width, height: 1000 })
     await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    // Wait for the frame's ResizeObserver to apply the new layout before
+    // measuring an interaction; resizing itself legitimately moves controls.
+    await expect.poll(() => page.locator('.settings-frame').evaluate(el => {
+      const width = (el.closest('.settings-page') ?? el).getBoundingClientRect().width
+      const mode = width >= 1200 ? 'dock' : width > 720 ? 'side' : 'sheet'
+      return el.classList.contains(`mode-${mode}`)
+    })).toBe(true)
     const guard = await controlStability(page, { toggle, name: detail.getByRole('button', { name: 'Rename Main', exact: true }) })
     await guard.check(async () => {
       const before = await toggle.getAttribute('aria-checked')
