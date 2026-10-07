@@ -180,12 +180,16 @@ func PrepareCatalog(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal,
 		if err != nil {
 			return err
 		}
-		// Initialize a closed board at its production boundaries; role-only CLI
-		// and the read-only legacy editor keep their established contracts.
-		placement := in.Operation == CatalogReview || in.Operation == CatalogCompletion || in.Request.URL.Path == "/api/model-preferences/board"
-		if in.Request.URL.Path == "/api/models/resolve" {
-			for _, key := range []string{"mode", "ticket", "area", "complexity", "person_id", "situation", "fix_round", "estimate_hours", "concept"} {
-				placement = placement || in.Request.URL.Query().Has(key)
+		// Placement reads and the board itself may open a closed default board.
+		// Review and completion must not: that write commits before the caller's
+		// mutation and replaces a legacy role ladder that was never migrated.
+		placement := false
+		if in.Request != nil {
+			placement = in.Request.URL.Path == "/api/model-preferences/board"
+			if in.Request.URL.Path == "/api/models/resolve" {
+				for _, key := range []string{"mode", "ticket", "area", "complexity", "person_id", "situation", "fix_round", "estimate_hours", "concept"} {
+					placement = placement || in.Request.URL.Query().Has(key)
+				}
 			}
 		}
 		if placement {

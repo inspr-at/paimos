@@ -131,7 +131,17 @@ func LookupKind(ctx context.Context, tx pgx.Tx, area, projectID string) (Kind, b
 	return kind, kind.Slug != area, err
 }
 func SeedKinds(ctx context.Context, tx pgx.Tx, tenantID string) error {
-	_, err := tx.Exec(ctx, `SELECT aeon_seed_model_board_kinds($1::uuid)`, tenantID)
+	// Replay and bootstrap before migration 1276 still have aeon_seed_work_kinds.
+	// A missing function aborts the transaction, so choose the name before calling it.
+	var board bool
+	if err := tx.QueryRow(ctx, `SELECT to_regprocedure('aeon_seed_model_board_kinds(uuid)') IS NOT NULL`).Scan(&board); err != nil {
+		return err
+	}
+	query := `SELECT aeon_seed_work_kinds($1::uuid)`
+	if board {
+		query = `SELECT aeon_seed_model_board_kinds($1::uuid)`
+	}
+	_, err := tx.Exec(ctx, query, tenantID)
 	return err
 }
 func Requirement(ctx context.Context, tx pgx.Tx, personID *string, projectID, ticketRequirement string) (string, error) {
