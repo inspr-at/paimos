@@ -334,13 +334,26 @@ func TestVendorStopAdviceRejectsUnenrolledDaemonSquatter(t *testing.T) {
 
 // Risk: a redacted overview row discloses quota headroom through routable,
 // or by omitting wait when slots remain. Private rows keep one constant shape.
+// A manual allowance is gated by the owner's clock, so the owned account runs on
+// explicit always-on hours and the claim is proved at a weekday midday, a
+// weekend night and the last minutes of a day, not just when CI happens to run.
 func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
+	for _, at := range []time.Time{
+		time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC),
+		time.Date(2026, 10, 10, 3, 0, 0, 0, time.UTC),
+		time.Date(2026, 10, 7, 23, 30, 0, 0, time.UTC),
+	} {
+		t.Run(at.Format("Mon 15:04"), func(t *testing.T) { redactedOverviewHidesRoutableHeadroomAt(t, at) })
+	}
+}
+
+func redactedOverviewHidesRoutableHeadroomAt(t *testing.T, now time.Time) {
 	reset(t)
 	person := makePrincipal(t, "overview-routable", "person", "Owner", []string{"admin"})
 	other := addPrincipal(t, person.TenantID, "person", "Other", nil)
 	runner := addPrincipal(t, person.TenantID, "agent", "runtime", nil)
 	codexProfile(t, person)
-	now := time.Now().UTC()
+	mod := fixedClockModule{Module: accountsMod(), at: now}
 	var own, private string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
 		for _, row := range []struct{ label, owner string }{{"Own", person.ID}, {"Private", other.ID}} {
@@ -361,15 +374,21 @@ func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	alwaysOn := capacity.DefaultSchedule("Europe/Vienna")
+	alwaysOn.Reserve = capacity.ReserveOff
+	for i := range alwaysOn.Week {
+		alwaysOn.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	callStatus(t, mod, &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: own, Schedule: &alwaysOn}), 204, nil)
 	var page overviewPage
-	callStatus(t, accountsMod(), &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
+	callStatus(t, mod, &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
 	seen := map[string]overviewAccount{}
 	for _, a := range page.Accounts {
 		seen[a.AccountID] = a
 	}
 	shared, privateRow := seen[own], seen[private]
 	if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil {
-		t.Fatalf("owned account with open slots was not routable: %+v", shared)
+		t.Fatalf("owned account with open slots was not routable at %s: %+v", now.Format(time.RFC3339), shared)
 	}
 	if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
 		t.Fatalf("redacted overview disclosed headroom: %+v", privateRow)
