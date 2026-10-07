@@ -146,7 +146,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	var provider, openRouterFile string
 	f.StringVar(&provider, "provider", "", "pi provider ID; openrouter prompts for the key locally")
 	f.StringVar(&openRouterFile, "openrouter-env-file", "", "owner-selected private file containing OPENROUTER_API_KEY")
-	f.Var(&harnesses, "harness", "selected harness; repeat for another harness")
+	f.Var(&harnesses, "harness", "selected harness; repeat for another harness. Several accounts per harness require separate isolated config homes and account keys")
 	f.StringVar(&contextLabel, "account-context", "", "Expected account identity (pi: configured provider ID)")
 	f.StringVar(&account, "account-id", "", "remove only this enrolled account")
 	f.StringVar(&nodePath, "node-path", "", "pinned Node executable for npm harness launchers")

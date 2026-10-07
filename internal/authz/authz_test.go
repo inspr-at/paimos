@@ -68,8 +68,8 @@ func TestRegistryAndBuiltins(t *testing.T) {
 }
 
 func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
-	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage"}) {
-		t.Fatal("built-in agent exclusions drifted from the explicit recurrence policy")
+	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage", "account.overview.read"}) {
+		t.Fatal("built-in agent exclusions drifted from the explicit policies")
 	}
 	for _, key := range builtinAgentExclusions {
 		permission, ok := Lookup(key)

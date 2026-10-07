@@ -151,6 +151,20 @@ paths:
       responses:
         '204': {description: Group removed}
         '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/overview:
+    get:
+      operationId: listAccountOverview
+      summary: "Every enrolled account and its capacity values"
+      description: "Tenant-scoped, read-only keyset pages. People need account.read; agent keys need the explicit account.overview.read scope and a custom-role grant, excluded from built-in agent defaults. Current owner-sharing masking applies, including private peers in shared pools. No vendor identity, account key, config-home path or contents, or credentials. Routing is advice; reservation and claim recheck all admission rules. Work is bounded to 1024 current accounts and 4096 windows per tenant with a five-second deadline; larger projections fail explicitly."
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+        - {name: after, in: query, schema: {type: string, format: uuid}, description: "Last account_id from the previous page; accounts are ordered by UUID."}
+      responses:
+        '200': {description: "Account values", content: {application/json: {schema: {$ref: '#/components/schemas/AccountOverviewPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
   /agent-accounts/pins:
     get:
       operationId: listAccountPins
@@ -12261,6 +12275,65 @@ components:
         revision: {type: integer, minimum: 0}
         state: {type: string, enum: [pending, linked]}
         expires_at: {type: string, format: date-time}
+    AccountOverview:
+      type: object
+      additionalProperties: false
+      required: [account_id, provider, harness, label, host_label, daemon_id, state, billing_mode, windows, routable, details_redacted]
+      properties:
+        account_id: {type: string, format: uuid}
+        provider: {type: string, description: "Configured provider, or the native harness provider; empty when unknown."}
+        harness: {type: string}
+        label: {type: string}
+        host_label: {type: string}
+        daemon_id: {type: string}
+        owner_person_id: {type: string, format: uuid}
+        owner_person_name: {type: string}
+        state: {type: string, enum: [available, draining, unavailable]}
+        billing_mode: {type: string, enum: [unknown, subscription, api]}
+        windows: {type: array, maxItems: 4096, items: {$ref: '#/components/schemas/AccountOverviewWindow'}}
+        schedule: {$ref: '#/components/schemas/CapacitySchedule'}
+        limit: {$ref: '#/components/schemas/AccountLimitRule'}
+        quota_pool_fingerprint: {type: string, description: "Confirmed shared-pool membership only; matching vendor signals alone do not join accounts."}
+        routing: {$ref: '#/components/schemas/CapacityRouting'}
+        routable: {type: boolean, description: "Advisory admission and slot eligibility, never launch authority or proof of measured room."}
+        wait: {$ref: '#/components/schemas/CapacityWait'}
+        details_redacted: {type: boolean, description: "Windows, schedule, limit, pool membership and routing withheld by current owner-sharing policy."}
+    AccountOverviewLearning:
+      type: object
+      additionalProperties: false
+      required: [burn_percent_per_hour, samples]
+      properties:
+        limit_tokens: {type: number, exclusiveMinimum: 0, description: "Learned full-window token capacity, absent without a token conversion."}
+        burn_percent_per_hour: {type: number, minimum: 0}
+        samples: {type: integer, minimum: 0}
+    AccountOverviewPage:
+      type: object
+      additionalProperties: false
+      required: [accounts, as_of, has_more]
+      properties:
+        as_of: {type: string, format: date-time}
+        accounts: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AccountOverview'}}
+        has_more: {type: boolean}
+        next_cursor: {type: string, format: uuid}
+    AccountOverviewWindow:
+      type: object
+      additionalProperties: false
+      required: [window_kind, bucket, starts_at, resets_at, unit, allowance, used, reserved, freshness, source]
+      properties:
+        window_kind: {type: string, description: "Vendor kind, manual, fact, refresh or blind."}
+        bucket: {type: string}
+        starts_at: {type: string, format: date-time}
+        resets_at: {type: string, format: date-time}
+        read_at: {type: string, format: date-time}
+        unit: {type: string}
+        allowance: {type: integer}
+        used: {type: number}
+        reserved: {type: integer}
+        used_percent: {type: number, minimum: 0, maximum: 100}
+        freshness: {type: string, enum: [fresh, aging, stale, expired, unknown]}
+        source: {type: string, enum: [vendor_reported, learned, manual, synthetic]}
+        pacing: {$ref: '#/components/schemas/CapacityPacing'}
+        learned: {$ref: '#/components/schemas/AccountOverviewLearning'}
     AccountProbe:
       type: object
       required: [daemon_id, daemon_generation, available]
@@ -17235,9 +17308,9 @@ components:
         code: {type: string, const: step_up_required}
         challenge_id: {type: string, format: uuid}
         expires_at: {type: string, format: date-time}
-    PairingAccountChoice: {"type": "object", "additionalProperties": false, "required": ["account_key", "harness", "label"], "properties": {"account_key": {"type": "string", "minLength": 1, "maxLength": 128}, "harness": {"type": "string", "enum": ["claude", "codex", "cursor", "grok", "pi", "gemini", "opencode"]}, "provider": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$", "description": "Optional pi configured-provider binding; restricts the selected model profile, never a person identity or credential."}, "label": {"type": "string", "minLength": 1, "maxLength": 128}, "model_profile_id": {"type": "string", "format": "uuid"}}}
-    PairingApproval: {"type": "object", "description": "Connect only never creates verification. Repeating the same selection may withdraw queued verification by changing one_per_harness to connect_only; it never replenishes verification. A new approval for an existing computer cancels older unclaimed queued verifications.", "additionalProperties": false, "required": ["request_digest", "verification", "selected_account_keys"], "properties": {"request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verification": {"type": "string", "enum": ["one_per_harness", "connect_only"]}, "selected_account_keys": {"type": "array", "minItems": 1, "maxItems": 7, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}}}}
-    PairingDeviceRequest: {"type": "object", "additionalProperties": false, "required": ["request_id", "device_hash", "runtime_hash", "lifecycle_hash", "computer_name", "platform", "arch", "workspace_path", "capabilities", "accounts"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "tenant_slug": {"type": "string"}, "device_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "runtime_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "computer_name": {"type": "string", "minLength": 1, "maxLength": 128}, "platform": {"type": "string", "enum": ["darwin", "linux"]}, "arch": {"type": "string", "enum": ["arm64", "amd64"]}, "workspace_path": {"type": "string", "maxLength": 1024}, "capabilities": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "managed_runs"}}, "accounts": {"type": "array", "minItems": 1, "maxItems": 7, "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "existing_computer_id": {"type": "string", "format": "uuid"}, "existing_lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "local_auth_public_key": {"type": "string", "maxLength": 88, "description": "Optional base64 X9.63 uncompressed P-256 public key from the Secure Enclave; immutable for the computer and included in browser-reviewed pairing details. Darwin only."}}, "oneOf": [{"required": ["tenant_id"], "not": {"required": ["tenant_slug"]}}, {"required": ["tenant_slug"], "not": {"required": ["tenant_id"]}}], "dependentRequired": {"existing_computer_id": ["existing_lifecycle_secret"], "existing_lifecycle_secret": ["existing_computer_id"]}}
+    PairingAccountChoice: {"type": "object", "additionalProperties": false, "required": ["account_key", "harness", "label"], "properties": {"account_key": {"type": "string", "minLength": 1, "maxLength": 128}, "harness": {"type": "string", "enum": ["claude", "codex", "cursor", "grok", "pi", "gemini", "opencode"]}, "provider": {"type": "string", "pattern": "^[a-z][a-z0-9_-]{0,63}$", "description": "Optional pi configured-provider binding; restricts the selected model profile, never a person identity or credential."}, "label": {"type": "string", "minLength": 1, "maxLength": 128}, "model_profile_id": {"type": "string", "format": "uuid"}, "config_home_id": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "Opaque computer-local identifier for a separate isolated config home. Each home must have its own identifier; never send its path, contents or vendor identity. Multiple accounts per harness require it on every account."}}}
+    PairingApproval: {"type": "object", "description": "Connect only never creates verification. Repeating the same selection may withdraw queued verification by changing one_per_harness to connect_only; it never replenishes verification. A new approval for an existing computer cancels older unclaimed queued verifications.", "additionalProperties": false, "required": ["request_digest", "verification", "selected_account_keys"], "properties": {"request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "verification": {"type": "string", "enum": ["one_per_harness", "connect_only"]}, "selected_account_keys": {"type": "array", "minItems": 1, "maxItems": 32, "uniqueItems": true, "items": {"type": "string", "maxLength": 128}}}}
+    PairingDeviceRequest: {"type": "object", "additionalProperties": false, "required": ["request_id", "device_hash", "runtime_hash", "lifecycle_hash", "computer_name", "platform", "arch", "workspace_path", "capabilities", "accounts"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "tenant_slug": {"type": "string"}, "device_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "runtime_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lifecycle_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "computer_name": {"type": "string", "minLength": 1, "maxLength": 128}, "platform": {"type": "string", "enum": ["darwin", "linux"]}, "arch": {"type": "string", "enum": ["arm64", "amd64"]}, "workspace_path": {"type": "string", "maxLength": 1024}, "capabilities": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"const": "managed_runs"}}, "accounts": {"type": "array", "minItems": 1, "maxItems": 32, "items": {"$ref": "#/components/schemas/PairingAccountChoice"}}, "existing_computer_id": {"type": "string", "format": "uuid"}, "existing_lifecycle_secret": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "local_auth_public_key": {"type": "string", "maxLength": 88, "description": "Optional base64 X9.63 uncompressed P-256 public key from the Secure Enclave; immutable for the computer and included in browser-reviewed pairing details. Darwin only."}}, "oneOf": [{"required": ["tenant_id"], "not": {"required": ["tenant_slug"]}}, {"required": ["tenant_slug"], "not": {"required": ["tenant_id"]}}], "dependentRequired": {"existing_computer_id": ["existing_lifecycle_secret"], "existing_lifecycle_secret": ["existing_computer_id"]}}
     PairingDeviceResponse: {"type": "object", "additionalProperties": false, "required": ["request_id", "tenant_id", "user_code", "state", "expires_at", "interval_seconds", "verification_uri", "request_digest"], "properties": {"request_id": {"type": "string", "format": "uuid"}, "tenant_id": {"type": "string", "format": "uuid"}, "user_code": {"type": "string"}, "state": {"type": "string"}, "expires_at": {"type": "string", "format": "date-time"}, "interval_seconds": {"const": 5}, "verification_uri": {"type": "string"}, "request_digest": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}}
     PairingDisconnect: {"type": "object", "additionalProperties": false, "required": ["mode", "expected_revision"], "properties": {"mode": {"type": "string", "enum": ["drain", "revoke_now"]}, "expected_revision": {"type": "integer", "minimum": 1, "description": "Required for person disconnect/remove from a reviewed PairingView. Optional for self-disconnect."}}}
     PairingError: {"type": "object", "additionalProperties": false, "required": ["error", "code"], "properties": {"error": {"type": "string"}, "code": {"type": "string"}}}

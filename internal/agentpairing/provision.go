@@ -3,13 +3,13 @@ package agentpairing
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentcompat"
-	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
@@ -31,7 +31,7 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		WriteError(w, err)
 		return
 	}
-	if !hashRE.MatchString(in.Digest) || (in.Verification != "one_per_harness" && in.Verification != "connect_only") || len(in.Selected) < 1 || len(in.Selected) > len(agentverification.Harnesses()) {
+	if !hashRE.MatchString(in.Digest) || (in.Verification != "one_per_harness" && in.Verification != "connect_only") || len(in.Selected) < 1 || len(in.Selected) > maxComputerAccounts {
 		WriteError(w, fail(400, "invalid_request", "review digest, selected accounts and verification choice required"))
 		return
 	}
@@ -133,6 +133,9 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 			if state != "connected" {
 				return fail(409, "pairing_revoked", "computer is disconnecting or revoked; pair afresh")
 			}
+			if err = validateAdditionalAccounts(ctx, tx, computer, chosen); err != nil {
+				return err
+			}
 			// Do not expand the original creator ceiling during Add harness.
 			var creator string
 			if err = tx.QueryRow(ctx, `SELECT q.approved_by::text FROM agent_pairing_computers c JOIN agent_pairing_requests q ON q.tenant_id=c.tenant_id AND q.id=c.request_id WHERE c.id=$1`, computer).Scan(&creator); err != nil {
@@ -232,6 +235,42 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 		return
 	}
 	reply(w, out)
+}
+
+// Check the complete live enrollment, not just this Add harness request. A
+// second request cannot evade the config-home isolation or computer-size bound.
+// Immutable reviewed details retain the opaque home binding without a migration.
+func validateAdditionalAccounts(ctx context.Context, tx pgx.Tx, computer string, chosen []Choice) error {
+	rows, err := tx.Query(ctx, `SELECT q.details,a.account_key FROM agent_pairing_enrollments e
+ JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id
+ JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id
+ WHERE e.computer_id=$1 AND e.state<>'revoked' ORDER BY e.account_id LIMIT 33`, computer)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	all := slices.Clone(chosen)
+	for rows.Next() {
+		var raw []byte
+		var key string
+		if err := rows.Scan(&raw, &key); err != nil {
+			return err
+		}
+		var details Details
+		if err := json.Unmarshal(raw, &details); err != nil {
+			return err
+		}
+		for _, account := range details.Accounts {
+			if account.AccountKey == key {
+				all = append(all, account)
+				break
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return validateAccountChoices(all)
 }
 
 // retireReplaced deactivates the runtime identities a fresh pairing replaces, so

@@ -421,8 +421,22 @@ function selectedKey(harness: string) {
 
 function toggleHarness(harness: string, accounts: PairingView['requested_accounts'], on: boolean) {
   if (!current.value) return
-  const key = on ? (selectedKey(harness) || accounts[0]?.account_key || null) : null
-  selected.value = setHarnessAccount(current.value.requested_accounts, selected.value, harness, key)
+  if (isolatedAccounts(accounts)) {
+    selected.value = selected.value.filter(key => !accounts.some(account => account.account_key === key))
+    if (on) selected.value.push(...accounts.map(account => account.account_key))
+  } else {
+    const key = on ? (selectedKey(harness) || accounts[0]?.account_key || null) : null
+    selected.value = setHarnessAccount(current.value.requested_accounts, selected.value, harness, key)
+  }
+}
+
+function isolatedAccounts(accounts: PairingView['requested_accounts']) {
+  return accounts.length > 1 && accounts.every(account => !!account.config_home_id) && new Set(accounts.map(account => account.config_home_id)).size === accounts.length
+}
+
+function toggleAccount(key: string, on: boolean) {
+  selected.value = selected.value.filter(value => value !== key)
+  if (on) selected.value.push(key)
 }
 
 function chooseAccount(harness: string, accountKey: string) {
@@ -620,14 +634,20 @@ function enrollmentDetail(enrollment: PairingView['enrollments'][number]) {
 
       <template v-if="pendingReview">
         <h3>Harnesses</h3>
-        <p class="sub">Each selected harness connects with one account.</p>
+        <p class="sub">Several accounts can connect to the same harness when each has a separate isolated config home. Without isolation, choose one account.</p>
         <div v-for="group in accountGroups" :key="group.harness" class="harness">
           <label class="check">
             <input type="checkbox" :checked="!!selectedKey(group.harness)" :aria-label="`Connect ${harnessLabel(group.harness)}`" @change="toggleHarness(group.harness, group.accounts, ($event.target as HTMLInputElement).checked)" />
             <HarnessMark :harness="group.harness" />
             <span>{{ harnessLabel(group.harness) }}</span>
           </label>
-          <label class="account-pick">
+          <div v-if="isolatedAccounts(group.accounts)" class="account-pick">
+            <label v-for="account in group.accounts" :key="account.account_key" class="check">
+              <input type="checkbox" :checked="selected.includes(account.account_key)" :aria-label="`Connect account ${account.label}`" @change="toggleAccount(account.account_key, ($event.target as HTMLInputElement).checked)" />
+              <span>{{ account.label }}</span>
+            </label>
+          </div>
+          <label v-else class="account-pick">
             <span class="sr">Account for {{ harnessLabel(group.harness) }}</span>
             <select class="field" :value="selectedKey(group.harness)" :aria-label="`Account for ${harnessLabel(group.harness)}`" @change="chooseAccount(group.harness, ($event.target as HTMLSelectElement).value)">
               <option value="">Leave out</option>

@@ -8800,6 +8800,18 @@
     ,
     {"kind":"browser","file":"tests/model-refresh.spec.ts","name":"model refresh starts private, saves its interval and accepts profiles without route writes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1440px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1440px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 390px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 390px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"Business shows only while one of its parts is open","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/nav.spec.ts","name":"Business tabs: a closed Customers or Quotes says how to open it; earlier links lead there","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -13357,6 +13369,8 @@
     {"kind":"node","file":"tests/markdown-links.test.ts","name":"splitPlainText keeps boundaries and balanced parentheses","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/metadata-history.test.ts","name":"short history is newest first and drops entries outside the published fields","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/multiple-account-pairing.test.ts","name":"pairing approves every distinct isolated home and rejects a duplicate or default home","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/no-shift-rules.test.ts","name":"worker guidance permits downward growth and scopes fixed-frame measurements to pattern B","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
