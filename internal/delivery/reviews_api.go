@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"reflect"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -73,7 +74,7 @@ func (m *Module) reviewRequest(w http.ResponseWriter, r *http.Request, permissio
 	if !ok {
 		return
 	}
-	project := r.PathValue("projectId")
+	project := strings.ToLower(r.PathValue("projectId"))
 	if !workorders.UUID(project) {
 		respondError(w, fail(400, "invalid review project"))
 		return
@@ -178,6 +179,8 @@ func (m *Module) enqueueReview(w http.ResponseWriter, r *http.Request) {
 		respondError(w, err)
 		return
 	}
+	in.SourceRound = strings.ToLower(in.SourceRound)
+	in.AuthorRun = strings.ToLower(in.AuthorRun)
 	if err := validateReviewInput(in); err != nil {
 		respondError(w, err)
 		return
@@ -191,12 +194,13 @@ func (m *Module) enqueueReview(w http.ResponseWriter, r *http.Request) {
 	})
 }
 func (m *Module) claimReview(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("reviewId")
+	id := strings.ToLower(r.PathValue("reviewId"))
 	var in ReviewClaimInput
 	if err := decode(w, r, &in); err != nil {
 		respondError(w, err)
 		return
 	}
+	in.Request = strings.ToLower(in.Request)
 	if !workorders.UUID(id) || !workorders.UUID(in.Request) || in.ScriptFamily != nil && !reviewgate.ValidFamily(*in.ScriptFamily) {
 		respondError(w, fail(400, "invalid review claim"))
 		return
@@ -271,12 +275,14 @@ func (m *Module) claimReview(w http.ResponseWriter, r *http.Request) {
 	})
 }
 func (m *Module) reviewVerdict(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("reviewId")
+	id := strings.ToLower(r.PathValue("reviewId"))
 	var in ReviewVerdictInput
 	if err := decode(w, r, &in); err != nil {
 		respondError(w, err)
 		return
 	}
+	in.Request = strings.ToLower(in.Request)
+	in.Profile = strings.ToLower(in.Profile)
 	if !workorders.UUID(id) {
 		respondError(w, fail(400, "invalid review id"))
 		return
@@ -365,6 +371,7 @@ func appendReviewChange(ctx context.Context, tx pgx.Tx, p tenant.Principal, kind
 // RebuildReviews restores only these shadow projections. It never replays a
 // proposed ticket, worker start, lead request or GitHub write as an action.
 func (m *Module) RebuildReviews(ctx context.Context, p tenant.Principal, project string) error {
+	project = strings.ToLower(project)
 	if !workorders.UUID(project) {
 		return fail(400, "invalid review project")
 	}

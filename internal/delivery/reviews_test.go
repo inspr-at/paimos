@@ -166,11 +166,18 @@ func TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation(t *testing.T) {
 	if !reflect.DeepEqual(first, retry) || reviewEvents(t, f) != n {
 		t.Fatal("enqueue was not idempotent")
 	}
+	canonical := in
+	canonical.AuthorRun = strings.ToUpper(in.AuthorRun)
+	f.call(t, f.person, "POST", "/api/projects/"+strings.ToUpper(f.project)+"/delivery-reviews", canonical, 200, &retry)
+	if !reflect.DeepEqual(first, retry) || reviewEvents(t, f) != n {
+		t.Fatal("UUID case changed the review identity")
+	}
 	other := in
 	other.Head = strings.Repeat("f", 40)
 	f.call(t, f.person, "POST", path, other, 409, nil)
 	f.call(t, f.foreign, "GET", path, nil, 404, nil)
 	f.call(t, f.foreign, "POST", path, in, 404, nil)
+	f.call(t, f.foreign, "POST", path+"/"+first.ID+"/claim", ReviewClaimInput{Request: requestID(1)}, 404, nil)
 	var off ReviewClaim
 	f.call(t, f.person, "POST", path+"/"+first.ID+"/claim", ReviewClaimInput{Request: requestID(1)}, 200, &off)
 	if off.Execute || off.Round != nil || off.Reason != "review_off" {
@@ -215,7 +222,15 @@ func TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation(t *testing.T) {
 	if claim.Execute || claim.Round == nil || claim.Round.Route == nil || claim.Round.Route.Profile != profile || claim.Round.Route.Family == claim.Round.AuthorFamily || claim.Agreement == nil || !*claim.Agreement {
 		t.Fatal("wrong shadow route", claim)
 	}
-	originalClaim := claim
+	// Keep a detached receipt: later response decoding reuses pointer fields.
+	var originalClaim ReviewClaim
+	claimBytes, err := json.Marshal(claim)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(claimBytes, &originalClaim); err != nil {
+		t.Fatal(err)
+	}
 	n = reviewEvents(t, f)
 	var duplicate ReviewClaim
 	f.call(t, f.agent, "POST", path+"/"+first.ID+"/claim", claimInput, 200, &duplicate)
@@ -231,6 +246,7 @@ func TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation(t *testing.T) {
 	wrong.Profile = requestID(900)
 	f.call(t, f.agent, "POST", path+"/"+first.ID+"/verdict", wrong, 409, nil)
 	f.call(t, f.person, "POST", path+"/"+first.ID+"/verdict", verdict, 403, nil)
+	f.call(t, f.foreign, "POST", path+"/"+first.ID+"/verdict", verdict, 404, nil)
 	setPolicy([]string{"openai"})
 	f.call(t, f.agent, "POST", path+"/"+first.ID+"/verdict", verdict, 409, nil)
 	setPolicy([]string{"anthropic"})
@@ -327,6 +343,16 @@ func TestDeliveryReviewsShadowFixCapFollowUpReplayAndIsolation(t *testing.T) {
 		return err
 	})
 	f.call(t, f.agent, "POST", path+"/"+notes.ID+"/verdict", verdict, 403, nil)
+	// Even an original receipt is hidden after its current ticket is deleted.
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=clock_timestamp() WHERE id=$1`, f.ticket)
+		return err
+	})
+	f.call(t, f.agent, "POST", path+"/"+first.ID+"/claim", claimInput, 404, nil)
+	f.call(t, f.person, "GET", path, nil, 200, &page)
+	if len(page.Items) != 0 {
+		t.Fatal("deleted ticket still exposed review bindings")
+	}
 	if err := db.InTenant(dbtest.Seed(t.Context()), f.d.App, f.foreign.TenantID, func(tx pgx.Tx) error {
 		for _, table := range []string{"delivery_review_rounds", "delivery_review_settings", "delivery_review_claims"} {
 			var n int
@@ -385,7 +411,12 @@ func TestDeliveryReviewsConcurrentClaimsHaveOneOwner(t *testing.T) {
 		}
 		for {
 			var waiters int
-			if err := f.d.Admin.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))`, blocker).Scan(&waiters); err != nil {
+			// PostgreSQL can queue the second waiter behind the first waiter
+			// rather than directly behind the holder. Prove the entire chain.
+			if err := f.d.Admin.QueryRow(ctx, `WITH RECURSIVE waiters AS (
+ SELECT pid FROM pg_stat_activity WHERE $1=ANY(pg_blocking_pids(pid))
+ UNION SELECT a.pid FROM pg_stat_activity a JOIN waiters w ON w.pid=ANY(pg_blocking_pids(a.pid))
+ ) SELECT count(*) FROM waiters`, blocker).Scan(&waiters); err != nil {
 				return err
 			}
 			if waiters >= 2 {
