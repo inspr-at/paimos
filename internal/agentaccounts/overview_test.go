@@ -368,7 +368,7 @@ func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3,$3,$4)`, person.TenantID, person.ID, own, raw)
+		_, err = tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3,$4::uuid,$5)`, person.TenantID, person.ID, own, own, raw)
 		return err
 	}); err != nil {
 		t.Fatal(err)
