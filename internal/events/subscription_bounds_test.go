@@ -212,7 +212,7 @@ func TestSubscriptionTopicProjectAndReferenceCeilings(t *testing.T) {
 		for i, change := range []Change{
 			{Type: "review_policy.changed", NodeID: &projects[0], After: map[string]any{"mode": "other_family"}},
 			{Type: "review_policy.changed", NodeID: &projects[1], After: map[string]any{"mode": "other_family"}},
-			{Type: "review_policy.changed", NodeID: &projects[0], After: map[string]any{"mode": "other_family", "project_id": projects[1]}},
+			{Type: "review_policy.changed", NodeID: &projects[0], After: map[string]any{"mode": "other_family", "node_id": projects[0], "project_id": projects[1]}},
 			{Type: "delivery.state_changed", NodeID: &projects[0], After: map[string]any{"state": "held"}},
 			{Type: "quote.updated", NodeID: &projects[0], After: map[string]any{"private": "never"}},
 		} {
