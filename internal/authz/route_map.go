@@ -26,6 +26,7 @@ const AuthenticatedRoute = "authenticated"
 var RoutePermissions = map[string]string{
 	"POST /api/github/webhook":                        "public",
 	"GET /api/delivery":                               "delivery.read",
+	"GET /api/delivery/alerts":                        "delivery.read",
 	"GET /api/nodes/{id}/delivery":                    "delivery.read",
 	"POST /api/delivery/{itemId}/hold":                "delivery.manage",
 	"DELETE /api/delivery/{itemId}/hold":              "delivery.manage",
@@ -813,7 +814,7 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 // Delivery entry checks admit project bindings; handlers fence and recheck
 // the live target project's permission and RLS before returning or changing it.
 func init() {
-	for _, pattern := range []string{"GET /api/delivery", "GET /api/nodes/{id}/delivery", "POST /api/delivery/{itemId}/hold", "DELETE /api/delivery/{itemId}/hold"} {
+	for _, pattern := range []string{"GET /api/delivery", "GET /api/delivery/alerts", "GET /api/nodes/{id}/delivery", "POST /api/delivery/{itemId}/hold", "DELETE /api/delivery/{itemId}/hold"} {
 		ProjectFilteredRoutes[pattern] = true
 	}
 }

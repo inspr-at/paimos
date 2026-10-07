@@ -3231,6 +3231,23 @@ paths:
         '200': {description: 'Delivery page', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryPage'}}}}
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
+  /delivery/alerts:
+    get:
+      operationId: listDeliveryAlerts
+      description: 'Observe-only stall alerts visible to the caller. Requires delivery.read; project keys and bounded episode keyset pagination are supported.'
+      security: [{session: []}, {agentKey: []}]
+      parameters:
+        - {name: project, in: query, schema: {type: string, maxLength: 64}}
+        - {name: open, in: query, description: 'True lists uncleared alerts; false lists cleared alerts. Omit to list both.', schema: {type: boolean}}
+        - {name: after, in: query, schema: {type: string, maxLength: 256}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        '200': {description: 'Delivery alert page', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryAlertPage'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '401': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '500': {$ref: '#/components/responses/Error'}
   /delivery/{itemId}/hold:
     parameters:
       - {name: itemId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -14341,6 +14358,23 @@ components:
         has_more: {type: boolean}
         next_cursor: {type: string}
         as_of: {type: string, format: date-time}
+    DeliveryAlert:
+      type: object
+      required: [item_id, state, state_since, alerted_at, recipient_principal_id, inbox_message_id, cleared_at]
+      properties:
+        item_id: {type: string, format: uuid}
+        state: {$ref: '#/components/schemas/DeliveryState'}
+        state_since: {type: string, format: date-time}
+        alerted_at: {type: string, format: date-time}
+        recipient_principal_id: {type: [string, 'null'], format: uuid}
+        inbox_message_id: {type: [string, 'null'], format: uuid}
+        cleared_at: {type: [string, 'null'], format: date-time}
+    DeliveryAlertPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/DeliveryAlert'}}
+        next_cursor: {type: [string, 'null'], maxLength: 256}
     DeliveryItem:
       type: object
       required: [id, project_id, ticket_node_id, repository, pull_request, branch, head_sha, state, state_since, owner, deadline_at, held_reason, link_source, updated_at]
