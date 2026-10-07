@@ -27,6 +27,7 @@ func makeRegistry() []Permission {
 		{"nodes", "read write delete move restore configure"},
 		{"recurrences", "manage"},
 		{"delivery", "read manage"},
+		{"delivery_queue", "read manage claim"},
 		{"reviewpolicy", "read manage"},
 		{"rules", "read write publish"},
 		{"kinds", "read manage"}, {"tags", "read write manage"},
@@ -139,6 +140,8 @@ func builtinPermissions(key string) []string {
 			allow = p.Key != "ownership.transfer"
 		case "member":
 			switch resource {
+			case "delivery_queue":
+				allow = p.Key == "delivery_queue.read"
 			case "recurrences":
 				allow = true
 			case "rules":
@@ -171,7 +174,7 @@ func builtinPermissions(key string) []string {
 
 func productReadGroup(group string) bool {
 	switch group {
-	case "delivery", "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "stage_handoffs", "harness", "work_orders", "runs", "run", "approvals", "inbox", "models", "views", "events", "search", "hours", "quotes", "crm", "cost_units", "project_groups", "profile", "outcome", "reviewpolicy":
+	case "delivery_queue", "delivery", "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "stage_handoffs", "harness", "work_orders", "runs", "run", "approvals", "inbox", "models", "views", "events", "search", "hours", "quotes", "crm", "cost_units", "project_groups", "profile", "outcome", "reviewpolicy":
 		return true
 	}
 	return false

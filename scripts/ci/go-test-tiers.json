@@ -5092,6 +5092,10 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryWebhookSequenceRebuildIsolationAndHolds","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWorkQueueConcurrentClaimOwnsSlugOnce","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryWorkQueueShadowRotationFreezeReplayAndIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestGitHubReaderConfirmsMissingPull","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestGitHubReaderUsesReadOnlyScopesAndFreshQueueHead","tier":"ESSENTIAL"}

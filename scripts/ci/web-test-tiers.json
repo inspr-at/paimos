@@ -6480,6 +6480,8 @@
     ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"failed writes stay honest; project reset offers scope-bound Undo and uses captured revisions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"shadow delivery rounds show holds without moving delivery controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/deploy-target.spec.ts","name":"Needs you names destinations and keeps target-less approvals usable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/developer-settings.spec.ts","name":"retired Flow bookmarks open tickets and saved opt-ins cannot revive it","config":"playwright.ui.config.ts","project":"","tags":[],"tier":"GATED-FULL"}
@@ -14107,6 +14109,8 @@
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a pending ticket read and lift result are discarded after ticket or person changes","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a policy save cannot report success after the person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"delivery queue reads stay with the ticket and person and expose refresh failures","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"family eligibility comes from the server; empty allowlists never save and failed writes keep the draft","tier":"ESSENTIAL"}
     ,

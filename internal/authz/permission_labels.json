@@ -1,6 +1,7 @@
 {
   "resources": {
     "reviewpolicy": "review policy",
+    "delivery_queue": "delivery work queue",
     "recurrences": "recurring work",
     "questions": "questions",
     "nodes": "work",
