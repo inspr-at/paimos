@@ -61,7 +61,7 @@ func TestKeyScopeFullAccessAndExpiryKeepBearer(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin, _ := authz.BuiltinPermissions("admin")
-	if !slices.Contains(admin, "recurrences.manage") || !slices.Contains(admin, "reviewpolicy.manage") || !slices.Contains(admin, "delivery.manage") {
+	if !slices.Contains(admin, "recurrences.manage") || !slices.Contains(admin, "delivery.manage") || !slices.Contains(admin, "reviewpolicy.manage") {
 		t.Fatal("fixture requires the person Admin recurrence, delivery and review-policy permissions")
 	}
 	excluded := builtinAgentExclusions(t)

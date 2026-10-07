@@ -56,7 +56,8 @@ func newWorkstationFixture(t *testing.T) *workstationFixture {
 	excluded := builtinAgentExclusions(t)
 	for _, p := range authz.Registry {
 		// The fixture switches to built-in Admin below. Excluded permissions
-		// require an explicit custom-role grant, even for workstation keys.
+		// (recurrence, delivery and review-policy management) require an
+		// explicit custom-role grant, even for workstation keys.
 		if p.AgentGrantable && !excluded[p.Key] {
 			scopes = append(scopes, p.Key)
 		}
