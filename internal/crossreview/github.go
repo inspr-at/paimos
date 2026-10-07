@@ -50,6 +50,9 @@ func (g *GitHubApp) Configured(tenantID, repository string) bool {
 	return appNumber.MatchString(a.ID) && appNumber.MatchString(a.InstallationID) && filepath.IsAbs(a.KeyFile) && workorders.UUID(a.TenantID) && reviewgate.ValidRepository(a.Repository) && tenantID == a.TenantID && repository == a.Repository
 }
 func (g *GitHubApp) request(ctx context.Context, token, method, path string, body, out any) error {
+	return g.requestBounded(ctx, token, method, path, body, out, 64<<10)
+}
+func (g *GitHubApp) requestBounded(ctx context.Context, token, method, path string, body, out any, limit int64) error {
 	var raw []byte
 	if body != nil {
 		var err error
@@ -82,8 +85,8 @@ func (g *GitHubApp) request(ctx context.Context, token, method, path string, bod
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
 		return errGitHub
 	}
-	raw, err = io.ReadAll(io.LimitReader(res.Body, 64<<10+1))
-	if err != nil || len(raw) > 64<<10 {
+	raw, err = io.ReadAll(io.LimitReader(res.Body, limit+1))
+	if err != nil || int64(len(raw)) > limit {
 		return errGitHub
 	}
 	if out != nil && json.Unmarshal(raw, out) != nil {
@@ -278,7 +281,7 @@ func (g *GitHubApp) ReadInstallation(ctx context.Context, read func(func(string,
 		}
 	}
 	return read(func(path string, out any) error {
-		return g.request(ctx, token.Token, "GET", "/repos/"+g.Config.Repository+path, nil, out)
+		return g.requestBounded(ctx, token.Token, "GET", "/repos/"+g.Config.Repository+path, nil, out, 4<<20)
 	}, func(number int64, head string) (bool, string, error) {
 		if number <= 0 || number > 2147483647 || !reviewgate.ValidSHA(head) {
 			return false, "", errGitHub

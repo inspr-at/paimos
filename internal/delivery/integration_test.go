@@ -156,7 +156,7 @@ func (f *fixture) webhook(t *testing.T, event, action, id string, want int) {
 }
 func (f *fixture) build(t *testing.T) {
 	f.tx(t, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,key,kind_id,title) SELECT $1,$2,'AEON-849',id,'Build order' FROM node_kinds WHERE slug='work' RETURNING id::text`, f.person.TenantID, f.ticket).Scan(&f.buildOrder); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,key,kind_id,title) SELECT $1,$2,'AEON-849',id,'Build order' FROM node_kinds WHERE slug='work_order' RETURNING id::text`, f.person.TenantID, f.ticket).Scan(&f.buildOrder); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,kind,status) VALUES($1,$2,$3,'build','done')`, f.person.TenantID, f.buildOrder, f.person.ID); err != nil {
@@ -172,7 +172,7 @@ func (f *fixture) build(t *testing.T) {
 func (f *fixture) review(t *testing.T) {
 	f.tx(t, func(tx pgx.Tx) error {
 		var order, run, profile, evidence string
-		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,key,kind_id,title) SELECT $1,$2,'AEON-850',id,'Review order' FROM node_kinds WHERE slug='work' RETURNING id::text`, f.person.TenantID, f.ticket).Scan(&order); err != nil {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,parent_id,key,kind_id,title) SELECT $1,$2,'AEON-850',id,'Review order' FROM node_kinds WHERE slug='work_order' RETURNING id::text`, f.person.TenantID, f.ticket).Scan(&order); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id,kind,status) VALUES($1,$2,$3,'review','done')`, f.person.TenantID, order, f.person.ID); err != nil {
