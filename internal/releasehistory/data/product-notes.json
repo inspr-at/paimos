@@ -5183,14 +5183,14 @@
     "261007063042.0.0": {
       "release_channel": "stable",
       "release_sequence": 125,
-      "snapshot_sha256": "b4c15ad79c889ba81dd3167a2aa028d8f7c53fc584c80d647ee98f17f31ee82a",
-      "captured_at": "2026-10-07T06:30:47Z",
+      "snapshot_sha256": "c40801543ead8f96d0a2ad55c0c56a31c7eb38d523ddcf774470dec9eb05810b",
+      "captured_at": "2026-10-07T06:33:24Z",
       "release_revision": 1,
       "items": [
         {
           "key": "AEON-858",
-          "pill_en": "Daemon starts reliably",
-          "pill_de": "Daemon startet zuverlässig",
+          "pill_en": "Daemon starts again",
+          "pill_de": "Daemon startet wieder",
           "benefit_en": "The background agent daemon starts again as a login service on Mac and Linux.",
           "benefit_de": "Der Agenten-Daemon startet wieder als Anmeldedienst auf Mac und Linux.",
           "group": "features"
