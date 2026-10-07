@@ -334,6 +334,8 @@ func TestVendorStopAdviceRejectsUnenrolledDaemonSquatter(t *testing.T) {
 
 // Risk: a redacted overview row discloses quota headroom through routable,
 // or by omitting wait when slots remain. Private rows keep one constant shape.
+// The owned account's schedule is on at every hour, so open manual slots stay
+// routable when this runs outside the default 08:00–22:00 UTC band.
 func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 	reset(t)
 	person := makePrincipal(t, "overview-routable", "person", "Owner", []string{"admin"})
@@ -357,7 +359,17 @@ func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 				private = id
 			}
 		}
-		return nil
+		schedule := capacity.DefaultSchedule()
+		for i := range schedule.Week {
+			schedule.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+		}
+		schedule.Reserve = capacity.ReserveOff
+		raw, err := json.Marshal(schedule)
+		if err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3,$3,$4)`, person.TenantID, person.ID, own, raw)
+		return err
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +381,7 @@ func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 	}
 	shared, privateRow := seen[own], seen[private]
 	if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil {
-		t.Fatalf("owned account with open slots was not routable: %+v", shared)
+		t.Fatalf("owned account with open slots was not routable: %+v wait=%+v", shared, shared.Wait)
 	}
 	if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
 		t.Fatalf("redacted overview disclosed headroom: %+v", privateRow)

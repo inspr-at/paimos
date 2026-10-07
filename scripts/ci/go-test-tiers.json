@@ -3488,6 +3488,8 @@
     ,
     {"kind":"go","package":"internal/authz","name":"TestStatusHelpAgentReadRequiresAuthentication","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/authz","name":"TestUsageProbeRouteRequiresAccountManage","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/authz","name":"TestViewerReadsStoredReviewPolicy","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/brand","name":"TestLoadOverride","tags":["delete-candidate"],"tier":"GATED-FULL"}
