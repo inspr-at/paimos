@@ -3,6 +3,7 @@ package crossreview
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -19,7 +20,7 @@ func statusState(v Review) string {
 	if v.GateOpen {
 		return "success"
 	}
-	if v.Result.Verdict == "changes" && v.Status == "completed" {
+	if (v.Result.Verdict == "changes" || v.policyDenied) && v.Status == "completed" {
 		if v.modelEvidence != "vendor_reported" || v.Model == nil || v.EffectiveModel == nil || !reviewgate.ModelMatches(*v.Model, *v.EffectiveModel) {
 			return "error"
 		}
@@ -31,6 +32,20 @@ func statusState(v Review) string {
 	default:
 		return "error"
 	}
+}
+
+// statusDescription is shared with the GitHub publisher (owned by AEON-848).
+// The current gate reason includes the effective family policy and recorded
+// identities. Never publish unbounded finding text as a status description.
+func statusDescription(v Review, state string) string {
+	if v.GitHubStatus == "stale" {
+		return "Review binding differs from the pull request"
+	}
+	if v.GateReason != "" && (state == "success" || state == "failure" || state == "error") {
+		description := []rune(strings.ReplaceAll(strings.ReplaceAll(v.GateReason, "\n", " "), "\r", " "))
+		return string(description[:min(140, len(description))])
+	}
+	return "Independent review pending"
 }
 
 // RunStatusReporter runs publication and binding refresh independently. Each

@@ -24,6 +24,11 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/settings/review-policy":                "reviewpolicy.read",
+	"PUT /api/settings/review-policy":                "reviewpolicy.manage",
+	"GET /api/projects/{projectId}/review-policy":    "reviewpolicy.read",
+	"PUT /api/projects/{projectId}/review-policy":    "reviewpolicy.manage",
+	"DELETE /api/projects/{projectId}/review-policy": "reviewpolicy.manage",
 	// Lead handlers retain their actor/owner checks inside the final transaction.
 	"GET /api/projects/{projectId}/lead":                            "harness.read",
 	"POST /api/projects/{projectId}/lead":                           "harness.control",
