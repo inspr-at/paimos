@@ -11876,6 +11876,8 @@
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"a role’s effect puts its riskiest permissions first; diffs and escalation","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/access.test.ts","name":"account overview ceilings require an explicit workspace grant in every key mode","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/access.test.ts","name":"agents split into working, deactivated and internal; a server without status knows only working ones","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"audit events read as sentences from the server’s shape","tier":"GATED-FULL"}
