@@ -3,6 +3,7 @@ package delivery
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/url"
@@ -179,6 +180,11 @@ func (g AppReader) Shipping(ctx context.Context, branch, head string) (ShipFacts
 	if err != nil {
 		return emptyShipFacts(), err
 	}
+	// Bound the complete normalized event, not just individual HTTP pages.
+	raw, err := json.Marshal(out)
+	if err != nil || len(raw) > 512<<10 {
+		return emptyShipFacts(), errRead
+	}
 	return out, nil
 }
 
@@ -194,6 +200,7 @@ func shipRuns(get func(string, any) error, head string) ([]ShipRun, error) {
 		Conclusion string `json:"conclusion"`
 	}
 	latest := map[string]workflowRun{}
+	total, received := -1, 0
 	for page := 1; page <= 10; page++ {
 		var response struct {
 			Total int           `json:"total_count"`
@@ -202,9 +209,11 @@ func shipRuns(get func(string, any) error, head string) ([]ShipRun, error) {
 		if err := get(fmt.Sprintf("/actions/runs?head_sha=%s&per_page=100&page=%d", head, page), &response); err != nil {
 			return nil, err
 		}
-		if response.Total > 1000 || response.Total < 0 {
+		if response.Total > 1000 || response.Total < 0 || len(response.Runs) > 100 || total != -1 && response.Total != total {
 			return nil, errRead
 		}
+		total = response.Total
+		received += len(response.Runs)
 		for _, run := range response.Runs {
 			if run.ID <= 0 || run.WorkflowID <= 0 || run.Attempt < 1 || run.Head != head || run.Name == "" || len(run.Name) > 200 {
 				return nil, errRead
@@ -224,12 +233,16 @@ func shipRuns(get func(string, any) error, head string) ([]ShipRun, error) {
 			return nil, errRead
 		}
 	}
+	if received != total {
+		return nil, errRead
+	}
 	if len(latest) > 20 {
 		return nil, errRead
 	}
 	out := []ShipRun{}
 	for _, run := range latest {
 		item := ShipRun{ID: run.ID, Attempt: run.Attempt, Head: run.Head, Workflow: run.Name, Event: run.Event, Status: run.Status, Conclusion: run.Conclusion, Jobs: []Check{}}
+		jobTotal := -1
 		for page := 1; page <= 10; page++ {
 			var response struct {
 				Total int `json:"total_count"`
@@ -246,9 +259,10 @@ func shipRuns(get func(string, any) error, head string) ([]ShipRun, error) {
 			if err := get(fmt.Sprintf("/actions/runs/%d/attempts/%d/jobs?per_page=100&page=%d", run.ID, run.Attempt, page), &response); err != nil {
 				return nil, err
 			}
-			if response.Total > 1000 || response.Total < 0 {
+			if response.Total > 1000 || response.Total < 0 || len(response.Jobs) > 100 || jobTotal != -1 && response.Total != jobTotal {
 				return nil, errRead
 			}
+			jobTotal = response.Total
 			for _, job := range response.Jobs {
 				if job.ID <= 0 || job.Run != run.ID || job.Attempt != run.Attempt || job.Head != head || job.Name == "" || len(job.Name) > 200 {
 					return nil, errRead
@@ -261,6 +275,9 @@ func shipRuns(get func(string, any) error, head string) ([]ShipRun, error) {
 			if page == 10 {
 				return nil, errRead
 			}
+		}
+		if len(item.Jobs) != jobTotal {
+			return nil, errRead
 		}
 		out = append(out, item)
 	}

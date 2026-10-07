@@ -190,7 +190,7 @@
       "name": "self-service is not implied by a project binding",
       "workspace": null,
       "projects": [["nodes.read"]],
-      "want": ["nodes.read"],
+      "want": ["nodes.read"]
     },
     {
       "name": "empty workspace role with project grants",

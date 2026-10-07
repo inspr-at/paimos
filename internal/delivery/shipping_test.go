@@ -220,6 +220,11 @@ func TestDeliveryShippingShadowOwnershipReplayAndIsolation(t *testing.T) {
 		return nil
 	})
 	f.tx(t, func(tx pgx.Tx) error {
+		// Keep the execution/run evidence while respecting parent deletion:
+		// retire the build child before retiring the business leaf.
+		if _, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=$2 WHERE id=$1`, f.buildOrder, f.at); err != nil {
+			return err
+		}
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET deleted_at=$2 WHERE id=$1`, f.ticket, f.at)
 		return err
 	})
