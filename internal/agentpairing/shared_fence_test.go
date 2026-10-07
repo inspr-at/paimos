@@ -117,6 +117,16 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		{"../statusautopilot/settings.go", "settings", "INSERT INTO status_autopilot_settings", "events.Append("},
 		{"../statusautopilot/settings.go", "project", "authz.LockProjectMutation(", "INSERT INTO status_autopilot_projects"},
 		{"../statusautopilot/settings.go", "project", "INSERT INTO status_autopilot_projects", "events.Append("},
+		// Review policy (AEON-851) enters the shared tree fence before the
+		// project row and re-checks authority there. Review rows are marked
+		// dirty before the event counter.
+		{"../crossreview/policy.go", "writePolicy", "db.LockTree(", "policyProject("},
+		{"../crossreview/policy.go", "writePolicy", "db.LockTree(", "authz.RequireTx("},
+		{"../crossreview/policy.go", "writePolicy", "UPDATE work_order_reviews", "events.Append("},
+		// Publication re-reads under the tenant fence after network I/O, before
+		// it writes the review row. The binding invalidation commits earlier,
+		// in its own transaction, and does not hold this fence across the post.
+		{"../crossreview/reporter.go", "publishReview", "db.LockTenant(", "github_status=$2"},
 	}
 	for _, c := range checks {
 		raw, err := os.ReadFile(c.path)
