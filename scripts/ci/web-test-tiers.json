@@ -15506,6 +15506,8 @@
     ,
     {"kind":"vitest","file":"tests/session-removal-store.unit.test.ts","name":"an in-flight poll and an older snapshot cannot resurrect a removed generation","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a burst during a slow poll starts one catch-up and one trailing read","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a slow poll cannot overwrite the reply loaded after a send","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"filters before limiting and keeps two sessions of one principal separate","tier":"ESSENTIAL"}

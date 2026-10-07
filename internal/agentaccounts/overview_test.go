@@ -361,6 +361,16 @@ func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// A manual window has no reading, so the default 08:00–22:00 band refuses
+	// it outside those hours. A round-the-clock week keeps the owned row
+	// routable at any hour; the assertion is about headroom, not the wall clock.
+	always := capacity.DefaultSchedule("UTC")
+	for i := range always.Week {
+		always.Week[i].On = true
+		always.Week[i].Start = 0
+		always.Week[i].End = 24
+	}
+	callStatus(t, accountsMod(), &person, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: own, Schedule: &always}), 204, nil)
 	var page overviewPage
 	callStatus(t, accountsMod(), &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
 	seen := map[string]overviewAccount{}

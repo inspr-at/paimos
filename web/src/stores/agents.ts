@@ -303,11 +303,16 @@ export const useAgents = defineStore('agents', () => {
     if (!order) orders.set(key, order = createReadOrder())
     return order
   }
-  const threadFlights = new Map<string, { again: boolean; promise: Promise<void> }>()
+  // A poll already in flight is not the result of a later send or hint.
+  // The first overlapping request starts a catch-up immediately, so that
+  // caller is not stuck behind the poll and the poll cannot overwrite it.
+  // Further requests join the catch-up and leave one trailing read.
+  const threadFlights = new Map<string, { again: boolean; catchingUp: boolean; promise: Promise<void> }>()
   function refreshThread(projectId: string, sessionId: string): Promise<void> {
     const pending = threadFlights.get(sessionId)
-    if (pending) { pending.again = true; return pending.promise }
-    const flight = { again: false, promise: Promise.resolve() }
+    if (pending?.catchingUp) { pending.again = true; return pending.promise }
+    if (pending) pending.catchingUp = true
+    const flight = { again: false, catchingUp: !!pending, promise: Promise.resolve() }
     threadFlights.set(sessionId, flight)
     flight.promise = (async () => {
       do {
@@ -319,9 +324,8 @@ export const useAgents = defineStore('agents', () => {
             if (messagingState.value !== 'ready') messagingState.value = 'ready'
           })
         } catch (e) { if (messagingState.value !== 'ready') messagingState.value = availability(e) }
-        // A hint during the read needs a trailing read to see the newest post.
       } while (flight.again)
-    })().finally(() => threadFlights.delete(sessionId))
+    })().finally(() => { if (threadFlights.get(sessionId) === flight) threadFlights.delete(sessionId) })
     return flight.promise
   }
   async function refreshAgentRuns(principalId: string) {
