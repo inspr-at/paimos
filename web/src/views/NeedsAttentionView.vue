@@ -218,7 +218,7 @@ function focusCursor(id: string) { cursor.value = id; table.value?.focusGrid(); 
 function keys(event: KeyboardEvent) {
   if (event.defaultPrevented || event.altKey) return
   const target = event.target instanceof HTMLElement ? event.target : null
-  const typing = target && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
+  const typing = target && (target.isContentEditable || ['TEXTAREA', 'SELECT'].includes(target.tagName) || target instanceof HTMLInputElement && !['checkbox', 'radio', 'button', 'submit', 'reset'].includes(target.type))
   if (event.key === 'Escape' && typing) { target.blur(); event.preventDefault(); return }
   if (typing || target?.closest('[role="dialog"], [role="menu"]')) return
   if (event.ctrlKey || event.metaKey) {
@@ -230,7 +230,7 @@ function keys(event: KeyboardEvent) {
   const key = event.key.toLowerCase()
   if (key === '/') { event.preventDefault(); toolbar.value?.focusSearch(); return }
   if (key === 'escape') { selected.value.clear(); toolbar.value?.closeOverlays(); return }
-  if (target?.closest('button, a') && [' ', 'enter'].includes(key)) return
+  if (target?.closest('button, a, input') && [' ', 'enter'].includes(key)) return
   const activeID = target?.closest('tr[id]')?.id.replace(/^row-/, '') || cursor.value
   const entries = navigation(), index = activeID ? entries.indexOf(activeID) : -1
   if (['j', 'k', 'arrowdown', 'arrowup'].includes(key)) {

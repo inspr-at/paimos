@@ -413,7 +413,7 @@ test('attention keys select a range, preserve native field shortcuts, skip inapp
  await first(page).getByRole('checkbox').click({ modifiers: ['Shift'] })
  await expect(page.getByRole('toolbar', { name: 'Selected tickets' })).toContainText('2 selected')
  await page.keyboard.press('Escape')
- await table(page).focus()
+ await expect(first(page).getByRole('checkbox')).toBeFocused()
  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+a' : 'Control+a')
  await expect(page.getByRole('toolbar', { name: 'Selected tickets' })).toContainText('3 selected')
  await expect(page.getByRole('toolbar', { name: 'Selected tickets' })).toContainText('1 cannot be applied')
