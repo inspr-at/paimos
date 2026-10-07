@@ -3,9 +3,11 @@
 package views
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
@@ -63,4 +65,13 @@ func (m *Module) getAgentsPlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, http.StatusOK, out)
+}
+
+// Preference writes share the same canonical ownership and conflict checks as
+// the plan endpoint and shadow admission.
+func agentsPlanOwner(ctx context.Context, tx pgx.Tx, tenantID, owner string) (string, error) {
+	return agentplan.OwnerTx(ctx, tx, tenantID, owner)
+}
+func readAgentsPlanPreference(ctx context.Context, tx pgx.Tx, tenantID, owner string) ([]byte, *time.Time, error) {
+	return agentplan.ReadPreferenceTx(ctx, tx, tenantID, owner)
 }

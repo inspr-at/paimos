@@ -90,7 +90,7 @@ func (f *fixture) schedule(t *testing.T, s capacity.Schedule) {
 	t.Helper()
 	raw, err := json.Marshal(s)
 	must(t, err)
-	f.exec(t, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3,$3,$4) ON CONFLICT(tenant_id,principal_id,scope,scope_key) DO UPDATE SET schedule=EXCLUDED.schedule`, f.person.TenantID, f.person.ID, f.account, raw)
+	f.exec(t, `INSERT INTO account_capacity_schedules(tenant_id,principal_id,scope,scope_key,account_id,schedule) VALUES($1,$2,'account',$3::uuid::text,$3::uuid,$4) ON CONFLICT(tenant_id,principal_id,scope,scope_key) DO UPDATE SET schedule=EXCLUDED.schedule`, f.person.TenantID, f.person.ID, f.account, raw)
 }
 func call(ctx context.Context, mux *http.ServeMux, p tenant.Principal, method, path string, in any) *httptest.ResponseRecorder {
 	raw, _ := json.Marshal(in)

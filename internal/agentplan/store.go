@@ -34,7 +34,7 @@ func ReadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (Snapshot, error
 	if err != nil {
 		return out, err
 	}
-	raw, at, err := readPreference(ctx, tx, p.TenantID, out.PrincipalID)
+	raw, at, err := ReadPreferenceTx(ctx, tx, p.TenantID, out.PrincipalID)
 	if err != nil {
 		return out, err
 	}
@@ -99,10 +99,11 @@ func CallerOwnerTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (string, 
 	if owner == "" {
 		return "", authz.ErrForbidden
 	}
-	return planOwner(ctx, tx, p.TenantID, owner)
+	return OwnerTx(ctx, tx, p.TenantID, owner)
 }
 
-func planOwner(ctx context.Context, tx pgx.Tx, tenantID, owner string) (string, error) {
+// OwnerTx validates a live person and its canonical linked identity.
+func OwnerTx(ctx context.Context, tx pgx.Tx, tenantID, owner string) (string, error) {
 	var canonical string
 	err := tx.QueryRow(ctx, `SELECT canonical.id::text FROM principals person
 		JOIN principals canonical ON canonical.tenant_id=person.tenant_id AND canonical.id=coalesce(person.linked_to,person.id)
@@ -117,7 +118,7 @@ func planOwner(ctx context.Context, tx pgx.Tx, tenantID, owner string) (string, 
 // Read every saved plan in the family, preferring the canonical row. Comparing
 // effective ceilings preserves legacy shapes and treats a missing limit like
 // explicit no_limit, while never guessing between conflicting start allowances.
-func readPreference(ctx context.Context, tx pgx.Tx, tenantID, owner string) ([]byte, *time.Time, error) {
+func ReadPreferenceTx(ctx context.Context, tx pgx.Tx, tenantID, owner string) ([]byte, *time.Time, error) {
 	rows, err := tx.Query(ctx, `SELECT pref.value,pref.updated_at FROM user_preferences pref
 		JOIN principals person ON person.tenant_id=pref.tenant_id AND person.id=pref.principal_id
 		WHERE pref.tenant_id=$1::uuid AND pref.key=$3 AND person.kind='person'
