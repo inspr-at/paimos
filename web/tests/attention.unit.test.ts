@@ -1,6 +1,10 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
+import { h, reactive, ref } from 'vue'
 import { attentionFolds, attentionGrouping, orderAttentionGroups, orderAttentionRows, attentionIdentity, refreshAttentionRelease, mergeAttentionRows, collectAttentionGroups, finishAttentionGroups, foldAttentionGroups, ATTENTION_GROUP_CAP, ATTENTION_GROUP_PAGE_CAP, type AttentionGroup, type AttentionItem, type AttentionIdentity, type AttentionPage, type AttentionResult, type AttentionFilters } from '../src/lib/attention'
+import * as attention from '../src/lib/attention'
+import * as identityScope from '../src/lib/identityScope'
+import { mountView, settle, textOf } from './webcore-view-harness'
 
 const identity = (event_id: number, extra: Partial<AttentionIdentity> = {}): AttentionIdentity => ({ event_id, node_id: `node-${event_id}`, revision: '2026-10-05T08:00:00Z', release_id: 'release', release_revision: 7, release_project_revision: 4, ...extra })
 const receipt: AttentionResult = { event_id: 1, ok: true, release_id: 'release', previous_release_revision: 7, release_revision: 8, previous_release_project_revision: 4, release_project_revision: 5 }
@@ -113,4 +117,99 @@ it('fills kind totals from the list counts and project names from facets', () =>
   ...attentionPage([], null), facets: { projects: [{ id: 'p-aeon', label: 'AEON Aeon' }], assignees: [] },
  }, 'project', noFilters)
  expect(named.groups[0]).toMatchObject({ id: 'p-aeon', key: 'AEON', title: 'Aeon' })
+})
+
+const fallbackItem = (event_id: number): AttentionItem => ({
+ event_id, node_id: `node-${event_id}`, revision: '2026-10-05T08:00:00Z', key: `AEON-${event_id}`, title: `Ticket ${event_id}`,
+ project_id: 'p-old', kind: 'triage', from: 'new', to: 'backlog', reason: 'because', at: '2026-10-07T08:00:00Z', editable: true, applicable: true,
+})
+const fallbackPage = (items: AttentionItem[], next_cursor: string | null): AttentionPage => ({
+ items, total: 17, counts: { triage: 17 }, next_cursor, facets_truncated: false,
+ facets: { projects: [{ id: 'p-old', label: 'OLD Old Project' }], assignees: [{ id: 'old-person', label: 'Previous assignee' }] },
+})
+const emptyFallbackPage: AttentionPage = { items: [], total: 0, counts: {}, next_cursor: null, facets: { projects: [], assignees: [] }, facets_truncated: false }
+
+// The groups route is missing, so the view walks the list. The held page resolves
+// and queues the visit change before that walk's caller resumes: a bare await
+// then writes the old groups, counts and facets into the new visit.
+async function fallbackVisit(change: 'stay' | 'identity' | 'filter') {
+ const session = reactive({ identity: { tenant: { id: 't1' }, principal: { id: 'ada' } } })
+ const route = reactive({ query: {} as Record<string, string>, fullPath: '/tickets' })
+ const calls: { owner: string; q: string; project: string; cursor: string }[] = []
+ const trace: string[] = []
+ let scans = 0, changed = false
+ let release!: (page: AttentionPage) => void
+ const continued = new Promise<AttentionPage>(resolve => { release = resolve })
+ function applyChange() {
+  if (changed || change === 'stay') return
+  changed = true
+  trace.push('switch')
+  if (change === 'identity') session.identity = { tenant: { id: 't1' }, principal: { id: 'grace' } }
+  else route.query = { q: 'later' }
+ }
+ vi.stubGlobal('window', { addEventListener() {}, removeEventListener() {}, innerHeight: 800 })
+ vi.stubGlobal('document', { documentElement: { lang: 'en' }, getElementById: () => null, querySelector: () => null })
+ vi.stubGlobal('navigator', { platform: 'MacIntel', userAgent: 'test' })
+ const view = mountView('../src/views/NeedsAttentionView.vue', {
+  'vue-router': { useRoute: () => route, useRouter: () => ({ replace() {}, push() {} }) },
+  '../lib/attention': { ...attention, listAttentionGroups: async () => null, collectAttentionGroups: async (...args: Parameters<typeof collectAttentionGroups>) => {
+   const result = await collectAttentionGroups(...args)
+   scans += 1; trace.push('scanned'); return result
+  }, listAttention: (filters: AttentionFilters, _signal: AbortSignal, cursor?: string) => {
+   const owner = `${session.identity.tenant.id}/${session.identity.principal.id}`
+   calls.push({ owner, q: filters.q, project: filters.project_id, cursor: cursor ?? '' })
+   if (cursor) return continued.then(page => { trace.push('resolved'); if (change !== 'stay') queueMicrotask(applyChange); return page })
+   if (!filters.project_id && owner === 't1/ada' && filters.q === '' && filters.kind === '') return Promise.resolve(fallbackPage([fallbackItem(1)], 'more'))
+   if (!filters.project_id) return new Promise<AttentionPage>(() => {})
+   return Promise.resolve(emptyFallbackPage)
+  } },
+  '../lib/identityScope': identityScope,
+  '../lib/preferences': { usePreference: () => ({ value: ref(null), ready: Promise.resolve(), save() {} }) },
+  '../lib/ticketList': { filtersFromQuery: () => ({}) },
+  '../lib/toast': { toast: () => 1, dismiss() {}, toastBottomClearance: ref(0) },
+  '../lib/work': { absoluteTime: (value: string) => value, relativeTime: () => '1d', statusMeta: (state: string) => ({ label: state }) },
+  '../stores/session': { useSession: () => session },
+  '../stores/projects': { useProjects: () => ({ load() {}, byId: () => null }) },
+  '../directives/clipTip': { vClipTip: { mounted() {}, updated() {} } },
+  '../components/work/TicketTable.vue': { __esModule: true, default: { props: ['groups'], setup(props: { groups?: { label?: string }[] }) { return () => h('div', (props.groups ?? []).map(group => group.label ?? '').join('|')) } } },
+  '../components/work/ListToolbar.vue': { __esModule: true, default: { props: ['attention'], setup(props: { attention?: { facets?: { projects?: { label: string }[]; assignees?: { label: string }[] } } }, ctx: { expose: (bindings: object) => void }) { ctx.expose({ closeOverlays() {} }); return () => h('div', [...(props.attention?.facets?.projects ?? []), ...(props.attention?.facets?.assignees ?? [])].map(facet => facet.label).join('|')) } } },
+ })
+ try {
+  await settle()
+  expect(calls.some(call => call.cursor === 'more')).toBe(true)
+  release(fallbackPage([fallbackItem(2)], null))
+  await settle(); await settle()
+  return { text: textOf(view.root), calls, trace, scans }
+ } finally { view.app.unmount(); vi.unstubAllGlobals() }
+}
+
+it('a finished fallback group scan shows the scanned project, count and facets', async () => {
+ const visit = await fallbackVisit('stay')
+ expect(visit.scans).toBe(1)
+ expect(visit.trace).toEqual(['resolved', 'scanned'])
+ expect(visit.text).toContain('17')
+ expect(visit.text).toContain('Old Project')
+ expect(visit.text).toContain('Previous assignee')
+})
+
+it('a resolved fallback group scan cannot restore groups, counts or facets after an identity change', async () => {
+ const visit = await fallbackVisit('identity')
+ expect(visit.scans).toBe(1)
+ expect(visit.trace.indexOf('switch')).toBeGreaterThanOrEqual(0)
+ expect(visit.trace.indexOf('switch')).toBeLessThan(visit.trace.indexOf('scanned'))
+ expect(visit.calls.some(call => call.owner === 't1/grace' && call.cursor === '')).toBe(true)
+ expect(visit.text).not.toContain('17')
+ expect(visit.text).not.toContain('Old Project')
+ expect(visit.text).not.toContain('Previous assignee')
+})
+
+it('a resolved fallback group scan cannot restore groups, counts or facets after a filter change', async () => {
+ const visit = await fallbackVisit('filter')
+ expect(visit.scans).toBe(1)
+ expect(visit.trace.indexOf('switch')).toBeGreaterThanOrEqual(0)
+ expect(visit.trace.indexOf('switch')).toBeLessThan(visit.trace.indexOf('scanned'))
+ expect(visit.calls.some(call => call.q === 'later' && call.cursor === '')).toBe(true)
+ expect(visit.text).not.toContain('17')
+ expect(visit.text).not.toContain('Old Project')
+ expect(visit.text).not.toContain('Previous assignee')
 })

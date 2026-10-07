@@ -131,24 +131,33 @@ function load(more = false) {
     if (by === 'none') return after(Promise.all([listAttention(query, signal, more ? next.value! : undefined), columnPrefs.ready]), ([page]) => {
       appendRows(flatRows.value, page); acceptPage(page); next.value = page.next_cursor
     })
-    return after(Promise.all([listAttentionGroups(query, by, signal), listAttention(query, signal), foldPrefs.ready, columnPrefs.ready]), async ([summary, page]) => {
-      let grouped = summary
-      if (!grouped) {
-        const collected = await collectAttentionGroups(by, after => after ? listAttention(query, signal, after) : Promise.resolve(page))
-        grouped = { ...finishAttentionGroups(collected, page, by, query), total: page.total }
-      }
-      groupsFromList = summary == null
+    // Commit groups, counts and facets in the same turn as the scope check.
+    // A bare await leaves a gap where the previous visit can be written back.
+    const commitGrouped = (grouped: { groups: AttentionGroup[]; total: number; truncated: boolean }, page: AttentionPage, fromList: boolean) => {
+      groupsFromList = fromList
       groupRows.value = orderAttentionGroups(grouped.groups, by).map(group => ({ ...group, items: [], next: null, loading: false, error: '' }))
       acceptPage(page); total.value = grouped.total; groupsTruncated.value = grouped.truncated
       collapsed.value = attentionFolds(groupRows.value, grouped.total, foldPrefs.value.value?.[by], !!query.q)
-      // Bound parallel reads even when hundreds of groups were saved open.
+    }
+    const loadOpenGroups = (): Promise<unknown> => {
       const open = groupRows.value.filter(group => !collapsed.value.has(group.id))
-      for (let i = 0; i < open.length; i += 4) {
-        const batch = open.slice(i, i + 4)
-        await after(Promise.all(batch.map(group => listAttention(groupFilters(group), signal))), pages => {
-          pages.forEach((groupPage, index) => { const group = batch[index]!; takeGroupPage(group, groupPage) })
+      const step = (index: number): Promise<unknown> => {
+        if (index >= open.length) return Promise.resolve()
+        const batch = open.slice(index, index + 4)
+        // Bound parallel reads even when hundreds of groups were saved open.
+        return after(Promise.all(batch.map(group => listAttention(groupFilters(group), signal))), pages => {
+          pages.forEach((groupPage, pageIndex) => { const group = batch[pageIndex]!; takeGroupPage(group, groupPage) })
+          return step(index + 4)
         })
       }
+      return step(0)
+    }
+    return after(Promise.all([listAttentionGroups(query, by, signal), listAttention(query, signal), foldPrefs.ready, columnPrefs.ready]), ([summary, page]) => {
+      if (summary) { commitGrouped(summary, page, false); return loadOpenGroups() }
+      return after(collectAttentionGroups(by, cursor => cursor ? listAttention(query, signal, cursor) : Promise.resolve(page)), collected => {
+        commitGrouped({ ...finishAttentionGroups(collected, page, by, query), total: page.total }, page, true)
+        return loadOpenGroups()
+      })
     })
   }, { failed: e => { error.value = e instanceof Error ? e.message : 'Needs attention could not be loaded.' }, settled: () => { loading.value = false } })
 }

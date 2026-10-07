@@ -13930,6 +13930,12 @@
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a finished fallback group scan shows the scanned project, count and facets","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a resolved fallback group scan cannot restore groups, counts or facets after a filter change","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"a resolved fallback group scan cannot restore groups, counts or facets after an identity change","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"builds capped groups from the list cursor and stops at the page cap","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"fills kind totals from the list counts and project names from facets","tier":"ESSENTIAL"}
