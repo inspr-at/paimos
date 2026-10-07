@@ -10394,6 +10394,18 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"scrolling a 40-message thread sends at most two read markers at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"the thread renders before the read marker answers","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"the thread stays pinned at the bottom, counts posts that arrive while scrolled up, and jumps back","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}

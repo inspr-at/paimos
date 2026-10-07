@@ -40,6 +40,14 @@ func TestHarnessSessionMessagesNeverMoveToAnotherGeneration(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &deliveries); err != nil || len(deliveries) != 1 || deliveries[0]["message_id"] != messages[i] {
 			t.Fatalf("drain crossed generation: %s", w.Body.String())
 		}
+		if deliveries[0]["project_id"] != f.project {
+			t.Fatal("project reply routing metadata missing from drain")
+		}
+		replay := f.call(f.agent, "POST", base+"/"+ids[i]+"/drain", map[string]any{}, leases[i])
+		expect(t, replay, 200)
+		if replay.Body.String() != w.Body.String() {
+			t.Fatal("replayed delivery lost reply routing metadata")
+		}
 	}
 	// Stop releases the old lease but does not transfer its targeted message.
 	expect(t, f.call(f.agent, "POST", base+"/"+ids[0]+"/stop", map[string]any{"reason": "stopped"}, leases[0]), 200)

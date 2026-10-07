@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/inspr-at/paimos/internal/attachedmsg"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -212,6 +213,11 @@ func (m *messaging) commitMessage(ctx context.Context, p tenant.Principal, proje
 		}
 		if err := messagingProject(ctx, tx, project); err != nil {
 			return err
+		}
+		if in.ReplyTo != nil && in.SenderSessionID != nil {
+			if err := authz.RequireTx(ctx, tx, p, "inbox.send", authz.Scope{ProjectID: project}); err != nil {
+				return errForbidden
+			}
 		}
 		// Serialize this projection's writes before taking row locks. events.Append
 		// also takes a per-tenant counter lock; a consistent order avoids inverse
@@ -451,7 +457,7 @@ func (m *messaging) inspectMessages(w http.ResponseWriter, r *http.Request) {
 	m.readMessages(w, r, true)
 }
 func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect bool) {
-	p, project, ok := m.messagingPrincipal(w, r, inspect)
+	p, project, ok := m.messagingPrincipal(w, r, false)
 	if !ok {
 		return
 	}
@@ -525,6 +531,24 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
 		if err := messagingProject(r.Context(), tx, project); err != nil {
 			return err
 		}
+		admin := false
+		if inspect {
+			admin = authz.RequireTx(r.Context(), tx, p, "inbox.manage", authz.Scope{ProjectID: project}) == nil
+			if !admin {
+				if sessionID == nil || pending || authz.RequireTx(r.Context(), tx, p, "harness.read", authz.Scope{ProjectID: project}) != nil {
+					return errForbidden
+				}
+			}
+			if sessionID != nil {
+				var exists bool
+				if err := tx.QueryRow(r.Context(), `SELECT EXISTS(SELECT 1 FROM harness_sessions WHERE id=$1::uuid AND project_id=$2::uuid)`, *sessionID, project).Scan(&exists); err != nil {
+					return err
+				}
+				if !exists {
+					return errNotFound
+				}
+			}
+		}
 		if sessionID != nil && !inspect {
 			if _, err := listeningSession(r.Context(), tx, sessionID, p.ID, project); err != nil {
 				return err
@@ -552,7 +576,7 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
  WHERE c.project_id=$1::uuid AND c.sender_session_id IS NULL AND c.recipient_session_id IS NULL AND NOT c.is_action_request
  ) SELECT `+compatMessageCols+` FROM inbox_compat_messages c `+compatObligationJoin+`
  LEFT JOIN inbox_messages i ON i.tenant_id=c.tenant_id AND i.id=c.inbox_message_id
- WHERE (c.content_mode='durable' OR ($3 AND c.content_mode='attached_volatile' AND c.sender_principal_id=$4::uuid
+ WHERE ($10 OR NOT c.is_action_request) AND (c.content_mode='durable' OR ($10 AND c.content_mode='attached_volatile' AND c.sender_principal_id=$4::uuid
  AND EXISTS(SELECT 1 FROM harness_attach_requests ar JOIN agent_pairing_computers pc ON pc.tenant_id=ar.tenant_id AND pc.id=ar.computer_id JOIN agent_pairing_requests pr ON pr.tenant_id=pc.tenant_id AND pr.id=pc.request_id
  WHERE ar.session_id=c.recipient_session_id AND ar.owner_id=$4::uuid AND pr.approved_by=$4::uuid))) AND c.project_id=$1::uuid AND `+comparison+`
  AND ($3 OR (c.recipient_principal_id=$4::uuid AND NOT c.is_action_request AND i.acked_at IS NULL AND (i.expires_at IS NULL OR i.expires_at>clock_timestamp())))
@@ -561,7 +585,7 @@ func (m *messaging) readMessages(w http.ResponseWriter, r *http.Request, inspect
  AND ($5='' OR c.recipient_address=$5)
  AND ($7::uuid IS NULL OR c.id IN (SELECT id FROM thread))
  AND (NOT $8 OR (c.is_action_request AND NOT EXISTS(SELECT 1 FROM events e WHERE e.type='inbox.action_resolved' AND e.node_id=c.project_id AND e.after->>'message_id'=c.id::text)))
- ORDER BY c.sent_event_id `+order+` LIMIT $6`, project, after, inspect, p.ID, to, limit, thread, pending, sessionID)
+ ORDER BY c.sent_event_id `+order+` LIMIT $6`, project, after, inspect, p.ID, to, limit, thread, pending, sessionID, admin)
 		if err != nil {
 			return err
 		}

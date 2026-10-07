@@ -230,20 +230,27 @@ func TestMessagingBackoffCancellation(t *testing.T) {
 }
 
 func TestSessionDeliveryRefusesUnboundOrMismatchedTarget(t *testing.T) {
-	for _, mode := range []string{"missing-reference", "wrong-harness"} {
+	for _, mode := range []string{"missing-reference", "wrong-harness", "managed", "stopped"} {
 		t.Run(mode, func(t *testing.T) {
 			config := setupHookTest(t)
 			var pulled atomic.Bool
 			hookListenServer(t, func(w http.ResponseWriter, r *http.Request) {
 				if r.URL.Path == harnessPath(hookProjectID, hookSessionID) {
-					fmt.Fprint(w, `{"id":"`+hookSessionID+`","harness":"claude"}`)
+					status := map[string]string{"id": hookSessionID, "harness": "claude"}
+					if mode == "managed" {
+						status["harness"], status["management_mode"] = "codex", "managed"
+					}
+					if mode == "stopped" {
+						status["harness"], status["phase"] = "codex", "stopped"
+					}
+					_ = json.NewEncoder(w).Encode(status)
 					return
 				}
 				pulled.Store(true)
 				http.Error(w, "unexpected inbox access", 500)
 			})
 			args := []string{"aeon", "--config", config, "listen", "--project", "AEON", "--session", hookSessionID, "--deliver", "codex"}
-			if mode == "wrong-harness" {
+			if mode != "missing-reference" {
 				ref := filepath.Join(t.TempDir(), "ref")
 				if err := os.WriteFile(ref, []byte("fixture-thread"), 0600); err != nil {
 					t.Fatal(err)
@@ -436,5 +443,85 @@ func TestTransientMessagingErrors(t *testing.T) {
 	}
 	if transientMessagingError(&url.Error{Op: "Get", Err: errors.New("unsupported protocol scheme")}) || transientMessagingError(errors.New("decode response")) {
 		t.Fatal("retried permanent request error")
+	}
+}
+
+// Barriers prove the companion was already waiting when an idle message arrived.
+// No turn hook or vendor process is run in this test.
+func TestSessionIdleCompanionWakesExactGeneration(t *testing.T) {
+	for _, adapter := range []string{"codex", "claude_resume"} {
+		t.Run(adapter, func(t *testing.T) {
+			config := setupHookTest(t)
+			ref := filepath.Join(t.TempDir(), "vendor-ref")
+			if err := os.WriteFile(ref, []byte("idle-vendor-generation"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			waiting, arrive, acked := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			var polls atomic.Int32
+			hookListenServer(t, func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == harnessPath(hookProjectID, hookSessionID):
+					_ = json.NewEncoder(w).Encode(map[string]string{"id": hookSessionID, "harness": strings.TrimSuffix(adapter, "_resume"), "management_mode": "unmanaged", "activity": "idle"})
+				case r.Method == "GET" && r.URL.Path == "/api/inbox/messages":
+					if polls.Add(1) > 1 {
+						http.Error(w, "end fixture", 403)
+						return
+					}
+					if r.URL.Query().Get("session") != hookSessionID || r.URL.Query().Get("exact_session") != "true" || r.URL.Query().Get("wait_ms") != "25000" {
+						t.Error("idle wait lost exact generation")
+					}
+					close(waiting)
+					select {
+					case <-arrive:
+					case <-r.Context().Done():
+						return
+					}
+					_ = json.NewEncoder(w).Encode(inbox.Page{Items: []inbox.Message{hookFixtureMessage()}, NextAfter: 42})
+				case r.Method == "POST" && r.URL.Path == "/api/inbox/messages/"+hookMessageID+"/ack":
+					close(acked)
+					fmt.Fprint(w, `{}`)
+				default:
+					t.Error("unexpected companion endpoint")
+					http.NotFound(w, r)
+				}
+			})
+			deliveries := 0
+			deliver := func(_ context.Context, got string, work inbox.DeliveryWork) (localDeliveryResult, error) {
+				deliveries++
+				if got != adapter || work.TargetRef != "idle-vendor-generation" || work.ID != hookMessageID || work.MaximumLevel != "simple" || work.Message == nil {
+					t.Error("idle wake crossed generation or promised steering")
+				}
+				select {
+				case <-acked:
+					t.Error("acknowledged before adapter handoff")
+				default:
+				}
+				return localDeliveryResult{EffectiveLevel: "simple"}, nil
+			}
+			finished := make(chan int, 1)
+			go func() {
+				var out, stderr bytes.Buffer
+				finished <- runMessaging([]string{"aeon", "--config", config, "listen", "--project", "AEON", "--session", hookSessionID, "--deliver", adapter, "--target-ref-file", ref, "--follow"}, strings.NewReader(""), &out, &stderr, deliver)
+			}()
+			select {
+			case <-waiting:
+			case <-t.Context().Done():
+				t.Fatal("companion never waited")
+			}
+			close(arrive)
+			select {
+			case code := <-finished:
+				if code != 1 || deliveries != 1 {
+					t.Fatalf("idle handoff code=%d deliveries=%d", code, deliveries)
+				}
+			case <-t.Context().Done():
+				t.Fatal("companion did not finish")
+			}
+			select {
+			case <-acked:
+			default:
+				t.Fatal("successful handoff not acknowledged")
+			}
+		})
 	}
 }

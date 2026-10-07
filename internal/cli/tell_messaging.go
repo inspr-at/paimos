@@ -201,7 +201,7 @@ func (rt *runtime) cmdMessagingListen() *Command {
 	var as, project, deliver, after, poll, sessionID, targetRefFile string
 	var follow, ack bool
 	limit := 10
-	return &Command{Name: "listen", Short: "Read your project inbox", Use: "listen --project KEY [--as harness:agent] [--ack]", maxArgs: 0, addFlags: func(fs *flagSet) {
+	return &Command{Name: "listen", Short: "Read your project inbox", Use: "listen --project KEY [--as harness:agent] [--ack] | listen --project KEY --session UUID --deliver codex|claude_resume --target-ref-file PATH --follow", maxArgs: 0, addFlags: func(fs *flagSet) {
 		fs.string(&sessionID, "session", 0, "read only this session plus principal-wide broadcasts")
 		fs.string(&as, "as", 0, "own harness:agent, name or UUID")
 		fs.string(&project, "project", 'p', "project key (required)")
@@ -210,7 +210,7 @@ func (rt *runtime) cmdMessagingListen() *Command {
 		fs.string(&deliver, "deliver", 0, "local transport adapter")
 		fs.string(&targetRefFile, "target-ref-file", 0, "exact local harness reference for --session --deliver")
 		fs.string(&poll, "poll-interval", 0, "delivery retry backoff (default 2s)")
-		fs.bool(&follow, "follow", 0, "long-poll until interrupted")
+		fs.bool(&follow, "follow", 0, "long-poll until interrupted; --session --deliver wakes an idle unmanaged session")
 		fs.bool(&ack, "ack", 0, "acknowledge each successfully printed message")
 	}, run: func(args []string) error {
 		if sessionID != "" && !validUUID(sessionID) {

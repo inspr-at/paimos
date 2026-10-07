@@ -451,7 +451,7 @@ var RoutePermissions = map[string]string{
 	"DELETE /api/projects/{projectId}/members/{principal_id}":                              "members.manage",
 	"GET /api/projects/{projectId}/message-deliveries":                                     "inbox.manage",
 	"GET /api/projects/{projectId}/message-targets":                                        "inbox.manage",
-	"GET /api/projects/{projectId}/messages":                                               "inbox.manage",
+	"GET /api/projects/{projectId}/messages":                                               "inbox.manage|harness.read",
 	"GET /api/projects/{projectId}/messages/listen":                                        "inbox.read",
 	"GET /api/projects/{projectId}/releases/{releaseId}/candidate-artifact":                "stage_handoffs.read",
 	"PUT /api/projects/{projectId}/releases/{releaseId}/candidate-artifact":                "stage_handoffs.write",

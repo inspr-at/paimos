@@ -7,15 +7,16 @@ import { resolve } from 'node:path'
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
+import { controlStability } from './control-stability'
 
 const now = Date.parse('2026-09-29T06:00:00Z')
 const longUrl = 'https://ci.example.test/inspr-at/paimos/actions/runs/18446744073709551615/jobs/9223372036854775807/logs?attempt=3&filter=playwright-session-chat-overflow-check'
 const longId = 'sha256:4f9c2a7be1d04c55a3a6c7f1d2e9b8a7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b7c6'
 
-async function setup(page: Page, options: { theme?: 'light' | 'dark'; count?: number; storage?: Record<string, string>; readMark?: { event: number; id: string }; failReadMarks?: number } = {}) {
+async function setup(page: Page, options: { admin?: boolean; theme?: 'light' | 'dark'; count?: number; storage?: Record<string, string>; readMark?: { event: number; id: string }; failReadMarks?: number } = {}) {
   await page.clock.install({ time: now })
   const work = fixtures(); work.preferences.theme = { choice: options.theme ?? 'light' }
-  await mockWork(page, work, { admin: true })
+  await mockWork(page, work, { admin: options.admin ?? true })
   const data = agentData({ now, me: me.id, projects: { pharos: 'p-pharos', aeon: 'p-aeon', pai: 'p-frozen' }, tickets: { fleet: 'n-1', restore: 'n-2', web: 'n-a1', release: 'n-5', approvals: 'n-6' }, nodes: {} })
   const worker = data.sessions[0]!
   Object.assign(worker, { display_label: 'release-lead', run_id: null })
@@ -602,3 +603,37 @@ test.describe('phone screenshots', () => {
     })
   }
 })
+
+for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+  test(`session queued input stays stable without a delivery toggle ${theme} ${width}`, async ({ page }, testInfo) => {
+    const { worker, data, calls } = await setup(page, { admin: false, theme, count: 5, storage: { 'aeon.session-tab': 'messages' } })
+    worker.display_label = 'Freigabeprüfung mit ausführlicher deutschsprachiger Rückmeldung'
+    await page.setViewportSize({ width, height: width === 390 ? 844 : 1000 })
+    await page.goto(`/agents/${worker.id}`)
+    const panel = panelOf(page)
+    const field = panel.getByRole('textbox', { name: `Message to ${worker.display_label}` })
+    const send = panel.getByRole('button', { name: 'Send', exact: true })
+    await expect(field).toBeVisible()
+    await expect(panel.getByRole('radiogroup', { name: 'Delivery' })).toHaveCount(0)
+    await expect(panel.getByRole('radio', { name: 'Steer', exact: true })).toHaveCount(0)
+    const guard = await controlStability(page, { composer: field, send, frame: panel })
+    let release: () => void = () => {}
+    const gate = new Promise<void>(resolve => { release = resolve })
+    await page.route('**/api/projects/*/messages', async route => {
+      if (route.request().method() === 'POST') await gate
+      await route.fallback()
+    })
+    try {
+      const text = 'Bitte die Freigabeprüfung vollständig durchführen und das abschließende Ergebnis hier im Gespräch festhalten.'
+      await guard.check(() => field.fill(text))
+      await guard.check(async () => { await send.click(); await expect(send).toHaveAttribute('aria-busy', 'true') })
+      await guard.check(async () => { release(); await expect(field).toHaveValue(''); await expect(send).toHaveAttribute('aria-busy', 'false') })
+      const sent = calls.filter(call => call.method === 'POST' && call.path.endsWith('/messages')).at(-1)
+      expect(sent?.body).toMatchObject({ body: text, recipient_session_id: worker.id, delivery_level: 'simple' })
+      expect(data.sent).toHaveLength(1)
+      guard.done()
+      expect(await noHorizontalScroll(page)).toEqual({ doc: true, panel: true, inner: true })
+      await page.screenshot({ path: testInfo.outputPath(`chat-${theme}-${width}.png`), fullPage: true })
+    } finally { release() }
+  })
+}

@@ -1624,6 +1624,8 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteProbeStatusSendsOnlyTheCause","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRemoteReplyRetainsProjectAndSession","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteRunToolsUseScopedExistingRoutes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteTelemetryErrorClassification","tier":"GATED-FULL"}
@@ -4576,6 +4578,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestSessionFullWorkCollections","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestSessionIdleCompanionWakesExactGeneration","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestSessionIndexEnumerationFdNotInherited","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestSessionIndexRefusesLiveConflict","tier":"GATED-FULL"}
@@ -6059,6 +6063,8 @@
     {"kind":"go","package":"internal/inbox","name":"TestSessionMessagesIsolationAndLegacyWire","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestSessionThreadIncludesBothDirectionsAndUnboundReplies","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/inbox","name":"TestSessionThreadParticipantReadsAndManagedReply","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestStreamAndPoll","tier":"GATED-FULL"}
     ,

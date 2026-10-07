@@ -35,7 +35,6 @@ const managed = computed(() => s.value.advertised_capabilities.includes('managed
 const unmanaged = computed(() => s.value.management_mode === 'unmanaged')
 
 const draft = ref('')
-const level = ref<'simple' | 'steer'>('simple')
 const replyTo = ref<ProjectMessage | null>(null)
 const sending = ref(false)
 const sendError = ref('')
@@ -474,7 +473,7 @@ watch(() => props.active, active => { if (active) refreshReceipts() })
 const composeBlock = computed(() => {
   if (ended.value || sendError.value === 'This session has ended.') return 'This session has ended.'
   if (agents.messagingState === 'error') return 'Messages could not be loaded right now. Close and reopen the session to try again.'
-  if (agents.messagingState === 'forbidden') return 'Messages are open to workspace admins.'
+  if (agents.messagingState === 'forbidden') return 'Reading this session requires access to its project and permission to read agent sessions.'
   // Only a message with no session still needs a registered target.
   if (!s.value.id && !address.value) return `${props.view.name} has no message address yet. It gets one when it registers a message target.`
   return ''
@@ -487,7 +486,7 @@ async function send() {
   const currentSend = () => request === readGeneration && sessionId === s.value.id && viewer === me.value
   sending.value = true; sendError.value = ''
   try {
-    await agents.send(s.value, recipient.value, draft.value.trim(), level.value, replyTo.value?.id)
+    await agents.send(s.value, recipient.value, draft.value.trim(), 'simple', replyTo.value?.id)
     if (!currentSend()) return
     refreshedAt = Date.now()
     draft.value = ''; replyTo.value = null
@@ -537,12 +536,8 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
         <textarea :id="`compose-${s.id}`" ref="textarea" v-model="draft" class="field" rows="2" :placeholder="`Message ${view.name}…`" :disabled="!canWrite || sending" @keydown="composerKeys" @focus="toBottom(true)" />
         <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
         <div class="compose-row">
-          <div class="seg level" role="radiogroup" aria-label="Delivery">
-            <button type="button" role="radio" :aria-checked="level === 'simple'" data-tip="Waits until the agent reads its inbox" @click="level = 'simple'">Simple</button>
-            <button type="button" role="radio" :aria-checked="level === 'steer'" data-tip="Reaches the agent during its current turn" @click="level = 'steer'"><AppIcon name="bolt" :size="11" />Steer</button>
-          </div>
           <span class="compose-hint" aria-hidden="true"><KeyCap k="mod" /><KeyCap k="enter" /></span>
-          <button type="submit" class="btn sm primary send" :disabled="!draft.trim() || sending || !canWrite"><AppIcon name="send" :size="13" />{{ sending ? 'Sending…' : 'Send' }}</button>
+          <button type="submit" class="btn sm primary send" :aria-busy="sending" :disabled="!draft.trim() || sending || !canWrite"><AppIcon name="send" :size="13" />Send</button>
         </div>
       </form>
     </footer>
@@ -566,8 +561,6 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 .compose { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
 .compose textarea { width: 100%; min-width: 0; min-height: 56px; max-height: 180px; resize: vertical; padding: 9px 11px; font: inherit; font-size: 13.5px; line-height: 1.45; }
 .compose-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.level { flex-shrink: 0; }
-.level button { display: inline-flex; align-items: center; gap: 4px; }
 .compose-hint { margin-left: auto; display: inline-flex; gap: 2px; }
 .compose-block { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); padding: 6px 2px; overflow-wrap: anywhere; }
 .compose-block svg { flex: none; }
