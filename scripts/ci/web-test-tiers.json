@@ -740,6 +740,18 @@
     ,
     "browser:tests/service-tier.spec.ts:390: phone Change tier menu opens and restores its actual trigger"
     ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 1024"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 1440"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 390"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle light 1024"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle light 1440"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle light 390"
+    ,
     "browser:tests/settings-account-pacing.spec.ts:Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them"
     ,
     "browser:tests/settings-account-pacing.spec.ts:Capacity and load: work days, nights and the editors, with controls that stay put"
@@ -10394,17 +10406,17 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"scrolling a 40-message thread sends at most two read markers at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 1024","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 1440","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 390","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"the thread renders before the read marker answers","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,

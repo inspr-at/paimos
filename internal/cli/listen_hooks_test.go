@@ -457,6 +457,15 @@ func TestSessionIdleCompanionWakesExactGeneration(t *testing.T) {
 				t.Fatal(err)
 			}
 			waiting, arrive, acked := make(chan struct{}), make(chan struct{}), make(chan struct{})
+			guard, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+			defer cancel()
+			defer func() {
+				select {
+				case <-arrive:
+				default:
+					close(arrive)
+				}
+			}()
 			var polls atomic.Int32
 			hookListenServer(t, func(w http.ResponseWriter, r *http.Request) {
 				switch {
@@ -505,7 +514,7 @@ func TestSessionIdleCompanionWakesExactGeneration(t *testing.T) {
 			}()
 			select {
 			case <-waiting:
-			case <-t.Context().Done():
+			case <-guard.Done():
 				t.Fatal("companion never waited")
 			}
 			close(arrive)
@@ -514,7 +523,7 @@ func TestSessionIdleCompanionWakesExactGeneration(t *testing.T) {
 				if code != 1 || deliveries != 1 {
 					t.Fatalf("idle handoff code=%d deliveries=%d", code, deliveries)
 				}
-			case <-t.Context().Done():
+			case <-guard.Done():
 				t.Fatal("companion did not finish")
 			}
 			select {

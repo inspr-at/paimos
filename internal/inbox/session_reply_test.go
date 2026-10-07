@@ -251,12 +251,20 @@ func TestSessionThreadParticipantReadsAndManagedReply(t *testing.T) {
 	answer.SenderSessionID, answer.ReplyTo = &session, &asked.ID
 	answer.Body = "Final answer in the session"
 	path := "/api/projects/" + project + "/messages"
-	status, body := compatPost(t, srv, w.agent, path, answer)
+	token := insertKey(t, w.db, w.agent, []string{"inbox.send"}, "managed-reply-fixture")
+	postReply := func() (int, []byte) {
+		raw, err := json.Marshal(answer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return do(t, srv, w.agent.ID, "POST", path, string(raw), headerAuth(token))
+	}
+	status, body := postReply()
 	if status != 201 {
 		t.Fatalf("managed reply %d: %s", status, body)
 	}
 	answered := mustJSON[CompatMessage](t, body)
-	status, body = compatPost(t, srv, w.agent, path, answer)
+	status, body = postReply()
 	if status != 201 || mustJSON[CompatMessage](t, body).ID != answered.ID {
 		t.Fatal("reply retry was not idempotent")
 	}

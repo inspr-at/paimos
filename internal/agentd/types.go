@@ -133,12 +133,14 @@ type HarnessControl struct {
 type InboxReplyTarget struct {
 	PrincipalID        string
 	ProjectID          string
+	ReplyToID          string
 	SenderSessionID    string
 	RecipientSessionID *string
 }
 
 type HarnessDelivery struct {
 	ProjectID         string  `json:"project_id,omitempty"`
+	ReplyToID         string  `json:"reply_to_id,omitempty"`
 	SenderSessionID   *string `json:"sender_session_id,omitempty"`
 	Outcome           string  `json:"-"`
 	FailureReason     string  `json:"-"`

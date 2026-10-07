@@ -504,13 +504,13 @@ func TestRemoteReplyRetainsProjectAndSession(t *testing.T) {
 	}))
 	defer server.Close()
 	r := NewRemote(server.URL, "fixture-key")
-	target := InboxReplyTarget{PrincipalID: "person", ProjectID: project, SenderSessionID: session}
+	target := InboxReplyTarget{PrincipalID: "person", ProjectID: project, SenderSessionID: session, ReplyToID: "project-message-parent"}
 	if err := r.ReplyInbox(t.Context(), "message", target, "final answer", "reply-key"); err != nil {
 		t.Fatal(err)
 	}
 	peer := recipientSession
 	target.RecipientSessionID = &peer
-	if err := r.ReplyInbox(t.Context(), "peer-message", target, "peer answer", "peer-key"); err != nil {
+	if err := r.ReplyInbox(t.Context(), "peer-inbox-message", target, "peer answer", "peer-key"); err != nil {
 		t.Fatal(err)
 	}
 	if err := r.ReplyInbox(t.Context(), "hidden-message", target, "hidden answer", "hidden-key"); err == nil {
@@ -524,7 +524,7 @@ func TestRemoteReplyRetainsProjectAndSession(t *testing.T) {
 			t.Fatalf("lost reply binding: %v", body)
 		}
 	}
-	if requests[0]["reply_to"] != "message" || requests[0]["body"] != "final answer" || requests[0]["idempotency_key"] != "reply-key" {
+	if requests[0]["reply_to"] != "project-message-parent" || requests[0]["body"] != "final answer" || requests[0]["idempotency_key"] != "reply-key" {
 		t.Fatal("reply content or retry key lost")
 	}
 	if _, ok := requests[0]["recipient_session_id"]; ok {

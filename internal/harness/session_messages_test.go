@@ -21,6 +21,7 @@ func TestHarnessSessionMessagesNeverMoveToAnotherGeneration(t *testing.T) {
 		ids = append(ids, decode(t, w)["id"].(string))
 	}
 	messages := []string{}
+	parents := []string{}
 	for _, id := range ids {
 		compat, inbox := attentionMessage(t, f, f.project, f.person.ID, f.agent.ID, false)
 		f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -31,6 +32,7 @@ func TestHarnessSessionMessagesNeverMoveToAnotherGeneration(t *testing.T) {
 			return err
 		})
 		messages = append(messages, inbox)
+		parents = append(parents, compat)
 	}
 	// The newer generation drains first; it cannot steal the older message.
 	for _, i := range []int{1, 0} {
@@ -40,7 +42,7 @@ func TestHarnessSessionMessagesNeverMoveToAnotherGeneration(t *testing.T) {
 		if err := json.Unmarshal(w.Body.Bytes(), &deliveries); err != nil || len(deliveries) != 1 || deliveries[0]["message_id"] != messages[i] {
 			t.Fatalf("drain crossed generation: %s", w.Body.String())
 		}
-		if deliveries[0]["project_id"] != f.project {
+		if deliveries[0]["project_id"] != f.project || deliveries[0]["reply_to_id"] != parents[i] {
 			t.Fatal("project reply routing metadata missing from drain")
 		}
 		replay := f.call(f.agent, "POST", base+"/"+ids[i]+"/drain", map[string]any{}, leases[i])

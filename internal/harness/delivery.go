@@ -16,6 +16,7 @@ import (
 
 type Delivery struct {
 	ProjectID         *string   `json:"project_id,omitempty"`
+	ReplyToID         *string   `json:"reply_to_id,omitempty"`
 	SenderSessionID   *string   `json:"sender_session_id,omitempty"`
 	ID                string    `json:"delivery_id"`
 	MessageID         string    `json:"message_id"`
@@ -44,7 +45,7 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	}
 	// Existing uncompleted lease must be replayed before taking later work.
 	var d Delivery
-	err = tx.QueryRow(ctx, `SELECT d.id::text,m.id::text,d.cursor,m.sender_principal_id::text,m.body,d.leased_at,(SELECT c.project_id::text FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.id=m.id),m.sender_session_id::text FROM harness_deliveries d JOIN inbox_messages m ON m.tenant_id=d.tenant_id AND m.id=d.message_id WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND d.session_id=$1 AND d.mode='managed' AND d.completed_at IS NULL AND d.released_at IS NULL AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) ORDER BY d.cursor LIMIT 1 FOR UPDATE OF m`, s.ID).Scan(&d.ID, &d.MessageID, &d.Cursor, &d.SenderPrincipalID, &d.Body, &d.LeasedAt, &d.ProjectID, &d.SenderSessionID)
+	err = tx.QueryRow(ctx, `SELECT d.id::text,m.id::text,d.cursor,m.sender_principal_id::text,m.body,d.leased_at,(SELECT c.project_id::text FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id LIMIT 1),(SELECT c.id::text FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id LIMIT 1),m.sender_session_id::text FROM harness_deliveries d JOIN inbox_messages m ON m.tenant_id=d.tenant_id AND m.id=d.message_id WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND d.session_id=$1 AND d.mode='managed' AND d.completed_at IS NULL AND d.released_at IS NULL AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) ORDER BY d.cursor LIMIT 1 FOR UPDATE OF m`, s.ID).Scan(&d.ID, &d.MessageID, &d.Cursor, &d.SenderPrincipalID, &d.Body, &d.LeasedAt, &d.ProjectID, &d.ReplyToID, &d.SenderSessionID)
 	if err == nil {
 		return []Delivery{d}, nil
 	}
@@ -55,7 +56,7 @@ func (m *Module) drain(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, err
 	// another generation for the same principal continue independently.
 	var messageID, sender, body string
 	var cursor int64
-	err = tx.QueryRow(ctx, `SELECT m.id::text,m.sender_principal_id::text,m.body,m.sent_event_id,(SELECT c.project_id::text FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.id=m.id),m.sender_session_id::text FROM inbox_messages m WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.recipient_principal_id=$1 AND ((m.recipient_session_id IS NULL AND $3) OR m.recipient_session_id=$2::uuid) AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) AND NOT EXISTS(SELECT 1 FROM harness_deliveries d WHERE d.message_id=m.id AND d.completed_at IS NULL AND d.released_at IS NULL) ORDER BY m.sent_event_id LIMIT 1 FOR UPDATE OF m SKIP LOCKED`, s.AgentPrincipalID, s.ID, s.Management == "managed").Scan(&messageID, &sender, &body, &cursor, &d.ProjectID, &d.SenderSessionID)
+	err = tx.QueryRow(ctx, `SELECT m.id::text,m.sender_principal_id::text,m.body,m.sent_event_id,(SELECT c.project_id::text FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id LIMIT 1),(SELECT c.id::text FROM inbox_compat_messages c WHERE c.tenant_id=m.tenant_id AND c.inbox_message_id=m.id LIMIT 1),m.sender_session_id::text FROM inbox_messages m WHERE m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.recipient_principal_id=$1 AND ((m.recipient_session_id IS NULL AND $3) OR m.recipient_session_id=$2::uuid) AND m.acked_at IS NULL AND (m.expires_at IS NULL OR m.expires_at>clock_timestamp()) AND NOT EXISTS(SELECT 1 FROM harness_deliveries d WHERE d.message_id=m.id AND d.completed_at IS NULL AND d.released_at IS NULL) ORDER BY m.sent_event_id LIMIT 1 FOR UPDATE OF m SKIP LOCKED`, s.AgentPrincipalID, s.ID, s.Management == "managed").Scan(&messageID, &sender, &body, &cursor, &d.ProjectID, &d.ReplyToID, &d.SenderSessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return []Delivery{}, nil
 	}

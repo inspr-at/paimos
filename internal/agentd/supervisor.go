@@ -1878,7 +1878,7 @@ func (s *Supervisor) serviceHarnessCycle(ctx context.Context, entry *owned, hear
 					}
 					entry.replyOrder = append(entry.replyOrder, item.MessageID)
 				}
-				entry.replies[item.MessageID] = InboxReplyTarget{PrincipalID: item.SenderPrincipalID, ProjectID: item.ProjectID, SenderSessionID: entry.harness.ID, RecipientSessionID: item.SenderSessionID}
+				entry.replies[item.MessageID] = InboxReplyTarget{PrincipalID: item.SenderPrincipalID, ProjectID: item.ProjectID, ReplyToID: item.ReplyToID, SenderSessionID: entry.harness.ID, RecipientSessionID: item.SenderSessionID}
 				entry.mu.Unlock()
 			}
 			if _, err := s.controlInbox(ctx, req, false, true); err != nil {

@@ -140,9 +140,13 @@ func (r *Remote) ReplyInbox(ctx context.Context, messageID string, target InboxR
 		if !uuidPattern.MatchString(target.ProjectID) || !uuidPattern.MatchString(target.SenderSessionID) {
 			return errors.New("inbox reply session binding unavailable")
 		}
+		parent := messageID
+		if target.ReplyToID != "" {
+			parent = target.ReplyToID
+		}
 		request := map[string]any{
 			"to": target.PrincipalID, "body": body, "idempotency_key": key,
-			"reply_to": messageID, "sender_session_id": target.SenderSessionID,
+			"reply_to": parent, "sender_session_id": target.SenderSessionID,
 			"delivery_level": "simple",
 		}
 		if target.RecipientSessionID != nil {
