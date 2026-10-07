@@ -31,14 +31,126 @@ export function orderAttentionGroups(groups: AttentionGroup[], by: Exclude<Atten
 export function orderAttentionRows<T extends AttentionItem>(items: T[]): T[] {
   return [...items].sort((a, b) => (kindOrder.get(a.kind) ?? 5) - (kindOrder.get(b.kind) ?? 5) || Date.parse(b.at) - Date.parse(a.at) || b.event_id - a.event_id)
 }
+// AEON-914 serves group headers. Until that route exists, grouped mode folds the
+// list endpoint. 500 is that route's group cap; 10 pages (50 rows each) bounds
+// the walk so a missing route cannot page the whole queue.
+export const ATTENTION_GROUP_CAP = 500
+export const ATTENTION_GROUP_PAGE_CAP = 10
+export function attentionGroupId(item: Pick<AttentionItem, 'kind' | 'project_id'>, by: Exclude<AttentionGrouping, 'none'>): string {
+  return by === 'kind' ? item.kind : (item.project_id || 'none')
+}
+// Facet labels are `key title` from the list query. A sample key covers a project the facet page did not reach.
+export function attentionProjectNames(id: string, sampleKey: string | undefined, facets: readonly AttentionFacet[]): { key: string; title: string } {
+  const facet = facets.find(facet => facet.id === id)
+  if (facet?.label) {
+    const split = facet.label.indexOf(' ')
+    if (split > 0) return { key: facet.label.slice(0, split), title: facet.label.slice(split + 1) }
+    return { key: facet.label, title: facet.label }
+  }
+  const key = sampleKey?.replace(/-\d+$/, '') ?? ''
+  return { key, title: key }
+}
+export function foldAttentionGroups(items: readonly AttentionItem[], by: Exclude<AttentionGrouping, 'none'>, cap = ATTENTION_GROUP_CAP): { groups: AttentionGroup[]; truncated: boolean } {
+  if (!Number.isInteger(cap) || cap < 1) throw new Error('attention group cap')
+  const groups: AttentionGroup[] = []
+  const index = new Map<string, AttentionGroup>()
+  let truncated = false
+  for (const item of items) {
+    const id = attentionGroupId(item, by)
+    let group = index.get(id)
+    if (!group) {
+      if (groups.length >= cap) { truncated = true; continue }
+      group = {
+        id,
+        ...(by === 'kind' ? { kind: item.kind } : { ...(item.project_id ? { project_id: item.project_id } : {}), key: item.key.replace(/-\d+$/, ''), title: '' }),
+        total: 0, counts: {}, applicable: 0, editable: 0, can_manage: false,
+      }
+      index.set(id, group)
+      groups.push(group)
+    }
+    group.total += 1
+    group.counts[item.kind] = (group.counts[item.kind] ?? 0) + 1
+    if (item.editable) group.editable += 1
+    if (item.editable && item.applicable) group.applicable += 1
+  }
+  return { groups, truncated }
+}
+// Kind-then-newest is not the list cursor yet (AEON-914). Sorting one page and
+// appending the next repeats kinds. Sort only once the cursor has ended.
+export function mergeAttentionRows<T extends AttentionItem>(existing: readonly T[], page: { items: readonly T[]; next_cursor: string | null }): T[] {
+  const seen = new Set(existing.map(row => row.event_id))
+  const merged = [...existing, ...page.items.filter(row => !seen.has(row.event_id))]
+  return page.next_cursor == null ? orderAttentionRows(merged) : merged
+}
+function attentionBound(value: number, max: number, label: string) {
+  if (!Number.isInteger(value) || value < 1 || value > max) throw new Error(label)
+  return value
+}
+export async function collectAttentionGroups(by: Exclude<AttentionGrouping, 'none'>, readPage: (after?: string) => Promise<AttentionPage>, options: { cap?: number; pageCap?: number } = {}): Promise<{ groups: AttentionGroup[]; truncated: boolean; pages: number }> {
+  const cap = attentionBound(options.cap ?? ATTENTION_GROUP_CAP, ATTENTION_GROUP_CAP, 'attention group cap')
+  const pageCap = attentionBound(options.pageCap ?? ATTENTION_GROUP_PAGE_CAP, ATTENTION_GROUP_PAGE_CAP, 'attention group page cap')
+  const items: AttentionItem[] = []
+  const seenEvents = new Set<number>()
+  const seenGroups = new Set<string>()
+  let after: string | undefined, truncated = false, pages = 0, more = false
+  while (pages < pageCap) {
+    const page = await readPage(after)
+    pages += 1
+    for (const item of page.items) {
+      if (seenEvents.has(item.event_id)) continue
+      seenEvents.add(item.event_id)
+      const id = attentionGroupId(item, by)
+      if (!seenGroups.has(id)) {
+        if (seenGroups.size >= cap) { truncated = true; continue }
+        seenGroups.add(id)
+      }
+      items.push(item)
+    }
+    more = !!page.next_cursor
+    if (truncated || !more) break
+    after = page.next_cursor!
+  }
+  if (more) truncated = true
+  const folded = foldAttentionGroups(items, by, cap)
+  return { groups: folded.groups, truncated: truncated || folded.truncated, pages }
+}
+// Kind totals come from the list count, which is not limited to the scanned pages.
+// A kind filter keeps only that kind. Project names prefer the facet label.
+export function finishAttentionGroups(built: { groups: AttentionGroup[]; truncated: boolean }, page: AttentionPage, by: Exclude<AttentionGrouping, 'none'>, filters: AttentionFilters, cap = ATTENTION_GROUP_CAP): { groups: AttentionGroup[]; truncated: boolean } {
+  const groups = built.groups.map(group => ({ ...group, counts: { ...group.counts } }))
+  let truncated = built.truncated
+  if (by === 'kind') {
+    for (const group of groups) {
+      const id = (group.kind ?? group.id) as AttentionKind
+      const count = page.counts[id] ?? group.total
+      group.total = count
+      group.counts = { [id]: count }
+    }
+    for (const kind of ATTENTION_KINDS) {
+      const count = page.counts[kind.id] ?? 0
+      if (count < 1 || groups.some(group => group.id === kind.id) || (filters.kind && filters.kind !== kind.id)) continue
+      if (groups.length >= cap) { truncated = true; continue }
+      groups.push({ id: kind.id, kind: kind.id, total: count, counts: { [kind.id]: count }, applicable: 0, editable: truncated ? 1 : 0, can_manage: false })
+    }
+  }
+  for (const group of groups) {
+    if (!group.project_id) continue
+    const sample = page.items.find(item => item.project_id === group.project_id)
+    const names = attentionProjectNames(group.project_id, sample?.key, page.facets.projects)
+    if (names.key) group.key = names.key
+    if (names.title) group.title = names.title
+  }
+  return { groups, truncated }
+}
 // Saved decisions win; searches open matching groups without overwriting them.
 export function attentionFolds(groups: AttentionGroup[], total: number, saved?: Record<string, boolean>, searching = false): Set<string> {
   return new Set(groups.flatMap((group, index) => !searching && (saved?.[group.id] ?? (total > 50 && index > 0)) ? [group.id] : []))
 }
 export const attentionIdentity = (item: AttentionIdentity): AttentionIdentity => ({ event_id: item.event_id, node_id: item.node_id, revision: item.revision, ...(item.resolution_event_id ? { resolution_event_id: item.resolution_event_id } : {}), ...(item.release_id ? { release_id: item.release_id, release_revision: item.release_revision, release_project_revision: item.release_project_revision } : {}) })
+const attentionFailure = (status: number) => new Error(status === 403 ? 'You may no longer open this view.' : 'Needs attention could not be loaded or changed. Try again.')
 async function read<T>(path: string, signal: AbortSignal, body?: unknown): Promise<T> {
   const response = await api(path, { signal, ...(body ? { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) } : {}) })
-  if (!response.ok) throw new Error(response.status === 403 ? 'You may no longer open this view.' : 'Needs attention could not be loaded or changed. Try again.')
+  if (!response.ok) throw attentionFailure(response.status)
   return response.json() as Promise<T>
 }
 export function listAttention(filters: AttentionFilters, signal: AbortSignal, after?: string) {
@@ -46,10 +158,15 @@ export function listAttention(filters: AttentionFilters, signal: AbortSignal, af
   if (after) query.set('after', after)
   return read<AttentionPage>(`/status-autopilot/attention?${query}`, signal)
 }
-export function listAttentionGroups(filters: AttentionFilters, by: Exclude<AttentionGrouping, 'none'>, signal: AbortSignal) {
+// Null means the route is not registered yet. AEON-914 ships the real response;
+// any other failure still rejects so Retry is not shown a made-up group list.
+export async function listAttentionGroups(filters: AttentionFilters, by: Exclude<AttentionGrouping, 'none'>, signal: AbortSignal): Promise<AttentionGroupsPage | null> {
   const query = new URLSearchParams(Object.entries(filters).filter(([, value]) => value !== ''))
   query.set('by', by)
-  return read<AttentionGroupsPage>(`/status-autopilot/attention/groups?${query}`, signal)
+  const response = await api(`/status-autopilot/attention/groups?${query}`, { signal })
+  if (response.status === 404) return null
+  if (!response.ok) throw attentionFailure(response.status)
+  return response.json() as Promise<AttentionGroupsPage>
 }
 export const actOnAttention = (action: 'apply' | 'dismiss' | 'undo', items: AttentionIdentity[], signal: AbortSignal) => read<{ items: AttentionResult[] }>('/status-autopilot/attention/actions', signal, { action, items })
 

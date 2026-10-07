@@ -8298,6 +8298,12 @@
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a delayed action cannot resolve a different filtered record or offer stale Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a filtered empty queue says nothing matches and keeps Clear filters","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a missing groups route still groups the list and leaves Group by None on the list endpoint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a phone tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"an unavailable queue shows an honest error and Retry without moving its controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"attention keys select a range, preserve native field shortcuts, skip inapplicable Apply and retain confirmed Undo","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -12446,6 +12452,8 @@
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: project grouping retains metadata, loaded totals, held placement and URL state","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-915: the ticket grid keeps a narrow loaded fit at the designed width","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/columns.test.ts","name":"a saved choice fixes order and visibility across desktop and phone widths","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"a saved choice retains progress and ETA when space gets tight","tags":["delete-candidate"],"tier":"GATED-FULL"}
@@ -13922,7 +13930,13 @@
     ,
     {"kind":"vitest","file":"tests/approval-snapshot.unit.test.ts","name":"S8-005: repeated mutation stops after three complete reads","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"builds capped groups from the list cursor and stops at the page cap","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"fills kind totals from the list counts and project names from facets","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"ignores failed or incomplete release receipts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"keeps server order across a live cursor and sorts the loaded window only when the cursor ends","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/attention.unit.test.ts","name":"orders every group by open flags and every row by kind then newest without mutating the visit","tier":"ESSENTIAL"}
     ,

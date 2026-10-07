@@ -12,7 +12,7 @@ const row = (index: number, extra: Partial<AttentionItem> = {}): AttentionItem =
   from: index % 2 ? 'backlog' : 'new', to: index % 2 ? 'cancelled' : 'backlog',
   reason: 'Untouched in this project; review the current suggestion.', at: '2026-10-03T08:00:00Z', editable: true, applicable: true, ...extra,
 })
-async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fail?: boolean; partial?: boolean; held?: Promise<void>; received?: () => void } = {}) {
+async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fail?: boolean; partial?: boolean; held?: Promise<void>; received?: () => void; groups?: 'absent' } = {}) {
   await mockWork(page, fixtures())
   await mockBusiness(page, businessData({ role: 'member' }), { role: 'member' })
   const preferences = new Map<string, unknown>()
@@ -22,7 +22,7 @@ async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fa
     await route.fulfill({ json: { value: preferences.get(key) ?? null } })
   })
   const live = new Map(items.map(item => [item.event_id, { ...item }]))
-  const actions: { action: string; items: AttentionItem[] }[] = [], queries: URLSearchParams[] = []
+  const actions: { action: string; items: AttentionItem[] }[] = [], queries: URLSearchParams[] = [], paths: string[] = []
   let fail = options.fail ?? false
   let releaseRevision = items.find(item => item.release_id)?.release_revision ?? 0
   let projectRevision = items.find(item => item.release_id)?.release_project_revision ?? 0
@@ -37,8 +37,10 @@ async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fa
       options.received?.(); if (options.held) await options.held
       return route.fulfill({ json: { items: results } }).catch(() => {})
     }
+    paths.push(url.pathname)
     queries.push(url.searchParams)
     if (fail) return route.fulfill({ status: 503, json: { error: 'unavailable' } })
+    if (options.groups === 'absent' && url.pathname.endsWith('/groups')) return route.fulfill({ status: 404, json: { error: 'not found' } })
     const q = url.searchParams, filtered = [...live.values()].filter(item => (!q.get('kind') || item.kind === q.get('kind')) && (!q.get('project_id') || item.project_id === q.get('project_id')) && (!q.get('q') || item.title.toLowerCase().includes(q.get('q')!.toLowerCase())))
     if (url.pathname.endsWith('/groups')) {
       const by = q.get('by'), ids = [...new Set(filtered.map(item => by === 'kind' ? item.kind : item.project_id))]
@@ -51,10 +53,24 @@ async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fa
     return route.fulfill({ json: { items: orderAttentionRows(filtered).slice(offset, offset + 50), total: filtered.length, counts: { proposed: 0, triage: items.filter(i => i.kind === 'triage').length, cancel: items.filter(i => i.kind === 'cancel').length, blocked: 0, missed: 0 }, next_cursor: filtered.length > offset + 50 ? String(offset + 50) : null,
       facets: { projects: [{ id: 'p-aeon', label: 'AEON Aeon' }, { id: 'p-pharos', label: 'PHAROS Pharos' }], assignees: [{ id: 'old-person', label: 'Previous assignee' }] }, facets_truncated: false } })
   })
-  return { actions, queries, preferences, recover: () => { fail = false } }
+  return { actions, queries, paths, preferences, recover: () => { fail = false } }
 }
 const table = (page: Page) => page.getByRole('grid', { name: 'Tickets needing attention' })
 const first = (page: Page) => table(page).locator('#row-attention-1')
+// A phone tap opens the ticket. Selection starts with a hold, and only then
+// do the round checkboxes exist for the remaining rows.
+async function chooseRows(page: Page, ids: number[]) {
+  const narrow = (page.viewportSize()?.width ?? 1280) <= 720
+  if (!narrow) {
+    for (const id of ids) await table(page).locator(`#row-attention-${id}`).getByRole('checkbox').click()
+    return
+  }
+  const row = table(page).locator(`#row-attention-${ids[0]}`)
+  await row.evaluate(el => el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 24, clientY: 24, pointerId: 1, pointerType: 'touch' })))
+  await expect(row.getByRole('checkbox')).toBeVisible()
+  await row.evaluate(el => el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, clientX: 24, clientY: 24, pointerId: 1, pointerType: 'touch' })))
+  for (const id of ids.slice(1)) await table(page).locator(`#row-attention-${id}`).getByRole('checkbox').click()
+}
 
 test('Apply, Dismiss and Undo retain rows and control boxes on desktop and phone, in both themes', async ({ page }, testInfo) => {
   const errors = watchErrors(page)
@@ -89,7 +105,7 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) te
   await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
   await page.goto('/tickets?view=needs-attention')
   await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
-  for (const id of [1, 2, 3]) await table(page).locator(`#row-attention-${id}`).getByRole('checkbox').click()
+  await chooseRows(page, [1, 2, 3])
   const bar = page.getByRole('toolbar', { name: 'Selected tickets' })
   const apply = bar.getByRole('button', { name: 'Apply 3', exact: true })
   const dismiss = bar.getByRole('button', { name: 'Dismiss 3', exact: true })
@@ -195,7 +211,7 @@ for (const width of [390, 1024, 1440]) test(`partial results keep toasts above s
  await page.setViewportSize({ width, height: width === 390 ? 844 : 900 })
  await setup(page, [row(0), row(1), row(2)], { partial: true })
  await page.goto('/tickets?view=needs-attention')
- for (const id of [1, 2, 3]) await table(page).locator(`#row-attention-${id}`).getByRole('checkbox').click()
+ await chooseRows(page, [1, 2, 3])
  const bar = page.getByRole('toolbar', { name: 'Selected tickets' })
  await bar.getByRole('button', { name: 'Apply 3' }).click()
  await expect(bar).toContainText('1 selected')
@@ -227,7 +243,7 @@ for (const width of [390, 1024, 1440]) test(`partial errors leave adjacent actio
   await page.goto('/tickets?view=needs-attention')
   await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
   const failedRow = table(page).locator('#row-attention-2'), adjacentRow = table(page).locator('#row-attention-3')
-  for (const id of [1, 2, 3]) await table(page).locator(`#row-attention-${id}`).getByRole('checkbox').click()
+  await chooseRows(page, [1, 2, 3])
   await adjacentRow.evaluate(el => el.scrollIntoView({ block: 'center' }))
   const guard = await controlStability(page, { failedRow, failedActions: failedRow.locator('.action-stack'), adjacentRow, adjacentActions: adjacentRow.locator('.action-stack') })
   await guard.check(async () => {
@@ -448,4 +464,48 @@ test('shared attention columns keep long keys whole and Since exposes the exact 
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1)
   await page.screenshot({ path: testInfo.outputPath(`attention-grid-${width}-${theme}-de.png`), fullPage: true })
  }
+})
+
+test('a missing groups route still groups the list and leaves Group by None on the list endpoint', async ({ page }) => {
+ const data = await setup(page, [row(0), row(1), row(2)], { groups: 'absent' })
+ await page.goto('/tickets?view=needs-attention&kind=triage')
+ await expect(page.locator('#row-group-p-aeon')).toBeVisible()
+ await expect(page.locator('#row-group-p-pharos')).toHaveCount(0)
+ await expect(page.getByRole('alert')).toHaveCount(0)
+ await expect(table(page).locator('.ticket-row:not(.fit-row)')).toHaveCount(2)
+ expect(data.paths.some(path => path.endsWith('/groups'))).toBe(true)
+ expect(data.queries.some(query => query.get('kind') === 'triage' && !query.has('by'))).toBe(true)
+ await page.goto('/tickets?view=needs-attention')
+ await expect(page.locator('#row-group-p-aeon')).toBeVisible()
+ await expect(page.locator('#row-group-p-pharos')).toBeVisible()
+ await expect(table(page).locator('.ticket-row:not(.fit-row)')).toHaveCount(3)
+ const before = data.paths.length
+ await page.getByRole('button', { name: /^Display:/ }).click()
+ await page.getByRole('radio', { name: 'None', exact: true }).click()
+ await expect(page).toHaveURL(/group=none/)
+ await expect(table(page).locator('.ticket-row:not(.fit-row)')).toHaveCount(3)
+ expect(data.paths.slice(before).some(path => path.endsWith('/groups'))).toBe(false)
+})
+
+test('a phone tap opens the ticket', async ({ page }) => {
+ await page.setViewportSize({ width: 390, height: 844 })
+ await setup(page)
+ await page.goto('/tickets?view=needs-attention')
+ await expect(first(page)).toBeVisible()
+ await first(page).locator('.attention-title').click()
+ await expect(page).toHaveURL(/\/projects\/AEON\/tickets\/AEON-10/)
+ await expect(page.getByRole('toolbar', { name: 'Selected tickets' })).toHaveCount(0)
+})
+
+test('a filtered empty queue says nothing matches and keeps Clear filters', async ({ page }) => {
+ await setup(page, [])
+ await page.goto('/tickets?view=needs-attention')
+ await expect(page.locator('.state h2')).toHaveText('Nothing here needs attention.')
+ await page.goto('/tickets?view=needs-attention&q=zzzz-no-match')
+ const state = page.locator('.state')
+ await expect(state.locator('h2')).toHaveText('No tickets match these filters')
+ await expect(state.getByRole('button', { name: 'Clear filters' })).toBeVisible()
+ await state.getByRole('button', { name: 'Clear filters' }).click()
+ await expect(page).toHaveURL('/tickets?view=needs-attention')
+ await expect(page.locator('.state h2')).toHaveText('Nothing here needs attention.')
 })

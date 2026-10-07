@@ -960,14 +960,14 @@ defineExpose({
     </div>
     <div v-else-if="!loading && !entries.length" class="state">
       <span class="state-icon"><AppIcon :name="filtered ? 'filter' : 'inbox'" :size="18" /></span>
-      <template v-if="emptyText">
-        <h2>{{ emptyText }}</h2>
-      </template>
-      <template v-else-if="filtered">
+      <template v-if="filtered">
         <h2>No tickets match these filters</h2>
         <div class="state-actions">
           <button type="button" class="btn" @click="emit('clearFilters')">Clear filters</button>
         </div>
+      </template>
+      <template v-else-if="emptyText">
+        <h2>{{ emptyText }}</h2>
       </template>
       <template v-else-if="hidingClosed">
         <h2>Nothing open here</h2>

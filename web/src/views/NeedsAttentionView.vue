@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ATTENTION_KINDS, actOnAttention, attentionIdentity, refreshAttentionRelease, listAttention, listAttentionGroups, attentionGrouping, attentionFolds, orderAttentionGroups, orderAttentionRows, type AttentionGroup, type AttentionFilters, type AttentionItem, type AttentionPage } from '../lib/attention'
+import { ATTENTION_KINDS, actOnAttention, attentionIdentity, refreshAttentionRelease, listAttention, listAttentionGroups, attentionGrouping, attentionFolds, orderAttentionGroups, collectAttentionGroups, finishAttentionGroups, mergeAttentionRows, type AttentionGroup, type AttentionFilters, type AttentionItem, type AttentionPage } from '../lib/attention'
 import { createScope, scopeOwner } from '../lib/identityScope'
 import { usePreference } from '../lib/preferences'
 import { filtersFromQuery, type RowGroup, type TicketRow } from '../lib/ticketList'
@@ -35,7 +35,7 @@ const columnPrefs = usePreference<ListPrefs>('needs-attention:columns')
 const locale = document.documentElement.lang.toLowerCase().startsWith('de') ? 'de' : 'en'
 const words = (en: string, de: string) => locale === 'de' ? de : en
 let pendingGroups: { group: Group; query: AttentionFilters; after?: string }[] = [], activeGroupReads = 0
-let generation = 0, selectionResize: ResizeObserver | undefined, rangeAnchor: number | undefined
+let generation = 0, selectionResize: ResizeObserver | undefined, rangeAnchor: number | undefined, groupsFromList = false
 function measureSelection() {
   const bar = selectionBar.value
   const footer = bar ? parseFloat(getComputedStyle(bar).getPropertyValue('--footer-h')) || 0 : 0
@@ -71,9 +71,11 @@ const groups = computed<RowGroup[]>(() => grouping.value === 'none' ? [{ key: 'a
 })))
 const tablePrefs = computed<ListPrefs>(() => ({ visible: [], widths: columnPrefs.value.value?.widths }))
 const extraColumns = computed<ColumnDef[]>(() => [
-  { id: 'attention-kind', label: words('Kind', 'Art'), sort: null, width: 150, min: 120, max: 300 },
+  // loadedFitWidth will not go under these widths. Kind and Since stay near
+  // their minima so Apply and Undo remain fully visible at 1024px.
+  { id: 'attention-kind', label: words('Kind', 'Art'), sort: null, width: 136, min: 120, max: 300 },
   { id: 'attention-suggestion', label: words('Suggestion', 'Vorschlag'), sort: null, width: 210, min: 170, max: 480 },
-  { id: 'attention-since', label: words('Since', 'Seit'), sort: null, width: 85, min: 70, max: 200, end: true },
+  { id: 'attention-since', label: words('Since', 'Seit'), sort: null, width: 70, min: 70, max: 200, end: true },
   { id: 'attention-actions', label: words('Actions', 'Aktionen'), sort: null, width: 172, min: 172, max: 360, end: true },
 ])
 const listFilters = computed(() => ({ ...filtersFromQuery({}), q: filters.value.q, group: grouping.value === 'kind' ? 'type' as const : grouping.value }))
@@ -81,21 +83,37 @@ function setFilter(field: keyof AttentionFilters, value: string) { void router.r
 function setGrouping(value: 'project' | 'kind' | 'none') { void router.replace({ path: '/tickets', query: { ...route.query, view: 'needs-attention', group: value } }) }
 function clearFilters() { void router.replace({ path: '/tickets', query: { view: 'needs-attention', ...(route.query.group ? { group: route.query.group } : {}) } }) }
 function resetVisit() {
-  generation++; reads.cancel(); pendingGroups = []; activeGroupReads = 0; flatRows.value = []; groupRows.value = []; selected.value.clear(); counts.value = {}; facets.value = { projects: [], assignees: [] }; truncated.value = false; groupsTruncated.value = false; toastBottomClearance.value = 0; total.value = 0; next.value = null; error.value = ''; busy.value = false; loading.value = false; cursor.value = null; collapsed.value = new Set(); rangeAnchor = undefined
+  generation++; reads.cancel(); pendingGroups = []; activeGroupReads = 0; groupsFromList = false; flatRows.value = []; groupRows.value = []; selected.value.clear(); counts.value = {}; facets.value = { projects: [], assignees: [] }; truncated.value = false; groupsTruncated.value = false; toastBottomClearance.value = 0; total.value = 0; next.value = null; error.value = ''; busy.value = false; loading.value = false; cursor.value = null; collapsed.value = new Set(); rangeAnchor = undefined
   if (undoToast.value) dismiss(undoToast.value)
 }
 function acceptPage(page: AttentionPage) { counts.value = page.counts; total.value = page.total; facets.value = page.facets; truncated.value = page.facets_truncated }
 function appendRows(existing: Row[], page: AttentionPage) {
-  const seen = new Set(existing.map(row => row.event_id))
-  existing.push(...orderAttentionRows(page.items.filter(row => !seen.has(row.event_id))))
+  const merged = mergeAttentionRows(existing, page)
+  existing.splice(0, existing.length, ...merged)
 }
-function groupFilters(group: Group): AttentionFilters { return { ...filters.value, ...(grouping.value === 'project' ? { project_id: group.project_id || group.id } : { kind: group.kind || group.id }) } }
+function takeGroupPage(group: Group, page: AttentionPage) {
+  appendRows(group.items, page)
+  group.next = page.next_cursor
+  if (!groupsFromList) return
+  group.total = page.total
+  group.editable = Math.max(group.editable, page.items.filter(row => row.editable).length)
+  group.applicable = Math.max(group.applicable, page.items.filter(row => row.editable && row.applicable).length)
+  if (grouping.value === 'project') {
+    const kind = filters.value.kind as Row['kind'] | ''
+    group.counts = kind ? { [kind]: page.counts[kind] ?? page.total } : { ...page.counts }
+  } else if (group.kind) group.counts = { [group.kind]: page.total }
+}
+function groupFilters(group: Group): AttentionFilters {
+  if (grouping.value !== 'project') return { ...filters.value, kind: group.kind || group.id }
+  const project_id = group.project_id || group.id
+  return { ...filters.value, ...(project_id && project_id !== 'none' ? { project_id } : {}) }
+}
 function drainGroups() {
   while (activeGroupReads < 4 && pendingGroups.length) {
     const request = pendingGroups.shift()!, group = request.group
     activeGroupReads++
     void scope.run(({ after, signal }) => after(listAttention(request.query, signal, request.after), page => {
-      appendRows(group.items, page); group.next = page.next_cursor
+      takeGroupPage(group, page)
     }), { failed: e => { group.error = e instanceof Error ? e.message : 'Needs attention could not be loaded.' }, settled: () => { group.loading = false; activeGroupReads--; drainGroups() } })
   }
 }
@@ -114,15 +132,21 @@ function load(more = false) {
       appendRows(flatRows.value, page); acceptPage(page); next.value = page.next_cursor
     })
     return after(Promise.all([listAttentionGroups(query, by, signal), listAttention(query, signal), foldPrefs.ready, columnPrefs.ready]), async ([summary, page]) => {
-      groupRows.value = orderAttentionGroups(summary.groups, by).map(group => ({ ...group, items: [], next: null, loading: false, error: '' }))
-      acceptPage(page); total.value = summary.total; groupsTruncated.value = summary.truncated
-      collapsed.value = attentionFolds(groupRows.value, summary.total, foldPrefs.value.value?.[by], !!query.q)
+      let grouped = summary
+      if (!grouped) {
+        const collected = await collectAttentionGroups(by, after => after ? listAttention(query, signal, after) : Promise.resolve(page))
+        grouped = { ...finishAttentionGroups(collected, page, by, query), total: page.total }
+      }
+      groupsFromList = summary == null
+      groupRows.value = orderAttentionGroups(grouped.groups, by).map(group => ({ ...group, items: [], next: null, loading: false, error: '' }))
+      acceptPage(page); total.value = grouped.total; groupsTruncated.value = grouped.truncated
+      collapsed.value = attentionFolds(groupRows.value, grouped.total, foldPrefs.value.value?.[by], !!query.q)
       // Bound parallel reads even when hundreds of groups were saved open.
       const open = groupRows.value.filter(group => !collapsed.value.has(group.id))
       for (let i = 0; i < open.length; i += 4) {
         const batch = open.slice(i, i + 4)
         await after(Promise.all(batch.map(group => listAttention(groupFilters(group), signal))), pages => {
-          pages.forEach((page, index) => { const group = batch[index]!; appendRows(group.items, page); group.next = page.next_cursor })
+          pages.forEach((groupPage, index) => { const group = batch[index]!; takeGroupPage(group, groupPage) })
         })
       }
     })
@@ -278,7 +302,7 @@ onBeforeUnmount(() => { generation++; scope.dispose(); selectionResize?.disconne
       @search="value => setFilter('q', value)" @attention-filter="setFilter" @attention-group="setGrouping" @clear-all="clearFilters" @expand-groups="foldAll(false)" @collapse-groups="foldAll(true)" />
     <TicketTable ref="table" :key="`${scopeOwner(session.identity)}:${grouping}`" :selection-disabled="busy" :sort-disabled="true" label="Tickets needing attention" :retry-label="words('Retry', 'Erneut versuchen')" :empty-text="words('Nothing here needs attention.', 'Hier braucht nichts Aufmerksamkeit.')" :expected-rows="6" :groups="groups" :group="listFilters.group" :rows-by-id="rowsById" :cursor-id="cursor" :open-id="null" :query="filters.q" :sort="[]" density="comfortable"
       :loading="loading" :loading-more="loading && rows.length > 0" :error="error" :more-error="rows.length ? error : ''" :has-more="grouping === 'none' && !!next" :filtered="Object.values(filters).some(Boolean)" :hiding-closed="false" :collapsed="collapsed" :total="total" :scroll-root="null" :now="Date.now()" :show-assignee="false" :creating="false" :extra-columns="extraColumns" :prefs="tablePrefs" :locale="locale"
-      :selectable="groupRows.some(group => group.editable > 0) || rows.some(row => row.editable)" :picking="true" :selected="selectedIds" :row-selectable="row => !!attentionById.get(row.id)?.editable && !attentionById.get(row.id)?.resolved"
+      :selectable="groupRows.some(group => group.editable > 0) || rows.some(row => row.editable)" :selected="selectedIds" :row-selectable="row => !!attentionById.get(row.id)?.editable && !attentionById.get(row.id)?.resolved"
       @select="(row, mode) => select(attentionById.get(row.id)!, mode)" @select-all="selectAll" @select-group="selectGroup" @toggle-group="toggleGroup" @more-in-group="key => loadGroup(key, !!groupRows.find(group => group.id === key)?.next)" @more="load(true)" @retry="load()" @clear-filters="clearFilters" @cursor="id => cursor = id" @open="openRow" @new-tab="newTab" @copy="copyKey" @widths="widths => columnPrefs.save({ widths })">
       <template #cell-title="{ row }"><AppIcon name="ticket" :size="14" /><span v-clip-tip="`${attentionRow(row).title} · ${attentionRow(row).failure || attentionRow(row).reason}`" class="attention-title" :class="{ 'row-error': attentionRow(row).failure }" :role="attentionRow(row).failure ? 'alert' : undefined">{{ attentionRow(row).failure || attentionRow(row).title }}</span></template>
       <template #cell-attention-kind="{ row }"><span class="attention-kind"><StatusIcon v-if="attentionRow(row).kind === 'cancel'" state="cancelled" :size="13" /><AppIcon v-else :name="kinds.get(attentionRow(row).kind)!.icon as IconName" :size="13" />{{ locale === 'de' ? kinds.get(attentionRow(row).kind)!.oneDe : kinds.get(attentionRow(row).kind)!.one }}</span></template>
