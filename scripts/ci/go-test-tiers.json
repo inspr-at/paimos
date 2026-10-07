@@ -6728,6 +6728,8 @@
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/nodes","name":"TestPlanningHistoricalFullStackKindKeepsLegacyRoute","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/nodes","name":"TestPlanningHugeUsageDoesNotBreakTheList","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPlanningLearningAnyRouteBasis","tier":"GATED-FULL"}
