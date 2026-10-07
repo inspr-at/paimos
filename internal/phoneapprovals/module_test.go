@@ -527,7 +527,8 @@ func TestPhonePushCommittedEventsAndRecoveryTick(t *testing.T) {
 	waitScan() // Connected, subscribed and completed its recovery scan.
 	emit := func(typ, id string) {
 		t.Helper()
-		if err := db.InTenant(t.Context(), f.db.App, f.p.TenantID, func(tx pgx.Tx) error {
+		ctx := db.AllProjects(t.Context(), "committed phone event fixture")
+		if err := db.InTenant(ctx, f.db.App, f.p.TenantID, func(tx pgx.Tx) error {
 			_, err := events.Append(t.Context(), tx, f.agent, events.Change{Type: typ, After: map[string]string{"request_id": id}})
 			return err
 		}); err != nil {
