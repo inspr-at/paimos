@@ -11886,6 +11886,8 @@
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"built-in ceilings keep review policy read and leave manage to an explicit custom role","tier":"ESSENTIAL"}
     ,
+    {"kind":"node","file":"tests/access.test.ts","name":"built-in ceilings keep shadow admission on the person and off agent keys","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/access.test.ts","name":"client/server scope ceiling parity, including project self-service and person-only exclusions","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"deactivating an agent says how many keys go with it","tier":"GATED-FULL"}
