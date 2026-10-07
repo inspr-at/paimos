@@ -68,7 +68,7 @@ func TestRegistryAndBuiltins(t *testing.T) {
 }
 
 func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
-	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage", "account.overview.read"}) {
+	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage", "reviewpolicy.manage", "account.overview.read"}) {
 		t.Fatal("built-in agent exclusions drifted from the explicit policies")
 	}
 	for _, key := range builtinAgentExclusions {
@@ -77,7 +77,8 @@ func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
 			t.Fatal("an explicit custom-role permission must remain agent-grantable")
 		}
 		for _, role := range []string{"owner", "admin", "member"} {
-			if !contains(builtinPermissions(role), key) {
+			want := key != "reviewpolicy.manage" || role != "member"
+			if contains(builtinPermissions(role), key) != want {
 				t.Fatalf("agent exclusions must leave person %s grants intact", role)
 			}
 		}

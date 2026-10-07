@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "tables": [
+    {
+      "table": "cross_family_policies",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "updated_by"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "mode": "metadata",
+        "allowed_families": "metadata",
+        "updated_by": "personal",
+        "updated_at": "metadata"
+      }
+    }
+  ]
+}

@@ -26,6 +26,7 @@ func makeRegistry() []Permission {
 	groups := []struct{ group, actions string }{
 		{"nodes", "read write delete move restore configure"},
 		{"recurrences", "manage"},
+		{"reviewpolicy", "read manage"},
 		{"rules", "read write publish"},
 		{"kinds", "read manage"}, {"tags", "read write manage"},
 		{"relations", "read write delete"}, {"comments", "read write delete"},

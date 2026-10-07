@@ -1,5 +1,6 @@
 {
   "resources": {
+    "reviewpolicy": "review policy",
     "recurrences": "recurring work",
     "questions": "questions",
     "nodes": "work",
