@@ -910,10 +910,12 @@ func (s *Supervisor) StartRun(ctx context.Context, run Run) (resultErr error) {
 		}
 		// Failed availability is not permission to launch a verification. Give
 		// the unclaimed request a terminal, replayable no-launch result instead
-		// of leaving it queued until its allowance expires.
+		// of leaving it queued until its allowance expires. Local dependency or
+		// profile repairs retain their existing queued recovery path.
 		if reason == "" && !held && !s.accountAvailable(run.requestedAccount()) {
 			s.mu.Lock()
-			knownFailure := s.probePendingSince[run.requestedAccount()].IsZero() && s.blockedAccounts[run.requestedAccount()] && !s.blockedAccounts[""]
+			knownFailure := s.probePendingSince[run.requestedAccount()].IsZero() && s.blockedAccounts[run.requestedAccount()] && !s.blockedAccounts[""] &&
+				s.dependencyErrors[run.requestedAccount()] == "" && !s.harnessFailed[run.requestedAccount()] && !s.profilePermissions[run.requestedAccount()]
 			s.mu.Unlock()
 			if knownFailure && s.dispatchAllowed(run.requestedAccount()) {
 				reason = "account_not_ready"
