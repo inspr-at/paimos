@@ -44,7 +44,7 @@ func newFixture(t *testing.T) *fixture {
 		must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Owner') RETURNING id::text`, p.TenantID).Scan(&p.ID))
 		dbtest.BindRole(t, f.d, p.TenantID, p.ID, "admin")
 	}
-	f.agent = tenant.Principal{TenantID: f.person.TenantID, Kind: tenant.Agent, KeyCreatorID: f.person.ID, Scopes: []string{"engine.admission", "engine.read", "engine.manage", "agents.plan.read", "account.overview.read"}}
+	f.agent = tenant.Principal{TenantID: f.person.TenantID, Kind: tenant.Agent, KeyCreatorID: f.person.ID, Scopes: []string{"nodes.read", "engine.admission", "engine.read", "engine.manage", "agents.plan.read", "account.overview.read"}}
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Runtime') RETURNING id::text`, f.person.TenantID).Scan(&f.agent.ID))
 	dbtest.BindRole(t, f.d, f.person.TenantID, f.agent.ID, "admin")
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,'ADM-1','Project' FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, f.person.TenantID).Scan(&f.project))
@@ -244,7 +244,7 @@ func TestAdmissionExplicitAuthorityFinalWriteAndIdempotentReplay(t *testing.T) {
 	f.call(t, f.agent, "PUT", "/api/projects/"+f.project+"/admission-settings", map[string]any{"expected_revision": 1, "shadow_enabled": false}, 403)
 	var role string
 	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'admission_observer','Admission observer') RETURNING id::text`, f.person.TenantID).Scan(&role))
-	for _, permission := range []string{"engine.admission", "engine.read", "agents.plan.read", "account.overview.read"} {
+	for _, permission := range []string{"nodes.read", "engine.admission", "engine.read", "agents.plan.read", "account.overview.read"} {
 		f.exec(t, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, f.person.TenantID, role, permission)
 	}
 	f.exec(t, `UPDATE role_bindings SET role_id=$2 WHERE principal_id=$1 AND scope_type='workspace'`, f.agent.ID, role)
