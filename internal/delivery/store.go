@@ -151,7 +151,8 @@ func saveTx(ctx context.Context, tx pgx.Tx, tid string, o Observation) (Item, *e
 	if reflect.DeepEqual(snapshot(before), snapshot(&after)) && reflect.DeepEqual(before.HeldReason, after.HeldReason) {
 		return after, nil, nil
 	}
-	return after, &events.Change{Type: "delivery.state_changed", NodeID: after.Ticket, Before: snapshot(before), After: snapshot(&after), At: &o.At}, nil
+	meta, _ := json.Marshal(map[string]any{"delivery_item_id": after.ID, "repository": after.Repository, "pull_request": after.PR})
+	return after, &events.Change{Type: "delivery.state_changed", NodeID: after.Ticket, Before: snapshot(before), After: snapshot(&after), At: &o.At, Metadata: meta}, nil
 }
 
 // appendChanges runs after every projection/ledger write and lock acquisition.
@@ -231,6 +232,8 @@ func internalRecord(kind string, at time.Time, os []Observation) record {
 // Rebuild replaces the disposable projection from normalized ledger facts,
 // without duplicating public events. The tenant fence serializes live ingestion.
 func (m *Module) Rebuild(ctx context.Context, tid string) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
 	ctx = db.AllProjects(ctx, "delivery projection rebuild")
 	err := db.InTenant(ctx, m.pool, tid, func(tx pgx.Tx) error {
 		if err := db.LockTenant(ctx, tx, tid); err != nil {

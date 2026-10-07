@@ -95,6 +95,8 @@ func (m *Module) sweep(ctx context.Context) {
 // Reconcile heals missed webhook heads/checks and derives pre-PR rows from
 // completed platform runs/reviews. No GitHub writes are available to it.
 func (m *Module) Reconcile(ctx context.Context, tid string) error {
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Minute)
+	defer cancel()
 	if tid != m.config.TenantID || m.github == nil {
 		return errNotConfigured
 	}
