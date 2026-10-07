@@ -7,7 +7,7 @@ import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 // bottom edge, closes on Escape, outside clicks and scroll that moves its trigger, and hands
 // focus back to the trigger when it closes by keyboard. A menu closes on Tab;
 // a small form (`cycle`) keeps Tab among its own controls instead.
-const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; settingsKeys?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false })
+const props = withDefaults(defineProps<{ anchor: HTMLElement | null; align?: 'start' | 'end'; width?: number; label: string; tallest?: number; cycle?: boolean; sheet?: boolean; fieldEscape?: boolean; settingsKeys?: boolean }>(), { align: 'start', width: 240, tallest: 420, cycle: false, sheet: false, fieldEscape: false })
 const emit = defineEmits<{ close: [restoreFocus: boolean] }>()
 const panel = ref<HTMLElement>()
 const x = ref(-9999)
@@ -79,6 +79,13 @@ function escape(event: KeyboardEvent) {
   // Names loaded after this panel mounts register their Escape listener later.
   // Let the open disclosure consume Escape before dismissing its menu.
   if (panel.value?.querySelector('.read-name-detail:popover-open')) return
+  // A form: Escape first leaves a text field or select, the next press closes (AEON-541 keyboard rule).
+  const field = event.target
+  if (props.fieldEscape && field instanceof HTMLElement && panel.value?.contains(field) && (field.tagName === 'SELECT' || (field.tagName === 'INPUT' && !['checkbox', 'radio', 'button'].includes((field as HTMLInputElement).type)))) {
+    event.preventDefault(); event.stopImmediatePropagation()
+    field.blur(); panel.value.tabIndex = -1; panel.value.focus({ preventScroll: true })
+    return
+  }
   event.preventDefault(); event.stopImmediatePropagation()
   if (props.settingsKeys && isSettingsField(event.target)) {
     (event.target as HTMLElement).blur(); panel.value?.focus({ preventScroll: true }); return
@@ -135,6 +142,7 @@ defineExpose({ place })
 
 <style scoped>
 .floating { position: fixed; z-index: 70; top: 0; left: 0; max-width: calc(100vw - 16px); overflow: auto; padding: 6px; overscroll-behavior: contain; }
+.floating:focus { outline: none; }
 .floating.sheet { width: min(960px, max(480px, 64vw)); max-width: calc(100vw - 32px); overflow: hidden; }
 @media (max-width: 600px) { .floating.sheet { width: 100%; max-width: none; border-radius: 0; } }
 @media (prefers-reduced-motion: no-preference) {
