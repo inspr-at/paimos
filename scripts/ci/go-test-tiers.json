@@ -2432,6 +2432,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestStaleQueueUndoFences","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestStartedTelemetryAcceptsMissingPlacementTrace","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestTelemetryFencesAndAtomicRollback","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestTelemetryHookRunsOnceAndCountersCannotOverflow","tier":"GATED-FULL"}
@@ -6496,6 +6498,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestRetirementAndResolveCompatibilityGolden","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestReviewAndCompletionLeaveUnsavedBoardAlone","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestReviewOrderActivationTokenAuditUndoAndLegacyPreservation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestReviewOrderCatalogUpgradePreservesSavedV2Default","tier":"GATED-FULL"}
@@ -6723,6 +6727,8 @@
     {"kind":"go","package":"internal/nodes","name":"TestPlanningDisplayedPlacementsInvariantAcrossSorts","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPlanningEmptyMatrixLegacyEqualityAndSecurityChange","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/nodes","name":"TestPlanningHistoricalFullStackKindKeepsLegacyRoute","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/nodes","name":"TestPlanningHugeUsageDoesNotBreakTheList","tier":"GATED-FULL"}
     ,

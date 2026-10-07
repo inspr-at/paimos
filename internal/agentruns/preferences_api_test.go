@@ -222,6 +222,24 @@ func containsRun(ids []string, id string) bool {
 	return false
 }
 
+// Risk: pairing verification and other runs start with a null trace. Treating
+// that absence as corrupt telemetry rejects the start with an internal error.
+func TestStartedTelemetryAcceptsMissingPlacementTrace(t *testing.T) {
+	f := setup(t)
+	o := f.order(t, nil)
+	v := f.run(t, o)
+	ids := f.reserve(t, v)
+	f.call(t, f.agent, "POST", "/api/runs/"+v.ID+"/claim", claimBody(ids), 200, &v)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=NULL WHERE id=$1`, v.ID)
+		return err
+	})
+	f.call(t, f.agent, "POST", "/api/runs/"+v.ID+"/telemetry", map[string]any{"sequence": 1, "kind": "started"}, 200, &v)
+	if v.Status != "running" || f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.pinned_bottom_used'`) != 0 {
+		t.Fatal("missing placement trace rejected startup or invented bottom-pin evidence")
+	}
+}
+
 // Risk: a planned bottom pin could be reported as used before a real start,
 // or a telemetry replay could count it twice.
 func TestPinnedBottomEvidenceOnlyWhenPlannedRunStarts(t *testing.T) {
