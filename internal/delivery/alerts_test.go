@@ -3,6 +3,7 @@ package delivery
 
 import (
 	"context"
+	"errors"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func alertObservation(f *fixture) Observation {
@@ -200,11 +202,12 @@ func TestDeliveryAlertsAcceptanceRollbackAndLeadAuthority(t *testing.T) {
 	f.at = f.at.Add(31 * time.Minute)
 	// Fail exactly the durable acceptance, after its sent event was appended.
 	if _, err := f.d.Admin.Exec(t.Context(), `CREATE FUNCTION fail_delivery_notice() RETURNS trigger LANGUAGE plpgsql AS $$
- BEGIN IF NEW.sender_label='Delivery' THEN RAISE EXCEPTION 'injected delivery inbox failure'; END IF; RETURN NEW; END; $$;
+ BEGIN IF NEW.sender_label='Delivery' THEN RAISE EXCEPTION 'injected delivery inbox failure' USING ERRCODE='P0849'; END IF; RETURN NEW; END; $$;
  CREATE TRIGGER fail_delivery_notice BEFORE INSERT ON inbox_messages FOR EACH ROW EXECUTE FUNCTION fail_delivery_notice()`); err != nil {
 		t.Fatal(err)
 	}
-	if n, err := f.m.SweepAlerts(t.Context(), f.person.TenantID); err == nil || n != 0 || !strings.Contains(err.Error(), "injected delivery inbox failure") {
+	var acceptanceError *pgconn.PgError
+	if n, err := f.m.SweepAlerts(t.Context(), f.person.TenantID); n != 0 || !errors.As(err, &acceptanceError) || acceptanceError.Code != "P0849" || acceptanceError.Message != "injected delivery inbox failure" {
 		t.Fatalf("wrong acceptance failure: count %d, error %v", n, err)
 	}
 	if a, m, e := alertCounts(t, f); a != 0 || m != 0 || e != 0 {
