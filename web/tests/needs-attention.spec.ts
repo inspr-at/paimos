@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test, expect, type Page } from '@playwright/test'
-import { fixtures, mockWork, watchErrors } from './work-fixtures'
+import { fixtures, mockWork, watchErrors, me } from './work-fixtures'
 import { businessData, mockBusiness } from './business-fixtures'
 import { controlStability } from './control-stability'
-import { orderAttentionRows, type AttentionItem, type AttentionResult } from '../src/lib/attention'
+import { orderAttentionRows, attentionMoveId, type AttentionItem, type AttentionResult, type AttentionBulkPreview, type AttentionBulkResult } from '../src/lib/attention'
 
 const row = (index: number, extra: Partial<AttentionItem> = {}): AttentionItem => ({
   event_id: index + 1, node_id: `node-${index}`, revision: '2026-10-04T08:00:00Z', key: `AEON-${index + 10}`,
@@ -12,9 +12,9 @@ const row = (index: number, extra: Partial<AttentionItem> = {}): AttentionItem =
   from: index % 2 ? 'backlog' : 'new', to: index % 2 ? 'cancelled' : 'backlog',
   reason: 'Untouched in this project; review the current suggestion.', at: '2026-10-03T08:00:00Z', editable: true, applicable: true, ...extra,
 })
-async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fail?: boolean; partial?: boolean; held?: Promise<void>; received?: () => void; groups?: 'absent' } = {}) {
+async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fail?: boolean; partial?: boolean; held?: Promise<void>; received?: () => void; groups?: 'absent'; canManage?: boolean } = {}) {
   await mockWork(page, fixtures())
-  await mockBusiness(page, businessData({ role: 'member' }), { role: 'member' })
+  await mockBusiness(page, businessData({ role: options.canManage ? 'admin' : 'member' }), { role: options.canManage ? 'admin' : 'member' })
   const preferences = new Map<string, unknown>()
   await page.route('**/api/preferences/needs-attention*', async route => {
     const key = new URL(route.request().url()).pathname
@@ -22,6 +22,7 @@ async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fa
     await route.fulfill({ json: { value: preferences.get(key) ?? null } })
   })
   const live = new Map(items.map(item => [item.event_id, { ...item }]))
+  const overrides = new Map<string, { mode: 'on' | 'off' | 'inherit'; revision: number }>()
   const actions: { action: string; items: AttentionItem[] }[] = [], queries: URLSearchParams[] = [], paths: string[] = []
   let fail = options.fail ?? false
   let releaseRevision = items.find(item => item.release_id)?.release_revision ?? 0
@@ -46,17 +47,94 @@ async function setup(page: Page, items = [row(0), row(1), row(2)], options: { fa
       const by = q.get('by'), ids = [...new Set(filtered.map(item => by === 'kind' ? item.kind : item.project_id))]
       return route.fulfill({ json: { total: filtered.length, truncated: false, groups: ids.map(id => {
         const rows = filtered.filter(item => (by === 'kind' ? item.kind : item.project_id) === id)
-        return { id, ...(by === 'kind' ? { kind: id } : { project_id: id, key: id === 'p-aeon' ? 'AEON' : 'PHAROS', title: id === 'p-aeon' ? 'Aeon' : 'Pharos' }), total: rows.length, counts: Object.fromEntries(['proposed', 'triage', 'cancel', 'blocked', 'missed'].map(kind => [kind, rows.filter(row => row.kind === kind).length])), editable: rows.filter(row => row.editable).length, applicable: rows.filter(row => row.applicable && row.editable).length, can_manage: false }
+        return { id, ...(by === 'kind' ? { kind: id } : { project_id: id, key: id === 'p-aeon' ? 'AEON' : 'PHAROS', title: id === 'p-aeon' ? 'Aeon' : 'Pharos' }), total: rows.length, counts: Object.fromEntries(['proposed', 'triage', 'cancel', 'blocked', 'missed'].map(kind => [kind, rows.filter(row => row.kind === kind).length])), editable: rows.filter(row => row.editable).length, applicable: rows.filter(row => row.applicable && row.editable).length, override_mode: overrides.get(id)?.mode ?? 'on', can_manage: !!options.canManage && rows.some(row => row.editable) }
       }) } })
     }
     const offset = Number(q.get('after') ?? 0)
     return route.fulfill({ json: { items: orderAttentionRows(filtered).slice(offset, offset + 50), total: filtered.length, counts: { proposed: 0, triage: items.filter(i => i.kind === 'triage').length, cancel: items.filter(i => i.kind === 'cancel').length, blocked: 0, missed: 0 }, next_cursor: filtered.length > offset + 50 ? String(offset + 50) : null,
       facets: { projects: [{ id: 'p-aeon', label: 'AEON Aeon' }, { id: 'p-pharos', label: 'PHAROS Pharos' }], assignees: [{ id: 'old-person', label: 'Previous assignee' }] }, facets_truncated: false } })
   })
-  return { actions, queries, paths, preferences, recover: () => { fail = false } }
+  return { actions, queries, paths, preferences, live, overrides, recover: () => { fail = false } }
 }
 const table = (page: Page) => page.getByRole('grid', { name: 'Tickets needing attention' })
 const first = (page: Page) => table(page).locator('#row-attention-1')
+// R3/R17/R18: whole-group writes, partial results, revision-bound settings
+// Undo, and stable controls. Keep real pending rows and resolution history so
+// assertions cannot pass by treating aggregate counts as row identities.
+async function groupActions(page: Page, items: AttentionItem[]) {
+  const data = await setup(page, items, { canManage: true })
+  const calls: { path: string; body: Record<string, any>; key: string | undefined }[] = []
+  const previews = new Map<string, { body: Record<string, any>; rows: AttentionItem[]; value: AttentionBulkPreview }>()
+  const batches = new Map<string, { action: string; rows: AttentionItem[]; result: AttentionBulkResult }>()
+  const history: { id: number; actor_principal_id: string; node_id: string; type: string; before: { updated_at: string }; after: { updated_at: string }; undo_of?: number }[] = []
+  let counter = 1000, token = 0
+  const control = { failEvent: 118, held: undefined as Promise<void> | undefined, received: undefined as (() => void) | undefined, failOverride: false }
+  await page.route('**/api/events?**', route => {
+    const q = new URL(route.request().url()).searchParams
+    return route.fulfill({ json: { items: history.filter(event => event.node_id === q.get('node_id') && event.id > Number(q.get('after'))), next_after: null } })
+  })
+  await page.route('**/api/status-autopilot/attention/bulk**', async route => {
+    const request = route.request(), path = new URL(request.url()).pathname, body = request.postDataJSON(), key = request.headers()['idempotency-key']
+    calls.push({ path, body, key })
+    if (path.endsWith('/undo')) {
+      const batch = batches.get(path.split('/').at(-2)!)!
+      for (const item of batch.rows) {
+        const resolution = [...history].reverse().find(event => event.node_id === item.node_id && event.type === `status_autopilot.attention_${batch.action}` && event.before.updated_at === item.revision)!
+        const revision = `2026-10-07T22:00:00.${String(++counter).padStart(6, '0')}Z`
+        history.push({ id: counter, actor_principal_id: me.id, node_id: item.node_id, type: 'status_autopilot.attention_undone', before: { updated_at: resolution.after.updated_at }, after: { updated_at: revision }, undo_of: resolution.id })
+        data.live.set(item.event_id, { ...item, revision })
+      }
+      return route.fulfill({ json: { batch_id: path.split('/').at(-2), changed: batch.rows.length, skipped: [], failed: [], completed: true } })
+    }
+    if (body.dry_run) {
+      const rows = [...data.live.values()].filter(row => (!body.scope.project_id || row.project_id === body.scope.project_id) && (!body.scope.kind || row.kind === body.scope.kind))
+      const moves = new Map<string, AttentionBulkPreview['moves'][number]>()
+      const skip = rows.filter(row => !row.editable || body.action === 'apply' && !row.applicable)
+      for (const row of rows.filter(row => !skip.includes(row))) {
+        const id = attentionMoveId(row)
+        const move = moves.get(id) || { id, kind: row.kind, from: row.from, to: row.to, count: 0, sample_keys: [], release_id: row.release_id, release_title: row.release_title }
+        move.count++; if (move.sample_keys.length < 4) move.sample_keys.push(row.key); moves.set(id, move)
+      }
+      const value: AttentionBulkPreview = { total: rows.length, moves: [...moves.values()], skipped: skip.length ? [{ reason: 'Parent statuses follow their children.', count: skip.length, sample_keys: skip.slice(0, 4).map(row => row.key) }] : [], through_event_id: Math.max(...rows.map(row => row.event_id)), preview_token: `batch-${++token}`, limit: 1000, truncated: false }
+      previews.set(value.preview_token, { body, rows: rows.map(row => ({ ...row })), value })
+      return route.fulfill({ json: value })
+    }
+    control.received?.(); if (control.held) await control.held
+    const earlier = batches.get(body.preview_token)
+    if (earlier) return route.fulfill({ json: earlier.result }).catch(() => {})
+    const preview = previews.get(body.preview_token)!
+    const candidates = preview.rows.filter(row => row.editable && (body.action === 'dismiss' || row.applicable) && !body.exclude.includes(attentionMoveId(row)))
+    const changed = candidates.filter(row => row.event_id !== control.failEvent)
+    for (const item of changed) {
+      const revision = `2026-10-07T21:00:00.${String(++counter).padStart(6, '0')}Z`
+      history.push({ id: counter, actor_principal_id: me.id, node_id: item.node_id, type: `status_autopilot.attention_${body.action}`, before: { updated_at: item.revision }, after: { updated_at: revision } })
+      data.live.delete(item.event_id)
+    }
+    const result: AttentionBulkResult = { batch_id: body.preview_token, changed: changed.length, skipped: preview.value.skipped, failed: candidates.filter(row => row.event_id === control.failEvent).map(row => ({ event_id: row.event_id, key: row.key, error: 'The ticket changed. Reload before trying again.' })), completed: true }
+    batches.set(body.preview_token, { action: body.action, rows: changed, result })
+    return route.fulfill({ json: result }).catch(() => {})
+  })
+  await page.route('**/api/projects/*/status-autopilot', route => {
+    const request = route.request(), path = new URL(request.url()).pathname, project = path.split('/')[3]!
+    const current = data.overrides.get(project) || { mode: 'on' as const, revision: 7 }
+    if (request.method() === 'PUT') {
+      const body = request.postDataJSON(); calls.push({ path, body, key: undefined })
+      if (control.failOverride || body.expected_revision !== current.revision) return route.fulfill({ status: 409, json: { error: 'Another admin changed these settings.' } })
+      data.overrides.set(project, { mode: body.mode, revision: current.revision + 1 })
+    }
+    return route.fulfill({ json: { ...(data.overrides.get(project) || current), effective_enabled: (data.overrides.get(project) || current).mode !== 'off' } })
+  })
+  let settings = { enabled: true, revision: 11, rules: Object.fromEntries(['new', 'backlog', 'blocked', 'progress', 'done', 'publish', 'accept'].map(rule => [rule, { enabled: true, days: 5 }])) }
+  await page.route('**/api/settings/status-autopilot', route => {
+    if (route.request().method() === 'PUT') {
+      const body = route.request().postDataJSON(); calls.push({ path: '/api/settings/status-autopilot', body, key: undefined })
+      if (body.expected_revision !== settings.revision) return route.fulfill({ status: 409, json: { error: 'stale settings' } })
+      settings = { enabled: body.enabled, rules: body.rules, revision: settings.revision + 1 }
+    }
+    return route.fulfill({ json: settings })
+  })
+  return { ...data, calls, control }
+}
 // A phone tap opens the ticket. Selection starts with a hold, and only then
 // do the round checkboxes exist for the remaining rows.
 async function chooseRows(page: Page, ids: number[]) {
@@ -508,4 +586,203 @@ test('a filtered empty queue says nothing matches and keeps Clear filters', asyn
  await state.getByRole('button', { name: 'Clear filters' }).click()
  await expect(page).toHaveURL('/tickets?view=needs-attention')
  await expect(page.locator('.state h2')).toHaveText('Nothing here needs attention.')
+})
+
+test('group preview, partial bulk Undo and project/rule Undo preserve scope, rights and control positions', async ({ page }, testInfo) => {
+  test.setTimeout(120000)
+  const errors = watchErrors(page)
+  const kinds = ['proposed', 'triage', 'cancel', 'blocked', 'missed'] as const
+  const items = Array.from({ length: 120 }, (_, index) => row(index, { project_id: 'p-aeon', kind: kinds[index % 5], from: index % 5 === 0 ? 'open' : index % 5 === 1 ? 'new' : 'backlog', to: index % 5 === 4 ? 'release' : index % 5 === 2 ? 'cancelled' : 'backlog', ...(index % 5 === 4 ? { release_id: 'r-plan', release_title: 'Zuverlässige Zusammenarbeit für sämtliche Arbeitsbereiche', release_revision: 3, release_project_revision: 4 } : {}), ...(index === 3 ? { applicable: false, unavailable_reason: 'Parent statuses follow their children.' } : {}) }))
+  items.push(row(120, { project_id: 'p-pharos', editable: false, applicable: false }))
+  const data = await groupActions(page, items)
+  const head = page.locator('#row-group-p-aeon')
+  const more = () => head.getByRole('button', { name: 'More for AEON' })
+  const apply = () => head.getByRole('button', { name: 'Apply all in AEON' })
+  const preview = () => page.getByRole('dialog', { name: 'Apply all in AEON' })
+  await page.goto('/tickets?view=needs-attention&assignee=none')
+  await expect(first(page)).toBeVisible()
+  const loaded = await table(page).locator('.ticket-row:not(.fit-row)').count()
+  expect(loaded).toBe(50)
+  // Binding brief requires these artifacts. Stability is measured for every
+  // move selector and disclosure; there is no screenshot/pixel equality gate.
+  for (const width of [1440, 1280, 1024, 400, 390]) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    await apply().click()
+    const pop = preview()
+    await expect(pop).toBeVisible()
+    const selectors = pop.getByRole('group', { name: 'Proposed changes', exact: true })
+    const triage = pop.getByRole('checkbox', { name: /^triage:/ })
+    const guard = await controlStability(page, { ...(width <= 600 ? { frame: pop } : {}), apply: pop.locator('.run'), cancel: pop.getByRole('button', { name: 'Cancel' }), selectors, clickedMove: triage.locator('..'), more: more() })
+    await guard.check(async () => { await triage.uncheck(); await expect(pop.locator('.run')).toHaveText('Apply95') })
+    await guard.check(async () => { await pop.locator('summary').click(); await expect(pop).toContainText('Parent statuses follow their children.') })
+    guard.done()
+    await page.screenshot({ path: testInfo.outputPath(`attention-group-preview-${width}-${theme}.png`), fullPage: true })
+    await page.keyboard.press('Escape')
+    await expect(apply()).toBeFocused()
+    await more().click()
+    await page.screenshot({ path: testInfo.outputPath(`attention-group-menu-${width}-${theme}.png`), fullPage: true })
+    await page.getByRole('menuitem', { name: /Turn autopilot off in AEON/ }).click()
+    const offPop = page.getByRole('dialog', { name: 'Turn autopilot off in AEON?' })
+    await expect(offPop.getByRole('button', { name: 'Turn off', exact: true })).toBeEnabled()
+    const offStable = await controlStability(page, { ...(width <= 600 ? { frame: offPop } : {}), turnOff: offPop.getByRole('button', { name: 'Turn off', exact: true }), cancel: offPop.getByRole('button', { name: 'Cancel' }), checkbox: offPop.getByRole('checkbox').locator('..') })
+    await offStable.check(async () => { await offPop.getByRole('checkbox').check() })
+    offStable.done()
+    await page.screenshot({ path: testInfo.outputPath(`attention-group-autopilot-off-${width}-${theme}.png`), fullPage: true })
+    await page.keyboard.press('Escape')
+  }
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light' })
+  await apply().click()
+  await preview().getByRole('checkbox', { name: /^triage:/ }).uncheck()
+  let release!: () => void, received!: () => void
+  data.control.held = new Promise<void>(resolve => { release = resolve })
+  const arrived = new Promise<void>(resolve => { received = resolve })
+  data.control.received = received
+  const guard = await controlStability(page, { more: more(), slot: head.locator('.group-slot'), clickedRow: first(page), rowActions: first(page).locator('.action-stack') })
+  await preview().locator('.run').click()
+  await arrived
+  await expect(head.getByRole('status')).toHaveText('Applying…')
+  await expect(first(page).getByRole('button', { name: /^Apply to/ })).toBeDisabled()
+  const readOnly = page.locator('#row-group-p-pharos')
+  await expect(readOnly).toContainText('View only')
+  await expect(readOnly.getByRole('button', { name: 'More for PHAROS' })).toBeEnabled()
+  release(); data.control.held = undefined; data.control.received = undefined
+  await guard.check(async () => { await expect(first(page).locator('.action-stack')).toHaveAttribute('data-resolved', 'apply'); await expect(more()).toBeEnabled() })
+  guard.done()
+  await expect(table(page).locator('#row-attention-118')).toContainText('The ticket changed')
+  await expect(table(page).locator('#row-attention-2 .action-stack')).not.toHaveAttribute('data-resolved', 'apply')
+  await expect(table(page).locator('.ticket-row:not(.fit-row)')).toHaveCount(loaded)
+  const run = data.calls.find(call => call.body.dry_run === false)!
+  expect(run.body).toMatchObject({ action: 'apply', scope: { project_id: 'p-aeon', assignee: 'none' }, exclude: ['triage'], through_event_id: 120 })
+  expect(run.key).toBeTruthy()
+  await page.locator('.toast:not(.toast-leave-active)').getByRole('button', { name: 'Undo all', exact: true }).click()
+  await expect(first(page).getByRole('button', { name: /^Apply to/ })).toBeVisible()
+  await expect(more()).toBeEnabled()
+  expect(data.calls.some(call => /\/bulk\/batch-\d+\/undo$/.test(call.path))).toBe(true)
+  data.control.failEvent = 0
+  await apply().focus()
+  await page.keyboard.press('d')
+  const dismissPreview = page.getByRole('dialog', { name: 'Dismiss all in AEON' })
+  await expect(dismissPreview).toContainText('The tickets stay as they are.')
+  await dismissPreview.locator('.run').click()
+  await expect(head).toContainText('120 dismissed')
+  await expect(more()).toBeEnabled()
+  await head.getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(first(page).getByRole('button', { name: /^Apply to/ })).toBeVisible()
+  await expect(more()).toBeEnabled()
+  await readOnly.getByRole('button', { name: 'More for PHAROS' }).click()
+  await expect(page.getByRole('menu').getByRole('menuitem')).toHaveCount(1)
+  await page.getByRole('menuitem', { name: 'Open PHAROS tickets' }).click()
+  await expect(page).toHaveURL(/\/p\/PHAROS\/tickets\?assignee=none/)
+  await page.goto('/tickets?view=needs-attention&assignee=none')
+  await expect(first(page)).toBeVisible()
+
+  await more().click()
+  await page.getByRole('menuitem', { name: /Turn autopilot off in AEON/ }).click()
+  const off = page.getByRole('dialog', { name: 'Turn autopilot off in AEON?' })
+  const also = off.getByRole('checkbox')
+  await expect(also).not.toBeChecked()
+  const offGuard = await controlStability(page, { turnOff: off.getByRole('button', { name: 'Turn off', exact: true }), cancel: off.getByRole('button', { name: 'Cancel' }), checkbox: also.locator('..') })
+  await offGuard.check(async () => { await also.check() })
+  await offGuard.check(async () => { await also.uncheck() })
+  offGuard.done()
+  const bulkBefore = data.calls.filter(call => call.body.dry_run === false).length
+  await off.getByRole('button', { name: 'Turn off', exact: true }).click()
+  await expect(head).toContainText('Autopilot off')
+  await expect(more()).toBeEnabled()
+  expect(data.calls.filter(call => call.body.dry_run === false)).toHaveLength(bulkBefore)
+  expect(data.calls.find(call => call.body.mode === 'off')?.body.expected_revision).toBe(7)
+  await page.locator('.toast:not(.toast-leave-active)').getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(head).not.toContainText('Autopilot off')
+  expect(data.calls.filter(call => call.body.mode).at(-1)?.body).toMatchObject({ mode: 'on', expected_revision: 8 })
+
+  await more().click()
+  await page.getByRole('menuitem', { name: /Turn autopilot off in AEON/ }).click()
+  await off.getByRole('checkbox').check()
+  await off.getByRole('button', { name: 'Turn off', exact: true }).click()
+  await expect(head).toContainText('120 dismissed')
+  await expect(more()).toBeEnabled()
+  await expect(first(page).locator('.action-stack')).toHaveAttribute('data-resolved', 'dismiss')
+  await page.locator('.toast:not(.toast-leave-active)').getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(first(page).getByRole('button', { name: /^Apply to/ })).toBeVisible()
+  await expect(head).not.toContainText('Autopilot off')
+  await expect(more()).toBeEnabled()
+  // Failed settings writes retain the actual mode and do not dismiss flags.
+  data.control.failOverride = true
+  await more().click()
+  await page.getByRole('menuitem', { name: /Turn autopilot off in AEON/ }).click()
+  await off.getByRole('button', { name: 'Turn off', exact: true }).click()
+  await expect(page.locator('.toast.error')).toContainText('Another admin changed')
+  await expect(head).not.toContainText('Autopilot off')
+  data.control.failOverride = false
+  await more().click()
+  await page.getByRole('menuitem', { name: /Turn autopilot off in AEON/ }).click()
+  await off.getByRole('button', { name: 'Turn off', exact: true }).click()
+  await expect(more()).toBeEnabled()
+  await more().click()
+  await page.getByRole('menuitem', { name: 'Follow the workspace again' }).click()
+  await expect(head).not.toContainText('Autopilot off')
+  expect(data.calls.filter(call => call.body.mode).at(-1)?.body.mode).toBe('inherit')
+  await page.locator('.toast:not(.toast-leave-active)').filter({ hasText: 'AEON follows the workspace again.' }).getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(head).toContainText('Autopilot off')
+
+  await page.goto('/tickets?view=needs-attention&group=kind')
+  const triageHead = page.locator('#row-group-triage')
+  await expect(triageHead).toBeVisible()
+  await triageHead.getByRole('button', { name: 'More for Triage list' }).click()
+  await page.getByRole('menuitem', { name: /Stop listing for triage/ }).click()
+  await expect(page.locator('.toast:not(.toast-leave-active)').filter({ hasText: 'Status autopilot saved.' })).toBeVisible()
+  const rule = data.calls.filter(call => call.path === '/api/settings/status-autopilot').at(-1)!
+  expect(rule.body).toMatchObject({ expected_revision: 11, enabled: true, rules: { new: { enabled: false }, backlog: { enabled: true } } })
+  await page.locator('.toast:not(.toast-leave-active)').getByRole('button', { name: 'Undo', exact: true }).click()
+  await expect(page.locator('.toast:not(.toast-leave-active)').filter({ hasText: 'The previous rule setting was restored.' })).toBeVisible()
+  expect(data.calls.filter(call => call.path === '/api/settings/status-autopilot').at(-1)?.body).toMatchObject({ expected_revision: 12, rules: { new: { enabled: true } } })
+  data.overrides.set('p-aeon', { mode: 'on', revision: 20 })
+  await page.addInitScript(() => { const observer = new MutationObserver(() => { if (document.documentElement) { document.documentElement.lang = 'de'; observer.disconnect() } }); observer.observe(document, { childList: true, subtree: true }) })
+  for (const width of [1440, 1280, 1024, 400, 390]) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.goto('/tickets?view=needs-attention')
+    await page.evaluate(value => { document.documentElement.dataset.theme = value }, theme)
+    await head.getByRole('button', { name: 'Alles anwenden in AEON' }).click()
+    const dePreview = page.getByRole('dialog', { name: 'Alles anwenden in AEON' })
+    await expect(dePreview).toBeVisible()
+    const stability = await controlStability(page, { ...(width <= 600 ? { frame: dePreview } : {}), run: dePreview.locator('.run'), cancel: dePreview.getByRole('button', { name: 'Abbrechen' }), moves: dePreview.getByRole('group', { name: 'Vorgeschlagene Änderungen', exact: true }) })
+    await stability.check(async () => { await dePreview.getByRole('checkbox', { name: /^triage:/ }).uncheck() })
+    stability.done()
+    await page.screenshot({ path: testInfo.outputPath(`attention-group-preview-${width}-${theme}-de.png`), fullPage: true })
+    await page.keyboard.press('Escape')
+    await head.getByRole('button', { name: 'Mehr zu AEON' }).click()
+    await expect(page.getByRole('menu')).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`attention-group-menu-${width}-${theme}-de.png`), fullPage: true })
+    await page.getByRole('menuitem', { name: /Autopilot in AEON ausschalten/ }).click()
+    const deOff = page.getByRole('dialog', { name: 'Autopilot in AEON ausschalten?' })
+    await expect(deOff.getByRole('button', { name: 'Ausschalten', exact: true })).toBeEnabled()
+    const offStable = await controlStability(page, { ...(width <= 600 ? { frame: deOff } : {}), turnOff: deOff.getByRole('button', { name: 'Ausschalten', exact: true }), cancel: deOff.getByRole('button', { name: 'Abbrechen' }), checkbox: deOff.getByRole('checkbox').locator('..') })
+    await offStable.check(async () => { await deOff.getByRole('checkbox').check() })
+    offStable.done()
+    await page.screenshot({ path: testInfo.outputPath(`attention-group-autopilot-off-${width}-${theme}-de.png`), fullPage: true })
+    await page.keyboard.press('Escape')
+  }
+  expect(errors).toEqual([])
+})
+
+test('a held group run cannot write a new visit or leave its Undo active there', async ({ page }) => {
+  const data = await groupActions(page, [row(0), row(1)])
+  await page.goto('/tickets?view=needs-attention')
+  await page.locator('#row-group-p-aeon').getByRole('button', { name: 'Apply all in AEON' }).click()
+  const preview = page.getByRole('dialog', { name: 'Apply all in AEON' })
+  await expect(preview).toBeVisible()
+  let release!: () => void, arrived!: () => void
+  data.control.held = new Promise<void>(resolve => { release = resolve })
+  const received = new Promise<void>(resolve => { arrived = resolve })
+  data.control.received = arrived
+  await preview.locator('.run').click()
+  await received
+  await page.getByRole('button', { name: /1 cancel suggested/ }).click()
+  await expect(page.locator('#row-group-p-aeon')).toHaveCount(0)
+  release()
+  await expect(page.locator('#row-group-p-pharos')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Undo all', exact: true })).toHaveCount(0)
+  await expect(page.locator('#row-attention-2 .action-stack')).not.toHaveAttribute('data-resolved', 'apply')
 })

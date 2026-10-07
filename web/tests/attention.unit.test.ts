@@ -3,6 +3,7 @@ import { expect, it, vi } from 'vitest'
 import { h, reactive, ref } from 'vue'
 import { attentionFolds, attentionGrouping, orderAttentionGroups, orderAttentionRows, attentionIdentity, refreshAttentionRelease, mergeAttentionRows, collectAttentionGroups, finishAttentionGroups, foldAttentionGroups, ATTENTION_GROUP_CAP, ATTENTION_GROUP_PAGE_CAP, type AttentionGroup, type AttentionItem, type AttentionIdentity, type AttentionPage, type AttentionResult, type AttentionFilters } from '../src/lib/attention'
 import * as attention from '../src/lib/attention'
+import * as statusAutopilot from '../src/lib/statusAutopilot'
 import * as identityScope from '../src/lib/identityScope'
 import { mountView, settle, textOf } from './webcore-view-harness'
 
@@ -152,6 +153,7 @@ async function fallbackVisit(change: 'stay' | 'identity' | 'filter') {
  vi.stubGlobal('navigator', { platform: 'MacIntel', userAgent: 'test' })
  const view = mountView('../src/views/NeedsAttentionView.vue', {
   'vue-router': { useRoute: () => route, useRouter: () => ({ replace() {}, push() {} }) },
+  '../lib/statusAutopilot': statusAutopilot,
   '../lib/attention': { ...attention, listAttentionGroups: async () => null, collectAttentionGroups: async (...args: Parameters<typeof collectAttentionGroups>) => {
    const result = await collectAttentionGroups(...args)
    scans += 1; trace.push('scanned'); return result

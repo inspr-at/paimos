@@ -8300,6 +8300,8 @@
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a filtered empty queue says nothing matches and keeps Clear filters","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a held group run cannot write a new visit or leave its Undo active there","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a missing groups route still groups the list and leaves Group by None on the list endpoint","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"a phone tap opens the ticket","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -8337,6 +8339,8 @@
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 768px in dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"coarse-pointer attention controls › expanded attention targets activate without moving controls at 768px in light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"group preview, partial bulk Undo and project/rule Undo preserve scope, rights and control positions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/needs-attention.spec.ts","name":"kind counts, project facets and search filter the URL; scrolling loads the next 50","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,

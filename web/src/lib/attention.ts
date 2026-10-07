@@ -170,6 +170,37 @@ export async function listAttentionGroups(filters: AttentionFilters, by: Exclude
 }
 export const actOnAttention = (action: 'apply' | 'dismiss' | 'undo', items: AttentionIdentity[], signal: AbortSignal) => read<{ items: AttentionResult[] }>('/status-autopilot/attention/actions', signal, { action, items })
 
+export type AttentionBulkAction = 'apply' | 'dismiss'
+export interface AttentionSkip { reason: string; count: number; sample_keys: string[] }
+export interface AttentionMove { id: string; kind: AttentionKind; from: string; to: string; release_id?: string; release_title?: string; count: number; sample_keys: string[] }
+export interface AttentionBulkPreview { total: number; moves: AttentionMove[]; skipped: AttentionSkip[]; through_event_id: number; preview_token: string; limit: number; truncated: boolean }
+export interface AttentionBulkResult { batch_id: string; changed: number; skipped: AttentionSkip[]; failed: { event_id: number; key: string; error: string }[]; completed: boolean }
+export const attentionMoveId = (item: AttentionItem) => item.to === 'release' ? `m:${item.release_id}` : item.kind === 'proposed' ? `p:${item.from}>${item.to}` : item.kind
+async function bulkRequest<T>(path: string, body: unknown, signal: AbortSignal, idempotencyKey?: string): Promise<T> {
+  // The server reserves 20 seconds for a batch; allow its durable result to arrive.
+  const response = await api(path, { method: 'POST', signal, headers: { 'Content-Type': 'application/json', ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}) }, body: JSON.stringify(body) }, 25000)
+  if (!response.ok) {
+    const reason = await response.json().catch(() => ({}))
+    throw new Error(typeof reason.error === 'string' ? reason.error : typeof reason.message === 'string' ? reason.message : attentionFailure(response.status).message)
+  }
+  return response.json() as Promise<T>
+}
+export const previewAttentionBulk = (action: AttentionBulkAction, scope: AttentionFilters, signal: AbortSignal) => bulkRequest<AttentionBulkPreview>('/status-autopilot/attention/bulk', { action, scope, exclude: [], through_event_id: 0, dry_run: true }, signal)
+export const runAttentionBulk = (action: AttentionBulkAction, scope: AttentionFilters, preview: AttentionBulkPreview, exclude: string[], idempotencyKey: string, signal: AbortSignal) => bulkRequest<AttentionBulkResult>('/status-autopilot/attention/bulk', { action, scope, exclude, through_event_id: preview.through_event_id, preview_token: preview.preview_token, dry_run: false }, signal, idempotencyKey)
+export const undoAttentionBulk = (batchId: string, idempotencyKey: string, signal: AbortSignal) => bulkRequest<AttentionBulkResult>(`/status-autopilot/attention/bulk/${encodeURIComponent(batchId)}/undo`, {}, signal, idempotencyKey)
+
+// Aggregate batch answers are not row identities. Confirm each loaded row from
+// bounded, node-scoped history before offering its existing /actions Undo.
+export async function attentionResolution(item: AttentionIdentity, action: 'apply' | 'dismiss' | 'undo', actorId: string, signal: AbortSignal): Promise<AttentionResult | null> {
+  const query = new URLSearchParams({ node_id: item.node_id, after: String(action === 'undo' ? item.resolution_event_id : item.event_id), limit: '200' })
+  type Event = { id: number; actor_principal_id: string; node_id: string; type: string; before?: { updated_at?: string }; after?: { updated_at?: string }; undo_of?: number }
+  const page = await read<{ items: Event[]; next_after: number | null }>(`/events?${query}`, signal)
+  if (page.next_after) throw new Error('Ticket history was truncated. Reload before trying again.')
+  const event = [...page.items].reverse().find(event => event.node_id === item.node_id && event.actor_principal_id === actorId && event.type === `status_autopilot.attention_${action === 'undo' ? 'undone' : action}` && (action === 'undo' ? event.undo_of === item.resolution_event_id : event.before?.updated_at === item.revision))
+  if (!event?.after?.updated_at) return null
+  return { event_id: item.event_id, ok: true, revision: event.after.updated_at, ...(action !== 'undo' ? { resolution_event_id: event.id } : {}) }
+}
+
 // Only advance sibling identities that match both resource revisions verified
 // by this committed write. A stale sibling remains stale after external edits.
 export function refreshAttentionRelease(items: AttentionIdentity[], result: AttentionResult) {
