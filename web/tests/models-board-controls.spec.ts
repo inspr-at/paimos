@@ -73,7 +73,7 @@ async function mockBoard(page: Page, options: { manage?: boolean; fail?: number;
 async function open(page: Page, query = '') { await page.goto(`/tests/models-board-harness.html${query}`); await expect(page.locator('[data-board-ready="true"]')).toBeVisible() }
 const col = (page: Page, column = 'backend') => page.locator(`[data-column="${column}"]`)
 const card = (page: Page, line: string, column = 'backend') => col(page, column).locator(`[data-line="${line}"]`)
-const headerControls = (page: Page) => ({ head: page.locator('.bhead'), show: page.locator('[data-board-show]'), providers: page.locator('[data-board-providers]'), full: page.locator('[data-models-fullscreen]') })
+const headerControls = (page: Page) => ({ head: page.locator('.bhead'), show: page.locator('[data-board-show]'), project: page.locator('[data-board-project]'), providers: page.locator('[data-board-providers]'), full: page.locator('[data-models-fullscreen]') })
 async function layer(page: Page, name: string) { await page.locator('[data-board-show]').click(); await page.getByRole('menuitem', { name, exact: true }).click(); await expect(page.locator('[data-board-ready="true"]')).toBeVisible() }
 
 test('keyboard moves write once with person and revision, keep pins and other controls still, and cross Not allowed', async ({ page }) => {
@@ -197,6 +197,9 @@ test('agent readers can inspect all layers but have no write controls or move ac
 test('provider writes keep selectors still and support Undo', async ({ page }) => {
   const state = await mockBoard(page); await open(page)
   const guard = await controlStability(page, headerControls(page))
+  await guard.check(async () => { await page.locator('[data-board-project]').click(); await page.getByRole('menuitem', { name: 'AEON', exact: true }).click(); await expect(page.locator('[data-board-project] .select-value > span').first()).toHaveText('AEON'); await expect(page.locator('[data-board-ready="true"]')).toBeVisible() })
+  await guard.check(async () => { await page.locator('[data-board-project]').click(); await page.getByRole('menuitem', { name: 'Any project', exact: true }).click(); await expect(page.locator('[data-board-project] .select-value > span').first()).toHaveText('Any project'); await expect(page.locator('[data-board-ready="true"]')).toBeVisible() })
+  expect(state.writes).toHaveLength(0)
   await guard.check(async () => { await page.locator('[data-board-providers]').click(); await page.getByRole('menuitem', { name: 'EU-hosted only', exact: true }).click(); await expect(page.locator('[data-board-providers]')).toContainText('EU-hosted only') })
   expect(state.writes).toHaveLength(1); expect(state.writes[0]).toMatchObject({ person: boardPerson, body: { residency: 'eu', revision: 3 } })
   await guard.check(async () => { await page.getByRole('button', { name: 'Undo', exact: true }).click(); await expect(page.locator('[data-board-providers]')).toContainText('As the workspace') }); guard.done()
