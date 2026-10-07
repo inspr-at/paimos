@@ -51,6 +51,7 @@ const attentionCTE = `WITH pending AS (SELECT DISTINCT ON (node_id) * FROM statu
  AND ($4='' OR strpos(lower(key||' '||title),lower($4))>0)) `
 
 type attentionInput struct {
+	BatchID                string    `json:"-"`
 	EventID                int64     `json:"event_id"`
 	NodeID                 string    `json:"node_id"`
 	Revision               time.Time `json:"revision"`
@@ -94,26 +95,56 @@ type attentionPage struct {
 func attentionKind(k string) bool {
 	return k == "" || k == "proposed" || k == "triage" || k == "cancel" || k == "blocked" || k == "missed"
 }
-func attentionCursor(raw string) (string, int64, error) {
+
+const attentionOrder = `CASE kind WHEN 'proposed' THEN 0 WHEN 'triage' THEN 1 WHEN 'cancel' THEN 2 WHEN 'blocked' THEN 3 ELSE 4 END`
+const attentionColumns = `event_id,node_id::text,key,title,coalesce(project_id::text,''),revision,kind,source,target,reason,at,stale`
+
+type attentionPosition struct {
+	NodeID  string
+	EventID int64
+	Kind    int
+	At      time.Time
+}
+
+func attentionCursor(raw string) (attentionPosition, error) {
+	var out attentionPosition
 	if raw == "" {
-		return "", 0, nil
+		return out, nil
 	}
 	if len(raw) > 120 {
-		return "", 0, fmt.Errorf("cursor too long")
+		return out, fmt.Errorf("cursor too long")
 	}
 	b, err := base64.RawURLEncoding.DecodeString(raw)
 	if err != nil {
-		return "", 0, err
+		return out, err
 	}
 	parts := strings.Split(string(b), "/")
-	if len(parts) != 2 || !uuid.MatchString(parts[0]) {
-		return "", 0, fmt.Errorf("invalid cursor")
+	// Previously issued node/event cursors remain usable; resolve their position
+	// in the current ordered projection inside the same read snapshot.
+	if len(parts) == 2 && uuid.MatchString(parts[0]) {
+		out.NodeID = parts[0]
+		out.EventID, err = strconv.ParseInt(parts[1], 10, 64)
+		if err != nil || out.EventID < 1 {
+			return out, fmt.Errorf("invalid event")
+		}
+		return out, nil
 	}
-	id, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil || id < 1 {
-		return "", 0, fmt.Errorf("invalid event")
+	if len(parts) != 3 {
+		return out, fmt.Errorf("invalid cursor")
 	}
-	return parts[0], id, nil
+	out.Kind, err = strconv.Atoi(parts[0])
+	if err != nil || out.Kind < 0 || out.Kind > 4 {
+		return out, fmt.Errorf("invalid kind")
+	}
+	out.At, err = time.Parse(time.RFC3339Nano, parts[1])
+	if err != nil {
+		return out, err
+	}
+	out.EventID, err = strconv.ParseInt(parts[2], 10, 64)
+	if err != nil || out.EventID < 1 {
+		return out, fmt.Errorf("invalid event")
+	}
+	return out, nil
 }
 func (m *Module) attention(w http.ResponseWriter, r *http.Request) {
 	p, ok := principal(w, r)
@@ -122,7 +153,7 @@ func (m *Module) attention(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	kind, project, assignee, search := q.Get("kind"), q.Get("project_id"), q.Get("assignee"), q.Get("q")
-	nodeID, eventID, err := attentionCursor(q.Get("after"))
+	position, err := attentionCursor(q.Get("after"))
 	if err != nil || !attentionKind(kind) || len(search) > 200 || project != "" && !uuid.MatchString(project) || assignee != "" && assignee != "none" && !uuid.MatchString(assignee) {
 		httpapi.WriteError(w, 400, "invalid filter or cursor")
 		return
@@ -157,8 +188,20 @@ func (m *Module) attention(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		rows, err = tx.Query(ctx, attentionCTE+`SELECT event_id,node_id::text,key,title,coalesce(project_id::text,''),revision,kind,source,target,reason,at,stale
- FROM filtered WHERE ($5='' OR (node_id,event_id)>(nullif($5,'')::uuid,$6)) ORDER BY node_id,event_id LIMIT 51`, append(args, nodeID, eventID)...)
+		if position.NodeID != "" {
+			err = tx.QueryRow(ctx, attentionCTE+`SELECT `+attentionOrder+`,at FROM attention WHERE node_id=$5::uuid AND event_id=$6`, append(args, position.NodeID, position.EventID)...).Scan(&position.Kind, &position.At)
+			if errors.Is(err, pgx.ErrNoRows) {
+				// Resolved flags are absent from attention but their event still binds the
+				// legacy cursor's time and kind without exposing another node's position.
+				err = tx.QueryRow(ctx, `SELECT CASE WHEN type='status_autopilot.proposed' THEN 0 WHEN metadata->>'flag'='triage_list' THEN 1 WHEN metadata->>'flag'='cancel_suggested' THEN 2 WHEN metadata->>'flag'='blocked_reminder' THEN 3 ELSE 4 END,at FROM events WHERE id=$1 AND node_id=$2::uuid`, position.EventID, position.NodeID).Scan(&position.Kind, &position.At)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		rows, err = tx.Query(ctx, attentionCTE+`SELECT `+attentionColumns+`
+ FROM filtered WHERE ($5=0 OR (`+attentionOrder+`,-extract(epoch FROM at),-event_id)>($6,-extract(epoch FROM $7::timestamptz),-$5::bigint))
+ ORDER BY `+attentionOrder+`,at DESC,event_id DESC LIMIT 51`, append(args, position.EventID, position.Kind, position.At)...)
 		if err != nil {
 			return err
 		}
@@ -178,7 +221,7 @@ func (m *Module) attention(w http.ResponseWriter, r *http.Request) {
 		if len(out.Items) > 50 {
 			out.Items = out.Items[:50]
 			last := out.Items[49]
-			cursor := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%s/%d", last.NodeID, last.EventID)))
+			cursor := base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%d/%s/%d", attentionKindOrder(last.Kind), last.At.UTC().Format(time.RFC3339Nano), last.EventID)))
 			out.Next = &cursor
 		}
 		for i := range out.Items {
@@ -560,7 +603,11 @@ func (m *Module) resolveAttention(ctx context.Context, tx pgx.Tx, p tenant.Princ
 		}
 		resolution.Membership = e.ID
 	}
-	meta, err := json.Marshal(map[string]any{"job": Job, "reason": item.Reason, "rule": resolution.Rule, "resolution": resolution})
+	metadata := map[string]any{"job": Job, "reason": item.Reason, "rule": resolution.Rule, "resolution": resolution}
+	if in.BatchID != "" {
+		metadata["batch_id"] = in.BatchID
+	}
+	meta, err := json.Marshal(metadata)
 	if err != nil {
 		return err
 	}
