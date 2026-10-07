@@ -18,8 +18,8 @@ import (
 // Actual contention and FK compatibility are exercised by boundary/recurrence tests.
 func TestSharedFenceCallerInventory(t *testing.T) {
 	expected := map[string][]string{
-		"db.LockTree":               {"authz/project_members.go", "crossreview/policy.go", "db/fences.go", "modelregistry/module.go", "modelregistry/preparation.go", "operatoractor/actor.go", "workorders/common.go"},
-		"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/api.go", "delivery/module.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "workorders/common.go"},
+		"db.LockTree":               {"authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/audit.go", "delivery/audit_store.go", "modelregistry/module.go", "modelregistry/preparation.go", "operatoractor/actor.go", "workorders/common.go"},
+		"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/api.go", "delivery/audit_store.go", "delivery/audit_webhook.go", "delivery/module.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "workorders/common.go"},
 		"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
 		"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
 		"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go"},
@@ -127,6 +127,18 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		// it writes the review row. The binding invalidation commits earlier,
 		// in its own transaction, and does not hold this fence across the post.
 		{"../crossreview/reporter.go", "publishReview", "db.LockTenant(", "github_status=$2"},
+		// Merge audit (AEON-852) prepares the System actor in its own fenced
+		// transaction. Writes and retries take tenant/tree before audit and
+		// recipient rows; recipient authorization and writes precede events.
+		{"../delivery/audit_store.go", "auditActor", "db.LockTenant(", "systemactor.Ensure("},
+		{"../delivery/audit_webhook.go", "auditCheckEvent", "db.LockTenant(", "INSERT INTO delivery_github_events"},
+		{"../delivery/audit_store.go", "auditMerge", "db.LockTree(", "auditRecipientTx("},
+		{"../delivery/audit_store.go", "auditMerge", "auditRecipientTx(", "INSERT INTO delivery_merge_audit"},
+		{"../delivery/audit_store.go", "auditMerge", "INSERT INTO delivery_merge_audit", "events.Append("},
+		{"../delivery/audit.go", "retryAuditAlerts", "db.LockTree(", "FOR NO KEY UPDATE"},
+		{"../delivery/audit.go", "retryAuditAlerts", "db.LockTree(", "auditRecipientTx("},
+		{"../delivery/audit.go", "retryAuditAlerts", "auditRecipientTx(", "UPDATE delivery_merge_audit"},
+		{"../delivery/audit.go", "retryAuditAlerts", "UPDATE delivery_merge_audit", "auditAlert("},
 	}
 	for _, c := range checks {
 		raw, err := os.ReadFile(c.path)
