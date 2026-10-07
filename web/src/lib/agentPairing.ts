@@ -996,7 +996,7 @@ function harnessDisplayName(harness: string): string {
 }
 
 function verificationRefusalText(item: { harness: string; verification_reason?: string }): string {
-  const cause: Record<string, string> = { adapter_unsupported: 'the installed adapter cannot enforce safe verification', binding_incomplete: 'the verification binding is incomplete or unsafe', local_binding_missing: 'the approved account has no usable local binding' }
+  const cause: Record<string, string> = { adapter_unsupported: 'the installed adapter cannot enforce safe verification', binding_incomplete: 'the verification binding is incomplete or unsafe', local_binding_missing: 'the approved account has no usable local binding', account_not_ready: 'the account availability check did not pass; repair the sign-in on this computer before trying again' }
   return `${harnessDisplayName(item.harness)} verification couldn't run on this computer (${cause[item.verification_reason ?? ''] ?? 'safe verification is unavailable'}). The computer is paired; re-run verification from /agents with a new approval.`
 }
 
@@ -1879,7 +1879,7 @@ function enrollments(value: unknown): PairingEnrollment[] {
 
 function optionalVerification(record: Record<string, unknown>): { verification_state?: VerificationState; verification_error?: string | null; verification_reason?: string } {
   const extra: { verification_state?: VerificationState; verification_error?: string | null; verification_reason?: string } = {}
-  if (typeof record.verification_reason === 'string' && ['adapter_unsupported', 'binding_incomplete', 'local_binding_missing'].includes(record.verification_reason)) extra.verification_reason = record.verification_reason
+  if (typeof record.verification_reason === 'string' && ['adapter_unsupported', 'binding_incomplete', 'local_binding_missing', 'account_not_ready'].includes(record.verification_reason)) extra.verification_reason = record.verification_reason
   const state = optionalEnum(record.verification_state, VERIFICATION_STATES)
   if (state) extra.verification_state = state
   if (typeof record.verification_error === 'string' && record.verification_error) extra.verification_error = record.verification_error.slice(0, 500)

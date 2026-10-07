@@ -776,7 +776,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 
 .state-label { font-size: 12.5px; color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row.needs .state-label { color: var(--warn-ink); font-weight: 600; }
-.row > .c-agent { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; padding-block: 6px; }
+.row > .c-agent { align-self: start; display: inline-flex; align-items: flex-start; flex-wrap: wrap; gap: 4px 8px; min-width: 0; padding-block: 10px; }
 .agent-link { display: inline-flex; flex: 1 1 0; align-items: center; gap: 8px; min-width: 0; max-width: 100%; color: var(--ink); text-decoration: none; }
 .agent-link:focus-visible { box-shadow: var(--focus-ring); border-radius: 6px; }
 .bot { position: relative; display: inline-grid; width: 30px; height: 30px; flex: none; }
@@ -798,7 +798,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
 .exec-model { font-size: 12.5px; color: var(--ink); }
 .exec-account { font-size: 11.5px; color: var(--ink-3); }
 /* The estimate follows the key on its line and wraps below it only when the column is narrow. */
-.row > .c-ticket { display: flex; flex-wrap: wrap; align-items: center; align-content: center; gap: 3px 8px; padding-block: 6px; }
+.row > .c-ticket { display: flex; flex-wrap: wrap; align-items: center; align-content: center; gap: 3px 8px; padding-block: 10px; }
 .row-eta { font-size: 12px; }
 .ticket-chip { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); font: 600 11.5px/1 var(--mono); text-decoration: none; font-variant-ligatures: none; white-space: nowrap; }
 .ticket-chip:hover { filter: brightness(1.04); text-decoration: underline; }
@@ -885,7 +885,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
   .ctx-beat { display: inline; }
   .ctx-beat::before { content: '·'; margin-right: 6px; }
   /* Lines run beside the fold buttons: 16 px per level, the elbow ends at the child's fold slot. */
-  .row > .tree-lines { left: 18px; }
+  .row > .tree-lines { left: 32px; }
   .tree-guide.elbow::after { width: calc(var(--tree-step) - 8px); }
   .tree-stem { top: calc(var(--tree-joint) + 22px); }
   .row:has(.lineage) { grid-template-rows: auto auto auto auto auto; }
@@ -894,7 +894,7 @@ defineExpose({ toggleHistory, menuHistory, reveal, revealSession })
   .worker-tools ~ .lineage { grid-row: 5; }
   .worker-tools { grid-column: 2 / -1; grid-row: 4; flex-wrap: nowrap; white-space: nowrap; min-height: 44px; margin: 0 0 0 -4px; padding: 0; }
   /* The 44 px line closes a lead's row by itself. */
-  .row:has(> .c-agent > .worker-tools) { padding-bottom: 0; }
+  .row:has(> .c-agent > .worker-tools) { padding-bottom: 10px; }
   .worker-toggle { min-height: 44px; padding-inline: 6px; }
   /* Reserve every available action on the title line. A silent session can
      offer Pause, Remove and Actions together; Host owns the line below. */

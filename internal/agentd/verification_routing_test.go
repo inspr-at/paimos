@@ -122,3 +122,26 @@ func TestVerificationRouteCannotSubstituteEnrollment(t *testing.T) {
 		t.Fatal("verification widened requested account or claimed a mismatched route")
 	}
 }
+
+func TestVerificationFailedProbeSettlesWithoutVendorLaunch(t *testing.T) {
+	s, api, adapter := claimFixture(t)
+	verificationClaim(api)
+	api.run.AccountID, api.run.RequestedAccountID = "", "account"
+	api.server = api.run
+	s.blockedAccounts["account"] = true
+	delete(s.probePendingSince, "account")
+	var stage, reason string
+	s.verificationDiagnostic = func(_, _ string, st, why string) { stage, reason = st, why }
+	if err := s.StartRun(t.Context(), api.run); err != nil {
+		t.Fatal(err)
+	}
+	if adapter.starts != 0 || api.routes != 0 || len(api.claimIDs) != 0 || api.server.Status != "failed" || stage != "refused" || reason != "account_not_ready" {
+		t.Fatal("failed probe did not produce the exact no-launch result", stage, reason)
+	}
+	if err := s.StartRun(t.Context(), api.run); err != nil {
+		t.Fatal("refusal replay", err)
+	}
+	if !s.blockedAccounts["account"] || s.accountAvailable("account") || adapter.starts != 0 {
+		t.Fatal("verification refusal changed account authority")
+	}
+}

@@ -198,7 +198,12 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	} else {
 		defer stepUps.Close()
 	}
-	s, err := agentd.NewSupervisor(ctx, agentd.Config{StepUps: stepUps, CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1},
+	logStore, err := agentsetup.OpenStore(state, true)
+	if err != nil {
+		return err
+	}
+	defer logStore.Close()
+	s, err := agentd.NewSupervisor(ctx, agentd.Config{VerificationDiagnostic: verificationLog(logStore), StepUps: stepUps, CapacityInterval: capacityInterval, API: remote, StateRoot: state, DaemonID: c.DaemonID, Workspace: c.Workspace, Accounts: accounts, Adapters: adapters, EstimatedUnits: map[string]int64{"requests": 1},
 		PollDiagnostic: func(reason string) { slog.Warn("agentd polling diagnostic", "reason", reason) }})
 	if err != nil {
 		return fmt.Errorf("initialize daemon state %s: %w", state, err)
