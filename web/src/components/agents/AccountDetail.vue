@@ -14,6 +14,8 @@ import { confirmAction, type ConfirmRequest } from '../../lib/confirm'
 import AppIcon from '../AppIcon.vue'
 import PiAccountModel from '../settings/PiAccountModel.vue'
 import ClaudeStatuslineToggle from '../settings/ClaudeStatuslineToggle.vue'
+import UsageProbeToggle from '../settings/UsageProbeToggle.vue'
+import { useSession } from '../../stores/session'
 
 // The inline detail of one account in Settings → Accounts (AEON-384): its
 // name, each window with source and freshness, the last three readings,
@@ -24,6 +26,9 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ changed: [] }>()
 
+const session = useSession()
+const mayProbe = computed(() => props.mayManage && session.identity?.principal.kind === 'person' && props.account.owner_person_id === session.identity?.principal.id && (['grok', 'claude', 'codex'].includes(props.account.harness) || props.account.harness === 'pi' && props.account.provider === 'openrouter'))
+const budget = computed(() => props.cap?.budget ?? props.account.usage_budget)
 const name = computed(() => accountName(props.account))
 const host = computed(() => props.row?.host || props.account.host_label || '')
 const windows = computed(() => sortWindows(props.cap?.windows ?? []))
@@ -194,6 +199,7 @@ async function drop(w: AllowanceWindow) {
 
 <template>
   <div class="detail">
+    <UsageProbeToggle v-if="mayProbe" :account="account" @changed="emit('changed')" />
     <PiAccountModel v-if="account.harness === 'pi'" :account="account" :editable="mayManage" @saved="emit('changed')" />
     <ClaudeStatuslineToggle v-if="mayManage && account.harness === 'claude' && account.statusline_opt_in" :account="account" @changed="emit('changed')" />
     <dl class="account-facts">
@@ -224,6 +230,16 @@ async function drop(w: AllowanceWindow) {
         </dd>
       </div>
 
+      <div v-if="budget" class="fact">
+        <dt>Dollar budget</dt>
+        <dd>
+          <span class="num">${{ budget.key_usage_usd.toFixed(2) }} used</span>
+          <span v-if="budget.key_limit_usd != null"> · ${{ budget.key_limit_usd.toFixed(2) }} key limit</span>
+          <span v-if="budget.key_remaining_usd != null"> · ${{ budget.key_remaining_usd.toFixed(2) }} key remaining</span>
+          <span> · {{ budget.balance_usd == null ? 'Account balance unknown' : `$${budget.balance_usd.toFixed(2)} account balance` }}</span>
+          <span class="src"> · Read {{ when(budget.read_at, now, timezone) }}</span>
+        </dd>
+      </div>
       <template v-if="windows.length">
         <div v-for="w in windows" :key="`${w.reading.window_kind}/${w.reading.bucket}`" class="fact window" :class="{ frozen: windowFacts(w, now, timezone).stale }">
           <dt>{{ windowLabel(w, account.harness) }}</dt>
@@ -233,7 +249,7 @@ async function drop(w: AllowanceWindow) {
           </dd>
         </div>
       </template>
-      <div v-else class="fact">
+      <div v-else-if="!budget" class="fact">
         <dt>Limits</dt>
         <dd class="quiet">{{ noWindowLine(account.harness, host) }}<p v-if="learnedSpend" class="learned-use">{{ learnedSpend }}</p></dd>
       </div>

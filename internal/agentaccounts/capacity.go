@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -20,6 +21,13 @@ import (
 
 type readingsWrite struct {
 	Readings []capacity.Reading `json:"readings"`
+}
+
+type usageReadingsWrite struct {
+	readingsWrite
+	Budget     *capacity.Budget `json:"budget"`
+	UsageProbe bool             `json:"usage_probe"`
+	Revision   *int64           `json:"binding_revision"`
 }
 
 func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +39,7 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var in readingsWrite
+	var in usageReadingsWrite
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeErr(w, err)
 		return
@@ -40,8 +48,58 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 		if err := requireScope(r.Context(), tx, r, p, "account.probe"); err != nil {
 			return err
 		}
-		if err := ingestReadings(r.Context(), tx, p, r.PathValue("accountId"), in.Readings); err != nil {
-			return err
+		id := r.PathValue("accountId")
+		if !uuidRE.MatchString(id) {
+			return fail(404, "account not found")
+		}
+		if len(in.Readings) > 32 || len(in.Readings) == 0 && in.Budget == nil {
+			return fail(400, "readings or budget required")
+		}
+		if in.UsageProbe || in.Budget != nil {
+			reader := p
+			var err error
+			reader.Scopes, err = readKeyScopes(r.Context(), tx, r, p, true)
+			if err != nil {
+				return err
+			}
+			if authz.RequireTx(r.Context(), tx, reader, "account.probe", authz.Scope{}) != nil {
+				return fail(403, "account probe permission required")
+			}
+			if !in.UsageProbe {
+				return fail(400, "budget requires a usage probe")
+			}
+			if err := agentpairing.AccountFence(r.Context(), tx, id, true); err != nil {
+				return err
+			}
+			a, err := usageConsent(r.Context(), tx, id, in.Revision)
+			if err != nil {
+				return err
+			}
+			if a.RegisteredBy != p.ID {
+				return fail(403, "registering agent required")
+			}
+			now, err := dbNow(r.Context(), tx)
+			if err != nil {
+				return err
+			}
+			for _, v := range in.Readings {
+				if v.Source != "agentd" || v.RunID != "" || v.Phase != "" {
+					return fail(400, "invalid usage probe reading")
+				}
+			}
+			if in.Budget != nil {
+				if a.Harness != "pi" || a.Provider != "openrouter" || in.Budget.Validate(now) != nil {
+					return fail(400, "invalid capacity budget")
+				}
+				if _, err := tx.Exec(r.Context(), `UPDATE agent_accounts SET usage_budget=$2 WHERE id=$1 AND (usage_budget IS NULL OR (usage_budget->>'read_at')::timestamptz<$3)`, id, in.Budget, in.Budget.ReadAt); err != nil {
+					return err
+				}
+			}
+		}
+		if len(in.Readings) > 0 {
+			if err := ingestReadings(r.Context(), tx, p, id, in.Readings); err != nil {
+				return err
+			}
 		}
 		a, err := getAccount(r.Context(), tx, r.PathValue("accountId"))
 		if err != nil {
@@ -266,6 +324,7 @@ type capacityWindow struct {
 	UsageTodayKnown bool             `json:"usage_today_known"`
 }
 type accountCapacity struct {
+	Budget             *capacity.Budget  `json:"budget,omitempty"`
 	Routing            *CapacityRouting  `json:"routing,omitempty"`
 	AccountID          string            `json:"account_id"`
 	OngoingUseApproved bool              `json:"ongoing_use_approved"`
@@ -436,7 +495,7 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 		if draft != nil {
 			s = scheduleWithDraft(entries, a, previous, draft.schedule, draft.pools, now)
 		}
-		item := accountCapacity{AccountID: a.ID, Schedule: s, Windows: []capacityWindow{}}
+		item := accountCapacity{AccountID: a.ID, Schedule: s, Windows: []capacityWindow{}, Budget: a.UsageBudget}
 		item.CostLimitSupported, err = costLimitSupported(ctx, tx, a.ID)
 		if err != nil {
 			return nil, err

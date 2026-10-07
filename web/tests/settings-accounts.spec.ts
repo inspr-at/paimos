@@ -11,6 +11,7 @@ import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { ACCOUNTS, NOW, OLD_WINDOW, TZ, capacityWorld, type CapacityOptions } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { controlStability } from './control-stability'
 
 test.use({ timezoneId: TZ })
 const world: AgentWorld = { me: me.id, now: NOW, projects: {}, tickets: {}, nodes: {} }
@@ -474,4 +475,46 @@ test.describe('screenshots', () => {
     mkdirSync(SHOTS!, { recursive: true })
     for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) await shoot(browser, shot, width, theme)
   })
+})
+
+// AEON-886: opt-in, honest errors and stable controls in the existing account detail.
+test('owner login usage switch stays put and failed saves preserve consent', async ({ page }) => {
+  const { capacity } = await setup(page)
+  const account = capacity.accounts.find(a => a.id === ACCOUNTS.main)!
+  Object.assign(account, { owner_person_id: me.id, link_revision: 3, usage_probe_enabled: false })
+  let fail = false
+  const writes: unknown[] = []
+  await page.route('**/api/agent-accounts/*/usage-probe', async route => {
+    const body = route.request().postDataJSON(); writes.push(body)
+    if (fail) return route.fulfill({ status: 403, json: { error: 'owner permission revoked' } })
+    Object.assign(account, { usage_probe_enabled: body.enabled })
+    return route.fulfill({ status: 204 })
+  })
+  await open(page)
+  const detail = await details(page, ACCOUNTS.main)
+  const toggle = detail.getByRole('switch', { name: "Read usage with this CLI's own login" })
+  await expect(toggle).toHaveAttribute('aria-checked', 'false')
+  await expect(detail).toContainText("Uses unofficial provider endpoints; they may change or stop. You are responsible for following your provider's terms.")
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    const guard = await controlStability(page, { toggle, name: detail.getByRole('button', { name: 'Rename Main', exact: true }) })
+    await guard.check(async () => {
+      const before = await toggle.getAttribute('aria-checked')
+      await toggle.click()
+      await expect(toggle).toHaveAttribute('aria-checked', before === 'true' ? 'false' : 'true')
+    })
+    guard.done()
+    await page.screenshot({ path: test.info().outputPath(`usage-probe-${width}-${theme}.png`), fullPage: true })
+  }
+  expect(writes[0]).toEqual({ binding_revision: 3, enabled: true })
+  fail = true
+  const before = await toggle.getAttribute('aria-checked')
+  const guard = await controlStability(page, { toggle })
+  await guard.check(async () => {
+    await toggle.click()
+    await expect(page.getByText('Could not confirm the change. Reload accounts before trying again.', { exact: true })).toBeVisible()
+    await expect(toggle).toHaveAttribute('aria-checked', before!)
+  })
+  guard.done()
 })

@@ -30,9 +30,11 @@ import (
 	"github.com/inspr-at/paimos/internal/piprobe"
 	"github.com/inspr-at/paimos/internal/servicetier"
 	"github.com/inspr-at/paimos/internal/sessionusage"
+	"github.com/inspr-at/paimos/internal/usageprobe"
 )
 
 type Config struct {
+	UsageProbes       usageprobe.Probe
 	StepUps           *StepUpManager
 	MaxTokens         int64
 	MaxTurns          int64
@@ -145,6 +147,7 @@ type harnessMetadata struct {
 }
 
 type Supervisor struct {
+	usageProbes            usageprobe.Probe
 	recoveryMu             sync.Mutex
 	attachedHooks          map[string]*attachedHookBinding
 	attachedHookVerifier   *AttachManager
@@ -382,7 +385,10 @@ func NewSupervisor(ctx context.Context, c Config) (*Supervisor, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Supervisor{stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
+	if c.UsageProbes == nil {
+		c.UsageProbes = usageprobe.Client{}
+	}
+	s := &Supervisor{usageProbes: c.UsageProbes, stepUps: c.StepUps, startedAt: time.Now(), capacityInterval: c.CapacityInterval, capacityLast: map[string]time.Time{}, capacityAttempt: map[string]time.Time{}, maxTokens: c.MaxTokens, maxTurns: c.MaxTurns, state: state, blockedAccounts: map[string]bool{}, probedAccounts: map[string]bool{}, loginRequired: map[string]bool{}, api: c.API, journal: j, lock: lock, adapters: adapters, runs: map[string]*owned{}, tenantID: tenantID,
 		principalID: principalID, daemonID: c.DaemonID, generation: gen, workspace: physical, estimates: c.EstimatedUnits, accounts: c.Accounts,
 		heartbeatInterval: heartbeat, maxRunDuration: maxRun, prepareScratch: verificationScratch, newHarnessID: randomID, lifetime: ctx, pollDiagnostic: c.PollDiagnostic}
 	s.capacityNow = c.Now
