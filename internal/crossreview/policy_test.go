@@ -23,7 +23,7 @@ func TestReviewPolicyUsesRunIdentityAndLiveProjectOverride(t *testing.T) {
 	f := newFixture(t)
 	project := testID()
 	f.tx(t, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title) SELECT $1,$2,id,'POLICY-1','Review policy' FROM node_kinds WHERE slug='project'`, f.person.TenantID, project); err != nil {
+		if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,state) SELECT $1,$2,id,'POLICY-1','Review policy','active' FROM node_kinds WHERE slug='project'`, f.person.TenantID, project); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `UPDATE nodes SET parent_id=$2 WHERE id=$1`, f.ticket, project)
@@ -167,7 +167,7 @@ func TestReviewPolicyExplicitAgentGrantAndTenantIsolation(t *testing.T) {
 	reader := tenant.Principal{ID: testID(), TenantID: f.person.TenantID, Kind: tenant.Person}
 	f.tx(t, func(tx pgx.Tx) error {
 		for i, project := range projects {
-			if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title) SELECT $1,$2,id,$3,'Policy isolation' FROM node_kinds WHERE slug='project'`, f.person.TenantID, project, []string{"ISOLATION-1", "ISOLATION-2"}[i]); err != nil {
+			if _, err := tx.Exec(t.Context(), `INSERT INTO nodes(tenant_id,id,kind_id,key,title,state) SELECT $1,$2,id,$3,'Policy isolation','active' FROM node_kinds WHERE slug='project'`, f.person.TenantID, project, []string{"ISOLATION-1", "ISOLATION-2"}[i]); err != nil {
 				return err
 			}
 		}
