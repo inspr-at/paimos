@@ -88,6 +88,10 @@ export function useModelsBoard(context: Ref<BoardContext>, german: Ref<boolean>)
       return write(revision => putBoardRules(target, column.column, after, revision), revision => putBoardRules(target, column.column, before, revision), true)
     }
     if (zone !== 'list' && zone !== 'not') return false
+    if (target.layer === 'default' && zone === 'not') {
+      error.value = text('Not allowed is a rule: switch Show to Workspace rules.', 'Nicht erlaubt ist eine Regel: Zeigen auf Regeln des Arbeitsbereichs stellen.')
+      return false
+    }
     const before = orderBody(column), after = moveOrder(column, card.line, zone, index)
     if (JSON.stringify(before) === JSON.stringify(after)) return false
     return write(revision => putBoardOrder(target, column.column, after, revision, person), column.source === 'own' ? revision => putBoardOrder(target, column.column, before, revision, person) : revision => resetBoardOrder(target, column.column, revision, person))

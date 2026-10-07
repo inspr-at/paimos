@@ -104,6 +104,37 @@ it('drops a late board read across an identity boundary', async () => {
   expect(editor.document.value).toBe(latest)
   expect(editor.document.value?.person_id).not.toBe('old-person')
 })
+it('refuses a new Not allowed on the workspace default and still stores Mine and rules bans', async () => {
+  const refused = useModelsBoard(ref({ layer: 'default', situation: 'first' }), ref(false)); await settle()
+  const column = refused.document.value!.columns.find(column => column.column === 'backend')!
+  const line = column.list.at(-1)!.line
+  expect(await refused.move(column, column.list.at(-1)!, 'not', 0)).toBe(false)
+  expect(putBoardOrder).not.toHaveBeenCalled(); expect(putBoardRules).not.toHaveBeenCalled()
+  expect(refused.error.value).toBe('Not allowed is a rule: switch Show to Workspace rules.')
+  state.cleanups.forEach(cleanup => cleanup()); state.cleanups = []
+  const german = useModelsBoard(ref({ layer: 'default', situation: 'first' }), ref(true)); await settle()
+  const germanColumn = german.document.value!.columns.find(column => column.column === 'backend')!
+  expect(await german.move(germanColumn, germanColumn.list.at(-1)!, 'not', 0)).toBe(false)
+  expect(german.error.value).toBe('Nicht erlaubt ist eine Regel: Zeigen auf Regeln des Arbeitsbereichs stellen.')
+  expect(putBoardOrder).not.toHaveBeenCalled()
+  state.cleanups.forEach(cleanup => cleanup()); state.cleanups = []
+  const mine = useModelsBoard(ref({ layer: 'mine', situation: 'first' }), ref(false)); await settle()
+  const mineColumn = mine.document.value!.columns.find(column => column.column === 'backend')!
+  const saved = boardFixture(); saved.revision = 4
+  vi.mocked(putBoardOrder).mockResolvedValue({ person_id: saved.person_id, revision: 4, dry_run: false, moved: [], profile: saved.profile })
+  vi.mocked(getBoard).mockResolvedValue(saved)
+  expect(await mine.move(mineColumn, mineColumn.list.at(-1)!, 'not', 0)).toBe(true)
+  expect(putBoardOrder).toHaveBeenCalledWith({ layer: 'mine', situation: 'first' }, 'backend', expect.objectContaining({ not: [line] }), 3, saved.person_id)
+  state.cleanups.forEach(cleanup => cleanup()); state.cleanups = []
+  vi.mocked(putBoardOrder).mockReset()
+  const rules = useModelsBoard(ref({ layer: 'rules', situation: 'first' }), ref(false)); await settle()
+  const rulesColumn = rules.document.value!.columns.find(column => column.column === 'backend')!
+  vi.mocked(putBoardRules).mockResolvedValue({ revision: 3, rules: [boardPin] })
+  vi.mocked(getBoard).mockResolvedValue(saved)
+  expect(await rules.move(rulesColumn, rulesColumn.list[0]!, 'not', 0, 'Kept by a rule')).toBe(true)
+  expect(putBoardOrder).not.toHaveBeenCalled()
+  expect(putBoardRules).toHaveBeenCalledWith({ layer: 'rules', situation: 'first' }, 'backend', expect.objectContaining({ not: { [rulesColumn.list[0]!.line]: 'Kept by a rule' } }), 2)
+})
 it('cannot edit as an agent or use profile writes to bypass project rule ownership', async () => {
   state.session.identity!.principal.kind = 'agent'
   const editor = useModelsBoard(ref({ layer: 'mine', situation: 'first' }), ref(false)); await settle()

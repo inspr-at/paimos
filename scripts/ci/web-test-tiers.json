@@ -8240,30 +8240,6 @@
     ,
     {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"an empty eligible list explains the provider wait and keeps held cards locked","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
-    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1024 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1024 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1280 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1280 dark en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1280 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1280 light en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1440 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1440 dark en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1440 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 1440 light en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 390 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
-    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"board and full-screen evidence 390 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
-    ,
     {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"capabilities stay separate from locks, rules may name incapable models, and reviews keep the author family excluded","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"column visibility persists and restores fixed ordering while mandatory columns stay visible","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -8282,7 +8258,33 @@
     ,
     {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"provider writes keep selectors still and support Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"rules Move to appends a second pin instead of inserting it ahead of pins already there","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/models-board-controls.spec.ts","name":"template preview writes no settings, shows Now to After, keeps personal columns and applies with guarded Undo","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1024 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1024 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1280 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1280 dark en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1280 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1280 light en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1440 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1440 dark en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1440 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 1440 light en text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 390 dark de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/models-board-evidence.spec.ts","name":"board and full-screen evidence 390 light de text","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
@@ -14843,6 +14845,8 @@
     {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"keeps rules out of personal writes, moves across Not allowed and retains fixed pin ownership","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"refreshes a conflict without a success toast and blocks edits after a saved write whose refresh fails","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"refuses a new Not allowed on the workspace default and still stores Mine and rules bans","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"rejects a held write and its follow-up read after a context change","tier":"ESSENTIAL"}
     ,

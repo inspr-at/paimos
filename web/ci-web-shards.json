@@ -328,7 +328,7 @@
         ,
         {"file":"tests/managed-controls.spec.ts","listedTests":25,"tierTiming":{"caseSeconds":{"max":3.674,"median":1.823,"min":1.574},"seconds":50.762087,"selectedTests":25},"weightSeconds":61.988304,"weightSource":"web-13"}
         ,
-        {"file":"tests/models-board-controls.spec.ts","listedTests":24,"weightSeconds":16,"weightSource":"estimate"}
+        {"file":"tests/models-board-controls.spec.ts","listedTests":13,"weightSeconds":1,"weightSource":"AEON-878 prior-gate ceiling"}
         ,
         {"file":"tests/no-shift.spec.ts","listedTests":46,"tierTiming":{"caseSeconds":{"max":19.97,"median":4.001,"min":0.151},"seconds":234.324689,"selectedTests":47},"weightSeconds":114.05848,"weightSource":"web-13"}
         ,
@@ -854,6 +854,8 @@
         ,
         {"file":"tests/markdown-ticket-links.spec.ts","listedTests":4,"weightSeconds":8.878049,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/models-board-evidence.spec.ts","listedTests":12,"weightSeconds":15,"weightSource":"AEON-878 estimate moved from models-board-controls"}
+        ,
         {"file":"tests/multiple-account-pairing.spec.ts","listedTests":6,"weightSeconds":13.317072,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/nav.spec.ts","listedTests":11,"weightSeconds":24.414634,"weightSource":"unmeasured-test-rate"}
@@ -1354,6 +1356,8 @@
     "AEON-697: Needs attention gates once in its own serial, trace-preserving group. listedTests comes from native collection; weightSeconds uses the existing unmeasured seconds/test estimate, not hosted runtime evidence."
     ,
     "OPS-257 round 4 L3: refresh measured per-case browser and per-owner Go/unit costs from full PR run 37377299349 (b2f9935a4264e932eae0fa2acd07c71e8d1fc417). The 39 clip cases split into planning/touch (27) and settings/rules (12), with shared imported fixtures and unchanged policies/tiers. Browser costs include group and tier execution residuals; each clip half conservatively retains the full original launch overhead. Go costs include terminal package elapsed plus each shard's residual native enumeration/launch time shared equally by its owners. Unit costs include Vitest elapsed or top-level Node durations plus shared residual launch time. Runner setup and unit shard 1's separate safety checks are excluded; hosted CI must validate total wall time. Exact-spec weightSeconds retain their historical allocation model; only the old clip allocation is divided proportionally between the two new files. The full-gate tier scheduler uses the refreshed tierTiming costs. Unit tie preference assigns shard 1 last on equal loads, moving the largest file to shard 2 without estimating the separate safety-check duration."
+    ,
+    "AEON-878: models-board-controls stays gated at 1s, the largest weight that keeps the twelve-shard prior maximum under 300 (1.1s reaches 300.01). The 12 screenshot cases moved to ungated models-board-evidence.spec.ts carry the other 15s of the original 16s estimate. Behavior cases remain in the gate."
   ]
   ,
   "originalNpmScripts": {

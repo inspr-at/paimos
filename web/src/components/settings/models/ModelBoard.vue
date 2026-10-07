@@ -134,7 +134,8 @@ async function select(id: string) {
   const own = column.list.filter(value => !value.lock), index = own.findIndex(value => value.line === card.line)
   if (id === 'up' || id === 'down') { const target = stepTarget(column, card.line, id === 'up' ? -1 : 1, context.value); if (target) await move(column, card, target.zone, target.index); return }
   const zone: BoardZone = context.value.layer === 'rules' ? id as BoardZone : id === 'not' ? 'not' : 'list'
-  await move(column, card, zone, id === 'last' ? own.length - 1 : id === 'first' ? 0 : id === 'allow' ? own.length : index)
+  const at = context.value.layer === 'rules' && (zone === 'top' || zone === 'bottom') ? column[zone].length : id === 'last' ? own.length - 1 : id === 'first' ? 0 : id === 'allow' ? own.length : index
+  await move(column, card, zone, at)
 }
 async function saveReason() {
   if (!pending.value || !currentAction() || !why.value.trim()) { if (!why.value.trim()) error.value = text('One sentence is required.', 'Ein Satz ist erforderlich.'); return }
