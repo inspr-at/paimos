@@ -97,25 +97,29 @@ type Observation struct {
 	ReviewedHead string    `json:"reviewed_head"`
 	Checks       []Check   `json:"checks"`
 	HoldReason   *string   `json:"hold_reason"`
+	HeldFrom     *State    `json:"held_from_state,omitempty"`
 	Settings     Settings  `json:"settings"`
 	At           time.Time `json:"at"`
 }
 type Item struct {
-	ID          string      `json:"id"`
-	Project     *string     `json:"project_id"`
-	Ticket      *string     `json:"ticket_node_id"`
-	Repository  string      `json:"repository"`
-	PR          *int64      `json:"pull_request"`
-	Branch      string      `json:"branch"`
-	Head        string      `json:"head_sha"`
-	State       State       `json:"state"`
-	Since       time.Time   `json:"state_since"`
-	Owner       string      `json:"owner"`
-	Deadline    *time.Time  `json:"deadline_at"`
-	HeldReason  *string     `json:"held_reason"`
-	LinkSource  *string     `json:"link_source"`
-	Updated     time.Time   `json:"updated_at"`
-	Observation Observation `json:"-"`
+	ID           string      `json:"id"`
+	Project      *string     `json:"project_id"`
+	Ticket       *string     `json:"ticket_node_id"`
+	Repository   string      `json:"repository"`
+	PR           *int64      `json:"pull_request"`
+	Branch       string      `json:"branch"`
+	Head         string      `json:"head_sha"`
+	State        State       `json:"state"`
+	Since        time.Time   `json:"state_since"`
+	Owner        string      `json:"owner"`
+	Deadline     *time.Time  `json:"deadline_at"`
+	HeldReason   *string     `json:"held_reason"`
+	HeldFrom     *State      `json:"held_from_state"`
+	ChecksPassed int         `json:"required_checks_passed"`
+	ChecksTotal  int         `json:"required_checks_total"`
+	LinkSource   *string     `json:"link_source"`
+	Updated      time.Time   `json:"updated_at"`
+	Observation  Observation `json:"-"`
 }
 
 func allSuccess(o Observation) bool {
@@ -174,7 +178,11 @@ func project(o Observation, before *Item) Item {
 		t := since.Add(time.Duration(n) * time.Minute)
 		deadline = &t
 	}
-	return Item{o.ID, o.Project, o.Ticket, o.Repository, o.PR, o.Branch, o.Head, s, since, owner(s), deadline, o.HoldReason, o.LinkSource, o.At, o}
+	if s == Held || s == Merged {
+		deadline = nil
+	}
+	passed, total := checkProgress(o)
+	return Item{ID: o.ID, Project: o.Project, Ticket: o.Ticket, Repository: o.Repository, PR: o.PR, Branch: o.Branch, Head: o.Head, State: s, Since: since, Owner: owner(s), Deadline: deadline, HeldReason: o.HoldReason, HeldFrom: o.HeldFrom, ChecksPassed: passed, ChecksTotal: total, LinkSource: o.LinkSource, Updated: o.At, Observation: o}
 }
 func stableID(tenant, repo, subject string) string {
 	h := sha256.Sum256([]byte("aeon-delivery\x00" + tenant + "\x00" + repo + "\x00" + subject))
@@ -187,4 +195,23 @@ func snapshot(i *Item) any {
 		return nil
 	}
 	return map[string]any{"state": i.State, "head_sha": i.Head, "owner": i.Owner, "deadline_at": i.Deadline}
+}
+
+// Count only current-head configured checks, with the same success rule as state().
+func checkProgress(o Observation) (passed, total int) {
+	if o.Settings.RequiredChecks == nil {
+		return
+	}
+	for _, name := range *o.Settings.RequiredChecks {
+		total++
+		for _, c := range o.Checks {
+			if c.Name == name {
+				if c.Status == "completed" && c.Conclusion == "success" {
+					passed++
+				}
+				break
+			}
+		}
+	}
+	return
 }

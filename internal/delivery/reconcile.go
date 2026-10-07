@@ -279,6 +279,7 @@ func (m *Module) refreshPlatform(ctx context.Context, tid string) error {
 				}
 				if before != nil {
 					o.HoldReason = before.HeldReason
+					o.HeldFrom = before.HeldFrom
 					o.Branch = before.Branch
 				}
 				// A review row is the authoritative pre-PR repository/head binding.

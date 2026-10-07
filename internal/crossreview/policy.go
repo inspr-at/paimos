@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
@@ -66,6 +67,9 @@ func (m *Module) readPolicy(r *http.Request, tx pgx.Tx, p tenant.Principal) (any
 }
 
 func (m *Module) writePolicy(r *http.Request, tx pgx.Tx, p tenant.Principal) (any, error) {
+	if len(r.Header.Get("If-Unmodified-Since")) > 64 {
+		return nil, workorders.Fail(400, "invalid review policy revision")
+	}
 	var in reviewgate.FamilyPolicy
 	if r.Method != http.MethodDelete {
 		raw, err := io.ReadAll(io.LimitReader(r.Body, 4097))
@@ -94,6 +98,16 @@ func (m *Module) writePolicy(r *http.Request, tx pgx.Tx, p tenant.Principal) (an
 	before, err := reviewgate.LoadFamilyPolicyTx(ctx, tx, project)
 	if err != nil {
 		return nil, err
+	}
+	if revision := r.Header.Get("If-Unmodified-Since"); revision != "" {
+		matches := revision == "none" && before.Policy == nil
+		if before.UpdatedAt != nil {
+			at, parseErr := time.Parse(time.RFC3339Nano, revision)
+			matches = parseErr == nil && at.Equal(*before.UpdatedAt)
+		}
+		if !matches {
+			return nil, workorders.Fail(412, "review policy changed; reload before saving or Undo")
+		}
 	}
 	if r.Method == http.MethodDelete {
 		_, err = tx.Exec(ctx, `DELETE FROM cross_family_policies WHERE project_id=$1::uuid`, project)

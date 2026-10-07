@@ -608,3 +608,57 @@ func TestReconcileContinuesAfterConfirmedMissingPull(t *testing.T) {
 		t.Fatal("platform refresh did not run after the confirmed-missing pull")
 	}
 }
+
+func TestDeliveryUIFactsHoldReplayAndAvailability(t *testing.T) {
+	// Risks: a hold drifts to a later step on replay, check counts invent green,
+	// or an unconfigured tenant gets the configured tenant's availability.
+	f := newFixture(t)
+	pull := f.pull()
+	for _, name := range *defaults().RequiredChecks {
+		pull.Checks = append(pull.Checks, Check{Name: name, Status: "completed", Conclusion: "success"})
+	}
+	f.gh.pulls[7] = pull
+	f.webhook(t, "pull_request", "opened", "ui-open", 204)
+	var page Page
+	f.call(t, f.person, "GET", "/api/nodes/"+f.ticket+"/delivery", nil, 200, &page)
+	if !page.Available || len(page.Items) != 1 || page.Items[0].ChecksPassed != 5 || page.Items[0].ChecksTotal != 5 {
+		t.Fatalf("bad UI check facts: %+v", page)
+	}
+	var held Item
+	f.at = f.at.Add(time.Minute)
+	f.call(t, f.person, "POST", "/api/delivery/"+page.Items[0].ID+"/hold", map[string]string{"reason": "Release freeze"}, 200, &held)
+	if held.State != Held || held.HeldFrom == nil || *held.HeldFrom != CIGreen || held.Deadline != nil {
+		t.Fatalf("hold lost original step: %+v", held)
+	}
+	pull.Queued = true
+	for n := 3; n < len(pull.Checks); n++ {
+		pull.Checks[n].Status = "in_progress"
+		pull.Checks[n].Conclusion = ""
+	}
+	f.gh.pulls[7] = pull
+	f.at = f.at.Add(time.Minute)
+	f.webhook(t, "pull_request", "enqueued", "ui-queued", 204)
+	if err := f.m.Rebuild(t.Context(), f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	replay := f.item(t, 7)
+	if replay.State != Held || replay.HeldFrom == nil || *replay.HeldFrom != CIGreen || replay.ChecksPassed != 3 || replay.ChecksTotal != 5 {
+		t.Fatalf("replay moved paused step: %+v", replay)
+	}
+	r := httptest.NewRequest("DELETE", "/api/delivery/"+held.ID+"/hold", nil)
+	r.Header.Set("If-Unmodified-Since", held.Updated.Format(time.RFC3339Nano))
+	r = r.WithContext(tenant.WithPrincipal(r.Context(), f.person))
+	w := httptest.NewRecorder()
+	f.mux.ServeHTTP(w, r)
+	if w.Code != 412 || !strings.Contains(w.Body.String(), "delivery changed") {
+		t.Fatalf("stale hold release: %d %s", w.Code, w.Body.String())
+	}
+	f.call(t, f.person, "DELETE", "/api/delivery/"+held.ID+"/hold", nil, 200, &held)
+	if held.State != InQueue || held.HeldFrom != nil {
+		t.Fatalf("release did not clear paused step: %+v", held)
+	}
+	f.call(t, f.foreign, "GET", "/api/delivery", nil, 200, &page)
+	if page.Available {
+		t.Fatal("availability crossed tenant binding")
+	}
+}

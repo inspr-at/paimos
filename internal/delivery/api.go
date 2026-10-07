@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/crossreview"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -66,8 +68,9 @@ func scope(project *string) authz.Scope {
 }
 
 type Page struct {
-	Items []Item  `json:"items"`
-	Next  *string `json:"next_cursor"`
+	Available bool    `json:"available"`
+	Items     []Item  `json:"items"`
+	Next      *string `json:"next_cursor"`
 }
 
 func (m *Module) list(w http.ResponseWriter, r *http.Request) {
@@ -93,7 +96,8 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 		respondError(w, fail(400, "invalid delivery filter"))
 		return
 	}
-	out := Page{Items: []Item{}}
+	app := crossreview.GitHubApp{Config: m.config}
+	out := Page{Items: []Item{}, Available: app.Configured(p.TenantID, m.config.Repository)}
 	err := db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		project := (*string)(nil)
 		if key != "" {
@@ -132,13 +136,34 @@ func (m *Module) list(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		permissionScope := scope(project)
-		if project == nil && ticket == "" {
+		unscoped := project == nil && ticket == ""
+		if unscoped {
 			permissionScope.AnyProject = true
 		}
 		if err := authz.RequireTx(r.Context(), tx, p, "delivery.read", permissionScope); err != nil {
 			return err
 		}
-		rows, err := tx.Query(r.Context(), `SELECT `+columns+` FROM delivery_items WHERE ($1::uuid IS NULL OR project_id=$1) AND ($2::uuid IS NULL OR ticket_node_id=$2) AND ($3='' OR state=$3) AND ($4::uuid IS NULL OR id>$4) ORDER BY id LIMIT $5`, project, nullable(ticket), s, nullable(after), limit+1)
+		// Node visibility is not delivery.read. An unscoped page keeps projects
+		// where this caller holds the grant, and rows with no project only when
+		// the workspace grant holds.
+		args := []any{project, nullable(ticket), s, nullable(after), limit + 1}
+		filter := ""
+		if unscoped {
+			check, err := authz.ProjectsTx(r.Context(), tx, p)
+			if err != nil {
+				return err
+			}
+			allowed, err := authz.GrantedProjectIDsTx(r.Context(), tx, p, "delivery.read")
+			if err != nil {
+				return err
+			}
+			if allowed == nil {
+				allowed = []string{}
+			}
+			filter = ` AND ($6::bool OR project_id = ANY($7::uuid[]))`
+			args = append(args, check("delivery.read", ""), allowed)
+		}
+		rows, err := tx.Query(r.Context(), `SELECT `+columns+` FROM delivery_items WHERE ($1::uuid IS NULL OR project_id=$1) AND ($2::uuid IS NULL OR ticket_node_id=$2) AND ($3='' OR state=$3) AND ($4::uuid IS NULL OR id>$4)`+filter+` ORDER BY id LIMIT $5`, args...)
 		if err != nil {
 			return err
 		}
@@ -273,8 +298,8 @@ func (m *Module) hold(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("itemId")
-	if !workorders.UUID(id) {
-		respondError(w, fail(400, "invalid delivery item"))
+	if !workorders.UUID(id) || len(r.Header.Get("If-Unmodified-Since")) > 64 {
+		respondError(w, fail(400, "invalid delivery item or revision"))
 		return
 	}
 	var reason *string
@@ -309,11 +334,23 @@ func (m *Module) hold(w http.ResponseWriter, r *http.Request) {
 		if err = authz.RequireTx(ctx, tx, p, "delivery.manage", scope(current.Project)); err != nil {
 			return err
 		}
+		if revision := r.Header.Get("If-Unmodified-Since"); revision != "" {
+			at, parseErr := time.Parse(time.RFC3339Nano, revision)
+			if parseErr != nil || !at.Equal(current.Updated) {
+				return fail(412, "delivery changed; reload before lifting the hold")
+			}
+		}
 		if current.State == Merged {
 			return fail(409, "merged delivery is terminal")
 		}
 		o := current.Observation
 		o.HoldReason = reason
+		if reason == nil {
+			o.HeldFrom = nil
+		} else if current.State != Held {
+			from := current.State
+			o.HeldFrom = &from
+		}
 		o.At = m.now()
 		if err = platformTx(ctx, tx, &o); err != nil {
 			return err

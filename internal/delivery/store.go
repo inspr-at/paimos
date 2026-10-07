@@ -18,14 +18,15 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
-const columns = `id::text,project_id::text,ticket_node_id::text,repository,pull_request,branch,head_sha,state,state_since,owner,deadline_at,held_reason,link_source,updated_at,observation`
+const columns = `id::text,project_id::text,ticket_node_id::text,repository,pull_request,branch,head_sha,state,state_since,owner,deadline_at,held_reason,link_source,updated_at,observation,held_from_state`
 
 func scan(row pgx.Row) (Item, error) {
 	var i Item
 	var raw []byte
-	err := row.Scan(&i.ID, &i.Project, &i.Ticket, &i.Repository, &i.PR, &i.Branch, &i.Head, &i.State, &i.Since, &i.Owner, &i.Deadline, &i.HeldReason, &i.LinkSource, &i.Updated, &raw)
+	err := row.Scan(&i.ID, &i.Project, &i.Ticket, &i.Repository, &i.PR, &i.Branch, &i.Head, &i.State, &i.Since, &i.Owner, &i.Deadline, &i.HeldReason, &i.LinkSource, &i.Updated, &raw, &i.HeldFrom)
 	if err == nil {
 		err = json.Unmarshal(raw, &i.Observation)
+		i.ChecksPassed, i.ChecksTotal = checkProgress(i.Observation)
 	}
 	return i, err
 }
@@ -138,14 +139,30 @@ func saveTx(ctx context.Context, tx pgx.Tx, tid string, o Observation) (Item, *e
 	if before != nil && before.State == Merged {
 		return *before, nil, nil
 	}
+	if o.HoldReason != nil && o.HeldFrom == nil {
+		if before != nil && before.HeldFrom != nil {
+			o.HeldFrom = before.HeldFrom
+		} else if before != nil && before.State != Held {
+			from := before.State
+			o.HeldFrom = &from
+		} else {
+			unheld := o
+			unheld.HoldReason = nil
+			from := state(unheld)
+			o.HeldFrom = &from
+		}
+	}
+	if o.HoldReason == nil {
+		o.HeldFrom = nil
+	}
 	after := project(o, before)
 	raw, err := json.Marshal(o)
 	if err != nil {
 		return after, nil, err
 	}
-	_, err = tx.Exec(ctx, `INSERT INTO delivery_items(tenant_id,id,project_id,ticket_node_id,repository,pull_request,branch,head_sha,state,state_since,owner,deadline_at,held_reason,link_source,updated_at,observation)
- VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
- ON CONFLICT(tenant_id,id) DO UPDATE SET project_id=EXCLUDED.project_id,ticket_node_id=EXCLUDED.ticket_node_id,pull_request=EXCLUDED.pull_request,branch=EXCLUDED.branch,head_sha=EXCLUDED.head_sha,state=EXCLUDED.state,state_since=EXCLUDED.state_since,owner=EXCLUDED.owner,deadline_at=EXCLUDED.deadline_at,held_reason=EXCLUDED.held_reason,link_source=EXCLUDED.link_source,updated_at=EXCLUDED.updated_at,observation=EXCLUDED.observation`, tid, after.ID, after.Project, after.Ticket, after.Repository, after.PR, after.Branch, after.Head, after.State, after.Since, after.Owner, after.Deadline, after.HeldReason, after.LinkSource, after.Updated, raw)
+	_, err = tx.Exec(ctx, `INSERT INTO delivery_items(tenant_id,id,project_id,ticket_node_id,repository,pull_request,branch,head_sha,state,state_since,owner,deadline_at,held_reason,link_source,updated_at,observation,held_from_state)
+ VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+ ON CONFLICT(tenant_id,id) DO UPDATE SET project_id=EXCLUDED.project_id,ticket_node_id=EXCLUDED.ticket_node_id,pull_request=EXCLUDED.pull_request,branch=EXCLUDED.branch,head_sha=EXCLUDED.head_sha,state=EXCLUDED.state,state_since=EXCLUDED.state_since,owner=EXCLUDED.owner,deadline_at=EXCLUDED.deadline_at,held_reason=EXCLUDED.held_reason,link_source=EXCLUDED.link_source,updated_at=EXCLUDED.updated_at,observation=EXCLUDED.observation,held_from_state=EXCLUDED.held_from_state`, tid, after.ID, after.Project, after.Ticket, after.Repository, after.PR, after.Branch, after.Head, after.State, after.Since, after.Owner, after.Deadline, after.HeldReason, after.LinkSource, after.Updated, raw, after.HeldFrom)
 	if err != nil {
 		return after, nil, err
 	}
@@ -197,6 +214,29 @@ func recordTx(ctx context.Context, tx pgx.Tx, tid string, r record) (bool, error
 		r.Observations = changed
 		if len(changed) == 0 {
 			return false, nil
+		}
+	}
+	for n := range r.Observations {
+		o := &r.Observations[n]
+		if o.HoldReason != nil && o.HeldFrom == nil {
+			before, err := load(ctx, tx, o.ID)
+			if err != nil {
+				return false, err
+			}
+			if before != nil && before.HeldFrom != nil {
+				o.HeldFrom = before.HeldFrom
+			} else if before != nil && before.State != Held {
+				from := before.State
+				o.HeldFrom = &from
+			} else {
+				unheld := *o
+				unheld.HoldReason = nil
+				from := state(unheld)
+				o.HeldFrom = &from
+			}
+		}
+		if o.HoldReason == nil {
+			o.HeldFrom = nil
 		}
 	}
 	raw, err := json.Marshal(r.Observations)
