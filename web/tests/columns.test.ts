@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { automaticColumns, COLUMN_BY_ID, layoutWidths, moveColumn, orderOf, releaseLabel, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf, type ColumnId } from '../src/lib/columns.ts'
+import { automaticColumns, COLUMN_BY_ID, layoutWidths, moveColumn, orderOf, releaseLabel, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnId } from '../src/lib/columns.ts'
+import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
 
 const ids = (width: number, options: Parameters<typeof visibleColumns>[1]) => visibleColumns(width, options).columns.map(c => c.id)
@@ -167,4 +168,55 @@ test('phone cards honor saved optional columns and cost access', () => {
   assert.equal(visibleColumns(390, { phone: true, prefs }).customised, true)
   assert.deepEqual(ids(390, { phone: true, prefs: { visible: [] }, present: { estimate: true, eta: true, progress: true } }), ['key', 'title'])
   assert.deepEqual(prefs.visible, ['paid', 'cost', 'assignee'])
+})
+
+// AEON-913 risk: one host must never alter the global picker or another host's widths.
+test('AEON-913: host column definitions preserve the picker and size within their bounds', () => {
+  const base = [COLUMN_BY_ID.get('key')!, COLUMN_BY_ID.get('title')!]
+  const extra: ColumnDef = { id: 'suggestion', label: 'Suggestion', sort: null, width: 180, min: 120, max: 340 }
+  const columns = withHostColumns(base, [extra, extra, { ...extra, id: 'status' }, { ...extra, id: 'bad"selector' }])
+  assert.deepEqual(columns.map(column => column.id), ['key', 'title', 'suggestion'])
+  assert.equal(COLUMN_BY_ID.has('suggestion' as ColumnId), false)
+  const definitions = new Map<string, ColumnDef>(columns.map(column => [column.id, column]))
+  assert.equal(widthOf('suggestion', { widths: { suggestion: 900 } }, definitions), 340)
+  assert.equal(widthOf('suggestion', { widths: { suggestion: 1 } }, definitions), 120)
+  const widths = layoutWidths(['key', 'title', 'suggestion'], 1000, null, { suggestion: 260 }, definitions)
+  assert.equal(widths.suggestion, 260)
+  assert.equal(1000 - Object.values(widths).reduce<number>((sum, value) => sum + (value ?? 0), 0), 622)
+  const fitted = { key: 190, suggestion: 220 }
+  assert.deepEqual(layoutWidths(['key', 'title', 'suggestion'], 1000, null, {}, definitions, fitted), fitted)
+  // Fitted widths remain flexible for a deliberate Title resize; saved widths win.
+  assert.deepEqual(layoutWidths(['key', 'title', 'suggestion'], 1000, { widths: { title: 600, suggestion: 260 } }, {}, definitions, fitted), { key: 140, suggestion: 260 })
+  assert.deepEqual(base.map(column => column.id), ['key', 'title'])
+})
+
+test('AEON-913: project grouping retains metadata, loaded totals, held placement and URL state', () => {
+  const project = { id: 'p-a', key: 'AEON', title: 'Aeon' }
+  const row = (id: string, p: typeof project | null, project_key?: string) => ({ id, key: `WORK-${id}`, project: p, project_key }) as TicketRow
+  const rows = [row('a', project), row('b', { id: 'p-z', key: 'ZED', title: 'Zed' }), row('c', project), row('d', null, 'HOST')]
+  const groups = groupRows(rows, 'project', { 'p-a': 120 })
+  assert.deepEqual(groups.map(group => group.project?.key), ['AEON', 'HOST', 'ZED'])
+  assert.deepEqual(groups[0].project, project)
+  assert.deepEqual(groups[0].rows, [rows[0], rows[2]])
+  assert.equal(groups[0].total, 120)
+  assert.equal(groups[0].loaded, 2)
+  assert.equal(groups[0].hasMore, true)
+  assert.equal(groups[2].hasMore, false)
+  const held = groupRows([rows[0]], 'project', {}, { layout: row => ({ ...row, project: rows[1].project }) })
+  assert.equal(held[0].project?.key, 'ZED')
+  assert.equal(held[0].rows[0], rows[0])
+  assert.equal(filtersToQuery(filtersFromQuery({ group: 'project' })).group, 'project')
+})
+
+test('AEON-913: group selection caps loaded rows at 100 and preserves other groups', () => {
+  const rows = Array.from({ length: 120 }, (_, id) => ({ id: `row-${id}` }) as TicketRow)
+  const group = { key: 'a', label: 'A', rows, total: 500, loaded: 120, hasMore: true }
+  const selected = new Set(['other'])
+  const next = selectLoadedGroup(group, selected, true)
+  assert.equal(next.size, 100)
+  assert.equal(next.has('other'), true)
+  assert.equal(next.has('row-98'), true)
+  assert.equal(next.has('row-99'), false)
+  assert.deepEqual([...selectLoadedGroup(group, next, false)], ['other'])
+  assert.deepEqual([...selected], ['other'])
 })
