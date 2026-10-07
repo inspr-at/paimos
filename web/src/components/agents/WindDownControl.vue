@@ -230,7 +230,7 @@ watch(() => `${session.identity?.tenant.id}:${session.identity?.principal.id}`, 
 // The chip replaces the button; a status popover for a wind-down that is gone closes.
 watch(active, now => { if (!now && panel.value === 'status') panel.value = null })
 onMounted(() => { void loadLabels(); void loadScope(); void pause.loadSettings(); void pause.refreshLeaving() })
-defineExpose({ open: openForm, openStatus: () => { panel.value = 'status' } })
+defineExpose({ open: openForm, openStatus: () => { chipButton.value?.scrollIntoView({ block: 'nearest' }); panel.value = 'status' } })
 </script>
 <template>
   <span v-if="visible" class="wind-down" :class="{ active }">

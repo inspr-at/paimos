@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Per-person server preferences. Every read, debounce and write tail belongs to
 // one tenant/principal epoch, including across same-document sign-in changes.
-import { computed, ref, shallowRef, type Ref } from 'vue'
+import { computed, reactive, ref, shallowRef, type Ref } from 'vue'
 import { api } from './api.ts'
 
 type Json = Record<string, unknown>
@@ -16,6 +16,11 @@ let authenticationCurrent = () => true
 const cache = new Map<string, Preference>()
 const flights = new Set<AbortController>()
 const failures = new Set<(key: string) => void>()
+// Writes in flight, and the saved preferences whose last write failed, for the footer on Settings
+// (AEON-785). Ids carry the owner. Only a preference this module holds can be saved again, with the
+// value it holds now; other callers (developer settings, say) report their own failure where they ask.
+export const preferenceSaves = reactive({ saving: new Set<string>(), failed: new Set<string>() })
+const inflight = new Map<string, number>()
 export function onPreferenceFailure(listener: (key: string) => void) { failures.add(listener); return () => { failures.delete(listener) } }
 
 // The session store invokes this synchronously, before a cookie-changing action
@@ -32,6 +37,7 @@ export function setPreferenceOwner(who: Owner, current = () => true) {
   }
   for (const flight of flights) flight.abort()
   flights.clear(); cache.clear(); owner.value = next
+  preferenceSaves.saving.clear(); preferenceSaves.failed.clear(); inflight.clear()
 }
 function capture() {
   const person = owner.value, started = epoch
@@ -52,6 +58,9 @@ export async function readPreference(key: string): Promise<Json | null> {
 export async function writePreference(key: string, value: Json): Promise<boolean> {
   const current = capture(), controller = new AbortController()
   if (!current()) return false
+  const id = `${owner.value}/${key}`
+  inflight.set(id, (inflight.get(id) ?? 0) + 1)
+  preferenceSaves.saving.add(id)
   flights.add(controller)
   try {
     const response = await api(`/preferences/${encodeURIComponent(key)}`, { method: 'PUT', signal: controller.signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) })
@@ -59,7 +68,12 @@ export async function writePreference(key: string, value: Json): Promise<boolean
     if (!response.ok) failures.forEach(listener => listener(key))
     return response.ok
   } catch { if (current()) failures.forEach(listener => listener(key)); return false }
-  finally { flights.delete(controller) }
+  finally {
+    flights.delete(controller)
+    const left = (inflight.get(id) ?? 1) - 1
+    if (left > 0) inflight.set(id, left)
+    else { inflight.delete(id); preferenceSaves.saving.delete(id) }
+  }
 }
 const owned = (pref: Preference) => pref.owner === owner.value && pref.epoch === epoch && !!pref.owner && authenticationCurrent()
 function preference(key: string): Preference | null {
@@ -78,7 +92,9 @@ function persist(pref: Preference) {
   const job = (pref.tail ?? Promise.resolve()).catch(() => undefined).then(async () => {
     if (!owned(pref)) return
     const value = pref.value.value
-    if (value) await writePreference(pref.key, value)
+    if (!value) return
+    const saved = await writePreference(pref.key, value)
+    if (owned(pref)) { if (saved) preferenceSaves.failed.delete(`${pref.owner}/${pref.key}`); else preferenceSaves.failed.add(`${pref.owner}/${pref.key}`) }
   }).finally(() => { if (pref.tail === job) pref.tail = undefined })
   pref.tail = job
 }
@@ -107,4 +123,8 @@ export function usePreference<T extends object>(key: string) {
     pref.timer = setTimeout(() => { pref.timer = undefined; if (owned(pref)) persist(pref) }, delay)
   }
   return { value, get ready() { return preference(key)?.ready ?? Promise.resolve() }, save }
+}
+// Saves again what a preference holds now, where its last write failed.
+export function retryFailedPreferences() {
+  for (const pref of cache.values()) if (owned(pref) && preferenceSaves.failed.has(`${pref.owner}/${pref.key}`)) persist(pref)
 }

@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { reactive, type App } from 'vue'
 import * as knowledge from '../src/lib/knowledge'
+import * as footerProviders from '../src/lib/footerProviders'
+import * as footerSummary from '../src/lib/footerSummary'
 import * as week from '../src/lib/week'
 import * as money from '../src/components/business/money'
 import * as duration from '../src/components/business/duration'
@@ -72,6 +74,7 @@ it('S8-014: a failed second search labels retained results and exposes retry unt
   const view = mountView('../src/views/KnowledgeView.vue', {
     'vue-router': { useRoute: () => route, useRouter: () => ({ replace() {} }) },
     '../lib/brand': { brand: { value: { product: 'Aeon' } }, setPageTitle() {} },
+    '../lib/footerProviders': footerProviders, '../lib/footerSummary': footerSummary,
     '../lib/knowledge': { ...knowledge, listKnowledge }, '../lib/work': { absoluteTime: (v: string) => v, relativeTime: () => '', plural: (n: number, word: string) => `${n} ${word}` },
     '../stores/projects': { useProjects: () => ({ load() {}, byId: () => null }) },
   })

@@ -366,6 +366,19 @@ test('AEON-783: progress distinguishes handover, confirmed stop and lost contact
   expect(ratio).toBeLessThan(0.73)
 })
 
+test('AEON-783: the footer summary of a running wind-down opens the head chip status', async ({ page }) => {
+  const mock = await setup(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto('/agents')
+  await startWindDown(page)
+  await expect.poll(() => mock.calls.length).toBe(1)
+  await expect(chipButton(page)).toContainText('Winding down')
+  await expect(statusPopover(page)).toHaveCount(0)
+  await page.getByRole('button', { name: /^Winding down, \d+ agents? left/ }).click()
+  await expect(statusPopover(page)).toBeVisible()
+  await expect(chipButton(page)).toHaveAttribute('aria-expanded', 'true')
+})
+
 test('AEON-783: live outcome text keeps wind-down status actions still', async ({ page }, testInfo) => {
   const mock = await setup(page)
   await page.setViewportSize({ width: 1440, height: 1000 })

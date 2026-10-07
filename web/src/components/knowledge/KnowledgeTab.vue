@@ -8,6 +8,8 @@ import { STATUS_VIEWS, type KnowledgeFilters, type KnowledgeState, type StatusVi
 import { toast } from '../../lib/toast'
 import { settledNavigation } from '../../lib/navigation'
 import { absoluteTime, plural, relativeTime } from '../../lib/work'
+import { knowledgeFooter } from '../../lib/footerProviders'
+import { useFooterSummary } from '../../lib/footerSummary'
 import AppIcon from '../AppIcon.vue'
 import FloatingPanel from '../work/FloatingPanel.vue'
 import KnowledgeCreateDialog from './KnowledgeCreateDialog.vue'
@@ -138,6 +140,20 @@ function searchKey(event: KeyboardEvent) {
 }
 function resetFilters() { draft.value = ''; updateFilters({ q: '', type: '', status: 'current' }) }
 function showAll() { updateFilters({ status: 'all' }) }
+
+// The footer says what this list shows: entries, and the proposed ones a person has to review (AEON-785).
+useFooterSummary(() => {
+  if (!props.state.loaded.value && props.state.error.value) return null
+  if (!props.state.loaded.value) return knowledgeFooter({ loaded: false, entries: 0, toReview: 0, updatedAt: null, now: props.now, act: { review: showReview, sort: showRecent } })
+  const items = props.state.visible.value
+  const updated = items.reduce((latest, item) => Math.max(latest, Date.parse(item.updated_at) || 0), 0)
+  return knowledgeFooter({
+    loaded: true, entries: items.length, toReview: items.filter(item => item.status === 'proposed').length, updatedAt: updated || null, now: props.now,
+    act: { review: showReview, sort: showRecent },
+  })
+})
+function showReview() { updateFilters({ status: 'proposed' }) }
+function showRecent() { updateFilters({ sort: 'updated' }) }
 
 // ---------- Keyboard: j k move, Enter or o opens, / searches, n writes ----------
 function rowEl(id: string) { return listEl.value?.querySelector<HTMLElement>(`[data-id="${id}"]`) ?? null }
