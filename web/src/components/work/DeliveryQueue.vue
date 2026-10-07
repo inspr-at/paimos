@@ -7,8 +7,8 @@ import { createScope, scopeOwner } from '../../lib/identityScope'
 import { useSession } from '../../stores/session'
 
 const props = defineProps<{ projectId: string; nodeId: string; de: boolean }>()
-interface QueueRound { id: string; key: string; kind: string; round_number: number; state: string; hold_reason: string | null; reason: string; estimate_minutes: number }
-interface QueuePage { items: QueueRound[]; settings: { mode: 'off' | 'shadow'; freeze: boolean }; next_cursor: string | null }
+interface QueueRound { id: string; key: string; slug: string; pull_request: number | null; kind: string; round_number: number; state: string; hold_reason: string | null; reason: string; estimate_minutes: number }
+interface QueuePage { items: QueueRound[]; settings: { mode: 'off' | 'shadow'; freeze: boolean; held_slugs: string[]; held_pull_requests: number[]; release_set: string[] }; next_cursor: string | null }
 const session = useSession()
 const read = computed(() => can('delivery_queue.read', props.projectId))
 const scope = createScope(() => scopeOwner(session.identity) ? `${scopeOwner(session.identity)}/${props.projectId}/${props.nodeId}` : '')
@@ -30,7 +30,16 @@ function state(value: string) { return (props.de ? { queued: 'Wartend', claimed:
 function reason(value: string) {
   const en: Record<string, string> = { release_freeze: 'Outside the frozen release set', round_hold: 'Round on hold', slug_hold: 'Branch on hold', pull_request_hold: 'Pull request on hold', delivery_hold: 'Delivery on hold', slug_running: 'Another round owns this branch', admission_unavailable: 'Admission unavailable', target_unavailable: 'Work item unavailable', target_not_leaf: 'Work item has children', already_merged: 'Already merged' }
   const de: Record<string, string> = { release_freeze: 'Außerhalb der eingefrorenen Liefermenge', round_hold: 'Runde angehalten', slug_hold: 'Branch angehalten', pull_request_hold: 'Pull Request angehalten', delivery_hold: 'Lieferung angehalten', slug_running: 'Eine andere Runde beansprucht diesen Branch', admission_unavailable: 'Startprüfung nicht verfügbar', target_unavailable: 'Arbeitsauftrag nicht verfügbar', target_not_leaf: 'Arbeitsauftrag enthält Unteraufträge', already_merged: 'Bereits gemergt' }
-  return (props.de ? de : en)[value] ?? ''
+  return (props.de ? de : en)[value] ?? (['queued', 'managed', 'admitted', 'shadow_running', 'shadow_done'].includes(value) ? '' : value)
+}
+function holdReason(round: QueueRound) {
+  if (round.state === 'done') return ''
+  if (round.hold_reason) return round.hold_reason
+  const settings = result.value?.settings
+  if (settings?.held_slugs?.includes(round.slug)) return reason('slug_hold')
+  if (round.pull_request && settings?.held_pull_requests?.includes(round.pull_request)) return reason('pull_request_hold')
+  if (settings?.freeze && !(settings.release_set ?? []).some(prefix => round.slug?.startsWith(prefix))) return reason('release_freeze')
+  return reason(round.reason)
 }
 </script>
 <template>
@@ -40,7 +49,7 @@ function reason(value: string) {
     <ol v-if="result?.items.length">
       <li v-for="round in result.items" :key="round.id">
         <div class="round"><strong>{{ kind(round.kind) }} {{ round.round_number }}</strong><span>{{ state(round.state) }} · {{ round.estimate_minutes }} min</span></div>
-        <p v-if="round.hold_reason || reason(round.reason)">{{ round.hold_reason || reason(round.reason) }}</p>
+        <p v-if="holdReason(round)">{{ holdReason(round) }}</p>
       </li>
     </ol>
     <p v-if="result?.next_cursor" role="status">{{ de ? 'Die ersten 20 Runden werden angezeigt. Weitere Runden sind vorhanden.' : 'Showing the first 20 rounds. More rounds are available.' }}</p>

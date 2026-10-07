@@ -114,13 +114,18 @@ it('a policy save cannot report success after the person changes', async () => {
 
 it('delivery queue reads stay with the ticket and person and expose refresh failures', async () => {
  const props=Vue.reactive({nodeId:'ticket',projectId:'project',de:false}), pending=deferred()
- const first={items:[{id:'round',key:'AEON-888',kind:'fix',round_number:1,state:'queued',hold_reason:null,reason:'slug_hold',estimate_minutes:60}],settings:{mode:'shadow',freeze:true},next_cursor:null}
+ const first={items:[{id:'round',key:'AEON-888',slug:'held-branch',pull_request:null,kind:'fix',round_number:1,state:'queued',hold_reason:null,reason:'slug_hold',estimate_minutes:60}],settings:{mode:'shadow',freeze:true,held_slugs:[] as string[],held_pull_requests:[] as number[],release_set:['ready-']},next_cursor:null}
  http.handle=async path => path.includes('ticket=ticket') ? pending.promise : json({...first,items:[]})
- const queue=setup<{result:Vue.Ref<typeof first|null>;error:Vue.Ref<string>;load:() => Promise<unknown>}>('work/DeliveryQueue.vue',props)
+ const queue=setup<{result:Vue.Ref<typeof first|null>;error:Vue.Ref<string>;load:() => Promise<unknown>;reason:(value:string) => string;holdReason:(round:object) => string}>('work/DeliveryQueue.vue',props)
  props.nodeId='other';await settle();pending.release(json(first));await settle()
  expect(queue.result.value?.items).toEqual([])
  http.handle=async () => json(first);props.nodeId='ticket';await settle()
  expect(queue.result.value?.items[0]?.id).toBe('round')
+ expect(queue.reason('Finishing reserve is full')).toBe('Finishing reserve is full')
+ expect(queue.holdReason(first.items[0]!)).toBe('Outside the frozen release set')
+ expect(queue.holdReason({...first.items[0],state:'done'})).toBe('')
+ queue.result.value!.settings.held_slugs=['held-branch']
+ expect(queue.holdReason(first.items[0]!)).toBe('Branch on hold')
  http.handle=async () => json({error:'Unavailable'},503);await queue.load()
  expect(queue.error.value).toContain('could not be loaded');expect(queue.result.value?.items[0]?.id).toBe('round')
  const late=deferred();http.handle=async () => late.promise;const loading=queue.load()

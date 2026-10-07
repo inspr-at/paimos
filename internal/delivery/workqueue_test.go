@@ -138,6 +138,23 @@ func TestDeliveryWorkQueueShadowRotationFreezeReplayAndIsolation(t *testing.T) {
 	if len(denied.Decisions) != 1 || denied.Decisions[0].Reason != "round_hold" {
 		t.Fatal("round hold bypassed")
 	}
+	// An older merged PR must not drop a round when another PR is still open.
+	merged := f.pull()
+	merged.Open, merged.Merged = false, true
+	f.gh.pulls[7] = merged
+	f.webhook(t, "pull_request", "closed", "queue-old-merged", 204)
+	live := f.pull()
+	live.Number = 8
+	f.gh.pulls[8] = live
+	if err := f.m.Reconcile(t.Context(), f.person.TenantID); err != nil {
+		t.Fatal(err)
+	}
+	var next Round
+	f.call(t, f.person, "POST", path, roundInput(f, "ready-branch", "fix", 2), 201, &next)
+	f.call(t, f.agent, "POST", path+"/claim", ClaimInput{Request: requestID(8)}, 200, &replay)
+	if replay.Round == nil || replay.Round.ID != next.ID {
+		t.Fatal("old merged PR parked work for an open PR", replay)
+	}
 	f.call(t, f.person, "GET", path, nil, 200, &page)
 	before := page
 	if err := f.m.RebuildWorkQueue(t.Context(), f.person, f.project); err != nil {
