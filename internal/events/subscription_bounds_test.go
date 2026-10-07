@@ -190,7 +190,7 @@ func TestSubscriptionTopicProjectAndReferenceCeilings(t *testing.T) {
 		t.Fatal(err)
 	}
 	projects := []string{}
-	for _, key := range []string{"VISIBLE", "HIDDEN"} {
+	for _, key := range []string{"VISIBLE-1", "HIDDEN-1"} {
 		var id string
 		if err := d.Admin.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,$2,$2 FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, agent.TenantID, key).Scan(&id); err != nil {
 			t.Fatal(err)
