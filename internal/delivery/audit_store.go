@@ -156,14 +156,25 @@ func auditQueued(ctx context.Context, tx pgx.Tx, repo, sha string) (bool, error)
 	return group, err
 }
 
-// A merge group is proved on the merge commit. Any other merge is proved on
+// Queue-bot identity and a stored merge_group checks_requested event are
+// each enough. A missing group webhook must not hide the queue commit.
+func auditViaQueue(queued bool, mergedBy string) bool {
+	return queued || mergedBy == "github-merge-queue[bot]"
+}
+
+// A queue merge is proved on the merge commit. Any other merge is proved on
 // the pull-request head: a landed merge commit does not carry those check runs.
 func auditProofSHA(queued bool, f MergeFact) string {
-	if queued {
+	if auditViaQueue(queued, f.MergedBy) {
 		return f.SHA
 	}
 	return f.Head
 }
+
+// Stored facts for a proof SHA chosen after the external read are not a
+// result. The next attempt reads that SHA. An inserted checks_missing row
+// would never be reconciled.
+var errProofChanged = errors.New("merge audit proof changed before its checks were read")
 
 func auditChecksTx(ctx context.Context, tx pgx.Tx, repo, sha string, s Settings) ([]Check, error) {
 	if s.RequiredChecks == nil {
@@ -365,13 +376,20 @@ func (m *Module) auditMerge(ctx context.Context, tid string, f MergeFact, reader
 		if err != nil {
 			return err
 		}
-		a.ViaQueue = f.MergedBy == "github-merge-queue[bot]" || queued
+		a.ViaQueue = auditViaQueue(queued, f.MergedBy)
 		want := auditProofSHA(queued, f)
 		switch {
 		case want != proof:
 			// Queue membership changed after the external read. A green
-			// pull-request head must not satisfy this merge commit.
+			// pull-request head must not satisfy this merge commit, and
+			// local absence is not a result for a SHA this attempt never read.
 			cs, err = auditChecksTx(ctx, tx, a.Repository, want, s)
+			if err != nil {
+				return err
+			}
+			if !allSuccess(Observation{Settings: s, Checks: cs}) {
+				return errProofChanged
+			}
 		case complete:
 			// Re-read under the final fence, including settings changes made
 			// during any earlier preparation or external work.
