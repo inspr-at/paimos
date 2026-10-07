@@ -1,24 +1,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type Component } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import '../styles/settings.css'
 import { can, permissionsKnown, permissionsRevoked, refreshPermissions } from '../lib/authz'
 import AppIcon from '../components/AppIcon.vue'
 import BizIcon, { type BizIconName } from '../components/business/BizIcon.vue'
-import BusinessSection from '../components/settings/BusinessSection.vue'
-import PersonalSection from '../components/settings/PersonalSection.vue'
-import ThemeSection from '../components/settings/ThemeSection.vue'
-import DeveloperSection from '../components/settings/DeveloperSection.vue'
-import VocabularySection from '../components/settings/VocabularySection.vue'
-import AgentsSection from '../components/settings/AgentsSection.vue'
-import AutopilotSection from '../components/settings/AutopilotSection.vue'
-import PortalSection from '../components/settings/PortalSection.vue'
-import WorkspaceSection from '../components/settings/WorkspaceSection.vue'
-import AccessSection from '../components/access/AccessSection.vue'
-import AgentRulesSection from '../components/rules/AgentRulesSection.vue'
-import AccountsSection from '../components/settings/AccountsSection.vue'
-import PoliciesSection from '../components/settings/PoliciesSection.vue'
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId } from '../lib/settings'
 import { useSession } from '../stores/session'
 import { doctrineInbox } from '../lib/doctrineInbox'
@@ -26,6 +13,21 @@ import { scopeOwner } from '../lib/identityScope'
 import { settingsFooter, settingsNeeds } from '../lib/footerProviders'
 import { useFooterSummary } from '../lib/footerSummary'
 import { preferenceSaves, retryFailedPreferences } from '../lib/preferences'
+
+// Load only the selected section, so its bundle cannot hold up navigation.
+const BusinessSection = defineAsyncComponent(() => import('../components/settings/BusinessSection.vue'))
+const PersonalSection = defineAsyncComponent(() => import('../components/settings/PersonalSection.vue'))
+const ThemeSection = defineAsyncComponent(() => import('../components/settings/ThemeSection.vue'))
+const DeveloperSection = defineAsyncComponent(() => import('../components/settings/DeveloperSection.vue'))
+const VocabularySection = defineAsyncComponent(() => import('../components/settings/VocabularySection.vue'))
+const AgentsSection = defineAsyncComponent(() => import('../components/settings/AgentsSection.vue'))
+const AutopilotSection = defineAsyncComponent(() => import('../components/settings/AutopilotSection.vue'))
+const PortalSection = defineAsyncComponent(() => import('../components/settings/PortalSection.vue'))
+const WorkspaceSection = defineAsyncComponent(() => import('../components/settings/WorkspaceSection.vue'))
+const AccessSection = defineAsyncComponent(() => import('../components/access/AccessSection.vue'))
+const AgentRulesSection = defineAsyncComponent(() => import('../components/rules/AgentRulesSection.vue'))
+const AccountsSection = defineAsyncComponent(() => import('../components/settings/AccountsSection.vue'))
+const PoliciesSection = defineAsyncComponent(() => import('../components/settings/PoliciesSection.vue'))
 
 // Settings groups share one frame; explicit grants gate Access, rules and accounts.
 // /settings/<section>#<target> deep-links to a card or field, ringed on arrival.

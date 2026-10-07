@@ -67,8 +67,8 @@ func TestPhoneDecisionHidesUnavailableApprovals(t *testing.T) {
 	}
 }
 
-func TestPhoneDecisionHidesUnavailableAttach(t *testing.T) {
-	f := fixtureFor(t)
+func (f *fixture) attachRequest(t *testing.T) string {
+	t.Helper()
 	f.m.pairing = agentpairing.New(f.db.App, testOrigin, "phone-test", nil)
 	project := f.project(t, "PHONE-3")
 	var key, pairing, computer, id string
@@ -92,6 +92,12 @@ func TestPhoneDecisionHidesUnavailableAttach(t *testing.T) {
 	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO harness_attach_requests(tenant_id,id,computer_id,owner_id,project_id,ticket_id,snapshot,digest,user_code) VALUES($1,gen_random_uuid(),$2,$3,$4,$4,$5,$6,'123456789') RETURNING id::text`, f.p.TenantID, computer, f.p.ID, project, mustJSON(t, snapshot), strings.Repeat("0", 64)).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
+	return id
+}
+
+func TestPhoneDecisionHidesUnavailableAttach(t *testing.T) {
+	f := fixtureFor(t)
+	id := f.attachRequest(t)
 	ctx := authz.BindPool(tenant.WithPrincipal(t.Context(), f.other), f.db.App)
 	if err := authz.Require(ctx, "account.manage", authz.Scope{}); err != nil {
 		t.Fatalf("non-owner lacks account management: %v", err)

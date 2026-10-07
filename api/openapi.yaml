@@ -17851,6 +17851,7 @@ components:
       properties:
         id: {type: string, format: uuid}
         created_at: {type: string, format: date-time}
+        endpoint_hash: {type: string, pattern: '^[a-f0-9]{64}$', description: 'SHA-256 of the JSON-encoded endpoint; matches this browser without exposing the push address.'}
     PluginCapability:
       type: object
       required: [id, permission]
