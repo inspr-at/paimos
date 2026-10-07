@@ -12436,6 +12436,8 @@
     ,
     {"kind":"node","file":"tests/codenames.test.ts","name":"the release history fills the lookup, skipping releases without a name","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: a loaded fit keeps the designed width until the value is wider","tier":"GATED-FULL"}
+    ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: automatic fits give width back until Title keeps its minimum","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/columns.test.ts","name":"AEON-913: group selection caps loaded rows at 100 and preserves other groups","tier":"GATED-FULL"}
