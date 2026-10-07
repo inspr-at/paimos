@@ -26,12 +26,12 @@ type Snapshot struct {
 // no session or project identity leaves that aggregate.
 func ReadTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (Snapshot, error) {
 	out := Snapshot{Running: map[string]int{}}
-	if err := authz.RequireTx(ctx, tx, p, ReadScope, authz.Scope{}); err != nil {
-		return out, err
-	}
 	var err error
 	out.PrincipalID, err = CallerOwnerTx(ctx, tx, p)
 	if err != nil {
+		return out, err
+	}
+	if err = authz.RequireTx(ctx, tx, p, ReadScope, authz.Scope{}); err != nil {
 		return out, err
 	}
 	raw, at, err := ReadPreferenceTx(ctx, tx, p.TenantID, out.PrincipalID)

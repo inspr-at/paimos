@@ -197,8 +197,9 @@ func TestAdmissionShadowLimitsFloorsFreshnessAndTenantIsolation(t *testing.T) {
 	f.exec(t, `UPDATE agent_pairing_computers SET capacity_reported_at=$2 WHERE id=$1`, f.computer, f.at)
 	f.exec(t, `UPDATE account_allowance_windows SET capacity_read_at=$2 WHERE id=$1`, f.window, f.at.Add(-11*time.Minute))
 	f.decide(t, f.request("stale-account", "fix"), "account_inputs_unreadable")
-	f.exec(t, `UPDATE account_allowance_windows SET capacity_read_at=$2,used=80 WHERE id=$1`, f.window, f.at)
-	f.exec(t, `UPDATE account_capacity_readings SET used_percent=80 WHERE account_id=$1`, f.account)
+	// The current 20% measurement leaves exactly the person's 80% floor.
+	// Retain its append-only reading and give pacing a prior-period baseline.
+	f.exec(t, `UPDATE account_allowance_windows SET capacity_read_at=$2,starts_at=$3 WHERE id=$1`, f.window, f.at, f.at.Add(-24*time.Hour))
 	s := capacity.DefaultSchedule()
 	s.Reserve = "fixed"
 	s.ReservePercent = 80
@@ -242,7 +243,7 @@ func TestAdmissionExplicitAuthorityFinalWriteAndIdempotentReplay(t *testing.T) {
 	f.call(t, f.agent, "POST", "/api/engine/admission", f.request("default-agent", "first_build"), 403)
 	f.call(t, f.agent, "PUT", "/api/projects/"+f.project+"/admission-settings", map[string]any{"expected_revision": 1, "shadow_enabled": false}, 403)
 	var role string
-	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'admission-observer','Admission observer') RETURNING id::text`, f.person.TenantID).Scan(&role))
+	must(t, f.d.Admin.QueryRow(t.Context(), `INSERT INTO roles(tenant_id,key,name) VALUES($1,'admission_observer','Admission observer') RETURNING id::text`, f.person.TenantID).Scan(&role))
 	for _, permission := range []string{"engine.admission", "engine.read", "agents.plan.read", "account.overview.read"} {
 		f.exec(t, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,$3)`, f.person.TenantID, role, permission)
 	}
