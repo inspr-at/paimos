@@ -227,13 +227,14 @@ type attentionSnapshot struct {
 	Items   []attentionItem  `json:"items"`
 }
 type attentionProgress struct {
-	Next     int                                `json:"next"`
-	Result   attentionBulkResult                `json:"result"`
-	Advances map[string]attentionReleaseAdvance `json:"advances"`
+	Next        int                                `json:"next"`
+	Result      attentionBulkResult                `json:"result"`
+	Advances    map[string]attentionReleaseAdvance `json:"advances"`
+	Resolutions map[int64]int64                    `json:"resolutions"`
 }
 
 func newAttentionProgress(id string) attentionProgress {
-	return attentionProgress{Result: attentionBulkResult{BatchID: id, Skipped: []attentionSkipped{}, Failed: []attentionFailure{}}, Advances: map[string]attentionReleaseAdvance{}}
+	return attentionProgress{Result: attentionBulkResult{BatchID: id, Skipped: []attentionSkipped{}, Failed: []attentionFailure{}}, Advances: map[string]attentionReleaseAdvance{}, Resolutions: map[int64]int64{}}
 }
 func attentionMoveID(item attentionItem) string {
 	if item.To == "release" {
@@ -650,7 +651,7 @@ func (m *Module) attentionBulkUndo(w http.ResponseWriter, r *http.Request) {
 	}
 	// Successful resolutions may be a subset of the preview. Obtain only those
 	// identities and immutable after revisions, under event and node RLS.
-	undoItems := []attentionItem{}
+	byResolution := map[int64]attentionItem{}
 	err = db.InTenantReadSnapshot(db.WithReadStatementTimeout(ctx, 3*time.Second), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, `SELECT id,(metadata->'resolution'->>'original')::bigint,(after->>'updated_at')::timestamptz FROM events WHERE id=ANY($1::bigint[]) ORDER BY array_position($1::bigint[],id)`, resolutions)
 		if err != nil {
@@ -674,7 +675,7 @@ func (m *Module) attentionBulkUndo(w http.ResponseWriter, r *http.Request) {
 				item.ReleaseRevision = a.Current
 				item.ReleaseProjectRevision = a.CurrentProject
 			}
-			undoItems = append(undoItems, item)
+			byResolution[resolution] = item
 		}
 		return rows.Err()
 	})
@@ -682,12 +683,24 @@ func (m *Module) attentionBulkUndo(w http.ResponseWriter, r *http.Request) {
 		respond(w, nil, err)
 		return
 	}
-	// Missing event rows are explicit failures; never silently call a partial
-	// RLS projection a complete undo. Preserve index order across retries.
+	// Retain the exact resolution order across retries and visibility changes.
+	// A missing event still carries its frozen original identity, so the normal
+	// node/event RLS path produces a precise failure rather than losing an item.
+	undoItems := make([]attentionItem, 0, len(resolutions))
+	originals := map[int64]int64{}
+	for original, resolution := range run.Resolutions {
+		originals[resolution] = original
+	}
 	for _, resolution := range resolutions {
-		if !slices.ContainsFunc(undoItems, func(item attentionItem) bool { return item.Resolution == resolution }) {
-			undoItems = append(undoItems, attentionItem{attentionInput: attentionInput{Resolution: resolution}})
+		item, found := byResolution[resolution]
+		if !found {
+			index := slices.IndexFunc(items, func(item attentionItem) bool { return item.EventID == originals[resolution] })
+			if index >= 0 {
+				item = items[index]
+			}
+			item.Resolution = resolution
 		}
+		undoItems = append(undoItems, item)
 	}
 	m.processAttentionBatch(ctx, p, id, "undo", scope, nil, undoItems, &progress, true)
 	respond(w, progress.Result, nil)
@@ -730,6 +743,9 @@ func (m *Module) processAttentionBatch(ctx context.Context, p tenant.Principal, 
 				next.Next++
 				next.Result.Changed++
 				attentionAdvance(&next, input, result)
+				if !undo {
+					next.Resolutions[item.EventID] = result.Resolution
+				}
 				resolution := result.Resolution
 				if undo {
 					resolution = 0
@@ -740,6 +756,9 @@ func (m *Module) processAttentionBatch(ctx context.Context, p tenant.Principal, 
 				progress.Next++
 				progress.Result.Changed++
 				attentionAdvance(progress, input, result)
+				if !undo {
+					progress.Resolutions[item.EventID] = result.Resolution
+				}
 				continue
 			}
 			if workCtx.Err() != nil {
@@ -817,6 +836,10 @@ func (m *Module) processAttentionBatch(ctx context.Context, p tenant.Principal, 
 }
 func cloneAttentionProgress(p attentionProgress) attentionProgress {
 	out := p
+	out.Resolutions = map[int64]int64{}
+	for original, resolution := range p.Resolutions {
+		out.Resolutions[original] = resolution
+	}
 	out.Advances = map[string]attentionReleaseAdvance{}
 	for id, a := range p.Advances {
 		out.Advances[id] = a

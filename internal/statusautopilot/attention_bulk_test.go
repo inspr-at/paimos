@@ -444,3 +444,72 @@ func TestAttentionBulkUnavailableProposalsAndAgentReleaseRights(t *testing.T) {
 		t.Fatalf("agent group rights %+v", groups)
 	}
 }
+
+// Risk: a disconnect after an item commits loses its durable progress, so an
+// idempotent retry either repeats the item or cannot finish the batch audit.
+// The query-end barrier cancels only after PostgreSQL has accepted the item
+// commit; it never relies on a delay or on elapsed time.
+type attentionCancelAfterItemCommit struct {
+	cancel  context.CancelFunc
+	commits int
+}
+
+func (p *attentionCancelAfterItemCommit) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	return ctx
+}
+func (p *attentionCancelAfterItemCommit) TraceQueryEnd(_ context.Context, _ *pgx.Conn, q pgx.TraceQueryEndData) {
+	if q.Err == nil && q.CommandTag.String() == "COMMIT" {
+		p.commits++
+		if p.commits == 2 {
+			p.cancel()
+		}
+	}
+}
+func TestAttentionBulkInterruptedCommitResumesWithoutRepeating(t *testing.T) {
+	f := setup(t)
+	id := f.add("AUT-2", "work", "new", 8, nil)
+	f.run(f.now)
+	in, _ := bulkPreview(f, f.p, "apply", attentionScope{ProjectID: f.project})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	config, err := pgxpool.ParseConfig(f.d.AppURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	probe := &attentionCancelAfterItemCommit{cancel: cancel}
+	config.ConnConfig.Tracer = probe
+	pool, err := pgxpool.NewWithConfig(t.Context(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	raw, _ := json.Marshal(in)
+	r := httptest.NewRequest("POST", "/api/status-autopilot/attention/bulk", strings.NewReader(string(raw))).WithContext(tenant.WithPrincipal(ctx, f.p))
+	r.Header.Set("Idempotency-Key", "interrupted")
+	w := httptest.NewRecorder()
+	New(pool).attentionBulk(w, r)
+	var partial attentionBulkResult
+	if err = json.Unmarshal(w.Body.Bytes(), &partial); err != nil {
+		t.Fatal(err)
+	}
+	if probe.commits != 2 || partial.Completed || len(partial.Failed) == 0 || f.state(id).State != "backlog" {
+		t.Fatalf("commit barrier/progress: commits=%d response=%s", probe.commits, w.Body)
+	}
+	final := bulkRun(f, f.p, in, "interrupted")
+	if !final.Completed || final.Changed != 1 || len(final.Failed) != 0 || len(final.Skipped) != 0 {
+		t.Fatalf("recovered result %+v", final)
+	}
+	f.tx(func(tx pgx.Tx) error {
+		var changes, summaries int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE type='status_autopilot.attention_apply'),count(*) FILTER(WHERE type='status_autopilot.attention_bulk') FROM events WHERE metadata->>'batch_id'=$1`, final.BatchID).Scan(&changes, &summaries); err != nil {
+			return err
+		}
+		if changes != 1 || summaries != 1 {
+			return fmt.Errorf("repeated commit or missing audit: changes=%d summaries=%d", changes, summaries)
+		}
+		return nil
+	})
+	if undone := bulkUndo(f, f.p, final.BatchID, 200); undone.Changed != 1 || len(undone.Failed) != 0 || f.state(id).State != "new" {
+		t.Fatalf("recovered undo %+v", undone)
+	}
+}

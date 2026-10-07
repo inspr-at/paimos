@@ -8358,6 +8358,8 @@
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkFrozenPreviewExclusionsAndOwnership","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkInterruptedCommitResumesWithoutRepeating","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkMissedReleaseSharesCapturedRevision","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkReturnsPartialResultsAndGuardsUndo","tier":"ESSENTIAL"}
