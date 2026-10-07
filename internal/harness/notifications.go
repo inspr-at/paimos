@@ -146,10 +146,16 @@ func (m *Module) notificationHint(r *http.Request, p tenant.Principal, eventID i
 		if eventID == 0 {
 			return nil
 		}
-		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=$1 AND e.id=$2 AND (
-   (e.type IN ('harness.control_requested','harness.pause_requested','harness.pause_interrupt_requested','harness.pause_stop_requested','harness.pause_level_changed','harness.resume_requested','harness.tier_requested') AND e.node_id=$3::uuid AND (e.after->>'session_id'=$4 OR e.after->>'id'=$4 OR e.after->'session'->>'id'=$4))
-   OR (e.type IN ('inbox.sent','inbox.compat_sent') AND EXISTS(SELECT 1 FROM inbox_messages m WHERE m.tenant_id=e.tenant_id AND m.id::text=e.after->>'id' AND m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.recipient_principal_id=$5::uuid AND (m.recipient_session_id IS NULL OR m.recipient_session_id=$4::uuid)))
-  ))`, p.TenantID, eventID, s.ProjectID, s.ID, s.AgentPrincipalID).Scan(&relevant)
+		// Principal inbox events can be hidden from project event readers. Read
+		// only this worker's recipient rows, just as drain does, by the committed
+		// sent-event ID; never broaden its event-history or inbox permissions.
+		return tx.QueryRow(ctx, `SELECT
+   EXISTS(SELECT 1 FROM events e WHERE e.tenant_id=$1 AND e.id=$2
+    AND e.type IN ('harness.control_requested','harness.pause_requested','harness.pause_interrupt_requested','harness.pause_stop_requested','harness.pause_level_changed','harness.resume_requested','harness.tier_requested')
+    AND e.node_id=$3::uuid AND (e.after->>'session_id'=$4 OR e.after->>'id'=$4 OR e.after->'session'->>'id'=$4))
+   OR EXISTS(SELECT 1 FROM inbox_messages m WHERE m.tenant_id=$1 AND m.sent_event_id=$2
+    AND m.content_mode='durable' AND m.chat_thread_id IS NULL AND m.recipient_principal_id=$5::uuid
+    AND (m.recipient_session_id IS NULL OR m.recipient_session_id=$4::uuid))`, p.TenantID, eventID, s.ProjectID, s.ID, s.AgentPrincipalID).Scan(&relevant)
 	})
 	return relevant, err
 }

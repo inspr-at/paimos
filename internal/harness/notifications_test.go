@@ -63,7 +63,7 @@ func TestHarnessNotificationsCommitWakeLeaseAndRevocation(t *testing.T) {
 		t.Fatal("missing reconnect wake")
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
-		_, err := inbox.AcceptMessageTx(t.Context(), tx, f.person, inbox.Acceptance{RecipientPrincipalID: f.agent.ID, RecipientSessionID: &id, Body: "private notification fixture", IdempotencyKey: uid(), ProjectID: &f.project})
+		_, err := inbox.AcceptMessageTx(t.Context(), tx, f.person, inbox.Acceptance{RecipientPrincipalID: f.agent.ID, RecipientSessionID: &id, Body: "private notification fixture", IdempotencyKey: uid()})
 		return err
 	})
 	if !next() {
