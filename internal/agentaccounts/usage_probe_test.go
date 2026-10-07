@@ -72,6 +72,9 @@ func TestUsageProbeDollarBudgetStorageAndPrivacy(t *testing.T) {
 	f.mod = fixedClockModule{Module: accountsMod(), at: now}
 	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts", `{"account_key":"main","harness":"pi","daemon_id":"daemon-a","label":"Main"}`, 201, &f.account)
 	ownFixtureAccount(t, f.admin, &f.account)
+	if _, err := adminPool.Exec(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'usage-pi','1','pi','openai','test','high','strong')`, f.admin.TenantID); err != nil {
+		t.Fatal(err)
+	}
 	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/probe", `{"daemon_id":"daemon-a","daemon_generation":"g1","available":true}`, 200, nil)
 	if _, err := adminPool.Exec(t.Context(), `UPDATE agent_accounts SET provider='openrouter' WHERE id=$1`, f.account.ID); err != nil {
 		t.Fatal(err)
