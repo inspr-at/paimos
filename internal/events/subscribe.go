@@ -321,11 +321,27 @@ func (m *module) subscriptionRead(ctx context.Context, p tenant.Principal, after
 	ctx, stop := context.WithTimeout(ctx, 10*time.Second)
 	defer stop()
 	ctx = db.WithReadStatementTimeout(ctx, 10*time.Second)
+	// History's event-family RLS intentionally hides internal policy/delivery
+	// events from project readers. This metadata-only projection instead checks
+	// the exact topic permission and every referenced node below. The allowlist
+	// contains no private inbox, quote, account, pairing or credential events.
+	readCtx := db.AllProjects(ctx, "agent subscription: allowlisted value-free hints with explicit current node and topic checks")
 	through := newest
 	var items []subscriptionHint
-	err := db.InTenant(ctx, m.pool, p.TenantID, func(tx pgx.Tx) error {
+	err := db.InTenant(readCtx, m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if err := authz.RequireTx(ctx, tx, p, "events.subscribe", authz.Scope{}); err != nil {
 			return err
+		}
+		workspaceNodesErr := authz.RequireTx(ctx, tx, p, "nodes.read", authz.Scope{})
+		if workspaceNodesErr != nil && !errors.Is(workspaceNodesErr, authz.ErrForbidden) {
+			return workspaceNodesErr
+		}
+		projects, err := authz.GrantedProjectIDsTx(ctx, tx, p, "nodes.read")
+		if err != nil {
+			return err
+		}
+		if len(projects) > 2000 {
+			return errors.New("subscription project set exceeds bound")
 		}
 		types := make([]string, 0, len(subscriptionTypes))
 		for typ, policy := range subscriptionTypes {
@@ -333,25 +349,33 @@ func (m *module) subscriptionRead(ctx context.Context, p tenant.Principal, after
 				types = append(types, typ)
 			}
 		}
-		// Project RLS and all private event policies apply to this query.
+		// Tenant RLS remains active. Current nodes.read grants (including key
+		// scope and creator ceiling) replace only event-family visibility. Every
+		// referenced node must exist and belong to the permitted node set.
 		rows, err := tx.Query(ctx, `SELECT e.id,e.type,e.at,coalesce(n.project_id,CASE WHEN k.slug='project' THEN n.id END)::text,
-            coalesce(e.after->>'scope',e.before->>'scope',''),coalesce(e.after->>'level',e.before->>'level','')
+            left(coalesce(e.after->>'scope',e.before->>'scope',''),37),cardinality(e.node_refs)>100
             FROM events e LEFT JOIN nodes n ON n.tenant_id=e.tenant_id AND n.id=e.node_id
             LEFT JOIN node_kinds k ON k.tenant_id=n.tenant_id AND k.id=n.kind_id
             WHERE e.tenant_id=$1 AND e.id>$2 AND e.id<=$3 AND e.type=ANY($4::text[])
-            ORDER BY e.id LIMIT 201`, p.TenantID, after, newest, types)
+            AND (e.node_id IS NULL OR n.id IS NOT NULL AND ($5 OR n.project_id=ANY($6::uuid[]) OR k.slug='project' AND n.id=ANY($6::uuid[])))
+            AND CASE WHEN cardinality(e.node_refs)>100 THEN true ELSE NOT EXISTS (SELECT 1 FROM unnest(e.node_refs) ref(id)
+                LEFT JOIN nodes rn ON rn.tenant_id=e.tenant_id AND rn.id=ref.id
+                LEFT JOIN node_kinds rk ON rk.tenant_id=rn.tenant_id AND rk.id=rn.kind_id
+                WHERE rn.id IS NULL OR NOT ($5 OR coalesce(rn.project_id=ANY($6::uuid[]) OR rk.slug='project' AND rn.id=ANY($6::uuid[]),false))) END
+            ORDER BY e.id LIMIT 201`, p.TenantID, after, newest, types, workspaceNodesErr == nil, projects)
 		if err != nil {
 			return err
 		}
 		type candidate struct {
-			hint         subscriptionHint
-			project      *string
-			scope, level string
+			hint      subscriptionHint
+			project   *string
+			scope     string
+			oversized bool
 		}
 		candidates := []candidate{}
 		for rows.Next() {
 			var c candidate
-			if err := rows.Scan(&c.hint.ID, &c.hint.Type, &c.hint.At, &c.project, &c.scope, &c.level); err != nil {
+			if err := rows.Scan(&c.hint.ID, &c.hint.Type, &c.hint.At, &c.project, &c.scope, &c.oversized); err != nil {
 				rows.Close()
 				return err
 			}
@@ -367,6 +391,9 @@ func (m *module) subscriptionRead(ctx context.Context, p tenant.Principal, after
 		}
 		cache := map[string]bool{}
 		for _, c := range candidates {
+			if c.oversized {
+				return errors.New("subscription event references exceed bound")
+			}
 			policy := subscriptionTypes[c.hint.Type]
 			project := ""
 			if c.project != nil {
@@ -389,6 +416,9 @@ func (m *module) subscriptionRead(ctx context.Context, p tenant.Principal, after
 					return err
 				}
 				if person != nil {
+					if p.KeyCreatorID == "" {
+						continue
+					}
 					var own bool
 					if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM principals a JOIN principals b ON b.tenant_id=a.tenant_id AND coalesce(b.linked_to,b.id)=coalesce(a.linked_to,a.id) WHERE a.tenant_id=$1 AND a.id=$2::uuid AND b.id=$3::uuid AND a.kind='person' AND a.status='active' AND b.status='active')`, p.TenantID, p.KeyCreatorID, *person).Scan(&own); err != nil {
 						return err

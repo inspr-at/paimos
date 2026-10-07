@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -164,5 +166,99 @@ func TestSubscriptionHeartbeatPreservesCursorAndRevocation(t *testing.T) {
 	<-finished
 	if m.subscriptions.total != 0 || len(m.subscriptions.keys) != 0 {
 		t.Fatal("revoked stream retained resources")
+	}
+}
+
+// Risk: the subscription must deliver person-authored project policy changes
+// while rejecting unreadable projects, hidden references and unrelated topics.
+func TestSubscriptionTopicProjectAndReferenceCeilings(t *testing.T) {
+	d, agent, _ := fixture(t)
+	ctx := t.Context()
+	var owner string
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Owner') RETURNING id::text`, agent.TenantID).Scan(&owner); err != nil {
+		t.Fatal(err)
+	}
+	dbtest.BindRole(t, d, agent.TenantID, owner, "owner")
+	var workspaceRole, projectRole string
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'subscription','Subscription') RETURNING id::text`, agent.TenantID).Scan(&workspaceRole); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO roles(tenant_id,key,name) VALUES($1,'project_subscription','Project subscription') RETURNING id::text`, agent.TenantID).Scan(&projectRole); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'events.subscribe'),($1,$3,'nodes.read'),($1,$3,'reviewpolicy.read')`, agent.TenantID, workspaceRole, projectRole); err != nil {
+		t.Fatal(err)
+	}
+	projects := []string{}
+	for _, key := range []string{"VISIBLE", "HIDDEN"} {
+		var id string
+		if err := d.Admin.QueryRow(ctx, `INSERT INTO nodes(tenant_id,kind_id,key,title) SELECT $1,id,$2,$2 FROM node_kinds WHERE tenant_id=$1 AND slug='project' RETURNING id::text`, agent.TenantID, key).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		projects = append(projects, id)
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type,scope_id) VALUES($1,$2,$3,'workspace',NULL),($1,$2,$4,'project',$5)`, agent.TenantID, agent.ID, workspaceRole, projectRole, projects[0]); err != nil {
+		t.Fatal(err)
+	}
+	agent.KeyCreatorID = owner
+	agent.Scopes = []string{"events.subscribe", "nodes.read", "reviewpolicy.read", "delivery.read"}
+	if err := d.Admin.QueryRow(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1,$2,'fixture','fixture',repeat('0',64),$3,$4) RETURNING id::text`, agent.TenantID, agent.ID, agent.Scopes, owner).Scan(&agent.KeyID); err != nil {
+		t.Fatal(err)
+	}
+	actor := tenant.Principal{ID: owner, TenantID: agent.TenantID, Kind: tenant.Person}
+	base := logPosition(t, d, agent)
+	var visibleID int64
+	if err := db.InTenant(dbtest.Seed(ctx), d.App, agent.TenantID, func(tx pgx.Tx) error {
+		for i, change := range []Change{
+			{Type: "review_policy.changed", NodeID: &projects[0], After: map[string]any{"mode": "other_family"}},
+			{Type: "review_policy.changed", NodeID: &projects[1], After: map[string]any{"mode": "other_family"}},
+			{Type: "review_policy.changed", NodeID: &projects[0], After: map[string]any{"mode": "other_family", "project_id": projects[1]}},
+			{Type: "delivery.state_changed", NodeID: &projects[0], After: map[string]any{"state": "held"}},
+			{Type: "quote.updated", NodeID: &projects[0], After: map[string]any{"private": "never"}},
+		} {
+			e, err := Append(ctx, tx, actor, change)
+			if err != nil {
+				return err
+			}
+			if i == 0 {
+				visibleID = e.ID
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// Confirm the hidden-reference fixture really retained both references.
+	var refs int
+	if err := d.Admin.QueryRow(ctx, `SELECT cardinality(node_refs) FROM events WHERE tenant_id=$1 AND id=$2`, agent.TenantID, visibleID+2).Scan(&refs); err != nil || refs != 2 {
+		t.Fatalf("hidden reference fixture: refs=%d err=%v", refs, err)
+	}
+	m := New(d.App).(*module)
+	requestCtx := tenant.WithPrincipal(ctx, agent)
+	latest := logPosition(t, d, agent)
+	hints, through, err := m.subscriptionRead(requestCtx, agent, base, latest, map[string]bool{"policies": true, "delivery": true})
+	if err != nil || through != latest || len(hints) != 1 || hints[0].ID != visibleID || hints[0].Topic != "policies" {
+		t.Fatalf("scoped hints: %+v cursor=%d err=%v", hints, through, err)
+	}
+	hints, through, err = m.subscriptionRead(requestCtx, agent, base, latest, map[string]bool{"delivery": true})
+	if err != nil || through != latest || len(hints) != 0 {
+		t.Fatal("topic filter or delivery role ceiling was bypassed")
+	}
+	if _, err := d.Admin.Exec(ctx, `INSERT INTO role_permissions(tenant_id,role_id,permission) VALUES($1,$2,'delivery.read')`, agent.TenantID, projectRole); err != nil {
+		t.Fatal(err)
+	}
+	hints, _, err = m.subscriptionRead(requestCtx, agent, base, latest, map[string]bool{"delivery": true})
+	if err != nil || len(hints) != 1 || hints[0].Type != "delivery.state_changed" {
+		t.Fatal("live explicit project read grant was not applied")
+	}
+	if _, err := d.Admin.Exec(ctx, `DELETE FROM role_permissions WHERE tenant_id=$1 AND role_id=$2 AND permission='reviewpolicy.read'`, agent.TenantID, projectRole); err != nil {
+		t.Fatal(err)
+	}
+	hints, _, err = m.subscriptionRead(requestCtx, agent, base, latest, map[string]bool{"policies": true})
+	if err != nil || len(hints) != 0 {
+		t.Fatal("live role revocation failed")
+	}
+	if err := authz.Require(authz.BindPool(requestCtx, d.App), "events.subscribe", authz.Scope{}); err != nil {
+		t.Fatal("topic revocation incorrectly revoked subscription")
 	}
 }
