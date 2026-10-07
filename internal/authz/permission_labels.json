@@ -1,5 +1,6 @@
 {
   "resources": {
+	"delivery_ship": "delivery shipping",
 	"delivery_reviews": "delivery reviews",
     "reviewpolicy": "review policy",
     "delivery_queue": "delivery work queue",

@@ -80,7 +80,7 @@ func TestViewerReadsStoredReviewPolicy(t *testing.T) {
 }
 
 func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
-	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage", "delivery.manage", "delivery_queue.manage", "delivery_queue.claim", "delivery_reviews.manage", "delivery_reviews.claim", "delivery_reviews.report", "reviewpolicy.manage", "account.overview.read"}) {
+	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage", "delivery.manage", "delivery_queue.manage", "delivery_queue.claim", "delivery_reviews.manage", "delivery_reviews.claim", "delivery_reviews.report", "delivery_ship.manage", "delivery_ship.claim", "reviewpolicy.manage", "account.overview.read"}) {
 		t.Fatal("built-in agent exclusions drifted from the explicit recurrence, delivery, review and overview policies")
 	}
 	for _, key := range builtinAgentExclusions {
@@ -89,7 +89,7 @@ func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
 			t.Fatal("an explicit custom-role permission must remain agent-grantable")
 		}
 		for _, role := range []string{"owner", "admin", "member"} {
-			if (key == "delivery.manage" || key == "delivery_queue.manage" || key == "delivery_queue.claim" || strings.HasPrefix(key, "delivery_reviews.") || key == "reviewpolicy.manage") && role == "member" {
+			if (key == "delivery.manage" || key == "delivery_queue.manage" || key == "delivery_queue.claim" || strings.HasPrefix(key, "delivery_reviews.") || strings.HasPrefix(key, "delivery_ship.") || key == "reviewpolicy.manage") && role == "member" {
 				if contains(builtinPermissions(role), key) {
 					t.Fatal("delivery and review-policy management should require an explicit member grant")
 				}

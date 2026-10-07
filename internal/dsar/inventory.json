@@ -209,6 +209,37 @@
         "request_id": "metadata",
         "snapshot": "review"
       }
+    },
+    {
+      "table": "delivery_ship_settings",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "snapshot": "review"
+      }
+    },
+    {
+      "table": "delivery_ship_decisions",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "claimant_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "request_id": "metadata",
+        "claimant_id": "personal",
+        "source_round_id": "metadata",
+        "head_sha": "metadata",
+        "action_key": "metadata",
+        "position": "metadata",
+        "snapshot": "review"
+      }
     }
   ]
 }

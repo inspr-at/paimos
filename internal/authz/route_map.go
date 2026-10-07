@@ -24,6 +24,10 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/projects/{projectId}/delivery-shipping":                    "delivery_ship.read",
+	"GET /api/projects/{projectId}/delivery-shipping/settings":           "delivery_ship.read",
+	"PUT /api/projects/{projectId}/delivery-shipping/settings":           "delivery_ship.manage",
+	"POST /api/projects/{projectId}/delivery-shipping/claim":             "delivery_ship.claim",
 	"GET /api/projects/{projectId}/delivery-reviews":                     "delivery_reviews.read",
 	"POST /api/projects/{projectId}/delivery-reviews":                    "delivery_reviews.manage",
 	"GET /api/projects/{projectId}/delivery-reviews/settings":            "delivery_reviews.read",
