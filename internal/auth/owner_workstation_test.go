@@ -408,7 +408,7 @@ func TestWorkstationForeignTenantAndSelfApproval(t *testing.T) {
 			return fmt.Errorf("foreign challenges visible")
 		}
 		p := tenant.Principal{ID: f.key.PrincipalID, TenantID: foreign, Kind: tenant.Agent, KeyID: f.key.ID, OwnerWorkstation: true, WorkstationComputerID: f.computer, WorkstationGeneration: 1}
-		_, _, err := authz.WorkstationKeyTx(t.Context(), tx, p)
+		_, _, _, err := authz.WorkstationKeyTx(t.Context(), tx, p)
 		if !errors.Is(err, authz.ErrForbidden) {
 			return fmt.Errorf("foreign key binding accepted")
 		}

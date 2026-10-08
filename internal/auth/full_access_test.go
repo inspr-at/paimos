@@ -104,6 +104,63 @@ func TestFullAccessLiveCatalogAndBoundaries(t *testing.T) {
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &me) != nil || !me.FullAccess || me.OwnerWorkstation || w.Header().Get("Aeon-Contract") != "me/1.4" {
 		t.Fatal("GET /api/me did not report the full-access key independently of workstation designation")
 	}
+	// The stored list is a historical snapshot. Marking the key must not make
+	// the workstation filter trust that list over the live agent-grantable catalog.
+	var computer string
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `INSERT INTO agent_pairing_requests(tenant_id,id,user_code,device_hash,runtime_hash,lifecycle_hash,details,request_digest,state)
+			VALUES($1,gen_random_uuid(),'991000991',$2,$2,$2,'{}','synthetic','redeemed') RETURNING id::text`,
+			owner.TenantID, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc").Scan(&computer); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash,local_auth_public_key,setup_state)
+			VALUES($1,$2,$2,$3,$4,'aeon-991-catalog',$5,$6,'connected')`,
+			owner.TenantID, computer, full.PrincipalID, full.ID, "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="); err != nil {
+			return err
+		}
+		tag, err := tx.Exec(ctx, `UPDATE agent_keys SET owner_workstation=true,workstation_computer_id=$2,workstation_generation=1,scopes='{nodes.read}'
+			WHERE id=$1 AND coalesce(full_access,false) AND cardinality(scopes)=0`, full.ID, computer)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return errors.New("full-access key was not marked")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	marked := authenticate(full)
+	if !marked.FullAccess || !marked.OwnerWorkstation || marked.KeyID == "" || marked.WorkstationComputerID == "" {
+		t.Fatal("full-access key was not authenticated as a marked workstation key")
+	}
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		var snapshot bool
+		if err := tx.QueryRow(ctx, `SELECT coalesce(full_access,false) AND owner_workstation AND NOT ('models.report'=ANY(scopes)) FROM agent_keys WHERE id=$1`, full.ID).Scan(&snapshot); err != nil {
+			return err
+		}
+		if !snapshot {
+			return errors.New("stored snapshot already contained the live permission")
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := authz.Require(authz.BindPool(tenant.WithPrincipal(ctx, marked), m.pool), "models.report", authz.Scope{}); err != nil {
+		t.Fatal("marked full-access key lost models.report from the live catalog")
+	}
+	if err := db.InTenant(ctx, m.pool, owner.TenantID, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `UPDATE agent_keys SET owner_workstation=false,workstation_computer_id=NULL,scopes='{}',workstation_generation=workstation_generation+1 WHERE id=$1`, full.ID); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DELETE FROM agent_pairing_computers WHERE tenant_id=$1 AND id=$2`, owner.TenantID, computer); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM agent_pairing_requests WHERE tenant_id=$1 AND id=$2`, owner.TenantID, computer)
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
 	rotated := decodeKey(t, keyRequest(m, owner, map[string]any{"rotate_key_id": full.ID}))
 	if !rotated.FullAccess || len(rotated.Scopes) != 0 || rotated.PrincipalID != full.PrincipalID {
 		t.Fatal("rotation lost the dynamic mode or stored a snapshot")
