@@ -5200,8 +5200,8 @@
     "261008161926.0.0": {
       "release_channel": "stable",
       "release_sequence": 126,
-      "snapshot_sha256": "12c6027168eac52e39292757842770f365650b20a395b274bc732790ffb892ae",
-      "captured_at": "2026-10-08T16:40:09Z",
+      "snapshot_sha256": "53f11b6d4f0f1696945e2cf165af9cdce9fcc069c0f2bcee22c04e564ae5f64b",
+      "captured_at": "2026-10-08T16:48:18Z",
       "release_revision": 1,
       "items": [
         {
@@ -5488,8 +5488,8 @@
           "key": "AEON-975",
           "pill_en": "Faster chat with agents",
           "pill_de": "Schnellerer Agenten-Chat",
-          "benefit_en": "Your messages show in the thread as you send them, replies land there too, and authorized project members can read managed agent chats.",
-          "benefit_de": "Eigene Nachrichten erscheinen beim Senden im Verlauf, Antworten landen dort ebenfalls, und berechtigte Projektmitglieder können Chats mit verwalteten Agenten lesen.",
+          "benefit_en": "Your messages show in chat as you send them, replies land there too, and authorized project members can read managed agent chats.",
+          "benefit_de": "Eigene Nachrichten erscheinen beim Senden im Chat, Antworten landen dort ebenfalls, und berechtigte Projektmitglieder können Chats mit verwalteten Agenten lesen.",
           "group": "features"
         },
         {
@@ -5504,8 +5504,8 @@
           "key": "AEON-977",
           "pill_en": "Clear message status",
           "pill_de": "Klarer Nachrichtenstatus",
-          "benefit_en": "See whether your messages to managed agents were sent, delivered or read, and edit or cancel those not yet offered to the agent.",
-          "benefit_de": "Sehen, ob eigene Nachrichten an verwaltete Agenten gesendet, zugestellt oder gelesen wurden; noch nicht an den Agenten übergebene Nachrichten bearbeiten oder abbrechen.",
+          "benefit_en": "See whether your messages to managed agents were sent, delivered or read, and edit or cancel queued messages not yet offered to the agent.",
+          "benefit_de": "Sehen, ob eigene Nachrichten an verwaltete Agenten gesendet, zugestellt oder gelesen wurden; wartende, noch nicht an den Agenten übergebene Nachrichten bearbeiten oder abbrechen.",
           "group": "features"
         }
       ]
