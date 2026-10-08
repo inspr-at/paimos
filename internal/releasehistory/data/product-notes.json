@@ -5196,6 +5196,319 @@
           "group": "features"
         }
       ]
+    },
+    "261008161926.0.0": {
+      "release_channel": "stable",
+      "release_sequence": 126,
+      "snapshot_sha256": "4948989559e87ae22cc17a26e1c5920536183bda9178f3005fe7d3f1ac0e5268",
+      "captured_at": "2026-10-08T16:19:32Z",
+      "release_revision": 1,
+      "items": [
+        {
+          "key": "AEON-642",
+          "pill_en": "Your colours",
+          "pill_de": "Eigene Farben",
+          "benefit_en": "Choose, duplicate and edit themes and set the accent colours with a live preview; Suggest picks a readable shade in one click.",
+          "benefit_de": "Themes auswählen, duplizieren und bearbeiten und Akzentfarben mit Live-Vorschau festlegen; Vorschlagen wählt mit einem Klick einen gut lesbaren Farbton.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-848",
+          "pill_en": "Delivery status per ticket",
+          "pill_de": "Lieferstatus pro Ticket",
+          "benefit_en": "Each ticket shows how far its change has come (reviewed, pushed, tested, queued or merged) and who acts next.",
+          "benefit_de": "Jedes Ticket zeigt, wie weit seine Änderung ist (geprüft, gepusht, getestet, eingereiht oder gemergt) und wer als Nächstes dran ist.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-849",
+          "pill_en": "Stall alerts",
+          "pill_de": "Hinweis bei Stillstand",
+          "benefit_en": "When a delivery step stalls past its deadline, the lead is told instead of the work sitting silently.",
+          "benefit_de": "Wenn ein Lieferschritt seine Frist überschreitet, erfährt es der Lead, statt dass die Arbeit still liegen bleibt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-850",
+          "pill_en": "Queue retry check",
+          "pill_de": "Prüfung vor erneutem Einreihen",
+          "benefit_en": "After a merge-queue failure, PAIMOS tells you whether a change may be queued again; it observes and does not block yet.",
+          "benefit_de": "Nach einem Fehler in der Merge-Warteschlange zeigt PAIMOS, ob eine Änderung wieder eingereiht werden darf; es beobachtet nur und blockiert noch nicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-851",
+          "pill_en": "Cross-family review setting",
+          "pill_de": "Modellübergreifende Prüfung einstellbar",
+          "benefit_en": "Choose per company or project whether a change needs a review from another model family; PAIMOS checks the author from its own records.",
+          "benefit_de": "Legen Sie pro Firma oder Projekt fest, ob eine Änderung eine Prüfung durch eine andere Modellfamilie braucht; PAIMOS prüft den Autor anhand eigener Aufzeichnungen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-852",
+          "pill_en": "Merge audit",
+          "pill_de": "Prüfprotokoll für Merges",
+          "benefit_en": "Every merge is linked to its ticket and review, and merges that skip the queue or the review are flagged.",
+          "benefit_de": "Jeder Merge ist mit Ticket und Prüfung verknüpft, und Merges, die Queue oder Prüfung umgehen, werden markiert.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-853",
+          "pill_en": "Delivery status in tickets",
+          "pill_de": "Lieferstatus im Ticket",
+          "benefit_en": "See a change's delivery state right in the ticket, and set cross-family review in one card.",
+          "benefit_de": "Sehen Sie den Lieferstand einer Änderung direkt im Ticket und stellen Sie die modellübergreifende Prüfung in einer Karte ein.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-854",
+          "pill_en": "Clear model settings",
+          "pill_de": "Klare Modell-Einstellungen",
+          "benefit_en": "See and set which model does which kind of work, and what runs next, on one clear page.",
+          "benefit_de": "Auf einer klaren Seite sehen und festlegen, welches Modell welche Arbeit übernimmt und was als Nächstes läuft.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-855",
+          "pill_en": "Attachment downloads work",
+          "pill_de": "Anhänge laden zuverlässig",
+          "benefit_en": "Agents and the CLI can download ticket attachments such as designs again.",
+          "benefit_de": "Agenten und die CLI können Ticket-Anhänge wie Designs wieder herunterladen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-858",
+          "pill_en": "Daemon starts again",
+          "pill_de": "Daemon startet wieder",
+          "benefit_en": "The background agent daemon starts again as a login service on Mac and Linux.",
+          "benefit_de": "Der Agenten-Daemon startet wieder als Anmeldedienst auf Mac und Linux.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-859",
+          "pill_en": "Safe daemon upgrades",
+          "pill_de": "Sichere Daemon-Updates",
+          "benefit_en": "Upgrading or rolling back the agent daemon never leaves its saved state unreadable.",
+          "benefit_de": "Ein Update oder Zurückrollen des Agenten-Daemons macht seinen gespeicherten Zustand nie unlesbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-864",
+          "pill_en": "All accounts counted",
+          "pill_de": "Alle Konten berücksichtigt",
+          "benefit_en": "PAIMOS sees every account per provider with its limits and reset times, so it can spread work across them.",
+          "benefit_de": "PAIMOS sieht jedes Konto pro Anbieter mit Limits und Rücksetzzeiten und kann Arbeit darauf verteilen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-877",
+          "pill_en": "Kinds of work",
+          "pill_de": "Arten von Arbeit",
+          "benefit_en": "Every kind of work has a plain definition that people and agents share.",
+          "benefit_de": "Jede Art von Arbeit hat eine klare Beschreibung, die Menschen und Agenten teilen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-878",
+          "pill_en": "Model ranking board",
+          "pill_de": "Rangliste der Modelle",
+          "benefit_en": "Drag models into the order you want for each kind of work.",
+          "benefit_de": "Modelle je Art von Arbeit per Ziehen in die gewünschte Reihenfolge bringen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-879",
+          "pill_en": "Models settings page",
+          "pill_de": "Seite für Modelle",
+          "benefit_en": "Model preferences live on one clear settings page instead of stacked dialogs, and saving your own preferences works again.",
+          "benefit_de": "Modelleinstellungen stehen auf einer klaren Seite statt in gestapelten Dialogen, und eigene Einstellungen lassen sich wieder speichern.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-880",
+          "pill_en": "Usage posture",
+          "pill_de": "Nutzung steuern",
+          "benefit_en": "Choose whether agents use your subscriptions carefully or to the max.",
+          "benefit_de": "Wählen Sie, ob Agenten Ihre Abos sparsam oder voll nutzen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-881",
+          "pill_en": "Expert model settings",
+          "pill_de": "Experten-Einstellungen für Modelle",
+          "benefit_en": "Fine-tune models per situation and thinking per kind of work.",
+          "benefit_de": "Modelle je Situation und Denkaufwand je Art von Arbeit fein einstellen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-882",
+          "pill_en": "Guided model setup",
+          "pill_de": "Geführte Modelleinrichtung",
+          "benefit_en": "Five questions set up sensible model preferences, with a preview and Undo.",
+          "benefit_de": "Fünf Fragen richten sinnvolle Modelleinstellungen ein, mit Vorschau und Rückgängig.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-883",
+          "pill_en": "Boost today",
+          "pill_de": "Heute mehr nutzen",
+          "benefit_en": "Let agents use more of your allowance for one day.",
+          "benefit_de": "Agenten für einen Tag mehr vom Kontingent nutzen lassen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-885",
+          "pill_en": "Agents notice changes",
+          "pill_de": "Agenten bemerken Änderungen",
+          "benefit_en": "When you change a setting, agents react within seconds; nobody has to tell them.",
+          "benefit_de": "Wenn Sie eine Einstellung ändern, reagieren Agenten in Sekunden, ohne dass es ihnen jemand sagen muss.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-886",
+          "pill_en": "Live usage per model",
+          "pill_de": "Live-Nutzung für jedes Modell",
+          "benefit_en": "PAIMOS shows real limits and reset times for Grok, Claude and Codex, even between runs.",
+          "benefit_de": "PAIMOS zeigt echte Limits und Rücksetzzeiten für Grok, Claude und Codex, auch zwischen Läufen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-887",
+          "pill_en": "Start decisions preview",
+          "pill_de": "Startentscheidungen als Vorschau",
+          "benefit_en": "In shadow mode, PAIMOS records whether each agent may start and why, next to today's process, so you can compare before switching it on per project.",
+          "benefit_de": "Im Schattenbetrieb hält PAIMOS fest, ob ein Agent starten darf und warum, neben dem heutigen Ablauf; so lässt sich vergleichen, bevor es pro Projekt eingeschaltet wird.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-888",
+          "pill_en": "Work queue preview",
+          "pill_de": "Warteschlange als Vorschau",
+          "benefit_en": "In shadow mode, delivery rounds are recorded in a fair queue, so you can see the order before PAIMOS acts on it.",
+          "benefit_de": "Im Schattenbetrieb werden Lieferrunden in einer fairen Warteschlange erfasst; die Reihenfolge ist sichtbar, bevor PAIMOS danach handelt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-889",
+          "pill_en": "Model routing preview",
+          "pill_de": "Modellzuteilung als Vorschau",
+          "benefit_en": "In shadow mode, PAIMOS records which model your settings would choose for each piece of work, before it routes for real.",
+          "benefit_de": "Im Schattenbetrieb hält PAIMOS fest, welches Modell Ihre Einstellungen für jede Arbeit wählen würden, bevor es wirklich zuteilt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-890",
+          "pill_en": "Review automation preview",
+          "pill_de": "Prüfautomatik als Vorschau",
+          "benefit_en": "In shadow mode, PAIMOS plans cross-family reviews and fix rounds next to today's process; you switch it on per project later.",
+          "benefit_de": "Im Schattenbetrieb plant PAIMOS modellübergreifende Prüfungen und Korrekturrunden neben dem heutigen Ablauf; eingeschaltet wird später pro Projekt.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-891",
+          "pill_en": "Shipping preview",
+          "pill_de": "Ausliefern als Vorschau",
+          "benefit_en": "In shadow mode, PAIMOS records when a reviewed change would go to the merge queue; it does not ship on its own yet.",
+          "benefit_de": "Im Schattenbetrieb hält PAIMOS fest, wann eine geprüfte Änderung in die Merge-Warteschlange käme; selbst ausliefern tut es noch nicht.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-903",
+          "pill_en": "Faster phone approvals",
+          "pill_de": "Schnellere Freigaben am Telefon",
+          "benefit_en": "Approval requests reach your phone within seconds, and the phone settings respond right away.",
+          "benefit_de": "Freigabeanfragen erreichen Ihr Telefon in Sekunden, und die Telefon-Einstellungen reagieren sofort.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-908",
+          "pill_en": "Polish from your review",
+          "pill_de": "Feinschliff aus Ihrer Prüfung",
+          "benefit_en": "Small rough edges in the Agents and Settings screens are gone, and Verify again shows what it is doing.",
+          "benefit_de": "Kleine Unebenheiten in Agenten- und Einstellungsansichten sind weg, und Erneut prüfen zeigt, was es tut.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-913",
+          "pill_en": "Grid that groups",
+          "pill_de": "Raster mit Gruppen",
+          "benefit_en": "The shared ticket list groups by project, fits its columns and loads more per group.",
+          "benefit_de": "Die gemeinsame Ticketliste gruppiert nach Projekt, passt Spalten an und lädt je Gruppe nach.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-914",
+          "pill_en": "Bulk triage with undo",
+          "pill_de": "Sammel-Triage mit Rückgängig",
+          "benefit_en": "Hundreds of autopilot suggestions can be applied per project in one previewed step that can be undone.",
+          "benefit_de": "Hunderte Autopilot-Vorschläge lassen sich je Projekt in einem Schritt mit Vorschau anwenden und rückgängig machen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-915",
+          "pill_en": "Grouped needs attention",
+          "pill_de": "Gruppierte Hinweise",
+          "benefit_en": "Needs attention groups flags by project on the familiar ticket grid, with keys that are never cut off.",
+          "benefit_de": "„Braucht Aufmerksamkeit“ gruppiert Markierungen nach Projekt im vertrauten Ticket-Raster; Schlüssel werden nie abgeschnitten.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-916",
+          "pill_en": "Project quick actions",
+          "pill_de": "Schnellaktionen pro Projekt",
+          "benefit_en": "Apply or dismiss a whole project's suggestions, or turn the autopilot off there, with a preview and Undo.",
+          "benefit_de": "Alle Vorschläge eines Projekts anwenden oder verwerfen oder dort den Autopiloten ausschalten, mit Vorschau und Rückgängig.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-917",
+          "pill_en": "Needs attention on phone",
+          "pill_de": "Hinweise am Handy",
+          "benefit_en": "Needs attention works on the phone with large targets and press-and-hold selection.",
+          "benefit_de": "„Braucht Aufmerksamkeit“ funktioniert am Handy mit großen Zielen und Auswahl durch langes Drücken.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-942",
+          "pill_en": "Chat replies arrive",
+          "pill_de": "Chat-Antworten kommen an",
+          "benefit_en": "Agents' replies show up in the chat, and only the right people can read it.",
+          "benefit_de": "Antworten der Agenten erscheinen im Chat, und nur die Richtigen können ihn lesen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-943",
+          "pill_en": "Faster chat",
+          "pill_de": "Schnellerer Chat",
+          "benefit_en": "Messages and Stop reach a running agent within a second or two.",
+          "benefit_de": "Nachrichten und Stopp erreichen einen laufenden Agenten in ein, zwei Sekunden.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-975",
+          "pill_en": "Faster chat with agents",
+          "pill_de": "Schnellerer Agenten-Chat",
+          "benefit_en": "Messages appear instantly, replies land in the thread, and project members can read agent chats.",
+          "benefit_de": "Nachrichten erscheinen sofort, Antworten landen im Verlauf, und Projektmitglieder können Agenten-Chats lesen.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-976",
+          "pill_en": "Readable agent replies",
+          "pill_de": "Lesbare Agenten-Antworten",
+          "benefit_en": "Code, tables and shell output read cleanly; stop a reply with Esc; scroll through the whole history.",
+          "benefit_de": "Code, Tabellen und Shell-Ausgaben sind gut lesbar; Antworten lassen sich mit Esc stoppen; der ganze Verlauf ist abrufbar.",
+          "group": "features"
+        },
+        {
+          "key": "AEON-977",
+          "pill_en": "Clear message status",
+          "pill_de": "Klarer Nachrichtenstatus",
+          "benefit_en": "See whether each message was sent, delivered or read, and edit or cancel queued ones.",
+          "benefit_de": "Sehen, ob jede Nachricht gesendet, zugestellt oder gelesen wurde; wartende Nachrichten bearbeiten oder abbrechen.",
+          "group": "features"
+        }
+      ]
     }
   }
 }
