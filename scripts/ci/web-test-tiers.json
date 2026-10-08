@@ -8390,6 +8390,8 @@
     ,
     {"kind":"browser","file":"tests/models-expert.spec.ts","name":"situation order edits leave First build intact and reviews stay on their own column","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-setup.spec.ts","name":"guided setup preserves controls and own columns, saves once with exact Undo and discards stale writes","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -15136,6 +15138,8 @@
     ,
     {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"sends the person precondition on the real HTTP order client and surfaces a server rejection","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"setup previews the complete patch, applies once, restores exact inheritance, and rejects stale approvals","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"Expert pickers reject stale contexts and share Kinds of work definitions from live limits","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"a canonical-person change clears proof folds and discards a held evidence page under the same login","tier":"ESSENTIAL"}
@@ -15151,6 +15155,8 @@
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"the account posture discards a held save after switching records and keeps failures honest","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"the page discards a held resolution when the mounted person changes and restores that person’s mode","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-setup.unit.test.ts","name":"starts from the current board and maps identical answers without touching own columns or exclusions","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/pairing-live.unit.test.ts","name":"a Retry-After beyond the lifetime ends the follow instead of reading later","tier":"GATED-FULL"}
     ,

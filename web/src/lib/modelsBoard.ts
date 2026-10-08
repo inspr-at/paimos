@@ -24,7 +24,8 @@ export interface ModelBoardDocument {
   person_id: string | null; layer: BoardLayer; situation: BoardSituation; revision: number; profile: BoardProfile
   columns: BoardColumn[]; tray: BoardCard[]; residency: { own: string | null; effective: 'any' | 'eu' | 'local' }; needs_you: string[]
 }
-export interface BoardWriteResult { person_id: string | null; revision: number; profile: BoardProfile; dry_run: boolean; moved: { column: string; before: string[]; after: string[] }[]; running_outside?: string[] }
+export type BoardProfilePatch = Partial<BoardProfile> & { replace_own?: boolean; other_order?: OrderBody | null }
+export interface BoardWriteResult { previous_other_order?: OrderBody | null; person_id: string | null; revision: number; profile: BoardProfile; dry_run: boolean; moved: { column: string; before: string[]; after: string[] }[]; running_outside?: string[] }
 export interface ModelRule { scope: 'workspace' | 'project'; project_id: string | null; column: string; line: string; lock: 'top' | 'bottom' | 'not'; position: number; why: string; set_by: string | null; set_at: string }
 export interface RulesDocument { revision: number; rules: ModelRule[] }
 export interface OrderBody { rank: string[]; not: string[] }

@@ -555,3 +555,79 @@ func TestBoardUsagePosturePersonPreconditionAndRevision(t *testing.T) {
 		t.Fatal("inheritance or event count wrong")
 	}
 }
+
+// Risk: setup could partially save five answers, erase an own column, loosen
+// residency, or Undo could freeze an inherited order. The dry-run must match
+// Apply, with one revision and one event, under the existing person fence.
+func TestBoardSetupAtomicPreviewApplyUndo(t *testing.T) {
+	for _, ownOther := range []bool{false, true} {
+		t.Run(fmt.Sprintf("own-other-%t", ownOther), func(t *testing.T) {
+			admin, member := boardFixture(t)
+			path := "/api/model-preferences/profile?for=me"
+			own := map[string]any{"rank": []string{"anthropic:sonnet", "openai:sol"}, "not": []string{}, "revision": 0}
+			boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/orders/backend/first", own, member.ID), 200)
+			boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/orders/other/first/thinking", map[string]any{"thinking": "max", "revision": 1}, member.ID), 200)
+			revision := int64(2)
+			if ownOther {
+				own["revision"] = revision
+				own["not"] = []string{"anthropic:opus"}
+				boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/orders/other/first", own, member.ID), 200)
+				revision++
+			}
+			before := boardDecode[boardDocument](t, boardCall(t, member, "GET", "/api/model-preferences/board", nil, ""), 200)
+			initialEvents := eventCount(t, admin, "model.preferences_changed")
+			body := map[string]any{"template": "best", "usage": "maxout", "thinking": "deep", "residency": nil, "other_order": map[string]any{"rank": []string{"anthropic:opus", "openai:sol"}, "not": []string{}}, "revision": revision}
+			boardError(t, boardCall(t, member, "PUT", path, body, ""), 428, "person_precondition_required")
+			boardError(t, boardCall(t, member, "PUT", path, body, admin.ID), 409, "preference_person_changed")
+			bad := map[string]any{"revision": revision, "other_order": map[string]any{"rank": []string{"unknown:line"}, "not": []string{}}}
+			boardError(t, boardCall(t, member, "PUT", path, bad, member.ID), 422, "unknown_line")
+			bad["other_order"] = map[string]any{"rank": []string{"openai:sol", "openai:sol"}, "not": []string{}}
+			boardError(t, boardCall(t, member, "PUT", path, bad, member.ID), 422, "invalid_line_order")
+			preview := boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", path+"&dry_run=true", body, member.ID), 200)
+			repeated := boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", path+"&dry_run=true", body, member.ID), 200)
+			if !reflect.DeepEqual(preview, repeated) || preview.Revision != revision || !preview.DryRun || eventCount(t, admin, "model.preferences_changed") != initialEvents {
+				t.Fatal("preview is not deterministic and read-only")
+			}
+			for _, moved := range preview.Moved {
+				if moved.Column == "backend" {
+					t.Fatal("preview changed own backend order")
+				}
+			}
+			saved := boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", path, body, member.ID), 200)
+			if saved.Revision != revision+1 || !reflect.DeepEqual(saved.Moved, preview.Moved) || eventCount(t, admin, "model.preferences_changed") != initialEvents+1 {
+				t.Fatal("Apply was not one atomic write matching the preview")
+			}
+			after := boardDecode[boardDocument](t, boardCall(t, member, "GET", "/api/model-preferences/board", nil, ""), 200)
+			for _, col := range after.Columns {
+				if col.Column == "backend" && (col.Source != "own" || col.List[0].Line != "anthropic:sonnet") {
+					t.Fatalf("own column changed: %+v", col)
+				}
+				if col.Column == "other" && (col.List[0].Line != "anthropic:opus" || col.Thinking.Own == nil || *col.Thinking.Own != "max") {
+					t.Fatalf("setup lost order or independent column thinking: %+v", col)
+				}
+			}
+			boardError(t, boardCall(t, member, "PUT", path, body, member.ID), 409, "stale_revision")
+			undo := map[string]any{"revision": saved.Revision, "template": before.Profile.Template, "usage": before.Profile.Usage, "thinking": before.Profile.Thinking, "residency": before.Profile.Residency, "other_order": saved.PreviousOtherOrder}
+			restored := boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", path, undo, member.ID), 200)
+			undone := boardDecode[boardDocument](t, boardCall(t, member, "GET", "/api/model-preferences/board", nil, ""), 200)
+			if !reflect.DeepEqual(before.Columns, undone.Columns) || undone.Profile.Template != nil || undone.Profile.Usage != nil || undone.Profile.Thinking != nil || restored.Revision != revision+2 || eventCount(t, admin, "model.preferences_changed") != initialEvents+2 {
+				t.Fatal("Undo did not exactly restore own orders and inheritance")
+			}
+			// A provider change with no route previews work waiting; it is not a write.
+			body["revision"] = restored.Revision
+			body["residency"] = "eu"
+			held := boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", path+"&dry_run=true", body, member.ID), 200)
+			if len(held.Moved) == 0 {
+				t.Fatal("provider restriction missing from diff")
+			}
+			for _, moved := range held.Moved {
+				if len(moved.After) != 0 {
+					t.Fatal("provider preview claimed a qualifying route")
+				}
+			}
+			if eventCount(t, admin, "model.preferences_changed") != initialEvents+2 {
+				t.Fatal("preview or rejection emitted an event")
+			}
+		})
+	}
+}

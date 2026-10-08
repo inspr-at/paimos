@@ -39,9 +39,9 @@ const route = useRoute()
 const router = useRouter()
 const session = useSession()
 const profile = useProfile()
+const kindsText = computed(() => textForKinds(profile.profile?.principal_id === session.identity?.principal.id && /^de\b/i.test(profile.profile?.locale ?? '')))
 const german = computed(() => route.query.lang === 'de' || document.documentElement.lang.startsWith('de'))
 const modelText = (en: string, de: string) => german.value ? de : en
-const kindsText = computed(() => textForKinds(profile.profile?.principal_id === session.identity?.principal.id && /^de\b/i.test(profile.profile?.locale ?? '')))
 const sectionLabel = (section: SettingsSection) => section.id === 'kinds' ? kindsText.value('title') : section.id === 'models' ? modelText('Models', 'Modelle') : section.label
 const sectionSummary = (section: SettingsSection) => section.id === 'kinds' ? kindsText.value('summary') : section.id === 'models' ? modelText('Which model does what, when', 'Welches Modell was wann tut') : section.summary
 const admin = computed(() => can('settings.manage'))
@@ -208,7 +208,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
    Cap it to the space under the page head so a lower section scrolls inside
    the nav. main would otherwise scroll, and a sticky list taller than main
    cannot stay put. 130px is the settings padding, the page head and its margin. */
-.section-nav { position: sticky; top: 16px; display: grid; gap: 1px; max-height: calc(100dvh - var(--header-h) - var(--footer-h) - 130px); overflow-y: auto; overscroll-behavior: contain; }
+.section-nav { position: sticky; top: 16px; display: grid; gap: 2px; max-height: calc(100dvh - var(--header-h) - var(--footer-h) - 130px); overflow-y: auto; overscroll-behavior: contain; }
 .theme-links { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 10px; font-size: 12px; }.theme-links a { color: var(--teal-ink); min-height: 28px; display: inline-flex; align-items: center; }
 @media (pointer: coarse) { .theme-links a { min-height: 44px; } }
 .section-link { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 46px; padding: 6px 10px; border-radius: 12px; color: var(--ink); text-decoration: none; }

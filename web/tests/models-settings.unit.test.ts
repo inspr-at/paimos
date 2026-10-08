@@ -45,7 +45,7 @@ it('the page discards a held resolution when the mounted person changes and rest
   const shell = setupSource('components/settings/ModelsSection.vue', {}, {
     'vue-router': { useRoute: () => route, useRouter: () => ({ replace: vi.fn() }) }, '../../stores/session': { useSession: () => session }, '../../stores/projects': { useProjects: () => ({ projects: [], load: vi.fn() }) },
     '../../lib/authz': { can: () => true }, '../../lib/identityScope': scopeModule, '../../lib/useModelsBoard': { useModelsBoard: () => editor },
-    '../../lib/modelsBoardApi': { getBoard: async () => boardFixture(), getBoardCoverage: async () => ({ consumers: [] }), resolveBoardModel: resolve }, '../../lib/modelsBoard': await import('../src/lib/modelsBoard'),
+    '../../lib/modelsBoardApi': { getBoard: async () => boardFixture(), getBoardCoverage: async () => ({ consumers: [] }), resolveBoardModel: resolve }, '../../lib/modelsBoard': await import('../src/lib/modelsBoard'), '../../lib/modelsSetup': await import('../src/lib/modelsSetup'), '../../lib/settingsOverlays': await import('../src/lib/settingsOverlays'),
   })
   shell.state.setMode('simple'); expect(stored.get(`models-page/tenant/${boardPerson}/mode`)).toBe('simple')
   document.value = { ...boardFixture(), person_id: 'linked-person' }; await flush()
@@ -98,6 +98,7 @@ it('Expert pickers reject stale contexts and share Kinds of work definitions fro
   columnProps.editable = false; column.state.choose('max', columnProps.contextKey); expect(column.emitted).toHaveLength(1)
   picker.stop(); column.stop()
 })
+
 it('the account posture discards a held save after switching records and keeps failures honest', async () => {
   vi.stubGlobal('navigator', { platform: 'Linux', userAgent: 'test' })
   const accountUsage = await import('../src/lib/accountUsage')

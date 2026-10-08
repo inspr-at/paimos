@@ -5,6 +5,7 @@ import { can, onAccessChange } from './authz'
 import { toast } from './toast'
 import { canMove, columnContext, contextKey, moveOrder, moveRule, orderBody, rulesBody, type BoardCard, type BoardColumn, type BoardContext, type BoardProfile, type BoardZone, type ModelBoardDocument, type RulesDocument, type ThinkingWord } from './modelsBoard'
 import { dismissBoardLine, getBoard, getBoardRules, putBoardOrder, putBoardProfile, putBoardRules, putColumnThinking, resetBoardOrder } from './modelsBoardApi'
+import { setupUndo, type SetupPatch, type SetupPreview } from './modelsSetup'
 import { useSession } from '../stores/session'
 import { preferenceFailure } from './modelsSettings'
 
@@ -50,6 +51,24 @@ export function useModelsBoard(context: Ref<BoardContext>, german: Ref<boolean>)
   async function applyTemplate(preview: Preview) {
     if (preview.key !== actionKey.value || preview.revision !== document.value?.revision) return false
     return profile({ template: preview.template })
+  }
+  async function previewSetup(body: SetupPatch, source: ModelBoardDocument): Promise<SetupPreview | null> {
+    const board = document.value
+    if (!board || !editable.value || busy.value || context.value.layer !== 'mine' || !source.person_id || source.person_id !== board.person_id || source.revision !== board.revision) return null
+    const current = capture(), target = { ...context.value }, identity = actionKey.value, revision = board.revision
+    busy.value = true; error.value = ''
+    try {
+      const result = await putBoardProfile(target, body, revision, source.person_id, true)
+      if (!current() || document.value?.revision !== revision) return null
+      if (result.person_id !== source.person_id || result.revision !== revision || !result.dry_run || result.previous_other_order === undefined) throw new Error(text('Could not confirm the setup preview.', 'Die Einrichtungsvorschau konnte nicht bestätigt werden.'))
+      return { key: identity, revision, person: source.person_id, body: structuredClone(body), before: setupUndo(source.profile, result.previous_other_order), moved: result.moved }
+    } catch (failure) { if (current()) error.value = failure instanceof APIError ? preferenceFailure(failure.status, german.value) : failure instanceof Error ? failure.message : text('Could not preview setup.', 'Einrichtung konnte nicht angezeigt werden.'); return null }
+    finally { if (current()) busy.value = false }
+  }
+  async function applySetup(preview: SetupPreview) {
+    if (preview.key !== actionKey.value || preview.person !== document.value?.person_id || preview.revision !== document.value?.revision || context.value.layer !== 'mine') return false
+    const target = { ...context.value }
+    return write(revision => putBoardProfile(target, preview.body, revision, preview.person), revision => putBoardProfile(target, preview.before, revision, preview.person))
   }
   type Operation = (revision: number) => Promise<{ revision: number; person_id?: string | null }>
   async function write(operation: Operation, undo: Operation | null, rule = false) {
@@ -134,5 +153,5 @@ export function useModelsBoard(context: Ref<BoardContext>, german: Ref<boolean>)
   const unsubscribe = onAccessChange(() => { generation++; epoch.value++; abort?.abort(); busy.value = false; if (!can('models.read', context.value.project)) document.value = null; else void load() })
   watch(() => can('models.read', context.value.project), allowed => { if (allowed && !document.value && !loading.value) void load() })
   onBeforeUnmount(() => { alive = false; generation++; epoch.value++; abort?.abort(); unsubscribe() })
-  return { document, rules, busy, loading, error, announcement, editable, key, actionKey, load, move, profile, reset, thinking, dismiss, previewTemplate, applyTemplate }
+  return { document, rules, busy, loading, error, announcement, editable, key, actionKey, load, move, profile, reset, thinking, dismiss, previewTemplate, applyTemplate, previewSetup, applySetup }
 }

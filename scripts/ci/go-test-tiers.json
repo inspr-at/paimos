@@ -6450,6 +6450,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardProjectRulesOnlyTightenAndKeepCapabilityPins","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestBoardSetupAtomicPreviewApplyUndo","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardTemplateDryRunPreservesOwnOrdersAndResetsAtomically","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardUsagePosturePersonPreconditionAndRevision","tier":"ESSENTIAL"}
