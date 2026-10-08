@@ -123,7 +123,7 @@ func ReadPreferenceTx(ctx context.Context, tx pgx.Tx, tenantID, owner string) ([
 		JOIN principals person ON person.tenant_id=pref.tenant_id AND person.id=pref.principal_id
 		WHERE pref.tenant_id=$1::uuid AND pref.key=$3 AND person.kind='person'
 		AND coalesce(person.linked_to,person.id)=$2::uuid
-		ORDER BY (person.id=$2::uuid) DESC,person.id`, tenantID, owner, PreferenceKey)
+		ORDER BY (person.id=$2::uuid) DESC,person.id LIMIT 65`, tenantID, owner, PreferenceKey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -131,11 +131,19 @@ func ReadPreferenceTx(ctx context.Context, tx pgx.Tx, tenantID, owner string) ([
 	var selected []byte
 	var updatedAt *time.Time
 	var selectedPlan Plan
+	count := 0
 	for rows.Next() {
+		count++
+		if count > 64 {
+			return nil, nil, errors.New("linked person plans exceed bound")
+		}
 		var raw []byte
 		var at time.Time
 		if err := rows.Scan(&raw, &at); err != nil {
 			return nil, nil, err
+		}
+		if len(raw) > 16<<10 {
+			return nil, nil, errors.New("plan exceeds bound")
 		}
 		plan, _, err := Decode(raw)
 		if err != nil {
@@ -148,6 +156,18 @@ func ReadPreferenceTx(ctx context.Context, tx pgx.Tx, tenantID, owner string) ([
 		}
 	}
 	return selected, updatedAt, rows.Err()
+}
+
+// ReadPreference reads the canonical person's linked preferences, failing
+// closed on conflicting ceilings. Authorization belongs to the caller.
+func ReadPreference(ctx context.Context, tx pgx.Tx, tenantID, owner string) ([]byte, *time.Time, error) {
+	return ReadPreferenceTx(ctx, tx, tenantID, owner)
+}
+
+// SameLimits reports whether two plans allow the same starts. A missing limit
+// matches explicit no_limit.
+func SameLimits(a, b Plan) bool {
+	return samePlan(a, b)
 }
 
 func samePlan(a, b Plan) bool {

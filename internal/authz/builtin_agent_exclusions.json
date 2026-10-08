@@ -3,6 +3,7 @@
   "permissions": [
     "account.overview.read",
     "delivery.manage",
+    "delivery.route",
     "delivery_queue.claim",
     "delivery_queue.manage",
     "delivery_reviews.claim",

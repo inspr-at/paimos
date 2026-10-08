@@ -9144,6 +9144,54 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {description: "Project is unavailable for policy changes"}
+  /projects/{projectId}/routing-decisions:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    post:
+      operationId: recordProjectShadowRoute
+      description: 'Records one advisory route for a queued round using live model preferences and the caller-owned plan. Requires delivery.route and agents.plan.read. Shadow mode must be enabled for this project. Never claims, starts, reserves, reviews or ships work. Reusing a round ID with the same input returns its original decision; different input conflicts. Family and design readiness values are launcher observations, not approval evidence.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRoutingRequest'}}}}
+      responses:
+        '200': {description: 'Recorded shadow decision', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRoutingDecision'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/routing-decisions/{roundId}:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+      - {name: roundId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectShadowRoute
+      description: 'Reads the original event-backed shadow decision. Requires delivery.route in this project. Available after shadow mode is switched off.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Recorded shadow decision', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRoutingDecision'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+  /projects/{projectId}/routing-settings:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectRoutingSettings
+      description: 'Reads this project routing switch. Default is off; no tenant-wide inheritance. Requires delivery.read.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Project routing switch', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRoutingSettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putProjectRoutingSettings
+      description: 'Sets off or shadow and records a settings event. Requires delivery.manage. Consult and act are unavailable in this release.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRoutingSettings'}}}}
+      responses:
+        '200': {description: 'Project routing switch', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRoutingSettings'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
   /projects/{projectId}/status-autopilot:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -15499,6 +15547,57 @@ components:
       additionalProperties: false
       required: ["revision","state"]
       properties: {"revision":{"type":"integer","format":"int64","minimum":1},"state":{"type":"string","enum":["running","done"]}}
+    DeliveryRoutingDecision:
+      type: object
+      required: [event_id, project_id, mode, request, plan, route, design_first, comparison, at]
+      properties:
+        event_id: {type: integer, format: int64}
+        project_id: {type: string, format: uuid}
+        mode: {type: string, const: shadow}
+        request: {$ref: '#/components/schemas/DeliveryRoutingRequest'}
+        plan:
+          type: object
+          description: 'Exact person-owned plan snapshot used for off-harness filtering. Capacity and total limits remain admission concerns.'
+          additionalProperties: true
+        route:
+          type: object
+          required: [profile, trace, owner_required]
+          properties:
+            profile: {oneOf: [{$ref: '#/components/schemas/ModelProfile'}, {type: 'null'}]}
+            trace: {type: object, additionalProperties: true}
+            owner_required: {type: boolean}
+            ladder: {type: array, items: {type: object, additionalProperties: true}}
+          additionalProperties: true
+        design_first: {type: boolean, description: 'A first frontend build without observed design readiness resolves the design column first.'}
+        comparison: {type: string, enum: [not_provided, match, mismatch, blocked]}
+        at: {type: string, format: date-time}
+    DeliveryRoutingRequest:
+      type: object
+      additionalProperties: false
+      required: [round_id, ticket_node_id, kind]
+      properties:
+        round_id: {type: string, format: uuid, description: 'Stable queued-round identity, unique within the project.'}
+        ticket_node_id: {type: string, format: uuid}
+        kind: {type: string, enum: [first_build, fix, merge, land, review, design]}
+        fix_round: {type: integer, minimum: 0, maximum: 1000, description: 'Positive for fix, zero for other kinds. The live board threshold determines stuck; default is round 4.'}
+        previous_family: {type: string, maxLength: 32, description: 'Observed previous model provider family, used for stuck family rotation.'}
+        author_family: {type: string, maxLength: 32, description: 'Observed author provider family, required for cross-family review routing.'}
+        design_ready: {type: boolean, default: false}
+        observed: {$ref: '#/components/schemas/DeliveryRoutingTarget'}
+    DeliveryRoutingSettings:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode: {type: string, enum: [off, shadow], default: off}
+    DeliveryRoutingTarget:
+      type: object
+      additionalProperties: false
+      required: [harness, model, effort]
+      properties:
+        harness: {type: string, enum: [codex, claude, grok, cursor, pi, gemini, opencode]}
+        model: {type: string, minLength: 1, maxLength: 128}
+        effort: {type: string, minLength: 1, maxLength: 32}
     DeliverySettings:
       type: object
       additionalProperties: false
