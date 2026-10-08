@@ -88,6 +88,7 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 	}
 	requestedPerson := params.Get("person_id")
 	q := WorkQuery{Role: strings.TrimSpace(params.Get("role")), AuthorFamily: params.Get("author_family"), Harness: params.Get("harness"), Area: params.Get("area"), Complexity: params.Get("complexity"), ProjectID: project}
+	q.ExplicitBoard = params.Get("mode") == "placement"
 	q.Situation = params.Get("situation")
 	if q.Situation != "" && !validBoardSituation(q.Situation) {
 		writePreferenceError(w, prefFail(400, "invalid_situation"))

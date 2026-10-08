@@ -6,8 +6,10 @@ import '../styles/settings.css'
 import { can, permissionsKnown, permissionsRevoked, refreshPermissions } from '../lib/authz'
 import AppIcon from '../components/AppIcon.vue'
 import BizIcon, { type BizIconName } from '../components/business/BizIcon.vue'
-import { SETTINGS_GROUPS, SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId } from '../lib/settings'
+import { SETTINGS_GROUPS, SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId, type SettingsSection } from '../lib/settings'
 import { useSession } from '../stores/session'
+import { useProfile } from '../stores/profile'
+import { textForKinds } from '../lib/workKindsCopy'
 import { doctrineInbox } from '../lib/doctrineInbox'
 import { scopeOwner } from '../lib/identityScope'
 import { settingsFooter, settingsNeeds } from '../lib/footerProviders'
@@ -20,6 +22,7 @@ const PersonalSection = defineAsyncComponent(() => import('../components/setting
 const ThemeSection = defineAsyncComponent(() => import('../components/settings/ThemeSection.vue'))
 const DeveloperSection = defineAsyncComponent(() => import('../components/settings/DeveloperSection.vue'))
 const VocabularySection = defineAsyncComponent(() => import('../components/settings/VocabularySection.vue'))
+const KindsOfWorkSection = defineAsyncComponent(() => import('../components/settings/KindsOfWorkSection.vue'))
 const AgentsSection = defineAsyncComponent(() => import('../components/settings/AgentsSection.vue'))
 const AutopilotSection = defineAsyncComponent(() => import('../components/settings/AutopilotSection.vue'))
 const PortalSection = defineAsyncComponent(() => import('../components/settings/PortalSection.vue'))
@@ -35,10 +38,12 @@ const ModelsSection = defineAsyncComponent(() => import('../components/settings/
 const route = useRoute()
 const router = useRouter()
 const session = useSession()
+const profile = useProfile()
+const kindsText = computed(() => textForKinds(profile.profile?.principal_id === session.identity?.principal.id && /^de\b/i.test(profile.profile?.locale ?? '')))
 const german = computed(() => route.query.lang === 'de' || document.documentElement.lang.startsWith('de'))
 const modelText = (en: string, de: string) => german.value ? de : en
-const sectionLabel = (section: typeof SETTINGS_SECTIONS[number]) => section.id === 'models' ? modelText('Models', 'Modelle') : section.label
-const sectionSummary = (section: typeof SETTINGS_SECTIONS[number]) => section.id === 'models' ? modelText('Which model does what, when', 'Welches Modell was wann tut') : section.summary
+const sectionLabel = (section: SettingsSection) => section.id === 'kinds' ? kindsText.value('title') : section.id === 'models' ? modelText('Models', 'Modelle') : section.label
+const sectionSummary = (section: SettingsSection) => section.id === 'kinds' ? kindsText.value('summary') : section.id === 'models' ? modelText('Which model does what, when', 'Welches Modell was wann tut') : section.summary
 const admin = computed(() => can('settings.manage'))
 // A session that ends (401) revokes every grant; what is on screen stays as it
 // was, inert, so typed input and a join link shown once are not lost.
@@ -83,8 +88,8 @@ const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
 // Which sections show depends on my permissions: the layout waits for them, so
 // the nav never re-flows under the pointer (usually a few milliseconds).
 void refreshPermissions()
-const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, policies: PoliciesSection, models: ModelsSection, workspace: WorkspaceSection, vocabulary: VocabularySection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
-const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', policies: 'shield', models: 'columns', workspace: 'building', vocabulary: 'tag', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'monitor', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
+const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, policies: PoliciesSection, models: ModelsSection, workspace: WorkspaceSection, vocabulary: VocabularySection, kinds: KindsOfWorkSection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
+const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', policies: 'shield', models: 'columns', workspace: 'building', vocabulary: 'tag', kinds: 'list', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'monitor', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
 const groups = computed(() => SETTINGS_GROUPS.map(label => ({ label, sections: sections.value.filter(section => section.group === label) })).filter(group => group.sections.length))
 const pickerOpen = ref(false)
 const picker = ref<HTMLButtonElement>()
@@ -152,7 +157,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
     <div v-if="!permissionsKnown()" class="layout waiting" role="status" aria-label="Loading settings"><span class="skeleton nav-skeleton" /><span class="skeleton body-skeleton" /></div>
     <div v-else class="layout" :class="{ 'nav-open': pickerOpen }">
       <div ref="navColumn" class="nav-col" @keydown="navKeys">
-        <button ref="picker" type="button" class="nav-picker" :aria-expanded="pickerOpen" aria-controls="settings-section-nav" :aria-label="`Section: ${meta.label}. Choose another section`" @click="pickerOpen = !pickerOpen">
+        <button ref="picker" type="button" class="nav-picker" :aria-expanded="pickerOpen" aria-controls="settings-section-nav" :aria-label="`Section: ${sectionLabel(meta)}. Choose another section`" @click="pickerOpen = !pickerOpen">
           <span class="link-icon" aria-hidden="true"><BizIcon :name="ICON[current]" :size="15" /></span>
           <span class="link-text"><span class="link-label">{{ sectionLabel(meta) }}</span><span class="link-summary">{{ meta.group }} · {{ sections.length }} sections</span></span>
           <AppIcon name="chevron" :size="14" />
@@ -171,7 +176,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
         </nav>
       </div>
       <div class="body" :class="{ wide: current === 'access' || current === 'agent-rules' || current === 'models' }">
-        <p v-if="allowed" class="who"><AppIcon :name="meta.admin && !meta.permission ? 'shield' : 'eye'" :size="14" /><span>{{ who }}</span></p>
+        <p v-if="allowed && current !== 'kinds'" class="who"><AppIcon :name="meta.admin && !meta.permission ? 'shield' : 'eye'" :size="14" /><span>{{ who }}</span></p>
         <nav v-if="allowed && current === 'theme'" class="theme-links" aria-label="Theme cards"><RouterLink to="/settings/theme#themes">Themes</RouterLink><RouterLink to="/settings/theme#colours">Colours</RouterLink><RouterLink to="/settings/theme#agents">Agents</RouterLink></nav>
         <component :is="VIEW[current]" v-if="allowed" :key="`${mountedOwner}/${current}`" />
         <div v-else-if="deciding" class="set-skeleton" role="status" aria-label="Loading"><span class="skeleton" /><span class="skeleton" /></div>
@@ -199,10 +204,10 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
 .page-head h1 { margin-top: 6px; }
 .summary { margin-top: 6px; font-size: 13.5px; color: var(--ink-2); }
 .layout { position: relative; display: grid; grid-template-columns: 248px minmax(0, 1fr); gap: 28px; align-items: start; }
-.section-nav { position: sticky; top: 16px; display: grid; gap: 2px; }
+.section-nav { position: sticky; top: 16px; display: grid; gap: 1px; }
 .theme-links { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 10px; font-size: 12px; }.theme-links a { color: var(--teal-ink); min-height: 28px; display: inline-flex; align-items: center; }
 @media (pointer: coarse) { .theme-links a { min-height: 44px; } }
-.section-link { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 50px; padding: 7px 10px; border-radius: 12px; color: var(--ink); text-decoration: none; }
+.section-link { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 46px; padding: 6px 10px; border-radius: 12px; color: var(--ink); text-decoration: none; }
 @media (hover: hover) { .section-link:hover { background: var(--row-hover); } }
 .section-link:focus-visible { box-shadow: var(--focus-ring); }
 /* The current section: a raised card, like the active place. */
@@ -217,7 +222,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
 /* Doctrine proposals wait (AEON-444): a small neutral dot. */
 .waiting-dot { justify-self: center; width: 7px; height: 7px; margin: 0 7px; border-radius: 50%; background: var(--ink-2); }
 .nav-col { align-self: stretch; min-width: 0; position: relative; }
-.nav-group { margin: 14px 10px 4px; font: 500 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+.nav-group { margin: 8px 10px 2px; font: 500 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
 .nav-group:first-child { margin-top: 0; }
 .nav-picker { display: none; }
 .body { min-width: 0; display: grid; gap: 14px; container: body / inline-size; }

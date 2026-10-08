@@ -2116,6 +2116,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestEngineAdmissionJoinsSharedTenantFence","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestEnrollmentFixtureScheduleLeavesEveryReadingBudgetAtAnyHour","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestExactAPIConnectOnlySixAndSevenAccounts","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestGeneratedInstallerIPv6Origin","tier":"GATED-FULL"}
@@ -6410,6 +6412,8 @@
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogV3Ladders","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCommandTemplates","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestDefaultRefreshNoNetworkAndOneAuditPerRun","tier":"GATED-FULL"}
@@ -8689,6 +8693,8 @@
     {"kind":"go","package":"internal/ticketwork","name":"TestAgentWorkRoutePermission","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/ticketwork","name":"TestApplyUsageGroupsModelsOnce","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/ticketwork","name":"TestLeakPatternsIgnoreGeneratedIDsAndTimestamps","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/ticketwork","name":"TestMigratedWorkSessionsAndCostsRespectVisibility","tier":"GATED-FULL"}
     ,
