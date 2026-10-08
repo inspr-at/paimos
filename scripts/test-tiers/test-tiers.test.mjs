@@ -1225,14 +1225,17 @@ test('AEON-732 measurement CLI fixtures expose upstream skips in JSON, summary a
     {lane:'full',status:1,coverage:'incomplete',reason:'skipped after upstream failure'},
     {lane:'docs-only',planned:true,status:0,coverage:'reported'},
     {lane:'full',planned:true,reuse:'merge_group',status:0,coverage:'reused'},
+    {lane:'full',planned:true,reuse:'pull_request',status:0,coverage:'reused'},
     {lane:'spec-only',planned:true,status:0,coverage:'untiered'},
     {lane:'spec-only',status:1,coverage:'incomplete',reason:'upstream jobs did not succeed'},
   ]) {
-    const fixtureJobs=jobs.map(job=>fixture.planned&&(job.name==='tier-plan'||fixture.lane==='spec-only'&&job.name.startsWith('web-'))
+    const fixtureEvidence=mkdtempSync(resolve(root,'case-evidence-'))
+    if(fixture.reuse==='pull_request')writeFileSync(resolve(fixtureEvidence,'go-timing-measurement.json'),JSON.stringify({version:1,job:'go-timing',classes:{},runId:'123',attempt:'2',sha:'a'.repeat(40)}))
+    const fixtureJobs=jobs.map(job=>fixture.reuse==='pull_request'&&job.name==='go-timing'?{...job,...finished,conclusion:'success'}:fixture.planned&&(job.name==='tier-plan'||fixture.lane==='spec-only'&&job.name.startsWith('web-'))
       ? {...job,...finished,conclusion:'success'}:job)
     writeFileSync(resolve(root,'gh'),`#!${process.execPath}\nif (process.argv[2] !== 'api' || process.argv[3] !== 'repos/example/aeon/actions/runs/123/attempts/2/jobs?per_page=100&page=1') process.exit(2)\nprocess.stdout.write(${JSON.stringify(JSON.stringify({total_count:fixtureJobs.length,jobs:fixtureJobs}))})\n`,{mode:0o755})
     writeFileSync(summary,'')
-    const result=spawnSync(process.execPath,[fileURLToPath(new URL('./measure.mjs',import.meta.url)),evidence],{
+    const result=spawnSync(process.execPath,[fileURLToPath(new URL('./measure.mjs',import.meta.url)),fixtureEvidence],{
       cwd:root,encoding:'utf8',timeout:10_000,
       env:{PATH:root,GITHUB_REPOSITORY:'example/aeon',GITHUB_RUN_ID:'123',GITHUB_RUN_ATTEMPT:'2',GITHUB_SHA:'a'.repeat(40),
         GITHUB_STEP_SUMMARY:summary,CI_LANE:fixture.lane,REUSE:fixture.reuse??'',SOURCE_RUN:fixture.reuse?'456':''},
@@ -1584,6 +1587,45 @@ test('three-tier full proof rejects incomplete gated results and old two-tier ev
   const {['GATED-FULL']:gated,...oldClasses}=report.classes
   assert.throws(()=>checkFull({...report,classes:oldClasses},env),/Full execution/)
   for(const counts of [{...gated,notRun:1},{...gated,failed:1}])assert.throws(()=>checkFull({...report,classes:{...report.classes,'GATED-FULL':counts}},env),/Full execution/)
+})
+
+
+test('MG reuse lookup misses retain main full scheduling and case selection',()=>{
+  const exists=()=>true
+  for(const paths of [[],['internal/nodes/module.go'],undefined]) {
+    for(const mgReuse of [undefined,'off','ON','true','on']) {
+      assert.equal(schedulingMode('merge_group',paths,exists,{mgReuse}),'full')
+      const selected=runnerSelection([g('internal/nodes','TestEssential','ESSENTIAL'),g('internal/nodes','TestFull','GATED-FULL')],
+        {event:'merge_group',paths},schedulingDecision('merge_group',paths,exists),{mode:'essential',layout:'static'})
+      assert.equal(selected.full,true)
+      assert.equal(selected.tests.length,2)
+    }
+  }
+  assert.equal(schedulingMode('pull_request',['internal/nodes/module.go'],exists),'essential')
+  const ci=readFileSync(new URL('../../.github/workflows/ci.yml',import.meta.url),'utf8')
+  assert.match(ci,/^  CI_MG_REUSE: \$\{\{ vars.CI_MG_REUSE \}\}$/m)
+  assert.match(ci,/^  CI_AFFECTED_LANE: \$\{\{ vars.CI_AFFECTED_LANE \}\}$/m)
+})
+
+
+test('MG measurements count only fresh timing guards beside reused PR evidence',()=>{
+  const selected=[g('internal/budget','TestClock','GATED-FULL')]
+  const timing={...reportCases(selected,[{key:key(selected[0]),status:'passed',started:true}],1,'go-timing'),runId:'2',attempt:'1',sha:'a'}
+  const jobs=[{name:'go-timing',status:'completed',conclusion:'success',started_at:'2026-10-05T10:00:00Z',completed_at:'2026-10-05T10:01:00Z'},
+    {name:'go-test (1)',status:'completed',conclusion:'skipped'}]
+  const options={runId:'2',attempt:'1',sha:'a',reusedFrom:'123',freshTiming:true}
+  const report=aggregate([timing],jobs,options)
+  assert.equal(report.coverage,'reused')
+  assert.equal(report.classes['GATED-FULL'].passed,1)
+  assert.equal(report.reusedFrom,'123')
+  assert.match(report.caseScope,/Only freshly executed timing guard cases/)
+  assert.throws(()=>aggregate([{...timing,job:'go-test-1'}],jobs,options),/must not report fresh test passes/)
+  assert.throws(()=>aggregate([timing],jobs,{...options,freshTiming:false}),/must not report fresh test passes/)
+  for(const reports of [[],[{...timing,attempt:'2'}]]) {
+    const missing=aggregate(reports,jobs,options)
+    assert.equal(missing.coverage,'incomplete')
+    assert.deepEqual(missing.missingEvidence,['go-timing'])
+  }
 })
 
 test('web collection is reused within a process only while the stamped tree is unchanged', () => {
