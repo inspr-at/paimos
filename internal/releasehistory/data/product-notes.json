@@ -5200,32 +5200,32 @@
     "261008161926.0.0": {
       "release_channel": "stable",
       "release_sequence": 126,
-      "snapshot_sha256": "4948989559e87ae22cc17a26e1c5920536183bda9178f3005fe7d3f1ac0e5268",
-      "captured_at": "2026-10-08T16:19:32Z",
+      "snapshot_sha256": "12c6027168eac52e39292757842770f365650b20a395b274bc732790ffb892ae",
+      "captured_at": "2026-10-08T16:40:09Z",
       "release_revision": 1,
       "items": [
         {
           "key": "AEON-642",
           "pill_en": "Your colours",
           "pill_de": "Eigene Farben",
-          "benefit_en": "Choose, duplicate and edit themes and set the accent colours with a live preview; Suggest picks a readable shade in one click.",
-          "benefit_de": "Themes auswählen, duplizieren und bearbeiten und Akzentfarben mit Live-Vorschau festlegen; Vorschlagen wählt mit einem Klick einen gut lesbaren Farbton.",
+          "benefit_en": "Choose, duplicate and edit themes and set the accent colours with a live preview.",
+          "benefit_de": "Themes auswählen, duplizieren und bearbeiten und Akzentfarben mit Live-Vorschau festlegen.",
           "group": "features"
         },
         {
           "key": "AEON-848",
           "pill_en": "Delivery status per ticket",
           "pill_de": "Lieferstatus pro Ticket",
-          "benefit_en": "Each ticket shows how far its change has come (reviewed, pushed, tested, queued or merged) and who acts next.",
-          "benefit_de": "Jedes Ticket zeigt, wie weit seine Änderung ist (geprüft, gepusht, getestet, eingereiht oder gemergt) und wer als Nächstes dran ist.",
+          "benefit_en": "With GitHub connected, linked tickets show how far their change has come (reviewed, pushed, tested, queued or merged) and who acts next.",
+          "benefit_de": "Mit verbundenem GitHub zeigen verknüpfte Tickets, wie weit ihre Änderung ist (geprüft, gepusht, getestet, eingereiht oder gemergt) und wer als Nächstes dran ist.",
           "group": "features"
         },
         {
           "key": "AEON-849",
           "pill_en": "Stall alerts",
           "pill_de": "Hinweis bei Stillstand",
-          "benefit_en": "When a delivery step stalls past its deadline, the lead is told instead of the work sitting silently.",
-          "benefit_de": "Wenn ein Lieferschritt seine Frist überschreitet, erfährt es der Lead, statt dass die Arbeit still liegen bleibt.",
+          "benefit_en": "When a tracked delivery step passes its deadline, PAIMOS records an alert and notifies a configured lead with read access.",
+          "benefit_de": "Wenn ein erfasster Lieferschritt seine Frist überschreitet, hält PAIMOS einen Hinweis fest und benachrichtigt einen eingerichteten Lead mit Leserechten.",
           "group": "features"
         },
         {
@@ -5248,8 +5248,8 @@
           "key": "AEON-852",
           "pill_en": "Merge audit",
           "pill_de": "Prüfprotokoll für Merges",
-          "benefit_en": "Every merge is linked to its ticket and review, and merges that skip the queue or the review are flagged.",
-          "benefit_de": "Jeder Merge ist mit Ticket und Prüfung verknüpft, und Merges, die Queue oder Prüfung umgehen, werden markiert.",
+          "benefit_en": "Observed merges are linked to available ticket and review records, and merges that skip the queue or lack a verified review are flagged.",
+          "benefit_de": "Beobachtete Merges werden mit vorhandenen Ticket- und Prüfnachweisen verknüpft; Merges ohne Queue oder bestätigte Prüfung werden markiert.",
           "group": "features"
         },
         {
@@ -5288,16 +5288,16 @@
           "key": "AEON-859",
           "pill_en": "Safe daemon upgrades",
           "pill_de": "Sichere Daemon-Updates",
-          "benefit_en": "Upgrading or rolling back the agent daemon never leaves its saved state unreadable.",
-          "benefit_de": "Ein Update oder Zurückrollen des Agenten-Daemons macht seinen gespeicherten Zustand nie unlesbar.",
+          "benefit_en": "Daemon upgrades migrate supported saved state; unsupported state versions are refused without overwriting them.",
+          "benefit_de": "Daemon-Updates migrieren unterstützte gespeicherte Zustände; nicht unterstützte Zustandsversionen werden ohne Überschreiben abgewiesen.",
           "group": "features"
         },
         {
           "key": "AEON-864",
-          "pill_en": "All accounts counted",
-          "pill_de": "Alle Konten berücksichtigt",
-          "benefit_en": "PAIMOS sees every account per provider with its limits and reset times, so it can spread work across them.",
-          "benefit_de": "PAIMOS sieht jedes Konto pro Anbieter mit Limits und Rücksetzzeiten und kann Arbeit darauf verteilen.",
+          "pill_en": "Registered accounts counted",
+          "pill_de": "Registrierte Konten berücksichtigt",
+          "benefit_en": "PAIMOS sees registered accounts per provider with available limits and reset times, so it can spread work across them.",
+          "benefit_de": "PAIMOS sieht registrierte Konten pro Anbieter mit verfügbaren Limits und Rücksetzzeiten und kann Arbeit darauf verteilen.",
           "group": "features"
         },
         {
@@ -5352,24 +5352,24 @@
           "key": "AEON-883",
           "pill_en": "Boost today",
           "pill_de": "Heute mehr nutzen",
-          "benefit_en": "Let agents use more of your allowance for one day.",
-          "benefit_de": "Agenten für einen Tag mehr vom Kontingent nutzen lassen.",
+          "benefit_en": "Let agents use more of your allowance today.",
+          "benefit_de": "Agenten heute mehr vom Kontingent nutzen lassen.",
           "group": "features"
         },
         {
           "key": "AEON-885",
           "pill_en": "Agents notice changes",
           "pill_de": "Agenten bemerken Änderungen",
-          "benefit_en": "When you change a setting, agents react within seconds; nobody has to tell them.",
-          "benefit_de": "Wenn Sie eine Einstellung ändern, reagieren Agenten in Sekunden, ohne dass es ihnen jemand sagen muss.",
+          "benefit_en": "Subscribed agents can receive setting-change notifications without a manual message.",
+          "benefit_de": "Agenten mit Ereignisabonnement können Benachrichtigungen über Einstellungsänderungen ohne manuelle Nachricht empfangen.",
           "group": "features"
         },
         {
           "key": "AEON-886",
-          "pill_en": "Live usage per model",
-          "pill_de": "Live-Nutzung für jedes Modell",
-          "benefit_en": "PAIMOS shows real limits and reset times for Grok, Claude and Codex, even between runs.",
-          "benefit_de": "PAIMOS zeigt echte Limits und Rücksetzzeiten für Grok, Claude und Codex, auch zwischen Läufen.",
+          "pill_en": "Usage per account",
+          "pill_de": "Nutzung je Konto",
+          "benefit_en": "With usage reading enabled, PAIMOS can show reported usage and reset times for Grok, Claude and Codex, even between runs.",
+          "benefit_de": "Bei aktivierter Nutzungserfassung kann PAIMOS gemeldete Nutzung und Rücksetzzeiten für Grok, Claude und Codex auch zwischen Läufen anzeigen.",
           "group": "features"
         },
         {
@@ -5416,8 +5416,8 @@
           "key": "AEON-903",
           "pill_en": "Faster phone approvals",
           "pill_de": "Schnellere Freigaben am Telefon",
-          "benefit_en": "Approval requests reach your phone within seconds, and the phone settings respond right away.",
-          "benefit_de": "Freigabeanfragen erreichen Ihr Telefon in Sekunden, und die Telefon-Einstellungen reagieren sofort.",
+          "benefit_en": "Approval requests can reach your phone sooner, and passkey setup shows progress while waiting.",
+          "benefit_de": "Freigabeanfragen können das Telefon schneller erreichen; die Passkey-Einrichtung zeigt während des Wartens den Fortschritt.",
           "group": "features"
         },
         {
@@ -5456,8 +5456,8 @@
           "key": "AEON-916",
           "pill_en": "Project quick actions",
           "pill_de": "Schnellaktionen pro Projekt",
-          "benefit_en": "Apply or dismiss a whole project's suggestions, or turn the autopilot off there, with a preview and Undo.",
-          "benefit_de": "Alle Vorschläge eines Projekts anwenden oder verwerfen oder dort den Autopiloten ausschalten, mit Vorschau und Rückgängig.",
+          "benefit_en": "Apply or dismiss up to 1,000 eligible suggestions per project, or turn the autopilot off there, with a preview and Undo.",
+          "benefit_de": "Bis zu 1.000 zulässige Vorschläge je Projekt anwenden oder verwerfen oder dort den Autopiloten ausschalten, mit Vorschau und Rückgängig.",
           "group": "features"
         },
         {
@@ -5480,32 +5480,32 @@
           "key": "AEON-943",
           "pill_en": "Faster chat",
           "pill_de": "Schnellerer Chat",
-          "benefit_en": "Messages and Stop reach a running agent within a second or two.",
-          "benefit_de": "Nachrichten und Stopp erreichen einen laufenden Agenten in ein, zwei Sekunden.",
+          "benefit_en": "Messages and Stop requests can reach managed agents sooner.",
+          "benefit_de": "Nachrichten und Stopp-Anfragen können verwaltete Agenten schneller erreichen.",
           "group": "features"
         },
         {
           "key": "AEON-975",
           "pill_en": "Faster chat with agents",
           "pill_de": "Schnellerer Agenten-Chat",
-          "benefit_en": "Messages appear instantly, replies land in the thread, and project members can read agent chats.",
-          "benefit_de": "Nachrichten erscheinen sofort, Antworten landen im Verlauf, und Projektmitglieder können Agenten-Chats lesen.",
+          "benefit_en": "Your messages show in the thread as you send them, replies land there too, and authorized project members can read managed agent chats.",
+          "benefit_de": "Eigene Nachrichten erscheinen beim Senden im Verlauf, Antworten landen dort ebenfalls, und berechtigte Projektmitglieder können Chats mit verwalteten Agenten lesen.",
           "group": "features"
         },
         {
           "key": "AEON-976",
           "pill_en": "Readable agent replies",
           "pill_de": "Lesbare Agenten-Antworten",
-          "benefit_en": "Code, tables and shell output read cleanly; stop a reply with Esc; scroll through the whole history.",
-          "benefit_de": "Code, Tabellen und Shell-Ausgaben sind gut lesbar; Antworten lassen sich mit Esc stoppen; der ganze Verlauf ist abrufbar.",
+          "benefit_en": "Code, tables and shell output read cleanly; stop supported managed-agent replies with Esc; scroll through the whole history.",
+          "benefit_de": "Code, Tabellen und Shell-Ausgaben sind gut lesbar; bei verwalteten Agenten mit Unterbrechungsfunktion lassen sich Antworten mit Esc stoppen; der ganze Verlauf ist abrufbar.",
           "group": "features"
         },
         {
           "key": "AEON-977",
           "pill_en": "Clear message status",
           "pill_de": "Klarer Nachrichtenstatus",
-          "benefit_en": "See whether each message was sent, delivered or read, and edit or cancel queued ones.",
-          "benefit_de": "Sehen, ob jede Nachricht gesendet, zugestellt oder gelesen wurde; wartende Nachrichten bearbeiten oder abbrechen.",
+          "benefit_en": "See whether your messages to managed agents were sent, delivered or read, and edit or cancel those not yet offered to the agent.",
+          "benefit_de": "Sehen, ob eigene Nachrichten an verwaltete Agenten gesendet, zugestellt oder gelesen wurden; noch nicht an den Agenten übergebene Nachrichten bearbeiten oder abbrechen.",
           "group": "features"
         }
       ]
