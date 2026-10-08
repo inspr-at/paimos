@@ -2396,6 +2396,8 @@
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotContinuationGuards","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotDeadlineWriteRollsBack","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotDuplicatesEligibilityAndCancellation","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentruns","name":"TestParentQueueSnapshotHiddenMovedLeaf","tier":"GATED-FULL"}
