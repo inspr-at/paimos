@@ -1,0 +1,77 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "questions.ask",
+      "questions.decide",
+      "questions.read"
+    ],
+    "member": [
+      "questions.ask",
+      "questions.decide",
+      "questions.read"
+    ],
+    "owner": [
+      "questions.ask",
+      "questions.decide",
+      "questions.read"
+    ],
+    "viewer": [
+      "questions.read"
+    ]
+  },
+  "project_filtered": {
+    "GET /api/decision-desk": true
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Ask questions",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Questions",
+      "key": "questions.ask",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": false,
+      "description": "Decide questions",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Questions",
+      "key": "questions.decide",
+      "owner_workstation_grantable": false,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read questions",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Questions",
+      "key": "questions.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "routes": {
+    "GET /api/decision-desk": "questions.read",
+    "GET /api/projects/{projectId}/questions": "questions.read",
+    "GET /api/questions/{questionId}": "questions.read",
+    "GET /api/questions/{questionId}/status": "questions.read",
+    "POST /api/projects/{projectId}/questions": "questions.ask",
+    "POST /api/questions/{questionId}/decision": "questions.decide"
+  },
+  "words": {
+    "resources": {
+      "questions": "questions"
+    }
+  }
+}

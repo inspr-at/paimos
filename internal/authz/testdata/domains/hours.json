@@ -1,0 +1,65 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "hours.approve",
+      "hours.read",
+      "hours.write"
+    ],
+    "member": [
+      "hours.read",
+      "hours.write"
+    ],
+    "owner": [
+      "hours.approve",
+      "hours.read",
+      "hours.write"
+    ],
+    "viewer": [
+      "hours.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Approve hours",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Hours",
+      "key": "hours.approve",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read hours",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Hours",
+      "key": "hours.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write hours",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Hours",
+      "key": "hours.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "hours": "hours"
+    }
+  }
+}

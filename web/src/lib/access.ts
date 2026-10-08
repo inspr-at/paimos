@@ -2,9 +2,7 @@
 // Access: people, invites, roles, project access, agents and the access audit
 // (ADR-003, the authz contract). Wire types mirror the contract exactly; the
 // helpers below are free of Vue so they can be unit-tested.
-import permissionWords from '../../../internal/authz/permission_labels.json' with { type: 'json' }
-import projectSelfPermissions from '../../../internal/authz/project_self_permissions.json' with { type: 'json' }
-import builtinAgentExclusions from '../../../internal/authz/builtin_agent_exclusions.json' with { type: 'json' }
+import { permissionWords, projectSelfPermissions, builtinAgentExclusions } from '../../../internal/authz/permission_data.mjs'
 import { api } from './api.ts'
 import { learnPictures } from './avatar.ts'
 import { sessionGone } from './authz.ts'

@@ -1,0 +1,9 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "project_filtered": {
+    "GET /api/me/greeting": true
+  },
+  "routes": {
+    "GET /api/me/greeting": "profile.read|profile.portal_read"
+  }
+}

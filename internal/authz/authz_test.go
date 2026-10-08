@@ -242,7 +242,7 @@ func TestRouteSourceCoverage(t *testing.T) {
 		if walkErr != nil {
 			return walkErr
 		}
-		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || filepath.Base(path) == "route_map.go" {
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") || (filepath.Base(path) == "route_map.go" || filepath.Dir(path) == filepath.Join("..", "authz") && strings.HasPrefix(filepath.Base(path), "routes_")) {
 			return nil
 		}
 		body, err := os.ReadFile(path)

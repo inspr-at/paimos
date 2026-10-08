@@ -3,15 +3,8 @@
 package authz
 
 import (
-	_ "embed"
-	"encoding/json"
 	"strings"
 )
-
-// The key dialogs and API/CLI diagnostics use one vocabulary.
-//
-//go:embed permission_labels.json
-var permissionWordsJSON []byte
 
 type permissionVocabulary struct {
 	Resources map[string]string `json:"resources"`
@@ -19,13 +12,8 @@ type permissionVocabulary struct {
 	Special   map[string]string `json:"special"`
 }
 
-var permissionWords = func() permissionVocabulary {
-	var words permissionVocabulary
-	if err := json.Unmarshal(permissionWordsJSON, &words); err != nil {
-		panic("invalid embedded permission labels")
-	}
-	return words
-}()
+// The key dialogs and API/CLI diagnostics assemble the same domain vocabulary.
+var permissionWords = assembledPermissionData.Words
 
 func PermissionLabel(key string) string {
 	if label := permissionWords.Special[key]; label != "" {
