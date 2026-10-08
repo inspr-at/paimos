@@ -99,11 +99,16 @@ func (c boardCatalog) effortCandidates(id, effort string, level int, review bool
 			latest = v
 		}
 	}
+	activeVersion := false
+	for _, p := range ps {
+		_, _, v := ProfileLine(p)
+		activeVersion = activeVersion || v == latest && p.Enabled && !p.Retired
+	}
 	out := []Profile{}
 	levels := []int{}
 	for _, p := range ps {
 		_, _, v := ProfileLine(p)
-		if v != latest {
+		if v != latest || activeVersion && (p.Retired || !p.Enabled) {
 			continue
 		}
 		if review && (p.Effort != "xhigh" || p.Tier != "strong" && p.Tier != "frontier") {

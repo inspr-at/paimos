@@ -4,6 +4,7 @@ package modelregistry
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/capacity"
+	"github.com/inspr-at/paimos/internal/linkvault"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
@@ -304,6 +306,43 @@ func TestMinimalAutoAcceptOnlyUsedSuccessors(t *testing.T) {
 		}
 		if accepted {
 			t.Fatal("new line auto accepted")
+		}
+		return nil
+	})
+	// Exercise the actual refresh path: API lists contain model IDs only,
+	// so the successor inherits the registered native efforts, never default.
+	mod := NewWithVault(appPool, []byte(strings.Repeat("x", 32)))
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		cipher, err := linkvault.Encrypt(mod.vaultKey, admin.TenantID, "models/"+account+"/openai", "synthetic-discovery-fixture")
+		if err != nil {
+			return err
+		}
+		if _, err = tx.Exec(t.Context(), `INSERT INTO model_discovery_credentials(tenant_id,account_id,vendor,ciphertext) VALUES($1,$2,'openai',$3)`, admin.TenantID, account, cipher); err != nil {
+			return err
+		}
+		_, err = tx.Exec(t.Context(), `UPDATE model_refresh_settings SET api_enabled=true,auto_add_profiles=true`)
+		return err
+	})
+	mod.discovery = &http.Client{Transport: roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() != vendorURLs["openai"] {
+			t.Fatal("unexpected vendor")
+		}
+		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"data":[{"id":"gpt-6.3-sol"},{"id":"gpt-7-newline"}]}`)), Header: http.Header{}}, nil
+	})}
+	result, err := mod.runRefresh(tenant.WithPrincipal(t.Context(), admin), admin, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Added < 1 {
+		t.Fatal("refresh did not accept a used successor", result)
+	}
+	inRegistry(t, admin, func(tx pgx.Tx) error {
+		var accepted, bad int
+		if err := tx.QueryRow(t.Context(), `SELECT count(*) FILTER(WHERE model='gpt-6.3-sol' AND effort='high' AND enabled),count(*) FILTER(WHERE (model='gpt-7-newline' AND enabled) OR (model='gpt-6.3-sol' AND effort='default')) FROM model_profiles`).Scan(&accepted, &bad); err != nil {
+			return err
+		}
+		if accepted != 1 || bad != 0 {
+			t.Fatal("incorrect successor admission", accepted, bad)
 		}
 		return nil
 	})

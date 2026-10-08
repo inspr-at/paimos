@@ -311,9 +311,6 @@ func resolveBoardWork(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 			out.Trace.Blocked = "admission_wait"
 		}
 	}
-	if len(d.Cant) > 0 {
-		out.Trace.Held = append(out.Trace.Held, d.Cant...)
-	}
 	return &out, nil
 }
 

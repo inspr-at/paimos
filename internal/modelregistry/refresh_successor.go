@@ -3,8 +3,10 @@ package modelregistry
 
 import (
 	"context"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"sort"
 )
 
 type refreshCooldown struct{ RetryAfter int }
@@ -76,4 +78,68 @@ func acceptUsedSuccessor(ctx context.Context, tx pgx.Tx, p tenant.Principal, pin
 		}
 	}
 	return true, nil
+}
+
+// Vendor model lists omit native efforts. For a used, registered successor,
+// carry only the predecessor's registered efforts instead of publishing a
+// synthetic "default" level. Both identity and ordering use AEON-1000 SQL.
+func successorObservations(ctx context.Context, tx pgx.Tx, observations []Observation, limit int) ([]Observation, bool, error) {
+	out := []Observation{}
+	limited := false
+	for _, o := range observations {
+		efforts := []string{o.Effort}
+		if o.Effort == "default" {
+			rows, err := tx.Query(ctx, `WITH predecessor AS (
+ SELECT p.model FROM model_profiles p WHERE p.harness=$1 AND p.enabled
+ AND (aeon_model_line(p.harness,p.model))[1]=(aeon_model_line($1,$2))[1]
+ AND aeon_model_version_newer((aeon_model_line($1,$2))[2],(aeon_model_line(p.harness,p.model))[2])
+ AND NOT EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.profile_id=p.id)
+ AND (EXISTS(SELECT 1 FROM model_pref_orders o WHERE aeon_model_board_line(p.family,p.harness,p.model)=ANY(o.rank))
+ OR EXISTS(SELECT 1 FROM model_rules r WHERE r.line=aeon_model_board_line(p.family,p.harness,p.model)))
+ ORDER BY p.created_at DESC,p.id LIMIT 1)
+ SELECT DISTINCT p.effort FROM model_profiles p JOIN predecessor old ON old.model=p.model
+ WHERE p.harness=$1 AND p.enabled AND NOT EXISTS(SELECT 1 FROM model_profile_retirements r WHERE r.profile_id=p.id)
+ ORDER BY p.effort LIMIT 17`, o.Harness, o.Model)
+			if err != nil {
+				return nil, false, err
+			}
+			registered := []string{}
+			for rows.Next() {
+				var e string
+				if err := rows.Scan(&e); err != nil {
+					rows.Close()
+					return nil, false, err
+				}
+				registered = append(registered, e)
+			}
+			err = rows.Err()
+			rows.Close()
+			if err != nil {
+				return nil, false, err
+			}
+			if len(registered) > 16 {
+				return nil, false, modelprefs.ErrBoardBounds
+			}
+			if len(registered) > 0 {
+				efforts = registered
+				sort.Strings(efforts)
+			}
+		}
+		for _, e := range efforts {
+			if len(out) >= limit {
+				limited = true
+				break
+			}
+			next := o
+			next.Effort = e
+			if e != o.Effort {
+				next.ReportID = EvidenceID(o.ReportID + "/" + e)
+			}
+			out = append(out, next)
+		}
+		if limited {
+			break
+		}
+	}
+	return out, limited, nil
 }

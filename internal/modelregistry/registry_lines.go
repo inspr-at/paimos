@@ -217,7 +217,12 @@ func (m *Module) editLine(w http.ResponseWriter, r *http.Request) {
 			out.Profiles = append(out.Profiles, prof)
 		}
 		for _, old := range before {
-			if _, err := tx.Exec(ctx, `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($1,$2,'Edited in Settings › Models',$3) ON CONFLICT(tenant_id,profile_id) DO UPDATE SET reason=excluded.reason,retired_by=excluded.retired_by,retired_at=now(),retire_at=NULL,applied_at=NULL`, p.TenantID, old.ID, p.ID); err != nil {
+			// Retirement rows reject UPDATE. Replace an existing future schedule
+			// through the same delete/insert lifecycle used by Undo.
+			if _, err := tx.Exec(ctx, `DELETE FROM model_profile_retirements WHERE profile_id=$1`, old.ID); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(ctx, `INSERT INTO model_profile_retirements(tenant_id,profile_id,reason,retired_by) VALUES($1,$2,'Edited in Settings › Models',$3)`, p.TenantID, old.ID, p.ID); err != nil {
 				return err
 			}
 		}
@@ -361,7 +366,9 @@ func applyScheduledRetirements(ctx context.Context, tx pgx.Tx, now time.Time) ([
 	if len(ids) > 512 {
 		return nil, modelprefs.ErrBoardBounds
 	}
-	if _, err := tx.Exec(ctx, `UPDATE model_profile_retirements SET applied_at=$2,retired_at=$2 WHERE profile_id=ANY($1::uuid[])`, ids, now); err != nil {
+	if _, err := tx.Exec(ctx, `WITH due AS (DELETE FROM model_profile_retirements WHERE profile_id=ANY($1::uuid[]) RETURNING *)
+ INSERT INTO model_profile_retirements(tenant_id,profile_id,retired_at,reason,retired_by,retire_at,applied_at)
+ SELECT tenant_id,profile_id,$2,reason,retired_by,retire_at,$2 FROM due`, ids, now); err != nil {
 		return nil, err
 	}
 	return changes, nil

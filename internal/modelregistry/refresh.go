@@ -293,6 +293,17 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 			if cfg.APIEnabled && valid && fetched.fresh {
 				observations := discoveryObservations(input.Vendor, out.At.UTC().Format(time.RFC3339Nano)+"/"+input.AccountID, fetched.ids)
 				result.State, result.Seen = "fresh", len(fetched.ids)
+				if cfg.AutoAddProfiles {
+					var limited bool
+					var err error
+					observations, limited, err = successorObservations(ctx, tx, observations, remaining)
+					if err != nil {
+						return err
+					}
+					if limited {
+						result.State = "limited"
+					}
+				}
 				if len(observations) > remaining {
 					result.State = "limited"
 					observations = observations[:remaining]
