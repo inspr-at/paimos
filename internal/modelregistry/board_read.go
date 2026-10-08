@@ -135,16 +135,19 @@ type boardCard struct {
 	Lock         *modelprefs.BoardLock `json:"lock,omitempty"`
 }
 type boardColumn struct {
-	Column   string `json:"column"`
-	Label    string `json:"label"`
-	Short    string `json:"short"`
-	Sentence string `json:"sentence"`
-	Fixed    bool   `json:"fixed"`
-	Hidden   bool   `json:"hidden"`
-	Source   string `json:"source"`
-	Thinking struct {
-		Word   string `json:"word"`
-		Source string `json:"source"`
+	Column       string `json:"column"`
+	Label        string `json:"label"`
+	Short        string `json:"short"`
+	Sentence     string `json:"sentence"`
+	Fixed        bool   `json:"fixed"`
+	Hidden       bool   `json:"hidden"`
+	Source       string `json:"source"`
+	FollowsFirst bool   `json:"follows_first"`
+	Thinking     struct {
+		Word       string  `json:"word"`
+		Source     string  `json:"source"`
+		FromColumn bool    `json:"from_column"`
+		Own        *string `json:"own"`
 	} `json:"thinking"`
 	List   []boardCard           `json:"list"`
 	Top    []boardCard           `json:"top"`
@@ -286,6 +289,13 @@ func boardDocumentFor(ctx context.Context, tx pgx.Tx, s modelprefs.BoardState, c
 		d = modelprefs.ResolveBoard(columnState, modelprefs.BoardQuery{Column: k.Slug, Situation: situation}, nil)
 		col := boardColumn{Column: k.Slug, Label: k.Label, Short: k.Label, Sentence: k.Hint, Fixed: k.Slug == "other" || k.Slug == "concept" || strings.HasPrefix(k.Slug, "review:"), Hidden: slices.Contains(out.Profile.HiddenKinds, k.Slug), Source: d.Source, List: []boardCard{}, Top: []boardCard{}, Free: []boardCard{}, Bottom: []boardCard{}, Not: []boardCard{}, Cant: d.Cant}
 		col.Thinking.Word, col.Thinking.Source = d.Thinking, d.ThinkingSource
+		col.FollowsFirst, col.Thinking.FromColumn = d.FollowsFirst, d.ThinkingColumn
+		for _, order := range s.Orders {
+			if order.ProfileID == out.Profile.ID && order.Column == k.Slug && order.Situation == d.Situation {
+				col.Thinking.Own = order.Thinking
+				break
+			}
+		}
 		for _, id := range d.Rank {
 			card := c.card(id, d)
 			placed[id] = true

@@ -3,8 +3,8 @@ import { computed, onBeforeUnmount, ref, watch, type Ref } from 'vue'
 import { APIError } from './api'
 import { can, onAccessChange } from './authz'
 import { toast } from './toast'
-import { canMove, contextKey, moveOrder, moveRule, orderBody, rulesBody, type BoardCard, type BoardColumn, type BoardContext, type BoardProfile, type BoardZone, type ModelBoardDocument, type RulesDocument } from './modelsBoard'
-import { dismissBoardLine, getBoard, getBoardRules, putBoardOrder, putBoardProfile, putBoardRules, resetBoardOrder } from './modelsBoardApi'
+import { canMove, columnContext, contextKey, moveOrder, moveRule, orderBody, rulesBody, type BoardCard, type BoardColumn, type BoardContext, type BoardProfile, type BoardZone, type ModelBoardDocument, type RulesDocument, type ThinkingWord } from './modelsBoard'
+import { dismissBoardLine, getBoard, getBoardRules, putBoardOrder, putBoardProfile, putBoardRules, putColumnThinking, resetBoardOrder } from './modelsBoardApi'
 import { useSession } from '../stores/session'
 import { preferenceFailure } from './modelsSettings'
 
@@ -89,7 +89,7 @@ export function useModelsBoard(context: Ref<BoardContext>, german: Ref<boolean>)
   }
   async function move(column: BoardColumn, card: BoardCard, zone: BoardZone, index: number, why = '') {
     if (!canMove(card, context.value)) return false
-    const target = { ...context.value }, person = document.value?.person_id ?? null
+    const target = columnContext(context.value, column.column), person = document.value?.person_id ?? null
     if (target.layer === 'rules') {
       if (!rules.value || (zone !== 'free' && !why.trim())) return false
       const before = rulesBody(rules.value, column.column), after = moveRule(before, card.line, zone, index, why.trim())
@@ -114,8 +114,16 @@ export function useModelsBoard(context: Ref<BoardContext>, german: Ref<boolean>)
   }
   async function reset(column: BoardColumn) {
     const board = document.value; if (!board || column.source !== 'own' || context.value.layer === 'rules') return false
-    const target = { ...context.value }, before = orderBody(column), person = board.person_id
+    const target = columnContext(context.value, column.column), before = orderBody(column), person = board.person_id
     return write(revision => resetBoardOrder(target, column.column, revision, person), revision => putBoardOrder(target, column.column, before, revision, person))
+  }
+  async function thinking(column: BoardColumn, value: ThinkingWord | null) {
+    const board = document.value
+    if (!board || context.value.layer === 'rules' || column.column.startsWith('review:')) return false
+    const before = column.thinking.own ?? null
+    if (value === before) return false
+    const target = columnContext(context.value, column.column), person = board.person_id
+    return write(revision => putColumnThinking(target, column.column, value, revision, person), revision => putColumnThinking(target, column.column, before, revision, person))
   }
   async function dismiss(line: string) {
     const board = document.value; if (!board || context.value.layer === 'rules') return false
@@ -126,5 +134,5 @@ export function useModelsBoard(context: Ref<BoardContext>, german: Ref<boolean>)
   const unsubscribe = onAccessChange(() => { generation++; epoch.value++; abort?.abort(); busy.value = false; if (!can('models.read', context.value.project)) document.value = null; else void load() })
   watch(() => can('models.read', context.value.project), allowed => { if (allowed && !document.value && !loading.value) void load() })
   onBeforeUnmount(() => { alive = false; generation++; epoch.value++; abort?.abort(); unsubscribe() })
-  return { document, rules, busy, loading, error, announcement, editable, key, actionKey, load, move, profile, reset, dismiss, previewTemplate, applyTemplate }
+  return { document, rules, busy, loading, error, announcement, editable, key, actionKey, load, move, profile, reset, thinking, dismiss, previewTemplate, applyTemplate }
 }

@@ -3,16 +3,16 @@
 import ColumnHead from './ColumnHead.vue'
 import ModelCard from './ModelCard.vue'
 import CantNote from './CantNote.vue'
-import { boardText, canMove, zonesFor, type BoardCard, type BoardColumn, type BoardContext, type BoardZone } from '../../../lib/modelsBoard'
-const props = defineProps<{ column: BoardColumn; context: BoardContext; editable: boolean; busy: boolean; german: boolean; full: boolean; inherited?: boolean; template?: 'best' | 'balanced' | 'save' | null; dragging?: string; target?: { column: string; zone: BoardZone; index: number } }>()
-defineEmits<{ open: [column: BoardColumn, card: BoardCard, zone: BoardZone, event: MouseEvent]; keys: [column: BoardColumn, card: BoardCard, event: KeyboardEvent]; press: [column: BoardColumn, card: BoardCard, event: PointerEvent]; menu: [column: BoardColumn, event: MouseEvent]; reset: [column: BoardColumn] }>()
+import { boardText, canMove, zonesFor, type BoardCard, type BoardColumn, type BoardContext, type BoardZone, type ThinkingWord } from '../../../lib/modelsBoard'
+const props = defineProps<{ column: BoardColumn; context: BoardContext; editable: boolean; busy: boolean; german: boolean; full: boolean; expert?: boolean; contextKey?: string; inherited?: boolean; template?: 'best' | 'balanced' | 'save' | null; dragging?: string; target?: { column: string; zone: BoardZone; index: number } }>()
+defineEmits<{ open: [column: BoardColumn, card: BoardCard, zone: BoardZone, event: MouseEvent]; keys: [column: BoardColumn, card: BoardCard, event: KeyboardEvent]; press: [column: BoardColumn, card: BoardCard, event: PointerEvent]; menu: [column: BoardColumn, event: MouseEvent]; reset: [column: BoardColumn]; thinking: [column: BoardColumn, value: ThinkingWord | null] }>()
 const labels: Record<BoardZone, [string, string]> = { list: ['In this order', 'In dieser Reihenfolge'], top: ['Pinned to top', 'Oben angepinnt'], free: ['People order these', 'Personen ordnen diese'], bottom: ['Pinned to bottom', 'Unten angepinnt'], not: ['Not allowed', 'Nicht erlaubt'] }
 const text = (en: string, de: string) => boardText(props.german, en, de)
 function number(zone: BoardZone, index: number) { if (zone === 'not') return undefined; return index + 1 + (zone === 'free' ? props.column.top.length : zone === 'bottom' ? props.column.top.length + props.column.free.length : 0) }
 </script>
 <template>
   <section class="bcol" :data-column="column.column" :aria-label="column.label">
-    <ColumnHead :column="column" :layer="context.layer" :german="german" :editable="editable && !busy" :full="full" :inherited="inherited" :template="template" @menu="$emit('menu', column, $event)" @reset="$emit('reset', column)" />
+    <ColumnHead :column="column" :layer="context.layer" :german="german" :editable="editable" :busy="busy" :expert="expert" :context-key="contextKey" :full="full" :inherited="inherited" :template="template" @menu="$emit('menu', column, $event)" @reset="$emit('reset', column)" @thinking="$emit('thinking', column, $event)" />
     <template v-for="zone in zonesFor(context.layer)" :key="zone">
       <div v-if="zone !== 'list'" class="divider" aria-hidden="true"><span>{{ text(...labels[zone]) }}</span></div>
       <ol class="zone" :class="{ 'drop-target': target?.column === column.column && target.zone === zone }" :data-zone="zone" :aria-label="`${column.label} · ${text(...labels[zone])}`" :data-empty="editable ? text('Drag here', 'Hierher ziehen') : text('None', 'Keine')">

@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../../AppIcon.vue'
 import KeyCap from '../../KeyCap.vue'
 import BoardColumn from './BoardColumn.vue'
+import SituationPicker from './SituationPicker.vue'
 import NewTray from './NewTray.vue'
 import ModelCard from './ModelCard.vue'
 import SettingsPopover, { type SettingsMenuItem } from '../SettingsPopover.vue'
@@ -15,7 +16,7 @@ import { useProjects } from '../../../stores/projects'
 import { useModelsBoard } from '../../../lib/useModelsBoard'
 import { rememberBoardPosition } from '../../../lib/modelsBoardNavigation'
 import { boardText, canMove, lineName, localizeColumn, stepTarget, zonesFor, type BoardCard, type BoardColumn as Column, type BoardContext, type BoardZone, type ModelBoardDocument } from '../../../lib/modelsBoard'
-const props = withDefaults(defineProps<{ full?: boolean; german?: boolean; context?: BoardContext; projects?: { id: string; name: string }[]; controller?: ReturnType<typeof useModelsBoard> }>(), { full: false, german: false })
+const props = withDefaults(defineProps<{ full?: boolean; expert?: boolean; german?: boolean; context?: BoardContext; projects?: { id: string; name: string }[]; controller?: ReturnType<typeof useModelsBoard> }>(), { full: false, german: false })
 const emit = defineEmits<{ change: [board: ModelBoardDocument]; context: [context: BoardContext] }>()
 const router = useRouter(), route = useRoute(), session = useSession(), projectStore = useProjects()
 const root = ref<HTMLElement>(), german = computed(() => props.german)
@@ -29,6 +30,7 @@ function fromURL(): BoardContext {
 const context = ref<BoardContext>(props.context ?? fromURL())
 watch(() => props.context, value => { if (value) context.value = { ...value } }, { deep: true })
 watch(() => route.query, () => { if (!props.context) context.value = fromURL() })
+const expert = computed(() => props.expert ?? route.query.mode === 'expert')
 const editor = props.controller ?? useModelsBoard(context, german)
 const { document: board, busy, loading, error, announcement, editable } = editor
 const discovered = ref<BoardCard[]>([])
@@ -197,11 +199,12 @@ onBeforeUnmount(() => { clearDrag(); document.removeEventListener('pointermove',
 defineExpose({ editor, context, previewTemplate, closePopover: () => { menuOpen.value = false; reasonOpen.value = false } })
 </script>
 <template>
-  <div ref="root" class="boardwrap" :class="{ full }" data-model-board :data-board-ready="!!board" :aria-busy="busy || loading">
+  <div ref="root" class="boardwrap" :class="{ full, expert }" data-model-board :data-board-ready="!!board" :aria-busy="busy || loading">
     <div class="bhead">
       <span class="dd"><span>{{ text('Show', 'Zeigen') }}</span><button type="button" class="scope-btn" :aria-label="`${text('Show', 'Zeigen')}: ${showLabel}`" aria-haspopup="menu" data-board-show @click="bind('show', $event)"><span class="select-value"><span v-clip-tip="showLabel">{{ showLabel }}</span><span v-for="label in [text(`Mine (${session.identity?.principal.name ?? ''})`, `Meine (${session.identity?.principal.name ?? ''})`), text('Workspace default', 'Vorgabe des Arbeitsbereichs'), text('Workspace rules', 'Regeln des Arbeitsbereichs'), text('Project rules', 'Projektregeln')]" :key="label" class="reserve" aria-hidden="true">{{ label }}</span></span><AppIcon name="chevron" :size="14" /></button></span>
       <span v-if="context.layer !== 'rules' || context.project" class="dd"><span>{{ text('in', 'in') }}</span><button type="button" class="scope-btn" :aria-label="text('Project', 'Projekt')" aria-haspopup="menu" data-board-project @click="bind('project', $event)"><span class="select-value"><span v-clip-tip="projectLabel">{{ projectLabel }}</span><span v-for="label in projectLabels" :key="label" class="reserve" aria-hidden="true">{{ label }}</span></span><AppIcon name="chevron" :size="14" /></button></span>
       <span class="dd"><span>{{ text('Providers', 'Anbieter') }}</span><button type="button" class="scope-btn" :aria-label="`${text('Providers', 'Anbieter')}: ${providerLabel}`" aria-haspopup="menu" data-board-providers @click="bind('providers', $event)"><span class="select-value"><span v-clip-tip="providerLabel">{{ providerLabel }}</span><span v-for="label in [text('As the workspace', 'Wie Arbeitsbereich'), text('Any provider', 'Jeder Anbieter'), text('EU-hosted only', 'Nur EU-gehostet'), text('Local only', 'Nur lokal')]" :key="label" class="reserve" aria-hidden="true">{{ label }}</span></span><AppIcon name="chevron" :size="14" /></button></span>
+      <SituationPicker v-if="expert && context.layer !== 'rules'" :value="context.situation" :german="german" :context-key="editor.actionKey.value" @choose="setContext({ ...context, situation: $event })" />
       <span class="grow" />
       <span class="bacts"><RouterLink class="btn sm ghost" to="/settings/kinds"><AppIcon name="list" :size="14" />{{ text('Kinds of work', 'Arten von Arbeit') }}</RouterLink><button v-if="editable && context.layer !== 'rules'" type="button" class="btn sm" aria-haspopup="menu" data-board-columns @click="bind('columns', $event)"><AppIcon name="plus" :size="14" />{{ text('Column', 'Spalte') }}</button><button v-if="!full" type="button" class="btn sm" data-models-fullscreen @click="fullScreen"><AppIcon name="expand" :size="14" />{{ text('Full screen', 'Vollbild') }}</button></span>
     </div>
@@ -210,8 +213,8 @@ defineExpose({ editor, context, previewTemplate, closePopover: () => { menuOpen.
     <template v-if="board">
       <p v-if="board.residency.effective !== 'any' && columns.length && columns.every(column => !column.list.length)" class="provider-note" role="status"><AppIcon name="server" :size="14" />{{ text(`${providerLabel}: no route qualifies today, so this work would wait. Every card is held under Not allowed.`, `${providerLabel}: Heute erfüllt keine Route das, diese Arbeit würde warten. Jede Karte steht unter Nicht erlaubt.`) }}</p>
       <NewTray :cards="context.layer === 'rules' ? [] : newCards" :columns="board.columns" :editable="editable && !busy" :german="german" @open="(card, event) => bind('tray', event, undefined, card)" @press="(card, event) => startPress(undefined, card, event)" />
-      <div class="board" data-board-scroll :style="{ '--board-columns': columns.length, '--board-slots': slots, '--board-head': full ? '120px' : '72px' }">
-        <BoardColumn v-for="column in columns" :key="column.column" :column="column" :context="context" :editable="editable" :busy="busy" :german="german" :full="full" :inherited="context.layer === 'mine' && (board.profile.scope === 'workspace' || !board.profile.template)" :template="board.profile.template" :dragging="dragging" :target="target" @open="(value, card, zone, event) => bind('move', event, value, card, zone)" @keys="keys" @press="startPress" @menu="(column, event) => bind('column', event, column)" @reset="editor.reset" />
+      <div class="board" data-board-scroll :style="{ '--board-columns': columns.length, '--board-slots': slots, '--board-head': expert ? (full ? '168px' : '120px') : (full ? '120px' : '72px') }">
+        <BoardColumn v-for="column in columns" :key="column.column" :column="column" :context="context" :editable="editable" :busy="busy" :german="german" :full="full" :expert="expert" :context-key="`${editor.actionKey.value}/${board.revision}/${column.column}`" :inherited="context.layer === 'mine' && (board.profile.scope === 'workspace' || !board.profile.template)" :template="board.profile.template" :dragging="dragging" :target="target" @open="(value, card, zone, event) => bind('move', event, value, card, zone)" @keys="keys" @press="startPress" @menu="(column, event) => bind('column', event, column)" @reset="editor.reset" @thinking="editor.thinking" />
       </div>
       <p v-if="!columns.length" class="state">{{ text('No columns to show.', 'Keine Spalten zum Anzeigen.') }}</p>
     </template>

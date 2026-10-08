@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { reactive, ref } from 'vue'
 import { api } from '../src/lib/api'
 import { putPreferenceRow, putPreferenceScope, resetPreference } from '../src/lib/modelPrefsApi'
-import { dismissBoardLine, putBoardOrder, putBoardProfile, resetBoardOrder } from '../src/lib/modelsBoardApi'
+import { dismissBoardLine, putBoardOrder, putBoardProfile, putColumnThinking, resetBoardOrder } from '../src/lib/modelsBoardApi'
 import { modelsSettingsLink, preferenceFailure } from '../src/lib/modelsSettings'
 import { boardFixture, boardPerson } from './models-board-fixtures'
 import { deferred, flush, setupSource } from './record-source'
@@ -20,7 +20,8 @@ it('binds every legacy and ranked person write, including delete and dismiss, to
   await resetBoardOrder(context, 'backend', 3, boardPerson)
   await putBoardProfile(context, { thinking: 'deep' }, 3, boardPerson)
   await dismissBoardLine(context, 'openai:nova', 3, boardPerson)
-  expect(api).toHaveBeenCalledTimes(7)
+  await putColumnThinking({ ...context, situation: 'fix' }, 'backend', 'max', 3, boardPerson)
+  expect(api).toHaveBeenCalledTimes(8)
   for (const [, init] of vi.mocked(api).mock.calls) expect(new Headers(init!.headers).get('If-Prefs-Person')).toBe(boardPerson)
 })
 it.each([409, 428])('legacy refusal %i gives a sentence and preserves the HTTP status', async status => {
@@ -75,4 +76,25 @@ it('a canonical-person change clears proof folds and discards a held evidence pa
   held.resolve({ items: [{ id: 'first-person-record' }], next_cursor: null }); await flush()
   expect(proof.state.folds.value).toEqual([]); expect(proof.state.evidence.value).toBeNull(); expect(read).toHaveBeenCalledTimes(1)
   expect(proof.state.owner.value).toBe('tenant/second-canonical-person'); proof.stop()
+})
+
+// Risk: picker choices or held definitions could apply after their owner changes.
+it('Expert pickers reject stale contexts and share Kinds of work definitions from live limits', async () => {
+  const copy = await import('../src/lib/workKindsCopy'), held = deferred<any>()
+  const props = reactive({ value: 'first', german: false, contextKey: 'person/first' })
+  const picker = setupSource('components/settings/models/SituationPicker.vue', props, {
+    'vue-router': { useRouter: () => ({ push: vi.fn() }) }, '../../../directives/clipTip': {},
+    '../../../lib/workKinds': { getSituationLimits: vi.fn().mockReturnValueOnce(held.promise).mockResolvedValue({ fix_rounds: 5 }) },
+    '../../../lib/workKindsCopy': copy,
+  })
+  props.contextKey = 'person/fix'; await flush(); held.resolve({ fix_rounds: 1 }); await flush()
+  expect(picker.state.definition('fix')).toBe(copy.situationDefinition('fix', 5, false))
+  picker.state.choose('stuck', 'person/first'); expect(picker.emitted).toEqual([])
+  picker.state.choose('stuck', 'person/fix'); expect(picker.emitted).toEqual([['choose', 'stuck']])
+  const columnProps = reactive({ column: boardFixture().columns.find(column => column.column === 'backend')!, editable: true, busy: false, german: false, contextKey: 'person/backend/fix/3' })
+  const column = setupSource('components/settings/models/ColumnThinking.vue', columnProps, { '../../../directives/clipTip': {} })
+  column.state.choose('deep', 'person/backend/first/3'); expect(column.emitted).toEqual([])
+  column.state.choose('deep', columnProps.contextKey); expect(column.emitted).toEqual([['choose', 'deep']])
+  columnProps.editable = false; column.state.choose('max', columnProps.contextKey); expect(column.emitted).toHaveLength(1)
+  picker.stop(); column.stop()
 })

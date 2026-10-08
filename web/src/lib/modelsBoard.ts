@@ -2,13 +2,16 @@
 // Display and editing only: the server owns eligibility and resolution.
 export type BoardLayer = 'mine' | 'default' | 'rules'
 export type BoardSituation = 'first' | 'fix' | 'stuck'
+export type BoardMode = 'auto' | 'simple' | 'expert'
+export type ThinkingWord = 'lean' | 'standard' | 'deep' | 'max'
 export type BoardZone = 'list' | 'top' | 'free' | 'bottom' | 'not'
 export interface BoardContext { layer: BoardLayer; project?: string; situation: BoardSituation }
 export interface BoardLock { kind: 'rule' | 'cross_family' | 'residency'; value: 'top' | 'bottom' | 'not'; who: string | null; why: string; at: string | null; scope: string }
 export interface BoardCard { line: string; version: string; harness: string; effort: string; lock?: BoardLock; introduced_at?: string }
 export interface BoardColumn {
   column: string; label: string; short: string; sentence: string; fixed: boolean; hidden: boolean
-  source: 'own' | 'default' | 'template' | 'follows'; thinking: { word: 'lean' | 'standard' | 'deep' | 'max'; source: string }
+  source: 'own' | 'default' | 'template' | 'follows'; follows_first?: boolean
+  thinking: { word: ThinkingWord; source: string; from_column?: boolean; own?: ThinkingWord | null }
   list: BoardCard[]; top: BoardCard[]; free: BoardCard[]; bottom: BoardCard[]; not: BoardCard[]; cant: { line: string; reason: string }[]
 }
 export interface BoardProfile {
@@ -28,6 +31,7 @@ export interface OrderBody { rank: string[]; not: string[] }
 export interface RulesBody { top: { line: string; why: string }[]; bottom: { line: string; why: string }[]; not: Record<string, string> }
 export const zonesFor = (layer: BoardLayer): BoardZone[] => layer === 'rules' ? ['top', 'free', 'bottom', 'not'] : ['list', 'not']
 export const contextKey = (context: BoardContext) => JSON.stringify([context.layer, context.project ?? '', context.situation])
+export const columnContext = (context: BoardContext, column: string): BoardContext => ({ ...context, situation: column.startsWith('review:') || column === 'concept' ? 'first' : context.situation })
 export function canMove(card: BoardCard, context: BoardContext): boolean {
   if (!card.lock) return true
   return context.layer === 'rules' && card.lock.kind === 'rule' && card.lock.scope === (context.project ? 'project' : 'workspace')

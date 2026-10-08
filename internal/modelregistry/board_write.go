@@ -236,8 +236,18 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 		}
 		var after *modelprefs.BoardOrder
 		if r.Method == http.MethodDelete {
-			if _, err := tx.Exec(ctx, `DELETE FROM model_pref_orders WHERE profile_id=$1 AND column_key=$2 AND situation=$3`, profile.ID, column, situation); err != nil {
-				return err
+			// Reset the ranked order without changing the separate thinking control.
+			if before != nil && before.Thinking != nil {
+				o := *before
+				o.Rank, o.Not = nil, []string{}
+				if err := putBoardOrder(ctx, tx, p, profile, o); err != nil {
+					return err
+				}
+				after = &o
+			} else {
+				if _, err := tx.Exec(ctx, `DELETE FROM model_pref_orders WHERE profile_id=$1 AND column_key=$2 AND situation=$3`, profile.ID, column, situation); err != nil {
+					return err
+				}
 			}
 		} else {
 			o := modelprefs.BoardOrder{ProfileID: profile.ID, Column: column, Situation: situation, Rank: in.Rank, Not: in.Not, Thinking: in.Thinking}

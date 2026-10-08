@@ -484,3 +484,54 @@ func TestBoardMigrationAllTenantsKeepsReceiptsAndEventsIsolated(t *testing.T) {
 		}
 	}
 }
+
+// Risk: the board could mislabel inherited thinking, reset it with an order,
+// or let a situation write alter First build. Each edit emits one event.
+func TestBoardExpertThinkingAndOrderReset(t *testing.T) {
+	admin, member := boardFixture(t)
+	path := "/api/model-preferences/orders/backend/"
+	put := func(situation, suffix string, body map[string]any) {
+		t.Helper()
+		boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", path+situation+suffix, body, member.ID), 200)
+	}
+	column := func(situation string) boardColumn {
+		t.Helper()
+		doc := boardDecode[boardDocument](t, boardCall(t, member, "GET", "/api/model-preferences/board?situation="+situation, nil, ""), 200)
+		for _, c := range doc.Columns {
+			if c.Column == "backend" {
+				return c
+			}
+		}
+		t.Fatal("backend column missing")
+		return boardColumn{}
+	}
+	put("first", "", map[string]any{"rank": []string{"openai:sol", "anthropic:opus"}, "not": []string{}, "revision": 0})
+	put("first", "/thinking", map[string]any{"thinking": "deep", "revision": 1})
+	fix := column("fix")
+	if !fix.FollowsFirst || fix.Thinking.FromColumn || fix.Thinking.Own != nil || fix.Thinking.Word != "standard" || fix.List[0].Line != "openai:sol" {
+		t.Fatalf("fallback metadata: %+v", fix)
+	}
+	put("fix", "/thinking", map[string]any{"thinking": "max", "revision": 2})
+	fix = column("fix")
+	if !fix.FollowsFirst || !fix.Thinking.FromColumn || fix.Thinking.Own == nil || *fix.Thinking.Own != "max" || fix.Thinking.Word != "max" {
+		t.Fatalf("explicit thinking: %+v", fix)
+	}
+	put("fix", "", map[string]any{"rank": []string{"anthropic:opus", "openai:sol"}, "not": []string{}, "revision": 3})
+	boardDecode[boardWriteResult](t, boardCall(t, member, "DELETE", path+"fix?revision=4", nil, member.ID), 200)
+	fix = column("fix")
+	if !fix.FollowsFirst || fix.List[0].Line != "openai:sol" || fix.Thinking.Own == nil || *fix.Thinking.Own != "max" {
+		t.Fatalf("reset removed thinking: %+v", fix)
+	}
+	put("fix", "/thinking", map[string]any{"thinking": nil, "revision": 5})
+	fix = column("fix")
+	if fix.Thinking.Word != "standard" || fix.Thinking.Own != nil || fix.Thinking.FromColumn {
+		t.Fatalf("auto did not restore inheritance: %+v", fix)
+	}
+	first := column("first")
+	if first.List[0].Line != "openai:sol" || first.Thinking.Word != "deep" {
+		t.Fatalf("fix wrote First build: %+v", first)
+	}
+	if eventCount(t, admin, "model.preferences_changed") != 6 {
+		t.Fatal("expected exactly one event per edit")
+	}
+}

@@ -8250,6 +8250,18 @@
     ,
     {"kind":"browser","file":"tests/models-board.spec.ts","name":"run evidence shows the actual catalog model and compares with the recorded choice in bounded pages","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/models-expert.spec.ts","name":"Expert full screen and German light-dark evidence preserve controls across every thinking option","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-expert.spec.ts","name":"Expert switches sparse situation boards without writes and keeps selectors and rows still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-expert.spec.ts","name":"a refused or held stale thinking write reports honestly and cannot create Undo on a new situation","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-expert.spec.ts","name":"agent readers see Expert and live situation definitions with no thinking write controls","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-expert.spec.ts","name":"column thinking saves one captured situation, keeps inherited rank, and Undo restores auto","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/models-expert.spec.ts","name":"situation order edits leave First build intact and reviews stay on their own column","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/multiple-account-pairing.spec.ts","name":"isolated account selection stays stable at 1024px in light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
@@ -14774,6 +14786,8 @@
     ,
     {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"carries inherited workspace rules and reasons into project writes and never permits cross-family moves","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"column thinking captures the situation and person, restores auto with Undo, and discards held stale writes","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"deduplicates a project restriction of a workspace rule without dropping inherited locks","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"discards a delayed template preview and its approval after the observed revision changes","tier":"ESSENTIAL"}
@@ -14793,6 +14807,8 @@
     {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"saves exactly one captured order with the person and revision then undoes an inherited order by deleting it","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-board.unit.test.ts","name":"sends the person precondition on the real HTTP order client and surfaces a server rejection","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"Expert pickers reject stale contexts and share Kinds of work definitions from live limits","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"a canonical-person change clears proof folds and discards a held evidence page under the same login","tier":"ESSENTIAL"}
     ,
@@ -18664,7 +18680,7 @@
     ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"failed limit writes retain the last server values and stale revisions are explained","tier":"ESSENTIAL"}
     ,
-    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"kinds of work does not link to an unregistered Models board","tier":"ESSENTIAL"}
+    {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"kinds of work links to the integrated Models board and preserves the legacy redirect","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/work-kinds.unit.test.ts","name":"paginates with explicit bounds and reports truncation instead of a complete list","tier":"ESSENTIAL"}
     ,

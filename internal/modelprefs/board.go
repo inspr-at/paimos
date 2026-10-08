@@ -106,6 +106,8 @@ type BoardDecision struct {
 	EffortLevel    int                   `json:"-"`
 	ThinkingSource string                `json:"-"`
 	Source         string                `json:"-"`
+	FollowsFirst   bool                  `json:"-"`
+	ThinkingColumn bool                  `json:"-"`
 	Selected       string                `json:"-"`
 }
 
@@ -254,10 +256,16 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 			d.Situation = "stuck"
 		}
 	}
+	// Reviews and requested concepts are columns, not build situations.
+	if strings.HasPrefix(d.Column, "review:") || d.Column == "concept" {
+		d.Situation = "first"
+	}
 	chosen := s.Workspace
 	order, source, found := BoardOrder{}, "", false
 	if s.Person != nil {
 		chosen = *s.Person
+		order, source, found = profileOrder(s, chosen, d.Column, d.Situation)
+	} else {
 		order, source, found = profileOrder(s, chosen, d.Column, d.Situation)
 	}
 	if !found && chosen.Template == nil {
@@ -277,6 +285,7 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 		}
 		d.Rank = TemplateRank(template, d.Column)
 	}
+	d.FollowsFirst = d.Situation != "first" && (!found || order.Situation == "first")
 	if chosen.Scope == "person" && (found || chosen.Template != nil) {
 		d.PreferenceOf.Source = "person"
 	}
@@ -292,18 +301,25 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 	if s.Person != nil {
 		profiles = append(profiles, *s.Person)
 	}
-	for _, p := range profiles {
-		o, ok := boardOrder(s, p, d.Column, d.Situation)
-		if !ok && d.Situation != "first" {
-			o, ok = boardOrder(s, p, d.Column, "first")
-		}
-		if ok && o.Thinking != nil {
-			d.Thinking = *o.Thinking
-			d.ThinkingSource = "default"
-			if p.Scope == "person" {
-				d.ThinkingSource = "own"
+	thinkingSituations := []string{"first"}
+	if d.Situation != "first" {
+		thinkingSituations = append(thinkingSituations, d.Situation)
+	}
+	// An exact situation override precedes inherited First build thinking;
+	// within each situation the person's column precedes the workspace column.
+	for _, situation := range thinkingSituations {
+		for _, p := range profiles {
+			if o, ok := boardOrder(s, p, d.Column, situation); ok && o.Thinking != nil {
+				d.Thinking = *o.Thinking
+				d.ThinkingColumn = o.Situation == d.Situation
+				d.ThinkingSource = "default"
+				if p.Scope == "person" {
+					d.ThinkingSource = "own"
+				}
 			}
 		}
+	}
+	for _, p := range profiles {
 		if o, _, ok := profileOrder(s, p, d.Column, d.Situation); ok {
 			for _, id := range o.Not {
 				if !slices.Contains(d.Not, id) {
@@ -314,7 +330,7 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 	}
 	level := ThinkingLevel(d.Thinking)
 	explicitSituation := found && order.Situation == d.Situation
-	if d.Situation == "fix" && !explicitSituation {
+	if d.Situation == "fix" && !d.ThinkingColumn {
 		level--
 	}
 	small := s.SmallHours
@@ -429,9 +445,13 @@ func ResolveBoard(s BoardState, q BoardQuery, available func(string, int) (bool,
 	// The same-family rule is visible even when a template omitted that line.
 	if strings.HasPrefix(d.Column, "review:") {
 		for _, l := range s.Lines {
-			known := slices.Contains(TemplateRank("balanced","concept"),l.ID)
-			for _,o := range s.Orders { known = known || (o.Column==d.Column && (slices.Contains(o.Rank,l.ID)||slices.Contains(o.Not,l.ID))) }
-			for _,r := range s.Rules { known = known || (r.Column==d.Column && r.Line==l.ID) }
+			known := slices.Contains(TemplateRank("balanced", "concept"), l.ID)
+			for _, o := range s.Orders {
+				known = known || (o.Column == d.Column && (slices.Contains(o.Rank, l.ID) || slices.Contains(o.Not, l.ID)))
+			}
+			for _, r := range s.Rules {
+				known = known || (r.Column == d.Column && r.Line == l.ID)
+			}
 			if known && l.Family == strings.TrimPrefix(d.Column, "review:") && !slices.Contains(d.Not, l.ID) {
 				d.Not = append(d.Not, l.ID)
 				d.Locks[l.ID] = &BoardLock{Kind: "cross_family", Value: "not", Why: "A model never reviews its own family", Scope: "workspace"}

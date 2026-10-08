@@ -6260,6 +6260,8 @@
     ,
     {"kind":"go","package":"internal/modelprefs","name":"TestRankedBoardCapabilityIsNotALockAndNearestEffortTiesUp","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/modelprefs","name":"TestRankedBoardExpertSituationThinking","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/modelprefs","name":"TestRankedBoardSixStepResolution","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelprefs","name":"TestRankedBoardSparseSituationsAndReviewRules","tier":"ESSENTIAL"}
@@ -6305,6 +6307,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestAutomaticallyObservedProfilesRequirePersonGrant","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardDispatchTraceResidencyAndNewLineExclusion","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestBoardExpertThinkingAndOrderReset","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardKindsFieldsAndSituationLimits","tier":"ESSENTIAL"}
     ,
