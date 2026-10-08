@@ -158,6 +158,9 @@ func minimalAccount(t *testing.T, p tenant.Principal, profile Profile) string {
 		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'agent','Minimal model runner') RETURNING id::text`, p.TenantID).Scan(&runner); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(t.Context(), `INSERT INTO role_bindings(tenant_id,principal_id,role_id,scope_type) SELECT $1,$2,id,'workspace' FROM roles WHERE key='admin'`, p.TenantID, runner); err != nil {
+			return err
+		}
 		if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,allowed_model_profile_ids) VALUES($1,$2,$3,'minimal',$4,'Minimal model',now(),true,'generation',$5,ARRAY[$6::uuid]) RETURNING id::text`, p.TenantID, profile.ID, profile.Harness, runner, p.ID, profile.ID).Scan(&id); err != nil {
 			return err
 		}

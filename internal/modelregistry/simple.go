@@ -43,6 +43,7 @@ type simpleRow struct {
 	Lock   *simpleLock `json:"lock"`
 }
 type simpleTrace struct {
+	Role     string `json:"role,omitempty"`
 	Line     string `json:"line"`
 	Stage    string `json:"stage"`
 	Reason   string `json:"reason"`
@@ -119,7 +120,7 @@ func simpleTraceFor(out *WorkResolution, c boardCatalog) []simpleTrace {
 		if strings.HasPrefix(held.Reason, "role:") {
 			stage = "role"
 		}
-		trace = append(trace, simpleTrace{Line: held.Line, Stage: stage, Reason: held.Reason})
+		trace = append(trace, simpleTrace{Role: out.Role, Line: held.Line, Stage: stage, Reason: held.Reason})
 		seen[held.Line] = true
 	}
 	for _, step := range out.Ladder {
@@ -132,7 +133,7 @@ func simpleTraceFor(out *WorkResolution, c boardCatalog) []simpleTrace {
 				if !step.Selected && seen[line] {
 					continue
 				}
-				trace = append(trace, simpleTrace{Line: line, Stage: candidateStage(step), Reason: strings.Join(step.SkipReasons, "; "), Selected: step.Selected})
+				trace = append(trace, simpleTrace{Role: out.Role, Line: line, Stage: candidateStage(step), Reason: strings.Join(step.SkipReasons, "; "), Selected: step.Selected})
 				seen[line] = true
 			}
 		}
@@ -392,6 +393,7 @@ func simpleNextFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, person *s
 		}
 		if reviewer != nil {
 			out.Reviewer = pickProfile(reviewer.Profile)
+			out.Trace = append(out.Trace, simpleTraceFor(reviewer, c)...)
 		}
 	}
 	return out, nil

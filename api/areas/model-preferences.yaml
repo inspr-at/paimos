@@ -466,6 +466,7 @@ components:
       properties:
         line: {type: string}
         stage: {type: string, enum: [column, default, role]}
+        role: {type: string, description: 'Separates queued-work selection from its independent review trace.'}
         reason: {type: string}
         selected: {type: boolean}
     ModelPreferenceEffective:
