@@ -783,30 +783,42 @@ func (s *scheduleOverride) UnmarshalJSON(raw []byte) error {
 // the day. Never move the usage baseline forward on every route. A window that
 // opened during this period uses the same rule: its first sample is a baseline,
 // not consumption already inside the period, and its start stays at open time.
+// Fact reports are the exception. Their percentages live in
+// account_readiness_facts, and the observation is the window start, so the
+// reported percent is use inside this period. A missing readings row must not
+// zero that use on every update and reopen the day's share.
 func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading, now time.Time, s capacity.Schedule) (capacity.Pacing, bool, error) {
 	period, _ := s.Period(now)
-	openedHere := !v.StartsAt().Before(period)
 	start := v.StartsAt()
-	bound := period
-	if openedHere {
-		bound = start
-	}
-	var baseline float64
-	var at time.Time
-	err := tx.QueryRow(ctx, `SELECT used_percent::float8,read_at FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND resets_at=$4 AND read_at>=$5 AND read_at<=$6 AND source<>'estimate' ORDER BY read_at,CASE source WHEN 'harness' THEN 0 ELSE 1 END LIMIT 1`, id, v.WindowKind, v.Bucket, v.ResetsAt, bound, v.ReadAt).Scan(&baseline, &at)
-	if err != nil && !isNoRows(err) {
-		return capacity.Pacing{}, false, err
-	}
 	used, known := 0.0, false
-	if err == nil && baseline <= v.UsedPercent {
-		used = v.UsedPercent - baseline
-		if openedHere {
-			known = !at.After(start)
+	if v.WindowKind == "fact" {
+		if !start.Before(period) {
+			used, known = v.UsedPercent, true
 		} else {
-			start, known = period, at.Equal(period)
+			start = period
 		}
-	} else if !openedHere {
-		start = period
+	} else {
+		openedHere := !start.Before(period)
+		bound := period
+		if openedHere {
+			bound = start
+		}
+		var baseline float64
+		var at time.Time
+		err := tx.QueryRow(ctx, `SELECT used_percent::float8,read_at FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND resets_at=$4 AND read_at>=$5 AND read_at<=$6 AND source<>'estimate' ORDER BY read_at,CASE source WHEN 'harness' THEN 0 ELSE 1 END LIMIT 1`, id, v.WindowKind, v.Bucket, v.ResetsAt, bound, v.ReadAt).Scan(&baseline, &at)
+		if err != nil && !isNoRows(err) {
+			return capacity.Pacing{}, false, err
+		}
+		if err == nil && baseline <= v.UsedPercent {
+			used = v.UsedPercent - baseline
+			if openedHere {
+				known = !at.After(start)
+			} else {
+				start, known = period, at.Equal(period)
+			}
+		} else if !openedHere {
+			start = period
+		}
 	}
 	learned, err := loadLearning(ctx, tx, id)
 	if err != nil {
