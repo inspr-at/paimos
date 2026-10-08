@@ -9,12 +9,15 @@ import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '../AppIcon.vue'
 import ProjectTabs from '../work/ProjectTabs.vue'
 import ExpertTile from './ExpertTile.vue'
+import FlowView from './FlowView.vue'
 import LevelSwitch from './LevelSwitch.vue'
 import TrendChart from './TrendChart.vue'
 import WindowSwitch from './WindowSwitch.vue'
 import { deliveryLanguage } from '../../lib/delivery'
 import { bucketOf, clockTime, DEFAULT_PREFS, DELIVERY_PREFS_KEY, hasAnyData, numbersOf, readDeliveryMetrics, readPrefs, shortDate, type DeliveryMetrics, type DeliveryPrefs, type Level, type TileModel, type WindowDays } from '../../lib/deliveryNumbers'
 import { deliveryText, fill } from '../../lib/deliveryNumbersText'
+import { exampleLive } from '../../lib/deliveryFlowExample'
+import { flowText } from '../../lib/deliveryFlowText'
 import { usePreference } from '../../lib/preferences'
 import { usePoller } from '../../lib/usePolledData'
 import { useProfile } from '../../stores/profile'
@@ -53,6 +56,9 @@ function choose(next: Partial<DeliveryPrefs>) {
 }
 const setWindow = (window: WindowDays) => choose({ window })
 const setLevel = (level: Level) => choose({ level })
+
+// ---------- Flow: the approved example until recorded runs arrive (package 6) ----------
+const flowExample = exampleLive()
 
 // ---------- Numbers: one bounded read, refreshed every minute while visible ----------
 // A failed read shows no numbers at all: an old answer never stands in for a new one.
@@ -226,10 +232,14 @@ watch([() => prefs.value.window, view, lang], closeTip)
         </div>
       </div>
     </template>
-    <div v-else class="flow-empty banner" role="status">
-      <AppIcon name="flow" :size="16" />
-      <span class="grow"><b>{{ text.flowNone }}</b> {{ text.flowNoneB }}</span>
-    </div>
+    <template v-else>
+      <!-- Until package 6 reads recorded runs, Flow shows the approved example, and says so. -->
+      <div class="flow-empty banner" role="status">
+        <AppIcon name="flow" :size="16" />
+        <span class="grow"><b>{{ text.flowNone }}</b> {{ flowText(lang).example }}</span>
+      </div>
+      <FlowView :data="flowExample" :level="prefs.level" :lang="lang" />
+    </template>
 
     <Teleport to="body">
       <div v-if="tip" ref="tipEl" class="dl-tip" role="tooltip" :style="{ left: `${tip.x}px`, top: `${tip.y}px`, visibility: tip.placed ? undefined : 'hidden' }" @mouseleave="leaveTip">

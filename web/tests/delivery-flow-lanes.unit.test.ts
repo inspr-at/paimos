@@ -1,0 +1,129 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// AEON-1005 risks: zooming re-packs rows so lanes jump; a label overflows its step or
+// loses "since"; slivers vanish or overlap instead of merging into "+N"; the wheel,
+// keys or a follow tick move the time when they should move only the window.
+import { expect, it } from 'vitest'
+import {
+  createTimeline, fitAll, fitLabel, following, followTick, keyInput, laneModel, MAX_ROWS, resetTimeline, rowPieces, setTime, timeLabel, wheelInput, zoomPreset, zoomTo,
+  type FlowData, type FlowRun, type FlowStep, type Lane,
+} from '../src/lib/deliveryFlow'
+import { exampleLive, EXAMPLE_NOW } from '../src/lib/deliveryFlowExample'
+import { hintParts, flowText } from '../src/lib/deliveryFlowText'
+
+const words = (en: string) => ({ en, de: en })
+const step = (start: number, end: number, lane: Lane = 'ops', kind: FlowStep['kind'] = 'work'): FlowStep => ({ start, end, lane, kind, expert: words(`s${start}`), simple: words(`s${start}`) })
+const data = (steps: FlowStep[], now: number | null = null): FlowData => {
+  const run: FlowRun = { id: 'r', tag: '1', title: words('Run'), steps }
+  return { origin: new Date(2026, 9, 8).getTime(), now, range: [0, 200], play: [10, 190], sets: [{ runs: [run], lanes: ['ops', 'ci'], main: run }] }
+}
+
+it('rows are reserved once per data set: overlaps take the next free row, at most four', () => {
+  const [set] = laneModel(data([step(0, 30), step(10, 20), step(20, 40), step(25, 26), step(25, 27), step(25, 28), step(50, 60), step(0, 5, 'ci')]))
+  expect(set!.rows).toEqual({ ops: MAX_ROWS, ci: 1 })
+  const rowOf = (start: number, end: number) => set!.items.find(i => i.step.start === start && i.step.end === end)!.row
+  expect([rowOf(0, 30), rowOf(10, 20), rowOf(20, 40), rowOf(25, 26), rowOf(25, 27), rowOf(25, 28), rowOf(50, 60)]).toEqual([0, 1, 1, 2, 3, 3, 0])
+  // The example keeps its six lanes; the model does not depend on the window.
+  const example = laneModel(exampleLive())[0]!
+  expect(example.lanes).toEqual(['you', 'lead', 'ops', 'review', 'build', 'ci'])
+  expect(Object.values(example.rows).every(rows => rows >= 1 && rows <= MAX_ROWS)).toBe(true)
+})
+
+it('a label falls back from tag and text, to the text, to the duration, to an ellipsis that keeps "since"', () => {
+  const base = { tag: '126', text: 'Fix being checked', pad: 6 }
+  expect(fitLabel({ ...base, room: 400 })).toBe('126 · Fix being checked')
+  expect(fitLabel({ ...base, room: 120 })).toBe('Fix being checked')
+  expect(fitLabel({ ...base, text: 'Waiting for a reviewer', duration: '14 min', pad: 16, room: 70 })).toBe('14 min')
+  const cut = fitLabel({ ...base, text: 'Being built, a bit longer than usual', since: ' · since 19:47', room: 200 })
+  expect(cut).toMatch(/^126 · Being.*… · since 19:47$/)
+  expect(cut.length * 5.9 + 6).toBeLessThan(200)
+  expect(fitLabel({ ...base, room: 40 })).toBe('')
+})
+
+it('slivers in a row merge into one "+N" cluster; a lone sliver stays a step', () => {
+  const row = [step(0, 0.5), step(0.6, 1), step(1.1, 1.5), step(10, 20), step(30, 30.5)].map(s => ({ step: s }))
+  const X = (m: number) => m * 4
+  const pieces = rowPieces(row, X, 0, 400)
+  expect(pieces.map(p => p.kind)).toEqual(['cluster', 'step', 'step'])
+  const cluster = pieces[0]!
+  expect(cluster.kind === 'cluster' && [cluster.items.length, cluster.from, cluster.to, cluster.w]).toEqual([3, 0, 1.5, 26])
+  // Zoomed in, the same steps are wide enough to stand alone.
+  expect(rowPieces(row, (m: number) => m * 40, 0, 4000).every(p => p.kind === 'step')).toBe(true)
+  // Steps outside the window are left out.
+  expect(rowPieces(row, X, 50, 100)).toHaveLength(1)
+})
+
+it('Live opens at 45 min with now at 65 % (20 on a phone) and presets zoom around now while following', () => {
+  const t = createTimeline()
+  resetTimeline(t, exampleLive(), { narrow: false })
+  expect([t.T, t.v1 - t.v0, (EXAMPLE_NOW - t.v0) / (t.v1 - t.v0)]).toEqual([EXAMPLE_NOW, 45, 0.65])
+  expect(timeLabel(exampleLive(), t.v0)).toBe('19:55')
+  expect(zoomPreset(t)).toBeNull()
+  zoomTo(t, 15, EXAMPLE_NOW, 0.65)
+  expect(zoomPreset(t)).toBe(15)
+  fitAll(t)
+  expect(zoomPreset(t)).toBe('fit')
+  resetTimeline(t, exampleLive(), { narrow: true })
+  expect(t.v1 - t.v0).toBe(20)
+  expect(timeLabel({ origin: null }, 14)).toBe('+14 min')
+})
+
+it('the wheel pans or zooms the window and never moves the time; a plain vertical wheel is left to the page', () => {
+  const t = createTimeline()
+  resetTimeline(t, data([step(0, 200)], 100), { narrow: false })
+  const T = t.T, span = t.v1 - t.v0
+  expect(wheelInput(t, { deltaX: 0, deltaY: 120, zoomKey: false, shiftKey: false, at: 90, minutesPerPx: 0.05 })).toBe(false)
+  expect([t.v1 - t.v0, t.follow]).toEqual([span, true])
+  // ⌘/Ctrl+wheel keeps the minute under the pointer where it is.
+  const frac = (90 - t.v0) / span
+  expect(wheelInput(t, { deltaX: 0, deltaY: -200, zoomKey: true, shiftKey: false, at: 90, minutesPerPx: 0.05 })).toBe(true)
+  expect(t.v1 - t.v0).toBeLessThan(span)
+  expect((90 - t.v0) / (t.v1 - t.v0)).toBeCloseTo(frac, 6)
+  const v0 = t.v0
+  expect(wheelInput(t, { deltaX: 100, deltaY: 10, zoomKey: false, shiftKey: false, at: 90, minutesPerPx: 0.05 })).toBe(true)
+  expect(t.v0).toBeCloseTo(v0 + 5, 6)
+  expect([t.T, t.follow]).toEqual([T, false])
+})
+
+it('Shift+←/→ move the time a minute, plain arrows pan, and Home/End jump within the run', () => {
+  const t = createTimeline()
+  resetTimeline(t, data([step(0, 200)], 100), { narrow: false })
+  const v0 = t.v0
+  expect(keyInput(t, 'ArrowRight', true)).toBe('time')
+  expect([t.T, t.v0]).toEqual([101, v0])
+  expect(keyInput(t, 'ArrowLeft', true)).toBe('time')
+  expect(keyInput(t, 'ArrowLeft', true)).toBe('time')
+  expect(t.T).toBe(99)
+  expect(keyInput(t, 'ArrowRight', false)).toBe('window')
+  expect([t.T, t.v0]).toEqual([99, v0 + 4.5])
+  // Moving the time out of the window brings the window along.
+  expect(keyInput(t, 'Home', false)).toBe('time')
+  expect(t.T).toBe(10)
+  expect(t.T >= t.v0 && t.T <= t.v1).toBe(true)
+  expect(keyInput(t, 'Enter', false)).toBe('select')
+  expect(keyInput(t, 'x', false)).toBeNull()
+})
+
+it('following: Live keeps now at 65 % until the playhead leaves now; a run keeps its playhead in view', () => {
+  const live = createTimeline()
+  resetTimeline(live, data([step(0, 200)], 100), { narrow: false })
+  expect(following(live)).toBe(true)
+  live.follow = false; setTime(live, 90)
+  expect(following(live)).toBe(false)
+  const replay = createTimeline()
+  resetTimeline(replay, data([step(0, 200)]), { narrow: false })
+  expect([replay.T, replay.v0]).toEqual([10, 6])
+  replay.T = 40; followTick(replay)
+  expect(40 >= replay.v0 && 40 <= replay.v0 + (replay.v1 - replay.v0) * 0.72).toBe(true)
+  replay.follow = false
+  const v0 = replay.v0
+  replay.T = 120; followTick(replay)
+  expect(replay.v0).toBe(v0)
+})
+
+it('the hint draws its keys instead of typing arrow symbols, in both languages', () => {
+  for (const lang of ['en', 'de'] as const) {
+    const parts = hintParts(flowText(lang).hint)
+    expect(parts.filter(p => 'key' in p).map(p => 'key' in p && p.key)).toEqual(['mod', 'left', 'right', 'left', 'right', 'up', 'down'])
+    expect(parts.some(p => 'text' in p && /[←→↑↓⌘]/.test(p.text))).toBe(false)
+  }
+})
