@@ -1,0 +1,179 @@
+/* SPDX-License-Identifier: AGPL-3.0-only */
+/* Settings › Models, minimal (AEON-999 v3, approved). Namespaced: .models-section for the page, .mdl-pop for the
+   teleported menus. Nothing on the page moves when a menu, tooltip or toast opens; rows that come or go animate
+   their height only (AEON-541). Tokens come from tokens.css and base.css. */
+.models-section { display: grid; gap: 20px; max-width: 720px; min-width: 0; container: models-card / inline-size; }
+.models-section .m-card { padding: 26px 28px 6px; min-width: 0; }
+.models-section .m-head { display: flex; align-items: flex-start; gap: 16px; padding-bottom: 20px; }
+.models-section .m-head .titles { flex: 1; min-width: 0; }
+.models-section .m-head h2 { font: 600 18px/1.3 var(--font); letter-spacing: -.01em; }
+.models-section .m-head .lead { margin-top: 4px; font-size: 13.5px; color: var(--ink-2); }
+.models-section .m-head > .seg { flex: none; margin-top: 2px; }
+.models-section .seg.scope button { min-height: 30px; padding: 0 13px; }
+
+/* Rows share four columns so every picker sits in one line: label | picker | lock | remove. */
+.models-section .rw { display: grid; grid-template-rows: 1fr; }
+.models-section .rw-in { min-height: 0; overflow: hidden; }
+.models-section .rw-enter-from, .models-section .rw-leave-to { grid-template-rows: 0fr; opacity: 0; }
+.models-section .rw-enter-active, .models-section .rw-leave-active { transition: grid-template-rows .24s ease, opacity .2s ease; }
+.models-section .row { display: grid; grid-template-columns: clamp(8rem, 30%, 11.75rem) minmax(0, 1fr) 32px 32px; grid-template-areas: 'l p t x' '. n n n'; align-items: center; column-gap: 12px; min-height: 64px; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.models-section .rl { grid-area: l; display: grid; min-width: 0; overflow-wrap: anywhere; }
+.models-section .rt { display: grid; min-width: 0; }
+.models-section .rn { font-size: 14px; font-weight: 600; color: var(--ink); }
+.models-section .mine { font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+.models-section .row > .pick { grid-area: p; }
+.models-section .c3 { grid-area: t; display: flex; justify-content: center; }
+.models-section .c4 { grid-area: x; display: flex; justify-content: flex-end; }
+
+/* The default: a raised tile, first and strongest. Overrides sit under "Except for" and read as exceptions. */
+.models-section .row.def { min-height: 84px; margin-bottom: 4px; border: 0; border-radius: 14px; background: var(--surface-raised); box-shadow: 0 0 0 1px var(--line-2), var(--shadow-btn); }
+.models-section .row.def .rn { font-weight: 500; color: var(--ink-2); }
+.models-section .row.def .rn b { font-weight: 650; font-size: 15px; color: var(--ink); }
+.models-section .row.def .hint { margin-top: 2px; font-size: 12.5px; line-height: 1.45; color: var(--ink-3); }
+.models-section .row.def .pick { height: 44px; }
+.models-section .ex-group { margin-top: 18px; }
+.models-section .ex-h { padding: 0 16px 6px; font: 500 10.5px/1.5 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); border-bottom: 1px solid var(--line); }
+.models-section .ex-group .row .rl { padding-left: 14px; }
+
+/* Picker: model and its own thinking level in one quiet field, with the harness glyph. */
+.models-section .pick { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; height: 40px; padding: 0 10px 0 11px; border: 0; border-radius: 10px; background: var(--field-bg); box-shadow: var(--field-inset), 0 0 0 1px var(--line); color: var(--ink); font-size: 13.5px; font-weight: 600; text-align: left; }
+.models-section .pick:hover { box-shadow: var(--field-inset), 0 0 0 1px var(--line-2); }
+.models-section .pick[aria-expanded="true"] { box-shadow: var(--field-inset), 0 0 0 1px var(--teal), 0 0 0 4px var(--row-selected); }
+.models-section .pick:focus-visible { outline: none; box-shadow: var(--field-inset), var(--focus-ring); }
+.models-section .pick .pn { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.models-section .pick .pe { font-weight: 500; color: var(--ink-2); }
+.models-section .pick .chev { flex: none; color: var(--ink-3); }
+.models-section .pick.ro { background: transparent; box-shadow: inset 0 0 0 1px var(--line); cursor: default; }
+.models-section .hg, .mdl-pop .hg { display: grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 7px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line); color: var(--ink); }
+.models-section .lock { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; color: var(--ink-2); cursor: help; }
+.models-section .lock:hover, .models-section .lock:focus-visible { background: var(--row-hover); outline: none; }
+.models-section .x { width: 32px; height: 32px; color: var(--ink-3); }
+
+/* Can't run: icon plus words, never colour alone. */
+.models-section .na { grid-area: n; display: flex; align-items: flex-start; gap: 8px; margin-top: 10px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.models-section .na svg { flex: none; margin-top: 2px; color: var(--warn-ink); }
+.models-section .na b { color: var(--ink); font-weight: 600; }
+
+.models-section .addrow { padding: 10px 16px 10px 30px; }
+.models-section .add { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; margin-left: -10px; padding: 0 12px 0 10px; border: 0; border-radius: 10px; background: transparent; color: var(--teal-ink); font-size: 13.5px; font-weight: 600; }
+.models-section .add:hover, .models-section .add[aria-expanded="true"] { background: var(--row-hover); }
+.models-section .add:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+
+.models-section .row.rv { grid-template-areas: 'l v v v'; margin-top: 8px; border-top: 1px solid var(--line); }
+.models-section .rv-v { grid-area: v; display: flex; align-items: center; gap: 10px; min-width: 0; padding-left: 11px; font-size: 13.5px; color: var(--ink-2); }
+.models-section .rv-v .hg { color: var(--ink-2); }
+.models-section .rv-v .grow { flex: 1; }
+
+.models-section .link-btn, .mdl-pop .link-btn { display: inline; padding: 0; border: 0; background: transparent; color: var(--teal-ink); font: inherit; font-weight: 500; text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 2px; cursor: pointer; }
+.models-section .link-btn:hover, .mdl-pop .link-btn:hover { text-decoration-color: currentColor; }
+.models-section .link-btn:focus-visible, .mdl-pop .link-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 4px; }
+.models-section .link-btn.quiet { color: var(--ink-2); }
+.models-section .link-btn.quiet:hover { color: var(--teal-ink); }
+.models-section .mine .link-btn { font-size: 12px; color: var(--ink-2); }
+.models-section a.link-btn { text-decoration: underline; }
+
+/* What runs next: one quiet line, the last thing in the card. */
+.models-section .next { display: flex; align-items: flex-start; gap: 10px; padding: 18px 16px 20px; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
+.models-section .next > svg { flex: none; margin-top: 3px; color: var(--ink-3); }
+.models-section .next b { color: var(--ink); font-weight: 600; }
+.models-section .next .link-btn { font-size: 13px; }
+
+/* A new model: one line at the top, a full subtle tint, no edge accent. */
+.models-section .news-in { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 8px 6px 8px 14px; border-radius: 12px; background: var(--row-selected); font-size: 13px; color: var(--ink); }
+.models-section .news-in > svg { flex: none; color: var(--teal-ink); }
+.models-section .news-in .grow { flex: 1; min-width: 0; }
+
+/* Loading and error keep the card's height close to the loaded page. */
+.models-section .sk { display: block; height: 12px; border-radius: 6px; background: var(--skeleton); }
+.models-section .sk.f { height: 40px; border-radius: 10px; }
+.models-section .m-err { display: flex; align-items: center; gap: 12px; min-height: 212px; padding: 12px 0 20px; border-top: 1px solid var(--line); }
+.models-section .m-err p { flex: 1; font-size: 13.5px; }
+.models-section .m-err svg { flex: none; color: var(--warn-ink); }
+.models-section .m-note { display: flex; align-items: flex-start; gap: 8px; margin: 0 16px 12px; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.models-section .m-note svg { flex: none; margin-top: 2px; color: var(--warn-ink); }
+.models-section .m-note .link-btn { margin-left: 4px; }
+.models-section .m-fold { min-width: 0; }
+.models-section .m-fold .fold { display: flex; align-items: center; gap: 10px; min-height: 44px; width: 100%; padding: 8px 4px; border: 0; background: transparent; color: var(--ink); text-align: left; }
+.models-section .m-fold .fold b { font-size: 14px; }
+.models-section .m-fold .fold span { margin-left: auto; font-size: 12px; color: var(--ink-3); }
+.models-section .m-fold .fold svg { flex: none; color: var(--ink-3); transition: transform .15s ease; }
+.models-section .m-fold .fold svg.open { transform: rotate(90deg); }
+.models-section .m-fold .fold:focus-visible { outline: none; box-shadow: var(--focus-ring); border-radius: 8px; }
+
+/* Menus: one popover. Model menu = filter field, harness groups, each model with its own thinking levels. */
+.mdl-pop { position: fixed; z-index: 80; display: flex; flex-direction: column; overflow: hidden; padding: 0; border-radius: 12px; background: var(--surface-raised); border: 1px solid var(--glass-edge); box-shadow: var(--shadow-pop); overscroll-behavior: contain; width: var(--pm-w, 320px); max-width: calc(100vw - 24px); }
+.mdl-pop:focus-visible { outline: none; }
+.mdl-pop .pm-q { display: block; width: 100%; height: 42px; padding: 0 14px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; color: var(--ink); font-size: 13.5px; box-shadow: none; }
+.mdl-pop .pm-q::placeholder { color: var(--ink-3); }
+.mdl-pop .pm-q:focus-visible { outline: none; }
+.mdl-pop .pm-l { flex: 1 1 auto; min-height: 0; padding: 6px; overflow: auto; max-height: 460px; }
+.mdl-pop .opt { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 16px; align-items: center; column-gap: 10px; width: 100%; min-height: 48px; padding: 6px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); text-align: left; cursor: pointer; }
+.mdl-pop .ot { display: grid; min-width: 0; }
+.mdl-pop .opt .t { display: block; font-size: 13.5px; font-weight: 600; }
+.mdl-pop .opt .d { display: block; font-size: 12px; line-height: 1.4; color: var(--ink-3); overflow-wrap: anywhere; }
+.mdl-pop .opt .d.cant { display: flex; align-items: flex-start; gap: 5px; }
+.mdl-pop .opt .d.cant svg { flex: none; margin-top: 2px; }
+.mdl-pop .opt .ok { color: var(--teal-ink); visibility: hidden; }
+.mdl-pop .opt[aria-selected="true"] .ok { visibility: visible; }
+.mdl-pop .opt:hover, .mdl-pop .opt.on { background: var(--row-hover); }
+.mdl-pop .opt.on { box-shadow: inset 0 0 0 1px var(--line-2); }
+.mdl-pop .opt.plain { grid-template-columns: minmax(0, 1fr) 16px; min-height: 40px; }
+.mdl-pop .opt .newt { margin-left: 6px; font: 600 9.5px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--teal-ink); }
+.mdl-pop .lvp { display: flex; gap: 2px; }
+.mdl-pop .lvc, .mdl-pop .lvp.one { display: inline-flex; align-items: center; min-height: 24px; padding: 0 7px; border: 0; border-radius: 999px; background: transparent; font: 500 11.5px/1.3 var(--mono); color: var(--ink-3); }
+.mdl-pop .lvc { cursor: pointer; }
+.mdl-pop .lvc:hover { color: var(--ink); background: var(--surface-sunken); }
+.mdl-pop .lvc[data-on] { color: var(--ink-2); background: var(--surface-sunken); }
+.mdl-pop .opt.on .lvc[data-on], .mdl-pop .opt[aria-selected="true"] .lvc[data-on] { color: var(--teal-ink); background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line-2); font-weight: 600; }
+.mdl-pop .pm-sep { height: 1px; margin: 5px 8px; background: var(--line); }
+.mdl-pop .pm-why { display: flex; gap: 8px; padding: 10px 14px 12px; border-top: 1px solid var(--line); font-size: 12px; line-height: 1.45; color: var(--ink-3); }
+.mdl-pop .pm-why svg { flex: none; margin-top: 1px; }
+.mdl-pop .pm-none { padding: 12px 10px; font-size: 12.5px; color: var(--ink-3); }
+.mdl-pop .pm-lock { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 14px; border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); }
+.mdl-pop .pm-lock .switch { min-height: 40px; }
+.mdl-pop .pm-foot { padding: 8px 14px 12px; border-top: 1px solid var(--line); font-size: 12px; color: var(--ink-3); }
+.mdl-pop.why { width: min(380px, calc(100vw - 24px)); padding: 16px 18px 14px; overflow: auto; }
+.mdl-pop.why h3 { font-size: 13.5px; }
+.mdl-pop.why ol { display: grid; gap: 7px; margin-top: 10px; padding-left: 18px; list-style: decimal; font-size: 12.5px; line-height: 1.5; color: var(--ink-2); }
+.mdl-pop.why ol b { color: var(--ink); font-weight: 600; }
+.mdl-pop.why li.skip { color: var(--ink); }
+
+/* Narrow (phone or a small window): label on its own line, controls under it. */
+@container models-card (max-width: 560px) {
+  .models-section .m-card { padding: 18px 14px 4px; }
+  .models-section .m-head { flex-wrap: wrap; row-gap: 12px; }
+  .models-section .m-head .titles { flex-basis: 100%; }
+  /* The picker keeps the whole width; lock and remove sit on the label line, and "yours" and the can't-run line grow
+     downward under the picker, so nothing that is picked moves when one of them appears. */
+  .models-section .row { grid-template-columns: minmax(0, 1fr) 44px 44px; grid-template-areas: 'l t x' 'p p p' 'm m m' 'n n n'; column-gap: 6px; row-gap: 0; padding: 12px; align-items: center; }
+  .models-section .rl { display: contents; }
+  .models-section .rt { grid-area: l; }
+  .models-section .mine { grid-area: m; margin-top: 8px; }
+  .models-section .row > .pick { margin-top: 8px; }
+  .models-section .na { margin-top: 8px; }
+  .models-section .row.def { min-height: 0; }
+  .models-section .ex-group .row .rl { padding-left: 0; }
+  .models-section .ex-h { padding: 0 12px 6px; }
+  .models-section .addrow { padding: 8px 12px; }
+  .models-section .row.rv { grid-template-areas: 'l' 'v'; grid-template-columns: minmax(0, 1fr); }
+  .models-section .rv-v { flex-wrap: wrap; row-gap: 0; padding-left: 0; }
+  .models-section .rv-v .grow { display: none; }
+  .models-section .next { padding: 16px 12px 18px; }
+  .models-section .pick, .models-section .add { min-height: 44px; height: 44px; }
+  .models-section .x, .models-section .lock { width: 44px; height: 44px; }
+}
+/* Pointer: text links get a 24 px hit area without moving the text around them (WCAG 2.5.8). */
+.models-section .link-btn, .mdl-pop .link-btn { position: relative; }
+.models-section .link-btn::before, .mdl-pop .link-btn::before { content: ''; position: absolute; inset: -4px -3px; }
+/* Touch: every target at least 44 px; inline links grow their hit area without moving the text. */
+@media (pointer: coarse) {
+  .models-section .link-btn::before, .mdl-pop .link-btn::before { inset: -14px -8px; }
+  .mdl-pop .pm-q, .mdl-pop .opt.plain, .mdl-pop .pm-lock .switch, .models-section .lock, .models-section .x, .models-section .seg.scope button, .models-section .pick, .models-section .add { min-height: 44px; }
+  .models-section .lock, .models-section .x { min-width: 44px; }
+  .mdl-pop .opt { grid-template-columns: 22px minmax(0, 1fr) 16px; }
+  .mdl-pop .opt .lvp { display: none; }
+  .mdl-pop .opt .ok { grid-column: 3; grid-row: 1; }
+  .mdl-pop .opt[aria-selected="true"] .lvp { display: flex; flex-wrap: wrap; grid-column: 2 / -1; grid-row: 2; gap: 4px; margin-top: 6px; }
+  .mdl-pop .lvc, .mdl-pop .lvp.one { justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; }
+}
+@media (prefers-reduced-motion: reduce) { .models-section .rw-enter-active, .models-section .rw-leave-active { transition: none; } }

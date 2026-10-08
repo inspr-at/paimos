@@ -43,7 +43,7 @@ const kindsText = computed(() => textForKinds(profile.profile?.principal_id === 
 const german = computed(() => route.query.lang === 'de' || document.documentElement.lang.startsWith('de'))
 const modelText = (en: string, de: string) => german.value ? de : en
 const sectionLabel = (section: SettingsSection) => section.id === 'kinds' ? kindsText.value('title') : section.id === 'models' ? modelText('Models', 'Modelle') : section.label
-const sectionSummary = (section: SettingsSection) => section.id === 'kinds' ? kindsText.value('summary') : section.id === 'models' ? modelText('Which model does what, when', 'Welches Modell was wann tut') : section.summary
+const sectionSummary = (section: SettingsSection) => section.id === 'kinds' ? kindsText.value('summary') : section.id === 'models' ? modelText('Which model does what', 'Welches Modell was macht') : section.summary
 const admin = computed(() => can('settings.manage'))
 // A session that ends (401) revokes every grant; what is on screen stays as it
 // was, inert, so typed input and a join link shown once are not lost.
@@ -79,7 +79,7 @@ useFooterSummary(() => {
   })
 })
 const meta = computed(() => SETTINGS_SECTIONS.find(section => section.id === current.value)!)
-const who = computed(() => current.value === 'models' ? modelText(meta.value.who, 'Die eigene Reihenfolge wird hier festgelegt. Admins setzen die Vorgabe und Regeln des Arbeitsbereichs; Projektverantwortliche setzen Projektregeln.') : meta.value.who)
+const who = computed(() => current.value === 'models' ? modelText(meta.value.who, 'Die eigenen Modelle werden hier gewählt. Admins setzen auch den Standard für alle und können eine Wahl sperren.') : meta.value.who)
 const granted = computed(() => meta.value.permission ? anyOf(meta.value.permission, permission => can(permission)) : !meta.value.admin || admin.value)
 watch([current, granted, mountedOwner], ([section, ok]) => { if (ok) shown.add(section) }, { immediate: true })
 const allowed = computed(() => granted.value || (permissionsRevoked() && shown.has(current.value)))
@@ -175,7 +175,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
           </template>
         </nav>
       </div>
-      <div class="body" :class="{ wide: current === 'access' || current === 'agent-rules' || current === 'models' }">
+      <div class="body" :class="{ wide: current === 'access' || current === 'agent-rules' }">
         <p v-if="allowed && current !== 'kinds'" class="who"><AppIcon :name="meta.admin && !meta.permission ? 'shield' : 'eye'" :size="14" /><span>{{ who }}</span></p>
         <nav v-if="allowed && current === 'theme'" class="theme-links" aria-label="Theme cards"><RouterLink to="/settings/theme#themes">Themes</RouterLink><RouterLink to="/settings/theme#colours">Colours</RouterLink><RouterLink to="/settings/theme#agents">Agents</RouterLink></nav>
         <component :is="VIEW[current]" v-if="allowed" :key="`${mountedOwner}/${current}`" />

@@ -24,6 +24,9 @@ const ALLOW: { file: string; includes: string; why: string }[] = [
   { file: 'components/business/QuoteLines.vue', includes: 'class="rate-hint">× ', why: 'rate × quantity, a multiplication in text' },
   { file: 'components/work/AttachmentLightbox.vue', includes: '.width} × ${', why: 'image dimensions, 1200 × 800' },
   { file: 'lib/releaseStats.ts', includes: '${rate(r)}×`', why: 'a multiple in text, "3× the median gap" (AEON-488)' },
+  { file: 'lib/modelsSimple.ts', includes: 'Locked in Settings › Models by', why: 'the stored reason of a lock, worded by the approved AEON-999 spec; a sentence in a rule, not an icon (AEON-1011)' },
+  { file: 'components/settings/models/KindMenu.vue', includes: 'Settings › Kinds of work', why: 'approved AEON-999 breadcrumb naming where kinds of work are managed; a sentence, not an icon (AEON-1011)' },
+  { file: 'components/settings/models/ModelPicker.vue', includes: 'Type to filter · ←→ thinking', why: 'approved AEON-999 placeholder; a field placeholder cannot hold a KeyCap, and the arrows name the keys (AEON-1011)' },
   { file: 'lib/workKindsCopy.ts', includes: 'Settings › Models', why: 'approved AEON-854 breadcrumb in the kinds lead; it names the Models board in a sentence and is not an icon' },
 ]
 
