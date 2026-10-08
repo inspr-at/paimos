@@ -998,6 +998,150 @@ test('AEON-977 Gemini holds normal input and interrupts only via Stop and send',
   expect(writes.map(call => call.path.endsWith('/controls/interrupt') ? 'interrupt' : (call.body as Record<string, unknown>).delivery_level)).toEqual(['simple', 'interrupt', 'simple'])
 })
 
+const pendingLimit = 'Too many pending messages. Retry an existing message or wait for it to appear in the thread.'
+
+// Hold message POSTs so optimistic sends stay pending. The product refuses the
+// 101st; the held route is the barrier, not a timer.
+async function holdMessagePosts(page: Page) {
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  let posts = 0
+  await page.route(url => {
+    const parsed = new URL(url)
+    return parsed.pathname.endsWith('/messages') && parsed.search === ''
+  }, async route => {
+    if (route.request().method() !== 'POST') return route.fallback()
+    posts += 1
+    await gate
+    return route.fallback()
+  })
+  return { count: () => posts, release }
+}
+
+// Thread reads started during the burst are superseded by each accepted write.
+// Hold them until every copy has its server id, then let one later read land.
+async function holdThreadReads(page: Page) {
+  let hold = false
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  await page.route(url => {
+    const parsed = new URL(url)
+    return hold && parsed.pathname.endsWith('/messages') && parsed.search !== ''
+  }, async route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    await gate
+    return route.fallback()
+  })
+  return { arm: () => { hold = true }, release: () => { hold = false; release() } }
+}
+
+// Dev server only (playwright mode test). The pending cap is component state;
+// a queued row stays on screen after its copy has settled.
+async function pendingCopies(page: Page) {
+  return page.locator('.session-chat').evaluate(el => {
+    const vm = (el as unknown as { __vueParentComponent?: { setupState?: Record<string, unknown> } }).__vueParentComponent
+    const raw = vm?.setupState?.localSends as { value?: unknown[] } | unknown[] | undefined
+    if (Array.isArray(raw)) return raw.length
+    if (raw && Array.isArray((raw as { value?: unknown[] }).value)) return (raw as { value: unknown[] }).value.length
+    return -1
+  })
+}
+
+async function queuePending(page: Page, count: number) {
+  const queued = await page.evaluate(async total => {
+    const field = document.querySelector('.session-chat textarea') as HTMLTextAreaElement | null
+    const form = field?.form
+    if (!field || !form) return -1
+    for (let i = 0; i < total; i++) {
+      field.value = `Pending follow-up ${i}`
+      field.dispatchEvent(new Event('input', { bubbles: true }))
+      form.requestSubmit()
+      await new Promise(resolve => queueMicrotask(resolve))
+      await new Promise(resolve => queueMicrotask(resolve))
+      if (field.value !== '') return i
+    }
+    return total
+  }, count)
+  expect(queued).toBe(count)
+}
+
+test('AEON-977 refused queue edit keeps the draft and the editing state', async ({ page }) => {
+  test.setTimeout(90_000)
+  const { worker, messages, calls } = await setup(page, { count: 3 })
+  Object.assign(worker, { management_mode: 'managed', activity: 'busy', advertised_capabilities: ['inbox', 'steer', 'interrupt'] })
+  const original = messages[2]!
+  original.body = 'Queued original that must survive a refused edit.'
+  const held = await holdMessagePosts(page)
+  const reads = await holdThreadReads(page)
+  const cancels: string[] = []
+  await page.route('**/api/projects/*/messages/*/cancel', route => {
+    const id = route.request().url().split('/').at(-2)!
+    cancels.push(id)
+    return route.fulfill({ json: { contract: 'chat-v1', message_id: id, result: 'cancelled', receipt: { state: 'cancelled' } } })
+  })
+  try {
+    await page.goto(`/agents/${worker.id}?tab=messages`)
+    const panel = panelOf(page), field = panel.getByRole('textbox', { name: 'Message to release-lead' })
+    await expect(panel.locator('.queue-item')).toHaveCount(1)
+    reads.arm()
+    await queuePending(page, 100)
+    await expect.poll(() => held.count()).toBe(100)
+    const edited = 'The revised wording stays when the replacement cannot be queued.'
+    await panel.locator('.queue-item', { hasText: original.body }).getByRole('button', { name: 'Edit', exact: true }).click()
+    await expect(field).toHaveValue(original.body)
+    await field.fill(edited)
+    await field.press('Enter')
+    await expect(page.locator('.toast').filter({ hasText: pendingLimit })).toBeVisible()
+    expect(cancels).toEqual([original.id])
+    expect(held.count()).toBe(100)
+    await expect(field).toHaveValue(edited)
+    await expect(panel.getByText('Editing a queued message', { exact: true })).toBeVisible()
+    await expect(panel.getByRole('button', { name: 'Save', exact: true })).toBeVisible()
+    held.release()
+    await expect.poll(() => panel.locator('.queue-item button[aria-label="Edit"][disabled]').count(), { timeout: 20_000 }).toBe(0)
+    reads.release()
+    await expect.poll(() => pendingCopies(page), { timeout: 20_000 }).toBe(0)
+    await field.press('Enter')
+    await expect(field).toHaveValue('')
+    await expect(panel.getByText('Editing a queued message', { exact: true })).toHaveCount(0)
+    await expect.poll(() => calls.filter(call => call.method === 'POST' && call.path.endsWith('/messages') && (call.body as { body?: string }).body === edited).length).toBe(1)
+    const replacement = calls.find(call => call.method === 'POST' && call.path.endsWith('/messages') && (call.body as { body?: string }).body === edited)!.body as { resend_of?: string }
+    expect(replacement.resend_of).toBe(original.id)
+    expect(cancels).toEqual([original.id, original.id])
+  } finally { held.release(); reads.release() }
+})
+
+test('AEON-977 refused stop and send keeps the draft', async ({ page }) => {
+  test.setTimeout(90_000)
+  const { worker, calls } = await setup(page, { count: 1 })
+  Object.assign(worker, { harness: 'gemini', management_mode: 'managed', activity: 'busy', advertised_capabilities: ['inbox', 'steer', 'interrupt'] })
+  const held = await holdMessagePosts(page)
+  const reads = await holdThreadReads(page)
+  try {
+    await page.goto(`/agents/${worker.id}?tab=messages`)
+    const panel = panelOf(page), field = panel.getByRole('textbox', { name: 'Message to release-lead' })
+    await expect(panel.getByRole('button', { name: 'Stop and send', exact: true })).toBeVisible()
+    reads.arm()
+    await queuePending(page, 100)
+    await expect.poll(() => held.count()).toBe(100)
+    const body = 'Interrupt with this wording'
+    await field.fill(body)
+    await panel.getByRole('button', { name: 'Stop and send', exact: true }).click()
+    await expect(page.locator('.toast').filter({ hasText: pendingLimit })).toBeVisible()
+    await expect.poll(() => calls.filter(call => call.method === 'POST' && call.path.endsWith('/controls/interrupt')).length).toBe(1)
+    expect(held.count()).toBe(100)
+    await expect(field).toHaveValue(body)
+    held.release()
+    await expect.poll(() => panel.locator('.queue-item button[aria-label="Edit"][disabled]').count(), { timeout: 20_000 }).toBe(0)
+    reads.release()
+    await expect.poll(() => pendingCopies(page), { timeout: 20_000 }).toBe(0)
+    await panel.getByRole('button', { name: 'Stop and send', exact: true }).click()
+    await expect(field).toHaveValue('')
+    await expect.poll(() => calls.filter(call => call.method === 'POST' && call.path.endsWith('/messages') && (call.body as { body?: string }).body === body).length).toBe(1)
+    expect(calls.filter(call => call.method === 'POST' && call.path.endsWith('/controls/interrupt'))).toHaveLength(2)
+  } finally { held.release(); reads.release() }
+})
+
 test('AEON-977 empty, offline and no-permission states preserve drafts and controls', async ({ page }, testInfo) => {
   const { worker } = await setup(page, { count: 0 })
   await page.goto(`/agents/${worker.id}?tab=messages`)

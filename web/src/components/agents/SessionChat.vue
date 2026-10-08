@@ -64,10 +64,15 @@ const primaryLabel = computed(() => editing.value ? words.value.save : working.v
 // Unmanaged sessions take rename/model requests next to the composer (AEON-225).
 const unmanaged = computed(() => s.value.management_mode === 'unmanaged')
 
-watch(() => agents.thread(s.value).map(message => message.id).join(), () => {
+// A copy counts toward the pending cap only until the thread has its server id.
+// The id swap can land after the read that already contains it, so both the
+// thread watch and deliver drop it.
+function forgetSettled() {
   const known = new Set(agents.thread(s.value).map(message => message.id))
-  localSends.value = localSends.value.filter(message => !known.has(message.id))
-})
+  const next = localSends.value.filter(message => !known.has(message.id))
+  if (next.length !== localSends.value.length) localSends.value = next
+}
+watch(() => agents.thread(s.value).map(message => message.id).join(), forgetSettled)
 const draft = ref('')
 const editing = ref<ProjectMessage | null>(null)
 const queueBusy = ref(false)
@@ -587,6 +592,7 @@ async function deliver(local: ProjectMessage) {
     if (!stillHere()) return
     if (local.queue_pending) queuedIds.value = new Set([...queuedIds.value, accepted.id])
     localSends.value = localSends.value.map(message => message.client_id === local.client_id ? { ...accepted, client_id: local.client_id, queue_pending: local.queue_pending } : message)
+    forgetSettled()
     refreshReceipts()
   } catch (error) {
     if (!stillHere()) return
@@ -594,11 +600,11 @@ async function deliver(local: ProjectMessage) {
     if (error instanceof APIError && error.status === 409 && error.body.code === 'session_ended') sendError.value = words.value.ended
   }
 }
-async function send(level: 'simple' | 'steer' = 'simple', source?: ProjectMessage) {
+async function send(level: 'simple' | 'steer' = 'simple', source?: ProjectMessage): Promise<boolean> {
   const body = source?.body ?? draft.value.trim()
-  if (!body || !props.canWrite || composeBlock.value || offline.value || queueBusy.value) return
-  if (editing.value && !source) { await saveEdit(); return }
-  if (localSends.value.length >= 100) { toast(words.value.pendingLimit); return }
+  if (!body || !props.canWrite || composeBlock.value || offline.value || queueBusy.value) return false
+  if (editing.value && !source) return saveEdit()
+  if (localSends.value.length >= 100) { toast(words.value.pendingLimit); return false }
   const clientId = crypto.randomUUID()
   const local: ProjectMessage = {
     id: clientId, client_id: clientId, optimistic: true, queue_pending: source?.queue_pending ?? (working.value || atPrompt.value), resend_of: source?.id, body, sender_principal_id: me.value,
@@ -611,6 +617,7 @@ async function send(level: 'simple' | 'steer' = 'simple', source?: ProjectMessag
   if (!source) { draft.value = ''; replyTo.value = null }
   void deliver(local)
   await nextTick(); if (stick) keepBottom()
+  return true
 }
 function retry(message: ProjectMessage) {
   if (!props.canWrite || composeBlock.value || offline.value) return
@@ -655,15 +662,20 @@ async function cancelQueued(message: ProjectMessage, forEdit = false) {
     return false
   } finally { if (generation === readGeneration) queueBusy.value = false }
 }
-async function saveEdit() {
+async function saveEdit(): Promise<boolean> {
   const message = editing.value, body = draft.value.trim(), generation = readGeneration
-  if (!message || !body) return
+  if (!message || !body) return false
   const cancelled = await cancelQueued(message, true)
-  if (generation !== readGeneration || editing.value?.id !== message.id) return
+  if (generation !== readGeneration || editing.value?.id !== message.id) return false
+  // too_late and uncertainty keep the text and leave edit mode, matching the accepted queue flow.
+  if (!cancelled) { editing.value = null; return false }
+  const enqueued = await send(message.delivery_level, { ...message, body, queue_pending: true })
+  if (generation !== readGeneration || editing.value?.id !== message.id) return false
+  // A refused replacement must stay editable. The cancel already happened, so the next Save retries it.
+  if (!enqueued) return false
   editing.value = null
-  if (!cancelled) return // The edited text stays in the composer on too_late or uncertainty.
-  await send(message.delivery_level, { ...message, body, queue_pending: true })
   if (draft.value.trim() === body) draft.value = ''
+  return true
 }
 async function stopAndSend() {
   if (!canStop.value || !draft.value.trim() || editing.value || queueBusy.value || offline.value) return
@@ -674,8 +686,9 @@ async function stopAndSend() {
     if (generation !== readGeneration || view.session.id !== s.value.id) return
     queueBusy.value = false
     // After-turn delivery waits for the explicit interrupt to end the turn.
-    await send('simple', { body, reply_to: parent, queue_pending: true } as ProjectMessage)
-    if (draft.value.trim() === body) { draft.value = ''; replyTo.value = null }
+    const enqueued = await send('simple', { body, reply_to: parent, queue_pending: true } as ProjectMessage)
+    if (generation !== readGeneration || view.session.id !== s.value.id) return
+    if (enqueued && draft.value.trim() === body) { draft.value = ''; replyTo.value = null }
   } catch {
     if (generation === readGeneration) toast(words.value.cancelFailed, { tone: 'error' })
   } finally { if (generation === readGeneration) queueBusy.value = false }

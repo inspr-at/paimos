@@ -10434,6 +10434,10 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 queue actions light 390: edit, cancel, receipts and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 refused queue edit keeps the draft and the editing state","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"AEON-977 refused stop and send keeps the draft","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"Messages is its own tab with an unread badge; seeing the posts clears it and the tab is remembered","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a failed read marker is sent again on the next flush, without an error","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
