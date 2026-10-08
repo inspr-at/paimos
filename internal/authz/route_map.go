@@ -24,6 +24,19 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"GET /api/model-preferences/board":                                 "models.read",
+	"PUT /api/model-preferences/orders/{column}/{situation}":           "models.read|model_prefs.manage",
+	"DELETE /api/model-preferences/orders/{column}/{situation}":        "models.read|model_prefs.manage",
+	"PUT /api/model-preferences/orders/{column}/{situation}/thinking":  "models.read|model_prefs.manage",
+	"PUT /api/model-preferences/profile":                               "models.read|model_prefs.manage",
+	"POST /api/model-preferences/tray/{line}/dismiss":                  "models.read|model_prefs.manage",
+	"GET /api/model-preferences/situations":                            "models.read",
+	"PUT /api/model-preferences/situations":                            "model_prefs.manage",
+	"GET /api/model-preferences/evidence":                              "models.read",
+	"GET /api/model-preferences/coverage":                              "models.read",
+	"GET /api/model-rules":                                             "models.read",
+	"PUT /api/model-rules/{scope}/{column}":                            "model_prefs.manage",
+	"PUT /api/work-kinds/order":                                        "model_prefs.manage",
 	"GET /api/projects/{projectId}/delivery-queue":                     "delivery_queue.read",
 	"POST /api/projects/{projectId}/delivery-queue":                    "delivery_queue.manage",
 	"GET /api/projects/{projectId}/delivery-queue/settings":            "delivery_queue.read",
@@ -359,6 +372,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/events":                                                        "events.read",
 	"GET /api/events/activity":                                               "events.read",
 	"GET /api/events/stream":                                                 "events.read",
+	"GET /api/events/subscribe":                                              "events.subscribe",
 	"GET /api/from-classic":                                                  "nodes.read",
 	"GET /api/harness-sessions":                                              "harness.read",
 	"GET /api/me/agent-pause-settings":                                       "harness.read",
@@ -758,6 +772,7 @@ var RoutePermissions = map[string]string{
 
 // Tier reads, worker reports and person decisions use the existing session permissions.
 func init() {
+	RoutePermissions["GET /api/projects/{projectId}/harness-sessions/{sessionId}/notifications"] = "harness.worker"
 	RoutePermissions["GET /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.read"
 	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.control"
 	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/report"] = "harness.worker"

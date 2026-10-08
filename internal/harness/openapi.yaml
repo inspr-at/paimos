@@ -302,6 +302,19 @@ paths:
         '410': {description: Authenticated archived generation; detach harness servicing without signaling a process}
         '409': {description: Managed worker required}
         '200': {description: 'Claimed controls. expires_in_ms is the remaining database-clock authorization, rounded down and at most 45000. Expired controls are settled first and omitted.'}
+  /api/projects/{projectId}/harness-sessions/{sessionId}/notifications:
+    get:
+      operationId: watchHarnessNotifications
+      description: "Content-free harness.wake SSE hints on connection and committed control/message changes. Current harness.worker permission and exact worker lease are checked on every wake and 15-second keepalive. Hints grant no process authority and acknowledge nothing; claim and drain remain authoritative."
+      parameters:
+        - $ref: '#/components/parameters/projectId'
+        - $ref: '#/components/parameters/sessionId'
+        - $ref: '#/components/parameters/workerLease'
+      responses:
+        '200': {description: "SSE harness.wake and stream.ping events with empty JSON objects", content: {text/event-stream: {schema: {type: string}}}}
+        '403': {description: "Worker proof or current permission rejected"}
+        '409': {description: "Managed worker required"}
+        '410': {description: "Archived generation"}
   /api/projects/{projectId}/harness-sessions/{sessionId}/drain:
     post:
       operationId: drainHarnessInbox
