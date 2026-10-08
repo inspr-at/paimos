@@ -15506,27 +15506,6 @@ components:
           type: array
           maxItems: 100
           items: {$ref: '#/components/schemas/DeliveryQueueFailure'}
-    DeliveryItem:
-      type: object
-      required: [id, project_id, ticket_node_id, repository, pull_request, branch, head_sha, state, state_since, owner, deadline_at, held_reason, link_source, updated_at]
-      properties:
-        id: {type: string, format: uuid}
-        project_id: {type: [string, 'null'], format: uuid}
-        ticket_node_id: {type: [string, 'null'], format: uuid}
-        repository: {type: string}
-        pull_request: {type: [integer, 'null']}
-        branch: {type: string}
-        head_sha: {type: string}
-        state: {$ref: '#/components/schemas/DeliveryState'}
-        state_since: {type: string, format: date-time}
-        owner: {type: string, enum: [coordinator, ci, queue, builder, person, '']}
-        deadline_at: {type: [string, 'null'], format: date-time}
-        held_reason: {type: [string, 'null']}
-        held_from_state: {type: [string, 'null'], description: 'Observed state when the hold started; unchanged while held.'}
-        required_checks_passed: {type: integer, minimum: 0, description: 'Successful configured checks in the stored observation for this head.'}
-        required_checks_total: {type: integer, minimum: 0, description: 'Configured required checks in the stored observation.'}
-        link_source: {type: [string, 'null'], enum: [review_row, title_key, branch_key, null]}
-        updated_at: {type: string, format: date-time}
     DeliveryFlow:
       type: object
       additionalProperties: false
@@ -15721,6 +15700,27 @@ components:
             p50_min: {type: [number, 'null']}
             p90_min: {type: [number, 'null']}
             arion_min: {type: [number, 'null']}
+    DeliveryItem:
+      type: object
+      required: [id, project_id, ticket_node_id, repository, pull_request, branch, head_sha, state, state_since, owner, deadline_at, held_reason, link_source, updated_at]
+      properties:
+        id: {type: string, format: uuid}
+        project_id: {type: [string, 'null'], format: uuid}
+        ticket_node_id: {type: [string, 'null'], format: uuid}
+        repository: {type: string}
+        pull_request: {type: [integer, 'null']}
+        branch: {type: string}
+        head_sha: {type: string}
+        state: {$ref: '#/components/schemas/DeliveryState'}
+        state_since: {type: string, format: date-time}
+        owner: {type: string, enum: [coordinator, ci, queue, builder, person, '']}
+        deadline_at: {type: [string, 'null'], format: date-time}
+        held_reason: {type: [string, 'null']}
+        held_from_state: {type: [string, 'null'], description: 'Observed state when the hold started; unchanged while held.'}
+        required_checks_passed: {type: integer, minimum: 0, description: 'Successful configured checks in the stored observation for this head.'}
+        required_checks_total: {type: integer, minimum: 0, description: 'Configured required checks in the stored observation.'}
+        link_source: {type: [string, 'null'], enum: [review_row, title_key, branch_key, null]}
+        updated_at: {type: string, format: date-time}
     DeliveryMetric:
       type: object
       additionalProperties: false
