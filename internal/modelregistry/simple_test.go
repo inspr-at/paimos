@@ -470,4 +470,72 @@ func TestMinimalNativeEffortRetainedAndNearestTieUp(t *testing.T) {
 	}
 	_ = admin
 }
+
+// Risk: a legacy {thinking, revision} write omits effort and clears the stored
+// native name, so the column runs the thinking adjustment instead. JSON null
+// remains the only clear.
+func TestMinimalThinkingWriteKeepsNativeEffort(t *testing.T) {
+	_, member := boardFixture(t)
+	path := "/api/model-preferences/orders/other/first/thinking"
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", "/api/model-preferences/orders/other/first", map[string]any{"rank": []string{"openai:sol"}, "not": []string{}, "revision": 0}, member.ID), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", path, map[string]any{"effort": "medium", "revision": 1}, member.ID), 200)
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", path, map[string]any{"thinking": "deep", "revision": 2}, member.ID), 200)
+	doc := boardDecode[simpleDocument](t, boardCall(t, member, "GET", "/api/model-preferences/simple", nil, ""), 200)
+	if doc.All.Effort == nil || *doc.All.Effort != "medium" {
+		got := "<nil>"
+		if doc.All.Effort != nil {
+			got = *doc.All.Effort
+		}
+		t.Fatalf("thinking-only write changed the running effort to %s", got)
+	}
+	inRegistry(t, member, func(tx pgx.Tx) error {
+		s, err := modelprefs.LoadBoard(t.Context(), tx, &member.ID, "")
+		if err != nil {
+			return err
+		}
+		if s.Person == nil {
+			t.Fatal("missing person profile")
+		}
+		found := false
+		for _, o := range s.Orders {
+			if o.ProfileID != s.Person.ID || o.Column != "other" || o.Situation != "first" {
+				continue
+			}
+			found = true
+			if o.Thinking == nil || *o.Thinking != "deep" || o.Effort == nil || *o.Effort != "medium" || o.EffortLevel == nil || *o.EffortLevel != 2 || !slices.Equal(o.Rank, []string{"openai:sol"}) {
+				t.Fatalf("stored native effort was not kept: %+v", o)
+			}
+		}
+		if !found {
+			t.Fatal("missing other/first order")
+		}
+		for _, column := range []string{"other", "backend"} {
+			d := modelprefs.ResolveBoard(s, modelprefs.BoardQuery{Column: column, Situation: "first"}, nil)
+			if d.Effort != "medium" || d.EffortLevel != 2 {
+				t.Fatalf("%s resolved through thinking instead of native effort: %q level %d", column, d.Effort, d.EffortLevel)
+			}
+		}
+		return nil
+	})
+	boardDecode[boardWriteResult](t, boardCall(t, member, "PUT", path, map[string]any{"thinking": "deep", "effort": nil, "revision": 3}, member.ID), 200)
+	inRegistry(t, member, func(tx pgx.Tx) error {
+		s, err := modelprefs.LoadBoard(t.Context(), tx, &member.ID, "")
+		if err != nil {
+			return err
+		}
+		for _, o := range s.Orders {
+			if s.Person == nil || o.ProfileID != s.Person.ID || o.Column != "other" || o.Situation != "first" {
+				continue
+			}
+			if o.Thinking == nil || *o.Thinking != "deep" || o.Effort != nil || o.EffortLevel != nil {
+				t.Fatalf("null effort did not clear only the native override: %+v", o)
+			}
+		}
+		d := modelprefs.ResolveBoard(s, modelprefs.BoardQuery{Column: "other", Situation: "first"}, nil)
+		if d.Effort != "" || d.EffortLevel != 4 {
+			t.Fatalf("cleared native effort did not return to stored thinking: %q level %d", d.Effort, d.EffortLevel)
+		}
+		return nil
+	})
+}
 func ptrInt(n int) *int { return &n }

@@ -279,8 +279,9 @@ func (m *Module) writeBoardOrder(w http.ResponseWriter, r *http.Request) {
 					if err := setNativeEffort(s, c, level, &o); err != nil {
 						return err
 					}
-				} else {
-					o.Effort, o.EffortLevel = nil, nil
+				} else if before != nil {
+					// An omitted effort is not a clear. Only JSON null is.
+					o.Effort, o.EffortLevel = before.Effort, before.EffortLevel
 				}
 			}
 			if !thinking && before != nil {
