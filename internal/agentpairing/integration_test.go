@@ -359,6 +359,14 @@ func TestPairingApprovalRedemptionIsolationAndOneShot(t *testing.T) {
 	if v.State != "redeemed" || len(v.Enrollments) != 1 {
 		t.Fatal("missing redemption bindings")
 	}
+	// Risk: the verification profile must not freeze the paired account's
+	// harness catalog at enrollment, while its verification binding stays exact.
+	var unpinned bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT a.allowed_model_profile_ids IS NULL AND e.model_profile_id=$2::uuid
+ FROM agent_accounts a JOIN agent_pairing_enrollments e ON e.tenant_id=a.tenant_id AND e.account_id=a.id
+ WHERE a.id=$1`, v.Enrollments[0].AccountID, f.profiles["claude"]).Scan(&unpinned); err != nil || !unpinned {
+		t.Fatalf("pairing pinned model allowance or lost verification profile: %v", err)
+	}
 	retry := f.redeem(p)
 	if retry.RuntimePrefix != v.RuntimePrefix || *retry.Enrollments[0].VerificationRunID != *v.Enrollments[0].VerificationRunID {
 		t.Fatal("redemption replay minted new authority")

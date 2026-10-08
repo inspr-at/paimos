@@ -5,7 +5,6 @@ import (
 	"context"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/jackc/pgx/v5"
-	"slices"
 	"time"
 )
 
@@ -84,7 +83,14 @@ func QualifyingAccountIDs(ctx context.Context, tx pgx.Tx, profileID, harness, pr
 	accounts = applyFence(accounts, fences, projectID)
 	kept := []Account{}
 	for _, a := range accounts {
-		if a.Harness == harness && (a.AllowedProfileIDs == nil || slices.Contains(a.AllowedProfileIDs, profileID)) {
+		if a.Harness != harness {
+			continue
+		}
+		allowed, err := AccountAllowsProfile(ctx, tx, a, profileID)
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
 			kept = append(kept, a)
 		}
 	}
@@ -126,7 +132,14 @@ func ResidencyProfileRouteCounts(ctx context.Context, tx pgx.Tx, profiles map[st
 			byHarness[harness] = candidates
 		}
 		for _, a := range candidates {
-			if a.Harness != harness || a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, profileID) {
+			if a.Harness != harness {
+				continue
+			}
+			allowed, err := AccountAllowsProfile(ctx, tx, a, profileID)
+			if err != nil {
+				return nil, err
+			}
+			if !allowed {
 				continue
 			}
 			class, err := ResidencyClass(ctx, tx, a, profileID, now)

@@ -301,7 +301,7 @@ func resolveWorkWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, 
 			}
 		}
 	}
-	out.Resolution, err = resolveRoleWithCatalog(ctx, tx, resolveQuery{Role: q.Role, Harness: q.Harness}, now, catalog)
+	out.Resolution, err = resolveRoleWithCatalog(ctx, tx, resolveQuery{Role: q.Role, Harness: q.Harness, ProjectID: q.ProjectID}, now, catalog)
 	if err != nil {
 		return out, err
 	}

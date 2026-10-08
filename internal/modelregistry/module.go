@@ -277,6 +277,7 @@ func (m *Module) resolve(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
+		q.ProjectID = project
 		out.Resolution, err = resolveRole(r.Context(), tx, q, now)
 		if err != nil {
 			return err

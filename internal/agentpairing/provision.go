@@ -197,7 +197,7 @@ func (m *Module) approve(w http.ResponseWriter, r *http.Request, p tenant.Princi
 				return fail(409, "conflict", "account key was already enrolled; use a fresh local enrollment key")
 			}
 			var account string
-			if err = tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,host_label,allowed_model_profile_ids) VALUES($1,$2,$3,$4,$5,$6,1,$7,ARRAY[$8::uuid]) RETURNING id::text`, p.TenantID, a.AccountKey, a.Harness, daemon, principal, a.Label, rec.Details.ComputerName, a.ProfileID).Scan(&account); err != nil {
+			if err = tx.QueryRow(ctx, `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,max_parallel_runs,host_label,allowed_model_profile_ids) VALUES($1,$2,$3,$4,$5,$6,1,$7,NULL) RETURNING id::text`, p.TenantID, a.AccountKey, a.Harness, daemon, principal, a.Label, rec.Details.ComputerName).Scan(&account); err != nil {
 				return err
 			}
 			if a.Harness == "pi" {

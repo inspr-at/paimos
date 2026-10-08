@@ -291,6 +291,11 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 			return fmt.Errorf("backfill %s: %w", name, err)
 		}
 	}
+	if name == "1296_account_model_successors.sql" {
+		if err := backfillAccountModelSuccessors(ctx, tx); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
 	if name == "1215_one_work_kind.sql" {
 		if err := migrateWorkNodes(ctx, tx); err != nil {
 			return fmt.Errorf("reconcile %s: %w", name, err)
@@ -557,6 +562,38 @@ func backfillModelProfileDisplay(ctx context.Context, tx pgx.Tx) error {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `SELECT aeon_backfill_model_profile_display()`); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Successor policy expands effective grants, retaining immutable paired pins
+// for old-release rollback. Fence all tenants before appending any audit event
+// so no account/tenant lock follows an event counter in this transaction.
+func backfillAccountModelSuccessors(ctx context.Context, tx pgx.Tx) error {
+	rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id FOR NO KEY UPDATE`)
+	if err != nil {
+		return err
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if err := enterTenant(ctx, tx, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT aeon_backfill_account_model_successors()`); err != nil {
 			return err
 		}
 	}

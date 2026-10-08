@@ -36,6 +36,7 @@ type resolveQuery struct {
 	Role         string
 	AuthorFamily string
 	Harness      string
+	ProjectID    string
 }
 
 type ladderStep struct {
@@ -89,6 +90,18 @@ func resolveRoleWithCatalog(ctx context.Context, tx pgx.Tx, q resolveQuery, now 
 	out := Resolution{Role: q.Role, AuthorFamily: q.AuthorFamily, Ladder: []Candidate{}, Source: "aeon"}
 	for _, step := range steps {
 		reasons := skipReasons(step, role, q, now, health)
+		// Retain catalog-only previews until a harness has an account pool.
+		// Enrolled pools use the board's exact allowance, project and capacity
+		// check, rather than accepting any healthy account of this harness.
+		if len(reasons) == 0 && health[step.Profile.Harness].Accounts > 0 {
+			ids, err := agentaccounts.QualifyingAccountIDs(ctx, tx, step.ProfileID, step.Profile.Harness, q.ProjectID, "any", now)
+			if err != nil {
+				return Resolution{}, err
+			}
+			if len(ids) == 0 {
+				reasons = append(reasons, "no qualified account with available capacity")
+			}
+		}
 		candidate := Candidate{ProfileID: step.ProfileID, SkipReasons: reasons}
 		if len(reasons) == 0 && out.Profile == nil {
 			profile := step.Profile
