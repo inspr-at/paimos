@@ -39,7 +39,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [1440, 390])
     const inbox = panel.getByRole('region', { name: 'Inbox attention' })
     // AEON-313: shared-inbox obligations stay outside the session thread, in
     // Messages as well as in Now.
-    await panel.getByRole('tab', { name: /Messages/ }).click()
+    await panel.getByRole('tab', { name: /Chat/ }).click()
     await expect(panel.getByRole('tabpanel', { name: /Messages/ }).getByRole('region', { name: 'Conversation' })).toBeVisible()
     await expect(inbox).toHaveCount(0)
     await expect(panel).not.toContainText('Shared inbox')

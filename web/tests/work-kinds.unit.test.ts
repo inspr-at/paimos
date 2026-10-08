@@ -161,6 +161,9 @@ function settingsRouter(): Router {
 
 it('kinds of work links to the integrated Models board and preserves the legacy redirect', async () => {
   const router = settingsRouter()
+  // Control: an unregistered Settings path is "Page not found", so the title below proves registration.
+  await router.push('/settings/no-such-section')
+  expect(router.currentRoute.value.meta.title).toBe('Page not found')
   await router.push('/settings/models')
   expect(router.currentRoute.value.meta.title).toBe('Settings')
   const source = sourceText('components/settings/KindsOfWorkSection.vue')

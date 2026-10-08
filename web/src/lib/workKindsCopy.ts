@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // EN/DE pairs from the approved AEON-854 HTML. Tenant-authored kind wording
 // stays exactly as stored; it is never replaced with the mock's example data.
+// Kinds of work names Settings › Models in the lead and links there. openModels
+// is the control on that link.
 export const kindsCopy = {
   title: ['Kinds of work', 'Arten von Arbeit'], summary: ['What each column means', 'Was jede Spalte bedeutet'],
   intro: ['Every ticket has one kind of work, such as UI design or Backend build. It tells people and agents what the work needs, and which models take it on. Admins define the kinds; everyone can read them.', 'Jedes Ticket hat eine Art von Arbeit, etwa UI-Design oder Backend-Build. Sie sagt Menschen und Agenten, was die Arbeit braucht und welche Modelle sie übernehmen. Admins legen die Arten fest; alle können sie lesen.'],

@@ -87,9 +87,9 @@ test('an unreported service tier stays explicit while optional setup fields stay
   await expect(panel).not.toContainText('Unmocked route')
 })
 
-// The track hangs from the parent's fold button and ends at the child's fold
-// slot (AEON-784): the stem and the child's elbow are one line, joined at the
-// row edge, and the elbow meets the child on its glyph's centre line.
+// The track hangs from the parent's fold button and ends on the child's fold
+// centre (AEON-784, AEON-908): the stem and the child's elbow are one line,
+// joined at the row edge, and the elbow meets the child on its glyph's centre line.
 for (const width of [1600, 390]) for (const reportedMetadata of [false, true]) {
   test(`tree guide joins the parent's fold button to the child at ${width}px${reportedMetadata ? ' with reported metadata' : ''}`, async ({ page }) => {
     const { lead, worker } = await setup(page, 'light', reportedMetadata)
@@ -124,9 +124,9 @@ for (const width of [1600, 390]) for (const reportedMetadata of [false, true]) {
     close(geometry.stem.bottom, geometry.row.bottom)
     close(geometry.stem.bottom, geometry.guide.y)
     close(geometry.guide.x, geometry.stem.x)
-    // The elbow turns on the child's glyph centre line and stops at the child's fold slot.
+    // The elbow turns on the child's glyph centre line and ends on the child's fold centre.
     close(geometry.guide.y + geometry.elbow.top + geometry.elbow.height, geometry.child.y + geometry.child.height / 2)
-    close(geometry.guide.x + geometry.elbow.width, geometry.slot.x, 4)
+    expect(Math.abs((geometry.guide.x + geometry.elbow.width) - (geometry.slot.x + geometry.slot.width / 2)), 'elbow meets fold centre').toBeLessThanOrEqual(0.5)
     expect(geometry.guide.y + geometry.lastHeight).toBeLessThan(geometry.child.y + geometry.child.height / 2)
   })
 }

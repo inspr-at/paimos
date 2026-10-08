@@ -122,3 +122,20 @@ func TestVerificationRouteCannotSubstituteEnrollment(t *testing.T) {
 		t.Fatal("verification widened requested account or claimed a mismatched route")
 	}
 }
+
+// A failed probe remains a readiness fence even when a person requested a
+// safe verification. Its queued lifecycle and existing recovery stay intact.
+func TestVerificationFailedProbeRetainsQueuedRunWithoutVendorLaunch(t *testing.T) {
+	s, api, adapter := claimFixture(t)
+	verificationClaim(api)
+	api.run.AccountID, api.run.RequestedAccountID = "", "account"
+	api.server = api.run
+	s.blockedAccounts["account"] = true
+	delete(s.probePendingSince, "account")
+	if err := s.StartRun(t.Context(), api.run); err == nil || !strings.Contains(err.Error(), "no local account enrollment for harness") {
+		t.Fatal("failed probe did not preserve the readiness fence", err)
+	}
+	if adapter.starts != 0 || api.routes != 0 || len(api.claimIDs) != 0 || api.server.Status != "queued" || !s.blockedAccounts["account"] || s.accountAvailable("account") {
+		t.Fatal("verification changed the queued run or account authority")
+	}
+}

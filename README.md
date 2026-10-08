@@ -1219,32 +1219,93 @@ It measures the handler and JSON decoding; the nearest-rank p95 must be below
 history traversal or guarantee production latency. Shared or loaded runners
 are unsuitable for interpreting this budget.
 
-### CI push reuse (AEON-423)
+### CI push and merge-queue reuse (AEON-423, OPS-257 L5)
 
-On a push to main, `scripts/ci-tree-reuse.mjs` searches for a successful `CI`
-merge-group run at that exact commit SHA and verifies its repository, workflow
-name/path/ID, latest run attempt, complete required jobs, all seven Go and twelve
-web shards, and successful execution steps. A verified match skips the heavy
-jobs before runner allocation and database startup; the existing required checks and aggregates
-report `reused merge_group run <id>`. One hosted `cache-prime` job still runs
-`npm ci`, installs Playwright Chromium and warms Go modules/builds, saving the
-same main-scoped dependency, browser and hosted Go shard cache keys restored
-by PR/queue jobs; its failure fails the required aggregates. `migration-compat` always
-runs against the latest release, including every step (AEON-415). Direct pushes
-without verified queue evidence, queue runs, manual runs, failed/cancelled
-or partial reruns, API errors and timeouts retain full validation. PRs keep
-the docs-only/spec-only classification above; the proof job itself runs only
-on main pushes. Lookup uses only
-read permissions, a ten-second network deadline, bounded responses and at most
-20 candidates; a failed proof job leaves outputs unset and runs full CI. Set
-`CI_TREE_REUSE=off` to disable lookup. PR-to-queue tree reuse and its registry
-publisher were removed to keep this path small; no tree comparisons or record
-writes remain. Offline fixtures run with `node --test scripts/ci-tree-reuse.test.mjs`
-and `go test ./scripts/releaseworkflow ./scripts/ci-runner-guard ./scripts/ci-go-shards`;
-hosted savings and the cache-priming duration require coordinator measurement
-once the change reaches main. The verifier job list and execution steps are
-checked against the actual workflow and its full merge-queue matrices, so
-adding or changing a job cannot silently leave the reuse proof behind.
+Main-push reuse keeps its existing `CI_TREE_REUSE` semantics: unless set to
+`off`, a successful full merge-group run at the **same commit SHA** can replace
+heavy execution. The verifier checks repository, workflow name/path/ID, latest
+attempt, complete job inventory and full-tier execution steps for every shard.
+Main-only `cache-prime` still installs dependencies and browsers and warms Go
+caches; its failure fails the required aggregates. A queue run that itself
+reused PR evidence is **not** full execution evidence for main: main runs its
+normal fallback suite. There is no transitive reuse or PR-to-main shortcut.
+
+Merge-group reuse is separately opt-in: only `CI_MG_REUSE=on` enables lookup;
+unset, `off` or any other value preserves the existing queue execution.
+The queue may reuse one successful **full** same-repository `pull_request` run
+whose actual checkout tree equals the queue commit's tree. The PR head tree
+alone is insufficient: PR jobs check out `refs/pull/N/merge`. An optional inline
+`ci-plan` step verifies `HEAD == GITHUB_SHA` and the exact two parents
+`event.base.sha event.head.sha`, then records the run ID, attempt, PR head, base,
+checkout commit and tree. The successful `tier-measurements` aggregate carries
+those value-free identifiers in its API-visible job name, with a successful
+`Confirm PR tree proof` step only after full-lane/full-tier execution and all
+five required checks passed. Lookup cross-checks that proof against the run's
+head SHA, workflow/repository identity, immutable Git commit/tree/parent API
+facts, every full-suite job and every full-tier execution marker. The source
+run is checked again after inspection. No mutable PR merge-ref lookup,
+registry, artifact download or artifact lifetime supplies identity; deleted or
+missing run/job/Git evidence falls back to normal CI.
+
+PR attempts other than **1** are deliberately ineligible, even complete reruns:
+carried-over jobs cannot become fresh execution evidence. Essential, spec-only,
+docs-only, incomplete/cancelled suites, missing or malformed proof, fork heads,
+tree mismatches, API errors, deadlines and absent trusted-base code all retain
+full queue tier validation when enabled (including full fanout and case
+selection). Unset/off retains the prior planner behavior. Discovery considers
+at most 20 green PR runs and uses a ten-second total network deadline and bounded responses; an older match can
+be missed safely. The heavy Go matrix, web setup/units/browser shards,
+release-check execution and e2e execution are skipped only after verified proof.
+`go-static`, `go-timing`, runner routing and planning still run; unconditional
+`migration-compat` rechecks current release compatibility. Required check names
+`go`, `web`, `release-check`, `e2e`, `migration-compat` stay unchanged. Each
+accepting aggregate independently revalidates the same source run, requires
+confirmed proof outputs, and fails when confirmation observes invalid proof
+after lookup.
+Passed checks are snapshots: a source rerun after the last confirmation does
+not retroactively revoke a passed check. This is not a revocation service.
+Measurements identify reused source evidence and count only the freshly run
+timing guard cases; missing current timing evidence remains incomplete. They
+never invent fresh passes for skipped shards.
+
+Queue lookup and aggregate confirmation execute `ci-tree-reuse.mjs` from the
+immutable merge-group **base SHA**, on hosted runners with only `contents: read`
+and `actions: read`, no persisted checkout credentials and no write token.
+An older base without this protocol cannot authorize reuse. Exact tree equality
+also includes workflows, scripts, manifests and tests. This does not sandbox a
+same-repository PR that changes its own workflow or fakes its own test commands:
+today's full CI already executes that tree's workflow. Trusted-base verification
+adds no stronger token or runner trust and cannot make an altered test suite
+stronger than its declared checks. Every retained cache-capable guard disables
+cache saving on reused queue runs; queue reuse never starts `cache-prime`.
+Main-scoped cache priming remains unchanged for genuinely full queue evidence.
+
+Roll out with the flag unset, review these offline regressions, then let the
+coordinator enable `CI_MG_REUSE=on`. Only new full PR runs emit proof. Inspect a
+hosted matching-tree run, a mismatch fallback, all required contexts and cache
+behavior before relying on savings. Roll back by unsetting the variable or
+setting it to `off`; an in-flight reused run whose confirmation observes the
+switch change fails safely and needs a fresh normal queue run. Keep
+`CI_TREE_REUSE` independent. Hosted runs must confirm job-name preservation,
+run head semantics, Git-object availability, API timing and actual latency.
+
+`node scripts/ci-mg-reuse-rate.mjs` measures an offline upper-bound proxy over
+the last 80 first-parent `origin/main` PR merges. At implementation the final
+merge tree equaled the second-parent PR head tree in **18/80 (22.5%)**; requiring
+that head to contain the previous main tip also gave **18/80 (22.5%)**. This
+proxy measures neither green full PR execution nor historical PR merge trees,
+queue grouping or production hit rate. Head-tree equality is not a mathematical
+upper bound for merge-checkout reuse: a PR can already have tested base-only
+content in its merge tree. It cannot establish the 1–2 minute
+latency target, especially while static/timing/migration checks remain active
+and reused queue evidence forces normal main-push fallback.
+
+Offline tests: `node --test --test-concurrency=1 scripts/ci-tree-reuse.test.mjs
+scripts/ci-pr-plan.test.mjs scripts/test-tiers/test-tiers.test.mjs` and
+`go test ./scripts/releaseworkflow ./scripts/ci-runner-guard -count=1`.
+The API fixture is representative offline data, not a hosted receipt. Historical
+workflow pins remain intact; tests normalize only these reviewed additions and
+check the full queue inventory against the verifier.
 
 The offline CI proof foundation (AEON-417 A) is in `internal/ciproof`, with
 versioned obligation, plan and receipt contracts in `contracts/v1.schema.json`.

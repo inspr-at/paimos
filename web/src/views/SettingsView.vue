@@ -1,26 +1,11 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type Component } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type Component } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import '../styles/settings.css'
 import { can, permissionsKnown, permissionsRevoked, refreshPermissions } from '../lib/authz'
 import AppIcon from '../components/AppIcon.vue'
 import BizIcon, { type BizIconName } from '../components/business/BizIcon.vue'
-import BusinessSection from '../components/settings/BusinessSection.vue'
-import PersonalSection from '../components/settings/PersonalSection.vue'
-import ThemeSection from '../components/settings/ThemeSection.vue'
-import DeveloperSection from '../components/settings/DeveloperSection.vue'
-import VocabularySection from '../components/settings/VocabularySection.vue'
-import KindsOfWorkSection from '../components/settings/KindsOfWorkSection.vue'
-import AgentsSection from '../components/settings/AgentsSection.vue'
-import AutopilotSection from '../components/settings/AutopilotSection.vue'
-import PortalSection from '../components/settings/PortalSection.vue'
-import WorkspaceSection from '../components/settings/WorkspaceSection.vue'
-import AccessSection from '../components/access/AccessSection.vue'
-import AgentRulesSection from '../components/rules/AgentRulesSection.vue'
-import AccountsSection from '../components/settings/AccountsSection.vue'
-import PoliciesSection from '../components/settings/PoliciesSection.vue'
-import ModelsSection from '../components/settings/ModelsSection.vue'
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId, type SettingsSection } from '../lib/settings'
 import { useSession } from '../stores/session'
 import { useProfile } from '../stores/profile'
@@ -31,15 +16,32 @@ import { settingsFooter, settingsNeeds } from '../lib/footerProviders'
 import { useFooterSummary } from '../lib/footerSummary'
 import { preferenceSaves, retryFailedPreferences } from '../lib/preferences'
 
+// Load only the selected section, so its bundle cannot hold up navigation.
+const BusinessSection = defineAsyncComponent(() => import('../components/settings/BusinessSection.vue'))
+const PersonalSection = defineAsyncComponent(() => import('../components/settings/PersonalSection.vue'))
+const ThemeSection = defineAsyncComponent(() => import('../components/settings/ThemeSection.vue'))
+const DeveloperSection = defineAsyncComponent(() => import('../components/settings/DeveloperSection.vue'))
+const VocabularySection = defineAsyncComponent(() => import('../components/settings/VocabularySection.vue'))
+const KindsOfWorkSection = defineAsyncComponent(() => import('../components/settings/KindsOfWorkSection.vue'))
+const AgentsSection = defineAsyncComponent(() => import('../components/settings/AgentsSection.vue'))
+const AutopilotSection = defineAsyncComponent(() => import('../components/settings/AutopilotSection.vue'))
+const PortalSection = defineAsyncComponent(() => import('../components/settings/PortalSection.vue'))
+const WorkspaceSection = defineAsyncComponent(() => import('../components/settings/WorkspaceSection.vue'))
+const AccessSection = defineAsyncComponent(() => import('../components/access/AccessSection.vue'))
+const AgentRulesSection = defineAsyncComponent(() => import('../components/rules/AgentRulesSection.vue'))
+const AccountsSection = defineAsyncComponent(() => import('../components/settings/AccountsSection.vue'))
+const PoliciesSection = defineAsyncComponent(() => import('../components/settings/PoliciesSection.vue'))
+const ModelsSection = defineAsyncComponent(() => import('../components/settings/ModelsSection.vue'))
+
 // Settings groups share one frame; explicit grants gate Access, rules and accounts.
 // /settings/<section>#<target> deep-links to a card or field, ringed on arrival.
 const route = useRoute()
 const router = useRouter()
 const session = useSession()
 const profile = useProfile()
+const kindsText = computed(() => textForKinds(profile.profile?.principal_id === session.identity?.principal.id && /^de\b/i.test(profile.profile?.locale ?? '')))
 const german = computed(() => route.query.lang === 'de' || document.documentElement.lang.startsWith('de'))
 const modelText = (en: string, de: string) => german.value ? de : en
-const kindsText = computed(() => textForKinds(profile.profile?.principal_id === session.identity?.principal.id && /^de\b/i.test(profile.profile?.locale ?? '')))
 const sectionLabel = (section: SettingsSection) => section.id === 'kinds' ? kindsText.value('title') : section.id === 'models' ? modelText('Models', 'Modelle') : section.label
 const sectionSummary = (section: SettingsSection) => section.id === 'kinds' ? kindsText.value('summary') : section.id === 'models' ? modelText('Which model does what, when', 'Welches Modell was wann tut') : section.summary
 const admin = computed(() => can('settings.manage'))
@@ -209,7 +211,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
 .section-nav { position: sticky; top: 16px; display: grid; gap: 2px; max-height: calc(100dvh - var(--header-h) - var(--footer-h) - 130px); overflow-y: auto; overscroll-behavior: contain; }
 .theme-links { display: flex; flex-wrap: wrap; gap: 8px 16px; padding: 8px 10px; font-size: 12px; }.theme-links a { color: var(--teal-ink); min-height: 28px; display: inline-flex; align-items: center; }
 @media (pointer: coarse) { .theme-links a { min-height: 44px; } }
-.section-link { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 50px; padding: 7px 10px; border-radius: 12px; color: var(--ink); text-decoration: none; }
+.section-link { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 46px; padding: 6px 10px; border-radius: 12px; color: var(--ink); text-decoration: none; }
 @media (hover: hover) { .section-link:hover { background: var(--row-hover); } }
 .section-link:focus-visible { box-shadow: var(--focus-ring); }
 /* The current section: a raised card, like the active place. */
@@ -224,7 +226,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
 /* Doctrine proposals wait (AEON-444): a small neutral dot. */
 .waiting-dot { justify-self: center; width: 7px; height: 7px; margin: 0 7px; border-radius: 50%; background: var(--ink-2); }
 .nav-col { align-self: stretch; min-width: 0; position: relative; }
-.nav-group { margin: 14px 10px 4px; font: 500 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+.nav-group { margin: 8px 10px 2px; font: 500 10px/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
 .nav-group:first-child { margin-top: 0; }
 .nav-picker { display: none; }
 .body { min-width: 0; display: grid; gap: 14px; container: body / inline-size; }

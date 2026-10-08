@@ -4,6 +4,7 @@ package phoneapprovals
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"time"
@@ -35,12 +36,101 @@ func (m *Module) Run(ctx context.Context) {
 	}
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+	m.run(ctx, ticker.C, nil)
+}
+
+// The listener owns a separate connection, never a query-pool slot. A bounded
+// queue drops excess hints; startup, reconnect and ticker scans recover them.
+func (m *Module) run(ctx context.Context, ticks <-chan time.Time, scanned func()) {
+	wakes := make(chan string, 64)
+	listenCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { defer close(done); m.listenPush(listenCtx, wakes) }()
+	defer func() { cancel(); <-done }()
+	_ = m.dispatch(ctx)
 	for {
-		_ = m.dispatch(ctx)
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-ticks:
+			_ = m.dispatch(ctx)
+		case id := <-wakes:
+			if id == "" {
+				_ = m.dispatch(ctx)
+			} else {
+				_ = m.dispatchTenant(db.AllProjects(ctx, "phone notification event; recipients reauthorized"), id)
+			}
+		}
+		if scanned != nil {
+			scanned()
+		}
+	}
+}
+
+func (m *Module) listenPush(ctx context.Context, wakes chan<- string) {
+	for ctx.Err() == nil {
+		_ = m.listenPushConnection(ctx, wakes)
+		retry := time.NewTimer(time.Second)
+		select {
+		case <-ctx.Done():
+			retry.Stop()
+			return
+		case <-retry.C:
+		}
+	}
+}
+
+func (m *Module) listenPushConnection(ctx context.Context, wakes chan<- string) error {
+	connectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	conn, err := pgx.ConnectConfig(connectCtx, m.pool.Config().ConnConfig.Copy())
+	if err == nil {
+		_, err = conn.Exec(connectCtx, "LISTEN aeon_events")
+	}
+	cancel()
+	if conn != nil {
+		defer func() {
+			closeCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+			defer cancel()
+			_ = conn.Close(closeCtx)
+		}()
+	}
+	if err != nil {
+		return err
+	}
+	wake := func(id string) {
+		select {
+		case wakes <- id:
+		default:
+		}
+	}
+	// Subscribe before scanning to cover requests committed during connection setup.
+	wake("")
+	for {
+		n, err := conn.WaitForNotification(ctx)
+		if err != nil {
+			return err
+		}
+		var hint struct {
+			Tenant string `json:"tenant_id"`
+			ID     int64  `json:"id"`
+		}
+		if len(n.Payload) > 1024 || json.Unmarshal([]byte(n.Payload), &hint) != nil || !validID(hint.Tenant) || hint.ID < 1 {
+			continue
+		}
+		// Notifications contain only an ID. Read the committed type under RLS;
+		// unrelated events (including notification audits) never trigger a scan.
+		readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		var typ string
+		err = db.InTenantReadSnapshot(db.AllProjects(readCtx, "phone notification event type"), m.pool, hint.Tenant, func(tx pgx.Tx) error {
+			return tx.QueryRow(readCtx, `SELECT type FROM events WHERE tenant_id=$1 AND id=$2`, hint.Tenant, hint.ID).Scan(&typ)
+		})
+		cancel()
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		if typ == "approval.proposed" || typ == "harness.attach_requested" {
+			wake(hint.Tenant)
 		}
 	}
 }

@@ -181,8 +181,13 @@ func PrepareCatalog(ctx context.Context, pool *pgxpool.Pool, p tenant.Principal,
 			return err
 		}
 		// Placement reads and the board itself may open a closed default board.
-		// Review and completion must not: that write commits before the caller's
-		// mutation and replaces a legacy role ladder that was never migrated.
+		// Opening the board or a placement resolve initializes a closed board.
+		// Review and completion must not: they stay on the legacy ladder until
+		// that board is saved or migrated. Their setup transaction must not
+		// commit model.board_initialized: completion rollback exempts only the
+		// catalog seed and upgrade events. That write also commits before the
+		// caller's mutation and replaces a legacy role ladder that was never
+		// migrated, so a nil request is not a placement read.
 		placement := false
 		if in.Request != nil {
 			placement = in.Request.URL.Path == "/api/model-preferences/board"

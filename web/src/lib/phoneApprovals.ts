@@ -6,7 +6,7 @@ import type { AttachReview } from './attachWatch.ts'
 export interface PhonePreferences {
   enabled: boolean; time_zone: string; quiet_start: number; quiet_end: number; escalation_minutes: number
 }
-export interface PhoneItem { id: string; created_at: string }
+export interface PhoneItem { id: string; created_at: string; endpoint_hash?: string }
 export interface PhoneSettings {
   available: boolean; push_available: boolean; vapid_public_key: string
   preferences: PhonePreferences; passkeys: PhoneItem[]; subscriptions: PhoneItem[]
@@ -36,6 +36,16 @@ export async function phoneRequest<T>(path: string, method = 'GET', body?: unkno
   return response.status === 204 ? undefined as T : response.json()
 }
 export const phoneSettings = (signal?: AbortSignal) => phoneRequest<PhoneSettings>('/me/phone-approvals', 'GET', undefined, signal)
+// Inspect only this origin's existing registration; opening Settings must never
+// prompt for permission or create a subscription. The endpoint stays local.
+export async function deviceSubscriptionHash(): Promise<string> {
+  if (!('serviceWorker' in navigator) || !('Notification' in window) || Notification.permission !== 'granted') return ''
+  const registration = await navigator.serviceWorker.getRegistration('/')
+  const subscription = await registration?.pushManager.getSubscription()
+  if (!subscription) return ''
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(subscription.endpoint)))
+  return Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('')
+}
 export const reviewPath = (kind: PhoneKind, id: string) => `/phone-approvals/${kind}/${encodeURIComponent(id)}`
 export function decodeBytes(value: string): ArrayBuffer {
   const raw = atob(value.replace(/-/g, '+').replace(/_/g, '/'))
@@ -67,10 +77,17 @@ export function credentialJSON(credential: PublicKeyCredential) {
     authenticatorData: encodeBytes(assertion.authenticatorData), signature: encodeBytes(assertion.signature),
     userHandle: assertion.userHandle ? encodeBytes(assertion.userHandle) : null } }
 }
-export async function addPhonePasskey(signal?: AbortSignal) {
+export async function addPhonePasskey(signal?: AbortSignal, prepared?: () => void) {
   const ceremony = await phoneRequest<Ceremony<CreationOptions>>('/me/phone-approvals/passkeys/options', 'POST', undefined, signal)
   signal?.throwIfAborted()
-  const credential = await navigator.credentials.create({ publicKey: creationOptions(ceremony.publicKey), signal }) as PublicKeyCredential | null
+  prepared?.()
+  let credential: PublicKeyCredential | null
+  try {
+    credential = await navigator.credentials.create({ publicKey: creationOptions(ceremony.publicKey), signal }) as PublicKeyCredential | null
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'NotAllowedError') throw new Error('Verification cancelled. No passkey was added.')
+    throw error
+  }
   if (!credential) throw new Error('Verification cancelled. No passkey was added.')
   return phoneRequest<PhoneItem>('/me/phone-approvals/passkeys', 'POST', { challenge_id: ceremony.challenge_id, credential: credentialJSON(credential) }, signal)
 }

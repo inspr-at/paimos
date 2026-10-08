@@ -16,6 +16,12 @@ import (
 const VerificationPurpose = "pairing_verification"
 const VerificationTask = "Reply exactly AEON_VERIFIED. Do not modify files, perform privileged actions, access external networks, or use external/MCP tools. Use the enforced read-only verification mode."
 
+func (s *Supervisor) verificationDiagnosticFor(run, account, purpose, stage, reason string) {
+	if purpose == VerificationPurpose && s.verificationDiagnostic != nil {
+		s.verificationDiagnostic(run, account, stage, reason)
+	}
+}
+
 var ErrVerificationUnavailable = errors.New("verification blocked: this adapter has no qualified harmless execution mode")
 
 // VerificationAdapter is an explicit execution capability, not a prompt hint.
