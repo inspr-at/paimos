@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { automaticColumns, COLUMN_BY_ID, layoutWidths, loadedFitWidth, moveColumn, orderOf, releaseLabel, tagList, TITLE_TARGET, titleRoom, visibleColumns, widthOf, withHostColumns, type ColumnDef, type ColumnId } from '../src/lib/columns.ts'
 import { groupRows, selectLoadedGroup, filtersFromQuery, filtersToQuery, type TicketRow } from '../src/lib/ticketList.ts'
 import { byPosition, positionBetween, positionOf, type Attachment } from '../src/lib/attachments.ts'
@@ -249,6 +250,12 @@ test('AEON-913: a loaded fit keeps the designed width until the value is wider',
   assert.equal(loadedFitWidth(model, 200), 200)
   assert.equal(loadedFitWidth(model, 400), model.max)
   assert.equal(loadedFitWidth(model, Number.NaN), model.width)
+})
+
+test('AEON-915: the ticket grid keeps a narrow loaded fit at the designed width', () => {
+  const source = readFileSync(new URL('../src/components/work/TicketTable.vue', import.meta.url), 'utf8')
+  assert.match(source, /next\[id\] = loadedFitWidth\(definitions\.value\.get\(id\)!/)
+  assert.equal(COLUMN_BY_ID.get('key')!.max, 480)
 })
 
 test('AEON-913: group selection caps loaded rows at 100 and preserves other groups', () => {

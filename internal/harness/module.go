@@ -106,6 +106,7 @@ func New(pool *pgxpool.Pool, planningStart ...func(context.Context, pgx.Tx, stri
 }
 
 func (m *Module) Mount(mux *http.ServeMux) {
+	mux.HandleFunc("GET /api/projects/{projectId}/harness-sessions/{sessionId}/notifications", m.notifications)
 	mux.HandleFunc("POST /api/inbox/session-binding", m.resolveSessionBinding)
 	for _, route := range []struct {
 		pattern, scope string

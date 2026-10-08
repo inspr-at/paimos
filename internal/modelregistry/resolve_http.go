@@ -3,7 +3,9 @@ package modelregistry
 
 import (
 	"context"
+	"math"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -86,6 +88,37 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 	}
 	requestedPerson := params.Get("person_id")
 	q := WorkQuery{Role: strings.TrimSpace(params.Get("role")), AuthorFamily: params.Get("author_family"), Harness: params.Get("harness"), Area: params.Get("area"), Complexity: params.Get("complexity"), ProjectID: project}
+	q.Situation = params.Get("situation")
+	if q.Situation != "" && !validBoardSituation(q.Situation) {
+		writePreferenceError(w, prefFail(400, "invalid_situation"))
+		return
+	}
+	if params.Has("fix_round") {
+		q.FixRound, err = strconv.Atoi(params.Get("fix_round"))
+		if err != nil || q.FixRound < 0 || q.FixRound > 1000 {
+			writePreferenceError(w, prefFail(400, "invalid_fix_round"))
+			return
+		}
+	}
+	if params.Has("estimate_hours") {
+		q.EstimateHours, err = strconv.ParseFloat(params.Get("estimate_hours"), 64)
+		if err != nil || q.EstimateHours < 0 || q.EstimateHours > 100000 || math.IsNaN(q.EstimateHours) || math.IsInf(q.EstimateHours, 0) {
+			writePreferenceError(w, prefFail(400, "invalid_estimate"))
+			return
+		}
+	}
+	if params.Has("concept") {
+		q.Concept, err = strconv.ParseBool(params.Get("concept"))
+		if err != nil {
+			writePreferenceError(w, prefFail(400, "invalid_concept"))
+			return
+		}
+	}
+	q.PreviousFamily, err = NormalizeAuthorFamily(params.Get("previous_family"))
+	if err != nil {
+		writePreferenceError(w, prefFail(400, "invalid_previous_family"))
+		return
+	}
 	ticket := strings.TrimSpace(params.Get("ticket"))
 	if len(ticket) > 80 || params.Has("ticket") && ticket == "" || len(q.Area) > 48 || len(q.Role) > 32 || len(q.AuthorFamily) > 32 || len(q.Harness) > 32 || q.Complexity != "" && q.Complexity != "S" && q.Complexity != "M" && q.Complexity != "L" {
 		writePreferenceError(w, prefFail(400, "invalid_placement"))
@@ -154,8 +187,11 @@ func (m *Module) resolvePreferences(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		out.Trace.Hard = append(out.Trace.Hard, "residency")
-		if q.Role == "review-gate" || q.Role == "review-gate-security" {
+		if out.Role == "review-gate" || out.Role == "review-gate-security" {
 			out.Trace.Hard = append(out.Trace.Hard, "cross_family", "review_qualification")
+		}
+		if out.Role == "review-gate-security" {
+			out.Trace.Hard = append(out.Trace.Hard, "security_review")
 		}
 		out.Trace.Role = out.Role
 		out.Trace.ProjectID = q.ProjectID
