@@ -2082,6 +2082,8 @@
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestEnclaveMigrationEndsLegacyStrictWatchesUnderForcedRLS","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentpairing","name":"TestEnrollmentFixtureScheduleLeavesEveryReadingBudgetAtAnyHour","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentpairing","name":"TestExactAPIConnectOnlySixAndSevenAccounts","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentpairing","name":"TestGeneratedInstallerIPv6Origin","tier":"GATED-FULL"}
@@ -6321,6 +6323,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardTemplateDryRunPreservesOwnOrdersAndResetsAtomically","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogV3Ladders","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCommandTemplates","tags":["delete-candidate"],"tier":"GATED-FULL"}
     ,

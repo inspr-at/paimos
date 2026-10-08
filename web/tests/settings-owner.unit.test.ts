@@ -9,6 +9,7 @@ import * as settings from '../src/lib/settings'
 import * as footerProviders from '../src/lib/footerProviders'
 import * as footerSummary from '../src/lib/footerSummary'
 import * as preferences from '../src/lib/preferences'
+import { textForKinds } from '../src/lib/workKindsCopy'
 import { scopeOwner } from '../src/lib/identityScope'
 import { flush } from './record-source'
 
@@ -48,6 +49,7 @@ function component() {
     vue: Vue, 'vue-router': { useRoute: () => route, useRouter: () => ({ push: async () => {} }) }, '../lib/settings': settings,
     '../lib/footerProviders': footerProviders, '../lib/footerSummary': footerSummary, '../lib/preferences': preferences, '../lib/identityScope': { scopeOwner },
     '../stores/session': { useSession: () => session }, '../lib/doctrineInbox': { doctrineInbox: {} },
+    '../stores/profile': { useProfile: () => ({ profile: null }) }, '../lib/workKindsCopy': { textForKinds },
     '../lib/authz': { can: (permission: string) => !grants.revoked && (permission === 'settings.manage' ? grants.admin : grants.access), permissionsKnown: () => true, permissionsRevoked: () => grants.revoked, refreshPermissions: async () => {} },
   }
   const exports: { default?: Vue.Component } = {}

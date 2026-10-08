@@ -1029,6 +1029,8 @@
         {"file":"tests/wide.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/work-integration.spec.ts","weightSeconds":70,"weightSource":"estimate"}
+        ,
+        {"file":"tests/work-kinds.spec.ts","listedTests":13,"weightSeconds":14.629,"weightSource":"AEON-877 local Chromium: 13 cases, one worker, wall 14.629 s"}
       ]
     }
     ,

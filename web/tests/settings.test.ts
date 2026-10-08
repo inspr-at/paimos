@@ -7,7 +7,7 @@ test('Personal, Developer and Policies are for everyone; workspace sections foll
   assert.deepEqual(visibleSections(false).map(s => s.id), ['personal', 'theme', 'developer', 'vocabulary', 'policies'])
   assert.deepEqual(visibleSections(true).map(s => s.label), ['Personal', 'Theme', 'Developer', 'Workspace', 'Vocabulary', 'Policies', 'Agents', 'Autopilot', 'Business', 'Product portal'])
   assert.equal(visibleSections(true).some(section => section.id === 'models'), false)
-  assert.deepEqual(visibleSections(true, permission => permission === 'models.read').map(section => section.id), ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'policies', 'models', 'agents', 'autopilot', 'business', 'portal'])
+  assert.deepEqual(visibleSections(true, permission => permission === 'models.read').map(section => section.id), ['personal', 'theme', 'developer', 'workspace', 'vocabulary', 'kinds', 'policies', 'models', 'agents', 'autopilot', 'business', 'portal'])
   assert.equal(sectionOf('projects'), 'vocabulary')
   assert.equal(sectionOf('agents'), 'agents')
   assert.equal(sectionOf('autopilot'), 'autopilot')
