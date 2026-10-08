@@ -241,11 +241,12 @@ test('a live blocks relation satisfies readiness for the dot, Queue, bulk and St
     }
     await route.fallback()
   })
-  await blocked.getByRole('button', { name: /Remove PHAROS-14 from the queue/ }).click()
-  await refreshStarted
-  await expect(blocked.locator('.q-btn')).toBeDisabled()
-  await blocked.getByRole('checkbox', { name: 'Select PHAROS-14' }).check()
-  releaseRefresh()
+  try {
+    await blocked.getByRole('button', { name: /Remove PHAROS-14 from the queue/ }).click()
+    await refreshStarted
+    await expect(blocked.locator('.q-btn')).toBeDisabled()
+    await blocked.getByRole('checkbox', { name: 'Select PHAROS-14' }).check()
+  } finally { releaseRefresh() }
   const add = blocked.getByRole('button', { name: 'Queue PHAROS-14', exact: true })
   await expect(add).toBeEnabled()
   await expect(add).toHaveAttribute('aria-pressed', 'false')
