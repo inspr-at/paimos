@@ -173,7 +173,9 @@ func TestParentQueueSnapshotBounds(t *testing.T) {
 			t.Fatalf("receipt lost queued identity: %+v", item)
 		}
 	}
-	if n := queries.total.Load(); n > 24 {
+	n := queries.total.Load()
+	t.Logf("snapshot receipt query count: %d", n)
+	if n > 24 {
 		t.Fatalf("bounded receipt needed %d queries for one project's 100 leaves; want at most 24", n)
 	}
 	// A timeout before transaction entry must not create any snapshot or queue
