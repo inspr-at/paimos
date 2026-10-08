@@ -125,7 +125,7 @@ it('the ⋯ menu binds to the record it opened on; Archive is disabled for built
   await flush()
   const security = state.kinds.value.find((item: kinds.WorkKind) => item.id === 'security'), other = state.kinds.value.find((item: kinds.WorkKind) => item.id === 'other')
   await state.openMenu(security, {})
-  const items = (): { id: string; disabled?: boolean }[] => state.menuItems.value
+  const items = (): { id: string; detail?: string; disabled?: boolean }[] => state.menuItems.value
   expect(items().find(item => item.id === 'archive')?.disabled).toBe(true)
   state.menuSelect('archive', state.menuContext.value); expect(state.confirmation.value).toBeNull()
   await state.openMenu(other, {})
@@ -133,6 +133,11 @@ it('the ⋯ menu binds to the record it opened on; Archive is disabled for built
   const design = state.kinds.value.find((item: kinds.WorkKind) => item.id === 'design')
   await state.openMenu(design, {})
   expect(items().map(item => item.id)).toEqual(['up', 'down', 'archive']); expect(items().find(item => item.id === 'up')?.disabled).toBe(true)
+  // Arrow glyphs stand in for icons (AEON-109). The approved shortcut stays, spelled.
+  expect(items().find(item => item.id === 'up')?.detail).toBe('Alt+Up')
+  expect(items().find(item => item.id === 'down')?.detail).toBe('Alt+Down')
+  expect(textForKinds(false)('orderHint')).toBe('Alt+Up/Down on a kind changes the column order.')
+  expect(textForKinds(true)('orderHint')).toBe('Alt+Pfeil hoch/runter auf einer Art ändert die Spaltenreihenfolge.')
   state.menuSelect('archive', 'another-person/design'); expect(state.confirmation.value).toBeNull()
   state.menuSelect('archive', state.menuContext.value); expect(state.confirmation.value?.kind.id).toBe('design')
   // Control: the same menu choice writes while the person may write, and stops once they may not.

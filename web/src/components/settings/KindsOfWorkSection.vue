@@ -163,7 +163,8 @@ const menuItems = computed<SettingsMenuItem[]>(() => {
   if (!kind) return []
   const movable = kind.system !== 'other', blocked = (direction: -1 | 1) => truncated.value || busy.value || !movedKinds(kinds.value, kind.id, direction)
   return [
-    ...(movable ? [{ id: 'up', label: t.value('moveUp'), detail: 'Alt+↑', icon: 'arrow-up' as const, disabled: blocked(-1) }, { id: 'down', label: t.value('moveDown'), detail: 'Alt+↓', icon: 'arrow-down' as const, disabled: blocked(1) }] : []),
+    // Spelled keys: arrow glyphs are icons (AEON-109). The approved shortcut stays Alt+Up / Alt+Down.
+    ...(movable ? [{ id: 'up', label: t.value('moveUp'), detail: 'Alt+Up', icon: 'arrow-up' as const, disabled: blocked(-1) }, { id: 'down', label: t.value('moveDown'), detail: 'Alt+Down', icon: 'arrow-down' as const, disabled: blocked(1) }] : []),
     { id: 'archive', label: t.value('archiveMenu'), detail: kind.system ? t.value('builtInReason') : german.value ? `${kind.ticket_count} Tickets folgen Alles andere` : `${kind.ticket_count} tickets follow Everything else`, icon: 'archive' as const, disabled: !!kind.system, separated: movable },
   ]
 })
