@@ -80,7 +80,7 @@ func TestViewerReadsStoredReviewPolicy(t *testing.T) {
 }
 
 func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
-	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage", "delivery.manage", "delivery.route", "reviewpolicy.manage", "account.overview.read", "events.subscribe"}) {
+	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage", "delivery.manage", "delivery.route", "delivery_queue.manage", "delivery_queue.claim", "reviewpolicy.manage", "account.overview.read", "events.subscribe"}) {
 		t.Fatal("built-in agent exclusions drifted from the explicit recurrence, delivery, review, overview and subscription policies")
 	}
 	for _, key := range builtinAgentExclusions {
@@ -89,7 +89,7 @@ func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
 			t.Fatal("an explicit custom-role permission must remain agent-grantable")
 		}
 		for _, role := range []string{"owner", "admin", "member"} {
-			if (key == "delivery.manage" || key == "reviewpolicy.manage") && role == "member" {
+			if (key == "delivery.manage" || key == "delivery_queue.manage" || key == "delivery_queue.claim" || key == "reviewpolicy.manage") && role == "member" {
 				if contains(builtinPermissions(role), key) {
 					t.Fatal("delivery and review-policy management should require an explicit member grant")
 				}
@@ -199,6 +199,13 @@ func TestStatusHelpAgentReadRequiresAuthentication(t *testing.T) {
 		if err := RequirePattern(ctx, route, Scope{}); !errors.Is(err, ErrForbidden) {
 			t.Errorf("unexpected status route authority: %s: %v", route, err)
 		}
+	}
+}
+
+func TestUsageProbeRouteRequiresAccountManage(t *testing.T) {
+	const route = "PUT /api/agent-accounts/{accountId}/usage-probe"
+	if got, ok := PermissionForPattern(route); !ok || got != "account.manage" {
+		t.Fatalf("usage probe route permission %q, declared=%v; want account.manage", got, ok)
 	}
 }
 
