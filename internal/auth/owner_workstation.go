@@ -201,7 +201,7 @@ func workstationGuard(p tenant.Principal, permission string, scope authz.Scope) 
 		if _, err := tx.Exec(ctx, `SELECT id FROM agent_keys WHERE tenant_id=$1::uuid AND id=$2::uuid FOR SHARE`, tid, p.KeyID); err != nil {
 			return err
 		}
-		public, _, err := authz.WorkstationKeyTx(ctx, tx, p)
+		public, _, _, err := authz.WorkstationKeyTx(ctx, tx, p)
 		if err != nil {
 			return err
 		}
@@ -292,7 +292,7 @@ func (m *Module) serveWorkstation(w http.ResponseWriter, r *http.Request, p tena
 			if err := workstationGuard(p, permission, authz.RouteScope(r.Context()))(r.Context(), tx, p.TenantID); err != nil {
 				return err
 			}
-			public, _, err := authz.WorkstationKeyTx(r.Context(), tx, p)
+			public, _, _, err := authz.WorkstationKeyTx(r.Context(), tx, p)
 			if err != nil {
 				return err
 			}

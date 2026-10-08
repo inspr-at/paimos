@@ -128,15 +128,15 @@ export async function getAudit(): Promise<{ items: AuditEvent[]; complete: boole
 export const createAgent = (body: { name: string; description?: string; workspace_role_id?: string; project_roles?: { project_id: string; role_id: string }[] }) => call<Agent>('/members/agents', 'POST', body)
 
 // Agent keys (existing endpoints): a new key's secret is shown only once.
-export interface AgentKeyCreated { id: string; token: string; prefix: string; name: string; expires_at: string | null }
-export const createAgentKey = (agent: PrincipalRef, expiresAt: string | null, scopes: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { principal_id: agent.principal_id, name: agent.name, scopes, ...(expiresAt ? { expires_at: expiresAt } : {}) })
+export interface AgentKeyCreated { id: string; token: string; prefix: string; name: string; expires_at: string | null; full_access?: boolean }
+export const createAgentKey = (agent: PrincipalRef, expiresAt: string | null, scopes: string[], fullAccess = false) => call<AgentKeyCreated>('/agent-keys', 'POST', { principal_id: agent.principal_id, name: agent.name, scopes, ...(fullAccess ? { full_access: true } : {}), ...(expiresAt ? { expires_at: expiresAt } : {}) })
 export const adoptAgentKey = (keyId: string) => call<AgentKey>(`/agent-keys/${id(keyId)}/adopt`, 'POST')
 export const revokeAgentKey = (keyId: string) => call<void>(`/agent-keys/${id(keyId)}`, 'DELETE')
 export const getAgentKeyScopes = (keyId: string) => call<{ key: AgentKey; grantable_scopes: string[]; agent_role?: Role | null; role_grantable_scopes?: string[] }>(`/agent-keys/${id(keyId)}/scopes`)
-export const changeAgentKeyScopes = (keyId: string, add: string[], remove: string[], roleExtension?: { role_id: string; add: string[] }, expiresAt?: string | null) => call<AgentKey>(`/agent-keys/${id(keyId)}/scopes`, 'PATCH', { add, remove, ...(roleExtension ? { role_extension: roleExtension } : {}), ...(expiresAt === undefined ? {} : { expires_at: expiresAt }) })
+export const changeAgentKeyScopes = (keyId: string, add: string[], remove: string[], roleExtension?: { role_id: string; add: string[] }, expiresAt?: string | null, fullAccess?: boolean) => call<AgentKey>(`/agent-keys/${id(keyId)}/scopes`, 'PATCH', { add, remove, ...(fullAccess === undefined ? {} : { full_access: fullAccess }), ...(roleExtension ? { role_extension: roleExtension } : {}), ...(expiresAt === undefined ? {} : { expires_at: expiresAt }) })
 export const keyExpiryAfter = (days: number, now = Date.now()) => days === 0 ? null : new Date(Math.floor(now / 1000) * 1000 + days * 86_400_000).toISOString()
 // One confirmed request commits the replacement and revocation together.
-export const rotateAgentKey = (keyId: string, expiresAt: string | null, scopes?: string[]) => call<AgentKeyCreated>('/agent-keys', 'POST', { rotate_key_id: keyId, expires_at: expiresAt, ...(scopes === undefined ? {} : { rotation_scopes: scopes }) })
+export const rotateAgentKey = (keyId: string, expiresAt: string | null, scopes?: string[], fullAccess?: boolean) => call<AgentKeyCreated>('/agent-keys', 'POST', { rotate_key_id: keyId, ...(fullAccess === undefined ? {} : { full_access: fullAccess }), expires_at: expiresAt, ...(scopes === undefined ? {} : { rotation_scopes: scopes }) })
 
 export function keyExpiry(key: Pick<AgentKey, 'expires_at' | 'revoked_at'>, now = Date.now()): { label: string; soon: boolean } {
   if (!key.expires_at) return { label: 'Never', soon: false }
@@ -157,7 +157,7 @@ export const COORDINATOR_SCOPES = ['account.manage', 'inbox.read', 'inbox.send',
 export const TICKET_WORKER_SCOPES = ['nodes.read', 'nodes.write', 'comments.read', 'comments.write', 'events.read', 'search.read']
 export type PresetScopes = string[] | 'all'
 export const KEY_SCOPE_PRESETS: { id: string; label: string; description: string; scopes: PresetScopes }[] = [
-  { id: 'full-access', label: 'Full access', description: 'Every agent-grantable scope allowed by this agent’s role and your permissions.', scopes: 'all' },
+  { id: 'full-access', label: 'Full access', description: 'Always every current and future agent permission, within this agent’s role, creator permissions and project access.', scopes: 'all' },
   { id: 'ticket-worker', label: 'Ticket worker', description: 'Read and edit tickets, read their history, read and write comments, and search.', scopes: TICKET_WORKER_SCOPES },
   { id: 'coordinator', label: 'Coordinator', description: 'Coordinate work, messages, accounts, views and history.', scopes: COORDINATOR_SCOPES },
 ]
@@ -394,3 +394,7 @@ export function auditSentence(event: AuditEvent, names: Names): { actor: string;
     default: return { actor, subject: '', text: event.type.replace(/[._]/g, ' ') }
   }
 }
+
+export const fullAccessLabel = (locale = typeof document === 'undefined' ? 'en' : new URLSearchParams(location.search).get('lang') ?? document.documentElement.lang) => locale.toLowerCase().startsWith('de')
+  ? 'Vollzugriff (immer alle Agentenberechtigungen)'
+  : 'Full access (always all agent permissions)'

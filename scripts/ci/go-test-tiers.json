@@ -3224,6 +3224,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestFromEnv","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestFullAccessLiveCatalogAndBoundaries","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestHasScopeAcceptsDotAndColon","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestImportedSignInHintRequiresVerifiedTenantEmail","tier":"GATED-FULL"}
@@ -4987,6 +4989,8 @@
     {"kind":"go","package":"internal/db","name":"TestEventReferencesFollowVisibility","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestEveryTenantTableHasForcedRLS","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestFullAccessMigrationAcrossTenants","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestHumanCheckMigrationUpgradesExistingStrictSchemasUnderRLS","tier":"GATED-FULL"}
     ,

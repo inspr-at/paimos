@@ -19,7 +19,7 @@ import (
 func (m *Module) pairingBoundary(r *http.Request, p tenant.Principal) error {
 	return db.InTenant(r.Context(), m.pool, p.TenantID, func(tx pgx.Tx) error {
 		if authz.OwnerWorkstation(p) {
-			_, _, err := authz.WorkstationKeyTx(r.Context(), tx, p)
+			_, _, _, err := authz.WorkstationKeyTx(r.Context(), tx, p)
 			return err
 		}
 		paired, err := agentpairing.PairedPrincipal(r.Context(), tx, p.ID)
