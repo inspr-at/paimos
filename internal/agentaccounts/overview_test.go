@@ -334,11 +334,12 @@ func TestVendorStopAdviceRejectsUnenrolledDaemonSquatter(t *testing.T) {
 
 // Risk: a redacted overview row discloses quota headroom through routable,
 // or by omitting wait when slots remain. Private rows keep one constant shape.
-// A manual allowance is gated by the owner's clock, so the owned account runs on
-// explicit always-on hours and the claim is proved at a weekday midday, a
-// weekend night and the last minutes of a day, not just when CI happens to run.
-// The same allowance still follows the owner's own schedule: pin that clock and
-// allow night work so a disabled night still explains the wait.
+// The default schedule is weekdays 08:00–22:00 UTC with nights off, so the
+// first probe is pinned to Wednesday noon (a wall clock after 22:00 waits even
+// when the manual window still has slots). Explicit always-on hours stay
+// routable at midday, a weekend night and the last minutes of a day. The same
+// allowance still follows the owner's schedule: pin that clock and allow night
+// work so a disabled night still explains the wait.
 func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
 	t.Run("schedule-band", func(t *testing.T) {
 		reset(t)
