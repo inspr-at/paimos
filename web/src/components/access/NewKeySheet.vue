@@ -127,7 +127,7 @@ async function copyCommand() {
   <AccessSheet :title="created ? 'Key ready' : `${rotateKey ? 'Rotate key' : firstKey ? 'Create first key' : 'New key'} for ${agent.name}`" size="center" scale="l" actions-first :submit-shortcut="!created" @submit="create" @close="busy || emit('close')">
     <div v-if="!created" class="body">
       <p v-if="rotateKey" class="note"><AppIcon name="refresh" :size="14" /><span>Rotate {{ keyHint(rotateKey.prefix) }}: create a replacement and revoke the old key immediately when you confirm. The same scopes are kept unless you change the selection. Copy the new key into {{ agent.name }}’s configuration to reconnect it.</span></p>
-      <p v-else class="note"><AppIcon name="shield" :size="14" /><span>Choose Full access or individual permissions below. The key stays within {{ agent.name }}’s role{{ role ? ` (${role})` : '' }}. Revoking it stops it at once.</span></p>
+      <p v-else class="note"><AppIcon name="shield" :size="14" /><span>Choose Full access or individual permissions below, and never more than {{ agent.name }}’s role{{ role ? ` (${role})` : '' }} allows. Revoking it stops it at once.</span></p>
       <KeyLifetime v-model="days" :disabled="busy || !allowed" />
       <ScopeCodeField :unavailable="codeUnavailable" :disabled="busy || !allowed || fullAccess" @applied="applyCode" />
       <label class="search-field">
