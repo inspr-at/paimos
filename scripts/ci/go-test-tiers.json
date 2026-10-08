@@ -6138,6 +6138,8 @@
     ,
     {"kind":"go","package":"internal/inbox","name":"TestSessionBoundSendNeedsNoTarget","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/inbox","name":"TestSessionChatCancelAndLinkedResend","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/inbox","name":"TestSessionDeadlineDeliveredThenFailedLoudly","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/inbox","name":"TestSessionEndFailsBoundMessagesAndCopiesCoordinator","tier":"GATED-FULL"}

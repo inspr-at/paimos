@@ -111,6 +111,7 @@ components:
       additionalProperties: false
       required: [to, body, idempotency_key]
       properties:
+        resend_of: {type: string, format: uuid, description: "Original terminal or cancelled message from this sender to the same session. Requires a new idempotency key; never recalls an offered message."}
         to: {type: string, description: 'harness:agent or principal UUID'}
         recipient_message_generation: {type: string, format: uuid, description: Required for attached owner notes; new grants never inherit it}
         recipient_session_id: {type: string, format: uuid, description: Exact active generation belonging to the recipient in this project. With this field set, the send needs no registered target and is not given a principal-wide target.}
@@ -125,6 +126,8 @@ components:
     Message:
       type: object
       properties:
+        cancelled: {type: boolean, description: "Sender cancelled this session message before it was offered. Retained in inspection history; omit it from the conversation."}
+        resend_of: {type: string, format: uuid, description: "Original same-sender session message for an explicit linked resend."}
         id: {type: string, format: uuid}
         sender_principal_id: {type: string, format: uuid}
         recipient_principal_id: {type: string, format: uuid}

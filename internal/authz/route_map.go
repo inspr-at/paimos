@@ -683,6 +683,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/projects/{projectId}/messages/delivery-claim":                                    "inbox.send",
 	"POST /api/projects/{projectId}/messages/delivery-complete":                                 "inbox.send",
 	"POST /api/projects/{projectId}/messages/delivery-unavailable":                              "inbox.send",
+	"POST /api/projects/{projectId}/messages/{messageId}/cancel":                                "inbox.send",
 	"POST /api/projects/{projectId}/messages/{messageId}/ack":                                   "inbox.send",
 	"POST /api/projects/{projectId}/messages/{messageId}/resolution":                            "inbox.manage",
 	"POST /api/projects/{projectId}/releases/{releaseId}/tickets":                               "releases.write",
