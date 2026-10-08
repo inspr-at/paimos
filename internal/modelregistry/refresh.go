@@ -37,6 +37,7 @@ type SourceResult struct {
 }
 type RefreshResult struct {
 	At            time.Time      `json:"at"`
+	NewLines      []string       `json:"new_lines"`
 	Added         int            `json:"added"`
 	Proposed      int            `json:"proposed"`
 	Sources       []SourceResult `json:"sources"`
@@ -144,7 +145,7 @@ type discoveredSource struct {
 // Reserve before making network calls. Only short catalog transactions hold
 // the tenant lock; both workers and the scheduler obey the same interval.
 func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled bool) (RefreshResult, error) {
-	out := RefreshResult{Sources: []SourceResult{}}
+	out := RefreshResult{Sources: []SourceResult{}, NewLines: []string{}}
 	inputs := []discoveryInput{}
 	reserved := false
 	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) (err error) {
@@ -286,8 +287,17 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 					}
 					pin, mapped := observedPin(o)
 					if cfg.AutoAddProfiles && mapped {
+						family, line, _ := ProfileLine(Profile{Family: pin.Family, Harness: pin.Harness, Model: pin.Model})
+						id := family + ":" + line
+						var knownLine bool
+						if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE aeon_model_board_line(family,harness,model)=$1)`, id).Scan(&knownLine); err != nil {
+							return err
+						}
 						if _, err := insertObservedProfile(ctx, tx, p.TenantID, pin); err != nil {
 							return err
+						}
+						if !knownLine {
+							out.NewLines = append(out.NewLines, id)
 						}
 						out.Added++
 					} else {

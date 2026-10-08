@@ -27,7 +27,7 @@ func (f *fixture) prefsCall(t *testing.T, p tenant.Principal, body any, status i
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := httptest.NewRequest("PUT", "/api/model-preferences/levels/person", strings.NewReader(string(raw)))
+	r := httptest.NewRequest("PUT", "/api/model-preferences/profile?for=me", strings.NewReader(string(raw)))
 	r = r.WithContext(tenant.WithPrincipal(r.Context(), p))
 	r.Header.Set("If-Prefs-Person", f.person.ID)
 	w := httptest.NewRecorder()
@@ -62,17 +62,17 @@ func TestAliasResidencyOverHTTPAndActiveRunRestamp(t *testing.T) {
 	})
 	f.prefsCall(t, alias, map[string]any{"revision": 0, "residency": "eu"}, 200, nil)
 	var aliasDoc, canonicalDoc struct {
-		PersonID string                     `json:"person_id"`
-		Levels   map[string]json.RawMessage `json:"levels"`
+		PersonID string          `json:"person_id"`
+		Profile  json.RawMessage `json:"profile"`
 	}
-	f.call(t, alias, "GET", "/api/model-preferences", nil, 200, &aliasDoc)
-	f.call(t, f.person, "GET", "/api/model-preferences", nil, 200, &canonicalDoc)
-	if aliasDoc.PersonID != f.person.ID || canonicalDoc.PersonID != f.person.ID || string(aliasDoc.Levels["person"]) != string(canonicalDoc.Levels["person"]) {
+	f.call(t, alias, "GET", "/api/model-preferences/board", nil, 200, &aliasDoc)
+	f.call(t, f.person, "GET", "/api/model-preferences/board", nil, 200, &canonicalDoc)
+	if aliasDoc.PersonID != f.person.ID || canonicalDoc.PersonID != f.person.ID || string(aliasDoc.Profile) != string(canonicalDoc.Profile) {
 		t.Fatal("alias selected a different You slice")
 	}
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		var person, actor string
-		if err := tx.QueryRow(t.Context(), `SELECT person_id::text,updated_by::text FROM model_pref_scopes WHERE level='person'`).Scan(&person, &actor); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT person_id::text,set_by::text FROM model_pref_profiles WHERE scope='person'`).Scan(&person, &actor); err != nil {
 			return err
 		}
 		if person != f.person.ID || actor != alias.ID {
@@ -185,7 +185,7 @@ func TestAliasResidencyOverHTTPAndActiveRunRestamp(t *testing.T) {
 		}
 		return nil
 	})
-	count := f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.residency_restamped'`)
+	count := f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.preferences_changed' AND jsonb_array_length(coalesce(after->'restamped','[]'::jsonb))>0`)
 	// Simulate a pre-link stale stamp. A local-to-EU loosening must not catch it
 	// up to EU; dispatch still reads the live requirement independently.
 	f.tx(t, f.person, func(tx pgx.Tx) error {
@@ -204,7 +204,7 @@ func TestAliasResidencyOverHTTPAndActiveRunRestamp(t *testing.T) {
 		return nil
 	})
 	f.prefsCall(t, alias, map[string]any{"revision": 3, "residency": "any"}, 200, &written)
-	if len(written.RunningOutside) != 0 || f.count(t, f.person, `SELECT count(*) FROM events WHERE type='run.residency_restamped'`) != count {
+	if len(written.RunningOutside) != 0 || f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.preferences_changed' AND jsonb_array_length(coalesce(after->'restamped','[]'::jsonb))>0`) != count {
 		t.Fatal("loosening restamped runs")
 	}
 	// The alias-scope guard remains authoritative for non-HTTP store clients.
@@ -220,4 +220,78 @@ func containsRun(ids []string, id string) bool {
 		}
 	}
 	return false
+}
+
+// Risk: pairing verification and other runs start with a null trace. Treating
+// that absence as corrupt telemetry rejects the start with an internal error.
+func TestStartedTelemetryAcceptsMissingPlacementTrace(t *testing.T) {
+	f := setup(t)
+	o := f.order(t, nil)
+	v := f.run(t, o)
+	ids := f.reserve(t, v)
+	f.call(t, f.agent, "POST", "/api/runs/"+v.ID+"/claim", claimBody(ids), 200, &v)
+	f.tx(t, f.person, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=NULL WHERE id=$1`, v.ID)
+		return err
+	})
+	f.call(t, f.agent, "POST", "/api/runs/"+v.ID+"/telemetry", map[string]any{"sequence": 1, "kind": "started"}, 200, &v)
+	if v.Status != "running" || f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.pinned_bottom_used'`) != 0 {
+		t.Fatal("missing placement trace rejected startup or invented bottom-pin evidence")
+	}
+}
+
+// Risk: a planned bottom pin could be reported as used before a real start,
+// or a telemetry replay could count it twice.
+func TestPinnedBottomEvidenceOnlyWhenPlannedRunStarts(t *testing.T) {
+	for _, matches := range []bool{true, false} {
+		t.Run(fmt.Sprint(matches), func(t *testing.T) {
+			f := setup(t)
+			modelregistry.New(f.d.App).Mount(f.mux)
+			o := f.order(t, nil)
+			v := f.run(t, o)
+			path := "/api/runs/" + v.ID
+			ids := f.reserve(t, v)
+			f.call(t, f.agent, "POST", path+"/claim", claimBody(ids), 200, &v)
+			planned := f.profile
+			if !matches {
+				planned = uuid()
+			}
+			raw, _ := json.Marshal(map[string]any{"work_placement": map[string]any{"planned_profile_id": planned, "kind": "backend", "person_id": f.person.ID, "column": "backend", "situation": "first", "preference_of": map[string]any{"person": f.person.ID, "source": "person"}, "lock": map[string]any{"kind": "rule", "value": "bottom", "scope": "workspace", "why": "Fallback"}}})
+			f.tx(t, f.person, func(tx pgx.Tx) error {
+				_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET trace=$2::jsonb WHERE id=$1`, v.ID, raw)
+				return err
+			})
+			if f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.pinned_bottom_used'`) != 0 {
+				t.Fatal("claim counted as a real start")
+			}
+			report := map[string]any{"sequence": 1, "kind": "started"}
+			f.call(t, f.agent, "POST", path+"/telemetry", report, 200, &v)
+			want := int64(0)
+			if matches {
+				want = 1
+			}
+			if v.Status != "running" || f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.pinned_bottom_used'`) != want {
+				t.Fatal("actual start evidence mismatch")
+			}
+			var evidence struct {
+				Items []struct {
+					ID        string  `json:"id"`
+					ForPerson *string `json:"for_person"`
+					Agreement string  `json:"agreement"`
+				} `json:"items"`
+			}
+			f.call(t, f.person, "GET", "/api/model-preferences/evidence?kind=backend", nil, 200, &evidence)
+			agreement := "differs"
+			if matches {
+				agreement = "matches"
+			}
+			if len(evidence.Items) != 1 || evidence.Items[0].ID != v.ID || evidence.Items[0].ForPerson == nil || *evidence.Items[0].ForPerson != f.person.ID || evidence.Items[0].Agreement != agreement {
+				t.Fatal("recorded evidence mismatch", evidence)
+			}
+			f.call(t, f.agent, "POST", path+"/telemetry", report, 200, nil)
+			if f.count(t, f.person, `SELECT count(*) FROM events WHERE type='model.pinned_bottom_used'`) != want {
+				t.Fatal("replay counted the bottom pin again")
+			}
+		})
+	}
 }

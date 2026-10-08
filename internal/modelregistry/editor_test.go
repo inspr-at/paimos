@@ -113,7 +113,7 @@ func newEditorHTTP(t *testing.T, m *Module) *editorHTTP {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &httpapi.Server{Pool: appPool, Modules: []httpapi.Module{m, authz.New(appPool)}, Middleware: []func(http.Handler) http.Handler{a.Middleware}}
+	s := &httpapi.Server{Pool: appPool, Modules: []httpapi.Module{legacyPreferenceTestModule{m}, authz.New(appPool)}, Middleware: []func(http.Handler) http.Handler{a.Middleware}}
 	return &editorHTTP{handler: s.Handler(), cookies: map[string]*http.Cookie{}}
 }
 
@@ -502,4 +502,12 @@ func TestEditorPersonHeaderStrictlyBoundedEquality(t *testing.T) {
 			t.Fatal("invalid or duplicate identity header accepted", err)
 		}
 	}
+}
+
+// Compatibility tests retain the pre-cutover writer's full security assertions.
+// Public routing never uses this test-only module.
+type legacyPreferenceTestModule struct{ *Module }
+
+func (m legacyPreferenceTestModule) Mount(mux *http.ServeMux) {
+	m.Module.mount(mux, m.Module.writePreferences)
 }

@@ -10428,6 +10428,18 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"displacement before a late read marker preserves the reader's position before scroll dispatch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat dark 1024: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat dark 1440: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat dark 390: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat light 1024: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat light 1440: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"fast chat light 390: live bursts retain the latest post and stable controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"focusing the window picks up a read from another device","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"keydown before a late read marker preserves the reader's position before scroll dispatch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -15545,6 +15557,8 @@
     {"kind":"vitest","file":"tests/session-order.unit.test.ts","name":"manual order by column > keeps families together and orders children by the same key","tier":"GATED-FULL"}
     ,
     {"kind":"vitest","file":"tests/session-removal-store.unit.test.ts","name":"an in-flight poll and an older snapshot cannot resurrect a removed generation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a burst during a slow poll starts one catch-up and one trailing read","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a slow poll cannot overwrite the reply loaded after a send","tier":"ESSENTIAL"}
     ,

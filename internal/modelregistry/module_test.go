@@ -113,7 +113,14 @@ func addPrincipal(t *testing.T, tenantID, kind, name string, roles []string) ten
 func call(t *testing.T, p *tenant.Principal, method, path, body string) (int, []byte) {
 	t.Helper()
 	mux := http.NewServeMux()
-	New(appPool).Mount(mux)
+	// Legacy invariants remain tested during the read-only transition. Real
+	// public retirement is covered separately with Module.Mount.
+	module := &Module{pool: appPool}
+	if strings.HasPrefix(path, "/api/model-preferences/levels/") {
+		module.mount(mux, module.writePreferences)
+	} else {
+		module.Mount(mux)
+	}
 	var r *http.Request
 	if body != "" {
 		r = httptest.NewRequest(method, path, strings.NewReader(body))

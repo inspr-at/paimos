@@ -11,6 +11,7 @@
     "delivery_ship.manage",
     "delivery_ship.claim",
     "reviewpolicy.manage",
-    "account.overview.read"
+    "account.overview.read",
+    "events.subscribe"
   ]
 }

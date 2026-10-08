@@ -275,7 +275,7 @@ func TestExplicitPlacementModeSelectsManagedReview(t *testing.T) {
 		WorkResolution
 		Preference PreferenceDecision `json:"preference"`
 	}](t, &p, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude&mode=placement", "", http.StatusOK)
-	if got.Preference.Role != "review-gate" || got.Preference.Kind.Slug != "review" || got.CommandTemplate != "" || !got.OwnerRequired || got.Profile != nil {
+	if got.Preference.Role != "review-gate" || got.Preference.Kind.Slug != "review:openai" || got.CommandTemplate != "" || !got.OwnerRequired || got.Profile != nil {
 		t.Fatalf("explicit placement bypassed managed-review requirements: %+v", got)
 	}
 }
