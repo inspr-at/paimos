@@ -257,7 +257,7 @@ func TestHistoricalFencePreservesUnconfirmedProcessEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.Close()
-	j, err := localjournal.Open(localjournal.Config[agentd.Record]{Directory: state, Prefix: "aeon-agentd-" + c.DaemonID, Version: 2, MaxBytes: 4 << 20, MaxRecords: 4096, Key: func(r agentd.Record) (string, error) { return r.RunID, nil }, Validate: func(agentd.Record) error { return nil }})
+	j, err := localjournal.Open(localjournal.Config[agentd.Record]{Directory: state, Prefix: "aeon-agentd-" + c.DaemonID, Version: agentd.RecordSchemaVersion, MaxBytes: 4 << 20, MaxRecords: 4096, Key: func(r agentd.Record) (string, error) { return r.RunID, nil }, Validate: func(agentd.Record) error { return nil }})
 	if err != nil {
 		t.Fatal(err)
 	}

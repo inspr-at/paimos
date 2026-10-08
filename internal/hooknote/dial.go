@@ -40,8 +40,8 @@ func dialWithTrust(ctx context.Context, socket string, pin DaemonPin, trust func
 	if err != nil {
 		return nil, ErrPeer
 	}
-	peer, err := Snapshot(conn)
-	if err != nil || !MatchesPin(peer, pin) || trust == nil || trust(ctx, peer) != nil || Recheck(conn, peer) != nil {
+	peer, err := SnapshotDaemon(conn)
+	if err != nil || !MatchesPin(peer, pin) || trust == nil || trust(ctx, peer) != nil || RecheckDaemon(conn, peer) != nil {
 		conn.Close()
 		return nil, ErrPeer
 	}
@@ -118,7 +118,7 @@ func (s *Session) Settle(ctx context.Context, nonce, outcome string) error {
 }
 
 func (s *Session) post(ctx context.Context, payload any, dest any) (int, error) {
-	if err := Recheck(s.conn, s.peer); err != nil {
+	if err := RecheckDaemon(s.conn, s.peer); err != nil {
 		return 0, ErrPeer
 	}
 	deadline := time.Now().Add(2500 * time.Millisecond)
@@ -141,7 +141,7 @@ func (s *Session) post(ctx context.Context, payload any, dest any) (int, error) 
 		return 0, ErrPeer
 	}
 	status, raw, err := readHTTP(s.r)
-	if Recheck(s.conn, s.peer) != nil {
+	if RecheckDaemon(s.conn, s.peer) != nil {
 		return 0, ErrPeer
 	}
 	if err != nil {
