@@ -41,7 +41,7 @@ function change(key: 'small_hours' | 'fix_rounds', value: number | string) {
     <div class="adv">
       <h3 class="adv-h">{{ t('recognitionHeading') }}</h3>
       <p class="note">{{ t('recognitionNote') }}</p>
-      <table class="kt">
+      <div class="kt-wrap"><table class="kt">
         <thead><tr><th scope="col">{{ t('colKind') }}</th><th scope="col">{{ t('colArea') }}</th><th scope="col">{{ t('colLabels') }}</th></tr></thead>
         <tbody>
           <tr v-for="kind in kinds" :key="kind.id">
@@ -50,7 +50,7 @@ function change(key: 'small_hours' | 'fix_rounds', value: number | string) {
             <td><template v-if="kind.labels.length"><code v-for="label in kind.labels" :key="label">{{ label }}</code></template><span v-else class="faint">{{ t('none') }}</span></td>
           </tr>
         </tbody>
-      </table>
+      </table></div>
       <h3 id="k-sits" class="adv-h">{{ t('limitsHeading') }}</h3>
       <p v-if="loading && !limits" role="status">{{ t('loading') }}</p>
       <div v-else-if="!limits" class="adv-err"><p class="err" role="alert">{{ error || t('limitsError') }}</p><button type="button" class="btn sm" :disabled="busy || loading" @click="emit('reload')">{{ t('reload') }}</button></div>
@@ -70,9 +70,10 @@ function change(key: 'small_hours' | 'fix_rounds', value: number | string) {
 .adv { padding: 4px 18px 18px; }
 .adv-h { margin: 16px 0 4px; font-size: 13.5px; font-weight: 650; }.adv-h:first-child { margin-top: 0; }
 .note { margin: 4px 0 0; font-size: 12px; line-height: 1.5; color: var(--ink-3); }
+.kt-wrap { overflow-x: auto; }
 .kt { width: 100%; margin: 8px 0 0; border-collapse: collapse; font-size: 12.5px; }
 .kt th { padding: 6px 8px; text-align: left; font-size: 11.5px; font-weight: 600; color: var(--ink-3); border-bottom: 1px solid var(--line); }
-.kt td { padding: 6px 8px; border-bottom: 1px solid var(--line); color: var(--ink-2); vertical-align: top; overflow-wrap: anywhere; }
+.kt td { padding: 6px 8px; border-bottom: 1px solid var(--line); color: var(--ink-2); vertical-align: top; overflow-wrap: break-word; }
 .kt td:first-child { color: var(--ink); font-weight: 600; }
 code { font: 500 11.5px/1.4 var(--mono); background: var(--code-bg); padding: 1px 4px; border-radius: 4px; color: var(--ink); margin-right: 3px; }
 .faint { color: var(--ink-3); }
