@@ -71,9 +71,15 @@ export async function verifyRun(repository, runID, api, sha) {
   ensure(run.status === 'completed' && run.conclusion === 'success' && positive(run.run_attempt), 'run not successful');
   ensure(run.event === 'merge_group' && run.head_sha === sha, 'not the exact merge-group SHA');
   const jobs = await api(`actions/runs/${runID}/attempts/${run.run_attempt}/jobs?per_page=100`);
+  verifyJobs(jobs, run.run_attempt);
+  return { run: runID, attempt: run.run_attempt, sha };
+}
+
+// Shared execution obligations: never substitute green aggregate conclusions.
+export function verifyJobs(jobs, attempt) {
   ensure(positive(jobs.total_count) && jobs.total_count <= 100 && jobs.jobs?.length === jobs.total_count, 'incomplete job list');
-  ensure(jobs.jobs.every(job => job.run_attempt === run.run_attempt && job.status === 'completed' && (job.conclusion === 'success' || (['cache-prime', 'tree-reuse'].includes(job.name) && job.conclusion === 'skipped'))), 'incomplete suite');
-  // The only optional/skipped jobs are push-only proof and cache priming. Unknown or
+  ensure(jobs.jobs.every(job => job.run_attempt === attempt && job.status === 'completed' && (job.conclusion === 'success' || (['cache-prime', 'tree-reuse'].includes(job.name) && job.conclusion === 'skipped'))), 'incomplete suite');
+  // The only optional/skipped jobs are reuse lookup and main cache priming. Unknown or
   // duplicate jobs cannot silently change the suite this proof recognizes.
   ensure(jobs.jobs.every(job => requiredJobs.includes(job.name) || ['cache-prime', 'tree-reuse'].includes(job.name)), 'unknown suite job');
   ensure(new Set(jobs.jobs.map(job => job.name)).size === jobs.jobs.length, 'duplicate suite job');
@@ -91,7 +97,75 @@ export async function verifyRun(repository, runID, api, sha) {
     }
     ensure(!job.steps?.some(step => step.name === 'Reuse the verified merge-group run' && step.conclusion !== 'skipped'), 'reused suite is not execution proof');
   }
-  return { run: runID, attempt: run.run_attempt, sha };
+}
+
+// The API-visible aggregate name binds the PR checkout, rather than the mutable
+// pulls/N/merge ref. It is produced inline by CI, with no artifact or registry.
+export const prProofPrefix = 'tier-measurements / pr-tree-v1:';
+export function parsePRProof(name) {
+  ensure(typeof name === 'string' && name.startsWith(prProofPrefix), 'missing PR tree proof');
+  const fields = name.slice(prProofPrefix.length).split(':');
+  ensure(fields.length === 6 && fields.slice(0, 2).every(x => /^[1-9][0-9]*$/.test(x)) && fields.slice(2).every(x => oid.test(x)), 'malformed PR tree proof');
+  const [run, attempt] = fields.slice(0, 2).map(Number);
+  ensure(positive(run) && positive(attempt), 'unsafe PR proof identity');
+  return { run, attempt, head: fields[2], base: fields[3], commit: fields[4], tree: fields[5] };
+}
+
+export function verifyPRFacts({ repository, run, workflow, jobs, commit, tree }) {
+  ensure(run.repository?.full_name === repository && run.head_repository?.full_name === repository && positive(run.repository?.id), 'wrong repository');
+  ensure(workflow.name === 'CI' && run.name === 'CI' && workflow.path === workflowPath && run.path === workflowPath && run.workflow_id === workflow.id && positive(workflow.id), 'wrong workflow');
+  ensure(run.event === 'pull_request' && run.status === 'completed' && run.conclusion === 'success' && oid.test(run.head_sha), 'not a green PR run');
+  // Reject every rerun, including retained jobs stamped with a newer attempt.
+  // Conservative relative to main reuse: a fresh run is needed for PR evidence.
+  ensure(run.run_attempt === 1, 'PR reruns are not execution proof');
+  ensure(Array.isArray(jobs.jobs), 'missing jobs');
+  ensure(positive(jobs.total_count) && jobs.total_count <= 100 && jobs.jobs.length === jobs.total_count, 'incomplete job list');
+  const proofJobs = jobs.jobs.filter(job => job.name?.startsWith(prProofPrefix));
+  ensure(proofJobs.length === 1, 'missing or duplicate PR proof');
+  const proof = parsePRProof(proofJobs[0].name);
+  ensure(proof.run === run.id && proof.attempt === run.run_attempt && proof.head === run.head_sha, 'PR proof does not match run');
+  ensure(proofJobs[0].steps?.filter(s => s.name === 'Confirm PR tree proof' && s.status === 'completed' && s.conclusion === 'success').length === 1, 'PR proof was not emitted by full aggregate');
+  ensure(commit.sha === proof.commit && commit.tree?.sha === proof.tree && commit.parents?.length === 2 && commit.parents[0].sha === proof.base && commit.parents[1].sha === proof.head, 'PR checkout is not the proven merge');
+  ensure(oid.test(tree) && proof.tree === tree, 'different tested tree');
+  verifyJobs({ ...jobs, jobs: jobs.jobs.map(job => job === proofJobs[0] ? { ...job, name: 'tier-measurements' } : job) }, run.run_attempt);
+  return proof;
+}
+
+export async function verifyPRRun(repository, runID, api, sha) {
+  ensure(repositoryPattern.test(repository) && positive(runID) && oid.test(sha), 'invalid PR lookup');
+  const [run, workflow, candidate] = await Promise.all([
+    api(`actions/runs/${runID}`), api('actions/workflows/ci.yml'), api(`git/commits/${sha}`),
+  ]);
+  ensure(run.id === runID && candidate.sha === sha && oid.test(candidate.tree?.sha), 'wrong run or merge-group commit');
+  ensure(run.run_attempt === 1, 'PR reruns are not execution proof');
+  const jobs = await api(`actions/runs/${runID}/attempts/1/jobs?per_page=100`);
+  const proofJob = jobs.jobs?.find(job => job.name?.startsWith(prProofPrefix));
+  const proof = parsePRProof(proofJob?.name);
+  const commit = await api(`git/commits/${proof.commit}`);
+  const verified = verifyPRFacts({ repository, run, workflow, jobs, commit, tree: candidate.tree.sha });
+  // Catch a rerun/cancellation started while evidence was being inspected.
+  const latest = await api(`actions/runs/${runID}`);
+  ensure(latest.id === runID && latest.run_attempt === verified.attempt && latest.status === 'completed' && latest.conclusion === 'success' && latest.head_sha === verified.head, 'PR evidence changed during lookup');
+  return verified;
+}
+
+export async function decideMergeGroup({ event, killSwitch, sha, repository, api }) {
+  if (event !== 'merge_group' || killSwitch !== 'on') return { reuse: 'none', reason: 'merge-group reuse disabled' };
+  try {
+    ensure(oid.test(sha), 'invalid merge-group SHA');
+    const found = await api('actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=20');
+    ensure(Number.isSafeInteger(found.total_count) && found.total_count >= 0 && Array.isArray(found.workflow_runs) && found.workflow_runs.length <= 20, 'invalid PR run list');
+    for (const candidate of found.workflow_runs) {
+      if (candidate?.event !== 'pull_request') continue;
+      try {
+        const proof = await verifyPRRun(repository, candidate.id, api, sha);
+        return { reuse: 'pull_request', run: proof.run, reason: `reused pull_request run ${proof.run}; exact tested tree ${proof.tree}` };
+      } catch { /* Every uncertain candidate retains full validation. */ }
+    }
+    return { reuse: 'none', reason: `no verified full PR tree in bounded candidate list${found.total_count > found.workflow_runs.length ? '; search truncated' : ''}` };
+  } catch {
+    return { reuse: 'none', reason: 'PR lookup unavailable; full CI required' };
+  }
 }
 
 export async function decide({ event, ref, killSwitch, sha, repository, api }) {
@@ -119,6 +193,19 @@ export async function main(vars, fetcher = fetch) {
   if (vars.GITHUB_EVENT_NAME === 'push' && vars.GITHUB_REF === 'refs/heads/main' && vars.CI_TREE_REUSE !== 'off') {
     const request = transport(vars.GH_TOKEN, vars.GITHUB_ACTOR, AbortSignal.timeout(10000), fetcher);
     decision = await decide({ event: vars.GITHUB_EVENT_NAME, ref: vars.GITHUB_REF, killSwitch: vars.CI_TREE_REUSE, sha: vars.GITHUB_SHA, repository: vars.GITHUB_REPOSITORY, api: github(vars.GITHUB_REPOSITORY, request) });
+  }
+  if (vars.GITHUB_EVENT_NAME === 'merge_group' && vars.CI_MG_REUSE === 'on') {
+    const request = transport(vars.GH_TOKEN, vars.GITHUB_ACTOR, AbortSignal.timeout(10000), fetcher);
+    const api = github(vars.GITHUB_REPOSITORY, request);
+    if (vars.CONFIRM_PR_RUN) {
+      ensure(/^[1-9][0-9]*$/.test(vars.CONFIRM_PR_RUN), 'invalid confirmation run');
+      const proof = await verifyPRRun(vars.GITHUB_REPOSITORY, Number(vars.CONFIRM_PR_RUN), api, vars.GITHUB_SHA);
+      decision = { reuse: 'pull_request', run: proof.run, reason: 'PR execution proof confirmed for aggregate' };
+    } else {
+      decision = await decideMergeGroup({ event: vars.GITHUB_EVENT_NAME, killSwitch: vars.CI_MG_REUSE, sha: vars.GITHUB_SHA, repository: vars.GITHUB_REPOSITORY, api });
+    }
+  } else if (vars.CONFIRM_PR_RUN) {
+    throw new Error('PR proof confirmation disabled or wrong event');
   }
   if (vars.GITHUB_OUTPUT) appendFileSync(vars.GITHUB_OUTPUT, `reuse=${decision.reuse}\nrun=${decision.run || ''}\n`);
   const note = `reuse=${decision.reuse}; ${decision.reason}`;

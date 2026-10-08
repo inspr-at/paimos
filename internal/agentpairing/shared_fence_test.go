@@ -16,19 +16,20 @@ import (
 
 // This explicit caller inventory makes newly connected entry paths reviewable.
 // Actual contention and FK compatibility are exercised by boundary/recurrence tests.
+var sharedFenceCallers = map[string][]string{
+	"db.LockTree":               {"authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/alerts.go", "delivery/audit.go", "delivery/audit_store.go", "delivery/routing.go", "modelregistry/module.go", "modelregistry/preparation.go", "operatoractor/actor.go", "workorders/common.go"},
+	"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/audit_store.go", "delivery/audit_webhook.go", "delivery/module.go", "delivery/quarantine.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "delivery/workqueue.go", "delivery/workqueue_api.go", "engineadmission/module.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "statusautopilot/attention_bulk.go", "workorders/common.go"},
+	"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
+	"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
+	"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go"},
+	"agentpairing.LockMutation": {"agentaccounts/module.go", "agentpairing/module.go", "agentruns/queue.go", "auth/owner_workstation.go", "harness/agent_recovery.go", "harness/module.go", "modelprovider/settings.go", "parentbenefits/module.go", "portal/market.go", "portal/moderate.go", "portal/module.go", "portal/products.go"},
+	"authz.LockProjectMutation": {"authz/agent_creation.go", "authz/members.go", "authz/project_members.go", "importer/users_backfill.go", "importer/writer.go", "statusautopilot/settings.go"},
+	"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "events/causal_undo.go", "events/module.go", "harness/lead_decisions.go", "knowledge/learnings.go", "nodes/causal_undo.go", "nodes/portal_publish.go", "themes/store.go", "themes/undo.go"},
+	"operatoractor.Ensure":      {"auth/store.go", "authz/operator.go", "operatoractor/actor.go"},
+	"rules.PrepareWrite":        {"knowledge/learning_draft.go"},
+}
+
 func TestSharedFenceCallerInventory(t *testing.T) {
-	expected := map[string][]string{
-		"db.LockTree":               {"authz/project_members.go", "crossreview/policy.go", "db/fences.go", "delivery/alerts.go", "delivery/audit.go", "delivery/audit_store.go", "delivery/routing.go", "modelregistry/module.go", "modelregistry/preparation.go", "operatoractor/actor.go", "workorders/common.go"},
-		"db.LockTenant":             {"auth/store.go", "crossreview/reporter.go", "db/fences.go", "delivery/alerts.go", "delivery/api.go", "delivery/audit_store.go", "delivery/audit_webhook.go", "delivery/module.go", "delivery/quarantine.go", "delivery/reconcile.go", "delivery/store.go", "delivery/webhook.go", "delivery/workqueue.go", "delivery/workqueue_api.go", "modelregistry/module.go", "modelregistry/preferences_http.go", "modelregistry/preparation.go", "modelregistry/routes_write.go", "statusautopilot/attention_bulk.go", "workorders/common.go"},
-		"db.LockCurrentTree":        {"agentpairing/lifecycle.go", "nodes/module.go"},
-		"agentpairing.LockRead":     {"agentaccounts/residency_evidence.go", "agentruns/runs.go"},
-		"agentpairing.Lock":         {"agentaccounts/route.go", "agentpairing/lifecycle.go", "agentpairing/provision.go", "agentruns/runs.go", "agentruns/telemetry.go", "crossreview/module.go", "knowledge/tagger.go", "knowledge/undo.go", "modelregistry/preparation.go", "nodes/bulk.go", "nodes/nodes.go"},
-		"agentpairing.LockMutation": {"agentaccounts/module.go", "agentpairing/module.go", "agentruns/queue.go", "auth/owner_workstation.go", "harness/agent_recovery.go", "harness/module.go", "modelprovider/settings.go", "parentbenefits/module.go", "portal/market.go", "portal/moderate.go", "portal/module.go", "portal/products.go"},
-		"authz.LockProjectMutation": {"authz/agent_creation.go", "authz/members.go", "authz/project_members.go", "importer/users_backfill.go", "importer/writer.go", "statusautopilot/settings.go"},
-		"authz.LockProjectWrite":    {"attachments/module.go", "decisiondesk/notifications.go", "events/causal_undo.go", "events/module.go", "harness/lead_decisions.go", "knowledge/learnings.go", "nodes/causal_undo.go", "nodes/portal_publish.go", "themes/store.go", "themes/undo.go"},
-		"operatoractor.Ensure":      {"auth/store.go", "authz/operator.go", "operatoractor/actor.go"},
-		"rules.PrepareWrite":        {"knowledge/learning_draft.go"},
-	}
 	root := ".."
 	observed := map[string]map[string]bool{}
 	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
@@ -63,7 +64,7 @@ func TestSharedFenceCallerInventory(t *testing.T) {
 			if key == "operatoractor.EnsureWithProduction" {
 				key = "operatoractor.Ensure"
 			}
-			if _, ok := expected[key]; ok {
+			if _, ok := sharedFenceCallers[key]; ok {
 				if observed[key] == nil {
 					observed[key] = map[string]bool{}
 				}
@@ -76,7 +77,7 @@ func TestSharedFenceCallerInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for key, want := range expected {
+	for key, want := range sharedFenceCallers {
 		got := []string{}
 		for path := range observed[key] {
 			got = append(got, path)
@@ -152,6 +153,12 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 		// failure rows and the ledger. recordTx appends the event counter after.
 		{"../delivery/quarantine.go", "quarantineEvent", "db.LockTenant(", "INSERT INTO delivery_queue_failures"},
 		{"../delivery/quarantine.go", "quarantineEvent", "INSERT INTO delivery_queue_failures", "recordTx("},
+		// Shadow admission (AEON-887) re-checks authority under the tenant fence
+		// after the GitHub WIP read. The decision row precedes the event.
+		{"../engineadmission/module.go", "admit", "db.LockTenant(", "INSERT INTO engine_admission_decisions"},
+		{"../engineadmission/module.go", "admit", "INSERT INTO engine_admission_decisions", "events.Append("},
+		{"../engineadmission/module.go", "settings", "db.LockTenant(", "authz.RequireTx("},
+		{"../engineadmission/module.go", "settings", "authz.RequireTx(", "events.Append("},
 		// Attention bulk (AEON-914) enters the canonical tenant fence, then the
 		// pairing advisory, then the shared tree advisory, before any batch row.
 		// Item commits lock the batch before node resolution; the summary event
@@ -216,6 +223,35 @@ func TestSharedFencePrimitiveOrder(t *testing.T) {
 	afterSummary := bulk[summary:]
 	if strings.Contains(afterSummary, "db.Lock") || strings.Contains(afterSummary, "pg_advisory") || strings.Contains(afterSummary, "FOR UPDATE") || strings.Contains(afterSummary, "FOR NO KEY UPDATE") || strings.Contains(afterSummary, "lockAttentionBatch(") || strings.Contains(afterSummary, "lock(") {
 		t.Error("attention bulk must not acquire fences after the summary event")
+	}
+}
+
+func TestEngineAdmissionJoinsSharedTenantFence(t *testing.T) {
+	// Risk: shadow admission reads GitHub between two transactions. The write
+	// must re-enter db.LockTenant, and that caller stays in the shared inventory.
+	body := functionBody(t, "../engineadmission/module.go", "admit")
+	lock := strings.Index(body, "db.LockTenant(")
+	preview := strings.Index(body, "admissionAuthority(")
+	insert := strings.Index(body, "INSERT INTO engine_admission_decisions")
+	event := strings.Index(body, "events.Append(")
+	if lock < 0 || preview < 0 || preview >= lock || insert < lock || event < insert {
+		t.Fatal("admit must preview authority, re-check it under the tenant fence, then append the event")
+	}
+	if strings.Index(body[lock:], "admissionAuthority(") < 0 {
+		t.Fatal("admit must re-check admission authority after the tenant fence")
+	}
+	tail := body[event:]
+	if strings.Contains(tail, "db.Lock") || strings.Contains(tail, "FOR UPDATE") || strings.Contains(tail, "FOR NO KEY UPDATE") {
+		t.Fatal("admit must not take another lock after the event")
+	}
+	var listed bool
+	for _, path := range sharedFenceCallers["db.LockTenant"] {
+		if path == "engineadmission/module.go" {
+			listed = true
+		}
+	}
+	if !listed {
+		t.Fatal("engine admission must be inventoried as a db.LockTenant caller")
 	}
 }
 

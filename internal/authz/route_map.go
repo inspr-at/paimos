@@ -24,6 +24,9 @@ const AuthenticatedRoute = "authenticated"
 // verifies the recipient binding. Authentication and public capability routes
 // remain explicit entries so route coverage can detect new unreviewed paths.
 var RoutePermissions = map[string]string{
+	"POST /api/engine/admission":                                       "engine.admission",
+	"GET /api/projects/{projectId}/admission-settings":                 "engine.read",
+	"PUT /api/projects/{projectId}/admission-settings":                 "engine.manage",
 	"GET /api/model-preferences/board":                                 "models.read",
 	"PUT /api/model-preferences/orders/{column}/{situation}":           "models.read|model_prefs.manage",
 	"DELETE /api/model-preferences/orders/{column}/{situation}":        "models.read|model_prefs.manage",
@@ -74,6 +77,9 @@ var RoutePermissions = map[string]string{
 	"GET /api/projects/{projectId}/lead/usage":                      "harness.read",
 	"POST /api/projects/{projectId}/chat-roles":                     "chat.bind",
 	"POST /api/projects/{projectId}/chat-threads/resolve":           "chat.read",
+	"GET /api/chat-threads/{id}/messages":                           "chat.read",
+	"GET /api/chat-threads/{id}/read-marker":                        "chat.read",
+	"PUT /api/chat-threads/{id}/read-marker":                        "chat.read",
 	"GET /api/chat-threads/{id}":                                    "chat.read",
 	"POST /api/chat-threads/{id}/binding":                           "chat.bind",
 	"POST /api/chat-deliveries/binding/resolve":                     "chat.receive",
@@ -479,7 +485,7 @@ var RoutePermissions = map[string]string{
 	"DELETE /api/projects/{projectId}/members/{principal_id}":                              "members.manage",
 	"GET /api/projects/{projectId}/message-deliveries":                                     "inbox.manage",
 	"GET /api/projects/{projectId}/message-targets":                                        "inbox.manage",
-	"GET /api/projects/{projectId}/messages":                                               "inbox.manage",
+	"GET /api/projects/{projectId}/messages":                                               "inbox.manage|harness.read",
 	"GET /api/projects/{projectId}/messages/listen":                                        "inbox.read",
 	"GET /api/projects/{projectId}/releases/{releaseId}/candidate-artifact":                "stage_handoffs.read",
 	"PUT /api/projects/{projectId}/releases/{releaseId}/candidate-artifact":                "stage_handoffs.write",
@@ -681,6 +687,7 @@ var RoutePermissions = map[string]string{
 	"POST /api/projects/{projectId}/messages/delivery-claim":                                    "inbox.send",
 	"POST /api/projects/{projectId}/messages/delivery-complete":                                 "inbox.send",
 	"POST /api/projects/{projectId}/messages/delivery-unavailable":                              "inbox.send",
+	"POST /api/projects/{projectId}/messages/{messageId}/cancel":                                "inbox.send",
 	"POST /api/projects/{projectId}/messages/{messageId}/ack":                                   "inbox.send",
 	"POST /api/projects/{projectId}/messages/{messageId}/resolution":                            "inbox.manage",
 	"POST /api/projects/{projectId}/releases/{releaseId}/tickets":                               "releases.write",
@@ -848,7 +855,7 @@ func RequirePattern(ctx context.Context, pattern string, scope Scope) error {
 // Delivery entry checks admit project bindings; handlers fence and recheck
 // the live target project's permission and RLS before returning or changing it.
 func init() {
-	for _, pattern := range []string{"GET /api/delivery", "GET /api/delivery/alerts", "GET /api/delivery/enqueue-allowed", "GET /api/nodes/{id}/delivery", "POST /api/delivery/{itemId}/hold", "DELETE /api/delivery/{itemId}/hold"} {
+	for _, pattern := range []string{"POST /api/engine/admission", "GET /api/delivery", "GET /api/delivery/alerts", "GET /api/delivery/enqueue-allowed", "GET /api/nodes/{id}/delivery", "POST /api/delivery/{itemId}/hold", "DELETE /api/delivery/{itemId}/hold"} {
 		ProjectFilteredRoutes[pattern] = true
 	}
 }

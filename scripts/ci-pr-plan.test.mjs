@@ -113,7 +113,7 @@ test('affected switch preserves ci-plan lanes and aggregate evidence for all 80 
 
 function workflowPlanScript() {
   const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8');
-  const step = workflow.split('      - name: Classify local PR diff\n')[1].split(/\n\n  [a-z][a-z-]*:/)[0];
+  const step = workflow.split('      - name: Classify local PR diff\n')[1].split(/\n      - |\n\n  [a-z][a-z-]*:/)[0];
   const run = step.split('        run: ')[1];
   assert.ok(run, 'classifier step must execute a command');
   return run.startsWith('|\n') ? run.slice(2).replace(/^          /gm, '') : run.trim();
@@ -269,7 +269,8 @@ test('required aggregate checks never execute the checked-out classifier script'
   for (const id of ['go', 'web', 'release-check', 'e2e']) {
     const job = requiredJob(id);
     assert.doesNotMatch(job, /scripts\/ci-pr-plan\.mjs/, `${id} must not execute PR-owned gate code`);
-    assert.doesNotMatch(job, /uses: actions\/checkout@/, `${id} must judge results without a checkout`);
+    assert.match(job, /ref: \$\{\{ github.event.merge_group.base_sha \}\}/, `${id} must check out only trusted base proof code`);
+    assert.match(job, /if: needs.tree-reuse.outputs.reuse == 'pull_request'/, `${id} must check out only for PR proof revalidation`);
   }
 });
 
@@ -375,7 +376,7 @@ exit 0
 // explicitly supplied. Unknown contexts fail instead of becoming false/skips.
 function evaluate(expression, context) {
   const source = expression.replace(/^\$\{\{\s*|\s*\}\}$/g, '')
-    .replace(/(?:needs|github)\.[\w.-]+/g, key => {
+    .replace(/(?:needs|github|steps)\.[\w.-]+/g, key => {
       assert.ok(Object.hasOwn(context, key), `Missing expression context: ${key}`);
       return JSON.stringify(context[key]);
     });
@@ -403,6 +404,7 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
         'needs.tier-plan.outputs.lane': lane, 'needs.tier-plan.outputs.mode': mode,
         'needs.tier-plan.outputs.layout': layout, 'needs.tier-plan.result': 'success',
         'needs.tree-reuse.outputs.reuse': 'none', 'needs.tree-reuse.result': 'skipped', 'needs.tree-reuse.outputs.run': '',
+        'steps.pr-confirm.outputs.reuse': 'none', 'steps.pr-confirm.outputs.run': '',
         'needs.cache-prime.result': 'skipped', 'needs.runner-route.result': 'success',
         'needs.runner-route.outputs.run_attempt': '1', 'needs.runner-route.outputs.runner_class': 'hosted',
         'needs.runner-route.outputs.runs_on': '["ubuntu-latest"]', 'needs.web-setup.result': 'success'};
@@ -428,10 +430,12 @@ test('effective lane precedence and real workflow execution agree for all 90 fla
       }
       assert.deepEqual(evaluate(/^    runs-on: (.+)$/m.exec(requiredJob('go-test'))[1], context), ['ubuntu-latest'], label);
       for (const id of ['go', 'web', 'e2e', 'release-check']) {
-        const job = requiredJob(id), envBlock = job.split('        env:\n')[1].split('        run: |\n')[0];
+        const job = requiredJob(id), gate = job.slice(job.indexOf('      - name: Require '));
+        assert.ok(gate.startsWith('      - name: Require '), id);
+        const envBlock = gate.split('        env:\n')[1].split('        run: |\n')[0];
         const env = {PATH: process.env.PATH, GITHUB_EVENT_NAME: event, GITHUB_REF: 'refs/heads/main', GITHUB_STEP_SUMMARY: summary};
         for (const match of envBlock.matchAll(/^          ([A-Z_]+): (.+)$/gm)) env[match[1]] = String(evaluate(match[2], context));
-        const run = job.split('        run: |\n')[1].replace(/^          /gm, '');
+        const run = gate.split('        run: |\n')[1].split('\n      - ')[0].replace(/^          /gm, '');
         const result = spawnSync('bash', ['-c', run], {env, encoding: 'utf8', timeout: 10_000});
         assert.equal(result.status, 0, `${label}/${id}: ${result.stderr}`);
         // A full planner cannot accept omitted heavy work through an old exemption.

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -301,7 +302,7 @@ func TestRemoteRunToolsUseScopedExistingRoutes(t *testing.T) {
 	if err := r.RequestApproval(ctx, "run", ApprovalRequest{Scope: "git.push", Rationale: "reason", ExpiresAt: "2026-09-26T18:00:00Z"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.ReplyInbox(ctx, "message", "sender", "answer", "reply-1"); err != nil {
+	if err := r.ReplyInbox(ctx, "message", InboxReplyTarget{PrincipalID: "sender"}, "answer", "reply-1"); err != nil {
 		t.Fatal(err)
 	}
 	for _, route := range []string{"POST /api/nodes/order/comments", "PATCH /api/work-orders/order", "POST /api/work-orders/order/criteria/criterion/check", "POST /api/work-orders/order/evidence", "POST /api/approvals", "POST /api/inbox/messages"} {
@@ -476,5 +477,60 @@ func TestRemoteDeployApprovalBinding(t *testing.T) {
 	}
 	if len(bodies) != 4 {
 		t.Fatalf("unexpected requests: %d", len(bodies))
+	}
+}
+
+// A managed reply must use the project projection, with the exact two generations.
+// A failed project reply must never silently become an unbound principal message.
+func TestRemoteReplyRetainsProjectAndSession(t *testing.T) {
+	const project = "11111111-1111-4111-8111-111111111111"
+	const session = "22222222-2222-4222-8222-222222222222"
+	const recipientSession = "33333333-3333-4333-8333-333333333333"
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/projects/"+project+"/messages" {
+			t.Errorf("reply left project thread: %s %s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		requests = append(requests, body)
+		if len(requests) == 3 {
+			http.Error(w, "not found", 404)
+			return
+		}
+		fmt.Fprint(w, `{}`)
+	}))
+	defer server.Close()
+	r := NewRemote(server.URL, "fixture-key")
+	target := InboxReplyTarget{PrincipalID: "person", ProjectID: project, SenderSessionID: session, ReplyToID: "project-message-parent"}
+	if err := r.ReplyInbox(t.Context(), "message", target, "final answer", "reply-key"); err != nil {
+		t.Fatal(err)
+	}
+	peer := recipientSession
+	target.RecipientSessionID = &peer
+	if err := r.ReplyInbox(t.Context(), "peer-inbox-message", target, "peer answer", "peer-key"); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.ReplyInbox(t.Context(), "hidden-message", target, "hidden answer", "hidden-key"); err == nil {
+		t.Fatal("failed write reported success")
+	}
+	if len(requests) != 3 {
+		t.Fatalf("unexpected retry/fallback count: %d", len(requests))
+	}
+	for _, body := range requests {
+		if body["sender_session_id"] != session || body["to"] != "person" || body["delivery_level"] != "simple" {
+			t.Fatalf("lost reply binding: %v", body)
+		}
+	}
+	if requests[0]["reply_to"] != "project-message-parent" || requests[0]["body"] != "final answer" || requests[0]["idempotency_key"] != "reply-key" {
+		t.Fatal("reply content or retry key lost")
+	}
+	if _, ok := requests[0]["recipient_session_id"]; ok {
+		t.Fatal("invented recipient generation")
+	}
+	if requests[1]["recipient_session_id"] != recipientSession {
+		t.Fatal("recipient generation lost")
 	}
 }

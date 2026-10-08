@@ -71,7 +71,7 @@ type RunToolAPI interface {
 	CheckCriterion(context.Context, string, string, bool) error
 	Evidence(context.Context, string, string, string, string) error
 	RequestApproval(context.Context, string, ApprovalRequest) error
-	ReplyInbox(context.Context, string, string, string, string) error
+	ReplyInbox(context.Context, string, InboxReplyTarget, string, string) error
 }
 
 func (r *Remote) Comment(ctx context.Context, nodeID, body string) error {
@@ -135,9 +135,27 @@ func (r *Remote) RequestApproval(ctx context.Context, runID string, in ApprovalR
 	return r.Client.Do(ctx, "POST", "/api/approvals", body, nil)
 }
 
-func (r *Remote) ReplyInbox(ctx context.Context, messageID, recipientID, body, key string) error {
+func (r *Remote) ReplyInbox(ctx context.Context, messageID string, target InboxReplyTarget, body, key string) error {
+	if target.ProjectID != "" {
+		if !uuidPattern.MatchString(target.ProjectID) || !uuidPattern.MatchString(target.SenderSessionID) {
+			return errors.New("inbox reply session binding unavailable")
+		}
+		parent := messageID
+		if target.ReplyToID != "" {
+			parent = target.ReplyToID
+		}
+		request := map[string]any{
+			"to": target.PrincipalID, "body": body, "idempotency_key": key,
+			"reply_to": parent, "sender_session_id": target.SenderSessionID,
+			"delivery_level": "simple",
+		}
+		if target.RecipientSessionID != nil {
+			request["recipient_session_id"] = *target.RecipientSessionID
+		}
+		return r.Client.Do(ctx, "POST", "/api/projects/"+url.PathEscape(target.ProjectID)+"/messages", request, nil)
+	}
 	return r.Client.Do(ctx, "POST", "/api/inbox/messages", map[string]string{
-		"recipient_principal_id": recipientID, "body": body,
+		"recipient_principal_id": target.PrincipalID, "body": body,
 		"idempotency_key": key, "reply_to_id": messageID,
 	}, nil)
 }
@@ -323,8 +341,12 @@ func (r *Remote) YieldHarness(ctx context.Context, s HarnessSession) ([]HarnessC
 }
 
 func (r *Remote) DrainHarness(ctx context.Context, s HarnessSession) ([]HarnessDelivery, error) {
+	return r.DrainHarnessInput(ctx, s, "")
+}
+
+func (r *Remote) DrainHarnessInput(ctx context.Context, s HarnessSession, level string) ([]HarnessDelivery, error) {
 	var result []HarnessDelivery
-	err := r.harnessWorker(ctx, s, "/drain", struct{}{}, &result)
+	err := r.harnessWorker(ctx, s, "/drain", map[string]string{"delivery_level": level}, &result)
 	return result, err
 }
 
@@ -351,7 +373,11 @@ func terminalControlCompletion(message string) bool {
 }
 
 func (r *Remote) CompleteHarnessDelivery(ctx context.Context, s HarnessSession, d HarnessDelivery) error {
-	body := map[string]any{"delivery_id": d.ID, "cursor": d.Cursor, "effective_level": "simple"}
+	level := d.Level
+	if level == "" {
+		level = "simple"
+	}
+	body := map[string]any{"delivery_id": d.ID, "cursor": d.Cursor, "effective_level": level}
 	if d.Outcome != "" {
 		body["outcome"] = d.Outcome
 	}

@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/dbtest"
 	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
@@ -277,6 +279,39 @@ func TestExplicitPlacementModeSelectsManagedReview(t *testing.T) {
 	}](t, &p, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude&mode=placement", "", http.StatusOK)
 	if got.Preference.Role != "review-gate" || got.Preference.Kind.Slug != "review:openai" || got.CommandTemplate != "" || !got.OwnerRequired || got.Profile != nil {
 		t.Fatalf("explicit placement bypassed managed-review requirements: %+v", got)
+	}
+}
+
+// The closed board an explicit placement request initializes answers that
+// request only. Review dispatch without mode=placement keeps the legacy ladder
+// until the board is saved or migrated.
+func TestClosedBoardAnswersExplicitPlacementButNotReviewDispatch(t *testing.T) {
+	reset(t)
+	p := makePrincipal(t, "closed-board", "person", "Owner", []string{"admin"})
+	got := decode[struct {
+		WorkResolution
+		Preference PreferenceDecision `json:"preference"`
+	}](t, &p, http.MethodGet, "/api/models/resolve?role=review-gate&author_family=openai&harness=claude&mode=placement", "", http.StatusOK)
+	if got.Preference.Kind.Slug != "review:openai" || got.Trace.PreferenceOf == nil {
+		t.Fatalf("explicit placement did not read the initialized board: %+v", got.Trace)
+	}
+	var revision int
+	var review ReviewRoute
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, p.TenantID, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT revision FROM model_pref_profiles WHERE scope='workspace'`).Scan(&revision); err != nil {
+			return err
+		}
+		var err error
+		review, err = ResolveReviewFor(t.Context(), tx, p, WorkQuery{AuthorFamily: "openai"}, time.Now())
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if revision != 0 {
+		t.Fatalf("fixture is not the closed initializer: revision %d", revision)
+	}
+	if review.Trace.PreferenceOf != nil || review.Trace.OrderMode != reviewOrderLegacy {
+		t.Fatalf("closed board moved review dispatch off the legacy ladder: %+v", review.Trace)
 	}
 }
 

@@ -267,27 +267,75 @@ func snapshotVisible(ctx context.Context, tx pgx.Tx, p tenant.Principal, s paren
 	out.Start = nil
 	out.Next = nil
 	out.Items = []snapshotItem{}
+	// Capture bounds the stored membership at snapshotLeaves. Re-read current
+	// visibility through RLS in one query; full ticket fields and blockers are
+	// unnecessary here and formerly cost one round trip for every leaf.
+	if len(s.Items) > snapshotLeaves {
+		return out, workorders.Fail(409, "snapshot exceeds item bound")
+	}
+	ids := make([]string, len(s.Items))
+	for i, item := range s.Items {
+		ids[i] = item.NodeID
+	}
+	rows, err := tx.Query(ctx, `SELECT id::text,project_id::text FROM nodes WHERE id=ANY($1::uuid[]) AND deleted_at IS NULL`, ids)
+	if err != nil {
+		return out, err
+	}
+	projects := make(map[string]*string, len(ids))
+	for rows.Next() {
+		var id string
+		var project *string
+		if err = rows.Scan(&id, &project); err != nil {
+			rows.Close()
+			return out, err
+		}
+		projects[id] = project
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return out, err
+	}
+	// These are read permissions for this projection only, scoped to the current
+	// project returned above. Mutation checks still run for every target inside
+	// queueSnapshotApply/queuePrepare under the tenant/tree/access fences.
+	type readScope struct {
+		project string
+		runs    bool
+	}
+	permissions := make(map[readScope]error)
+	permission := func(project *string, runs bool) error {
+		key := readScope{runs: runs}
+		if project != nil {
+			key.project = *project
+		}
+		if checked, ok := permissions[key]; ok {
+			return checked
+		}
+		var err error
+		if runs {
+			err = authz.RequireTx(ctx, tx, p, "run.read", authz.Scope{ProjectID: key.project})
+		} else {
+			err = queuePermission(ctx, tx, p, project, false)
+		}
+		permissions[key] = err
+		return err
+	}
 	for _, item := range s.Items {
-		t, err := queueLoadTicket(ctx, tx, item.NodeID, false)
-		if errors.Is(err, pgx.ErrNoRows) {
+		project, visible := projects[item.NodeID]
+		if !visible {
+			out.Partial = true
+			continue
+		}
+		err := permission(project, false)
+		if errors.Is(err, authz.ErrForbidden) {
 			out.Partial = true
 			continue
 		}
 		if err != nil {
 			return out, err
 		}
-		if err = queuePermission(ctx, tx, p, t.ProjectID, false); errors.Is(err, authz.ErrForbidden) {
-			out.Partial = true
-			continue
-		} else if err != nil {
-			return out, err
-		}
 		if item.RunID != "" && p.Kind != tenant.Agent {
-			project := ""
-			if t.ProjectID != nil {
-				project = *t.ProjectID
-			}
-			err = authz.RequireTx(ctx, tx, p, "run.read", authz.Scope{ProjectID: project})
+			err = permission(project, true)
 			if errors.Is(err, authz.ErrForbidden) {
 				item.RunID = ""
 			} else if err != nil {

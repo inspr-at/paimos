@@ -36,6 +36,11 @@ type WorkQuery struct {
 	// Column and OffHarnesses are supplied by shadow round routing only.
 	Column       string
 	OffHarnesses []string
+	// ExplicitBoard marks a caller that asked for board placement with
+	// mode=placement. A closed (revision-0) board answers it; dispatch,
+	// review and escalation callers leave it false and keep the legacy ladder
+	// until the board is adopted.
+	ExplicitBoard bool
 }
 type PreferenceTrace struct {
 	PreferenceOf         *preferenceOwner           `json:"preference_of,omitempty"`
