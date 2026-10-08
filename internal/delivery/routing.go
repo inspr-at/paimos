@@ -319,7 +319,9 @@ func (m *Module) routingDecision(w http.ResponseWriter, r *http.Request) {
 		}
 		sort.Strings(off)
 		at := m.now()
-		query := modelregistry.WorkQuery{TicketID: in.TicketID, ProjectID: project, Queued: true, FixRound: in.FixRound, PreviousFamily: in.PreviousFamily, AuthorFamily: in.AuthorFamily, OffHarnesses: off}
+		// Queued would adopt the ticket assignee's board. Shadow evidence stays on
+		// the caller: the plan and the off-harness list already do.
+		query := modelregistry.WorkQuery{TicketID: in.TicketID, ProjectID: project, Queued: false, FixRound: in.FixRound, PreviousFamily: in.PreviousFamily, AuthorFamily: in.AuthorFamily, OffHarnesses: off}
 		route, design, err := modelregistry.ResolveRound(ctx, tx, p, query, in.Kind, in.DesignReady, at)
 		if err != nil {
 			return err

@@ -327,3 +327,75 @@ func TestShadowRoutingRechecksRevocationUnderFence(t *testing.T) {
 	}
 	f.call(t, f.person, "GET", routePath(f)+"/"+roundRequest(f, 1, "design", 0).RoundID, nil, 404, nil)
 }
+
+func personBoardOrder(ctx context.Context, tx pgx.Tx, tenantID, personID string, rank []string) error {
+	var profile string
+	if err := tx.QueryRow(ctx, `INSERT INTO model_pref_profiles(tenant_id,scope,person_id,revision,set_by)
+ VALUES($1,'person',$2,1,$2) RETURNING id::text`, tenantID, personID).Scan(&profile); err != nil {
+		return err
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO model_pref_orders(tenant_id,profile_id,column_key,situation,rank,set_by)
+ VALUES($1,$2,'backend','first',$3,$4)`, tenantID, profile, rank, personID)
+	return err
+}
+
+// Risk: an assignee who is not the caller could replace the caller's board in
+// the recorded shadow route while the plan stayed the caller's.
+func TestShadowRoutingKeepsCallerBoardWhenAssigneeDiffers(t *testing.T) {
+	f := routingFixture(t)
+	f.call(t, f.person, "PUT", "/api/projects/"+f.project+"/routing-settings", RoutingSettings{Mode: "shadow"}, 200, nil)
+	assignee := tenant.Principal{TenantID: f.person.TenantID, Kind: tenant.Person}
+	f.tx(t, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO principals(tenant_id,kind,name) VALUES($1,'person','Other board') RETURNING id::text`, assignee.TenantID).Scan(&assignee.ID); err != nil {
+			return err
+		}
+		// The caller's first line is Claude. The assignee's is Codex. Workspace
+		// order matches the assignee, so only the caller's own board selects Claude.
+		if err := personBoardOrder(t.Context(), tx, f.person.TenantID, f.person.ID, []string{"anthropic:opus", "openai:sol"}); err != nil {
+			return err
+		}
+		return personBoardOrder(t.Context(), tx, assignee.TenantID, assignee.ID, []string{"openai:sol", "anthropic:opus"})
+	})
+	if assignee.ID == f.person.ID {
+		t.Fatal("assignee is the caller")
+	}
+	var callerRank, assigneeRank string
+	f.tx(t, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `SELECT o.rank[1] FROM model_pref_orders o JOIN model_pref_profiles p ON p.tenant_id=o.tenant_id AND p.id=o.profile_id
+ WHERE p.person_id=$1 AND o.column_key='backend' AND o.situation='first'`, f.person.ID).Scan(&callerRank); err != nil {
+			return err
+		}
+		return tx.QueryRow(t.Context(), `SELECT o.rank[1] FROM model_pref_orders o JOIN model_pref_profiles p ON p.tenant_id=o.tenant_id AND p.id=o.profile_id
+ WHERE p.person_id=$1 AND o.column_key='backend' AND o.situation='first'`, assignee.ID).Scan(&assigneeRank)
+	})
+	if callerRank != "anthropic:opus" || assigneeRank != "openai:sol" || callerRank == assigneeRank {
+		t.Fatalf("orders do not differ: caller %s assignee %s", callerRank, assigneeRank)
+	}
+	in := roundRequest(f, 1, "first_build", 0)
+	var caller RoutingDecision
+	f.call(t, f.person, "POST", routePath(f), in, 200, &caller)
+	routeProfile(t, caller, "claude", "xhigh", "first", "backend")
+	preferCaller := func(got RoutingDecision) {
+		t.Helper()
+		owner := got.Route.Trace.PreferenceOf
+		if owner == nil || owner.Person == nil || *owner.Person != f.person.ID || owner.Source != "person" || got.Route.Trace.PersonID == nil || *got.Route.Trace.PersonID != f.person.ID {
+			t.Fatalf("preference left the caller: %+v person %v", owner, got.Route.Trace.PersonID)
+		}
+		if *owner.Person == assignee.ID || got.Route.Profile == nil || got.Route.Profile.Harness != "claude" {
+			t.Fatal("assignee board changed the route", got.Route.Profile)
+		}
+	}
+	preferCaller(caller)
+	f.tx(t, func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE nodes SET fields=fields||jsonb_build_object('assignee',$2::text) WHERE id=$1`, f.ticket, assignee.ID)
+		return err
+	})
+	in.RoundID = roundRequest(f, 2, "first_build", 0).RoundID
+	var assigned RoutingDecision
+	f.call(t, f.person, "POST", routePath(f), in, 200, &assigned)
+	routeProfile(t, assigned, "claude", "xhigh", "first", "backend")
+	preferCaller(assigned)
+	if caller.Route.Profile.Harness != assigned.Route.Profile.Harness || caller.Route.Profile.Model != assigned.Route.Profile.Model || caller.Route.Profile.Effort != assigned.Route.Profile.Effort || *caller.Route.Trace.PreferenceOf.Person != *assigned.Route.Trace.PreferenceOf.Person {
+		t.Fatal("assignee changed the recorded route", caller.Route.Profile, assigned.Route.Profile)
+	}
+}
