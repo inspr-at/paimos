@@ -74,7 +74,13 @@ func TestNoOutboundServerHelper(t *testing.T) {
 		_, _ = net.DialTimeout("tcp", "192.0.2.1:443", time.Second)
 		t.Fatal("outbound connect escaped the denial filter")
 	case "dns":
+		// PreferGo LookupHost returns "no such host" without a socket when
+		// nsswitch has no DNS source (hosts: files). The pure Go resolver
+		// dials a numeric nameserver only after that order includes DNS
+		// (Go 1.26 dnsclient_unix.go, hostLookupFiles), so dial one if the
+		// lookup returned. 192.0.2.1 is TEST-NET-1 and is not a real resolver.
 		_, _ = (&net.Resolver{PreferGo: true}).LookupHost(t.Context(), "aeon-outbound-guard.invalid")
+		_, _ = net.DialTimeout("udp", "192.0.2.1:53", time.Second)
 		t.Fatal("DNS escaped the denial filter")
 	case "server":
 		cfg, err := config.FromEnv()
@@ -112,7 +118,7 @@ func TestDefaultServerHasNoOutboundNetwork(t *testing.T) {
 		probe.Env = []string{"AEON_NO_OUTBOUND_TEST=" + mode, "GODEBUG=netdns=go", "GOMAXPROCS=2"}
 		out, err := probe.CombinedOutput()
 		if err == nil || !bytes.Contains(out, []byte("SIGSYS")) {
-			t.Fatalf("%s negative control did not trap: %v", mode, err)
+			t.Fatalf("%s negative control did not trap: %v\n%s", mode, err, out)
 		}
 	}
 	fresh := dbtest.Open(t)

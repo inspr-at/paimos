@@ -12,9 +12,11 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// The read covers two of the longest windows (the window and the one just
+// before it). Facts beyond these bounds are cut; coverage then starts later.
 const (
-	metricRunLimit  = 20000
-	metricFactLimit = 5000
+	metricRunLimit  = 50000
+	metricFactLimit = 10000
 )
 
 // Facts are idempotent upserts keyed by GitHub identity; replays, webhook
@@ -50,15 +52,18 @@ func upsertPullsTx(ctx context.Context, tx pgx.Tx, tid, repository, source strin
 // reported marks are corrected by a later report with the same key.
 func upsertMarksTx(ctx context.Context, tx pgx.Tx, tid, repository, source string, marks []metricMark, at time.Time) error {
 	for _, k := range marks {
-		if _, err := tx.Exec(ctx, `INSERT INTO delivery_metric_marks(tenant_id,repository,kind,mark_key,pull_request,head_sha,started_at,at,outcome,source,recorded_at)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		if _, err := tx.Exec(ctx, `INSERT INTO delivery_metric_marks(tenant_id,repository,kind,mark_key,pull_request,head_sha,started_at,at,outcome,source,recorded_at,release_name,release_tag,healthy_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
 			ON CONFLICT(tenant_id,repository,kind,mark_key) DO UPDATE SET
 			pull_request=CASE WHEN EXCLUDED.source='report' THEN EXCLUDED.pull_request ELSE delivery_metric_marks.pull_request END,
 			head_sha=CASE WHEN EXCLUDED.source='report' THEN EXCLUDED.head_sha ELSE delivery_metric_marks.head_sha END,
 			started_at=CASE WHEN EXCLUDED.source='report' THEN EXCLUDED.started_at ELSE delivery_metric_marks.started_at END,
 			at=CASE WHEN EXCLUDED.source='report' THEN EXCLUDED.at ELSE least(delivery_metric_marks.at,EXCLUDED.at) END,
+			release_name=CASE WHEN EXCLUDED.source='report' THEN EXCLUDED.release_name ELSE delivery_metric_marks.release_name END,
+			release_tag=CASE WHEN EXCLUDED.source='report' THEN EXCLUDED.release_tag ELSE delivery_metric_marks.release_tag END,
+			healthy_at=CASE WHEN EXCLUDED.source='report' THEN EXCLUDED.healthy_at ELSE delivery_metric_marks.healthy_at END,
 			outcome=EXCLUDED.outcome`,
-			tid, repository, k.Kind, k.Key, k.PR, k.Head, k.Started, k.At, k.Outcome, source, at); err != nil {
+			tid, repository, k.Kind, k.Key, k.PR, k.Head, k.Started, k.At, k.Outcome, source, at, k.Release, k.Tag, k.Healthy); err != nil {
 			return err
 		}
 	}
@@ -179,11 +184,17 @@ func loadMetricSourceTx(ctx context.Context, tx pgx.Tx, project string, lock boo
 	return &s, nil
 }
 
-// loadMetricInputTx reads the bounded window of facts, newest first. More
-// facts than the bound mark the result truncated, never silently complete.
+// loadMetricInputTx reads the bounded window of facts, newest first: the
+// longest window, the one before it and the slack. More facts than a bound
+// cut the oldest; ReadFrom then names the time from which every fact was
+// read (plus the slack that run and review pairs look back), so older days
+// are partial, never silently complete.
 func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now time.Time) (metricInput, error) {
 	in := metricInput{CIWorkflow: s.CIWorkflow, NightlyWorkflow: s.NightlyWorkflow, Runs: []metricRun{}, Pulls: []metricPull{}, Marks: []metricMark{}}
-	from := now.Add(-metricDays*24*time.Hour - metricSlack)
+	from := windowSpan(now, metricLongDays, true).first.Add(-metricSlack)
+	cut := func(oldest time.Time) {
+		in.ReadFrom = later(in.ReadFrom, oldest.UTC().Add(metricSlack))
+	}
 	rows, err := tx.Query(ctx, `SELECT run_id,attempt,workflow_path,workflow_name,event,head_branch,head_sha,pull_request,created_at,started_at,completed_at,conclusion,source
 		FROM delivery_metric_runs WHERE repository=$1 AND completed_at>=$2 ORDER BY completed_at DESC LIMIT $3`, s.Repository, from, metricRunLimit+1)
 	if err != nil {
@@ -202,7 +213,8 @@ func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now ti
 		return in, err
 	}
 	if len(in.Runs) > metricRunLimit {
-		in.Runs, in.Truncated = in.Runs[:metricRunLimit], true
+		in.Runs = in.Runs[:metricRunLimit]
+		cut(in.Runs[metricRunLimit-1].Completed)
 	}
 	rows, err = tx.Query(ctx, `SELECT pull_request,head_branch,opened_at,merged_at,closed_at,source FROM delivery_metric_pulls
 		WHERE repository=$1 AND merged_at>=$2 ORDER BY merged_at DESC LIMIT $3`, s.Repository, from, metricFactLimit+1)
@@ -222,16 +234,17 @@ func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now ti
 		return in, err
 	}
 	if len(in.Pulls) > metricFactLimit {
-		in.Pulls, in.Truncated = in.Pulls[:metricFactLimit], true
+		in.Pulls = in.Pulls[:metricFactLimit]
+		cut(*in.Pulls[metricFactLimit-1].Merged)
 	}
-	rows, err = tx.Query(ctx, `SELECT kind,mark_key,pull_request,head_sha,started_at,at,outcome,source FROM delivery_metric_marks
+	rows, err = tx.Query(ctx, `SELECT kind,mark_key,pull_request,head_sha,started_at,at,outcome,source,release_name,release_tag,healthy_at FROM delivery_metric_marks
 		WHERE repository=$1 AND at>=$2 ORDER BY at DESC LIMIT $3`, s.Repository, from, metricFactLimit+1)
 	if err != nil {
 		return in, err
 	}
 	for rows.Next() {
 		var k metricMark
-		if err = rows.Scan(&k.Kind, &k.Key, &k.PR, &k.Head, &k.Started, &k.At, &k.Outcome, &k.Source); err != nil {
+		if err = rows.Scan(&k.Kind, &k.Key, &k.PR, &k.Head, &k.Started, &k.At, &k.Outcome, &k.Source, &k.Release, &k.Tag, &k.Healthy); err != nil {
 			rows.Close()
 			return in, err
 		}
@@ -242,7 +255,8 @@ func loadMetricInputTx(ctx context.Context, tx pgx.Tx, s metricSourceRow, now ti
 		return in, err
 	}
 	if len(in.Marks) > metricFactLimit {
-		in.Marks, in.Truncated = in.Marks[:metricFactLimit], true
+		in.Marks = in.Marks[:metricFactLimit]
+		cut(in.Marks[metricFactLimit-1].At)
 	}
 	// Coverage: a finished backfill covers from its start; otherwise facts are
 	// complete from the first one the webhook recorded.

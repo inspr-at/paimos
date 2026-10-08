@@ -2,6 +2,7 @@
 package delivery
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -133,5 +134,169 @@ func TestDeliveryMetricsFix3InsertedRunKeepsPausedResume(t *testing.T) {
 	}
 	if _, _, err = backfillStep(get, "example/delivery", []string{defaultCIWorkflow}, next, now); err != nil {
 		t.Fatalf("following step still fails: %v", err)
+	}
+}
+
+func TestDeliveryMetricsFix4DoneRunGainsAttemptWhilePaused(t *testing.T) {
+	// Risk: DoneRuns remembers only the run id. A run that already finished
+	// on this page gains an attempt while another run is paused. Resume skips
+	// the id, the page finishes untruncated, and the new verdict is missing.
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	day := dayStart(now)
+	head := strings.Repeat("f", 40)
+	list := "/actions/workflows/ci.yml/runs?created=" + day.Format("2006-01-02") + "&status=completed&per_page=100&page=1"
+	listed := 0
+	calls := map[string]int{}
+	get := func(path string, out any) error {
+		calls[path]++
+		switch {
+		case path == list:
+			listed++
+			attempt, conclusion := 1, "failure"
+			if listed > 1 {
+				attempt, conclusion = 3, "success"
+			}
+			return writeMetricJSON(out, map[string]any{"total_count": 2, "workflow_runs": []any{
+				githubRunBody(700, attempt, defaultCIWorkflow, "pull_request", "work/done", head, day.Add(time.Hour), 8*time.Minute, conclusion, 0),
+				githubRunBody(800, 45, defaultCIWorkflow, "pull_request", "work/paused", head, day.Add(2*time.Hour), 8*time.Minute, "failure", 0),
+			}})
+		case strings.HasPrefix(path, "/actions/runs/700/attempts/"):
+			n, err := strconv.Atoi(path[strings.LastIndex(path, "/")+1:])
+			if err != nil || n < 1 || n > 3 {
+				return fmt.Errorf("unexpected attempt %s", path)
+			}
+			conclusion := "failure"
+			if n == 3 {
+				conclusion = "success"
+			}
+			return writeMetricJSON(out, githubRunBody(700, n, defaultCIWorkflow, "pull_request", "work/done", head, day.Add(time.Duration(n)*time.Minute), 8*time.Minute, conclusion, 0))
+		case strings.HasPrefix(path, "/actions/runs/800/attempts/"):
+			n, err := strconv.Atoi(path[strings.LastIndex(path, "/")+1:])
+			if err != nil || n < 1 || n >= 45 {
+				return fmt.Errorf("unexpected attempt %s", path)
+			}
+			return writeMetricJSON(out, githubRunBody(800, n, defaultCIWorkflow, "pull_request", "work/paused", head, day.Add(time.Duration(n)*time.Minute), 8*time.Minute, "failure", 0))
+		case path == "":
+			return writeMetricJSON(out, map[string]any{"full_name": "example/delivery", "default_branch": "main"})
+		case strings.HasPrefix(path, "/pulls"):
+			return writeMetricJSON(out, []any{})
+		case strings.HasPrefix(path, "/actions/workflows/"):
+			return writeMetricJSON(out, map[string]any{"total_count": 0, "workflow_runs": []any{}})
+		default:
+			return fmt.Errorf("unexpected GitHub read %s", path)
+		}
+	}
+	cursor := backfillCursor{Since: day, Phase: "runs", Day: day.Format("2006-01-02"), Page: 1}
+	seen := map[string]bool{}
+	for steps := 0; cursor.Phase != "done"; steps++ {
+		if steps > 6 {
+			t.Fatalf("backfill did not finish: %+v", cursor)
+		}
+		next, batch, err := backfillStep(get, "example/delivery", []string{defaultCIWorkflow}, cursor, now)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if batch.Calls > backfillCallBudget {
+			t.Fatalf("step used %d calls", batch.Calls)
+		}
+		for _, run := range batch.Runs {
+			seen[fmt.Sprintf("%d:%d:%s", run.ID, run.Attempt, run.Conclusion)] = true
+		}
+		if steps == 0 {
+			if next.AttemptRun != 800 || next.Attempt != 40 || !seen["700:1:failure"] || seen["700:2:failure"] || seen["700:3:success"] {
+				t.Fatalf("first step did not pause after storing run 700 once: cursor %+v", next)
+			}
+			raw, err := json.Marshal(next)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var wire struct {
+				DoneRuns json.RawMessage `json:"done_runs"`
+			}
+			if err := json.Unmarshal(raw, &wire); err != nil {
+				t.Fatal(err)
+			}
+			var rows []struct {
+				ID      int64 `json:"id"`
+				Attempt int   `json:"attempt"`
+			}
+			if err := json.Unmarshal(wire.DoneRuns, &rows); err != nil || len(rows) != 1 || rows[0].ID != 700 || rows[0].Attempt != 1 {
+				t.Fatalf("persisted done run = %s (%v)", wire.DoneRuns, err)
+			}
+			if err := json.Unmarshal(raw, &cursor); err != nil {
+				t.Fatalf("stored cursor did not load: %v", err)
+			}
+			continue
+		}
+		cursor = next
+	}
+	if cursor.Truncated {
+		t.Fatal("backfill finished truncated")
+	}
+	for _, want := range []string{"700:1:failure", "700:2:failure", "700:3:success"} {
+		if !seen[want] {
+			t.Fatalf("missing %s in %v", want, seen)
+		}
+	}
+	if calls["/actions/runs/700/attempts/1"] != 0 || calls["/actions/runs/700/attempts/2"] != 1 {
+		t.Fatalf("done run was reread or its new attempt was skipped: %v", calls)
+	}
+}
+
+func TestDeliveryMetricsFix4LegacyDoneRunIDStillReadsNewerAttempt(t *testing.T) {
+	// Risk: a cursor stored before attempts were recorded is a list of run
+	// ids. Resume treats that id as finished and drops an attempt that
+	// completed while another run was paused.
+	now := time.Date(2026, 10, 8, 12, 0, 0, 0, time.UTC)
+	day := dayStart(now)
+	head := strings.Repeat("a", 40)
+	list := "/actions/workflows/ci.yml/runs?created=" + day.Format("2006-01-02") + "&status=completed&per_page=100&page=1"
+	calls := map[string]int{}
+	get := func(path string, out any) error {
+		calls[path]++
+		switch {
+		case path == list:
+			return writeMetricJSON(out, map[string]any{"total_count": 2, "workflow_runs": []any{
+				githubRunBody(700, 2, defaultCIWorkflow, "pull_request", "work/done", head, day.Add(2*time.Hour), 8*time.Minute, "success", 0),
+				githubRunBody(800, 45, defaultCIWorkflow, "pull_request", "work/paused", head, day.Add(time.Hour), 8*time.Minute, "failure", 0),
+			}})
+		case path == "/actions/runs/700/attempts/1":
+			return writeMetricJSON(out, githubRunBody(700, 1, defaultCIWorkflow, "pull_request", "work/done", head, day.Add(time.Hour), 8*time.Minute, "failure", 0))
+		case strings.HasPrefix(path, "/actions/runs/800/attempts/"):
+			n, err := strconv.Atoi(path[strings.LastIndex(path, "/")+1:])
+			if err != nil || n < 44 || n >= 45 {
+				return fmt.Errorf("unexpected attempt %s", path)
+			}
+			return writeMetricJSON(out, githubRunBody(800, n, defaultCIWorkflow, "pull_request", "work/paused", head, day.Add(time.Duration(n)*time.Minute), 8*time.Minute, "failure", 0))
+		case path == "":
+			return writeMetricJSON(out, map[string]any{"full_name": "example/delivery", "default_branch": "main"})
+		case strings.HasPrefix(path, "/pulls"):
+			return writeMetricJSON(out, []any{})
+		case strings.HasPrefix(path, "/actions/workflows/"):
+			return writeMetricJSON(out, map[string]any{"total_count": 0, "workflow_runs": []any{}})
+		default:
+			return fmt.Errorf("unexpected GitHub read %s", path)
+		}
+	}
+	var cursor backfillCursor
+	raw := []byte(`{"since":"2026-10-08T00:00:00Z","phase":"runs","workflow":0,"day":"2026-10-08","page":1,"attempt_run":800,"attempt":44,"done_runs":[700]}`)
+	if err := json.Unmarshal(raw, &cursor); err != nil {
+		t.Fatal(err)
+	}
+	next, batch, err := backfillStep(get, "example/delivery", []string{defaultCIWorkflow}, cursor, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]bool{}
+	for _, run := range batch.Runs {
+		got[fmt.Sprintf("%d:%d:%s", run.ID, run.Attempt, run.Conclusion)] = true
+	}
+	for _, want := range []string{"700:1:failure", "700:2:success", "800:44:failure", "800:45:failure"} {
+		if !got[want] {
+			t.Fatalf("missing %s in %v", want, got)
+		}
+	}
+	if calls["/actions/runs/800/attempts/1"] != 0 || (next.AttemptRun == 800 && next.Attempt <= 44) {
+		t.Fatalf("legacy cursor restarted or stuck the paused run: calls %v cursor %+v", calls, next)
 	}
 }
