@@ -179,6 +179,7 @@ export const useAgents = defineStore('agents', () => {
   const pendingHeld = ref<Record<string, ProjectMessage[]>>({})
   const threads = ref<Record<string, ProjectMessage[]>>({})
   const threadStates = ref<Record<string, Availability>>({})
+  const threadMore = ref<Record<string, boolean>>({})
   let threadGeneration = 0
   const addresses = ref<Record<string, string>>({})
   const runs = shallowRef<Record<string, AgentRun>>({})
@@ -314,7 +315,7 @@ export const useAgents = defineStore('agents', () => {
   const threadFlights = new Map<string, { again: boolean; catchingUp: boolean; promise: Promise<void> }>()
   onReset(() => {
     threadGeneration++
-    threads.value = {}; threadStates.value = {}; messagingState.value = 'idle'
+    threads.value = {}; threadStates.value = {}; threadMore.value = {}; messagingState.value = 'idle'
     threadFlights.clear(); threadOrders.clear()
   })
   function refreshThread(projectId: string, sessionId: string): Promise<void> {
@@ -325,13 +326,23 @@ export const useAgents = defineStore('agents', () => {
     const flight = { again: false, catchingUp: !!pending, promise: Promise.resolve() }
     threadFlights.set(sessionId, flight)
     flight.promise = (async () => {
+      // Re-read the most recent loaded window, then catch up forwards. A
+      // reconnect with more than 50 new posts must not leave a hidden gap
+      // between the retained history and the newest page.
+      const recent = threads.value[sessionId]?.slice(-50)
+      let cursor = recent?.length ? Math.max(0, recent[0]!.sent_event_id - 1) : undefined
       do {
         flight.again = false
         try {
-          await readOrdered(orderFor(threadOrders, sessionId), () => listMessages(projectId, { session: sessionId, limit: 200 }), page => {
+          await readOrdered(orderFor(threadOrders, sessionId), () => listMessages(projectId, { session: sessionId, limit: 50, ...(cursor === undefined ? {} : { newest_first: false, after: cursor }) }), page => {
             if (generation !== threadGeneration) return
             threadStates.value = { ...threadStates.value, [sessionId]: 'ready' }
-            threads.value = { ...threads.value, [sessionId]: page.items }
+            if (threadMore.value[sessionId] === undefined) threadMore.value = { ...threadMore.value, [sessionId]: page.items.length === 50 }
+            mergeThread(sessionId, page.items)
+            if (cursor !== undefined && page.items.length) {
+              cursor = Math.max(...page.items.map(message => message.sent_event_id))
+              if (page.items.length === 50) flight.again = true
+            }
             learnAddresses(page.items)
             if (messagingState.value !== 'ready') messagingState.value = 'ready'
           })
@@ -339,13 +350,36 @@ export const useAgents = defineStore('agents', () => {
           if (generation === threadGeneration) {
             const state = availability(e)
             threadStates.value = { ...threadStates.value, [sessionId]: state }
-            if (state === 'forbidden') threads.value = { ...threads.value, [sessionId]: [] }
+            if (state === 'forbidden') { threads.value = { ...threads.value, [sessionId]: [] }; threadMore.value = { ...threadMore.value, [sessionId]: false } }
             messagingState.value = state
           }
         }
       } while (flight.again && generation === threadGeneration)
     })().finally(() => { if (threadFlights.get(sessionId) === flight) threadFlights.delete(sessionId) })
     return flight.promise
+  }
+  function mergeThread(sessionId: string, items: ProjectMessage[]) {
+    const all = new Map((threads.value[sessionId] ?? []).map(message => [message.id, message]))
+    for (const message of items) all.set(message.id, message)
+    threads.value = { ...threads.value, [sessionId]: [...all.values()].sort((a, b) => a.sent_event_id - b.sent_event_id) }
+  }
+  async function earlierThread(projectId: string, sessionId: string) {
+    const generation = threadGeneration
+    const first = threads.value[sessionId]?.[0]
+    if (!first || !threadMore.value[sessionId]) return
+    let page
+    try { page = await listMessages(projectId, { session: sessionId, limit: 50, after: first.sent_event_id }) }
+    catch (error) {
+      if (generation === threadGeneration && availability(error) === 'forbidden') {
+        threads.value = { ...threads.value, [sessionId]: [] }
+        threadStates.value = { ...threadStates.value, [sessionId]: 'forbidden' }
+        threadMore.value = { ...threadMore.value, [sessionId]: false }
+      }
+      throw error
+    }
+    if (generation !== threadGeneration || threadStates.value[sessionId] === 'forbidden') return
+    mergeThread(sessionId, page.items)
+    threadMore.value = { ...threadMore.value, [sessionId]: page.items.length === 50 }
   }
   async function refreshAgentRuns(principalId: string) {
     try {
@@ -588,7 +622,7 @@ export const useAgents = defineStore('agents', () => {
   return {
     now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, models, eventPulseFor,
     loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordSession, loadSessionDetail, admitSessions, sessionById, admitRun, admitRuns, grouped,
-    loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshAccounts, refreshSessions, refreshThread, refreshAgentRuns, tick, deliveryPulse, deliveryChanged, threadPulse, threadChanged,
+    loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshAccounts, refreshSessions, refreshThread, earlierThread, threadMore, refreshAgentRuns, tick, deliveryPulse, deliveryChanged, threadPulse, threadChanged,
     viewOf, byAgent, forTicket, recentRuns, askerName, thread, threadState, addressOf, decide, revoke, resolve, control, send, setAccount, removeAccount, cancelQueuedRun,
     invalidatePolls, afterWrite, onWrite,
   }

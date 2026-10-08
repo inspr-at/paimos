@@ -17,8 +17,8 @@ import { advanceReceipt, chatSendLevel, chatWords, awaitsInboxHook, hookDelivery
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
-const props = defineProps<{ view: SessionView; now: number; canWrite: boolean; active: boolean }>()
-const emit = defineEmits<{ unread: [count: number] }>()
+const props = defineProps<{ view: SessionView; now: number; canWrite: boolean; active: boolean; interruptBlock: string }>()
+const emit = defineEmits<{ unread: [count: number]; interrupt: [] }>()
 const agents = useAgents()
 const identity = useSession()
 const profile = useProfile()
@@ -49,6 +49,23 @@ watch(() => agents.thread(s.value).map(message => message.id).join(), () => {
 const draft = ref('')
 const replyTo = ref<ProjectMessage | null>(null)
 const sendError = ref('')
+const historyLoading = ref(false)
+const historyError = ref('')
+const canStop = computed(() => !ended.value && s.value.activity === 'busy' && !props.interruptBlock)
+function stop() { if (props.active && canStop.value) emit('interrupt') }
+function chatKeys(event: KeyboardEvent) {
+  if (!props.active || event.key !== 'Escape' || event.repeat || event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
+  if (document.querySelector('dialog[open], .floating, .ticket-peek-host')) return
+  if (event.target instanceof HTMLElement && event.target !== document.body && !root.value?.contains(event.target)) return
+  if (replyTo.value) { event.preventDefault(); event.stopPropagation(); replyTo.value = null; return }
+  // The repo keyboard convention takes precedence over the mock: the first
+  // Escape leaves a text field; the next press can interrupt the turn.
+  const target = event.target
+  if (target instanceof HTMLElement && target.closest('input, textarea, select, [contenteditable="true"]')) {
+    event.preventDefault(); event.stopPropagation(); target.blur(); return
+  }
+  if (canStop.value) { event.preventDefault(); event.stopPropagation(); stop() }
+}
 
 // ---------- Read state ----------
 const mark = ref<ReadMark | null>(null)
@@ -183,12 +200,32 @@ function repull() {
 
 // ---------- Scrolling ----------
 const scroller = ref<HTMLElement>()
+const root = ref<HTMLElement>()
 const textarea = ref<HTMLTextAreaElement>()
 const distance = ref(0)
 // Unread posts are always below the read ones, so they are what the jump button counts.
 const below = computed(() => props.active ? unread.value.length : 0)
 const jump = computed(() => distance.value > 160 || (below.value > 0 && distance.value > 32))
 let stick = true, lastTop = 0, entered = false, loaded = false
+let paging = false
+async function earlier() {
+  if (historyLoading.value) return
+  const session = s.value, viewer = me.value, generation = readGeneration
+  const el = scroller.value
+  if (!el) return
+  historyLoading.value = true; historyError.value = ''; paging = true
+  stick = false
+  try {
+    await agents.earlierThread(session.project_id, session.id)
+    if (generation !== readGeneration || viewer !== me.value || session.id !== s.value.id) return
+    await nextTick()
+    onScroll(); observe()
+  } catch {
+    if (generation === readGeneration) historyError.value = words.value.historyError
+  } finally {
+    if (generation === readGeneration) { historyLoading.value = false; paging = false }
+  }
+}
 // Finger origin for a touch. A move downward (clientY grows) scrolls the thread up.
 let touchY: number | undefined
 const reduced = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -213,7 +250,8 @@ function onWheel(event: WheelEvent) {
   if (!claimReader()) return
   if ((event.deltaY < 0 && canScrollUp()) || pending) stick = false
 }
-function onPointerDown() {
+function onPointerDown(event: PointerEvent) {
+  if ((event.target as HTMLElement).closest('.code-fold')) stick = false
   claimReader()
 }
 function onTouchStart(event: TouchEvent) {
@@ -232,6 +270,7 @@ function onTouchEnd() {
   touchY = undefined
 }
 function onScrollKey(event: KeyboardEvent) {
+  if (['Enter', ' '].includes(event.key) && (event.target as HTMLElement).closest('.code-fold')) stick = false
   if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
   if (!['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' '].includes(event.key)) return
   const target = event.target
@@ -352,13 +391,24 @@ watch(() => props.active, active => {
 })
 // New posts keep the view pinned when the reader is at the bottom; otherwise they
 // only count toward the jump button.
-watch(() => current.value.map(m => `${m.id}:${m.count}`).join(), async (_now, _before, onCleanup) => {
+watch(() => current.value.map(m => `${m.id}:${m.count}:${m.body}`).join(), async (_now, _before, onCleanup) => {
+  const el = scroller.value
+  const anchor = el ? [...el.querySelectorAll<HTMLElement>('.msg')].find(node => node.getBoundingClientRect().bottom > el.getBoundingClientRect().top) : undefined
+  const offset = anchor?.getBoundingClientRect().top
   let cancelled = false
   onCleanup(() => { cancelled = true })
   await nextTick()
   if (cancelled || !props.active || !entered) return
-  if (stick) keepBottom()
-  else onScroll()
+  if (stick && !paging) keepBottom()
+  else {
+    if (el && anchor?.isConnected && offset !== undefined) {
+      adjusting = true
+      el.scrollTop += anchor.getBoundingClientRect().top - offset
+      anchorTop = el.scrollTop; lastTop = el.scrollTop
+      adjusting = false
+    }
+    onScroll()
+  }
   observe()
 })
 
@@ -395,16 +445,20 @@ function onFocus() { repull() }
 onMounted(() => {
   document.addEventListener('visibilitychange', onVisibility)
   window.addEventListener('focus', onFocus)
+  window.addEventListener('keydown', chatKeys, true)
   if (typeof ResizeObserver !== 'undefined' && scroller.value) {
     // The keyboard or a taller composer shrinks the thread: stay on the latest post.
     resize = new ResizeObserver(() => { if (props.active && entered && stick) keepBottom() })
     resize.observe(scroller.value)
+    const content = scroller.value.querySelector('.session-messages')
+    if (content) resize.observe(content)
   }
 })
 onBeforeUnmount(() => {
   seen?.disconnect(); resize?.disconnect()
   document.removeEventListener('visibilitychange', onVisibility)
   window.removeEventListener('focus', onFocus)
+  window.removeEventListener('keydown', chatKeys, true)
   void flush()
 })
 
@@ -463,6 +517,7 @@ watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
   markerHold = viewer && person.value && !local ? generation : 0
   seen?.disconnect()
   draft.value = ''; replyTo.value = null; sendError.value = ''; localSends.value = []
+  historyLoading.value = false; historyError.value = ''; paging = false
   const projectId = s.value.project_id
   boundProject = projectId
   boundSession = id
@@ -544,22 +599,27 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 </script>
 
 <template>
-  <div class="session-chat">
+  <div ref="root" class="session-chat">
     <div class="thread-wrap">
       <div ref="scroller" class="thread-scroll" @scroll.passive="onScroll"
         @wheel.capture.passive="onWheel" @touchstart.capture.passive="onTouchStart"
         @touchmove.capture.passive="onTouchMove" @touchend.capture.passive="onTouchEnd"
         @touchcancel.capture.passive="onTouchEnd" @pointerdown.capture.passive="onPointerDown"
         @keydown.capture="onScrollKey">
+        <div class="history-head">
+          <button v-if="agents.threadMore[s.id]" type="button" class="earlier" :disabled="historyLoading" @click="earlier">{{ words.older }}</button>
+          <span v-else-if="agents.threadState(s) === 'ready' && messages.length">{{ words.start }}</span>
+          <span v-if="historyError" class="history-error" role="alert">{{ historyError }}</span>
+        </div>
         <SessionMessages :messages="messages" :principal-id="s.agent_principal_id" :now="now"
           :can-reply="canWrite && !composeBlock" :new-from="newFrom" :new-count="newCount" :statuses="statuses" @reply="reply" @retry="retry" />
       </div>
       <Transition name="jump">
         <button v-if="jump" type="button" class="jump" :class="{ labelled: below > 0 }"
-          :aria-label="below > 0 ? `${below} new ${below === 1 ? 'message' : 'messages'}, go to the latest` : 'Go to the latest message'"
+          :aria-label="below > 0 ? `${words.newCount(below)}, ${words.latest}` : words.latest"
           :data-tip="below > 0 ? undefined : 'Latest message'" @click="toBottom(true)">
-          <span v-if="below > 0" class="jump-count">{{ below }} new</span>
-          <AppIcon name="chevron" :size="16" />
+          <AppIcon name="arrow-down" :size="16" />
+          <span v-if="below > 0" class="jump-count">{{ words.newCount(below) }}</span>
         </button>
       </Transition>
     </div>
@@ -577,6 +637,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
           <span class="compose-hint"><KeyCap k="shift" /><KeyCap k="enter" />{{ words.newline }}</span>
           <button v-if="canSteer" type="button" class="btn sm steer-send" :aria-label="words.now" :disabled="!draft.trim() || !canWrite" @click="send('steer')"><AppIcon name="bolt" :size="13" />{{ words.now }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
           <button type="submit" class="btn sm primary send" :aria-label="canSteer ? words.after : words.send" :disabled="!draft.trim() || !canWrite"><AppIcon name="send" :size="13" /><span>{{ canSteer ? words.after : words.send }}</span><KeyCap k="enter" /></button>
+          <button v-if="s.management_mode === 'managed' && s.advertised_capabilities.includes('interrupt')" type="button" class="btn sm chat-stop" :aria-label="words.stop" :data-tip="canStop ? words.stopTip : interruptBlock || words.stopTip" :disabled="!canStop" @click="stop"><AppIcon name="stop" :size="13" /><span>{{ words.stop }}</span><KeyCap k="Esc" /></button>
         </div>
       </form>
     </footer>
@@ -587,14 +648,18 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 .session-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .thread-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 18px 24px 20px; }
-.jump { z-index: 1; position: absolute; right: 16px; bottom: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 40px; height: 40px; padding: 0; border: 0; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); }
+.jump { z-index: 1; position: absolute; left: 50%; transform: translateX(-50%); bottom: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 44px; height: 44px; padding: 0; border: 0; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); }
+.history-head { position: relative; display: flex; justify-content: center; align-items: center; min-height: 44px; margin-bottom: 12px; font-size: 12px; color: var(--ink-3); }
+.earlier { border: 0; background: transparent; color: var(--teal-ink); min-height: 44px; padding: 0 10px; font: inherit; font-weight: 600; }
+.history-error { position: absolute; top: 100%; left: 0; right: 0; z-index: 1; background: var(--surface-raised); color: var(--danger); box-shadow: var(--shadow-pop); padding: 8px; }
+.chat-stop { background: var(--ink); color: var(--surface-raised); min-height: 44px; }
 .jump svg { flex: none; }
 .jump.labelled { padding: 0 12px 0 14px; color: var(--teal-ink); }
 .jump-count { font-size: 12.5px; font-weight: 650; white-space: nowrap; }
 @media (hover: hover) { .jump:hover { color: var(--ink); background: var(--btn-bg-hover); } }
 .jump:focus-visible { outline: none; box-shadow: var(--shadow-pop), var(--focus-ring); }
 .jump-enter-active, .jump-leave-active { transition: opacity .16s ease, transform .16s ease; }
-.jump-enter-from, .jump-leave-to { opacity: 0; transform: translateY(6px); }
+.jump-enter-from, .jump-leave-to { opacity: 0; transform: translate(-50%, 6px); }
 @media (prefers-reduced-motion: reduce) { .jump-enter-active, .jump-leave-active { transition: none; } }
 .composer { flex-shrink: 0; padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--surface-raised-2); border-radius: 0 0 var(--radius) var(--radius); }
 .compose { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
@@ -609,7 +674,6 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 .send-error { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--danger); overflow-wrap: anywhere; }
 @media (max-width: 720px) {
   .thread-scroll { padding: 14px 16px 16px; }
-  .jump { right: 12px; }
   .composer { border-radius: 0; padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: var(--surface-raised); }
   /* 16px keeps iOS Safari from zooming the page when the field takes focus. */
   .compose textarea { font-size: 16px; min-height: 48px; resize: none; }
