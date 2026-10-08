@@ -14480,6 +14480,8 @@
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"a run of nights ends at a night without a run; only tonight may still be due","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"days after coverage ends stay \"no data yet\", including a night after the App disconnects","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"days before the source covers them are \"no data yet\", later empty days are not, and nothing is invented","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-numbers.unit.test.ts","name":"long windows use the server’s weeks and months and label only some of them","tier":"ESSENTIAL"}

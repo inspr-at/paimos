@@ -116,6 +116,42 @@ it('a run of nights ends at a night without a run; only tonight may still be due
   expect(nightStreak([])).toBeNull()
 })
 
+it('days after coverage ends stay "no data yet", including a night after the App disconnects', () => {
+  // The source covered day(6) through day(3), then the App disconnected. Later empty days are unobserved.
+  const daily = Array.from({ length: 30 }, (_, index) => {
+    const date = day(29 - index), back = 29 - index
+    return back === 6 || back === 5
+      ? { date, status: 'ok' as const, n: 2, value: 12, p50: 12, p90: 18 }
+      : { date, status: 'no_data' as const, n: 0, value: null, p50: null, p90: null }
+  })
+  const span = coverage(7, day(6), { full: false, covered_days: 4, buckets_covered: 4 })
+  const subject = metric('pr_ci_wall', { daily }, { coverage: span })
+  expect(bucketsOf(subject, 7, 'en').buckets.map(bucket => bucket.status)).toEqual(['ok', 'ok', 'empty', 'empty', 'no_data', 'no_data', 'no_data'])
+  const model = chartModel(def('pr_ci_wall'), new Map([['pr_ci_wall', subject]]), 7, null, 'en')
+  expect(model.readouts[2]).toBe('4 Oct · Nothing recorded')
+  expect(model.readouts[4]).toBe('6 Oct · No data yet')
+  expect(model.readouts[6]).toBe('Today · No data yet')
+  const nights = daily.map(point => {
+    const back = Math.round((Date.parse(`${TODAY}T00:00:00Z`) - Date.parse(`${point.date}T00:00:00Z`)) / 86_400_000)
+    if (back === 6) return { ...point, n: 1, value: 100, p50: 100, p90: 100 }
+    if (back === 5) return { ...point, n: 1, value: 0, p50: 0, p90: 0 }
+    return point
+  })
+  const nightly = metric('nightly_green', { daily: nights, unit: 'percent' }, { n: 2, value: 50, coverage: span })
+  const strip = chartModel(def('nightly_green'), new Map([['nightly_green', nightly]]), 7, null, 'en')
+  expect(strip.nights).toEqual(['ok', 'bad', 'none', 'none', 'nodata', 'nodata', 'nodata'])
+  expect(strip.readouts[2]).toBe('4 Oct · No run')
+  expect(strip.readouts[4]).toBe('6 Oct · No data yet')
+  expect(strip.readouts[6]).toBe('Today · No data yet')
+  // A week that only starts after the covered span is unobserved, even though its end is after the coverage start.
+  const weeks = [
+    { days: 90, from: day(20), to: day(14), bucket: 'week' as const, status: 'no_data' as const, n: 0, value: null, p50: null, p90: null },
+    { days: 90, from: day(13), to: day(7), bucket: 'week' as const, status: 'no_data' as const, n: 0, value: null, p50: null, p90: null },
+  ]
+  const long = metric('pr_ci_wall', { series: weeks }, { days: 90, coverage: coverage(90, day(20), { full: false, covered_days: 7, buckets_covered: 1 }) }, 90)
+  expect(bucketsOf(long, 90, 'en').buckets.map(bucket => bucket.status)).toEqual(['empty', 'no_data'])
+})
+
 it('p90 stretches the duration scale at most to twice its room, else it is clipped and named', () => {
   expect(durationTop([16, 17, 18], [30, 33], 8)).toEqual({ top: 40, clippedTo: null })
   expect(durationTop([55, 56], [692], 12)).toEqual({ top: 100, clippedTo: 692 })

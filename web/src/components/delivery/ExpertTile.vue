@@ -90,6 +90,7 @@ const id = (suffix: string) => `dl-${props.tile.def.key}-${suffix}`
 .mini-n i.ok { background: var(--ok); }
 .mini-n i.bad { background: var(--danger); }
 .mini-n i.none { box-shadow: inset 0 0 0 1px var(--line-2); }
+.mini-n i.nodata { background: repeating-linear-gradient(-45deg, transparent, transparent 2px, var(--line-2) 2px, var(--line-2) 3px); }
 .sk { display: block; border-radius: 6px; background: var(--skeleton); }
 @media (prefers-reduced-motion: no-preference) {
   .sk { background: linear-gradient(90deg, var(--skeleton) 0%, var(--skeleton-hi) 50%, var(--skeleton) 100%) 0 0 / 200% 100%; animation: dl-sk 1.4s ease-in-out infinite; }

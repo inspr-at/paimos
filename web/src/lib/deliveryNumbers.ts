@@ -2,8 +2,8 @@
 // The Delivery page's numbers (AEON-994): the AEON-993/1001 metrics contract,
 // the per-person page preferences, and everything the tiles and charts show,
 // worked out here so it is tested without a browser. Nothing is extrapolated:
-// a bucket without samples is "no data yet" before the source covers it and
-// "nothing recorded" after; a missing window before is "no comparison", never 0.
+// a bucket without samples is "no data yet" outside the covered span and
+// "nothing recorded" inside it; a missing window before is "no comparison", never 0.
 import { api, APIError } from './api.ts'
 import type { DeliveryLanguage } from './delivery'
 import { deliveryText, fill, type DeliveryText, type MetricTextKey } from './deliveryNumbersText'
@@ -127,15 +127,25 @@ export interface Part { text: string; strong?: boolean }
 export interface TileModel {
   def: TileDef; label: string; definition: string; reason: string | null; target: string; source: string
   status: SampleStatus; value: { main: string; unit: string } | null
-  lineA: { parts: Part[]; mono: boolean; squares?: ('ok' | 'bad' | 'none')[] }; lineB: string
+  lineA: { parts: Part[]; mono: boolean; squares?: ('ok' | 'bad' | 'none' | 'nodata')[] }; lineB: string
   delta: Delta; partial: boolean; foot: string
 }
 const plural = (n: number, one: string, many: string) => n === 1 ? one : many
 
+/** Last covered UTC day, inclusive. The server's coverage is one contiguous span: `from` and the next `covered_days`. */
+export function coveredUntil(coverage: MetricCoverage | null | undefined): string | null {
+  if (!coverage?.from || coverage.covered_days < 1) return null
+  return new Date(dateOf(coverage.from).getTime() + (coverage.covered_days - 1) * 86_400_000).toISOString().slice(0, 10)
+}
+/** A day or bucket was observed when it overlaps the covered span. Either side of that span is unobserved. */
+function observed(coverage: MetricCoverage | null | undefined, start: string, end: string): boolean {
+  const until = coveredUntil(coverage)
+  return !!coverage?.from && !!until && end >= coverage.from && start <= until
+}
 /** Nights of the daily series, oldest first: green, red, or no run (covered, nothing ran) / no data yet. */
-export function nightOf(point: Measured & { date: string }, coveredFrom: string | null): 'ok' | 'bad' | 'none' | 'nodata' {
+export function nightOf(point: Measured & { date: string }, coverage: MetricCoverage | null): 'ok' | 'bad' | 'none' | 'nodata' {
   if (point.n > 0 && point.value != null) return point.value >= 100 ? 'ok' : 'bad'
-  return coveredFrom && point.date >= coveredFrom ? 'none' : 'nodata'
+  return observed(coverage, point.date, point.date) ? 'none' : 'nodata'
 }
 /** Same verdict on consecutive nights back from the latest one; tonight may not have run yet, any other night without a run ends it. */
 export function nightStreak(nights: ('ok' | 'bad' | 'none' | 'nodata')[]): { verdict: 'ok' | 'bad'; count: number } | null {
@@ -197,9 +207,9 @@ export function tileModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: W
 }
 type TileBase = Omit<TileModel, 'value' | 'lineA' | 'lineB'>
 function nightlyTile(base: TileBase, metric: Metric | undefined, window: MetricWindow | null, days: WindowDays, text: DeliveryText, lang: DeliveryLanguage, empty: boolean): TileModel {
-  const from = windowOf(metric, 30)?.coverage.from ?? window?.coverage.from ?? null
-  const nights = (metric?.daily ?? []).map(point => nightOf(point, from))
-  const last7 = nights.slice(-7).map(night => night === 'nodata' ? 'none' : night)
+  const coverage = windowOf(metric, 30)?.coverage ?? window?.coverage ?? null
+  const nights = (metric?.daily ?? []).map(point => nightOf(point, coverage))
+  const last7 = nights.slice(-7)
   const streak = nightStreak(nights)
   const ran = window?.n ?? 0
   const without = Math.max(0, (window?.coverage.covered_days ?? 0) - ran)
@@ -222,13 +232,12 @@ export function newestRelease(releases: MetricRelease[], days: number, daily: Me
 // ---------- Chart buckets ----------
 export type BucketStatus = 'ok' | 'partial' | 'no_data' | 'empty'
 export interface ChartBucket { from: string; to: string; unit: BucketUnit; status: BucketStatus; label: string; long: string; show: boolean }
-/** Buckets of one window: days from daily (7, 30), weeks (90, 180) or months (365) from series. A bucket before the
- * source covers it is "no data yet" (no_data); after that, a bucket without samples is "empty", never zero. */
+/** Buckets of one window: days from daily (7, 30), weeks (90, 180) or months (365) from series. A bucket outside the
+ * covered span is "no data yet" (no_data); inside it, a bucket without samples is "empty", never zero. */
 export function bucketsOf(metric: Metric | undefined, days: WindowDays, lang: DeliveryLanguage): { buckets: ChartBucket[]; samples: Measured[] } {
   const text = deliveryText(lang), unit = bucketOf(days)
   const coverage = windowOf(metric, days)?.coverage ?? null
-  const coveredFrom = coverage?.from ?? null
-  const status = (sample: Measured, last: string): BucketStatus => sample.status !== 'no_data' ? sample.status : coveredFrom && last >= coveredFrom ? 'empty' : 'no_data'
+  const status = (sample: Measured, start: string, end: string): BucketStatus => sample.status !== 'no_data' ? sample.status : observed(coverage, start, end) ? 'empty' : 'no_data'
   if (unit === 'day') {
     const points = (metric?.daily ?? []).slice(-days)
     return {
@@ -236,7 +245,7 @@ export function bucketsOf(metric: Metric | undefined, days: WindowDays, lang: De
       buckets: points.map((point, index) => {
         const last = index === points.length - 1, back = points.length - 1 - index
         const label = last ? text.today : days === 7 ? `${fmtDate(point.date, lang, { weekday: 'short' })} ${dateOf(point.date).getUTCDate()}` : shortDate(point.date, lang)
-        return { from: point.date, to: point.date, unit, status: status(point, point.date), label, long: last ? text.today : shortDate(point.date, lang), show: days === 7 || back % 7 === 0 }
+        return { from: point.date, to: point.date, unit, status: status(point, point.date, point.date), label, long: last ? text.today : shortDate(point.date, lang), show: days === 7 || back % 7 === 0 }
       }),
     }
   }
@@ -246,11 +255,11 @@ export function bucketsOf(metric: Metric | undefined, days: WindowDays, lang: De
     buckets: series.map((bucket, index) => {
       const last = index === series.length - 1, back = series.length - 1 - index
       if (unit === 'week') {
-        return { from: bucket.from, to: bucket.to, unit, status: status(bucket, bucket.to),
+        return { from: bucket.from, to: bucket.to, unit, status: status(bucket, bucket.from, bucket.to),
           label: last ? text.thisWk : shortDate(bucket.from, lang), long: last ? text.thisWeek : `${text.weekOf} ${shortDate(bucket.from, lang)}`,
           show: back % (days === 90 ? 4 : 8) === 0 }
       }
-      return { from: bucket.from, to: bucket.to, unit, status: status(bucket, bucket.to),
+      return { from: bucket.from, to: bucket.to, unit, status: status(bucket, bucket.from, bucket.to),
         label: fmtDate(bucket.from, lang, { month: 'short' }),
         long: last ? `${fmtDate(bucket.from, lang, { month: 'long' })} (${text.soFar})` : fmtDate(bucket.from, lang, { month: 'long', year: 'numeric' }),
         show: back % 3 === 0 }
@@ -320,10 +329,10 @@ export function chartModel(def: TileDef, metrics: Map<MetricKey, Metric>, days: 
     panels.push({ top: 100, share: 1, caption: '', band: null, fade: false, lines: [{ values: values(samples, sample => sample.value), tone: 'teal', connect: true }],
       targets: target != null ? [{ value: target, label: words.line }] : [] })
   }
-  const coveredFrom = windowOf(metric, days)?.coverage.from ?? null
+  const covered = windowOf(metric, days)?.coverage ?? null
   const nights = def.kind === 'nightly' ? samples.map((sample, index) => {
     if (sample.n > 0 && sample.value != null) return sample.value >= 100 ? 'ok' : 'bad'
-    return coveredFrom && buckets[index].to >= coveredFrom ? 'none' : 'nodata'
+    return observed(covered, buckets[index].from, buckets[index].to) ? 'none' : 'nodata'
   }) as ChartModel['nights'] : []
   const readouts = buckets.map((bucket, index) => readout(def, bucket, samples[index], alsoSamples[index], nights[index], text, lang))
   const notes = [sourceLabel(def, source, text)]
