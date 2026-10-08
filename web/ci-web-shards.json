@@ -782,6 +782,8 @@
         ,
         {"file":"tests/delivery-guarantee.spec.ts","listedTests":8,"weightSeconds":17.756098,"weightSource":"unmeasured-test-rate"}
         ,
+        {"file":"tests/delivery-numbers.spec.ts","listedTests":14,"weightSeconds":30,"weightSource":"aeon-1002-estimate"}
+        ,
         {"file":"tests/delivery-rating.spec.ts","listedTests":5,"weightSeconds":11.097561,"weightSource":"unmeasured-test-rate"}
         ,
         {"file":"tests/delivery-ui.spec.ts","listedTests":16,"weightSeconds":25,"weightSource":"aeon-853-estimate"}

@@ -154,6 +154,29 @@ func TestDeliveryMetricsFromFixedFacts(t *testing.T) {
 	}
 }
 
+func TestDeliveryMetricsQueueRunsCountOnlyMergedPulls(t *testing.T) {
+	// Risk: a pull request that entered the merge queue and then failed or was
+	// abandoned still counts, so 1.0 no longer means every counted PR merged
+	// on its first queue run.
+	ci := ".github/workflows/ci.yml"
+	h := func(c string) string { return strings.Repeat(c, 40) }
+	d := func(days float64) time.Time { return metricNow.Add(-time.Duration(days * 24 * float64(time.Hour))) }
+	covered := d(40)
+	metrics := computeMetrics(metricInput{
+		CIWorkflow: ci, NightlyWorkflow: ".github/workflows/nightly-full.yml", Covered: &covered,
+		Runs: []metricRun{
+			metricFixtureRun(1, 1, ci, "merge_group", "gh-readonly-queue/main/pr-7-"+h("a"), h("a"), d(1), 0, 10, "success"),
+			metricFixtureRun(2, 1, ci, "merge_group", "gh-readonly-queue/main/pr-8-"+h("b"), h("b"), d(1), 0, 10, "failure"),
+			metricFixtureRun(3, 1, ci, "merge_group", "gh-readonly-queue/main/pr-8-"+h("c"), h("c"), d(1).Add(time.Hour), 0, 10, "failure"),
+		},
+		Pulls: []metricPull{
+			{Number: 7, Opened: d(2), Merged: ptrTime(d(1))},
+			{Number: 8, Opened: d(2), Closed: ptrTime(d(1))},
+		},
+	}, metricNow)
+	wantWindow(t, metricByKey(t, metrics, "queue_runs_per_pr"), 30, "ok", 1, f64(1), f64(1), f64(1))
+}
+
 func TestDeliveryMetricsNeverReportMissingDataAsZero(t *testing.T) {
 	// Risk: an empty or half-backfilled history renders as 0 minutes or 0 %.
 	empty := computeMetrics(metricInput{CIWorkflow: ".github/workflows/ci.yml", NightlyWorkflow: ".github/workflows/nightly-full.yml"}, metricNow)
