@@ -9002,6 +9002,8 @@
     ,
     {"kind":"go","package":"scripts/pdf-visual-diff","name":"TestShiftedRectangleExceedsThreshold","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"scripts/readmelayout","name":"TestReadmeCarriesNoFeatureProse","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestAnnotatedTagGuardFailsClosed","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestBuilderChecksumAndPluginPathFailClosed","tier":"NIGHTLY"}
