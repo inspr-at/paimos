@@ -154,9 +154,13 @@ function position() {
   const el = editorRef.value?.root
   if (!editor.value || !card.value || !el) return
   const box = card.value.getBoundingClientRect(), g = editor.value.gear.getBoundingClientRect(), w = el.offsetWidth
-  // Fit the room below the control (the app footer takes the last 56 px); a tall
-  // editor scrolls inside, with its footer in view.
-  editorStyle.value = { top: `${g.bottom - box.top + 8}px`, left: `${Math.max(12, Math.min(g.right - box.left - w + 10, box.width - w - 12))}px`, maxHeight: `${Math.max(440, window.innerHeight - g.bottom - 64)}px` }
+  // Choose the position on open. A low trigger opens above, keeping room
+  // above the app footer; controls stay anchored as content grows below.
+  const footerGap = 88, viewportTop = 72
+  const height = Math.min(el.offsetHeight, Math.max(0, window.innerHeight - viewportTop - footerGap))
+  const below = g.bottom + 8
+  const top = below + height <= window.innerHeight - footerGap ? below : Math.max(viewportTop, g.top - height - 8)
+  editorStyle.value = { top: `${top - box.top}px`, left: `${Math.max(12, Math.min(g.right - box.left - w + 10, box.width - w - 12))}px`, maxHeight: `${Math.max(0, window.innerHeight - top - footerGap)}px` }
 }
 // On a phone the trigger sits in the inert page. Remember it and focus only
 // after the sheet has unmounted and that inert is gone (see the sheet watch).
@@ -514,7 +518,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .tog { position: relative; display: inline-flex; align-items: center; flex: none; width: 38px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: var(--line-2); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-black) 12%, transparent); cursor: pointer; }
 .tog::after { content: ''; position: absolute; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--switch-knob); box-shadow: 0 1px 3px color-mix(in srgb, var(--shadow-black) 28%, transparent); transition: transform .18s ease; }
 .tog[aria-checked="true"] { background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo)); }
-.tog[aria-checked="true"]::after { background: var(--primary-on); transform: translateX(16px); }
+.tog[aria-checked="true"]::after { background: var(--switch-knob); transform: translateX(16px); }
 .tog:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .tog::before { content: ''; position: absolute; inset: -11px -4px; }
 .tog:disabled { cursor: default; opacity: .6; }
@@ -676,7 +680,7 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .setting .seg button { height: 38px; min-width: 44px; }
   .tog { width: 44px; height: 26px; }
   .tog::after { width: 20px; height: 20px; }
-  .tog[aria-checked="true"]::after { background: var(--primary-on); transform: translateX(18px); }
+  .tog[aria-checked="true"]::after { background: var(--switch-knob); transform: translateX(18px); }
   .pool { gap: 8px; padding: 14px 14px 12px; }
   .plan { padding-left: 0; }
   .pool-head .more { width: 44px; height: 44px; margin-right: -8px; }

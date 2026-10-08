@@ -57,7 +57,7 @@ func TestHarnessHintsDrainAndStopWithoutHeartbeatOrPoll(t *testing.T) {
 	s, api, process := testSupervisor(t)
 	hints := &hintAPI{fakeAPI: api, connected: make(chan func(), 1), deliveries: make(chan struct{}, 2), controls: make(chan string, 2)}
 	s.api = hints
-	entry := &owned{record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", Generation: s.generation, State: "running", PID: process.PID(), Controls: map[string]replay{}}, harness: HarnessSession{ID: "session", ProjectID: "project"}, process: process, inboxCapable: true, replies: map[string]string{}, monitorDone: make(chan struct{}), harnessWake: make(chan struct{}, 1)}
+	entry := &owned{record: Record{TenantID: s.tenantID, PrincipalID: s.principalID, RunID: "run", Generation: s.generation, State: "running", PID: process.PID(), Controls: map[string]replay{}}, harness: HarnessSession{ID: "session", ProjectID: "project"}, process: process, inboxCapable: true, replies: map[string]InboxReplyTarget{}, monitorDone: make(chan struct{}), harnessWake: make(chan struct{}, 1)}
 	s.runs["run"] = entry
 	ended := make(chan struct{})
 	go func() { defer close(ended); s.heartbeatLoop(entry, nil, nil) }()

@@ -98,6 +98,32 @@
     ,
     "browser:tests/add-account.spec.ts:the Agents page links to Settings; Add an account lives there and opens the steps"
     ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1024 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1440 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 1440 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 390 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:tree, hours spacing and light switch thumbs 390 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification errors stay honest and changing computer discards pending feedback"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1024 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1024 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1440 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 1440 light"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 dark"
+    ,
+    "browser:tests/aeon-908-polish.spec.ts:verification progress and computer panel remain stable 390 light"
+    ,
     "browser:tests/agent-pause.spec.ts:1440 dark: scope, preview, levels and report controls stay under the pointer"
     ,
     "browser:tests/agent-pause.spec.ts:1440 dark: the Wind down popover keeps its controls still, starts, shows and cancels a wind-down"
@@ -739,6 +765,20 @@
     "browser:tests/service-tier.spec.ts:320: phone Change tier menu opens and restores its actual trigger"
     ,
     "browser:tests/service-tier.spec.ts:390: phone Change tier menu opens and restores its actual trigger"
+    ,
+    "browser:tests/session-chat.spec.ts:a held-request 403 keeps the session composer (AEON-942)"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 1024"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 1440"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle dark 390"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle light 1024"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle light 1440"
+    ,
+    "browser:tests/session-chat.spec.ts:session queued input stays stable without a delivery toggle light 390"
     ,
     "browser:tests/settings-account-pacing.spec.ts:Capacity and load: leaving a custom week for 5, 6 or 7 moves none of them"
     ,
@@ -4640,6 +4680,32 @@
     ,
     {"kind":"browser","file":"tests/aeon-635.spec.ts","name":"waiting-panel keys keep the selected release and native controls at 390 (AEON-635 fix2)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"tree, hours spacing and light switch thumbs 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification errors stay honest and changing computer discards pending feedback","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1024 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 1440 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 390 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/aeon-908-polish.spec.ts","name":"verification progress and computer panel remain stable 390 light","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/agent-activity.spec.ts","name":"Off shows no activity line or current activity history","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/agent-activity.spec.ts","name":"activity fits phone and desktop in both themes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -6481,6 +6547,8 @@
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"delivery loading, empty, unavailable and error replace one slot; readers have no management actions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"failed writes stay honest; project reset offers scope-bound Undo and uses captured revisions","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/delivery-ui.spec.ts","name":"shadow delivery rounds show holds without moving delivery controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/deploy-target.spec.ts","name":"Needs you names destinations and keeps target-less approvals usable","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10418,6 +10486,8 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a failed read marker is sent again on the next flush, without an error","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a held-request 403 keeps the session composer (AEON-942)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a late read marker never moves a reader who scrolled up","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a late server read marker opens the thread at the first unread message","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -10461,6 +10531,18 @@
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"scrolling a 40-message thread sends at most two read markers at 1600","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"scrolling a 40-message thread sends at most two read markers at 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle dark 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 1024","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 1440","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"session queued input stays stable without a delivery toggle light 390","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"the thread renders before the read marker answers","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10671,6 +10753,8 @@
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"names that clash ask to be named, and a rename changes only the name","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"old limits set by hand show as Set by you, with Make this repeat and Remove","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"owner login usage switch stays put and failed saves preserve consent","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/settings-accounts.spec.ts","name":"phone: Name it is reachable and opens the rename","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -11953,6 +12037,8 @@
     {"kind":"node","file":"tests/access.test.ts","name":"built-in agent roles exclude recurrence automation in every key mode; custom grants remain explicit","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"built-in ceilings keep review policy read and leave manage to an explicit custom role","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/access.test.ts","name":"built-in ceilings keep shadow admission on the person and off agent keys","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/access.test.ts","name":"client/server scope ceiling parity, including project self-service and person-only exclusions","tier":"ESSENTIAL"}
     ,
@@ -14209,6 +14295,8 @@
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a pending ticket read and lift result are discarded after ticket or person changes","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"a policy save cannot report success after the person changes","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"delivery queue reads stay with the ticket and person and expose refresh failures","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/delivery-ui.unit.test.ts","name":"family eligibility comes from the server; empty allowlists never save and failed writes keep the draft","tier":"ESSENTIAL"}
     ,
