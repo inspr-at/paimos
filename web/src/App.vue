@@ -7,7 +7,6 @@ import ConfirmHost from './components/ConfirmHost.vue'
 import PauseDialog from './components/agents/PauseDialog.vue'
 import DoneGateHost from './components/DoneGateHost.vue'
 import ToastHost from './components/ToastHost.vue'
-import { modelPrefsContext, closeModelPrefs } from './lib/modelPrefsCommand'
 import TooltipHost from './components/TooltipHost.vue'
 import AppFooter from './components/AppFooter.vue'
 import ErrorPage from './components/ErrorPage.vue'
@@ -31,14 +30,11 @@ import { headerFolded } from './lib/chrome'
 import { usePoller } from './lib/usePolledData'
 import { sessionFreezeApplies } from './lib/agentPairing'
 
-const ModelPrefsDialog = defineAsyncComponent(() => import('./components/model-prefs/ModelPrefsDialog.vue'))
 const ReleasesSheet = defineAsyncComponent(() => import('./components/releases/ReleasesSheet.vue'))
 const session = useSession()
 const profile = useProfile()
 const route = useRoute()
 const router = useRouter()
-watch(() => session.identity ? `${session.identity.tenant.id}/${session.identity.principal.id}` : undefined, closeModelPrefs)
-watch(() => route.fullPath, closeModelPrefs)
 const ticketPeek = provideTicketPeek()
 const main = ref<HTMLElement>()
 const shortcuts = ref<InstanceType<typeof ShortcutSheet>>()
@@ -238,7 +234,6 @@ watch(() => [route.path, route.params.projectKey, route.params.ticketKey, route.
     <ReleasesSheet v-if="releasesOpen" ref="releasesSheet" :target="releasesTarget" @select="selectRelease" @query="setReleasesQuery" @close="closeReleases" @home="goHome" @navigate="leaveReleasesFor" />
     <TicketPeekHost v-if="ticketPeek.openKey.value && !releasesOpen" :ref="ticketPeek.bind" :ticket-key="ticketPeek.openKey.value" :back-label="ticketPeek.backLabel.value" @close="ticketPeek.close()" />
     <LeadOverlays v-if="session.identity && !bare && !fatal" />
-    <ModelPrefsDialog v-if="modelPrefsContext && session.identity && !session.requiresSignIn" :key="modelPrefsContext.requestId" :context="modelPrefsContext" @close="closeModelPrefs" />
     <ToastHost />
     <ConfirmHost />
     <PauseDialog />
