@@ -513,7 +513,7 @@ func workerKeyTx(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Princ
 	}
 	sum := sha256.Sum256([]byte(secret))
 	var allowed bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_keys WHERE principal_id=$1 AND prefix=$2 AND hash=$3 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp()) AND 'chat.receive'=ANY(scopes))`, p.ID, prefix, hex.EncodeToString(sum[:])).Scan(&allowed)
+	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM agent_keys WHERE principal_id=$1 AND prefix=$2 AND hash=$3 AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>clock_timestamp()) AND ((coalesce(full_access,false) AND $4::boolean) OR 'chat.receive'=ANY(scopes)))`, p.ID, prefix, hex.EncodeToString(sum[:]), authz.KeyGrantable("chat.receive", false)).Scan(&allowed)
 	if err != nil {
 		return err
 	}

@@ -25,6 +25,7 @@ type Principal struct {
 	Name                  string
 	Roles                 []string // e.g. "admin", "member"
 	Scopes                []string // authenticated agent key's outer permission ceiling
+	FullAccess            bool     // dynamic agent-grantable key ceiling, independent of workstation designation
 	KeyCreatorID          string   // creator's live binding further narrows an agent key
 	KeyID                 string   `json:"-"` // authenticating key metadata ID; never a prefix or credential
 	OwnerWorkstation      bool     // explicit designation; authz rechecks live binding

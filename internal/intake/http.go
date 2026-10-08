@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/inspr-at/paimos/internal/aithema/tokens"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -217,19 +218,20 @@ func keyScopes(ctx context.Context, r *http.Request, tx pgx.Tx, p tenant.Princip
 	}
 	sum := sha256.Sum256([]byte(secret))
 	var scopes pgtype.FlatArray[string]
+	var fullAccess bool
 	err := tx.QueryRow(ctx, `
-		SELECT scopes FROM agent_keys
+		SELECT scopes,coalesce(full_access,false) FROM agent_keys
 		WHERE tenant_id = $1::uuid AND principal_id = $2::uuid AND prefix = $3 AND hash = $4
 		  AND revoked_at IS NULL
 		  AND (expires_at IS NULL OR expires_at > now())`,
-		p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:])).Scan(&scopes)
+		p.TenantID, p.ID, prefix, hex.EncodeToString(sum[:])).Scan(&scopes, &fullAccess)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fail(http.StatusForbidden, "scoped agent key required")
 	}
 	if err != nil {
 		return nil, err
 	}
-	return []string(scopes), nil
+	return authz.ResolveKeyScopes([]string(scopes), fullAccess), nil
 }
 
 func splitBearer(header string) (prefix, secret string, ok bool) {
