@@ -149,9 +149,17 @@ export function mergeRegistries(base, ours, theirs, file) {
       // Permission and test-case records are atomic: combining separate edits
       // could manufacture a wider grant or a fixture neither author reviewed.
       // Privacy tables merge only their independently keyed columns;
-      // classification and locator remain indivisible safety controls.
+      // classification and locator together form an indivisible safety header.
+      if (file === registryPaths[3] && /^tables\.[^.]+$/.test(path)) {
+        const header = value => value === absent ? absent : {
+          table: value.table, classification: value.classification, locator: value.locator,
+        }
+        const mergedHeader = merge(...[b, o, t].map(header), `${path}.<header>`)
+        const columns = merge(...[b, o, t].map(value => value === absent ? absent : value.columns), `${path}.columns`)
+        return { ...mergedHeader, columns }
+      }
       const recursive = path === '' || (file === registryPaths[1] && ['resources', 'actions', 'special'].includes(path)) ||
-        (file === registryPaths[3] && /^tables\.[^.]+(?:\.columns)?$/.test(path))
+        (file === registryPaths[3] && /^tables\.[^.]+\.columns$/.test(path))
       if (recursive && (b === absent || object(b)) && object(o) && object(t)) {
         const keys = [...new Set([b === absent ? [] : Object.keys(b), Object.keys(o), Object.keys(t)].flat())].sort(compare)
         return Object.fromEntries(keys.flatMap(key => {

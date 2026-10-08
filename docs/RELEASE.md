@@ -2014,7 +2014,7 @@ Node built-ins and runs from old checkouts without importing their source.
 | `internal/authz/builtin_agent_exclusions.json` | DATA: permission strings form a keyed set. Independent exclusions survive, sorted. |
 | `internal/authz/permission_labels.json` | DATA: labels merge by group and key; divergent labels conflict. |
 | `internal/auth/testdata/key_scope_ceiling.json` | DATA: permissions key by `key`, cases by `name`. Each record is atomic; divergent grant flags, locations or case expectations conflict. |
-| `internal/dsar/inventory.json` | DATA: tables key by `table`, columns by name. Independent columns survive, including on a concurrently introduced table. Divergent column classifications, table classifications and whole locators conflict. |
+| `internal/dsar/inventory.json` | DATA: tables key by `table`, columns by name. Independent columns survive, including on a concurrently introduced table. Each table's classification and locator form one atomic safety header; divergent headers or column classifications conflict. |
 | `scripts/ci/go-test-tiers.json`, `scripts/ci/web-test-tiers.json`, `web/ci-web-shards.json` | DATA with regenerated canonical layout: retain the existing `tiers` driver and authored test tiers, weights and launch policy. |
 | `internal/authz/route_map.go` | CODE holding route lists: leave for AEON-982. |
 | `internal/authz/registry.go` | CODE constructing the permission catalog and grant rules: leave for AEON-982. |
@@ -2030,7 +2030,8 @@ The registry driver implements a three-way keyed merge: independent additions
 are retained; a deletion against an unchanged entry is honoured; deletion against
 an edited entry conflicts. Identical changes agree, and a unilateral edit is
 retained. Permission records and case records are never combined field by field
-into a policy neither author supplied. Locators are also indivisible. Array
+into a policy neither author supplied. Table classification and locator together
+are also indivisible. Array
 order inside fixture cases and grants is retained; top-level sets and object
 keys sort deterministically. No permission, privacy classification or expected
 ceiling is inferred from code.

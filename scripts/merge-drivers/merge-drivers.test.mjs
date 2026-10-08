@@ -109,6 +109,9 @@ test('privacy columns union by column; classification, locator and deletion disa
   const a = structuredClone(base), b = structuredClone(base)
   a.tables[0].locator.person_column = 'owner_id'; b.tables[0].locator.tenant_column = 'workspace_id'
   assert.equal(invoke(t, [base, a, b], file).status, 1)
+  const changedClass = structuredClone(base)
+  changedClass.tables[0].classification = 'metadata'
+  assert.equal(invoke(t, [base, changedClass, a], file).status, 1)
 })
 
 test('labels with divergent values conflict; matching additions and one-sided edits survive', t => {
