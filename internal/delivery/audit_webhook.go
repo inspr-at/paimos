@@ -118,6 +118,10 @@ func (m *Module) auditWebhook(w http.ResponseWriter, r *http.Request) {
 	if err == nil && f != nil {
 		err = m.auditMerge(ctx, m.config.TenantID, *f, reader)
 	}
+	if err == nil {
+		// AEON-993 timing facts; a failed read or write stays retryable.
+		err = m.metricsEvent(ctx, name, raw)
+	}
 	if err != nil {
 		w.WriteHeader(502)
 		return

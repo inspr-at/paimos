@@ -12120,6 +12120,18 @@
     ,
     {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary and surfaces 390 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary reads top-down with an icon picker 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary reads top-down with an icon picker 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary reads top-down with an icon picker 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary reads top-down with an icon picker 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary reads top-down with an icon picker 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/work-vocabulary.spec.ts","name":"work vocabulary reads top-down with an icon picker 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/workspace-activity.spec.ts","name":"Activity matches the approved responsive layout and holds controls still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
@@ -13796,7 +13808,15 @@
     ,
     {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"Parents / Leaves and depth survive links, saved views and API translation","tier":"NIGHTLY"}
     ,
+    {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"an unknown stored icon draws the level default","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"internal work types retain default names and custom spelling","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"list keys move within the options and stop at the ends","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"settings rows read top-down: top level first, the leaf last, with defaults per depth","tier":"ESSENTIAL"}
+    ,
+    {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"the preview chain names every configured level top-down, then the leaf","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/work-vocabulary.test.ts","name":"type facets, selected chips and groups display the workspace leaf name","tier":"ESSENTIAL"}
     ,
@@ -19100,7 +19120,15 @@
     ,
     {"kind":"vitest","file":"tests/work-surfaces-fix2.unit.test.ts","name":"stops at the lazy item budget while retaining an honest incomplete result","tier":"NIGHTLY"}
     ,
+    {"kind":"vitest","file":"tests/work-vocabulary-card.unit.test.ts","name":"Add level puts the new level directly above the leaf and saves levels[0] as the top level","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-vocabulary-card.unit.test.ts","name":"lists the levels top-down, ending with the leaf, and previews the whole chain","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-vocabulary-card.unit.test.ts","name":"lists the same order and labels read-only","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/work-vocabulary-card.unit.test.ts","name":"serializes a deferred Reload with Save and leaves the saved revision visible","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/work-vocabulary-card.unit.test.ts","name":"the icon picker shows every icon with its name and chooses one","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/workspace-activity.unit.test.ts","name":"drops another person’s history and binds every delayed Undo result to the exact displayed event, ticket and revision","tier":"GATED-FULL"}
   ]
