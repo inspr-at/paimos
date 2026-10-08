@@ -202,6 +202,13 @@ func TestStatusHelpAgentReadRequiresAuthentication(t *testing.T) {
 	}
 }
 
+func TestUsageProbeRouteRequiresAccountManage(t *testing.T) {
+	const route = "PUT /api/agent-accounts/{accountId}/usage-probe"
+	if got, ok := PermissionForPattern(route); !ok || got != "account.manage" {
+		t.Fatalf("usage probe route permission %q, declared=%v; want account.manage", got, ok)
+	}
+}
+
 // Every current module declares literal ServeMux patterns. This source walk
 // catches a new route even when its module is mounted only in production.
 func TestRouteSourceCoverage(t *testing.T) {
