@@ -770,6 +770,7 @@ var RoutePermissions = map[string]string{
 
 // Tier reads, worker reports and person decisions use the existing session permissions.
 func init() {
+	RoutePermissions["GET /api/projects/{projectId}/harness-sessions/{sessionId}/notifications"] = "harness.worker"
 	RoutePermissions["GET /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.read"
 	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier"] = "harness.control"
 	RoutePermissions["POST /api/projects/{projectId}/harness-sessions/{sessionId}/tier/report"] = "harness.worker"
