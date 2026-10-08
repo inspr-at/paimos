@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/delivery
+paths:
+  /projects/{projectId}/routing-settings:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectRoutingSettings
+      description: 'Reads this project routing switch. Default is off; no tenant-wide inheritance. Requires delivery.read.'
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200': {description: 'Project routing switch', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRoutingSettings'}}}}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+    put:
+      operationId: putProjectRoutingSettings
+      description: 'Sets off or shadow and records a settings event. Requires delivery.manage. Consult and act are unavailable in this release.'
+      security: [{session: []}, {agentKey: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRoutingSettings'}}}}
+      responses:
+        '200': {description: 'Project routing switch', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryRoutingSettings'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    DeliveryRoutingSettings:
+      type: object
+      additionalProperties: false
+      required: [mode]
+      properties:
+        mode: {type: string, enum: [off, shadow], default: off}

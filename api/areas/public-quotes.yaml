@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/business/quotes/public
+paths:
+  /public/quotes/{publicTenant}/{token}:
+    get:
+      operationId: readPublicQuote
+      summary: Read only the frozen document bound to a bearer capability
+      security: []
+      parameters: [{name: publicTenant, in: path, required: true, schema: {type: string}}, {name: token, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: Scoped public document and state, headers: {Cache-Control: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicDocument'}}}}
+        '404': {$ref: '#/components/responses/Error'}
+  /public/quotes/{publicTenant}/{token}/accept:
+    post:
+      operationId: acceptPublicQuote
+      summary: Accept the exact issued document through a capability
+      description: Name, company, note, explicit confirmation, version, digest and UUID mutation ID are required. One quote decision wins across both acceptance channels. Exact replays return the original acceptance.
+      security: []
+      parameters: [{name: publicTenant, in: path, required: true, schema: {type: string}}, {name: token, in: path, required: true, schema: {type: string}}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicAcceptanceWrite'}}}}
+      responses:
+        '201': {description: Accepted; receipt rendering is queued, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicAcceptance'}}}}
+        '200': {description: Exact replay, content: {application/json: {schema: {$ref: '#/components/schemas/QuotePublicAcceptance'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+        '429': {$ref: '#/components/responses/Error'}
+  /public/quotes/{publicTenant}/{token}/pdf:
+    get:
+      operationId: printPublicQuote
+      summary: Render the frozen document with bundled Chromium
+      security: []
+      parameters: [{name: publicTenant, in: path, required: true, schema: {type: string}}, {name: token, in: path, required: true, schema: {type: string}}]
+      responses:
+        '200': {description: A4 PDF, content: {application/pdf: {schema: {type: string, format: binary}}}}
+        '503': {$ref: '#/components/responses/Error'}
+components:
+  schemas:
+    QuotePublicAcceptance:
+      type: object
+      required: [version, content_sha256, accepted_at, confirmation_state]
+      properties:
+        version: {type: integer, minimum: 1}
+        content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        accepted_at: {type: string, format: date-time}
+        confirmation_state: {type: string, enum: [pending, rendering, ready, failed, uncertain]}
+    QuotePublicAcceptanceWrite:
+      type: object
+      additionalProperties: false
+      required: [version, expected_content_sha256, client_mutation_id, name, company, note, confirm]
+      properties:
+        version: {type: integer, minimum: 1}
+        expected_content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        client_mutation_id: {type: string, format: uuid}
+        name: {type: string, minLength: 1, maxLength: 500}
+        company: {type: string, maxLength: 500}
+        note: {type: string, maxLength: 4000}
+        confirm: {const: true}
+    QuotePublicDocument:
+      type: object
+      required: [document, offer_no, version, content_sha256, state, expires_at, acceptable, receipt_ready]
+      properties:
+        document: {$ref: '#/components/schemas/QuoteDocument'}
+        offer_no: {type: string}
+        version: {type: integer, minimum: 1}
+        content_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        state: {type: string, description: Current projection; an older accepted snapshot can remain readable}
+        expires_at: {type: string, format: date-time}
+        acceptable: {type: boolean}
+        receipt_ready: {type: boolean}
+        accepted_at: {type: string, format: date-time}

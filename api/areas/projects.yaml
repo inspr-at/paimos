@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/nodes
+paths:
+  /projects:
+    get:
+      operationId: listProjects
+      security: *auth
+      parameters:
+        - {name: include_archived, in: query, schema: {type: boolean, default: false}}
+      responses:
+        '200':
+          description: Projects with counts of live descendant work leaves (including descendants below non-work kinds) and last activity. A category on that kind's field_schema.states wins (open, doing or in_progress, done, cancelled, archived). Otherwise open is every state that is not in progress, done, cancelled or archived, including open, blocked and unknown states; in_progress is in_progress, active and qa; done is done, delivered and accepted; cancelled is cancelled. Archived work is in total and archived_count. Existing fields retain their meanings; bounded status_counts and status_counts_truncated are additive.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: {type: string, format: uuid}
+                        key: {type: string}
+                        title: {type: string}
+                        state: {type: string}
+                        open: {type: integer}
+                        in_progress: {type: integer}
+                        done: {type: integer}
+                        cancelled: {type: integer}
+                        archived_count: {type: integer, minimum: 0}
+                        status_counts:
+                          type: array
+                          maxItems: 256
+                          description: Live descendant work counts by canonical status and work bucket, in one snapshot. Kind categories take precedence exactly as for Hide. Status spellings are trimmed, lowercased and space/hyphen normalized; active and inprogress map to in_progress, canceled to cancelled. A status used with different kind categories has one entry per bucket. Non-work and deleted nodes are excluded. Older servers may omit this additive field.
+                          items:
+                            type: object
+                            required: [state, bucket, count]
+                            properties:
+                              state: {type: string}
+                              bucket: {type: string, enum: [open, in_progress, done, cancelled, archived]}
+                              count: {type: integer, minimum: 0}
+                        status_counts_truncated: {type: boolean, description: More than 256 status/bucket pairs exist. Group totals remain exact; clients must disclose partial status counts.}
+                        total: {type: integer}
+                        last_activity: {type: string, format: date-time}
+                        people:
+                          type: array
+                          maxItems: 5
+                          description: The people and agents most recently active in the project (actors of the tenant's latest events, at most 90 days old, on the project or anything below it), newest first. A linked principal is shown as the person it links to.
+                          items:
+                            type: object
+                            required: [id, name, kind, has_avatar]
+                            properties:
+                              id: {type: string, format: uuid}
+                              name: {type: string}
+                              kind: {type: string, enum: [person, agent]}
+                              has_avatar: {type: boolean, description: 'The person has a profile picture at /api/people/{id}/avatar/{size}; clients request it only then and show initials otherwise.'}
+        '400':
+          $ref: '#/components/responses/Error'
+components:

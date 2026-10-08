@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/statusautopilot
+paths:
+  /projects/{projectId}/status-autopilot:
+    parameters:
+      - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+    get:
+      operationId: getProjectStatusAutopilot
+      summary: Read a project's status autopilot override
+      security: [{session: []}, {agentKey: []}]
+      responses:
+        '200':
+          description: Effective setting and inheritance
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusAutopilotOverride'}
+        '404': {description: Project not visible}
+    put:
+      operationId: putProjectStatusAutopilot
+      summary: Save Inherit, On or Off for a project
+      security: [{session: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode, expected_revision]
+              additionalProperties: false
+              properties:
+                mode: {type: string, enum: [inherit, on, off]}
+                expected_revision: {type: integer, minimum: 0}
+      responses:
+        '428': {$ref: '#/components/responses/OwnerWorkstationStepUpRequired'}
+        '200':
+          description: Saved override
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusAutopilotOverride'}
+        '403': {description: Person with workspace settings.manage required}
+        '404': {description: Project not visible}
+        '409': {description: Override changed since it was read}
+components:

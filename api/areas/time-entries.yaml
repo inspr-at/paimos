@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# aeon:owner internal/business/hours
+paths:
+  /time-entries:
+    get:
+      operationId: listTimeEntries
+      summary: List time entries with period, principal or node filters
+      security: *auth
+      parameters:
+        - {name: period_id, in: query, schema: {type: string, format: uuid}}
+        - {name: principal_id, in: query, schema: {type: string, format: uuid}}
+        - {name: node_id, in: query, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: Entries, content: {application/json: {schema: {type: array, items: {$ref: '#/components/schemas/TimeEntry'}}}}}
+    post:
+      operationId: createTimeEntry
+      summary: Record principal time against a node
+      description: Manual entries require the acting principal or an admin person. Agent-run entries derive principal, work-order node and terminal interval from R2 telemetry; one entry per run.
+      security: *auth
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TimeEntryWrite'}}}}
+      responses:
+        '201': {description: Entry, content: {application/json: {schema: {$ref: '#/components/schemas/TimeEntry'}}}}
+        '409': {$ref: '#/components/responses/Error'}
+  /time-entries/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string, format: uuid}}
+      - name: If-Unmodified-Since
+        in: header
+        description: Optional last observed updated_at (RFC3339 with microseconds or HTTP date). Stale values return 412 with the current entry.
+        schema: {type: string}
+      - name: If-Match
+        in: header
+        description: Optional quoted updated_at from the entry ETag (also accepts a list of strong tags or *). Takes precedence over If-Unmodified-Since; weak tags never match.
+        schema: {type: string}
+    patch:
+      operationId: updateTimeEntry
+      summary: Correct an entry in an open period
+      description: Entry owner (person) or admin person only. Changing cost unit or UTC start date snapshots the effective hourly rate; other edits preserve the rate. Agent-run node and interval remain telemetry-derived. Every actual edit increments the period revision and writes time_entry.updated. Approved periods are immutable.
+      security: [{session: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/TimeEntryPatch'}}}}
+      responses:
+        '200': {description: Current entry, headers: {ETag: {schema: {type: string}}}, content: {application/json: {schema: {$ref: '#/components/schemas/TimeEntry'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {description: Approved period or invalid interval/rate; response includes a clear message, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
+        '412': {description: Entry changed, content: {application/json: {schema: {$ref: '#/components/schemas/TimeEntryPreconditionFailed'}}}}
+    delete:
+      operationId: deleteTimeEntry
+      summary: Delete an entry from an open period
+      description: Entry owner (person) or admin person only. Writes time_entry.deleted with the full before snapshot and increments the period revision. Undo can restore it only while the period remains open.
+      security: [{session: []}]
+      responses:
+        '204': {description: Entry deleted}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
+        '412': {description: Entry changed, content: {application/json: {schema: {$ref: '#/components/schemas/TimeEntryPreconditionFailed'}}}}
+components:
+  schemas:
+    TimeEntry:
+      allOf:
+        - {$ref: '#/components/schemas/TimeEntryWrite'}
+        - {type: object, required: [id, principal_id, node_id, started_at, ended_at, duration_seconds, rate_amount, currency, amount, updated_at], properties: {updated_at: {type: string, format: date-time}, id: {type: string, format: uuid}, duration_seconds: {type: integer, minimum: 1}, rate_amount: {type: number, minimum: 0}, currency: {type: string, pattern: '^[A-Z]{3}$'}, amount: {type: number, minimum: 0}}}
+    TimeEntryPatch:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: Omitted fields retain their value. Supply duration_seconds or ended_at, never both. A start-only change retains the existing duration. Intervals must use whole seconds and fit the period.
+      properties:
+        node_id: {type: string, format: uuid}
+        cost_unit_node_id: {type: string, format: uuid}
+        started_at: {type: string, format: date-time}
+        ended_at: {type: string, format: date-time}
+        duration_seconds: {type: integer, minimum: 1}
+        note: {type: string, maxLength: 65536}
+    TimeEntryPreconditionFailed:
+      type: object
+      required: [error, current]
+      properties:
+        error: {type: string}
+        current: {$ref: '#/components/schemas/TimeEntry'}
+    TimeEntryWrite:
+      type: object
+      additionalProperties: false
+      required: [period_id, cost_unit_node_id, currency, source]
+      properties:
+        period_id: {type: string, format: uuid}
+        cost_unit_node_id: {type: string, format: uuid}
+        currency: {type: string, pattern: '^[A-Z]{3}$'}
+        source: {type: string, enum: [manual, agent_run]}
+        principal_id: {type: string, format: uuid, description: Required for manual entries; derived from run for agent_run}
+        node_id: {type: string, format: uuid, description: Required for manual entries; work-order node for agent_run}
+        started_at: {type: string, format: date-time, description: Required for manual entries; derived from run for agent_run}
+        ended_at: {type: string, format: date-time, description: Required for manual entries; derived from run for agent_run}
+        agent_run_id: {type: string, format: uuid, description: Required only for agent_run}
+        note: {type: string}

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, truncateSync, utimesSync } from 'node:fs'
+import { readFileSync, readdirSync, mkdtempSync, mkdirSync, writeFileSync, symlinkSync, truncateSync, utimesSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawnSync, execFileSync } from 'node:child_process'
@@ -254,6 +254,36 @@ test('R2 contract diffs run the Go packages that read the contract and keep web 
   const empty={go:new Map([['internal/x/x.go','package x']]),webTests:new Map()}
   assert.match(on(['api/openapi.yaml'],{tree:empty}).reason,/^R2 full: no Go consumer found/)
   assert.match(on(['api/openapi.yaml'],{tree:undefined}).reason,/^R2 full: no Go consumer found/)
+})
+
+test('R2 OpenAPI fragments retain the live bundle reader set and their owners or stay full',()=>{
+  const readers=consumers(repoTree,{substrings:['api/openapi.yaml']}).goPackages
+  assert.ok(readers.has('scripts'),'the reporter pin tool is a bundle reader')
+  const options={event:'pull_request',affectedLane:'on',tree:repoTree,readFile:readRepo}
+  const baseline=impactRisk(['api/openapi.yaml'],options)
+  assert.equal(baseline.full,false)
+  assert.deepEqual(baseline.goSeeds,readers)
+  for(const path of ['api/openapi.base.yaml','internal/harness/openapi.yaml',
+    ...readdirSync(resolve(repoRoot,'api/areas')).map(file=>`api/areas/${file}`)]) {
+    const risk=impactRisk([path],options)
+    const expected=new Set(readers)
+    if(path.startsWith('internal/'))expected.add('internal/harness')
+    const text=readRepo(path)
+    const owners=[...text.matchAll(/^# aeon:owner (\S+)$/gm)].map(match=>match[1])
+    if(path.startsWith('api/areas/')&&!owners.length&&/^  \//m.test(text)) {
+      assert.equal(risk.full,true,path)
+      assert.match(risk.reasons[0],/fragment owner unavailable/)
+    } else {
+      for(const owner of owners)expected.add(owner)
+      assert.equal(risk.full,false,path)
+      assert.deepEqual(risk.goSeeds,expected,path)
+    }
+    assert.equal(impactRisk([path,'internal/reportercontract/pins.json'],options).full,true,path)
+  }
+  assert.deepEqual(goPackages(on(['internal/harness/openapi.yaml'])),goPackages(on(['api/openapi.yaml'])))
+  assert.deepEqual(goPackages(on(['api/openapi.base.yaml'])),goPackages(on(['api/openapi.yaml'])))
+  assert.equal(impactRisk(['api/areas/missing.yaml'],options).full,true)
+  assert.equal(impactRisk(['api/openapi.base.yaml'],{...options,tree:{go:new Map(),webTests:new Map()}}).full,true)
 })
 
 test('R4 migrations map recognised schema objects to referencing packages; unreadable, unparseable or wide diffs stay full',()=>{
