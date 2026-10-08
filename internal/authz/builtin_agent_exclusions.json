@@ -1,1 +1,21 @@
-testdata/builtin_agent_exclusions.json
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "permissions": [
+    "account.overview.read",
+    "delivery.manage",
+    "delivery.route",
+    "delivery_queue.claim",
+    "delivery_queue.manage",
+    "delivery_reviews.claim",
+    "delivery_reviews.manage",
+    "delivery_reviews.report",
+    "delivery_ship.claim",
+    "delivery_ship.manage",
+    "engine.admission",
+    "engine.manage",
+    "engine.read",
+    "events.subscribe",
+    "recurrences.manage",
+    "reviewpolicy.manage"
+  ]
+}

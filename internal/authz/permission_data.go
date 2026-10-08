@@ -11,8 +11,10 @@ import (
 	"sort"
 )
 
-// Only domain inputs are committed. Embedding the glob adds a domain without
-// changing a shared list of imports or generating a committed aggregate.
+// Runtime policy comes only from domain inputs. The glob adds a domain without
+// changing a shared import list or generating a committed aggregate. Top-level
+// legacy JSON is retained solely for the existing key and merge-driver fixtures;
+// it is not runtime input and must not be regenerated from these fragments.
 //
 //go:embed permission_data/*.json
 var permissionDataFiles embed.FS
