@@ -59,7 +59,7 @@ type Server struct {
 	// not draining; liveness (GET /api/health) ignores both.
 	serving  atomic.Bool
 	draining atomic.Bool
-	// readyProbe overrides the readiness database ping. Nil uses Pool.Ping.
+	// readyProbe overrides the readiness database ping. Nil uses db.Probe.
 	// Tests inject it; production leaves it nil.
 	readyProbe func(context.Context) error
 
