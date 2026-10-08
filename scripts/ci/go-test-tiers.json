@@ -1612,6 +1612,10 @@
     ,
     {"kind":"go","package":"internal/agentd","name":"TestReadySiblingRetainsOnlyBlockedAccountProbeDetail","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentd","name":"TestRecordSchemaForwardRecoveryAndDowngrade","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRecordSchemaGolden","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentd","name":"TestRejectDuplicateKeys","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRemoteCapacityCheckContractAndBoundedErrors","tier":"GATED-FULL"}
@@ -6247,6 +6251,8 @@
     {"kind":"go","package":"internal/localjournal","name":"TestJournalRejectsOversizedCheckpointBeforeAppending","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/localjournal","name":"TestJournalRepairsOnlyIncompleteFinalWALRecord","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/localjournal","name":"TestJournalSchemaMigrationAndRefusal","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/localjournal","name":"TestStartupErrorsIdentifyCheckpointAndJournal","tier":"GATED-FULL"}
     ,

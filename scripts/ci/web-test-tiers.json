@@ -4144,11 +4144,11 @@
     ,
     "vitest:tests/webcore-views.unit.test.ts:S8-011: timing writes > disables pending writes and adopts the authoritative value without overlapping requests"
     ,
-    "vitest:tests/webcore-views.unit.test.ts:S8-011: timing writes > restores confirmed values and offers retry after 403"
+    "vitest:tests/webcore-views.unit.test.ts:S8-011: timing writes > keeps the typed value, reports the save failure, and saves again after 403"
     ,
-    "vitest:tests/webcore-views.unit.test.ts:S8-011: timing writes > restores confirmed values and offers retry after 500"
+    "vitest:tests/webcore-views.unit.test.ts:S8-011: timing writes > keeps the typed value, reports the save failure, and saves again after 500"
     ,
-    "vitest:tests/webcore-views.unit.test.ts:S8-011: timing writes > restores confirmed values and offers retry after network"
+    "vitest:tests/webcore-views.unit.test.ts:S8-011: timing writes > keeps the typed value, reports the save failure, and saves again after network"
     ,
     "vitest:tests/webcore-views.unit.test.ts:S8-012: hours preview uses the submitted start instant > prices America/Los_Angeles at 1410 minutes on UTC day 2026-10-03 (explicit=false)"
     ,
@@ -18636,11 +18636,11 @@
     ,
     {"kind":"vitest","file":"tests/webcore-views.unit.test.ts","name":"S8-011: timing writes > disables pending writes and adopts the authoritative value without overlapping requests","tier":"NIGHTLY"}
     ,
-    {"kind":"vitest","file":"tests/webcore-views.unit.test.ts","name":"S8-011: timing writes > restores confirmed values and offers retry after 403","tier":"NIGHTLY"}
+    {"kind":"vitest","file":"tests/webcore-views.unit.test.ts","name":"S8-011: timing writes > keeps the typed value, reports the save failure, and saves again after 403","tier":"NIGHTLY"}
     ,
-    {"kind":"vitest","file":"tests/webcore-views.unit.test.ts","name":"S8-011: timing writes > restores confirmed values and offers retry after 500","tier":"NIGHTLY"}
+    {"kind":"vitest","file":"tests/webcore-views.unit.test.ts","name":"S8-011: timing writes > keeps the typed value, reports the save failure, and saves again after 500","tier":"NIGHTLY"}
     ,
-    {"kind":"vitest","file":"tests/webcore-views.unit.test.ts","name":"S8-011: timing writes > restores confirmed values and offers retry after network","tier":"NIGHTLY"}
+    {"kind":"vitest","file":"tests/webcore-views.unit.test.ts","name":"S8-011: timing writes > keeps the typed value, reports the save failure, and saves again after network","tier":"NIGHTLY"}
     ,
     {"kind":"vitest","file":"tests/webcore-views.unit.test.ts","name":"S8-012: hours preview uses the submitted start instant > prices America/Los_Angeles at 1410 minutes on UTC day 2026-10-03 (explicit=false)","tier":"NIGHTLY"}
     ,
