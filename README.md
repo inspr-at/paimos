@@ -4034,6 +4034,33 @@ existing state values stay intact; optional `watch.process_state` carries a
 confirmed exit. The existing default-off permission and code-attempt-cap tests
 remain in `internal/agentpairing/watch_test.go`.
 
+## Database pool capacity (AEON-995)
+
+`AEON_DATABASE_URL` defaults to **16 query connections**, independent of host
+CPU count. Its existing `pool_max_conns` URL or keyword setting overrides this;
+the minimum is 3. Two query slots are reserved for requests and health probes,
+so background loops collectively acquire at most `pool_max_conns - 2` slots.
+The shared admission limit follows worker contexts into per-tenant goroutines
+and callbacks, and releases with rows/transactions rather than loop timers.
+Advisory-lock workers reuse their retained session for sequential tenant
+transactions; tenant settings, authorization and replica locks still apply.
+
+Size Postgres `max_connections` for the sum of all serving processes' query
+pool maxima, **plus dedicated LISTEN sessions**, operator/migration connections
+and other database clients. SSE, inbox long polls and configured phone-push
+listeners already use connections outside the query pool. Increasing CPU count
+no longer silently changes the application's connection budget. Startup logs
+record the effective pool maximum, minimum, reserve and background limit.
+
+`/api/ready` and `/api/health` acquire within 100ms and ping within an overall
+500ms request budget. Readiness remains fail-closed: foreground saturation
+returns 503 with `reason: pool_exhausted` and acquired/waiting counts; a failed
+connection or ping returns `database_unavailable`. Liveness still returns 200
+with `db: down` when its database probe fails. Readiness includes content-free
+pool counters and the p95 of the latest 256 completed acquisitions (including
+failed acquisitions and background admission waits). A warning logs those
+statistics when acquisition waits remain present for more than five seconds.
+
 ## Server outbound calls (AEON-493)
 
 With default optional configuration and no opted-in tenant integrations, the active external-service call list is **empty**. Startup, scheduled default workers, health and installation-guide rendering do not contact GitHub, the tap, an update feed or a telemetry service. Postgres is the required operator-configured database dependency (`AEON_DATABASE_URL`), not an external-service integration; use a local socket or local address when the installation must have no network dependency. DNS resolution for the optional destinations below occurs only when their activation requires it.

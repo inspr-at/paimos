@@ -151,6 +151,8 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	ctx, cancelWorkers := context.WithCancel(ctx)
 	defer cancelWorkers()
 	workerCtx := db.Background(ctx)
+	startPoolStats := db.Stats(pool)
+	slog.Info("database pool configured", "max_conns", startPoolStats.Max, "min_conns", pool.Config().MinConns, "foreground_reserve", db.ForegroundReserve, "background_limit", startPoolStats.BackgroundLimit)
 	var workers []func()
 	startWorker := func(run func()) { workers = append(workers, run) }
 
@@ -482,6 +484,7 @@ func serveWithPool(ctx context.Context, cfg config.Config, ln net.Listener, pool
 	}
 
 	// Start the complete worker set only after initialization succeeds.
+	go db.WatchPool(ctx, pool)
 	for _, run := range workers {
 		go run()
 	}

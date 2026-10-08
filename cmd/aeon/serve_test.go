@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -21,6 +22,8 @@ import (
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
 	"github.com/inspr-at/paimos/internal/dbtest"
+	"github.com/inspr-at/paimos/internal/inbox"
+	"github.com/inspr-at/paimos/internal/knowledge"
 	"github.com/inspr-at/paimos/web"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -39,11 +42,17 @@ func TestServeBackgroundPoolHeadroom(t *testing.T) {
 	}
 	poolCfg.MaxConns = 4 // Old pgx default on the affected four-CPU host.
 	poolCfg.MinConns = 0
+	if _, err := db.ConfigurePool(poolCfg); err != nil {
+		t.Fatal(err)
+	}
 	held := make(chan struct{}, 4)
 	release := make(chan struct{})
-	defer close(release)
+	var releaseOnce sync.Once
+	openBarrier := func() { releaseOnce.Do(func() { close(release) }) }
+	defer openBarrier()
+	var attempts atomic.Int64
 	poolCfg.PrepareConn = func(ctx context.Context, _ *pgx.Conn) (bool, error) {
-		if db.IsBackground(ctx) {
+		if db.IsBackground(ctx) && attempts.Add(1) <= 2 {
 			held <- struct{}{}
 			select {
 			case <-release:
@@ -78,7 +87,7 @@ func TestServeBackgroundPoolHeadroom(t *testing.T) {
 	}()
 	client := &http.Client{Timeout: 10 * time.Second}
 	base := "http://" + ln.Addr().String()
-	for range 4 {
+	for range 2 {
 		select {
 		case <-held:
 		case err := <-done:
@@ -86,6 +95,9 @@ func TestServeBackgroundPoolHeadroom(t *testing.T) {
 		case <-time.After(20 * time.Second):
 			t.Fatal("real workers did not reach acquisition barrier")
 		}
+	}
+	if got := pool.Stat().AcquiredConns(); got != 2 {
+		t.Fatalf("background held %d slots, want exactly 2 with the acquisition barrier", got)
 	}
 	resp, err := client.Get(base + "/api/ready")
 	if err != nil {
@@ -95,6 +107,43 @@ func TestServeBackgroundPoolHeadroom(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("readiness with real background workers = %d %s (acquired=%d max=%d)", resp.StatusCode, body, pool.Stat().AcquiredConns(), pool.Stat().MaxConns())
+	}
+
+	var ready struct {
+		Pool db.PoolStats `json:"pool"`
+	}
+	if err := json.Unmarshal(body, &ready); err != nil {
+		t.Fatal(err)
+	}
+	if ready.Pool.Max != 4 || ready.Pool.BackgroundLimit != 2 || ready.Pool.Waiting < 2 || ready.Pool.AcquireSamples == 0 {
+		t.Fatalf("readiness detail: %+v", ready.Pool)
+	}
+	resp, err = client.Get(base + "/api/health")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !bytes.Contains(body, []byte(`"db":"ok"`)) {
+		t.Fatalf("health under background load: %d %s", resp.StatusCode, body)
+	}
+	// A foreground operation shares the same pool and still has capacity.
+	foreground, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foreground.Release()
+	openBarrier()
+	work, stop := context.WithTimeout(db.Background(ctx), 10*time.Second)
+	defer stop()
+	if _, err := inbox.NewSweeper(pool).SweepLocked(work); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := knowledge.TagOnce(work, pool); err != nil {
+		t.Fatal(err)
+	}
+	if s := db.Stats(pool); s.NestedAcquires != 0 {
+		t.Fatalf("worker attempted nested pool acquire: %+v", s)
 	}
 }
 

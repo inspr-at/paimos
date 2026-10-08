@@ -5013,6 +5013,7 @@
     ,
     {"kind":"go","package":"internal/db","name":"TestNodeProjectRootFollowsMoves","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/db","name":"TestPoolSizingAndRetainedSessionAdmission","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/db","name":"TestOpenTurnsJITOffUnlessTheURLSetsIt","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestPairingReportAudienceMigrationBoundsLockWait","tier":"GATED-FULL"}
@@ -6005,6 +6006,7 @@
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestReadyGate","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/httpapi","name":"TestReadyPoolSaturationAndDatabaseFailure","tier":"ESSENTIAL"},
     {"kind":"go","package":"internal/httpapi","name":"TestReadyProbeDeadlineAndDrain","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/httpapi","name":"TestRequestLogRoutes","tier":"GATED-FULL"}

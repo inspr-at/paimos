@@ -65,6 +65,7 @@ func (s *Sweeper) SweepLocked(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	defer conn.Release()
+	ctx = db.WithConnection(ctx, s.pool, conn)
 	var locked bool
 	if err := conn.QueryRow(ctx, `SELECT pg_try_advisory_lock($1)`, sweeperLockKey).Scan(&locked); err != nil || !locked {
 		return 0, err
@@ -77,7 +78,7 @@ func (s *Sweeper) SweepLocked(ctx context.Context) (int, error) {
 			_ = conn.Conn().Close(unlockCtx)
 		}
 	}()
-	ids, err := s.tenantIDs(ctx)
+	ids, err := s.tenantIDs(ctx, conn)
 	if err != nil {
 		return 0, err
 	}
@@ -94,8 +95,8 @@ func (s *Sweeper) SweepLocked(ctx context.Context) (int, error) {
 }
 
 // tenantIDs reads the tenant registry, which has no tenant_id and no RLS.
-func (s *Sweeper) tenantIDs(ctx context.Context) ([]string, error) {
-	rows, err := s.pool.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+func (s *Sweeper) tenantIDs(ctx context.Context, conn *pgxpool.Conn) ([]string, error) {
+	rows, err := conn.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
