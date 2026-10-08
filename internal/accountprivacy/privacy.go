@@ -120,12 +120,18 @@ func accountID(obj map[string]any) string {
 	if id, ok := obj["account_id"].(string); ok && uuid(id) {
 		return id
 	}
-	if _, ok := obj["registered_by_principal_id"]; ok {
+	if _, ok := obj["registered_by_principal_id"]; ok || guardProjection(obj) {
 		if id, ok := obj["id"].(string); ok && uuid(id) {
 			return id
 		}
 	}
 	return ""
+}
+
+func guardProjection(obj map[string]any) bool {
+	_, posture := obj["posture"]
+	_, keep := obj["keep_for_you_percent"]
+	return posture && keep
 }
 func uuid(s string) bool {
 	if len(s) != 36 {
@@ -166,13 +172,21 @@ func RedactWithControls(raw json.RawMessage, policy, controls Policy, fallback s
 		}
 		switch obj := v.(type) {
 		case []any:
-			for i, child := range obj {
+			out := make([]any, 0, len(obj))
+			for _, child := range obj {
+				// A guard's required fields cannot be replaced with invented
+				// posture/reserve values. Remove the row if sharing was revoked
+				// after the handler's snapshot and before response delivery.
+				if row, ok := child.(map[string]any); ok && guardProjection(row) && !policy[accountID(row)] {
+					continue
+				}
 				next, err := walk(child, id, depth+1)
 				if err != nil {
 					return nil, err
 				}
-				obj[i] = next
+				out = append(out, next)
 			}
+			return out, nil
 		case map[string]any:
 			if own := accountID(obj); own != "" {
 				id = own

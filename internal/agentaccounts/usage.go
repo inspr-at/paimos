@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/inspr-at/paimos/internal/accountprivacy"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/events"
@@ -267,7 +268,7 @@ func (m *Module) postures(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	harness := r.URL.Query().Get("harness")
-	after := r.URL.Query().Get("after")
+	after := strings.ToLower(r.URL.Query().Get("after"))
 	limit := 100
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		var err error
@@ -307,6 +308,21 @@ func (m *Module) postures(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		ids := make([]string, 0, len(all))
+		for _, a := range all {
+			ids = append(ids, a.ID)
+		}
+		visible, err := accountprivacy.Load(ctx, tx, p, ids)
+		if err != nil {
+			return err
+		}
+		kept := all[:0]
+		for _, a := range all {
+			if a.Harness == harness && visible[a.ID] {
+				kept = append(kept, a)
+			}
+		}
+		all = kept
 		sort.Slice(all, func(i, j int) bool { return all[i].ID < all[j].ID })
 		now, err := dbNow(ctx, tx)
 		if err != nil {

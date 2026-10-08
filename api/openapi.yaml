@@ -191,7 +191,7 @@ paths:
   /agent-accounts/posture:
     get:
       operationId: listAccountPostures
-      description: "Small, tenant-scoped guard projection of owner posture and floors, without windows, owner details or credentials. Requires account.read, including a live explicit key scope for agents. At most 100 accounts per keyset page, with a five-second deadline. Order follows routing advice; Max out uses the soonest active reset. Boost remains zero until its separate feature ships."
+      description: "Small, tenant-scoped guard projection of owner posture and floors, without windows, owner details or credentials. Requires account.read, including a live explicit key scope for agents. Only owner-authorized or usage-shared accounts are included; sharing is rechecked at the response boundary. At most 100 accounts per keyset page, with a five-second deadline. Order follows routing advice; Max out uses the soonest active reset. Boost remains zero until its separate feature ships."
       parameters:
         - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, grok, pi, cursor, gemini, opencode]}}
         - {name: after, in: query, schema: {type: string, format: uuid}}

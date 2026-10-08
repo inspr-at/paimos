@@ -3,6 +3,7 @@ package agentaccounts
 
 import (
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -176,13 +177,19 @@ func TestUsageOwnerOverrideSharedFloorAdmissionAndGuard(t *testing.T) {
 		More     bool           `json:"has_more"`
 		Cursor   string         `json:"next_cursor"`
 	}
+	// Even an admin who owns one door cannot read a private sibling's
+	// learned reserve or routing order through the compact guard endpoint.
+	callStatus(t, mod, &peer, "", "GET", "/api/agent-accounts/posture?harness=codex", "", 200, &page)
+	if len(page.Accounts) != 0 {
+		t.Fatal("guard exposed private shared-quota details")
+	}
 	callStatus(t, mod, &runner, token, "GET", "/api/agent-accounts/posture?harness=codex&limit=1", "", 403, nil)
 	dbtest.BindRole(t, testDB, owner.TenantID, runner.ID, "admin")
 	callStatus(t, mod, &runner, token, "GET", "/api/agent-accounts/posture?harness=codex&limit=1", "", 200, &page)
 	if len(page.Accounts) != 1 || !page.More || page.Cursor == "" || page.Accounts[0].Floor != 20 || page.Accounts[0].Boost != 0 || page.Accounts[0].BoostUntil != nil {
 		t.Fatalf("projection %+v", page)
 	}
-	callStatus(t, mod, &runner, token, "GET", "/api/agent-accounts/posture?harness=codex&limit=1&after="+page.Cursor, "", 200, &page)
+	callStatus(t, mod, &runner, token, "GET", "/api/agent-accounts/posture?harness=codex&limit=1&after="+strings.ToUpper(page.Cursor), "", 200, &page)
 	if len(page.Accounts) != 1 || page.More {
 		t.Fatal("pagination lost account")
 	}
