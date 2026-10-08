@@ -339,6 +339,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/agent-accounts/readiness":                                      "account.read",
 	"POST /api/agent-accounts/{accountId}/check":                             "account.manage",
 	"PUT /api/agent-accounts/{accountId}/sharing":                            "account.manage",
+	"PUT /api/agent-accounts/{accountId}/usage-probe":                        "account.manage", // Handler re-checks the owning person inside the write.
 	"GET /api/agent-accounts":                                                "account.read",
 	"GET /api/agent-accounts/overview":                                       "account.read|account.overview.read",
 	"GET /api/agent-accounts/catalog":                                        "account.read",

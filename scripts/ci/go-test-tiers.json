@@ -912,6 +912,12 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestUnstartedRecoveryReleasesPermit","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestUsageProbeDollarBudgetStorageAndPrivacy","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestUsageProbeOlderThanCreditSnapshotDoesNotStoreBudget","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestUsageProbeOwnerConsentFencesReadingsAndBinding","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestUseAccountIDRetainsLabelAndOwnership","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestUseAccountPayloadHasNoPath","tier":"GATED-FULL"}
@@ -1839,6 +1845,8 @@
     {"kind":"go","package":"internal/agentd","name":"TestUnsupportedLifetimeRejectsLaunchBeforeExec","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestUnsupportedVerificationPollProbesWithoutLaunching","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestUsageProbeOptInAndCooldownSurviveRestart","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestVerificationOneShotNoRepoToolsAndNoDuplicate","tier":"GATED-FULL"}
     ,
@@ -3501,6 +3509,8 @@
     {"kind":"go","package":"internal/authz","name":"TestStageHandoffWritesAcceptRoutedOpScopes","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestStatusHelpAgentReadRequiresAuthentication","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/authz","name":"TestUsageProbeRouteRequiresAccountManage","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestViewerReadsStoredReviewPolicy","tier":"ESSENTIAL"}
     ,
@@ -8759,6 +8769,14 @@
     {"kind":"go","package":"internal/usagedashboard","name":"TestTrimSessionsDropsOnlyTheLastSession","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/usagedashboard","name":"TestWasteKindNamesOnlyRealWaste","tags":["delete-candidate"],"tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/usageprobe","name":"TestClaudeUnusableFileUsesKeychainWindow","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/usageprobe","name":"TestHostLoginProbesNormalizeFixturesWithoutLeakingCredentials","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/usageprobe","name":"TestOpenRouterUnknownBalanceDoesNotInventCredit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/usageprobe","name":"TestProbeFailuresAreBoundedAndNeverRefreshOrFollowRedirects","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/views","name":"TestAgentsPlanLinkedPersonReadWriteAndConflicts","tier":"GATED-FULL"}
     ,

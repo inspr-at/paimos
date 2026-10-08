@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -21,6 +22,8 @@ import (
 
 // Account is an opaque local enrollment. AccountKey is not a vendor credential.
 type Account struct {
+	UsageProbeEnabled    bool                `json:"usage_probe_enabled"`
+	UsageBudget          *capacity.Budget    `json:"usage_budget,omitempty"`
 	ShareUsage           bool                `json:"share_usage"`
 	PendingCheck         *AccountCheck       `json:"pending_check,omitempty"`
 	ReadinessResources   []ReadinessResource `json:"readiness_resources,omitempty"`
