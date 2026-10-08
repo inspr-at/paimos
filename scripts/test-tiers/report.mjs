@@ -10,13 +10,15 @@ export function reportCases(selected, outcomes, seconds, job) {
   const classes = {}
   for (const tier of tiers) {
     const rows = selected.filter(row=>row.tier===tier)
-    const tally = { selected:rows.length,run:0,passed:0,skipped:0,failed:0,notRun:0,platformInactive:0 }
+    const tally = { selected:rows.length,run:0,passed:0,skipped:0,failed:0,notRun:0,platformInactive:0,flaky:0,quarantined:0 }
     for (const row of rows) {
       if (!row.active && row.kind==='go') { tally.platformInactive++;tally.skipped++;continue }
       const outcome = seen.get(key(row))
       if (!outcome) { tally.notRun++;continue }
       if (outcome.started) tally.run++
-      if (outcome.status==='passed') tally.passed++
+      if (outcome.flaky) tally.flaky++
+      if (outcome.status==='quarantined') tally.quarantined++
+      else if (outcome.status==='passed') tally.passed++
       else if (outcome.status==='skipped') tally.skipped++
       else tally.failed++
     }
@@ -50,6 +52,7 @@ export function browserOutcomes(report, rows) {
         if(attempts.length>1) throw new Error(`Automatic retries forbidden: ${spec.title}`)
         if(!attempts.length) continue // registration blocked before execution: report as notRun
         const status=attempts[0]?.status
+        if(!['passed','skipped','failed','timedOut'].includes(status)) throw new Error(`Incomplete browser attempt: ${spec.title}`)
         outcomes.push({key:key(row),started:!!status && status!=='skipped',status:status==='passed'?'passed':status==='skipped'?'skipped':'failed'})
       }
       visit(suite.suites)

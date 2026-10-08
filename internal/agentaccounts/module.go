@@ -45,6 +45,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	handle("PUT /api/settings/quota-warnings", m.warningSettings)
 	handle("POST /api/agent-accounts/{accountId}/check", m.check)
 	handle("PUT /api/agent-accounts/{accountId}/sharing", m.sharing)
+	handle("PUT /api/agent-accounts/{accountId}/usage-probe", m.usageProbe)
 	handle("PUT /api/agent-accounts/quota-pool", m.quotaPool)
 	handle("PUT /api/agent-accounts/{accountId}/signals", m.signals)
 	handle("GET /api/agent-accounts/{accountId}/statusline", m.statusline)

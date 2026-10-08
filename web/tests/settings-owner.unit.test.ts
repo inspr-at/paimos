@@ -9,6 +9,7 @@ import * as settings from '../src/lib/settings'
 import * as footerProviders from '../src/lib/footerProviders'
 import * as footerSummary from '../src/lib/footerSummary'
 import * as preferences from '../src/lib/preferences'
+import { textForKinds } from '../src/lib/workKindsCopy'
 import { scopeOwner } from '../src/lib/identityScope'
 import { flush } from './record-source'
 
@@ -48,6 +49,7 @@ function component() {
     vue: Vue, 'vue-router': { useRoute: () => route, useRouter: () => ({ push: async () => {} }) }, '../lib/settings': settings,
     '../lib/footerProviders': footerProviders, '../lib/footerSummary': footerSummary, '../lib/preferences': preferences, '../lib/identityScope': { scopeOwner },
     '../stores/session': { useSession: () => session }, '../lib/doctrineInbox': { doctrineInbox: {} },
+    '../stores/profile': { useProfile: () => ({ profile: null }) }, '../lib/workKindsCopy': { textForKinds },
     '../lib/authz': { can: (permission: string) => !grants.revoked && (permission === 'settings.manage' ? grants.admin : grants.access), permissionsKnown: () => true, permissionsRevoked: () => grants.revoked, refreshPermissions: async () => {} },
   }
   const exports: { default?: Vue.Component } = {}
@@ -81,6 +83,7 @@ afterEach(() => { for (const app of apps.splice(0)) app.unmount(); vi.unstubAllG
 it.each(['access', 'personal'])('%s retains the same child, draft and one-time link on expiry, with writes inert', async current => {
   route.params.section = current
   const root = mount()
+  await flush()
   drafts[0]!.value = 'Unsaved draft'; links[0]!.value = 'https://example.invalid/join/one-time'
   await flush()
   const before = input(root)
@@ -98,6 +101,7 @@ it.each(['access', 'personal'])('%s retains the same child, draft and one-time l
 it('a section opened in the same frame also keeps its draft on expiry', async () => {
   route.params.section = 'personal'
   const root = mount()
+  await flush()
   route.params.section = 'access'; await flush()
   drafts.at(-1)!.value = 'Access draft'; await flush()
   const before = input(root)
@@ -109,6 +113,7 @@ it('a section opened in the same frame also keeps its draft on expiry', async ()
 
 it.each([person('person-b'), person('person-a', 'tenant-b')])('a different authenticated owner replaces the frozen child with fresh state (%j)', async next => {
   const root = mount()
+  await flush()
   drafts[0]!.value = 'Previous owner draft'; links[0]!.value = 'Previous owner link'
   session.identity = null; grants.revoked = true; await flush()
   expect(input(root)?.props.value).toBe('Previous owner draft')
@@ -124,6 +129,7 @@ it.each([person('person-b'), person('person-a', 'tenant-b')])('a different authe
 
 it('same-owner refresh keeps mounted state, but lost permission closes Access', async () => {
   const root = mount()
+  await flush()
   drafts[0]!.value = 'Kept draft'; await flush()
   session.identity = person(); await flush()
   expect(input(root)?.props.value).toBe('Kept draft')
@@ -135,6 +141,7 @@ it('same-owner refresh keeps mounted state, but lost permission closes Access', 
 
 it('a new owner without Access cannot resurrect the previous owner’s shown section on expiry', async () => {
   const root = mount()
+  await flush()
   session.identity = null; grants.revoked = true; await flush()
   session.identity = person('person-b'); grants.revoked = false; grants.access = false; await flush()
   expect(input(root)).toBeUndefined()
@@ -144,6 +151,7 @@ it('a new owner without Access cannot resurrect the previous owner’s shown sec
 
 it('an incoming owner clears frozen Access before fresh permissions arrive', async () => {
   const root = mount()
+  await flush()
   session.identity = null; grants.revoked = true; await flush()
   expect(input(root)).toBeDefined()
   session.identity = person('person-b'); await flush()

@@ -67,11 +67,11 @@ func TestPhoneDecisionHidesUnavailableApprovals(t *testing.T) {
 	}
 }
 
-func TestPhoneDecisionHidesUnavailableAttach(t *testing.T) {
-	f := fixtureFor(t)
+func (f *fixture) attachRequest(t *testing.T) string {
+	t.Helper()
 	f.m.pairing = agentpairing.New(f.db.App, testOrigin, "phone-test", nil)
 	project := f.project(t, "PHONE-3")
-	var key, pairing, computer, id string
+	var key, pairing, computer, ticket, profile, account, id string
 	queries := []struct {
 		sql  string
 		args []any
@@ -88,10 +88,30 @@ func TestPhoneDecisionHidesUnavailableAttach(t *testing.T) {
 	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO agent_pairing_computers(tenant_id,id,request_id,principal_id,key_id,daemon_id,lifecycle_hash) VALUES($1,gen_random_uuid(),$2,$3,$4,'phone-fixture',$5) RETURNING id::text`, f.p.TenantID, pairing, f.agent.ID, key, strings.Repeat("0", 64)).Scan(&computer); err != nil {
 		t.Fatal(err)
 	}
-	snapshot := attachwatch.Snapshot{ComputerID: computer, ProjectID: project, TicketID: project}
-	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO harness_attach_requests(tenant_id,id,computer_id,owner_id,project_id,ticket_id,snapshot,digest,user_code) VALUES($1,gen_random_uuid(),$2,$3,$4,$4,$5,$6,'123456789') RETURNING id::text`, f.p.TenantID, computer, f.p.ID, project, mustJSON(t, snapshot), strings.Repeat("0", 64)).Scan(&id); err != nil {
+	for _, q := range []struct {
+		sql  string
+		args []any
+		id   *string
+	}{
+		{`INSERT INTO nodes(tenant_id,kind_id,key,title,parent_id) SELECT $1,id,'PHONE-4','Phone attach ticket',$2 FROM node_kinds WHERE tenant_id=$1 AND slug='work' RETURNING id::text`, []any{f.p.TenantID, project}, &ticket},
+		{`INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier) VALUES($1,'phone-codex','1','codex','openai','test-model','low','fast') RETURNING id::text`, []any{f.p.TenantID}, &profile},
+		{`INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label) VALUES($1,'phone-codex','codex','phone-fixture',$2,'Phone fixture') RETURNING id::text`, []any{f.p.TenantID, f.agent.ID}, &account},
+	} {
+		if err := f.db.Admin.QueryRow(t.Context(), q.sql, q.args...).Scan(q.id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.exec(t, `INSERT INTO agent_pairing_enrollments(tenant_id,account_id,computer_id,request_id,model_profile_id,verification_expires_at) VALUES($1,$2,$3,$4,$5,now()+interval '1 hour')`, f.p.TenantID, account, computer, pairing, profile)
+	snapshot := attachwatch.Snapshot{ComputerID: computer, ProjectID: project, TicketID: ticket, Harness: "codex"}
+	if err := f.db.Admin.QueryRow(t.Context(), `INSERT INTO harness_attach_requests(tenant_id,id,computer_id,owner_id,project_id,ticket_id,snapshot,digest,user_code) VALUES($1,gen_random_uuid(),$2,$3,$4,$5,$6,$7,'123456789') RETURNING id::text`, f.p.TenantID, computer, f.p.ID, project, ticket, mustJSON(t, snapshot), snapshot.Digest()).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
+	return id
+}
+
+func TestPhoneDecisionHidesUnavailableAttach(t *testing.T) {
+	f := fixtureFor(t)
+	id := f.attachRequest(t)
 	ctx := authz.BindPool(tenant.WithPrincipal(t.Context(), f.other), f.db.App)
 	if err := authz.Require(ctx, "account.manage", authz.Scope{}); err != nil {
 		t.Fatalf("non-owner lacks account management: %v", err)

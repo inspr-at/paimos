@@ -228,9 +228,31 @@ test('a live blocks relation satisfies readiness for the dot, Queue, bulk and St
   await blocked.hover(); await blocked.getByRole('button', { name: 'Queue PHAROS-14', exact: true }).click()
   await expect.poll(() => state.ids.includes('n-4')).toBe(true)
   await expect(page.getByRole('dialog', { name: /what is missing/ })).toHaveCount(0)
-  await blocked.getByRole('button', { name: /Remove PHAROS-14 from the queue/ }).click()
-  await blocked.getByRole('checkbox', { name: 'Select PHAROS-14' }).check(); await page.keyboard.press('q')
+  await expect(blocked.getByRole('button', { name: /Remove PHAROS-14 from the queue/ })).toBeEnabled()
+  // Hold the membership refresh after DELETE: the fixture has already removed
+  // the item while the store still owns the write and ignores bulk shortcuts.
+  let releaseRefresh!: () => void, refreshEntered!: () => void
+  const refreshHeld = new Promise<void>(resolve => { releaseRefresh = resolve })
+  const refreshStarted = new Promise<void>(resolve => { refreshEntered = resolve })
+  let held = false
+  await page.route(url => url.pathname === '/api/queue', async route => {
+    if (!held && route.request().method() === 'GET' && !state.ids.includes('n-4')) {
+      held = true; refreshEntered(); await refreshHeld
+    }
+    await route.fallback()
+  })
+  try {
+    await blocked.getByRole('button', { name: /Remove PHAROS-14 from the queue/ }).click()
+    await refreshStarted
+    await expect(blocked.locator('.q-btn')).toBeDisabled()
+    await blocked.getByRole('checkbox', { name: 'Select PHAROS-14' }).check()
+  } finally { releaseRefresh() }
+  const add = blocked.getByRole('button', { name: 'Queue PHAROS-14', exact: true })
+  await expect(add).toBeEnabled()
+  await expect(add).toHaveAttribute('aria-pressed', 'false')
+  await page.keyboard.press('q')
   await expect.poll(() => state.ids.includes('n-4')).toBe(true)
+  await expect(blocked.getByRole('button', { name: /Remove PHAROS-14 from the queue/ })).toBeEnabled()
   await page.keyboard.press('Escape')
   await blocked.getByRole('button', { name: /Change assignee/ }).click()
   const menu = page.getByRole('dialog', { name: 'Assignee of PHAROS-14', exact: true })
