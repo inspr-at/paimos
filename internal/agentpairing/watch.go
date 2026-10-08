@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/inspr-at/paimos/internal/workorders"
 	"github.com/jackc/pgx/v5"
@@ -367,7 +368,12 @@ func (m *Module) attachDevice(w http.ResponseWriter, r *http.Request) {
 			}
 			out, _, _, err = loadAttach(ctx, tx, in.RequestID)
 			out.UserCode = code
-			return err
+			if err != nil {
+				return err
+			}
+			// The committed event wakes phone delivery. Keep registration proofs,
+			// the one-time code and the process snapshot out of its payload.
+			return appendEvent(ctx, tx, p, events.Change{Type: "harness.attach_requested", After: map[string]string{"request_id": in.RequestID, "owner_id": owner}})
 		}
 		var approvedOwner string
 		out, approvedOwner, _, err = loadAttach(ctx, tx, in.RequestID)

@@ -8780,13 +8780,21 @@
     ,
     {"kind":"browser","file":"tests/performance.spec.ts","name":"cold ticket page has bounded API requests","config":"playwright.perf.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"account pause stays available when this browser has no Web Push","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"device notifications replace Enable with state and stable Pause in both themes","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"ended requests offer context without a decision button","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"personal phone settings save quiet hours and revoke a device","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
+    {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"phone Settings shell renders before its personal section and phone data","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"phone decline sends a bound assertion and announces the recorded result","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"phone review requires an explicit tap and fresh passkey; cancellation records nothing","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/phone-approvals.spec.ts","name":"registration awaits one fresh options response before platform verification and keeps actions still","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/phone-controls.spec.ts","name":"Compare works by pointer with long German captions at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
