@@ -3,6 +3,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import AppIcon from '../AppIcon.vue'
 import DeliveryRow from './DeliveryRow.vue'
+import DeliveryQueue from './DeliveryQueue.vue'
 import { can, onAccessChange } from '../../lib/authz'
 import { createScope, scopeOwner } from '../../lib/identityScope'
 import { deliveryLanguage, liftDeliveryHold, minutesSince, readDelivery, sortDelivery, type DeliveryItem, type DeliveryPage } from '../../lib/delivery'
@@ -75,6 +76,7 @@ onBeforeUnmount(() => { scope.dispose(); clearInterval(poll); stopAccess() })
     <p v-if="error && !showSlot" class="problem" role="status">{{ de ? 'Lieferstatus konnte nicht geladen werden. Der Rest des Tickets ist aktuell.' : 'Delivery status could not be loaded. The rest of the ticket is up to date.' }}</p>
     <p v-if="mutationError" class="problem" role="alert">{{ mutationError }}</p>
     <p v-if="result?.next_cursor" class="problem" role="status">{{ de ? 'Es werden die ersten 100 Pull Requests angezeigt. Weitere Lieferdaten sind vorhanden.' : 'Showing the first 100 pull requests. More delivery records are available.' }}</p>
+    <DeliveryQueue :project-id="projectId" :node-id="nodeId" :de="de" />
     <p class="foot"><AppIcon name="eye" :size="13" /><span>{{ de ? 'PAIMOS meldet nur, was GitHub und die eigenen Läufe zeigen; es pusht, reiht ein und mergt nie selbst.' : 'PAIMOS only reports what GitHub and its own runs show; it never pushes, queues or merges.' }}</span></p>
   </section>
 </template>

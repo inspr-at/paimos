@@ -63,7 +63,12 @@ export interface CapacityWindow {
   freshness: 'fresh' | 'aging' | 'stale' | 'expired'; usage_today_known?: boolean; pacing: CapacityPacing
 }
 export interface CapacityRouting { rank: number; available_slots: number; resets_at?: string; cap_percent?: number; wait?: CapacityWait; same_quota_as?: string }
+export interface CapacityBudget {
+  currency: 'USD'; source: 'agentd'; read_at: string; key_usage_usd: number
+  key_limit_usd: number | null; key_remaining_usd: number | null; balance_usd: number | null
+}
 export interface AccountCapacity {
+  budget?: CapacityBudget
   learning?: CapacityLearning
   routing?: CapacityRouting
   account_id: string; ongoing_use_approved?: boolean; schedule: CapacitySchedule; windows: CapacityWindow[]

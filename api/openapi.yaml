@@ -468,7 +468,10 @@ paths:
               additionalProperties: false
               required: [readings]
               properties:
-                readings: {description: Full normalized snapshot per source; missing buckets retire previous windows without deleting history. Sparse vendor events must be normalized before reporting., type: array, minItems: 1, maxItems: 32, items: {$ref: '#/components/schemas/CapacityReading'}}
+                readings: {description: "Full normalized snapshot per source; missing buckets retire previous windows without deleting history. An empty array requires a dollar budget.", type: array, minItems: 0, maxItems: 32, items: {$ref: '#/components/schemas/CapacityReading'}}
+                usage_probe: {type: boolean, description: "Host usage probe; requires current owner consent and binding_revision."}
+                binding_revision: {type: integer, minimum: 0}
+                budget: {$ref: '#/components/schemas/CapacityBudget'}
       responses:
         '204': {description: Observations recorded}
         '400': {description: Invalid reading}
@@ -550,6 +553,28 @@ paths:
       requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/StatuslineConsent'}}}}
       responses:
         '200': {description: Consent, content: {application/json: {schema: {$ref: '#/components/schemas/StatuslineConsent'}}}}
+  /agent-accounts/{accountId}/usage-probe:
+    parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+    put:
+      operationId: setAccountUsageProbe
+      summary: Owner consent to host usage probes
+      description: "Requires the owning person with account.manage and the current binding revision. Uses unofficial provider endpoints; they may change or stop. You are responsible for following your provider's terms. Consent grants no execution or sharing authority."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [binding_revision, enabled]
+              properties:
+                binding_revision: {type: integer, minimum: 0}
+                enabled: {type: boolean}
+      responses:
+        '204': {description: "Consent saved"}
+        '400': {description: "Invalid request"}
+        '403': {description: "Owning person required"}
+        '409': {description: "Account binding changed"}
   /agent-accounts/{accountId}/windows:
     post:
       operationId: createAccountWindow
@@ -7144,6 +7169,79 @@ paths:
         '400': {description: Invalid bounded request}
         '408': {description: Request body did not arrive before the deadline}
         '404': {description: Disabled or unauthorized target}
+  /projects/{projectId}/delivery-queue:
+    parameters: [{"name":"projectId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]
+    get:
+      operationId: "listDeliveryRounds"
+      description: "Requires delivery_queue.read. Bounded position keyset pagination of shadow rounds; never launches work."
+      security: [{"session":[]},{"agentKey":[]}]
+      responses:
+        "200": {"description":"Shadow queue result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryRoundPage"}}}}
+        "403": {"$ref":"#/components/responses/Error"}
+        "409": {"description":"Stale revision, conflicting retry or invalid transition"}
+      parameters: [{"name":"after","in":"query","schema":{"type":"string","pattern":"^[0-9]{1,19}$"}},{"name":"limit","in":"query","schema":{"type":"integer","minimum":1,"maximum":100,"default":50}},{"name":"ticket","in":"query","schema":{"type":"string","format":"uuid"}}]
+    post:
+      operationId: "enqueueDeliveryRound"
+      description: "Requires explicit delivery_queue.manage. Enqueues a leaf work round idempotently by project, ticket, kind and round number; conflicting inputs return 409. Records an event."
+      security: [{"session":[]},{"agentKey":[]}]
+      responses:
+        "200": {"description":"Shadow queue result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryRound"}}}}
+        "201": {"description":"Shadow queue result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryRound"}}}}
+        "403": {"$ref":"#/components/responses/Error"}
+        "409": {"description":"Conflicting round identity"}
+      requestBody: {"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryRoundInput"}}}}
+  /projects/{projectId}/delivery-queue/claim:
+    parameters: [{"name":"projectId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]
+    post:
+      operationId: "claimDeliveryRound"
+      description: "Requires explicit delivery_queue.claim. Request UUID is bound to the principal and comparison input. Evaluates at most 100 rounds under the tenant fence; rotates blocked or occupied slugs and parks frozen-out rounds. Server admission fails closed when unavailable. Always execute=false; shadow claims confer no launch, push, merge or deployment authority. Every decision is an event."
+      security: [{"session":[]},{"agentKey":[]}]
+      responses:
+        "200": {"description":"Shadow queue result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryRoundClaim"}}}}
+        "403": {"$ref":"#/components/responses/Error"}
+        "409": {"description":"Stale revision, conflicting retry or invalid transition"}
+      requestBody: {"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryRoundClaimInput"}}}}
+  /projects/{projectId}/delivery-queue/settings:
+    parameters: [{"name":"projectId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]
+    get:
+      operationId: "getDeliveryQueueSettings"
+      description: "Requires delivery_queue.read. Defaults to off; only shadow mode is available."
+      security: [{"session":[]},{"agentKey":[]}]
+      responses:
+        "200": {"description":"Shadow queue result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryQueueSettings"}}}}
+        "403": {"$ref":"#/components/responses/Error"}
+        "409": {"description":"Stale revision, conflicting retry or invalid transition"}
+    put:
+      operationId: "putDeliveryQueueSettings"
+      description: "Requires explicit delivery_queue.manage and current revision. Holds match exact slugs or PR numbers. Freeze parks rounds outside release-set slug prefixes; lifting it requires explicit requeue. Records an event; changes no launcher behavior."
+      security: [{"session":[]},{"agentKey":[]}]
+      responses:
+        "200": {"description":"Shadow queue result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryQueueSettings"}}}}
+        "403": {"$ref":"#/components/responses/Error"}
+        "409": {"description":"Stale revision, conflicting retry or invalid transition"}
+      requestBody: {"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryQueueSettings"}}}}
+  /projects/{projectId}/delivery-queue/{roundId}:
+    parameters: [{"name":"projectId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},{"name":"roundId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]
+    patch:
+      operationId: "manageDeliveryRound"
+      description: "Requires explicit delivery_queue.manage and current revision. Sets or clears a hold, parks idle work, or explicitly requeues parked work. Active and done rounds cannot be reassigned. Records each transition."
+      security: [{"session":[]},{"agentKey":[]}]
+      responses:
+        "200": {"description":"Shadow queue result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryRound"}}}}
+        "403": {"$ref":"#/components/responses/Error"}
+        "409": {"description":"Stale revision, conflicting retry or invalid transition"}
+      requestBody: {"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryRoundPatch"}}}}
+  /projects/{projectId}/delivery-queue/{roundId}/progress:
+    parameters: [{"name":"projectId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}},{"name":"roundId","in":"path","required":true,"schema":{"type":"string","format":"uuid"}}]
+    post:
+      operationId: "progressDeliveryRound"
+      description: "Requires explicit delivery_queue.claim and the original claimant. Advances claimed to running and running to done at current revision; a same-state retry at current revision is idempotent. These are shadow observations, not launch authority."
+      security: [{"session":[]},{"agentKey":[]}]
+      responses:
+        "200": {"description":"Shadow queue result","content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryRound"}}}}
+        "403": {"$ref":"#/components/responses/Error"}
+        "409": {"description":"Stale revision, conflicting retry or invalid transition"}
+      requestBody: {"required":true,"content":{"application/json":{"schema":{"$ref":"#/components/schemas/DeliveryRoundProgress"}}}}
   /projects/{projectId}/delivery-settings:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -12671,6 +12769,7 @@ components:
       type: object
       required: [account_id, schedule, windows]
       properties:
+        budget: {$ref: '#/components/schemas/CapacityBudget'}
         account_id: {type: string, format: uuid}
         routing: {$ref: '#/components/schemas/CapacityRouting'}
         learning: {$ref: '#/components/schemas/CapacityLearning'}
@@ -13098,6 +13197,8 @@ components:
             pending_check: {$ref: "#/components/schemas/AccountCheck"}
             readiness_resources: {type: array, maxItems: 16, items: {$ref: "#/components/schemas/ReadinessResource"}}
             share_usage: {type: boolean, description: "Owner-controlled quota sharing, false until opted in."}
+            usage_probe_enabled: {type: boolean, description: "Read usage with this CLI's own login. Off until the owner opts in for this binding."}
+            usage_budget: {$ref: '#/components/schemas/CapacityBudget'}
             details_redacted: {type: boolean}
             owner_person_id: {type: string, format: uuid, description: Person who explicitly confirmed an ownership code; absent while unlinked. Independent of pairing and ongoing-use approval.}
             owner_person_name: {type: string}
@@ -14241,6 +14342,18 @@ components:
         external_provider: {type: string, maxLength: 100}
         external_id: {type: string, maxLength: 500}
         external_url: {type: string, maxLength: 1000}
+    CapacityBudget:
+      type: object
+      additionalProperties: false
+      required: [currency, source, read_at, key_usage_usd]
+      properties:
+        currency: {type: string, const: USD}
+        source: {type: string, const: agentd}
+        read_at: {type: string, format: date-time}
+        key_usage_usd: {type: number, minimum: 0, maximum: 1000000000000}
+        key_limit_usd: {type: [number, 'null'], minimum: 0, maximum: 1000000000000}
+        key_remaining_usd: {type: [number, 'null'], minimum: 0, maximum: 1000000000000}
+        balance_usd: {type: [number, 'null'], minimum: 0, maximum: 1000000000000, description: "Account balance when /credits accepts this key; null means unknown."}
     CapacityEvidence:
       type: object
       additionalProperties: false
@@ -14990,6 +15103,17 @@ components:
         conclusion: {type: string}
         kind: {type: string, enum: [required_failure, infra]}
         at: {type: string, format: date-time}
+    DeliveryQueueSettings:
+      type: "object"
+      additionalProperties: false
+      required: ["mode","freeze","release_set","held_slugs","held_pull_requests","revision"]
+      properties:
+        mode: {"type":"string","enum":["off","shadow"],"default":"off"}
+        freeze: {"type":"boolean","default":false}
+        release_set: {"type":"array","maxItems":100,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"^[a-z0-9][a-z0-9-]*$"}}
+        held_slugs: {"type":"array","maxItems":100,"uniqueItems":true,"items":{"type":"string","minLength":1,"maxLength":120,"pattern":"^[a-z0-9][a-z0-9-]*$"}}
+        held_pull_requests: {"type":"array","maxItems":100,"uniqueItems":true,"items":{"type":"integer","format":"int64","minimum":1}}
+        revision: {"type":"integer","format":"int64","minimum":0}
     DeliveryRating:
       type: object
       description: One visible session. A missing mine means this person has not marked it. harness, model and account_label are current session metadata.
@@ -15031,6 +15155,91 @@ components:
         rework_rate: {type: [string, 'null'], pattern: '^[1-9][0-9]*/[1-9][0-9]*$', description: exceptions/deliveries. Null when there are no exceptions.}
         by_model: {type: array, items: {$ref: '#/components/schemas/DeliveryRatingGroup'}}
         by_harness: {type: array, items: {$ref: '#/components/schemas/DeliveryRatingGroup'}}
+    DeliveryRound:
+      type: "object"
+      additionalProperties: false
+      required: ["ticket_node_id","slug","kind","round_number","brief_ref","base_ref","estimate_minutes","pull_request","id","project_id","key","state","position","hold_reason","reason","claimant_id","claim_request_id","revision","updated_at"]
+      properties:
+        ticket_node_id: {"type":"string","format":"uuid"}
+        slug: {"type":"string","minLength":1,"maxLength":120,"pattern":"^[a-z0-9][a-z0-9-]*$"}
+        kind: {"type":"string","enum":["first_build","fix","merge","land"]}
+        round_number: {"type":"integer","minimum":1,"maximum":100}
+        brief_ref: {"type":"string","minLength":1,"maxLength":1024,"description":"Opaque repository-relative reference; never resolved or executed by the server."}
+        base_ref: {"type":"string","minLength":1,"maxLength":200}
+        estimate_minutes: {"type":"integer","minimum":1,"maximum":1440}
+        pull_request: {"type":["integer","null"],"format":"int64","minimum":1}
+        id: {"type":"string","format":"uuid"}
+        project_id: {"type":"string","format":"uuid"}
+        key: {"type":"string"}
+        state: {"type":"string","enum":["queued","claimed","running","done","parked"]}
+        position: {"type":"integer","format":"int64"}
+        hold_reason: {"type":["string","null"],"maxLength":1000}
+        reason: {"type":"string","maxLength":200}
+        claimant_id: {"type":["string","null"],"format":"uuid"}
+        claim_request_id: {"type":["string","null"],"format":"uuid"}
+        revision: {"type":"integer","format":"int64","minimum":1}
+        updated_at: {"type":"string","format":"date-time"}
+    DeliveryRoundClaim:
+      type: "object"
+      additionalProperties: false
+      required: ["request_id","project_id","mode","execute","reason","round","decisions","scan_limited","script_round_id","agreement"]
+      properties:
+        request_id: {"type":"string","format":"uuid"}
+        project_id: {"type":"string","format":"uuid"}
+        mode: {"type":"string","enum":["off","shadow"]}
+        execute: {"type":"boolean","const":false}
+        reason: {"type":"string","maxLength":200}
+        round: {"oneOf":[{"$ref":"#/components/schemas/DeliveryRound"},{"type":"null"}]}
+        decisions:
+          type: "array"
+          maxItems: 100
+          items:
+            type: "object"
+            additionalProperties: false
+            required: ["round_id","action","reason"]
+            properties: {"round_id":{"type":"string","format":"uuid"},"action":{"type":"string","enum":["rotate","park","claim"]},"reason":{"type":"string","maxLength":200}}
+        scan_limited: {"type":"boolean"}
+        script_round_id: {"type":["string","null"],"format":"uuid"}
+        agreement: {"type":["boolean","null"]}
+    DeliveryRoundClaimInput:
+      type: "object"
+      additionalProperties: false
+      required: ["request_id"]
+      properties: {"request_id":{"type":"string","format":"uuid"},"script_round_id":{"type":["string","null"],"format":"uuid"}}
+    DeliveryRoundInput:
+      type: "object"
+      additionalProperties: false
+      required: ["ticket_node_id","slug","kind","round_number","brief_ref","base_ref","estimate_minutes"]
+      properties:
+        ticket_node_id: {"type":"string","format":"uuid"}
+        slug: {"type":"string","minLength":1,"maxLength":120,"pattern":"^[a-z0-9][a-z0-9-]*$"}
+        kind: {"type":"string","enum":["first_build","fix","merge","land"]}
+        round_number: {"type":"integer","minimum":1,"maximum":100}
+        brief_ref: {"type":"string","minLength":1,"maxLength":1024,"description":"Opaque repository-relative reference; never resolved or executed by the server."}
+        base_ref: {"type":"string","minLength":1,"maxLength":200}
+        estimate_minutes: {"type":"integer","minimum":1,"maximum":1440}
+        pull_request: {"type":["integer","null"],"format":"int64","minimum":1}
+    DeliveryRoundPage:
+      type: "object"
+      additionalProperties: false
+      required: ["items","settings","next_cursor"]
+      properties:
+        items: {"type":"array","maxItems":100,"items":{"$ref":"#/components/schemas/DeliveryRound"}}
+        settings: {"$ref":"#/components/schemas/DeliveryQueueSettings"}
+        next_cursor: {"type":["string","null"]}
+    DeliveryRoundPatch:
+      type: "object"
+      additionalProperties: false
+      required: ["revision"]
+      properties:
+        revision: {"type":"integer","format":"int64","minimum":1}
+        state: {"type":"string","enum":["queued","parked"]}
+        hold_reason: {"type":["string","null"],"maxLength":1000}
+    DeliveryRoundProgress:
+      type: "object"
+      additionalProperties: false
+      required: ["revision","state"]
+      properties: {"revision":{"type":"integer","format":"int64","minimum":1},"state":{"type":"string","enum":["running","done"]}}
     DeliverySettings:
       type: object
       additionalProperties: false

@@ -1,0 +1,231 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+package usageprobe
+
+import (
+	"context"
+	"encoding/json"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+	"time"
+)
+
+type transportFunc func(*http.Request) (*http.Response, error)
+
+func (f transportFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+func fixtureHome(t *testing.T, name, login string) string {
+	t.Helper()
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, name), []byte(login), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return home
+}
+
+// Risk: endpoint credentials or arbitrary vendor strings must never survive
+// normalization; offline idle capture must retain every supported quota window.
+func TestHostLoginProbesNormalizeFixturesWithoutLeakingCredentials(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		harness, file, login, fixture, host, header, value string
+		want                                               int
+	}{
+		{"grok", "auth.json", `{"https://auth.x.ai::fixture":{"key":"synthetic-login-value"}}`, "grok.json", "cli-chat-proxy.grok.com", "x-xai-token-auth", "xai-grok-cli", 1},
+		{"claude", ".credentials.json", `{"claudeAiOauth":{"accessToken":"synthetic-login-value","scopes":["user:profile"],"expiresAt":2000000000000}}`, "claude.json", "api.anthropic.com", "anthropic-beta", "oauth-2025-04-20", 4},
+		{"codex", "auth.json", `{"tokens":{"access_token":"synthetic-login-value","account_id":"fixture-account"}}`, "codex.json", "chatgpt.com", "ChatGPT-Account-Id", "fixture-account", 2},
+		{"pi", "auth.json", `{"openrouter":{"type":"api_key","key":"synthetic-login-value"}}`, "openrouter-key.json", "openrouter.ai", "Accept", "application/json", 0},
+	} {
+		t.Run(tc.harness, func(t *testing.T) {
+			home := fixtureHome(t, tc.file, tc.login)
+			path := filepath.Join(home, tc.file)
+			before, _ := os.Stat(path)
+			calls := 0
+			client := Client{HTTP: &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+				calls++
+				if r.Method != "GET" || r.URL.Host != tc.host || r.Header.Get("Authorization") != "Bearer synthetic-login-value" || r.Header.Get(tc.header) != tc.value {
+					t.Fatal("wrong vendor-only request")
+				}
+				fixture := tc.fixture
+				if r.URL.Path == "/api/v1/credits" {
+					fixture = "openrouter-credits.json"
+				}
+				raw, err := os.ReadFile(filepath.Join("testdata", fixture))
+				if err != nil {
+					t.Fatal(err)
+				}
+				return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(raw))), Header: make(http.Header)}, nil
+			})}}
+			result := client.Capture(t.Context(), Target{Harness: tc.harness, Home: home, Provider: "openrouter"}, now)
+			if result.Cause != "" || len(result.Readings) != tc.want {
+				t.Fatalf("normalization failed: %s, windows %d", result.Cause, len(result.Readings))
+			}
+			for _, v := range result.Readings {
+				if v.Source != "agentd" || v.Validate(now) != nil || v.Plan != "" {
+					t.Fatal("unsafe normalized reading")
+				}
+			}
+			if tc.harness == "pi" && (calls != 2 || result.Budget == nil || result.Budget.KeyUsageUSD != 12.5 || *result.Budget.KeyLimitUSD != 50 || *result.Budget.BalanceUSD != 80 || len(result.Readings) != 0) {
+				t.Fatal("dollar budget mixed with quota or lost balance")
+			}
+			raw, _ := json.Marshal(result)
+			if strings.Contains(string(raw), "synthetic-login-value") || strings.Contains(string(raw), "ignored-vendor-text") || strings.Contains(string(raw), home) {
+				t.Fatal("login or raw payload escaped projection")
+			}
+			after, _ := os.Stat(path)
+			stored, _ := os.ReadFile(path)
+			if string(stored) != tc.login || !before.ModTime().Equal(after.ModTime()) {
+				t.Fatal("probe wrote login")
+			}
+		})
+	}
+}
+
+// Risk: error text, redirects and oversized responses could leak login material;
+// missing quota fields could masquerade as measured zero or successful refresh.
+func TestProbeFailuresAreBoundedAndNeverRefreshOrFollowRedirects(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	home := fixtureHome(t, "auth.json", `{"tokens":{"access_token":"synthetic-login-value","account_id":"fixture-account"}}`)
+	for _, tc := range []struct {
+		status      int
+		body, cause string
+	}{
+		{429, `{"error":"synthetic-login-value"}`, "rate_limited"},
+		{401, `{"error":"synthetic-login-value"}`, "authentication_failed"},
+		{302, "", "unavailable"},
+		{200, strings.Repeat("x", maximum+1), "protocol"},
+		{200, `{"rate_limit":{"primary_window":{"reset_at":2000000000,"limit_window_seconds":18000}}}`, "protocol"},
+	} {
+		calls := 0
+		client := Client{HTTP: &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+			calls++
+			return &http.Response{StatusCode: tc.status, Body: io.NopCloser(strings.NewReader(tc.body)), Header: http.Header{"Location": []string{"https://example.invalid/stolen"}}}, nil
+		})}}
+		got := client.Capture(t.Context(), Target{Harness: "codex", Home: home}, now)
+		if got.Cause != tc.cause || len(got.Readings) != 0 || got.Budget != nil || calls != 1 {
+			t.Fatal("unsafe or incorrect error classification")
+		}
+	}
+	bad := fixtureHome(t, "auth.json", `{"tokens":{"access_token":"synthetic-login-value"}}`)
+	client := Client{HTTP: &http.Client{Transport: transportFunc(func(*http.Request) (*http.Response, error) {
+		t.Fatal("ambiguous account reached network")
+		return nil, nil
+	})}}
+	if got := client.Capture(context.Background(), Target{Harness: "codex", Home: bad}, now); got.Cause != "authentication_failed" {
+		t.Fatal("missing account accepted")
+	}
+	if got := client.Capture(t.Context(), Target{Harness: "cursor", Home: bad}, now); !reflect.DeepEqual(got, Result{Cause: "unsupported"}) {
+		t.Fatal("headless Cursor guessed browser identity")
+	}
+}
+
+// Risk: a parseable but expired or unusable Claude file must not hide a live
+// default-home keychain login, and the file token must not be sent or stored.
+func TestClaudeUnusableFileUsesKeychainWindow(t *testing.T) {
+	now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+	const fileToken = "expired-file-token"
+	const keyToken = "keychain-login-value"
+	payload := []byte(`{"claudeAiOauth":{"accessToken":"keychain-login-value","scopes":["user:profile"],"expiresAt":2000000000000}}`)
+	var calls int
+	previous := loadClaudeKeychain
+	t.Cleanup(func() { loadClaudeKeychain = previous })
+	loadClaudeKeychain = func(string) ([]byte, error) {
+		calls++
+		return append([]byte(nil), payload...), nil
+	}
+	capture := func(t *testing.T, home, login, wantAuth string) Result {
+		t.Helper()
+		path := filepath.Join(home, ".credentials.json")
+		before, statErr := os.Stat(path)
+		client := Client{HTTP: &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method != http.MethodGet || r.URL.Host != "api.anthropic.com" || r.Header.Get("Authorization") != "Bearer "+wantAuth || r.Header.Get("anthropic-beta") != "oauth-2025-04-20" {
+				t.Fatal("request did not use the selected login")
+			}
+			raw, err := os.ReadFile(filepath.Join("testdata", "claude.json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(string(raw))), Header: make(http.Header)}, nil
+		})}}
+		result := client.Capture(t.Context(), Target{Harness: "claude", Home: home}, now)
+		if login != "" {
+			after, err := os.Stat(path)
+			stored, readErr := os.ReadFile(path)
+			if statErr != nil || err != nil || readErr != nil || string(stored) != login || !before.ModTime().Equal(after.ModTime()) {
+				t.Fatal("probe rewrote the credentials file")
+			}
+		}
+		return result
+	}
+	for _, tc := range []struct{ name, login string }{
+		{"expired", `{"claudeAiOauth":{"accessToken":"` + fileToken + `","scopes":["user:profile"],"expiresAt":1}}`},
+		{"empty", `{}`},
+		{"short", `{"claudeAiOauth":{"accessToken":"short","scopes":["user:profile"],"expiresAt":2000000000000}}`},
+		{"no-profile", `{"claudeAiOauth":{"accessToken":"` + fileToken + `","scopes":["user:inference"],"expiresAt":2000000000000}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			calls = 0
+			home := fixtureHome(t, ".credentials.json", tc.login)
+			got := capture(t, home, tc.login, keyToken)
+			raw, _ := json.Marshal(got)
+			if calls != 1 || got.Cause != "" || len(got.Readings) != 4 || strings.Contains(string(raw), fileToken) || strings.Contains(string(raw), keyToken) {
+				t.Fatalf("keychain window missing: calls %d cause %s readings %d", calls, got.Cause, len(got.Readings))
+			}
+		})
+	}
+	t.Run("valid-file-stays-ahead", func(t *testing.T) {
+		calls = 0
+		login := `{"claudeAiOauth":{"accessToken":"synthetic-login-value","scopes":["user:profile"],"expiresAt":2000000000000}}`
+		home := fixtureHome(t, ".credentials.json", login)
+		got := capture(t, home, login, "synthetic-login-value")
+		raw, _ := json.Marshal(got)
+		if calls != 0 || got.Cause != "" || len(got.Readings) != 4 || strings.Contains(string(raw), "synthetic-login-value") || strings.Contains(string(raw), keyToken) {
+			t.Fatal("valid file login did not stay ahead of keychain")
+		}
+	})
+}
+
+func TestOpenRouterUnknownBalanceDoesNotInventCredit(t *testing.T) {
+	now := time.Now().UTC()
+	home := fixtureHome(t, "auth.json", `{"openrouter":{"type":"api_key","key":"synthetic-login-value"}}`)
+	client := Client{HTTP: &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) {
+		status, body := 200, `{"data":{"usage":0,"limit":null,"limit_remaining":999}}`
+		if r.URL.Path == "/api/v1/credits" {
+			status, body = 403, `{"error":"management key needed"}`
+		}
+		return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+	})}}
+	got := client.Capture(t.Context(), Target{Harness: "pi", Home: home, Provider: "openrouter"}, now)
+	if got.Cause != "" || got.Budget == nil || got.Budget.KeyRemainingUSD != nil || got.Budget.BalanceUSD != nil {
+		t.Fatal("unknown cap or balance inferred from unrelated field")
+	}
+	for _, tc := range []struct {
+		key, credits, cause string
+		wantZero            bool
+	}{
+		{`{"data":{"usage":0,"limit":0}}`, "", "", true},
+		{`{"data":{"usage":0,"limit":10,"limit_remaining":5}}`, `{"data":{"total_credits":-1,"total_usage":-2}}`, "protocol", false},
+		{`{"data":{"usage":0,"limit":10,"limit_remaining":5}}`, `{"data":{"total_credits":1000000000001,"total_usage":1000000000000}}`, "protocol", false},
+	} {
+		client.HTTP.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+			status, body := 200, tc.key
+			if r.URL.Path == "/api/v1/credits" {
+				status, body = 403, ""
+				if tc.credits != "" {
+					status, body = 200, tc.credits
+				}
+			}
+			return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}, nil
+		})
+		got := client.Capture(t.Context(), Target{Harness: "pi", Home: home, Provider: "openrouter"}, now)
+		if got.Cause != tc.cause || tc.wantZero && (got.Budget == nil || got.Budget.KeyRemainingUSD == nil || *got.Budget.KeyRemainingUSD != 0) {
+			t.Fatal("zero cap lost or invalid balance accepted")
+		}
+	}
+}
