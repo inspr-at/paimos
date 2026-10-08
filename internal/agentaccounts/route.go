@@ -437,6 +437,9 @@ type ranked struct {
 	reset          *time.Time
 	slots          int
 	presence       bool
+	soonest        *time.Time
+	posture        string
+	projected      float64
 }
 
 func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harness, profileID, daemonID string, accountIDs []string, estimates map[string]int64, now time.Time) (Account, []Window, map[string]int64, error) {

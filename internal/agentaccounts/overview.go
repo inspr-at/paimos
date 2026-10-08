@@ -39,6 +39,7 @@ type overviewAccount struct {
 	State           string             `json:"state"`
 	BillingMode     string             `json:"billing_mode"`
 	Windows         []overviewWindow   `json:"windows"`
+	UsagePolicy     *usagePolicy       `json:"usage_policy,omitempty"`
 	Schedule        *capacity.Schedule `json:"schedule,omitempty"`
 	Limit           *LimitRule         `json:"limit,omitempty"`
 	QuotaPool       string             `json:"quota_pool_fingerprint,omitempty"`
@@ -46,6 +47,7 @@ type overviewAccount struct {
 	Routable        bool               `json:"routable"`
 	Wait            *CapacityWait      `json:"wait,omitempty"`
 	DetailsRedacted bool               `json:"details_redacted"`
+	BoostWithheld   bool               `json:"boost_withheld,omitempty"`
 }
 
 type overviewWindow struct {
@@ -111,21 +113,7 @@ func (m *Module) overview(w http.ResponseWriter, r *http.Request) {
 			return fail(403, "permission required: "+permission)
 		}
 		// Global advice must see every door in a shared pool, even across pages.
-		// Bound the tenant projection BEFORE listAccounts attaches its windows.
-		var count int
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM agent_accounts WHERE NOT `+retiredSQL+` LIMIT 1025) a`).Scan(&count); err != nil {
-			return err
-		}
-		if count > 1024 {
-			return fail(503, "too many accounts for a complete routing overview")
-		}
-		if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows w JOIN agent_accounts ON agent_accounts.id=w.account_id AND agent_accounts.tenant_id=w.tenant_id WHERE NOT `+retiredSQL+` AND NOT w.pairing_verification AND NOT w.capacity_retired AND w.removed_at IS NULL LIMIT 4097) w`).Scan(&count); err != nil {
-			return err
-		}
-		if count > 4096 {
-			return fail(503, "too many windows for a complete routing overview")
-		}
-		accounts, err := listAccounts(ctx, tx)
+		accounts, err := overviewAccounts(ctx, tx)
 		if err != nil {
 			return err
 		}
@@ -160,6 +148,13 @@ func (m *Module) overview(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		owned := map[string]bool{}
+		if p.Kind == tenant.Person && authz.RequireTx(ctx, tx, p, "account.manage", authz.Scope{}) == nil {
+			owned, err = canonicalOwnedIDs(ctx, tx, p.ID, ids)
+			if err != nil {
+				return err
+			}
+		}
 		for _, a := range page {
 			route := advice[a.ID]
 			// The generic privacy boundary strips timing values on a later
@@ -169,7 +164,7 @@ func (m *Module) overview(w http.ResponseWriter, r *http.Request) {
 				wait.Timezone = ""
 				route.Wait = &wait
 			}
-			item := overviewAccount{AccountID: a.ID, Provider: overviewProvider(a), Harness: a.Harness, Label: a.Label, HostLabel: a.HostLabel, DaemonID: a.DaemonID, OwnerPersonID: a.OwnerPersonID, OwnerPersonName: a.OwnerPersonName, State: a.State, BillingMode: a.BillingMode, Windows: []overviewWindow{}, Routable: route.AvailableSlots > 0, Wait: route.Wait, DetailsRedacted: !policy[a.ID]}
+			item := overviewAccount{AccountID: a.ID, Provider: overviewProvider(a), Harness: a.Harness, Label: a.Label, HostLabel: a.HostLabel, DaemonID: a.DaemonID, OwnerPersonID: a.OwnerPersonID, OwnerPersonName: a.OwnerPersonName, State: a.State, BillingMode: a.BillingMode, Windows: []overviewWindow{}, Routable: route.AvailableSlots > 0, Wait: route.Wait, DetailsRedacted: !policy[a.ID], BoostWithheld: !policy[a.ID] && owned[a.ID]}
 			if !policy[a.ID] {
 				// Available slots and a missing or capacity wait are quota
 				// headroom. A private row has one constant shape.
@@ -185,6 +180,14 @@ func (m *Module) overview(w http.ResponseWriter, r *http.Request) {
 					return err
 				}
 				item.Schedule = &schedule
+				u, err := loadUsagePolicy(ctx, tx, a.ID)
+				if err != nil {
+					return err
+				}
+				if err := m.usagePermissions(ctx, tx, p, a, &u); err != nil {
+					return err
+				}
+				item.UsagePolicy = &u
 				item.Limit, err = currentLimit(ctx, tx, a.ID)
 				if err != nil {
 					return err
@@ -321,4 +324,23 @@ func overviewWindows(ctx context.Context, tx pgx.Tx, a Account, now time.Time, s
 		return nil, fail(503, "too many windows for a complete account overview")
 	}
 	return out, nil
+}
+
+// Shared bounded source for overview and the guard posture projection.
+func overviewAccounts(ctx context.Context, tx pgx.Tx) ([]Account, error) {
+	// Bound the tenant projection BEFORE listAccounts attaches its windows.
+	var count int
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM agent_accounts WHERE NOT `+retiredSQL+` LIMIT 1025) a`).Scan(&count); err != nil {
+		return nil, err
+	}
+	if count > 1024 {
+		return nil, fail(503, "too many accounts for a complete routing overview")
+	}
+	if err := tx.QueryRow(ctx, `SELECT count(*) FROM (SELECT 1 FROM account_allowance_windows w JOIN agent_accounts ON agent_accounts.id=w.account_id AND agent_accounts.tenant_id=w.tenant_id WHERE NOT `+retiredSQL+` AND NOT w.pairing_verification AND NOT w.capacity_retired AND w.removed_at IS NULL LIMIT 4097) w`).Scan(&count); err != nil {
+		return nil, err
+	}
+	if count > 4096 {
+		return nil, fail(503, "too many windows for a complete routing overview")
+	}
+	return listAccounts(ctx, tx)
 }
