@@ -1979,6 +1979,119 @@ existing runtime warning/default policy. Known-flaky ESSENTIAL restrictions stil
 apply. Legacy `classify go|web` keeps its NIGHTLY default and strict stale check,
 and now writes canonical form. Web discovery lists cases without launching browsers.
 
+### Central registry merge drivers (AEON-981)
+
+The five authored JSON registries below use `merge=registries`. Install a
+reviewed copy outside the repository, alongside the tier driver. A branch being
+merged must never supply the executable that decides its own merge. Installation
+is a coordinator action; workers test configuration in a disposable clone only.
+Neither these drivers nor the regeneration command grant review or merge approval.
+
+```sh
+mkdir -p "$HOME/.local/share/aeon-ci"
+cp <repo>/scripts/merge-drivers/registries.mjs "$HOME/.local/share/aeon-ci/registries.mjs"
+# Replace /absolute/path/to/node with the absolute path from command -v node.
+git -C <repo> config merge.registries.driver '"/absolute/path/to/node" "$HOME/.local/share/aeon-ci/registries.mjs" %O %A %B %P'
+```
+
+Preserve the existing `$GIT_COMMON_DIR/info/attributes` and append these lines
+once, so PR branches from before this change also use the reviewed driver:
+
+```gitattributes
+internal/authz/builtin_agent_exclusions.json merge=registries
+internal/authz/permission_labels.json merge=registries
+internal/auth/testdata/key_scope_ceiling.json merge=registries
+internal/dsar/inventory.json merge=registries
+internal/authz/testdata/builtin_agent_exclusions.json merge=registries
+```
+
+Resolve `$GIT_COMMON_DIR` with
+`git -C <repo> rev-parse --path-format=absolute --git-common-dir`. Refresh the
+installed copy only after reviewing and testing its replacement. It uses only
+Node built-ins and runs from old checkouts without importing their source.
+
+| Hotspot | Classification and merge policy |
+| --- | --- |
+| `internal/authz/builtin_agent_exclusions.json` | DATA: permission strings form a keyed set. Independent exclusions survive, sorted. |
+| `internal/authz/testdata/builtin_agent_exclusions.json` | DATA: the independent expected exclusion definition, extracted from the existing Go test. The same set driver preserves additions and deletions; the Go test still checks exact equality and live grant behavior. |
+| `internal/authz/permission_labels.json` | DATA: labels merge by group and key; divergent labels conflict. |
+| `internal/auth/testdata/key_scope_ceiling.json` | DATA: permissions key by `key`, cases by `name`. Each record is atomic; divergent grant flags, locations or case expectations conflict. |
+| `internal/dsar/inventory.json` | DATA: tables key by `table`, columns by name. Independent columns survive, including on a concurrently introduced table. Each table's classification and locator form one atomic safety header; divergent headers or column classifications conflict. |
+| `scripts/ci/go-test-tiers.json`, `scripts/ci/web-test-tiers.json`, `web/ci-web-shards.json` | DATA with regenerated canonical layout: retain the existing `tiers` driver and authored test tiers, weights and launch policy. |
+| `internal/authz/route_map.go` | CODE holding route lists: leave for AEON-982. |
+| `internal/authz/registry.go` | CODE constructing the permission catalog and grant rules: leave for AEON-982. |
+| `internal/authz/authz_test.go` | CODE with policy assertions and fixtures: only the literal expected exclusion list moves to data, with a strict test loader. Remaining lists and assertions stay for AEON-982. |
+| `internal/agentpairing/shared_fence_test.go` | CODE with call-site inventory and lock-order assertions: leave for AEON-982. |
+| `web/src/router.ts` | CODE with route lists and guards: leave for AEON-982. |
+| `web/src/lib/settings.ts` | CODE with setting lists and visibility policy: leave for AEON-982. |
+| `web/src/views/SettingsView.vue` | CODE with rendering and section registration: leave for AEON-982. |
+| `api/openapi.yaml` | Authored contract: ordinary text merge and existing contract/static checks; no whole-file union or policy regeneration. |
+| `scripts/ci/go-shards.txt`, `scripts/ci/go-shards-4.txt` | GENERATED from measured CI logs and test JSON. Existing coverage checks run; regeneration still requires those measurements via `ci-go-shards generate -log ... -json ...`. Do not invent replacement weights during a merge. |
+
+The registry driver implements a three-way keyed merge: independent additions
+are retained; a deletion against an unchanged entry is honoured; deletion against
+an edited entry conflicts. Identical changes agree, and a unilateral edit is
+retained. Permission records and case records are never combined field by field
+into a policy neither author supplied. Table classification and locator together
+are also indivisible. Array
+order inside fixture cases and grants is retained; top-level sets and object
+keys sort deterministically. No permission, privacy classification or expected
+ceiling is inferred from code.
+
+Exit 0 writes validated canonical JSON to OURS. Exit 1 writes whole-document
+diff3 conflict markers to OURS and names the conflicting key on stderr; the
+index remains conflicted and the markers cannot parse as JSON. Exit 2 covers
+usage, schema, parse and I/O failures and leaves OURS unchanged. Duplicate row
+identities, duplicate JSON object keys (including escaped aliases), unknown
+fields, invalid classifications and unsupported paths fail closed. Inputs are
+bounded to 4 MiB, 64 levels and 500,000 tokens. Output uses a sibling temporary
+file, fsync and atomic rename; failure before rename preserves OURS.
+
+After the coordinator's normal merge, run one preparation command:
+
+```sh
+git merge origin/main
+node scripts/merge-main.mjs --regenerate
+```
+
+The command refuses an unmerged index or unresolved diff markers before writing.
+It validates all five registries and three tier manifests before canonicalizing
+their layouts, runs the driver regressions, then runs the existing full fast
+static pre-filter with `--here` against the actual working tree. The canonical
+layouts are the only regenerated outputs in this scope; none of the safety
+registries is generated from code. Exit 0 means ready to commit. Static failures,
+missing prerequisites and incomplete/skipped checks retain their nonzero codes
+(including 3 for incomplete); they never report ready. It does not stage,
+commit, push, install drivers, approve a merge, or deploy. Run it on the approved
+test offload machine when the static checks require heavy Go work. The required
+committed-HEAD `ci-static --merge-main` handover check remains separate.
+
+The new regressions run in the existing fixed script-test lane through
+`scripts/test-tiers/test-tiers.test.mjs`; they introduce no Go/web test identities
+or tier changes. Source ownership is already covered by slice S7's `scripts/**`.
+
+Pinned reproduction used main `9a12d8450ee2c60b4153e6fc5f0b65bc37b1ec25`
+and `git merge-tree --write-tree --name-only MAIN BRANCH`. The after runs used
+copies of both drivers outside a throwaway clone, with clone-only config and
+`info/attributes`; the shared repository configuration was untouched.
+
+| Branch (pinned tip) | Before conflicts → after | Remaining |
+| --- | --- | --- |
+| `aeon-880-prefusage` (`0943795e206f8c000b397881161bf311839a3dfe`) | 3 → 2; exit 1 → 1 | `internal/accountprivacy/privacy.go`, `internal/agentaccounts/capacity.go` |
+| `aeon-881-prefexpert` (`f943d18debd54a650789ee568789ef1928ee7189`) | 1 → 0; exit 1 → 0 | Clean merge. |
+| `aeon-889-routing` (`b0df44a955d2e6aafd1236024b8b26a80b1173e2`) | 7 → 6; exit 1 → 1 | `internal/agentpairing/shared_fence_test.go`, `internal/agentplan/store.go` (add/add), `internal/auth/testdata/key_scope_ceiling.json`, `internal/authz/authz_test.go`, `internal/authz/registry.go`, `internal/views/agents_plan.go` |
+| `aeon-890-reviews` (`3cfadf2f5a8a23cf9743465b036475595f7d7171`) | 5 → 4; exit 1 → 1 | `internal/agentpairing/shared_fence_test.go`, `internal/auth/testdata/key_scope_ceiling.json`, `internal/authz/authz_test.go`, `internal/authz/route_map.go` |
+| `aeon-891-shipapp` (`97f645a8b4cf48516a7fca8fa3361dfc808096fe`) | 5 → 4; exit 1 → 1 | Same files as AEON-890. |
+
+Conflicted files fall from 21 to 16, including registry conflicts from 8 to 3.
+All three retained registry conflicts concern divergent edits to the case
+`built-in Admin excludes explicit recurrence automation`. They require explicit
+fixture review; mechanically merging those expectations could conceal drift.
+The remaining code lists need the scoped fragment design in AEON-982. Unrelated
+behavior conflicts still go through the coordinator's usual review round.
+
+### Test-tier driver installation
+
 Once per clone, install the self-contained driver at a stable absolute path
 outside the repository, then configure local merge-main rounds. This copy uses
 only Node built-ins and works while an old PR branch without the new tooling (or

@@ -18,6 +18,7 @@ import { inputBounds, boundedText, inputMetadata, readInput } from './inputs.mjs
 import { tierWeights } from '../../web/scripts/ci-web-shard.mjs'
 import './manifests.test.mjs'
 import './tiers-merge-driver.test.mjs'
+import '../merge-drivers/merge-drivers.test.mjs'
 
 const g=(pkg,name,tier='NIGHTLY')=>({kind:'go',package:pkg,name,tier,active:true})
 const w=(file,name,tier='NIGHTLY')=>({kind:'node',file,name,tier})
