@@ -22,7 +22,10 @@ type metricsFake struct {
 	calls   []string
 }
 
-func (g *metricsFake) MetricsRead(_ context.Context, read func(func(string, any) error) error) error {
+func (g *metricsFake) MetricsRead(_ context.Context, tenantID string, read func(func(string, any) error) error) error {
+	if tenantID == "" {
+		return errRead
+	}
 	return read(func(path string, out any) error {
 		g.calls = append(g.calls, path)
 		body, err := g.respond(path)
@@ -145,10 +148,14 @@ func TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent(t *testing.T) {
 	rerun := githubRunBody(601, 2, defaultCIWorkflow, "pull_request", "work/a", strings.Repeat("1", 40), day.Add(2*time.Hour), 9*time.Minute, "success", 0)
 	failOn := ""
 	g.respond = func(path string) (any, error) {
-		if path == failOn {
+		// An empty failOn means the step should succeed. The repository read
+		// uses that empty path, so the sentinel must not match it.
+		if failOn != "" && path == failOn {
 			return nil, errRead
 		}
 		switch {
+		case path == "":
+			return map[string]any{"full_name": f.m.config.Repository, "default_branch": "main"}, nil
 		case path == ci:
 			return map[string]any{"total_count": 2, "workflow_runs": []any{
 				githubRunBody(600, 1, defaultCIWorkflow, "merge_group", "gh-readonly-queue/main/pr-7-"+strings.Repeat("a", 40), strings.Repeat("a", 40), day.Add(time.Hour), 14*time.Minute, "success", 0), rerun}}, nil
@@ -228,6 +235,9 @@ func TestDeliveryMetricsBackfillStepsCoverEveryDayOnce(t *testing.T) {
 	since := dayStart(now.AddDate(0, 0, -60))
 	seen := map[string]int{}
 	get := func(path string, out any) error {
+		if path == "" {
+			return json.Unmarshal([]byte(`{"full_name":"example/delivery","default_branch":"main"}`), out)
+		}
 		if strings.HasPrefix(path, "/pulls") {
 			return json.Unmarshal([]byte(`[]`), out)
 		}

@@ -108,7 +108,7 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) erro
 		if !ok || e.Suite.App.Slug != "github-actions" || e.Suite.Status != "completed" {
 			return nil
 		}
-		err := reader.MetricsRead(ctx, func(get func(string, any) error) error {
+		err := reader.MetricsRead(ctx, m.config.TenantID, func(get func(string, any) error) error {
 			var err error
 			runs, err = suiteRuns(get, e.Suite.ID, e.Suite.Head)
 			return err

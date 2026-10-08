@@ -59,6 +59,8 @@ type metricMark struct {
 // metricInput is everything one project's metrics are computed from. Covered
 // is the earliest time from which run and pull facts are complete: the
 // finished backfill's start, else the first fact the webhook recorded.
+// CoveredUntil, when set, is the last instant those facts are known to be
+// complete. Nil means coverage runs through now.
 type metricInput struct {
 	Runs            []metricRun
 	Pulls           []metricPull
@@ -66,6 +68,7 @@ type metricInput struct {
 	CIWorkflow      string
 	NightlyWorkflow string
 	Covered         *time.Time
+	CoveredUntil    *time.Time
 	Truncated       bool
 }
 
@@ -122,7 +125,7 @@ type metricSpec struct {
 	key, label, unit, source, def string
 	aggregate                     string // "p50", "mean" or "share"
 	target                        *MetricTarget
-	coverage                      *time.Time
+	coverage, coverageEnd         *time.Time
 	partialReason, noDataReason   string
 	alwaysPartial                 bool
 }
@@ -183,9 +186,18 @@ func (s metricSpec) summarize(values []float64) (value, p50, p90 *float64) {
 	return p50, p50, p90
 }
 
+// incomplete reports a window that starts before coverage, ends after coverage,
+// or belongs to an incomplete source.
+func (s metricSpec) incomplete(start, end time.Time, truncated bool) bool {
+	if s.alwaysPartial || truncated || s.coverage == nil || s.coverage.After(start) {
+		return true
+	}
+	return s.coverageEnd != nil && s.coverageEnd.Before(end)
+}
+
 // build turns timestamped samples into windows and a daily series. A window
-// that starts before the covered time, or any window of an incomplete source,
-// is partial; an empty window is "no_data", never zero.
+// that starts before the covered time, ends after CoveredUntil, or belongs to
+// an incomplete source is partial; an empty window is "no_data", never zero.
 func (s metricSpec) build(now time.Time, samples []metricPoint, truncated bool) Metric {
 	out := Metric{Number: s.number, Key: s.key, Label: s.label, Unit: s.unit, Source: s.source, Definition: s.def, Target: s.target, Windows: []MetricWindow{}, Daily: []MetricPoint{}}
 	sort.SliceStable(samples, func(i, j int) bool { return samples[i].at.Before(samples[j].at) })
@@ -199,9 +211,7 @@ func (s metricSpec) build(now time.Time, samples []metricPoint, truncated bool) 
 		}
 	}
 	reasons := []string{}
-	partialWindow := func(start time.Time) bool {
-		return s.alwaysPartial || truncated || s.coverage == nil || s.coverage.After(start)
-	}
+	windowStart := now.Add(-metricDays * 24 * time.Hour)
 	for _, days := range []int{metricShortDays, metricDays} {
 		start := now.Add(-time.Duration(days) * 24 * time.Hour)
 		values := []float64{}
@@ -214,7 +224,7 @@ func (s metricSpec) build(now time.Time, samples []metricPoint, truncated bool) 
 		w.Value, w.P50, w.P90 = s.summarize(values)
 		if len(values) == 0 {
 			w.Status = "no_data"
-		} else if partialWindow(start) {
+		} else if s.incomplete(start, now, truncated) {
 			w.Status = "partial"
 		}
 		out.Windows = append(out.Windows, w)
@@ -232,7 +242,7 @@ func (s metricSpec) build(now time.Time, samples []metricPoint, truncated bool) 
 		p.Value, p.P50, p.P90 = s.summarize(values)
 		if len(values) == 0 {
 			p.Status = "no_data"
-		} else if partialWindow(day) {
+		} else if s.incomplete(day, day.AddDate(0, 0, 1), truncated) {
 			p.Status = "partial"
 		}
 		out.Daily = append(out.Daily, p)
@@ -242,15 +252,18 @@ func (s metricSpec) build(now time.Time, samples []metricPoint, truncated bool) 
 	case long.N == 0:
 		out.Status = "no_data"
 		reasons = append(reasons, s.noDataReason)
-	case partialWindow(now.Add(-metricDays * 24 * time.Hour)):
+	case s.incomplete(windowStart, now, truncated):
 		out.Status = "partial"
 		if truncated {
 			reasons = append(reasons, "Some facts are missing: a day had more runs than GitHub lists (1 000), or the window holds more facts than one read returns.")
 		}
 		if s.alwaysPartial {
 			reasons = append(reasons, s.partialReason)
-		} else if s.coverage == nil || s.coverage.After(now.Add(-metricDays*24*time.Hour)) {
+		} else if s.coverage == nil || s.coverage.After(windowStart) {
 			reasons = append(reasons, coverageReason(s.coverage))
+		}
+		if s.coverageEnd != nil && s.coverageEnd.Before(now) {
+			reasons = append(reasons, coverageEndReason(*s.coverageEnd))
 		}
 	default:
 		out.Status = "ok"
@@ -270,6 +283,10 @@ func coverageReason(covered *time.Time) string {
 		return "History is not complete: no backfill has finished yet."
 	}
 	return fmt.Sprintf("Facts are complete only since %s UTC; earlier days are missing until the backfill finishes.", covered.UTC().Format("2006-01-02 15:04"))
+}
+
+func coverageEndReason(end time.Time) string {
+	return fmt.Sprintf("GitHub facts are complete only through %s UTC; later time is unobserved.", end.UTC().Format("2006-01-02 15:04"))
 }
 
 func sameWorkflow(run metricRun, workflow string) bool {
@@ -320,10 +337,10 @@ func computeMetrics(in metricInput, now time.Time) []Metric {
 	}
 	out = append(out, metricSpec{number: 1, key: "pr_ci_wall", label: "PR CI duration (wall)", unit: "minutes", source: runSource("pull_request"),
 		def:       "First attempt only: run started → run completed, per pull_request run. Runner wait before the start, re-runs and cancelled (superseded) runs are not included; time to green is number 4.",
-		aggregate: "p50", target: arion(5, "max", "8 after Phase 2, 5 after Phase 3"), coverage: in.Covered, noDataReason: noRuns}.build(now, wall("pull_request"), in.Truncated))
+		aggregate: "p50", target: arion(5, "max", "8 after Phase 2, 5 after Phase 3"), coverage: in.Covered, coverageEnd: in.CoveredUntil, noDataReason: noRuns}.build(now, wall("pull_request"), in.Truncated))
 	out = append(out, metricSpec{number: 2, key: "queue_run_wall", label: "Merge-queue run duration (wall)", unit: "minutes", source: runSource("merge_group"),
 		def:       "First attempt only: run started → run completed, per merge_group run; cancelled runs are not included.",
-		aggregate: "p50", target: arion(7, "max", "3 on a reuse hit"), coverage: in.Covered, noDataReason: "No completed " + ci + " merge-queue runs in the last 30 days."}.build(now, wall("merge_group"), in.Truncated))
+		aggregate: "p50", target: arion(7, "max", "3 on a reuse hit"), coverage: in.Covered, coverageEnd: in.CoveredUntil, noDataReason: "No completed " + ci + " merge-queue runs in the last 30 days."}.build(now, wall("merge_group"), in.Truncated))
 
 	// 3: first-attempt green rate, and failures that only flaked.
 	green, flaked := []metricPoint{}, []metricPoint{}
@@ -349,10 +366,10 @@ func computeMetrics(in metricInput, now time.Time) []Metric {
 	}
 	out = append(out, metricSpec{number: 3, key: "first_attempt_green", label: "First-attempt green rate", unit: "percent", source: runSource("pull_request"),
 		def:       "Share of first attempts of pull_request runs that concluded success. Cancelled runs (superseded by a newer push) are left out.",
-		aggregate: "share", coverage: in.Covered, noDataReason: noRuns}.build(now, green, in.Truncated))
+		aggregate: "share", coverage: in.Covered, coverageEnd: in.CoveredUntil, noDataReason: noRuns}.build(now, green, in.Truncated))
 	out = append(out, metricSpec{number: 3, key: "flaked_failures", label: "Failures that only flaked", unit: "percent", source: runSource("pull_request"),
 		def:       "Share of first attempts of pull_request runs that failed although a re-run of the same run, or another run on the same head commit, later succeeded without a code change. This is the false-failure rate of the Arion contract, without infra classification.",
-		aggregate: "share", target: arion(5, "max", "False failures ≤ 10 % after 2 weeks, ≤ 5 % after 4 (WP1.1)"), coverage: in.Covered, noDataReason: noRuns}.build(now, flaked, in.Truncated))
+		aggregate: "share", target: arion(5, "max", "False failures ≤ 10 % after 2 weeks, ≤ 5 % after 4 (WP1.1)"), coverage: in.Covered, coverageEnd: in.CoveredUntil, noDataReason: noRuns}.build(now, flaked, in.Truncated))
 
 	// 4: time to first green per pull request branch.
 	branches := map[string][]metricRun{}
@@ -376,7 +393,7 @@ func computeMetrics(in metricInput, now time.Time) []Metric {
 	}
 	out = append(out, metricSpec{number: 4, key: "time_to_first_green", label: "Time to first green", unit: "minutes", source: runSource("pull_request"),
 		def:       "Per pull request branch: first run created → first successful run completed, including runner wait, failed runs and re-runs. Branches that never went green are not counted.",
-		aggregate: "p50", target: arion(12, "max", ""), coverage: in.Covered, noDataReason: "No pull request branch reached a green " + ci + " run in the last 30 days."}.build(now, toGreen, in.Truncated))
+		aggregate: "p50", target: arion(12, "max", ""), coverage: in.Covered, coverageEnd: in.CoveredUntil, noDataReason: "No pull request branch reached a green " + ci + " run in the last 30 days."}.build(now, toGreen, in.Truncated))
 
 	// 5: pull request opened → merged.
 	merged := []metricPoint{}
@@ -387,7 +404,7 @@ func computeMetrics(in metricInput, now time.Time) []Metric {
 	}
 	out = append(out, metricSpec{number: 5, key: "pr_open_to_merged", label: "PR opened → merged", unit: "minutes", source: "GitHub pull requests (GitHub App pull_request events and backfill)",
 		def:       "Per merged pull request: created → merged, counted on the merge day.",
-		aggregate: "p50", target: arion(40, "max", ""), coverage: in.Covered, noDataReason: "No pull request was merged in the last 30 days."}.build(now, merged, in.Truncated))
+		aggregate: "p50", target: arion(40, "max", ""), coverage: in.Covered, coverageEnd: in.CoveredUntil, noDataReason: "No pull request was merged in the last 30 days."}.build(now, merged, in.Truncated))
 
 	// 6: merge-queue runs per pull request.
 	queued := map[int64][]metricRun{}
@@ -413,7 +430,7 @@ func computeMetrics(in metricInput, now time.Time) []Metric {
 	}
 	out = append(out, metricSpec{number: 6, key: "queue_runs_per_pr", label: "Queue runs per PR", unit: "runs", source: runSource("merge_group"),
 		def:       "Per pull request named in the merge-queue branch (gh-readonly-queue/…/pr-N-…): every queue run attempt, counted on the day of its last run. The value is the mean; a group run counts for the PR its branch names.",
-		aggregate: "mean", target: arion(1.1, "max", "0.1 extra queue runs per PR"), coverage: in.Covered, noDataReason: "No merge-queue runs in the last 30 days."}.build(now, perPR, in.Truncated))
+		aggregate: "mean", target: arion(1.1, "max", "0.1 extra queue runs per PR"), coverage: in.Covered, coverageEnd: in.CoveredUntil, noDataReason: "No merge-queue runs in the last 30 days."}.build(now, perPR, in.Truncated))
 
 	// 7: review time and the share of "changes" verdicts.
 	reviewTime, changes := []metricPoint{}, []metricPoint{}
@@ -514,7 +531,7 @@ func computeMetrics(in metricInput, now time.Time) []Metric {
 	}
 	night := metricSpec{number: 10, key: "nightly_green", label: "Nightly full run green", unit: "percent", source: fmt.Sprintf("GitHub Actions workflow %s (GitHub App check suites and backfill)", nightly),
 		def:       "One verdict per night (UTC day the run was created): the scheduled run's last attempt, else the night's first run; green only on success. The value is the share of green nights; nights without a run are not counted.",
-		aggregate: "share", target: arion(100, "min", "7 green nights in a row (WP1.2)"), coverage: in.Covered, noDataReason: "No completed " + nightly + " run in the last 30 days."}.build(now, nightPoints, in.Truncated)
+		aggregate: "share", target: arion(100, "min", "7 green nights in a row (WP1.2)"), coverage: in.Covered, coverageEnd: in.CoveredUntil, noDataReason: "No completed " + nightly + " run in the last 30 days."}.build(now, nightPoints, in.Truncated)
 	out = append(out, night)
 	return out
 }
@@ -528,6 +545,14 @@ func boolValue(b bool) float64 {
 
 func earlier(current *time.Time, at time.Time) *time.Time {
 	if current == nil || at.Before(*current) {
+		v := at
+		return &v
+	}
+	return current
+}
+
+func later(current *time.Time, at time.Time) *time.Time {
+	if current == nil || at.After(*current) {
 		v := at
 		return &v
 	}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/authz"
@@ -131,14 +132,57 @@ func requireMetrics(ctx context.Context, tx pgx.Tx, p tenant.Principal, permissi
 	return authz.RequireTx(ctx, tx, p, permission, authz.Scope{ProjectID: project})
 }
 
-func (m *Module) appConnected(repository string) bool {
+func (m *Module) appConnected(tenantID, repository string) bool {
 	app := crossreview.GitHubApp{Config: m.config}
 	_, reads := m.github.(metricsReader)
-	return reads && app.Configured(m.config.TenantID, m.config.Repository) && repository == m.config.Repository
+	return reads && app.Configured(tenantID, repository)
 }
 
-func (m *Module) sourceView(s metricSourceRow, covered *time.Time) *MetricSource {
-	out := &MetricSource{Repository: s.Repository, CIWorkflow: s.CIWorkflow, NightlyWorkflow: s.NightlyWorkflow, AppConnected: m.appConnected(s.Repository), Backfill: "not_started", BackfillSince: s.Since, BackfillDoneAt: s.DoneAt, CoveredSince: covered}
+func appendMetricReason(m *Metric, note string) {
+	if m.Status == "ok" {
+		return
+	}
+	if m.Reason == nil {
+		m.Reason = &note
+		return
+	}
+	if strings.Contains(*m.Reason, note) {
+		return
+	}
+	joined := *m.Reason + " " + note
+	m.Reason = &joined
+}
+
+// githubCoverageEnd is the last instant GitHub facts are known to be complete
+// once the App is disconnected. It is always before now, so an open window
+// cannot stay "ok" across the unobserved interval.
+func githubCoverageEnd(s metricSourceRow, in metricInput, now time.Time) time.Time {
+	var end *time.Time
+	if s.DoneAt != nil {
+		v := s.DoneAt.UTC()
+		end = &v
+	}
+	for _, run := range in.Runs {
+		end = later(end, run.Completed)
+	}
+	for _, pull := range in.Pulls {
+		if pull.Merged != nil {
+			end = later(end, pull.Merged.UTC())
+		}
+	}
+	for _, mark := range in.Marks {
+		if mark.Source != "report" {
+			end = later(end, mark.At)
+		}
+	}
+	if end != nil && end.Before(now) {
+		return end.UTC()
+	}
+	return now.Add(-time.Nanosecond)
+}
+
+func (m *Module) sourceView(tenantID string, s metricSourceRow, covered *time.Time) *MetricSource {
+	out := &MetricSource{Repository: s.Repository, CIWorkflow: s.CIWorkflow, NightlyWorkflow: s.NightlyWorkflow, AppConnected: m.appConnected(tenantID, s.Repository), Backfill: "not_started", BackfillSince: s.Since, BackfillDoneAt: s.DoneAt, CoveredSince: covered}
 	if s.DoneAt != nil {
 		out.Backfill = "done"
 	} else if s.Cursor != nil {
@@ -177,15 +221,30 @@ func (m *Module) getMetrics(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		out.Source = m.sourceView(*s, in.Covered)
+		// A disconnected App no longer observes the repository. Coverage ends
+		// at the last stored GitHub fact or the finished backfill, so a window
+		// that runs through now cannot stay complete.
+		if !m.appConnected(p.TenantID, s.Repository) {
+			end := githubCoverageEnd(*s, in, now)
+			in.CoveredUntil = &end
+		}
+		out.Source = m.sourceView(p.TenantID, *s, in.Covered)
 		out.Metrics = computeMetrics(in, now)
 		if !out.Source.AppConnected {
-			reason := "The GitHub App of this workspace does not receive events for " + s.Repository + "; numbers come only from earlier facts and reports."
+			note := "The GitHub App of this workspace does not receive events for " + s.Repository + "; numbers come only from earlier facts and reports."
 			for i := range out.Metrics {
-				if out.Metrics[i].Status != "ok" && out.Metrics[i].Reason != nil {
-					joined := *out.Metrics[i].Reason + " " + reason
-					out.Metrics[i].Reason = &joined
+				if !strings.Contains(out.Metrics[i].Source, "GitHub App") {
+					continue
 				}
+				if out.Metrics[i].Status == "ok" {
+					out.Metrics[i].Status = "partial"
+					for j := range out.Metrics[i].Windows {
+						if out.Metrics[i].Windows[j].Status == "ok" {
+							out.Metrics[i].Windows[j].Status = "partial"
+						}
+					}
+				}
+				appendMetricReason(&out.Metrics[i], note)
 			}
 		}
 		return nil
@@ -248,7 +307,7 @@ func (m *Module) putMetricSource(w http.ResponseWriter, r *http.Request) {
 		if s == nil {
 			return pgx.ErrNoRows
 		}
-		out = m.sourceView(*s, nil)
+		out = m.sourceView(p.TenantID, *s, nil)
 		return nil
 	})
 	if err != nil {
@@ -298,7 +357,7 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 		respondError(w, fail(409, "link a repository to this project first"))
 		return
 	}
-	if !readable || !m.appConnected(source.Repository) {
+	if !readable || !m.appConnected(p.TenantID, source.Repository) {
 		respondError(w, fail(409, "the GitHub App is not connected to this repository"))
 		return
 	}
@@ -319,7 +378,7 @@ func (m *Module) backfillMetrics(w http.ResponseWriter, r *http.Request) {
 	}
 	next := *cursor
 	var batch backfillBatch
-	err = reader.MetricsRead(r.Context(), func(get func(string, any) error) error {
+	err = reader.MetricsRead(r.Context(), p.TenantID, func(get func(string, any) error) error {
 		var err error
 		next, batch, err = backfillStep(get, source.Repository, workflows, *cursor, now)
 		return err

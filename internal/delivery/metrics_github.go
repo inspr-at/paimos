@@ -8,21 +8,26 @@ import (
 	"path"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/reviewgate"
 )
 
 // metricsReader runs bounded reads with the App's existing short-lived
-// installation token, the same read channel the queue quarantine uses for
-// workflow runs (Actions reads of a private repository need the App's
-// actions permission, as QueueChecks notes). No new credential exists.
+// installation token. tenantID is the authenticated tenant (or the App's
+// configured tenant for a webhook it already accepted). Reads of a private
+// repository's workflow runs need actions:read, which the shipping
+// installation token already requests. No new credential exists.
 type metricsReader interface {
-	MetricsRead(context.Context, func(get func(string, any) error) error) error
+	MetricsRead(context.Context, string, func(get func(string, any) error) error) error
 }
 
-func (g AppReader) MetricsRead(ctx context.Context, read func(func(string, any) error) error) error {
-	return g.App.ReadInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
+func (g AppReader) MetricsRead(ctx context.Context, tenantID string, read func(func(string, any) error) error) error {
+	if !g.App.Configured(tenantID, g.App.Config.Repository) {
+		return errRead
+	}
+	return g.App.ReadShippingInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
 		return read(get)
 	})
 }
@@ -75,8 +80,9 @@ func metricRunFrom(r githubRun) (metricRun, bool, error) {
 }
 
 // suiteRuns resolves a completed GitHub Actions check suite to its workflow
-// run, plus the run's first attempt when the suite reports a re-run: the
-// Arion first-attempt numbers need attempt 1 even if its own event was lost.
+// run and every earlier attempt. The Arion first-attempt, flake and queue
+// numbers need an intermediate success even when the suite event is the
+// latest attempt.
 func suiteRuns(get func(string, any) error, suite int64, head string) ([]metricRun, error) {
 	if suite <= 0 || !reviewgate.ValidSHA(head) {
 		return nil, errRead
@@ -95,28 +101,53 @@ func suiteRuns(get func(string, any) error, suite int64, head string) ([]metricR
 }
 
 func runWithFirstAttempt(get func(string, any) error, r githubRun) ([]metricRun, error) {
-	run, ok, err := metricRunFrom(r)
-	if err != nil || !ok {
+	runs, next, err := readRunAttempts(get, r, 1, true, func() bool { return true })
+	if err != nil {
 		return nil, err
 	}
-	out := []metricRun{run}
-	if run.Attempt > 1 {
-		var first githubRun
-		if err := get(fmt.Sprintf("/actions/runs/%d/attempts/1", run.ID), &first); err != nil {
-			return nil, err
+	if next != 0 {
+		return nil, errRead
+	}
+	return runs, nil
+}
+
+// readRunAttempts returns attempts of one completed run. from is the next
+// attempt number still to fetch (1 reads every earlier attempt). The latest
+// attempt is r itself and is included only when includeLatest is set, so a
+// resumed read does not emit it twice. allow gates each fetch; a false allow
+// returns the attempt number to resume from.
+func readRunAttempts(get func(string, any) error, r githubRun, from int, includeLatest bool, allow func() bool) ([]metricRun, int, error) {
+	latest, ok, err := metricRunFrom(r)
+	if err != nil || !ok {
+		return nil, 0, err
+	}
+	if from < 1 {
+		from = 1
+	}
+	var out []metricRun
+	if includeLatest {
+		out = append(out, latest)
+	}
+	for n := from; n < latest.Attempt; n++ {
+		if !allow() {
+			return out, n, nil
 		}
-		if first.ID != run.ID || first.Attempt != 1 {
-			return nil, errRead
+		var body githubRun
+		if err := get(fmt.Sprintf("/actions/runs/%d/attempts/%d", latest.ID, n), &body); err != nil {
+			return nil, 0, err
 		}
-		attempt, ok, err := metricRunFrom(first)
+		if body.ID != latest.ID || body.Attempt != n {
+			return nil, 0, errRead
+		}
+		attempt, ok, err := metricRunFrom(body)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 		if ok {
 			out = append(out, attempt)
 		}
 	}
-	return out, nil
+	return out, 0, nil
 }
 
 type githubPullFact struct {
@@ -131,7 +162,8 @@ type githubPullFact struct {
 	Base struct {
 		Ref  string `json:"ref"`
 		Repo struct {
-			Name string `json:"full_name"`
+			Name    string `json:"full_name"`
+			Default string `json:"default_branch"`
 		} `json:"repo"`
 	} `json:"base"`
 }
@@ -161,8 +193,18 @@ type backfillCursor struct {
 	Workflow int       `json:"workflow"`
 	Day      string    `json:"day"`
 	Page     int       `json:"page"`
-	// Truncated records a day with more runs than GitHub lists (1 000).
+	// Truncated records a day with more runs than GitHub lists (1 000), or a
+	// pull-request listing that hit GitHub's last page while recent pulls remain.
 	Truncated bool `json:"truncated,omitempty"`
+	// DefaultBranch is the repository default branch, read once when pulls
+	// begin. Backfill keeps the same pulls the webhook does: base == default.
+	DefaultBranch string `json:"default_branch,omitempty"`
+	// AttemptRun is the listed run whose earlier attempts are still unread.
+	// Attempt is the next attempt number to fetch. DoneRuns are runs on this
+	// page whose attempts are already stored.
+	AttemptRun int64   `json:"attempt_run,omitempty"`
+	Attempt    int     `json:"attempt,omitempty"`
+	DoneRuns   []int64 `json:"done_runs,omitempty"`
 }
 
 type backfillBatch struct {
@@ -172,14 +214,17 @@ type backfillBatch struct {
 }
 
 const (
-	backfillCallBudget = 40
-	backfillMaxPages   = 10
+	backfillCallBudget  = 40
+	backfillMaxPages    = 10
+	backfillPullPageCap = 100
 )
 
 // backfillStep reads from the cursor until the call budget is spent or the
-// backfill is done. Each listing page is consumed whole, so the returned
-// cursor never skips facts; a failed step leaves the stored cursor alone and
-// a retry repeats the same pages idempotently.
+// backfill is done. A page of runs can span steps: the cursor keeps the run
+// and the next attempt, and runs already stored on that page, so a retry
+// repeats only the unread attempts. A failed step leaves the stored cursor
+// alone. Pulls into other base branches are not facts. Hitting the last pull
+// page while recent pulls remain is truncated, not done.
 func backfillStep(get func(string, any) error, repository string, workflows []string, cursor backfillCursor, now time.Time) (backfillCursor, backfillBatch, error) {
 	batch := backfillBatch{}
 	today := dayStart(now)
@@ -213,22 +258,71 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 			if response.Total > 100*backfillMaxPages {
 				cursor.Truncated = true
 			}
+			if len(cursor.DoneRuns) > 100 {
+				return cursor, batch, errRead
+			}
+			foundResume := cursor.AttemptRun == 0
 			for _, r := range response.Runs {
-				runs, err := runWithFirstAttempt(get, r)
+				if containsRun(cursor.DoneRuns, r.ID) {
+					if r.ID == cursor.AttemptRun {
+						foundResume = true
+					}
+					continue
+				}
+				from, includeLatest := 1, true
+				if cursor.AttemptRun == r.ID && cursor.Attempt > 0 {
+					from, includeLatest = cursor.Attempt, false
+					foundResume = true
+				}
+				allow := func() bool {
+					if batch.Calls >= backfillCallBudget {
+						return false
+					}
+					batch.Calls++
+					return true
+				}
+				runs, next, err := readRunAttempts(get, r, from, includeLatest, allow)
 				if err != nil {
 					return cursor, batch, err
 				}
-				if len(runs) > 1 {
-					batch.Calls++
-				}
 				batch.Runs = append(batch.Runs, runs...)
+				if next != 0 {
+					cursor.AttemptRun, cursor.Attempt = r.ID, next
+					return cursor, batch, nil
+				}
+				if r.ID == cursor.AttemptRun {
+					foundResume = true
+				}
+				cursor.DoneRuns = append(cursor.DoneRuns, r.ID)
+				cursor.AttemptRun, cursor.Attempt = 0, 0
 			}
+			if !foundResume {
+				return cursor, batch, errRead
+			}
+			cursor.AttemptRun, cursor.Attempt, cursor.DoneRuns = 0, 0, nil
 			if len(response.Runs) < 100 || cursor.Page >= backfillMaxPages {
 				cursor.Day, cursor.Page = day.AddDate(0, 0, 1).Format("2006-01-02"), 1
 			} else {
 				cursor.Page++
 			}
 		case "pulls":
+			if cursor.DefaultBranch == "" {
+				var repo struct {
+					FullName string `json:"full_name"`
+					Default  string `json:"default_branch"`
+				}
+				batch.Calls++
+				if err := get("", &repo); err != nil {
+					return cursor, batch, err
+				}
+				if repo.FullName != repository || !metricDefaultBranch(repo.Default) {
+					return cursor, batch, errRead
+				}
+				cursor.DefaultBranch = repo.Default
+				if batch.Calls >= backfillCallBudget {
+					return cursor, batch, nil
+				}
+			}
 			var pulls []githubPullFact
 			batch.Calls++
 			if err := get(fmt.Sprintf("/pulls?state=all&sort=updated&direction=desc&per_page=100&page=%d", cursor.Page), &pulls); err != nil {
@@ -239,17 +333,25 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 			}
 			older := false
 			for _, p := range pulls {
-				pull, err := metricPullFrom(p, repository)
-				if err != nil {
-					return cursor, batch, err
-				}
 				if p.Updated.Before(cursor.Since) {
 					older = true
 					continue
 				}
+				// Same population as webhook ingestion: only pulls into the default branch.
+				if p.Base.Ref != cursor.DefaultBranch {
+					continue
+				}
+				pull, err := metricPullFrom(p, repository)
+				if err != nil {
+					return cursor, batch, err
+				}
 				batch.Pulls = append(batch.Pulls, pull)
 			}
-			if older || len(pulls) < 100 || cursor.Page >= 100 {
+			capped := !older && len(pulls) == 100 && cursor.Page >= backfillPullPageCap
+			if older || len(pulls) < 100 || capped {
+				if capped {
+					cursor.Truncated = true
+				}
 				cursor = backfillCursor{Since: cursor.Since, Phase: "done", Truncated: cursor.Truncated}
 				return cursor, batch, nil
 			}
@@ -261,4 +363,17 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 		}
 	}
 	return cursor, batch, nil
+}
+
+func metricDefaultBranch(name string) bool {
+	return queueBase.MatchString(name) && !strings.Contains(name, "..") && !strings.HasSuffix(name, "/")
+}
+
+func containsRun(ids []int64, id int64) bool {
+	for _, candidate := range ids {
+		if candidate == id {
+			return true
+		}
+	}
+	return false
 }
