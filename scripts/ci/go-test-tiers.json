@@ -3510,6 +3510,8 @@
     ,
     {"kind":"go","package":"internal/authz","name":"TestMissingScopeNamesLabelAndCodeOnlyAfterAuthentication","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/authz","name":"TestModelLineAndSimplePreferenceRoutes","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/authz","name":"TestOperatorProjectBindingsUseRLSStoreAndEvents","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestOperatorWorkspaceBindingsUseHTTPStoreAndProtectOwner","tier":"GATED-FULL"}
