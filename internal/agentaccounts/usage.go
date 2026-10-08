@@ -3,6 +3,7 @@ package agentaccounts
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"sort"
 	"strconv"
@@ -74,14 +75,19 @@ func usageSchedule(s capacity.Schedule, p usagePolicy, now time.Time) capacity.S
 	if !p.active {
 		return s
 	}
-	// Hold and dated Away are explicit actions on Accounts and computers.
+	// Explicit actions on Accounts and computers outrank the base posture;
+	// admission still applies the hard floor after any Sprint or Run now.
 	override := s.ActiveOverride(now)
 	s.Nights = false
 	switch p.Posture {
 	case "careful":
+		reserve := 30.0
+		if s.Reserve == capacity.ReserveFixed && s.ReservePercent >= 10 && s.ReservePercent <= 80 {
+			reserve = s.ReservePercent
+		}
 		s.OffDays = "rest"
 		s.Reserve = capacity.ReserveFixed
-		s.ReservePercent = 30
+		s.ReservePercent = reserve
 	case "balanced":
 		s.OffDays = "expire"
 		s.Reserve = capacity.ReserveAuto
@@ -91,7 +97,7 @@ func usageSchedule(s capacity.Schedule, p usagePolicy, now time.Time) capacity.S
 		s.Reserve = capacity.ReserveOff
 		s.ReservePercent = 0
 	}
-	if override == "hold" || override == "away" {
+	if override == "hold" || override == "away" || override == "sprint" {
 		return s
 	}
 	s.Override, s.OverrideUntil = "", nil
@@ -174,15 +180,19 @@ func (m *Module) writeUsagePolicy(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		var in struct {
-			Posture  *string `json:"posture"`
-			Revision *int64  `json:"revision"`
-			Binding  *int64  `json:"binding_revision"`
+			Posture  json.RawMessage `json:"posture"`
+			Revision *int64          `json:"revision"`
+			Binding  *int64          `json:"binding_revision"`
 		}
 		if err := decodeJSON(w, r, &in); err != nil {
 			writeErr(w, err)
 			return
 		}
-		posture, revision, binding = in.Posture, in.Revision, in.Binding
+		if len(in.Posture) == 0 || json.Unmarshal(in.Posture, &posture) != nil {
+			writeErr(w, fail(400, "posture is required and must be a usage word or null"))
+			return
+		}
+		revision, binding = in.Revision, in.Binding
 		if posture != nil && !validPosture(*posture) {
 			writeErr(w, fail(400, "invalid usage posture"))
 			return

@@ -78,6 +78,7 @@ it('a canonical-person change clears proof folds and discards a held evidence pa
 })
 
 it('the account posture discards a held save after switching records and keeps failures honest', async () => {
+  vi.stubGlobal('navigator', { platform: 'Linux', userAgent: 'test' })
   const accountUsage = await import('../src/lib/accountUsage')
   const first = { account_id: 'a', posture: 'balanced' as const, source: 'person' as const, floor_percent: 10, own_floor_percent: 10, revision: 3, binding_revision: 2, can_set_posture: true, can_set_floor: true }
   const second = { ...first, account_id: 'b', posture: 'careful' as const, revision: 7 }

@@ -14,6 +14,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/modelprefs"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -853,6 +854,12 @@ func routingSchedule(ctx context.Context, tx pgx.Tx, a Account) (capacity.Schedu
 		return capacity.Schedule{}, err
 	}
 	s := capacity.DefaultSchedule()
+	if person != nil {
+		person, err = modelprefs.CanonicalPerson(ctx, tx, *person)
+		if err != nil {
+			return s, err
+		}
+	}
 	if person != nil {
 		s, err = effectiveSchedule(ctx, tx, *person, a)
 		if err != nil {

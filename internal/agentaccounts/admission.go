@@ -133,14 +133,6 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 		s.Override = "sprint"
 		s.OverrideUntil = nil
 	}
-	// Unknown usage cannot enforce a numeric reserve, but the person's clock
-	// and explicit Hold remain real gates. Sprint/Away/Run now retain meaning.
-	if unknownOnly && s.ActiveOverride(now) != "sprint" && s.ActiveOverride(now) != "away" {
-		next := s.NextStart(now, s.OffDays == "normal")
-		if next == nil || next.After(now) {
-			return nil, &CapacityWait{Code: "schedule", Until: next, Timezone: s.Timezone, RunNowAllowed: true}, nil
-		}
-	}
 	if err := applyCapacityPacing(ctx, tx, a, active, now, s); err != nil {
 		return nil, nil, err
 	}
@@ -212,6 +204,14 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	}
 	if hardUntil != nil {
 		return nil, &CapacityWait{Code: "allowance", Until: hardUntil, Timezone: s.Timezone}, nil
+	}
+	// Unknown vendor usage cannot enforce a numeric reserve, but manual caps
+	// and floors above still bind before the person's clock offers Run now.
+	if unknownOnly && s.ActiveOverride(now) != "sprint" && s.ActiveOverride(now) != "away" {
+		next := s.NextStart(now, s.OffDays == "normal")
+		if next == nil || next.After(now) {
+			return nil, &CapacityWait{Code: "schedule", Until: next, Timezone: s.Timezone, RunNowAllowed: true}, nil
+		}
 	}
 	// The Advanced sentence caps on top, like a window set by hand. A percent
 	// rule lowers the returned windows' budgets in place, so fits agrees.

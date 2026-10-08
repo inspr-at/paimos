@@ -25,11 +25,18 @@ func TestUsagePostureMappingAndFloor(t *testing.T) {
 		if tc.word == "careful" && s.ReservePercent != 30 {
 			t.Fatal("Careful needs 30%")
 		}
-		s.Override = "hold"
-		s = usageSchedule(s, usagePolicy{Posture: tc.word, active: true}, now)
-		if s.ActiveOverride(now) != "hold" {
-			t.Fatal("posture released an explicit Hold")
+		for _, override := range []string{"hold", "away", "sprint"} {
+			s.Override = override
+			s = usageSchedule(s, usagePolicy{Posture: tc.word, active: true}, now)
+			if s.ActiveOverride(now) != override {
+				t.Fatalf("posture released explicit %s", override)
+			}
 		}
+	}
+	s := capacity.DefaultSchedule()
+	s.Reserve, s.ReservePercent = capacity.ReserveFixed, 45
+	if usageSchedule(s, usagePolicy{Posture: "careful", active: true}, now).ReservePercent != 45 {
+		t.Fatal("Careful lost the allowed custom reserve")
 	}
 	w := Window{Allowance: 100, Used: 78, Reserved: 1, StartsAt: now.Add(-time.Hour), EndsAt: now.Add(time.Hour), PaceModel: "unrestricted"}
 	windows := []Window{w}
@@ -88,6 +95,7 @@ func TestUsageOwnerOverrideSharedFloorAdmissionAndGuard(t *testing.T) {
 	body := `{"posture":"maxout","revision":0,"binding_revision":0}`
 	callStatus(t, mod, &peer, "", "PUT", path+"/posture", body, 403, nil)
 	callStatus(t, mod, &runner, token, "PUT", path+"/posture", body, 403, nil)
+	callStatus(t, mod, &owner, "", "PUT", path+"/posture", `{"revision":0,"binding_revision":0}`, 400, nil)
 	var saved usagePolicy
 	callStatus(t, mod, &owner, "", "PUT", path+"/posture", body, 200, &saved)
 	if saved.Posture != "maxout" || saved.Source != "account" || saved.Revision != 1 {
@@ -101,7 +109,7 @@ func TestUsageOwnerOverrideSharedFloorAdmissionAndGuard(t *testing.T) {
 	codexProfile(t, owner)
 	now := time.Date(2026, 10, 8, 14, 0, 0, 0, time.UTC)
 	err := db.InTenant(dbtest.Seed(t.Context()), appPool, owner.TenantID, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_pool_fingerprint='confirmed' WHERE id=ANY($1::uuid[])`, []string{a.ID, b.ID}); err != nil {
+		if _, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET quota_fingerprint=repeat('a',64),quota_pool_fingerprint=repeat('a',64) WHERE id=ANY($1::uuid[])`, []string{a.ID, b.ID}); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(t.Context(), `INSERT INTO model_pref_profiles(tenant_id,scope,person_id,usage) VALUES($1,'person',$2,'maxout')`, owner.TenantID, owner.ID); err != nil {
@@ -120,6 +128,11 @@ func TestUsageOwnerOverrideSharedFloorAdmissionAndGuard(t *testing.T) {
 		}
 		account.LastProbeAt = &now
 		w := Window{AccountID: b.ID, Allowance: 100, Used: 80, Unit: "requests", StartsAt: now.Add(-time.Hour), EndsAt: now.Add(time.Hour), PaceModel: "unrestricted"}
+		// The shared-quota loader re-reads the durable ledger, so retain the
+		// window being asserted rather than only passing an in-memory fixture.
+		if err := tx.QueryRow(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model) VALUES($1,$2,$3,$4,'requests',100,80,'unrestricted') RETURNING id::text`, owner.TenantID, b.ID, w.StartsAt, w.EndsAt).Scan(&w.ID); err != nil {
+			return err
+		}
 		for _, override := range []string{"", "now"} {
 			windows, wait, err := admission(t.Context(), tx, account, []Window{w}, now, 0, runRow{Purpose: "managed", CapacityOverride: override}, false)
 			if err != nil {
@@ -131,6 +144,9 @@ func TestUsageOwnerOverrideSharedFloorAdmissionAndGuard(t *testing.T) {
 		}
 		// An already held run must not launch after the floor was raised.
 		w.Reserved = 1
+		if _, err := tx.Exec(t.Context(), `UPDATE account_allowance_windows SET reserved=1 WHERE id=$1`, w.ID); err != nil {
+			return err
+		}
 		_, wait, err := admission(t.Context(), tx, account, []Window{w}, now, 0, runRow{Purpose: "managed"}, true)
 		if err != nil {
 			return err
