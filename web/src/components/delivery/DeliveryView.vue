@@ -2,7 +2,8 @@
 <script setup lang="ts">
 // Project › Delivery (AEON-994 draft 5, package 2): the page head — Numbers | Flow,
 // the 7 · 30 · 90 · 180 · 365-day window and Simple | Expert, both the person's
-// own (saved server-side) — and the Numbers Expert view: ten tiles, ten trends.
+// own (saved server-side) — and the Numbers views: Simple (the default; summary,
+// three plain sections, small charts) and Expert (ten tiles, ten trends).
 // Controls sit in the head and never move; content below grows downward.
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -10,6 +11,7 @@ import AppIcon from '../AppIcon.vue'
 import ProjectTabs from '../work/ProjectTabs.vue'
 import ExpertTile from './ExpertTile.vue'
 import LevelSwitch from './LevelSwitch.vue'
+import SimpleNumbers from './SimpleNumbers.vue'
 import TrendChart from './TrendChart.vue'
 import WindowSwitch from './WindowSwitch.vue'
 import { deliveryLanguage } from '../../lib/delivery'
@@ -148,7 +150,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('scroll', closeTip, { capture: true })
 })
 // The tile behind an open popover belongs to this window and this answer.
-watch([() => prefs.value.window, view, lang], closeTip)
+watch([() => prefs.value.window, () => prefs.value.level, view, lang], closeTip)
 </script>
 
 <template>
@@ -199,8 +201,8 @@ watch([() => prefs.value.window, view, lang], closeTip)
         </div>
       </div>
 
-      <!-- Simple (package 3) is not built yet; both levels show the Expert numbers until it lands. -->
-      <div class="expert" :data-level="prefs.level">
+      <SimpleNumbers v-if="prefs.level === 'simple'" :data="data" :window="prefs.window" :state="state" :no-data="noData || (state === 'ready' && !source)" :lang="lang" />
+      <div v-else class="expert">
         <p class="tiles-cap">{{ fill(text.cap, { w: prefs.window }) }}</p>
         <div class="tiles" role="list" data-testid="delivery-tiles">
           <ExpertTile v-for="tile in tiles" :key="tile.def.key" :tile="tile" :state="state" :text="text" :info-open="tip?.tile.def.key === tile.def.key"

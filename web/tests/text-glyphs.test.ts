@@ -25,6 +25,8 @@ const ALLOW: { file: string; includes: string; why: string }[] = [
   { file: 'components/work/AttachmentLightbox.vue', includes: '.width} × ${', why: 'image dimensions, 1200 × 800' },
   { file: 'lib/releaseStats.ts', includes: '${rate(r)}×`', why: 'a multiple in text, "3× the median gap" (AEON-488)' },
   { file: 'lib/deliveryNumbersText.ts', includes: "const TO = '→'", why: 'approved AEON-994 Delivery copy uses the arrow as the word "to" (run start → run end, PR opened → merged); text, not an icon' },
+  { file: 'lib/deliverySimple.ts', includes: '1 : 0)}× ${text.theTarget}', why: 'a multiple in text, "about 5× the target" (AEON-1003 verdict gap)' },
+  { file: 'lib/deliverySimpleText.ts', includes: "const TO = '→'", why: 'approved AEON-994 Simple copy uses the arrow as the word "to" (start → end, PR opened → merged); text, not an icon' },
   { file: 'lib/workKindsCopy.ts', includes: 'Settings › Models', why: 'approved AEON-854 breadcrumb in the kinds lead; it names the Models board in a sentence and is not an icon' },
 ]
 

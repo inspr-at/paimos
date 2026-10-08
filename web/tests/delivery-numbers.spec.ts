@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-1002 (AEON-994 package 2): Project › Delivery. Risks: the window, level or view
+// AEON-1002 (AEON-994 package 2, Simple default since AEON-1003): Project › Delivery. Risks: the window, level or view
 // switch moves a control; the person's choices are lost or not saved; a failed read
 // shows old or zero numbers; people without delivery.read see the section.
 import { expect, test, type Page } from '@playwright/test'
@@ -49,8 +49,8 @@ test('window, level and view switches keep every control still and are the perso
   // Defaults: Simple and 7 days, until the person chooses.
   await expect(windows.getByRole('radio', { name: '7 days' })).toHaveAttribute('aria-checked', 'true')
   await expect(levels.getByRole('radio', { name: 'Simple' })).toHaveAttribute('aria-checked', 'true')
-  await expect(tile(page, 'PR CI run (wall)').locator('.t-value')).toHaveText(/^\d+min$/)
-  await expect(page.getByText('Key numbers · last 7 days · change against the 7 days before')).toBeVisible()
+  // Simple is the default level (AEON-1003); its summary names the window.
+  await expect(page.getByTestId('delivery-summary')).toContainText('Last 7 days vs. the 7 before')
   await expect(head(page).getByTestId('delivery-updated')).toContainText('· live')
 
   const guard = await controlStability(page, {
@@ -61,9 +61,11 @@ test('window, level and view switches keep every control still and are the perso
   for (const days of [30, 90, 180, 365, 7]) {
     await guard.check(() => windows.getByRole('radio', { name: `${days} days` }).click())
     await expect(windows.getByRole('radio', { name: `${days} days` })).toHaveAttribute('aria-checked', 'true')
-    await expect(page.getByText(`Key numbers · last ${days} days · change against the ${days} days before`)).toBeVisible()
+    await expect(page.getByTestId('delivery-summary')).toContainText(`Last ${days} days vs. the ${days} before`)
   }
   await guard.check(() => levels.getByRole('radio', { name: 'Expert' }).click())
+  await expect(tile(page, 'PR CI run (wall)').locator('.t-value')).toHaveText(/^\d+min$/)
+  await expect(page.getByText('Key numbers · last 7 days · change against the 7 days before')).toBeVisible()
   await guard.check(() => levels.getByRole('radio', { name: 'Simple' }).click())
   // Arrow keys move the window choice without leaving the group.
   await windows.getByRole('radio', { name: '7 days' }).focus()
@@ -136,7 +138,8 @@ test('a project without data or without a repository says so in place', async ({
   await page.goto('/p/AEON/delivery')
   await expect(page.getByRole('status')).toContainText('No delivery data yet.')
   await expect(page.getByRole('status')).toContainText('inspr-at/aeon')
-  await expect(page.getByTestId('delivery-tiles').locator('.t-value.empty').first()).toHaveText('No data yet')
+  await expect(page.getByTestId('delivery-summary')).toContainText('No numbers yet.')
+  await expect(page.getByTestId('delivery-simple').locator('.s-val.empty').first()).toHaveText('No data yet')
   world.metrics({ noSource: true })
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
   await expect(page.getByRole('status')).toContainText('No repository is linked yet.')
