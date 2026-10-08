@@ -2,7 +2,9 @@
 package delivery
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"path"
@@ -202,11 +204,59 @@ type backfillCursor struct {
 	DefaultBranch string `json:"default_branch,omitempty"`
 	// AttemptRun is the listed run whose earlier attempts are still unread.
 	// Attempt is the next attempt number to fetch. The listed attempt is
-	// upserted again on resume. DoneRuns are runs on this page whose
-	// attempts are already stored.
-	AttemptRun int64   `json:"attempt_run,omitempty"`
-	Attempt    int     `json:"attempt,omitempty"`
-	DoneRuns   []int64 `json:"done_runs,omitempty"`
+	// upserted again on resume. DoneRuns records the highest attempt already
+	// stored for each run on this page. A higher attempt in a later listing
+	// is read before the page advances. A cursor stored before that record
+	// is a list of run ids; those runs are read again.
+	AttemptRun int64    `json:"attempt_run,omitempty"`
+	Attempt    int      `json:"attempt,omitempty"`
+	DoneRuns   doneRuns `json:"done_runs,omitempty"`
+}
+
+// doneRun is one run on the current page and the highest attempt stored for
+// it. Attempt 0 is a cursor written when only the run id was stored.
+type doneRun struct {
+	ID      int64 `json:"id"`
+	Attempt int   `json:"attempt"`
+}
+
+type doneRuns []doneRun
+
+func (d *doneRuns) UnmarshalJSON(raw []byte) error {
+	raw = bytes.TrimSpace(raw)
+	if bytes.Equal(raw, []byte("null")) {
+		*d = nil
+		return nil
+	}
+	if len(raw) == 0 || raw[0] != '[' {
+		return errRead
+	}
+	body := bytes.TrimSpace(raw[1:])
+	if len(body) == 0 {
+		return errRead
+	}
+	if body[0] == ']' {
+		*d = doneRuns{}
+		return nil
+	}
+	if body[0] == '{' {
+		var rows []doneRun
+		if err := json.Unmarshal(raw, &rows); err != nil {
+			return err
+		}
+		*d = rows
+		return nil
+	}
+	var ids []int64
+	if err := json.Unmarshal(raw, &ids); err != nil {
+		return err
+	}
+	rows := make(doneRuns, len(ids))
+	for i, id := range ids {
+		rows[i] = doneRun{ID: id}
+	}
+	*d = rows
+	return nil
 }
 
 type backfillBatch struct {
@@ -223,12 +273,13 @@ const (
 
 // backfillStep reads from the cursor until the call budget is spent or the
 // backfill is done. A page of runs can span steps: the cursor keeps the run
-// and the next attempt, and runs already stored on that page, so a retry
-// repeats only the unread attempts. Each visit upserts the listed attempt, so
-// a newer attempt that landed between steps is kept. Finishing another run
-// on the page leaves the paused run's identity in place until that run is
-// read. A failed step leaves the stored cursor alone. Pulls into other base
-// branches are not facts. Hitting the last pull page while recent pulls
+// and the next attempt, and the attempt already stored for each finished run
+// on that page, so a retry repeats only the unread attempts. Each visit
+// upserts the listed attempt, so a newer attempt that landed between steps is
+// kept, including one for a run this page already finished. That gap waits
+// until a paused run on the same page is stored, and a pause keeps that run's
+// identity. A failed step leaves the stored cursor alone. Pulls into other
+// base branches are not facts. Hitting the last pull page while recent pulls
 // remain is truncated, not done.
 func backfillStep(get func(string, any) error, repository string, workflows []string, cursor backfillCursor, now time.Time) (backfillCursor, backfillBatch, error) {
 	batch := backfillBatch{}
@@ -267,48 +318,47 @@ func backfillStep(get func(string, any) error, repository string, workflows []st
 				return cursor, batch, errRead
 			}
 			foundResume := cursor.AttemptRun == 0
+			var pending []githubRun
 			for _, r := range response.Runs {
-				if containsRun(cursor.DoneRuns, r.ID) {
+				stored, seen := doneAttempt(cursor.DoneRuns, r.ID)
+				if seen && r.Attempt <= stored {
 					if r.ID == cursor.AttemptRun {
 						foundResume = true
 					}
 					continue
 				}
-				from := 1
-				if cursor.AttemptRun == r.ID && cursor.Attempt > 0 {
-					from = cursor.Attempt
-					foundResume = true
+				// A paused run still owns the only resume slot. Read this
+				// newer attempt after that run is stored, in this step when
+				// the budget allows, without dropping the pause.
+				if seen && cursor.AttemptRun != 0 && cursor.AttemptRun != r.ID {
+					pending = append(pending, r)
+					continue
 				}
-				allow := func() bool {
-					if batch.Calls >= backfillCallBudget {
-						return false
-					}
-					batch.Calls++
-					return true
-				}
-				// The listed attempt is upserted on every visit, including a
-				// resume. Suppressing it would drop an attempt that completed
-				// between steps and still report the backfill as complete.
-				runs, next, err := readRunAttempts(get, r, from, true, allow)
+				wasPaused := cursor.AttemptRun == r.ID
+				var stop bool
+				cursor, stop, err = absorbListedRun(get, cursor, &batch, r)
 				if err != nil {
 					return cursor, batch, err
 				}
-				batch.Runs = append(batch.Runs, runs...)
-				if next != 0 {
-					cursor.AttemptRun, cursor.Attempt = r.ID, next
+				if stop {
 					return cursor, batch, nil
 				}
-				cursor.DoneRuns = append(cursor.DoneRuns, r.ID)
-				// A different run that finished on this page must not clear the
-				// paused run. Losing that identity makes the step fail, and the
-				// stored cursor then retries the same page forever.
-				if r.ID == cursor.AttemptRun {
+				if wasPaused {
 					foundResume = true
-					cursor.AttemptRun, cursor.Attempt = 0, 0
 				}
 			}
 			if !foundResume {
 				return cursor, batch, errRead
+			}
+			for _, r := range pending {
+				var stop bool
+				cursor, stop, err = absorbListedRun(get, cursor, &batch, r)
+				if err != nil {
+					return cursor, batch, err
+				}
+				if stop {
+					return cursor, batch, nil
+				}
 			}
 			cursor.AttemptRun, cursor.Attempt, cursor.DoneRuns = 0, 0, nil
 			if len(response.Runs) < 100 || cursor.Page >= backfillMaxPages {
@@ -380,11 +430,59 @@ func metricDefaultBranch(name string) bool {
 	return queueBase.MatchString(name) && !strings.Contains(name, "..") && !strings.HasSuffix(name, "/")
 }
 
-func containsRun(ids []int64, id int64) bool {
-	for _, candidate := range ids {
-		if candidate == id {
-			return true
+func doneAttempt(runs doneRuns, id int64) (int, bool) {
+	for _, run := range runs {
+		if run.ID == id {
+			return run.Attempt, true
 		}
 	}
-	return false
+	return 0, false
+}
+
+func rememberDone(runs doneRuns, id int64, attempt int) doneRuns {
+	for i := range runs {
+		if runs[i].ID == id {
+			if attempt > runs[i].Attempt {
+				runs[i].Attempt = attempt
+			}
+			return runs
+		}
+	}
+	return append(runs, doneRun{ID: id, Attempt: attempt})
+}
+
+// absorbListedRun stores attempts of one listed run that this page has not
+// stored yet. A stored attempt reads only the gap up to the listing. stop
+// means the call budget paused the read; the cursor then names that run and
+// the next attempt. The listed attempt is upserted on every visit.
+func absorbListedRun(get func(string, any) error, cursor backfillCursor, batch *backfillBatch, r githubRun) (backfillCursor, bool, error) {
+	stored, seen := doneAttempt(cursor.DoneRuns, r.ID)
+	from := 1
+	if seen && stored >= 1 {
+		from = stored + 1
+	}
+	if cursor.AttemptRun == r.ID && cursor.Attempt > from {
+		from = cursor.Attempt
+	}
+	allow := func() bool {
+		if batch.Calls >= backfillCallBudget {
+			return false
+		}
+		batch.Calls++
+		return true
+	}
+	runs, next, err := readRunAttempts(get, r, from, true, allow)
+	if err != nil {
+		return cursor, false, err
+	}
+	batch.Runs = append(batch.Runs, runs...)
+	if next != 0 {
+		cursor.AttemptRun, cursor.Attempt = r.ID, next
+		return cursor, true, nil
+	}
+	cursor.DoneRuns = rememberDone(cursor.DoneRuns, r.ID, r.Attempt)
+	if r.ID == cursor.AttemptRun {
+		cursor.AttemptRun, cursor.Attempt = 0, 0
+	}
+	return cursor, false, nil
 }

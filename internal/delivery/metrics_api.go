@@ -68,13 +68,20 @@ type metricFactInput struct {
 	StartedAt   *time.Time `json:"started_at"`
 	At          time.Time  `json:"at"`
 	Outcome     string     `json:"outcome"`
+	Release     *string    `json:"release"`
+	Tag         *string    `json:"tag"`
+	HealthyAt   *time.Time `json:"healthy_at"`
 }
 
 type metricFactsInput struct {
 	Facts []metricFactInput `json:"facts"`
 }
 
-var metricFactKey = regexp.MustCompile(`^[A-Za-z0-9._:/+-]{1,128}$`)
+var (
+	metricFactKey     = regexp.MustCompile(`^[A-Za-z0-9._:/+-]{1,128}$`)
+	metricReleaseName = regexp.MustCompile(`^[A-Za-z0-9._-]{1,32}$`)
+	metricReleaseTag  = regexp.MustCompile(`^[A-Za-z0-9._+-]{1,128}$`)
+)
 
 const (
 	defaultCIWorkflow      = ".github/workflows/ci.yml"
@@ -455,6 +462,20 @@ func validFact(f metricFactInput, now time.Time) (metricMark, error) {
 		v := f.StartedAt.UTC()
 		k.Started = &v
 	}
+	// Release facts (AEON-1001): name, tag and the time the live version was
+	// healthy again, only on a release, and healthy only after it went live.
+	if f.Kind != "release" && (f.Release != nil || f.Tag != nil || f.HealthyAt != nil) ||
+		f.Release != nil && !metricReleaseName.MatchString(*f.Release) || f.Tag != nil && !metricReleaseTag.MatchString(*f.Tag) {
+		return k, fail(400, "release, tag and healthy_at belong to a release fact")
+	}
+	if f.HealthyAt != nil {
+		if f.Outcome != "live" || f.HealthyAt.Before(f.At) || f.HealthyAt.After(now.Add(5*time.Minute)) || f.HealthyAt.Sub(f.At) > 30*24*time.Hour {
+			return k, fail(400, "healthy_at needs a live release and lies between at and now")
+		}
+		v := f.HealthyAt.UTC()
+		k.Healthy = &v
+	}
+	k.Release, k.Tag = f.Release, f.Tag
 	switch f.Kind {
 	case "review":
 		if f.StartedAt == nil || f.Outcome != "ok" && f.Outcome != "changes" {

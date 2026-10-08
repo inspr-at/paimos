@@ -24,7 +24,7 @@ paths:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
     get:
       operationId: getProjectDeliveryMetrics
-      description: 'Requires delivery.read on the project; an invisible project is absent (404). Computes the ten Project Arion delivery numbers for the repository linked to the project, from GitHub App events, the backfill and reported facts. Every metric names its source and definition; windows without samples are no_data and windows before complete coverage are partial, never zero.'
+      description: 'Requires delivery.read on the project; an invisible project is absent (404). Computes the ten Project Arion delivery numbers for the repository linked to the project, from GitHub App events, the backfill and reported facts. Every metric names its source and definition; windows without samples are no_data and windows before complete coverage are partial, never zero. Windows of 7, 30, 90, 180 and 365 whole UTC days end today; each names its coverage and the window just before it; 90 and 180 days are bucketed by week and 365 by calendar month in series. Nothing is extrapolated.'
       security: [{session: []}, {agentKey: []}]
       responses:
         '200': {description: 'Delivery metrics', content: {application/json: {schema: {$ref: '#/components/schemas/DeliveryMetrics'}}}}
