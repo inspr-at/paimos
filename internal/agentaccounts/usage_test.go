@@ -54,13 +54,22 @@ func TestUsagePostureMappingAndFloor(t *testing.T) {
 	}
 }
 
-// Risk: Max out uses a long-window reset rather than the first expiring window,
-// or missing resets and ties make account ordering unstable.
+// Risk: one Max out account rewrites every sibling's long-window reset, so
+// selectAccount orders the others by a five-hour window, or Careful projected
+// use and presence stop applying beside that Max out account.
 func TestMaxOutSoonestResetAndCarefulProjectedOrder(t *testing.T) {
 	now := time.Date(2026, 10, 8, 14, 0, 0, 0, time.UTC)
 	rank := func(id, posture string, short, long time.Duration, used int64) ranked {
 		windows := []Window{{StartsAt: now.Add(-time.Hour), EndsAt: now.Add(short), Allowance: 100, Used: used, PaceModel: "unrestricted", capacityKind: "5h", usagePosture: posture}, {StartsAt: now.Add(-7 * 24 * time.Hour), EndsAt: now.Add(long), Allowance: 100, Used: used, PaceModel: "unrestricted", capacityKind: "weekly", usagePosture: posture}}
 		return routeRank(Account{ID: id, MaxParallel: 3}, windows, 0, map[string]int64{"": 1}, now)
+	}
+	at := func(picks []ranked, id string) int {
+		for i, p := range picks {
+			if p.account.ID == id {
+				return i
+			}
+		}
+		return -1
 	}
 	picks := []ranked{rank("later", "maxout", 2*time.Hour, 24*time.Hour, 0), rank("sooner", "maxout", time.Hour, 7*24*time.Hour, 50), {account: Account{ID: "unknown"}, posture: "maxout"}}
 	orderPicks(picks)
@@ -71,6 +80,48 @@ func TestMaxOutSoonestResetAndCarefulProjectedOrder(t *testing.T) {
 	orderPicks(picks)
 	if picks[0].account.ID != "low" {
 		t.Fatal("Careful must prefer lowest projected use")
+	}
+	// A Max out sibling keeps its own soonest-window rank. It must leave each
+	// Careful account's published ResetsAt on the weekly window, and it must
+	// not replace Careful's projected-use order with the five-hour window.
+	low := rank("low", "careful", 2*time.Hour, 48*time.Hour, 10)
+	high := rank("high", "careful", time.Hour, 24*time.Hour, 70)
+	burst := rank("burst", "maxout", 30*time.Minute, 7*24*time.Hour, 0)
+	laterMax := rank("later-max", "maxout", 3*time.Hour, 36*time.Hour, 0)
+	if low.reset == nil || low.soonest == nil || high.reset == nil || burst.reset == nil || laterMax.reset == nil || low.soonest.Equal(*low.reset) || high.soonest.Equal(*high.reset) || burst.soonest.Equal(*burst.reset) {
+		t.Fatal("fixture collapsed the short window and the long reset")
+	}
+	lowLong, highLong, burstLong, laterLong := *low.reset, *high.reset, *burst.reset, *laterMax.reset
+	picks = []ranked{high, burst, low, laterMax}
+	orderPicks(picks)
+	for _, id := range []string{"low", "high", "burst", "later-max"} {
+		if at(picks, id) < 0 {
+			t.Fatalf("lost %s", id)
+		}
+	}
+	published := map[string]CapacityRouting{
+		"low":       {ResetsAt: picks[at(picks, "low")].reset},
+		"high":      {ResetsAt: picks[at(picks, "high")].reset},
+		"burst":     {ResetsAt: picks[at(picks, "burst")].reset},
+		"later-max": {ResetsAt: picks[at(picks, "later-max")].reset},
+	}
+	if published["low"].ResetsAt == nil || !published["low"].ResetsAt.Equal(lowLong) || published["high"].ResetsAt == nil || !published["high"].ResetsAt.Equal(highLong) {
+		t.Fatalf("Max out sibling moved Careful ResetsAt off the long window: low %v high %v", published["low"].ResetsAt, published["high"].ResetsAt)
+	}
+	if published["burst"].ResetsAt == nil || !published["burst"].ResetsAt.Equal(burstLong) || published["later-max"].ResetsAt == nil || !published["later-max"].ResetsAt.Equal(laterLong) {
+		t.Fatal("Max out replaced its own long-window ResetsAt")
+	}
+	if at(picks, "low") > at(picks, "high") {
+		t.Fatalf("Careful projected order lost beside Max out: %+v", picks)
+	}
+	if at(picks, "burst") > at(picks, "later-max") {
+		t.Fatalf("Max out did not keep soonest-window order: %+v", picks)
+	}
+	soon, later, far := now.Add(time.Hour), now.Add(24*time.Hour), now.Add(72*time.Hour)
+	picks = []ranked{{account: Account{ID: "present"}, presence: true, reset: &soon}, {account: Account{ID: "absent"}, reset: &later}, {account: Account{ID: "burst"}, posture: "maxout", soonest: &far, reset: &far}}
+	orderPicks(picks)
+	if picks[0].account.ID != "absent" || picks[at(picks, "absent")].reset == nil || !picks[at(picks, "absent")].reset.Equal(later) {
+		t.Fatalf("presence no longer precedes the long reset beside Max out: %+v", picks)
 	}
 }
 
