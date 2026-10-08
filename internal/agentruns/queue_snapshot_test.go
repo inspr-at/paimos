@@ -3,12 +3,14 @@ package agentruns_test
 
 import (
 	"context"
+	"errors"
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -136,6 +138,12 @@ func TestParentQueueSnapshotDuplicatesEligibilityAndCancellation(t *testing.T) {
 }
 func TestParentQueueSnapshotBounds(t *testing.T) {
 	f := setup(t)
+	// This test proves membership/traversal bounds, not host throughput. Keep
+	// the five-second budget on a controlled clock; rollback on expiry is
+	// exercised at a partial-write barrier by the deadline test below.
+	clock := &snapshotClock{}
+	f.mux = http.NewServeMux()
+	agentruns.NewWithQueueClock(f.d.App, clock.withTimeout).Mount(f.mux)
 	nodes.New(f.d.App, nil).Mount(f.mux)
 	parent := f.apiQueueTicket(t, nil)
 	// Retain all 101 real leaves in the fixture; a traversal limit must not be
@@ -162,7 +170,7 @@ func TestParentQueueSnapshotBounds(t *testing.T) {
 	}
 	defer pool.Close()
 	f.mux = http.NewServeMux()
-	agentruns.New(pool).Mount(f.mux)
+	agentruns.NewWithQueueClock(pool, clock.withTimeout).Mount(f.mux)
 	var read parentSnapshot
 	f.call(t, f.person, "GET", "/api/queue-snapshots/"+s.ID, nil, 200, &read)
 	if len(read.Items) != 100 || read.State != "applied" || !read.Truncated || !read.Partial {
@@ -194,6 +202,60 @@ func (q *snapshotQueryCount) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _
 	return ctx
 }
 func (*snapshotQueryCount) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+// A manual timer source keeps server deadlines independent of runner load.
+// Parent/client cancellation still propagates through context.WithCancel.
+type snapshotClock struct {
+	sync.Mutex
+	now    time.Duration
+	timers map[*snapshotDeadline]snapshotTimer
+}
+type snapshotTimer struct {
+	at     time.Duration
+	cancel context.CancelCauseFunc
+}
+type snapshotDeadline struct {
+	context.Context
+}
+
+func (d *snapshotDeadline) Err() error {
+	if errors.Is(context.Cause(d.Context), context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	return d.Context.Err()
+}
+func (c *snapshotClock) withTimeout(parent context.Context, duration time.Duration) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancelCause(parent)
+	d := &snapshotDeadline{Context: ctx}
+	c.Lock()
+	if c.timers == nil {
+		c.timers = make(map[*snapshotDeadline]snapshotTimer)
+	}
+	c.timers[d] = snapshotTimer{at: c.now + duration, cancel: cancel}
+	c.Unlock()
+	return d, func() {
+		c.Lock()
+		delete(c.timers, d)
+		c.Unlock()
+		cancel(context.Canceled)
+	}
+}
+func (c *snapshotClock) advance(duration time.Duration) int {
+	c.Lock()
+	c.now += duration
+	timers := make(map[*snapshotDeadline]snapshotTimer)
+	for d, timer := range c.timers {
+		if timer.at <= c.now {
+			timers[d] = timer
+			delete(c.timers, d)
+		}
+	}
+	c.Unlock()
+	for _, timer := range timers {
+		timer.cancel(context.DeadlineExceeded)
+	}
+	return len(timers)
+}
 func TestParentQueueSnapshotOwnerPermissionRevocationAndVisibility(t *testing.T) {
 	f := setup(t)
 	nodes.New(f.d.App, nil).Mount(f.mux)
@@ -385,6 +447,7 @@ type snapshotWritePause struct {
 	first   atomic.Bool
 	written chan struct{}
 	resume  chan struct{}
+	ctx     context.Context
 }
 type snapshotWritePauseKey struct{}
 
@@ -396,6 +459,7 @@ func (p *snapshotWritePause) TraceQueryStart(ctx context.Context, _ *pgx.Conn, q
 }
 func (p *snapshotWritePause) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, q pgx.TraceQueryEndData) {
 	if ctx.Value(snapshotWritePauseKey{}) == true && q.Err == nil {
+		p.ctx = ctx
 		close(p.written)
 		select {
 		case <-p.resume:
@@ -404,6 +468,13 @@ func (p *snapshotWritePause) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, q p
 	}
 }
 func TestParentQueueSnapshotCancelledWriteRollsBack(t *testing.T) {
+	parentQueueSnapshotInterruptedWrite(t, false)
+}
+func TestParentQueueSnapshotDeadlineWriteRollsBack(t *testing.T) {
+	parentQueueSnapshotInterruptedWrite(t, true)
+}
+func parentQueueSnapshotInterruptedWrite(t *testing.T, deadline bool) {
+	t.Helper()
 	f := setup(t)
 	nodes.New(f.d.App, nil).Mount(f.mux)
 	parent := f.apiQueueTicket(t, nil)
@@ -418,7 +489,8 @@ func TestParentQueueSnapshotCancelledWriteRollsBack(t *testing.T) {
 	}
 	defer pool.Close()
 	mux := http.NewServeMux()
-	agentruns.New(pool).Mount(mux)
+	clock := &snapshotClock{}
+	agentruns.NewWithQueueClock(pool, clock.withTimeout).Mount(mux)
 	guard, stop := context.WithTimeout(t.Context(), 8*time.Second)
 	defer stop()
 	ctx, cancel := context.WithCancel(guard)
@@ -438,7 +510,27 @@ func TestParentQueueSnapshotCancelledWriteRollsBack(t *testing.T) {
 	case <-guard.Done():
 		t.Fatal("apply did not prepare first leaf write")
 	}
-	cancel()
+	if deadline {
+		if n := clock.advance(5*time.Second - time.Nanosecond); n != 0 {
+			t.Fatalf("snapshot expired before its five-second budget: %d timers", n)
+		}
+		select {
+		case <-done:
+			t.Fatal("partial write returned before deadline expiry or barrier release")
+		default:
+		}
+		if n := clock.advance(time.Nanosecond); n != 1 {
+			t.Fatalf("want exactly the five-second snapshot deadline to expire, got %d timers", n)
+		}
+		if !errors.Is(pause.ctx.Err(), context.DeadlineExceeded) || !errors.Is(context.Cause(pause.ctx), context.DeadlineExceeded) {
+			t.Fatalf("partial write cancelled for the wrong reason: err=%v cause=%v", pause.ctx.Err(), context.Cause(pause.ctx))
+		}
+		if ctx.Err() != nil {
+			t.Fatal("server deadline cancelled the caller's context")
+		}
+	} else {
+		cancel()
+	}
 	close(pause.resume)
 	select {
 	case w := <-done:
