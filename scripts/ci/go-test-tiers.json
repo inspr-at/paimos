@@ -5286,6 +5286,8 @@
     ,
     {"kind":"go","package":"internal/demo","name":"TestDemoMissingHarnessRollsBack","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/demo","name":"TestDemoProfilePinsLeafSuccessor","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/demo","name":"TestDemoProfileSelectsEnabledHarness","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/demo","name":"TestDemoSeedRefusesOutsideDev","tier":"ESSENTIAL"}
