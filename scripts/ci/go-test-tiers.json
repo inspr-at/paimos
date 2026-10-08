@@ -760,6 +760,8 @@
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestMakeThisRepeat","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestMaxOutSoonestResetAndCarefulProjectedOrder","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestMigratedWorkRetainsAndEditsAccountPins","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestMoveAndWritesStayFenced","tier":"GATED-FULL"}
@@ -911,6 +913,10 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestUnnamedStopAfterClearedNamedDenialKeepsBackoff","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestUnstartedRecoveryReleasesPermit","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestUsageOwnerOverrideSharedFloorAdmissionAndGuard","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestUsagePostureMappingAndFloor","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestUseAccountIDRetainsLabelAndOwnership","tier":"GATED-FULL"}
     ,
@@ -5114,6 +5120,16 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestGitHubReaderUsesReadOnlyScopesAndFreshQueueHead","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeAuditAdminHeadChecksDoNotUseMergeCommit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeAuditLateQueueProvenanceRetriesUnreadChecks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeAuditObservationChecksOnPullHead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeAuditPendingAlertsAndAtomicFailure","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeAuditWebhookReconciliationAndIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestProjectionReplayAndInheritedSettings","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestProjectionStatesOwnersAndDeadlines","tier":"ESSENTIAL"}
@@ -6337,6 +6353,8 @@
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardProjectRulesOnlyTightenAndKeepCapabilityPins","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestBoardTemplateDryRunPreservesOwnOrdersAndResetsAtomically","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/modelregistry","name":"TestBoardUsagePosturePersonPreconditionAndRevision","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/modelregistry","name":"TestCatalogV3Ladders","tier":"GATED-FULL"}
     ,

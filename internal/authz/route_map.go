@@ -42,6 +42,7 @@ var RoutePermissions = map[string]string{
 	"GET /api/delivery/enqueue-allowed":               "delivery.read",
 	"GET /api/delivery":                               "delivery.read",
 	"GET /api/delivery/alerts":                        "delivery.read",
+	"GET /api/delivery/audit":                         "delivery.read",
 	"GET /api/nodes/{id}/delivery":                    "delivery.read",
 	"POST /api/delivery/{itemId}/hold":                "delivery.manage",
 	"DELETE /api/delivery/{itemId}/hold":              "delivery.manage",
@@ -324,6 +325,9 @@ var RoutePermissions = map[string]string{
 	"PUT /api/agent-accounts/{accountId}/sharing":                            "account.manage",
 	"GET /api/agent-accounts":                                                "account.read",
 	"GET /api/agent-accounts/overview":                                       "account.read|account.overview.read",
+	"GET /api/agent-accounts/posture":                                        "account.read",
+	"PUT /api/agent-accounts/{accountId}/posture":                            "account.manage",
+	"PUT /api/agent-accounts/{accountId}/floor":                              "account.manage", // Handler also requires workspace model_prefs.manage.
 	"GET /api/agent-accounts/catalog":                                        "account.read",
 	"PUT /api/agent-accounts/{accountId}/model":                              "account.manage",
 	"PUT /api/agent-accounts/quota-pool":                                     "account.manage",

@@ -11402,6 +11402,42 @@
     ,
     {"kind":"browser","file":"tests/usage-dashboard.spec.ts","name":"without account access the capacity band is hidden and the rest works","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1024 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1024 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1280 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1280 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1440 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 1440 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 390 dark","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Account owner posture and admin floor stay still at 390 light","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"An agent sees the Usage values without person controls","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Usage controls stay still at 1024 dark with German copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Usage controls stay still at 1024 light with German copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Usage controls stay still at 1280 dark with German copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Usage controls stay still at 1280 light with German copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Usage controls stay still at 1440 dark with German copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Usage controls stay still at 1440 light with German copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Usage controls stay still at 390 dark with German copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Usage controls stay still at 390 light with German copy","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/usage-posture.spec.ts","name":"Usage saves for the captured person, Undo restores inheritance, and a failed save keeps the current value","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
     {"kind":"browser","file":"tests/vendor-signals.spec.ts","name":"a computer approver loses the statusline toggle when account.manage is revoked","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/vendor-signals.spec.ts","name":"vendor throttling and explicit statusline consent 1600 dark","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
@@ -14819,6 +14855,8 @@
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"legacy refusal 428 gives a sentence and preserves the HTTP status","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"preserves project, kind and ticket context when entry points navigate to Models","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"the account posture discards a held save after switching records and keeps failures honest","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/models-settings.unit.test.ts","name":"the page discards a held resolution when the mounted person changes and restores that person’s mode","tier":"ESSENTIAL"}
     ,

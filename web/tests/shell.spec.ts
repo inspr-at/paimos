@@ -12,7 +12,9 @@ const projects = [
 ]
 const projectNodes = projects.map(p => ({ id: p.id, key: p.key, title: p.title, body: '', state: p.state, kind_slug: 'project', fields: { classic: { key: p.id === 'p1' ? 'BAKE' : 'CLINIC', description: 'A small studio project.' } } }))
 
-async function mockAPI(page: Page, options: { signedIn?: boolean; auth?: { signedIn: boolean }; devMode?: boolean; version?: string; codename?: string; sessionFailure?: boolean; logoutFailure?: boolean; loginFailure?: boolean } = {}) {
+// `gate` holds the project responses until the test releases them, so a spec can
+// observe (and then wait out) the list's loading state instead of racing it.
+async function mockAPI(page: Page, options: { signedIn?: boolean; auth?: { signedIn: boolean }; devMode?: boolean; version?: string; codename?: string; sessionFailure?: boolean; logoutFailure?: boolean; loginFailure?: boolean; gate?: Promise<void> } = {}) {
   let signedIn = options.signedIn ?? true
   const calls: { path: string; method: string; body: string | null }[] = []
   await page.route('**/api/**', async route => {
@@ -20,8 +22,14 @@ async function mockAPI(page: Page, options: { signedIn?: boolean; auth?: { signe
     const path = new URL(request.url()).pathname
     calls.push({ path, method: request.method(), body: request.postData() })
     if (path === '/api/kinds' || path === '/api/views') return route.fulfill({ json: { items: [] } })
-    if (path === '/api/projects') return route.fulfill({ json: { items: projects } })
-    if (path === '/api/nodes') return route.fulfill({ json: { items: projectNodes, next_cursor: null } })
+    if (path === '/api/projects') {
+      await options.gate
+      return route.fulfill({ json: { items: projects } })
+    }
+    if (path === '/api/nodes') {
+      await options.gate
+      return route.fulfill({ json: { items: projectNodes, next_cursor: null } })
+    }
     if (path === '/api/nodes/tree') return route.fulfill({ json: { items: [], next_cursor: null } })
     if (path === '/api/events/stream') return route.fulfill({ contentType: 'text/event-stream', body: ': heartbeat\n\n' })
     if (path === '/api/version') return route.fulfill({ json: { version: options.version ?? canonical, scheme: 'inspr-calendar-v2', ...(options.codename ? { codename: options.codename } : {}) } })
@@ -74,6 +82,8 @@ for (const viewport of [{ width: 1280, height: 720 }, { width: 390, height: 844 
         // Sign-in's card carries the copyable version; signed in, the footer bar's pill opens the release history.
         if (screen.startsWith('signin')) await expect(page.locator('footer [data-version-view="pretty"]')).toBeVisible()
         else await expect(page.locator('footer.app-footer .version-pill .calendar-version[role="img"]')).toHaveAttribute('aria-label', versionName)
+        // Skeleton rows overflow the shell; measure the loaded list, not the loading state.
+        if (screen === 'home') await expect(page.getByRole('list', { name: 'Projects' }).getByRole('link')).toHaveCount(2)
         await page.evaluate(() => document.fonts.ready)
         await noOverflow(page)
         // Sign-in is a bare page: no header, the card carries brand, version and theme.
@@ -104,10 +114,13 @@ for (const width of [390, 1024, 1440]) {
     test(`home attention entry fits and stays still at ${width}px in ${colorScheme}`, async ({ page }, testInfo) => {
       await page.setViewportSize({ width, height: 844 })
       await page.emulateMedia({ colorScheme })
-      await mockAPI(page)
-      // The header and its link render before the project data and preferences.
-      // Hold the summaries to exercise that order on every run, then measure
-      // the loaded list rather than the taller loading skeletons.
+      // Branch gate holds project and node payloads. Main holds /api/projects one
+      // layer above that so the header link renders before either response, on
+      // every run. Release both before measuring the loaded list: skeleton rows
+      // are taller than the shell and are not the layout under test.
+      let release!: () => void
+      const gate = new Promise<void>(resolve => { release = resolve })
+      await mockAPI(page, { gate })
       let releaseProjects!: () => void
       const projectsGate = new Promise<void>(resolve => { releaseProjects = resolve })
       await page.route(/\/api\/projects(?:\?|$)/, async route => { await projectsGate; await route.fallback() })
@@ -118,11 +131,15 @@ for (const width of [390, 1024, 1440]) {
       await expect(loading).toBeVisible()
       const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
       await expect(attention).toHaveAttribute('href', '/tickets?view=needs-attention')
+      await expect(page.getByRole('status', { name: 'Loading projects' })).toBeVisible()
       const projectsLoaded = page.waitForResponse(response => response.ok() && new URL(response.url()).pathname === '/api/projects')
       releaseProjects()
+      release()
       await projectsLoaded
+      await expect(page.getByRole('list', { name: 'Projects' }).getByRole('link')).toHaveCount(2)
       await expect(page.getByRole('list', { name: 'Projects' }).getByRole('listitem')).toHaveCount(projects.length)
       await expect(loading).toHaveCount(0)
+      await expect(page.getByRole('status', { name: 'Loading projects' })).toHaveCount(0)
       await page.evaluate(() => document.fonts.ready)
       await noOverflow(page)
       const bounds = await attention.boundingBox()
