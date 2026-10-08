@@ -256,6 +256,7 @@ test('the head keeps its height, and the toggle stays put, whether or not Verify
 // width alone, never by what is shown, so these controls keep their place through hover, focus and
 // unfolding (which removes Verify again), and nothing leaves the card at any width in between.
 test('Away with an expired verification keeps the head inside the card and its controls put at 640, 720 and 800', async ({ page }) => {
+  test.setTimeout(90_000) // the same kind of width scan: ~17 s on CI against the 30 s default
   await page.setViewportSize({ width: 800, height: 3000 })
   const { capacity } = await setup(page, { away: true, thresholds: { early_percent: 10, urgent_percent: 3 } })
   expireClaude(capacity)
@@ -313,6 +314,9 @@ test('Away with an expired verification keeps the head inside the card and its c
 // the row) drops half the difference: back.y moved 1 px on the CI Linux fonts at 720 (AEON-782 gate).
 // Widening the state's letters stands in for the font, so this holds on any machine.
 test('Away stays put when unfolding removes Verify again beside it, even with a wide status', async ({ page }) => {
+  // 41 widths, each folding and unfolding twice: ~7 s here, but a loaded CI runner needs the full 30 s default
+  // and failed on the last width (AEON-887 and AEON-886 merge queues). The budget only guards against a hang.
+  test.setTimeout(90_000)
   await page.setViewportSize({ width: 1100, height: 3000 })
   const { capacity } = await setup(page, { away: true, thresholds: { early_percent: 10, urgent_percent: 3 } })
   expireClaude(capacity)

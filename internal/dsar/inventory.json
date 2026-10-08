@@ -3,6 +3,39 @@
   "version": 1,
   "tables": [
     {
+      "table": "engine_admission_settings",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "updated_by"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "project_id": "metadata",
+        "shadow_enabled": "metadata",
+        "revision": "metadata",
+        "updated_by": "personal",
+        "updated_at": "metadata"
+      }
+    },
+    {
+      "table": "engine_admission_decisions",
+      "classification": "metadata",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "actor_principal_id"
+      },
+      "columns": {
+        "tenant_id": "metadata",
+        "actor_principal_id": "personal",
+        "request_id": "metadata",
+        "project_id": "metadata",
+        "request_sha256": "metadata",
+        "decision": "review",
+        "evaluated_at": "metadata"
+      }
+    },
+    {
       "table": "cross_family_policies",
       "classification": "metadata",
       "locator": {
