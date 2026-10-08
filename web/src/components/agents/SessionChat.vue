@@ -27,6 +27,9 @@ const me = computed(() => identity.identity?.principal.id ?? '')
 const person = computed(() => identity.identity?.principal.kind === 'person')
 const s = computed(() => props.view.session)
 const localSends = ref<ProjectMessage[]>([])
+// In-flight optimistic sends belong to the session they were addressed to.
+// A late failure for A must not leave B looking busy (S8-013).
+const sending = computed(() => localSends.value.some(message => message.optimistic && !message.send_failed && message.recipient_session_id === s.value.id))
 const statuses = ref<Record<string, MessageStatus>>({})
 const messages = computed(() => {
   if (!me.value) return []
@@ -745,9 +748,9 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
         <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
         <div class="compose-row">
           <span class="compose-hint"><KeyCap k="shift" /><KeyCap k="enter" />{{ words.newline }}</span>
-          <button v-if="canSteer" type="button" class="btn sm steer-send" :aria-label="alternative" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || offline" @click="send('steer')"><AppIcon name="bolt" :size="13" />{{ alternative }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
-          <button v-if="capability === 'abort' && working" type="button" class="btn sm stop-send" :aria-label="words.stopSend" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || !canStop || offline" @click="stopAndSend"><AppIcon name="alert" :size="13" />{{ words.stopSend }}</button>
-          <button type="submit" class="btn sm primary send" :aria-label="primaryLabel" :disabled="!draft.trim() || !canWrite || queueBusy || offline"><AppIcon name="send" :size="13" /><span class="send-label"><span>{{ primaryLabel }}</span><span aria-hidden="true" class="label-size">{{ words.after }}</span></span><KeyCap k="enter" /></button>
+          <button v-if="canSteer" type="button" class="btn sm steer-send" :aria-label="alternative" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || offline" @click="send('steer')"><AppIcon name="bolt" :size="13" />{{ alternative }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
+          <button v-if="capability === 'abort' && working" type="button" class="btn sm stop-send" :aria-label="words.stopSend" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || !!editing || !canStop || offline" @click="stopAndSend"><AppIcon name="alert" :size="13" />{{ words.stopSend }}</button>
+          <button type="submit" class="btn sm primary send" :aria-label="primaryLabel" :aria-busy="sending" :disabled="!draft.trim() || !canWrite || queueBusy || offline"><AppIcon name="send" :size="13" /><span class="send-label"><span>{{ primaryLabel }}</span><span aria-hidden="true" class="label-size">{{ words.after }}</span></span><KeyCap k="enter" /></button>
           <button v-if="s.management_mode === 'managed' && s.advertised_capabilities.includes('interrupt')" type="button" class="btn sm chat-stop" :aria-label="words.stop" :data-tip="canStop ? words.stopTip : interruptBlock || words.stopTip" :disabled="!canStop" @click="stop"><AppIcon name="stop" :size="13" /><span>{{ words.stop }}</span><KeyCap k="Esc" /></button>
         </div>
       </form>

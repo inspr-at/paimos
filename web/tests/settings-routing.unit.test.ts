@@ -25,7 +25,7 @@ afterEach(() => { vi.unstubAllGlobals() })
 
 const moved = [
   ['work-vocabulary', 'vocabulary'], ['ticket-types', 'vocabulary'],
-  ['models', 'agents'], ['model-refresh', 'agents'], ['estimates', 'agents'], ['silent-sessions', 'agents'], ['agent-activity', 'agents'],
+  ['models', 'models'], ['model-refresh', 'models'], ['estimates', 'agents'], ['silent-sessions', 'agents'], ['agent-activity', 'agents'],
   ['quota-warnings', 'accounts'], ['status-autopilot', 'autopilot'], ['autopilot-projects', 'autopilot'],
   ['autopilot-suggestions', 'autopilot'], ['autopilot-recent', 'autopilot'], ['autopilot-proposals', 'autopilot'], ['autopilot-changes', 'autopilot'], ['members', 'access'],
 ] as const
@@ -71,6 +71,10 @@ it('current cards and unknown bookmarks keep their section', async () => {
     await router.push(url)
     expect(router.currentRoute.value.fullPath).toBe(url)
   }
+})
+it.each(['models', 'model-refresh'])('retired Agents #%s bookmark opens catalog freshness and keeps its context', async anchor => {
+  await router.push(`/settings/agents?project_id=project-a#${anchor}`)
+  expect(router.currentRoute.value.fullPath).toBe('/settings/models?project_id=project-a#model-refresh')
 })
 
 it('retired briefing bookmarks open Agents and keep request links', async () => {
