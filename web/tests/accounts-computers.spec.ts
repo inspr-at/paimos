@@ -256,6 +256,7 @@ test('the head keeps its height, and the toggle stays put, whether or not Verify
 // width alone, never by what is shown, so these controls keep their place through hover, focus and
 // unfolding (which removes Verify again), and nothing leaves the card at any width in between.
 test('Away with an expired verification keeps the head inside the card and its controls put at 640, 720 and 800', async ({ page }) => {
+  test.setTimeout(90_000) // the same kind of width scan: ~17 s on CI against the 30 s default
   await page.setViewportSize({ width: 800, height: 3000 })
   const { capacity } = await setup(page, { away: true, thresholds: { early_percent: 10, urgent_percent: 3 } })
   expireClaude(capacity)
@@ -330,6 +331,9 @@ async function wideAway(page: Page, width: number) {
 // Retain the positive-case guard over every original width. The actual fold
 // interactions run below in bounded groups, instead of 82 clicks in one case.
 test('the wide status scan encounters Away beside Verify again', async ({ page }) => {
+  // The old single scan folded and unfolded 41 widths and failed on the last width under the 30 s
+  // default (AEON-887 and AEON-886 merge queues). The budget only guards against a hang.
+  test.setTimeout(90_000)
   const { verify, measure } = await wideAway(page, 1100)
   let shared = 0
   for (let width = 1100; width >= 700; width -= 10) {
@@ -347,6 +351,8 @@ test('the wide status scan encounters Away beside Verify again', async ({ page }
 for (const first of [1100, 1020, 940, 860, 780, 700]) {
   const last = Math.max(700, first - 70)
   test(`Away and Back now stay put through fold and unfold from ${first} to ${last}px`, async ({ page }) => {
+    // Same hang-only budget as the wide-status scan this case was split from (AEON-887).
+    test.setTimeout(90_000)
     const { verify, measure } = await wideAway(page, first)
     for (let width = first; width >= last; width -= 10) {
       await page.setViewportSize({ width, height: 3000 })
