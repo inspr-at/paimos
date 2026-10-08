@@ -38,14 +38,12 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await composer.fill('Bitte die ausführliche Freigabeprüfung und den vollständigen Übergabebericht berücksichtigen.')
     await composer.blur()
     await page.clock.pauseAt(new Date(now + 60_000))
+    // AEON-942 removed the Simple/Steer toggle: session-bound messages have one
+    // delivery path, so the guard measures the composer, its Send and the frame.
     const guard = await controlStability(page, {
       frame: panel, messages: messagesTab(page), composer,
-      delivery: panel.getByRole('radiogroup', { name: 'Delivery' }),
-      simple: panel.getByRole('radio', { name: 'Simple' }),
-      steer: panel.getByRole('radio', { name: 'Steer' }),
       send: panel.getByRole('button', { name: 'Send', exact: true }),
     })
-    await guard.check(() => panel.getByRole('radio', { name: 'Steer' }).click())
     let release!: () => void
     let entered!: () => void
     const started = new Promise<void>(resolve => { entered = resolve })
