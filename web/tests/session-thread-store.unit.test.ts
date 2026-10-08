@@ -53,3 +53,28 @@ it('a burst during a slow poll starts one catch-up and one trailing read', async
   expect(listMessages).toHaveBeenCalledTimes(3)
   expect(store.thread(session('first')).map(m => m.id)).toEqual(['1', '2', '3'])
 })
+
+it('a denied session read clears its thread without changing another thread', async () => {
+  const { APIError } = await import('../src/lib/api')
+  const store = useAgents()
+  vi.mocked(listMessages).mockResolvedValueOnce(page(1)).mockResolvedValueOnce(page(2))
+  await store.refreshThread('project', 'first'); await store.refreshThread('project', 'second')
+  vi.mocked(listMessages).mockRejectedValueOnce(new APIError(403, 'forbidden', {}))
+  await store.refreshThread('project', 'first')
+  expect(store.thread(session('first'))).toEqual([])
+  expect(store.threadState(session('first'))).toBe('forbidden')
+  expect(store.thread(session('second')).map(m => m.id)).toEqual(['2'])
+  expect(store.threadState(session('second'))).toBe('ready')
+})
+
+it('an authentication reset drops both stored messages and an older response', async () => {
+  const { resetPositions } = await import('../src/lib/position')
+  const store = useAgents()
+  let finish!: (value: MessagePage) => void
+  vi.mocked(listMessages).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const stale = store.refreshThread('project', 'first')
+  resetPositions()
+  expect(store.thread(session('first'))).toEqual([])
+  finish(page(1)); await stale
+  expect(store.thread(session('first'))).toEqual([])
+})

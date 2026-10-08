@@ -38,11 +38,11 @@ for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as 
     await composer.fill('Bitte die ausführliche Freigabeprüfung und den vollständigen Übergabebericht berücksichtigen.')
     await composer.blur()
     await page.clock.pauseAt(new Date(now + 60_000))
-    // AEON-942 removed the Simple/Steer toggle: session-bound messages have one
-    // delivery path, so the guard measures the composer, its Send and the frame.
+    // Per-send actions replace the old delivery toggle. Live arrivals must
+    // preserve the composer, its primary action and the frame.
     const guard = await controlStability(page, {
       frame: panel, messages: messagesTab(page), composer,
-      send: panel.getByRole('button', { name: 'Send', exact: true }),
+      send: panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true }),
     })
     let release!: () => void
     let entered!: () => void
@@ -628,22 +628,22 @@ test('own posts show quiet delivery ticks from the sender status', async ({ page
   await expect(mine).toHaveCount(3)
   await expect(mine.first().locator('.delivery.read')).toHaveAttribute('data-tip', /^Read by the session · /)
   await expect(mine.first().locator('.delivery.read')).toContainText('Read')
-  await expect(mine.last().locator('.delivery.sent')).toHaveAttribute('data-tip', 'Sent · waiting for the session to pick it up')
+  await expect(mine.last().locator('.delivery.sent')).toHaveAttribute('data-tip', 'On its way to the agent.')
   // Only the viewer's own posts are asked for, never the agent's.
   const own = new Set(messages.filter(m => m.sender_principal_id === me.id).map(m => m.id))
   expect(receipts.length).toBeGreaterThan(0)
   expect(receipts.every(id => own.has(id))).toBe(true)
 })
 
-test('a managed session has no composer or Reply; Steer lives in the session controls (AEON-260)', async ({ page }) => {
+test('a managed session keeps its composer and Reply alongside the session controls (AEON-975)', async ({ page }) => {
   const { worker } = await setup(page, { count: 4, storage: { 'aeon.session-tab': 'messages' } })
   worker.advertised_capabilities = [...worker.advertised_capabilities, 'managed_control_v1']
   await page.goto(`/agents/${worker.id}`)
   const panel = panelOf(page)
   await expect(panel.locator('.msg').first()).toBeVisible()
-  await expect(panel.locator('.composer')).toHaveCount(0)
-  await expect(panel.getByRole('button', { name: 'Reply' })).toHaveCount(0)
-  await expect(panel.getByText('Steer this managed session with the controls above.')).toBeVisible()
+  await expect(panel.locator('.composer')).toBeVisible()
+  await expect(panel.getByRole('button', { name: 'Reply' }).first()).toBeVisible()
+  await expect(panel.getByText('Steer this managed session with the controls above.')).toHaveCount(0)
 })
 
 test.describe('phone screenshots', () => {
@@ -677,7 +677,7 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     await page.goto(`/agents/${worker.id}`)
     const panel = panelOf(page)
     const field = panel.getByRole('textbox', { name: `Message to ${worker.display_label}` })
-    const send = panel.getByRole('button', { name: 'Send', exact: true })
+    const send = panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true })
     await expect(field).toBeVisible()
     await expect(panel.getByRole('radiogroup', { name: 'Delivery' })).toHaveCount(0)
     await expect(panel.getByRole('radio', { name: 'Steer', exact: true })).toHaveCount(0)
@@ -691,14 +691,14 @@ for (const theme of ['light', 'dark'] as const) for (const width of [390, 1024, 
     try {
       const text = 'Bitte die Freigabeprüfung vollständig durchführen und das abschließende Ergebnis hier im Gespräch festhalten.'
       await guard.check(() => field.fill(text))
-      await guard.check(async () => { await send.click(); await expect(send).toHaveAttribute('aria-busy', 'true') })
-      await guard.check(async () => { release(); await expect(field).toHaveValue(''); await expect(send).toHaveAttribute('aria-busy', 'false') })
+      await guard.check(async () => { await send.click(); await expect(field).toHaveValue(''); await expect(panel.getByText(text, { exact: true })).toBeVisible(); await expect(panel.locator('.msg').last().getByText('Sending', { exact: true })).toBeVisible() })
+      await guard.check(async () => { release(); await expect.poll(() => data.sent.length).toBe(1); await expect(field).toHaveValue(''); await expect(panel.getByText(text, { exact: true })).toHaveCount(1) })
       const sent = calls.filter(call => call.method === 'POST' && call.path.endsWith('/messages')).at(-1)
       expect(sent?.body).toMatchObject({ body: text, recipient_session_id: worker.id, delivery_level: 'simple' })
       expect(data.sent).toHaveLength(1)
       guard.done()
       expect(await noHorizontalScroll(page)).toEqual({ doc: true, panel: true, inner: true })
-      await page.screenshot({ path: testInfo.outputPath(`chat-${theme}-${width}.png`), fullPage: true })
+      await page.screenshot({ path: testInfo.outputPath(`aeon-975-chatbasics/chat-${theme}-${width}.png`), fullPage: true })
     } finally { release() }
   })
 }
@@ -709,7 +709,7 @@ test('a held-request 403 keeps the session composer (AEON-942)', async ({ page }
   await page.goto(`/agents/${worker.id}`)
   const panel = panelOf(page)
   const field = panel.getByRole('textbox', { name: 'Message to release-lead' })
-  const send = panel.getByRole('button', { name: 'Send', exact: true })
+  const send = panel.getByRole('button', { name: /^(Send|After this turn)$/, exact: true })
   const denied = panel.getByText('Reading this session requires access to its project and permission to read agent sessions.')
   const unread = panel.getByText('Messages could not be loaded right now. Close and reopen the session to try again.')
   const pendingReads = () => calls.filter(call => call.method === 'GET' && call.path.endsWith('/messages') && call.query?.get('pending') === 'true').length
@@ -739,3 +739,52 @@ test('a held-request 403 keeps the session composer (AEON-942)', async ({ page }
   await expect(unread).toHaveCount(0)
   await expect(panel.getByText('Still here', { exact: true })).toBeVisible()
 })
+
+for (const locale of ['en', 'de'] as const) for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark'] as const) {
+  test(`managed optimistic input and retry ${theme} ${width}${locale === 'de' ? ' German' : ''}`, async ({ page }, testInfo) => {
+    const { worker, calls } = await setup(page, { admin: false, theme, count: 3 })
+    Object.assign(worker, { management_mode: 'managed', activity: 'busy', advertised_capabilities: ['inbox', 'steer', 'interrupt', 'managed_control_v1'] })
+    if (locale === 'de') await page.route('**/api/me/profile', route => route.fulfill({ json: { principal_id: me.id, locale: 'de', avatar_hashes: {}, initials: 'MB', first_name: 'Markus', last_name: 'Barta', preferred_name: 'Markus', short_name: 'markus', timezone: 'Europe/Vienna', greeting_enabled: false, avatar_color: '#888888', week_start: 1, revision: 1 } }))
+    const words = locale === 'de' ? { message: 'Nachricht an release-lead', after: 'Nach dieser Runde', now: 'Jetzt senden', sending: 'Wird gesendet', retry: 'Erneut senden' } : { message: 'Message to release-lead', after: 'After this turn', now: 'Send now', sending: 'Sending', retry: 'Retry' }
+    await page.setViewportSize({ width, height: 900 })
+    await page.goto(`/agents/${worker.id}?tab=messages`)
+    const panel = panelOf(page)
+    const field = panel.getByRole('textbox', { name: words.message })
+    const after = panel.getByRole('button', { name: words.after, exact: true })
+    const nowButton = panel.getByRole('button', { name: words.now, exact: true })
+    await expect(field).toBeVisible()
+    await field.focus()
+    const guard = await controlStability(page, { field, after, now: nowButton, frame: panel })
+    let release!: () => void
+    let entered!: () => void
+    const started = new Promise<void>(resolve => { entered = resolve })
+    const held = new Promise<void>(resolve => { release = resolve })
+    const payloads: Record<string, unknown>[] = []
+    await page.route('**/api/projects/*/messages', async route => {
+      if (route.request().method() !== 'POST') return route.fallback()
+      payloads.push(route.request().postDataJSON())
+      if (payloads.length === 1) { entered(); await held; return route.fulfill({ status: 503, json: { error: 'fixture unavailable' } }) }
+      return route.fallback()
+    })
+    const text = 'Bitte die ausführliche Freigabeprüfung nach dieser Runde durchführen und den vollständigen Übergabebericht hier festhalten.'
+    try {
+      await guard.check(async () => {
+        await field.fill(text); await field.press('Enter'); await started
+        await expect(field).toHaveValue('')
+        await expect(panel.getByText(text, { exact: true })).toBeVisible()
+        await expect(panel.locator('.msg').last().getByText(words.sending, { exact: true })).toBeVisible()
+      })
+      await field.fill('A newer draft stays here')
+      await guard.check(async () => { release(); await expect(panel.getByRole('button', { name: words.retry, exact: true })).toBeVisible() })
+      await guard.check(async () => { await panel.getByRole('button', { name: words.retry, exact: true }).click(); await expect.poll(() => payloads.length).toBe(2); await expect(field).toHaveValue('A newer draft stays here') })
+      expect(payloads[0].delivery_level).toBe('simple')
+      expect(payloads[1].idempotency_key).toBe(payloads[0].idempotency_key)
+      await guard.check(async () => { await field.press('Control+Enter'); await expect.poll(() => payloads.length).toBe(3); await expect(field).toHaveValue('') })
+      expect(payloads[2].delivery_level).toBe('steer')
+      expect(payloads[2].idempotency_key).not.toBe(payloads[0].idempotency_key)
+      await expect.poll(() => calls.filter(call => call.method === 'POST' && call.path.endsWith('/messages')).length).toBe(2)
+      guard.done()
+      await page.screenshot({ path: testInfo.outputPath(`aeon-975-chatbasics/managed-${locale}-${theme}-${width}.png`) })
+    } finally { release?.() }
+  })
+}

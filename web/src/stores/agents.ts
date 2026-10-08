@@ -178,6 +178,9 @@ export const useAgents = defineStore('agents', () => {
   const messagingState = ref<Availability>('idle')
   const pendingHeld = ref<Record<string, ProjectMessage[]>>({})
   const threads = ref<Record<string, ProjectMessage[]>>({})
+  const threadStates = ref<Record<string, Availability>>({})
+  let threadGeneration = 0
+  onReset(() => { threadGeneration++; threads.value = {}; threadStates.value = {}; messagingState.value = 'idle' })
   const addresses = ref<Record<string, string>>({})
   const runs = shallowRef<Record<string, AgentRun>>({})
   const agentRuns = ref<Record<string, string[]>>({})
@@ -311,6 +314,7 @@ export const useAgents = defineStore('agents', () => {
   // Further requests join the catch-up and leave one trailing read.
   const threadFlights = new Map<string, { again: boolean; catchingUp: boolean; promise: Promise<void> }>()
   function refreshThread(projectId: string, sessionId: string): Promise<void> {
+    const generation = threadGeneration
     const pending = threadFlights.get(sessionId)
     if (pending?.catchingUp) { pending.again = true; return pending.promise }
     if (pending) pending.catchingUp = true
@@ -321,11 +325,13 @@ export const useAgents = defineStore('agents', () => {
         flight.again = false
         try {
           await readOrdered(orderFor(threadOrders, sessionId), () => listMessages(projectId, { session: sessionId, limit: 200 }), page => {
+            if (generation !== threadGeneration) return
+            threadStates.value = { ...threadStates.value, [sessionId]: 'ready' }
             threads.value = { ...threads.value, [sessionId]: page.items }
             learnAddresses(page.items)
             if (messagingState.value !== 'ready') messagingState.value = 'ready'
           })
-        } catch (e) { if (messagingState.value !== 'ready') messagingState.value = availability(e) }
+        } catch (e) { if (generation === threadGeneration) { threadStates.value = { ...threadStates.value, [sessionId]: availability(e) }; if (availability(e) === 'forbidden') threads.value = { ...threads.value, [sessionId]: [] }; messagingState.value = availability(e) } }
       } while (flight.again)
     })().finally(() => { if (threadFlights.get(sessionId) === flight) threadFlights.delete(sessionId) })
     return flight.promise
@@ -436,6 +442,7 @@ export const useAgents = defineStore('agents', () => {
   // Oldest first for reading; the server returns the newest 200.
   const thread = (session: HarnessSession) => (threads.value[session.id] ?? [])
     .slice().sort((a, b) => a.sent_event_id - b.sent_event_id)
+  const threadState = (session: HarnessSession) => threadStates.value[session.id] ?? 'idle'
   const addressOf = (principalId: string) => addresses.value[principalId] ?? ''
 
   // ---------- One rule for every write (AEON-402) ----------
@@ -540,11 +547,12 @@ export const useAgents = defineStore('agents', () => {
   }
   // `to` is the registered harness address when one exists, otherwise the principal id.
   // recipient_session_id is always the open generation and is never dropped.
-  async function send(session: HarnessSession, to: string, body: string, level: 'simple' | 'steer', replyTo?: string) {
-    await sendMessage(session.project_id, { to, body, recipient_session_id: session.id, idempotency_key: crypto.randomUUID(), expects_reply: false, is_action_request: false, delivery_level: level, ...(replyTo ? { reply_to: replyTo } : {}) })
+  async function send(session: HarnessSession, to: string, body: string, level: 'simple' | 'steer', replyTo?: string, clientId: string = crypto.randomUUID()) {
+    const message = await sendMessage(session.project_id, { to, body, recipient_session_id: session.id, idempotency_key: clientId, expects_reply: false, is_action_request: false, delivery_level: level, ...(replyTo ? { reply_to: replyTo } : {}) })
     // A message can change what the lists show (held requests, reply obligations); the open thread is read first.
     void afterWrite()
-    await refreshThread(session.project_id, session.id)
+    void refreshThread(session.project_id, session.id)
+    return message
   }
   async function setAccount(account: AgentAccount, state: AgentAccount['state']) {
     const updated = await setAccountState(account.id, state)
@@ -570,7 +578,7 @@ export const useAgents = defineStore('agents', () => {
     now, sessions, sessionsState, sessionsError, sessionsUpdatedAt, sessionsStale, refreshStale, approvals, approvalsState, approvalsError, approvalsHardError, accounts, accountsState, accountsUpdatedAt, messagingState, runs, nodes, controls, models, eventPulseFor,
     loading, loaded, pending, held, needsCount, views, removedViews, historyViews, historyState, historyMore, loadHistory, loadOlderHistory, recordSession, loadSessionDetail, admitSessions, sessionById, admitRun, admitRuns, grouped,
     loadAll, loadNeeds, ensureTicket, refreshApprovals, refreshAccounts, refreshSessions, refreshThread, refreshAgentRuns, tick, deliveryPulse, deliveryChanged, threadPulse, threadChanged,
-    viewOf, byAgent, forTicket, recentRuns, askerName, thread, addressOf, decide, revoke, resolve, control, send, setAccount, removeAccount, cancelQueuedRun,
+    viewOf, byAgent, forTicket, recentRuns, askerName, thread, threadState, addressOf, decide, revoke, resolve, control, send, setAccount, removeAccount, cancelQueuedRun,
     invalidatePolls, afterWrite, onWrite,
   }
 })

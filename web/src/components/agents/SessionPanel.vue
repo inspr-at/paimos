@@ -435,9 +435,9 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }) })
   .head-actions .btn { flex: 1 1 0; min-width: 0; min-height: 44px; padding-inline: 4px; }
   .head-top .icon-btn { width: 40px; height: 40px; }
   /* While typing (keyboard open) the thread gets the room: controls and ticket step aside. */
-  .session-panel:has(#session-panel-messages textarea:focus) .head-actions,
-  .session-panel:has(#session-panel-messages textarea:focus) .head-sub,
-  .session-panel:has(#session-panel-messages textarea:focus) .managed-controls { display: none; }
+  .session-panel:has(#session-panel-messages:focus-within) .head-actions,
+  .session-panel:has(#session-panel-messages:focus-within) .head-sub,
+  .session-panel:has(#session-panel-messages:focus-within) .managed-controls { display: none; }
   .scroll { padding: 16px 18px 24px; }
   .telemetry { grid-template-columns: 1fr 1fr; }
   .run-row { grid-template-columns: 88px minmax(0, 1fr) 56px; }

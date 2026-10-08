@@ -107,7 +107,7 @@ export function statusLabel(status: MessageStatus): string {
     case 'read': return 'Read'
     case 'delivered': return 'Delivered'
     case 'not_delivered': return status.reason ? `Not delivered · ${reasonText(status.reason)}` : 'Not delivered'
-    default: return 'Sent'
+    default: return 'Sending'
   }
 }
 export function statusTip(status: MessageStatus, format: (iso: string) => string): string {
@@ -115,7 +115,7 @@ export function statusTip(status: MessageStatus, format: (iso: string) => string
     case 'read': return status.read_at ? `Read by the session · ${format(status.read_at)}` : 'Read by the session'
     case 'delivered': return status.delivered_at ? `Delivered to the session · ${format(status.delivered_at)}` : 'Delivered to the session'
     case 'not_delivered': return 'It will not arrive later. Send it again once the session is listening.'
-    default: return 'Sent · waiting for the session to pick it up'
+    default: return 'On its way to the agent.'
   }
 }
 export const statusDone = (status?: MessageStatus) => status?.status === 'read' || status?.status === 'not_delivered'
@@ -214,3 +214,22 @@ export const hookNoticeVisible = (awaits: boolean, receipts: HookReceipts) => aw
 // Within this distance of the end the thread counts as read to the bottom.
 export const nearBottom = (el: { scrollHeight: number; scrollTop: number; clientHeight: number }, slack = 32) =>
   el.scrollHeight - el.scrollTop - el.clientHeight <= slack
+
+// Receipt reads may complete out of order. Evidence never moves backwards.
+export function advanceReceipt(held: MessageStatus | undefined, next: MessageStatus): MessageStatus {
+  if (!held) return next
+  const rank = { sent: 0, delivered: 1, read: 2, not_delivered: 2 }
+  if (rank[next.status] < rank[held.status] || held.status === 'read' || held.status === 'not_delivered') return held
+  return next
+}
+// Chat's approved exception to the general field-submit convention. IME and
+// native browser shortcuts remain untouched.
+export function chatSendLevel(event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'altKey' | 'metaKey' | 'ctrlKey' | 'isComposing'>, canSteer: boolean): 'simple' | 'steer' | null {
+  if (event.key !== 'Enter' || event.isComposing || event.shiftKey || event.altKey) return null
+  return canSteer && (event.metaKey || event.ctrlKey) ? 'steer' : 'simple'
+}
+
+export const chatWords = {
+  en: { pendingLimit: 'Too many pending messages. Retry an existing message or wait for it to appear in the thread.', send: 'Send', now: 'Send now', after: 'After this turn', newline: 'new line', sending: 'Sending', delivered: 'Delivered', read: 'Read', failed: 'Not delivered', retry: 'Retry', message: 'Message to', placeholder: 'Message', reply: 'Reply' },
+  de: { pendingLimit: 'Zu viele ausstehende Nachrichten. Eine vorhandene Nachricht erneut senden oder warten, bis sie im Gespräch erscheint.', send: 'Senden', now: 'Jetzt senden', after: 'Nach dieser Runde', newline: 'neue Zeile', sending: 'Wird gesendet', delivered: 'Zugestellt', read: 'Gelesen', failed: 'Nicht zugestellt', retry: 'Erneut senden', message: 'Nachricht an', placeholder: 'Nachricht an', reply: 'Antworten' },
+} as const

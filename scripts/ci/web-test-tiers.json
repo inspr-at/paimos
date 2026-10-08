@@ -10432,7 +10432,7 @@
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a late server read marker opens the thread at the first unread message","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
-    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a managed session has no composer or Reply; Steer lives in the session controls (AEON-260)","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a managed session keeps its composer and Reply alongside the session controls (AEON-975)","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"a tap at the bottom keeps following new posts","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -10459,6 +10459,30 @@
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"focusing the window picks up a read from another device","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"keydown before a late read marker preserves the reader's position before scroll dispatch","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1024 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 1440 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry dark 390 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1024","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1024 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1440","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 1440 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 390","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
+    ,
+    {"kind":"browser","file":"tests/session-chat.spec.ts","name":"managed optimistic input and retry light 390 German","config":"playwright.ui.config.ts","project":"","tier":"ESSENTIAL"}
     ,
     {"kind":"browser","file":"tests/session-chat.spec.ts","name":"own posts show quiet delivery ticks from the sender status","config":"playwright.ui.config.ts","project":"","tier":"NIGHTLY"}
     ,
@@ -13370,9 +13394,13 @@
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"a reload rebuilds the hook wait from the loaded thread and its receipts (AEON-369)","tier":"GATED-FULL"}
     ,
+    {"kind":"node","file":"tests/sessionChat.test.ts","name":"chat keys distinguish after-turn input, steer and composition","tier":"ESSENTIAL"}
+    ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"delivery wording is short and specific (AEON-280)","tier":"GATED-FULL"}
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"near the bottom allows a small slack","tier":"GATED-FULL"}
+    ,
+    {"kind":"node","file":"tests/sessionChat.test.ts","name":"receipt catch-up cannot replace Read with Sending or a late failure","tier":"ESSENTIAL"}
     ,
     {"kind":"node","file":"tests/sessionChat.test.ts","name":"the hook notice follows each pending send, including a terminal failure (AEON-369)","tier":"GATED-FULL"}
     ,
@@ -15590,7 +15618,11 @@
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a burst during a slow poll starts one catch-up and one trailing read","tier":"ESSENTIAL"}
     ,
+    {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a denied session read clears its thread without changing another thread","tier":"ESSENTIAL"}
+    ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"a slow poll cannot overwrite the reply loaded after a send","tier":"ESSENTIAL"}
+    ,
+    {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"an authentication reset drops both stored messages and an older response","tier":"ESSENTIAL"}
     ,
     {"kind":"vitest","file":"tests/session-thread-store.unit.test.ts","name":"filters before limiting and keeps two sessions of one principal separate","tier":"ESSENTIAL"}
     ,

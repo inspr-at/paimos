@@ -117,7 +117,7 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(mine.nth(1).locator('.delivery')).toHaveText('Delivered')
       await expect(mine.nth(2).locator('.undelivered')).toHaveText('Not delivered · the session ended')
       await expect(mine.nth(2).locator('.delivery')).toHaveCount(0)
-      await expect(mine.nth(3).locator('.delivery')).toHaveText('Sent')
+      await expect(mine.nth(3).locator('.delivery')).toHaveText('Sending')
       // Only the viewer's own posts are asked for.
       const own = new Set(messages.filter(m => m.sender_principal_id === me.id).map(m => m.id))
       expect(asked.flat().every(id => own.has(id))).toBe(true)

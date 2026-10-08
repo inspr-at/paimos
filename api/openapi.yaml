@@ -2784,7 +2784,7 @@ paths:
     get:
       operationId: "listChatMessages"
       x-aeon-package: "R2"
-      description: "Reserved chat-v1 contract for R2; not mounted by R1. Default latest 50, max 100, ascending display order. before/after/around_message are mutually exclusive; opaque cursors bind caller and conversation. Page at most 1 MiB, even if fewer than the count limit. Snapshot and migration epoch accompany exact per-message person read state. Imported source audiences remain enforced."
+      description: "Mounted opt-in chat-v1 R2 participant history contract. Default latest 50, max 100, ascending display order. before/after/around_message are mutually exclusive; opaque cursors bind caller and conversation. Page at most 1 MiB, even if fewer than the count limit. Snapshot and migration epoch accompany exact per-message person read state. Imported source audiences remain enforced."
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}}, {"name": "before", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "after", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "around_message", "in": "query", "required": false, "schema": {"type": "string", "format": "uuid"}}]
       responses:
         '200':
@@ -2875,7 +2875,7 @@ paths:
     get:
       operationId: "getChatReadMarker"
       x-aeon-package: "R2"
-      description: "Reserved chat-v1 contract for R2; not mounted by R1. Person participant only. At most 64 exact 512-byte bitmap chunks per 128 KiB keyset page, separate from the contiguous prefix. A greatest-position watermark never implies seeing unloaded messages."
+      description: "Mounted opt-in chat-v1 R2 participant history contract. Person participant only. At most 64 exact 512-byte bitmap chunks per 128 KiB keyset page, separate from the contiguous prefix. A greatest-position watermark never implies seeing unloaded messages."
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}, {"name": "cursor", "in": "query", "required": false, "schema": {"type": "string", "maxLength": 4096}}, {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 64, "default": 64}}]
       responses:
         '200':
@@ -2895,7 +2895,7 @@ paths:
     put:
       operationId: "unionChatSeenMessages"
       x-aeon-package: "R2"
-      description: "Reserved chat-v1 contract for R2; not mounted by R1. Person participant only. Within a 16 KiB request, union up to 100 explicitly visible authorized IDs; lock chunks in increasing order, touch at most 100 chunks and compact at most 16 chunks with a five-second deadline; reads, background fetches and delivery receipts never mark messages seen. Preserve unloaded gaps and migration unknown-state provenance. Reauthorize inside the final write transaction."
+      description: "Mounted opt-in chat-v1 R2 participant history contract. Person participant only. Within a 16 KiB request, union up to 100 explicitly visible authorized IDs; lock chunks in increasing order, touch at most 100 chunks and compact at most 16 chunks with a five-second deadline; reads, background fetches and delivery receipts never mark messages seen. Preserve unloaded gaps and migration unknown-state provenance. Reauthorize inside the final write transaction."
       parameters: [{"name": "id", "in": "path", "required": true, "schema": {"type": "string", "format": "uuid"}}]
       responses:
         '200':
@@ -7370,7 +7370,7 @@ paths:
               properties:
                 delivery_id: {type: string, format: uuid}
                 cursor: {type: integer, minimum: 1}
-                effective_level: {type: string, enum: [simple], default: simple}
+                effective_level: {type: string, enum: [simple, steer], default: simple}
                 outcome: {type: string, enum: [handed_off, failed], default: handed_off}
                 failure_reason: {type: string, enum: [outcome_unconfirmed, child_unavailable]}
       responses:
@@ -7459,9 +7459,17 @@ paths:
     post:
       operationId: drainHarnessInbox
       description: "Existing managed inbox or an explicitly paired attached hook. Attached hooks lease only exact-session messages; an unfinished lease is replayed until the foreground hook confirms handoff. Reconnect never acknowledges messages. Requires existing harness.worker authority and this registration's worker lease."
-      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false}}}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                delivery_level: {type: string, enum: [steer], description: "While a turn is busy, lease only boundary input; omitted selects the ordinary FIFO between turns."}
       responses:
-        '200': {description: Empty or one replayable delivery, content: {application/json: {schema: {type: array, maxItems: 1, items: {type: object, required: [delivery_id, message_id, cursor, sender_principal_id, body, leased_at], properties: {delivery_id: {type: string, format: uuid}, message_id: {type: string, format: uuid}, cursor: {type: integer, format: int64}, sender_principal_id: {type: string, format: uuid}, project_id: {type: string, format: uuid, description: 'Originating project for a project message; omitted for principal inbox messages'}, reply_to_id: {type: string, format: uuid, description: 'Project message parent for replies; may differ from the inbox message ID'}, sender_session_id: {type: string, format: uuid, description: 'Original sender generation, when bound'}, body: {type: string}, leased_at: {type: string, format: date-time}}}}}}}
+        '200': {description: Empty or one replayable delivery, content: {application/json: {schema: {type: array, maxItems: 1, items: {type: object, required: [delivery_id, message_id, cursor, sender_principal_id, body, leased_at], properties: {delivery_level: {type: string, enum: [simple, steer], description: "Requested input timing; simple waits for the current turn to end and steer uses the supported input boundary"}, delivery_id: {type: string, format: uuid}, message_id: {type: string, format: uuid}, cursor: {type: integer, format: int64}, sender_principal_id: {type: string, format: uuid}, project_id: {type: string, format: uuid, description: 'Originating project for a project message; omitted for principal inbox messages'}, reply_to_id: {type: string, format: uuid, description: 'Project message parent for replies; may differ from the inbox message ID'}, sender_session_id: {type: string, format: uuid, description: 'Original sender generation, when bound'}, body: {type: string}, leased_at: {type: string, format: date-time}}}}}}}
         '403': {description: Worker proof rejected}
         '409': {description: An existing managed inbox or paired attached hook is required}
         '410': {description: Archived generation}

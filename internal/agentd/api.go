@@ -341,8 +341,12 @@ func (r *Remote) YieldHarness(ctx context.Context, s HarnessSession) ([]HarnessC
 }
 
 func (r *Remote) DrainHarness(ctx context.Context, s HarnessSession) ([]HarnessDelivery, error) {
+	return r.DrainHarnessInput(ctx, s, "")
+}
+
+func (r *Remote) DrainHarnessInput(ctx context.Context, s HarnessSession, level string) ([]HarnessDelivery, error) {
 	var result []HarnessDelivery
-	err := r.harnessWorker(ctx, s, "/drain", struct{}{}, &result)
+	err := r.harnessWorker(ctx, s, "/drain", map[string]string{"delivery_level": level}, &result)
 	return result, err
 }
 
@@ -369,7 +373,11 @@ func terminalControlCompletion(message string) bool {
 }
 
 func (r *Remote) CompleteHarnessDelivery(ctx context.Context, s HarnessSession, d HarnessDelivery) error {
-	body := map[string]any{"delivery_id": d.ID, "cursor": d.Cursor, "effective_level": "simple"}
+	level := d.Level
+	if level == "" {
+		level = "simple"
+	}
+	body := map[string]any{"delivery_id": d.ID, "cursor": d.Cursor, "effective_level": level}
 	if d.Outcome != "" {
 		body["outcome"] = d.Outcome
 	}

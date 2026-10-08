@@ -6,12 +6,14 @@ import { messageStatuses, type MessageStatus, type ProjectMessage } from '../../
 import { readSessionMarker, writeSessionMarker } from '../../lib/agentRows'
 import { useAgents, type SessionView } from '../../stores/agents'
 import { useSession } from '../../stores/session'
+import { useProfile } from '../../stores/profile'
+import { toast } from '../../lib/toast'
 import AppIcon from '../AppIcon.vue'
 import KeyCap from '../KeyCap.vue'
 import SessionMessages from './SessionMessages.vue'
 import SessionRequests from './SessionRequests.vue'
 import { collapseMessages } from './sessionMessages'
-import { awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
+import { advanceReceipt, chatSendLevel, chatWords, awaitsInboxHook, hookDeliveryNotice, hookNoticeVisible, hookReceipts, keepFailedReadMark, loadReadMark, markerFromServer, nearBottom, preferReadMark, queueReadMark, readMarkFlushDelay, receiptQueryBatches, saveReadMark, sessionBoundSends, unreadGroups, type ReadMark } from './sessionChat'
 
 // The Messages tab of the session panel (AEON-273): the thread with a read
 // watermark per viewer, a pinned bottom with a jump button, and the composer.
@@ -19,24 +21,33 @@ const props = defineProps<{ view: SessionView; now: number; canWrite: boolean; a
 const emit = defineEmits<{ unread: [count: number] }>()
 const agents = useAgents()
 const identity = useSession()
+const profile = useProfile()
+const words = computed(() => chatWords[profile.profile?.locale.startsWith('de') ? 'de' : 'en'])
 const me = computed(() => identity.identity?.principal.id ?? '')
 const person = computed(() => identity.identity?.principal.kind === 'person')
 const s = computed(() => props.view.session)
-const messages = computed(() => agents.thread(s.value))
+const localSends = ref<ProjectMessage[]>([])
+const messages = computed(() => {
+  if (!me.value) return []
+  const server = agents.thread(s.value)
+  const known = new Set(server.map(message => message.id))
+  return [...server, ...localSends.value.filter(message => !known.has(message.id))]
+})
 const address = computed(() => agents.addressOf(s.value.agent_principal_id))
 // A registered address is sent when one exists. Otherwise the recipient is the session's principal.
 const recipient = computed(() => address.value || s.value.agent_principal_id)
 const current = computed(() => collapseMessages(messages.value))
 const ended = computed(() => s.value.phase === 'stopped' || !!s.value.stopped_at || !!s.value.archived_at)
-// Managed sessions (AEON-260) take input only through the Session controls above:
-// no composer and no Reply here.
-const managed = computed(() => s.value.advertised_capabilities.includes('managed_control_v1'))
+const canSteer = computed(() => s.value.management_mode === 'managed' && s.value.advertised_capabilities.includes('steer'))
 // Unmanaged sessions take rename/model requests next to the composer (AEON-225).
 const unmanaged = computed(() => s.value.management_mode === 'unmanaged')
 
+watch(() => agents.thread(s.value).map(message => message.id).join(), () => {
+  const known = new Set(agents.thread(s.value).map(message => message.id))
+  localSends.value = localSends.value.filter(message => !known.has(message.id))
+})
 const draft = ref('')
 const replyTo = ref<ProjectMessage | null>(null)
-const sending = ref(false)
 const sendError = ref('')
 
 // ---------- Read state ----------
@@ -413,13 +424,13 @@ function refreshReceipts() {
   const visible = current.value.filter(m => m.sender_principal_id === me.value).slice(-30).map(m => m.id)
   const batches = receiptQueryBatches(boundHookIds.value, visible, statuses.value)
   if (!batches.length) return
-  const session = s.value.id
+  const session = s.value.id, viewer = me.value, generation = readGeneration
   statusFlight = (async () => {
     for (const ids of batches) {
       const page = await messageStatuses(ids)
-      if (s.value.id !== session) return
+      if (s.value.id !== session || me.value !== viewer || readGeneration !== generation) return
       const next = { ...statuses.value }
-      for (const item of page.items) next[item.message_id] = item
+      for (const item of page.items) next[item.message_id] = advanceReceipt(next[item.message_id], item)
       statuses.value = next
     }
   })().catch(() => { /* The status simply stays as it was. */ }).finally(() => {
@@ -433,14 +444,14 @@ watch(() => agents.deliveryPulse, () => refreshReceipts())
 async function refresh() {
   await agents.refreshThread(s.value.project_id, s.value.id)
 }
-watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
+watch([() => me.value, () => s.value.id], async ([viewer, id], before) => {
   const generation = ++readGeneration
   if (flushTimer !== undefined) { clearTimeout(flushTimer); flushTimer = undefined }
   const leftover = pending
   const leftoverProject = boundProject
   const leftoverSession = boundSession
   pending = null
-  if (leftover && person.value && leftoverSession && leftoverSession !== id) void sendMark(leftoverProject, leftoverSession, viewer, generation - 1, leftover).catch(() => undefined)
+  if (leftover && person.value && before?.[0] === viewer && leftoverSession && leftoverSession !== id) void sendMark(leftoverProject, leftoverSession, viewer, generation - 1, leftover).catch(() => undefined)
   const local = viewer ? loadReadMark(viewer, id) : null
   mark.value = local
   statuses.value = {}
@@ -451,13 +462,13 @@ watch([() => me.value, () => s.value.id], async ([viewer, id]) => {
   touchY = undefined
   markerHold = viewer && person.value && !local ? generation : 0
   seen?.disconnect()
-  draft.value = ''; replyTo.value = null; sendError.value = ''; sending.value = false
+  draft.value = ''; replyTo.value = null; sendError.value = ''; localSends.value = []
   const projectId = s.value.project_id
   boundProject = projectId
   boundSession = id
   // The thread renders from the messages read. The marker catches up after.
   if (viewer && person.value) void pullReadMark(projectId, id, viewer, generation)
-  await refresh()
+  if (viewer) await refresh()
   if (generation !== readGeneration || s.value.id !== id) return
   loaded = true
   if (props.active) await enter()
@@ -471,29 +482,59 @@ watch(() => props.active, active => { if (active && loaded) void refresh().then(
 // ---------- Composer ----------
 const composeBlock = computed(() => {
   if (ended.value || sendError.value === 'This session has ended.') return 'This session has ended.'
-  if (agents.messagingState === 'error') return 'Messages could not be loaded right now. Close and reopen the session to try again.'
-  if (agents.messagingState === 'forbidden') return 'Reading this session requires access to its project and permission to read agent sessions.'
+  if (agents.threadState(s.value) === 'error') return 'Messages could not be loaded right now. Close and reopen the session to try again.'
+  if (agents.threadState(s.value) === 'forbidden') return 'Reading this session requires access to its project and permission to read agent sessions.'
   // Only a message with no session still needs a registered target.
   if (!s.value.id && !address.value) return `${props.view.name} has no message address yet. It gets one when it registers a message target.`
   return ''
 })
 const hookReceipt = computed(() => hookReceipts(boundHookIds.value, statuses.value))
 const showHookNotice = computed(() => hookNoticeVisible(awaitsInboxHook(s.value), hookReceipt.value))
-async function send() {
-  if (!draft.value.trim() || sending.value || composeBlock.value) return
-  const sessionId = s.value.id, viewer = me.value, request = readGeneration
-  const currentSend = () => request === readGeneration && sessionId === s.value.id && viewer === me.value
-  sending.value = true; sendError.value = ''
+async function deliver(local: ProjectMessage) {
+  const session = s.value, viewer = me.value, generation = readGeneration
+  const stillHere = () => generation === readGeneration && session.id === s.value.id && viewer === me.value
+  local.send_failed = false
   try {
-    await agents.send(s.value, recipient.value, draft.value.trim(), 'simple', replyTo.value?.id)
-    if (!currentSend()) return
-    draft.value = ''; replyTo.value = null
-    await nextTick(); if (currentSend()) { toBottom(true); refreshReceipts() }
-  } catch (e) { if (currentSend()) sendError.value = e instanceof APIError && e.status === 409 && e.body.code === 'session_ended' ? 'This session has ended.' : e instanceof Error ? e.message : 'The message was not sent. Please try again.' }
-  finally { if (currentSend()) sending.value = false }
+    const accepted = await agents.send(session, recipient.value, local.body, local.delivery_level, local.reply_to ?? undefined, local.client_id)
+    if (!stillHere()) return
+    localSends.value = localSends.value.map(message => message.client_id === local.client_id ? { ...accepted, client_id: local.client_id } : message)
+    refreshReceipts()
+  } catch (error) {
+    if (!stillHere()) return
+    localSends.value = localSends.value.map(message => message.client_id === local.client_id ? { ...message, send_failed: true } : message)
+    if (error instanceof APIError && error.status === 409 && error.body.code === 'session_ended') sendError.value = 'This session has ended.'
+  }
+}
+async function send(level: 'simple' | 'steer' = 'simple', source?: ProjectMessage) {
+  const body = source?.body ?? draft.value.trim()
+  if (!body || !props.canWrite || composeBlock.value) return
+  if (localSends.value.length >= 100) { toast(words.value.pendingLimit); return }
+  const clientId = crypto.randomUUID()
+  const local: ProjectMessage = {
+    id: clientId, client_id: clientId, optimistic: true, body, sender_principal_id: me.value,
+    recipient_principal_id: s.value.agent_principal_id, recipient_session_id: s.value.id, to: recipient.value,
+    sent_event_id: Number.MAX_SAFE_INTEGER, is_action_request: false, expects_reply: false,
+    delivery_level: level, reply_to: source?.reply_to ?? replyTo.value?.id, status: 'accepted', reply_obligation: 'none', created_at: new Date().toISOString(),
+  }
+  localSends.value = [...localSends.value, local]
+  if (!source) { draft.value = ''; replyTo.value = null }
+  void deliver(local)
+  await nextTick(); toBottom(true)
+}
+function retry(message: ProjectMessage) {
+  if (!props.canWrite || composeBlock.value) return
+  if (message.send_failed && message.client_id) {
+    // An ambiguous POST reuses its idempotency key. A confirmed terminal
+    // delivery failure is a new explicit send, never automatic reinjection.
+    localSends.value = localSends.value.map(item => item.client_id === message.client_id ? { ...item, send_failed: false } : item)
+    void deliver(message)
+  } else if (statuses.value[message.id]?.status === 'not_delivered') {
+    void send(message.delivery_level, message)
+  }
 }
 function composerKeys(event: KeyboardEvent) {
-  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); void send() }
+  const level = chatSendLevel(event, canSteer.value)
+  if (level) { event.preventDefault(); void send(level) }
 }
 function reply(message: ProjectMessage) {
   replyTo.value = message
@@ -511,7 +552,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
         @touchcancel.capture.passive="onTouchEnd" @pointerdown.capture.passive="onPointerDown"
         @keydown.capture="onScrollKey">
         <SessionMessages :messages="messages" :principal-id="s.agent_principal_id" :now="now"
-          :can-reply="canWrite && !composeBlock && !managed" :new-from="newFrom" :new-count="newCount" :statuses="statuses" @reply="reply" />
+          :can-reply="canWrite && !composeBlock" :new-from="newFrom" :new-count="newCount" :statuses="statuses" @reply="reply" @retry="retry" />
       </div>
       <Transition name="jump">
         <button v-if="jump" type="button" class="jump" :class="{ labelled: below > 0 }"
@@ -523,19 +564,19 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
       </Transition>
     </div>
 
-    <p v-if="managed && !ended" class="managed-hint"><AppIcon name="send" :size="13" />Steer this managed session with the controls above.</p>
-    <footer v-else class="composer">
+    <footer class="composer">
       <SessionRequests v-if="unmanaged" :key="s.id" :session="s" :now="now" />
       <p v-if="composeBlock" class="compose-block"><AppIcon name="inbox" :size="13" />{{ composeBlock }}</p>
-      <form v-else class="compose" @submit.prevent="send">
+      <form v-else class="compose" @submit.prevent="send()">
         <p v-if="showHookNotice" class="compose-block" role="status">{{ hookDeliveryNotice }}</p>
         <p v-if="replyTo" class="replying"><span>Replying to “{{ replyTo.body.slice(0, 80) }}{{ replyTo.body.length > 80 ? '…' : '' }}”</span><button type="button" class="icon-btn sm flat" aria-label="Cancel the reply" @click="replyTo = null"><AppIcon name="close" :size="12" /></button></p>
-        <label class="sr-only" :for="`compose-${s.id}`">Message to {{ view.name }}</label>
-        <textarea :id="`compose-${s.id}`" ref="textarea" v-model="draft" class="field" rows="2" :placeholder="`Message ${view.name}…`" :disabled="!canWrite || sending" @keydown="composerKeys" @focus="toBottom(true)" />
+        <label class="sr-only" :for="`compose-${s.id}`">{{ words.message }} {{ view.name }}</label>
+        <textarea :id="`compose-${s.id}`" ref="textarea" v-model="draft" class="field" rows="2" :placeholder="`${words.placeholder} ${view.name}`" :disabled="!canWrite" @keydown="composerKeys" @focus="toBottom(true)" />
         <p v-if="sendError" class="send-error" role="alert"><AppIcon name="alert" :size="12" />{{ sendError }}</p>
         <div class="compose-row">
-          <span class="compose-hint" aria-hidden="true"><KeyCap k="mod" /><KeyCap k="enter" /></span>
-          <button type="submit" class="btn sm primary send" :aria-busy="sending" :disabled="!draft.trim() || sending || !canWrite"><AppIcon name="send" :size="13" />Send</button>
+          <span class="compose-hint"><KeyCap k="shift" /><KeyCap k="enter" />{{ words.newline }}</span>
+          <button v-if="canSteer" type="button" class="btn sm steer-send" :aria-label="words.now" :disabled="!draft.trim() || !canWrite" @click="send('steer')"><AppIcon name="bolt" :size="13" />{{ words.now }}<KeyCap k="mod" /><KeyCap k="enter" /></button>
+          <button type="submit" class="btn sm primary send" :aria-label="canSteer ? words.after : words.send" :disabled="!draft.trim() || !canWrite"><AppIcon name="send" :size="13" /><span>{{ canSteer ? words.after : words.send }}</span><KeyCap k="enter" /></button>
         </div>
       </form>
     </footer>
@@ -546,7 +587,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 .session-chat { flex: 1; display: flex; flex-direction: column; min-height: 0; min-width: 0; }
 .thread-wrap { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .thread-scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; padding: 18px 24px 20px; }
-.jump { position: absolute; right: 16px; bottom: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 40px; height: 40px; padding: 0; border: 0; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); }
+.jump { z-index: 1; position: absolute; right: 16px; bottom: 12px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 40px; height: 40px; padding: 0; border: 0; border-radius: 999px; background: var(--surface-raised); color: var(--ink-2); box-shadow: var(--shadow-pop); }
 .jump svg { flex: none; }
 .jump.labelled { padding: 0 12px 0 14px; color: var(--teal-ink); }
 .jump-count { font-size: 12.5px; font-weight: 650; white-space: nowrap; }
@@ -556,16 +597,15 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
 .jump-enter-from, .jump-leave-to { opacity: 0; transform: translateY(6px); }
 @media (prefers-reduced-motion: reduce) { .jump-enter-active, .jump-leave-active { transition: none; } }
 .composer { flex-shrink: 0; padding: 10px 14px 12px; border-top: 1px solid var(--line); background: var(--surface-raised-2); border-radius: 0 0 var(--radius) var(--radius); }
-.compose { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
-.compose textarea { width: 100%; min-width: 0; min-height: 56px; max-height: 180px; resize: vertical; padding: 9px 11px; font: inherit; font-size: 13.5px; line-height: 1.45; }
-.compose-row { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.compose { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; min-width: 0; }
+.compose textarea { width: 100%; min-width: 0; min-height: 56px; height: 64px; resize: none; padding: 9px 11px; font: inherit; font-size: 13.5px; line-height: 1.45; }
+.compose-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; min-width: 0; }
 .compose-hint { margin-left: auto; display: inline-flex; gap: 2px; }
 .compose-block { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-2); padding: 6px 2px; overflow-wrap: anywhere; }
 .compose-block svg { flex: none; }
-.managed-hint { flex-shrink: 0; display: flex; align-items: center; gap: 8px; margin: 0; padding: 10px 18px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); font-size: 12.5px; color: var(--ink-2); overflow-wrap: anywhere; }
-.managed-hint svg { flex: none; color: var(--ink-3); }
-.replying { display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 10px; border-radius: 8px; background: var(--code-bg); font-size: 12px; color: var(--ink-2); }
+.replying { position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; display: flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 4px 4px 10px; border-radius: 8px; background: var(--code-bg); font-size: 12px; color: var(--ink-2); }
 .replying span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compose > .compose-block { pointer-events: none; position: absolute; bottom: calc(100% + 8px); left: 0; right: 0; margin: 0; padding: 8px 12px; background: var(--surface-raised); box-shadow: var(--shadow-pop); }
 .send-error { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--danger); overflow-wrap: anywhere; }
 @media (max-width: 720px) {
   .thread-scroll { padding: 14px 16px 16px; }
@@ -574,6 +614,7 @@ defineExpose({ focusComposer: () => textarea.value?.focus() })
   /* 16px keeps iOS Safari from zooming the page when the field takes focus. */
   .compose textarea { font-size: 16px; min-height: 48px; resize: none; }
   .compose-hint { display: none; }
-  .compose-row .send { margin-left: auto; height: 40px; }
+  .compose-row .send { margin-left: auto; min-height: 44px; }
+  .compose-row .steer-send { min-height: 44px; }
 }
 </style>
