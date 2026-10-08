@@ -159,15 +159,18 @@ function settingsRouter(): Router {
   }).router
 }
 
-it('kinds of work does not link to an unregistered Models board', async () => {
+it('kinds of work names the registered Models page and links to no board', async () => {
   const router = settingsRouter()
-  await router.push('/settings/models')
+  // Control: an unregistered Settings path is "Page not found", so the title below proves registration.
+  await router.push('/settings/no-such-section')
   expect(router.currentRoute.value.meta.title).toBe('Page not found')
+  await router.push('/settings/models')
+  expect(router.currentRoute.value.meta.title).toBe('Settings')
   const source = sourceText('components/settings/KindsOfWorkSection.vue')
   expect(source).toContain('anchor="k-kinds"')
   expect(navigationTargets(source)).toEqual([])
   await router.push('/settings/workspace#models')
-  expect(router.currentRoute.value.fullPath).toBe('/settings/agents#models')
+  expect(router.currentRoute.value.fullPath).toBe('/settings/models#models')
   expect(textForKinds(false)('lead')).toContain('Settings › Models')
   expect(textForKinds(true)('lead')).toContain('Einstellungen › Modelle')
 })
