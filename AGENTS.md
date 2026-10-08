@@ -9,7 +9,7 @@ The next generation of Paimos: agents first, voice first, multi-tenant, hybrid h
 - Work creation: **create a work item; nesting decides its name**. Agents work on leaves only; parent statuses follow their children and are never set by lead status scripts.
 - Core model: **nodes** (one type in a fully dynamic tree, kinds and labels are tenant configuration), **relations** (typed links), **events** (one append-only log per tenant for audit, history, undo, live updates), plus **principals** (people and agents) and **files**.
 - Every row carries `tenant_id`; Postgres row-level security enforces isolation.
-- Stack: Go (standard library HTTP, `pgx`, `sqlc`-style typed SQL), Postgres 18 + pgvector, Vue 3 + TypeScript + Vite, one OpenAPI 3.1 contract (`api/openapi.yaml`), server-sent events for live updates, OIDC through Zitadel for people, scoped API keys for agents.
+- Stack: Go (standard library HTTP, `pgx`, `sqlc`-style typed SQL), Postgres 18 + pgvector, Vue 3 + TypeScript + Vite, one OpenAPI 3.1 contract authored in `api/areas/*.yaml` plus `api/openapi.base.yaml` (`api/openapi.yaml` is generated output rebuilt by `node api/generate.mjs --write`), server-sent events for live updates, OIDC through Zitadel for people, scoped API keys for agents.
 
 ## Layout
 
@@ -17,15 +17,15 @@ The next generation of Paimos: agents first, voice first, multi-tenant, hybrid h
 cmd/aeon/            single binary: `paimos serve` and later the CLI
 internal/            Go packages (config, db, migrate, tenant, auth, httpapi, events, …)
 internal/db/migrations/  numbered SQL migrations, embedded
-api/openapi.yaml     the contract; change it first, then code
+api/areas/*.yaml     authored contract plus api/openapi.base.yaml; api/openapi.yaml is generated output rebuilt by node api/generate.mjs --write
 web/                 Vue 3 + TypeScript app (built into the binary)
 scripts/             release checks
 ```
 
 ## How you work
 
-1. **Your ticket is your scope.** Change only the paths in your brief's write set. If you must touch a shared file (`api/openapi.yaml`, `go.mod`, `web/package.json`, a migration, `AGENTS.md`), keep the change minimal and additive and say so in your summary.
-2. **Contract first.** Endpoints are added to `api/openapi.yaml` in the same change as their handler. Keep contract changes additive and backward compatible (PHAROS and JANUS parse strictly; never rename or remove fields or routes). Quote OpenAPI descriptions and run `go test ./internal/reportercontract/`. For new routes, update the strict route tables in tests deliberately, and bump the Aeon-Contract version when a pinned response schema changes.
+1. **Your ticket is your scope.** Change only the paths in your brief's write set. If you must touch a shared file (`api/areas/*.yaml`, `api/openapi.base.yaml`, `go.mod`, `web/package.json`, a migration, `AGENTS.md`), keep the change minimal and additive and say so in your summary. `api/openapi.yaml` is generated output rebuilt by `node api/generate.mjs --write`; do not hand-edit it.
+2. **Contract first.** Endpoints are added to the authored contract (`api/areas/*.yaml` plus `api/openapi.base.yaml`) in the same change as their handler. `api/openapi.yaml` is generated output rebuilt by `node api/generate.mjs --write`. Keep contract changes additive and backward compatible (PHAROS and JANUS parse strictly; never rename or remove fields or routes). Quote OpenAPI descriptions and run `go test ./internal/reportercontract/`. For new routes, update the strict route tables in tests deliberately, and bump the Aeon-Contract version when a pinned response schema changes.
 3. **Migrations** are `NNNN_name.sql` in `internal/db/migrations/` and **expand-only**: add tables, nullable columns or indexes. NOT NULL, CHECK or FK constraints that older writers could violate, DROP, RENAME and destructive UPDATEs need `-- aeon:contract-phase …` after a released expansion. Use the number your brief names (reserved by the coordinator, above the latest released maximum); on a collision with main, stop and report, never renumber yourself. Run `node scripts/check-migrations.mjs`. Classify new tables and columns in `internal/dsar/inventory.json` in the same change.
 4. **Tests are part of done** and follow the agent test policy (PAIMOS Knowledge AEON `agent-test-policy`): name the risk; usually one behaviour test per ticket; barriers and injected clocks instead of sleeps; never loosen or skip a test without a person-approved note on the ticket. Register new tests in the tier manifests (`node scripts/test-tiers/cli.mjs`). Tests never write to absolute local paths (use Playwright `testInfo.outputPath()`). Before hand-over, `node scripts/ci-static.mjs --merge-main` exits 0 (exit 3 means incomplete, not green).
 5. **Progress file.** After every meaningful step overwrite `.agent-status.json` in your worktree root (it is git-ignored):
