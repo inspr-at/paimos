@@ -400,9 +400,12 @@ func TestPreferencePickerEvidence(t *testing.T) {
 	admin := makePrincipal(t, "prefs-picker", "person", "Admin", []string{"admin"})
 	runner := addPrincipal(t, admin.TenantID, "agent", "Picker runner", []string{"admin"})
 	prefDoc(t, admin) // seed the registry before binding the allowed model
+	// Use the newest line version for this exact-grant/retirement fixture;
+	// predecessor grants now also qualify their registered successors.
+	const allowedSlug = "codex-6-1-sol-high"
 	var allowedID string
 	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, admin.TenantID, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug='codex-sol-high'`).Scan(&allowedID); err != nil {
+		if err := tx.QueryRow(t.Context(), `SELECT id::text FROM model_profiles WHERE slug=$1`, allowedSlug).Scan(&allowedID); err != nil {
 			return err
 		}
 		_, err := tx.Exec(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,allowed_model_profile_ids)
@@ -421,7 +424,7 @@ func TestPreferencePickerEvidence(t *testing.T) {
 	foundUnqualified := false
 	for _, choice := range view.Choices {
 		total += choice.ResidencyRoutes
-		if choice.Profile.Slug == "codex-sol-high" {
+		if choice.Profile.Slug == allowedSlug {
 			profileID = choice.Profile.ID
 			if choice.Line != "sol" || choice.ModelVersion == "" {
 				t.Fatal("picker used catalog revision instead of model version", choice)
