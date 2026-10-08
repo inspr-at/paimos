@@ -187,7 +187,7 @@ func TestAfterTurnInputWaitsWhileSteerAndControlsStayAvailable(t *testing.T) {
 		t.Fatalf("busy injection count %d", calls)
 	}
 	api.harnessControls = []HarnessControl{{ID: "interrupt", Kind: "interrupt"}}
-	if err := s.serviceHarnessCycle(t.Context(), entry, false); err != nil {
+	if err := s.serviceHarnessWake(t.Context(), entry, false, true); err != nil {
 		t.Fatal(err)
 	}
 	select {
