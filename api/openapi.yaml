@@ -730,7 +730,7 @@ paths:
     post:
       operationId: createAgentKey
       summary: Create or rotate an agent key and return its secret once
-      description: Pass principal_id to mint a key for an existing agent. name alone still finds or creates an agent, for older clients. For confirmed manual rotation, pass rotate_key_id and optional expires_at; the server copies the old key's agent, name and scopes unless rotation_scopes explicitly supplies a replacement scope set. It creates the replacement and revokes the old key in one tenant transaction with audit events. Rotation may replace an expired key but never a revoked key. No automatic rotation occurs. Scopes are stored in dot notation; colon input is normalized. A key never receives a permission the creator does not hold, and never a permission that is not agent_grantable. The agent's current role ceiling and the actor's grant rules apply to rotation too. Requires a person with keys.manage. Scope codes in the dialogs select a proposed set locally and grant nothing until the person confirms.
+      description: "Pass principal_id to mint a key for an existing agent. name alone still finds or creates an agent, for older clients. For confirmed manual rotation, pass rotate_key_id and optional expires_at; the server copies the old key's agent, name and scopes unless rotation_scopes explicitly supplies a replacement scope set. It creates the replacement and revokes the old key in one tenant transaction with audit events. Rotation may replace an expired key but never a revoked key. No automatic rotation occurs. Scopes are stored in dot notation; colon input is normalized. A key never receives a permission the creator does not hold, and never a permission that is not agent_grantable. The agent's current role ceiling and the actor's grant rules apply to rotation too. Requires a person with keys.manage. Scope codes in the dialogs select a proposed set locally and grant nothing until the person confirms. full_access resolves every current and future agent-grantable permission at authorization time; live role, creator and project ceilings still apply. Full-access keys store no scope snapshot. Rotation preserves full_access unless an explicit replacement mode is supplied."
       security:
         - session: []
         - agentKey: []
@@ -758,6 +758,7 @@ paths:
                   type: string
                   format: uuid
                   description: Existing agent. Takes precedence over creating an agent by name.
+                full_access: {type: boolean, description: "Dynamic agent-grantable ceiling; mutually exclusive with nonempty scopes or rotation_scopes. Omit during rotation to preserve the old mode; an explicit rotation_scopes set selects scoped mode."}
                 scopes:
                   type: array
                   items:
@@ -927,7 +928,7 @@ paths:
     patch:
       operationId: changeAgentKeyScopes
       summary: Edit scopes and expiry without rotating the key
-      description: Requires a person with keys.manage. Applies add/remove and optional expires_at atomically to the latest key; overlapping deltas are invalid. Omitted expires_at preserves the current expiry, null means Never, and a timestamp must be in the future. At least one of add, remove or expires_at is required. Revoked or expired keys cannot be edited. An optional role_extension requires roles.manage, must name the agent's current custom workspace role, and may add only agent-grantable permissions also present in add and held by both editor and original creator. Built-in roles cannot be expanded. A shared role affects all its bindings, while other keys retain their scopes. The resulting key set must fit the live agent role, editor permissions and original creator ceiling, including expiry-only changes. Unknown stored scopes are pruned automatically. Empty scopes grant nothing. Colon notation is normalized. The same key takes effect on its next request. Records one agent_key.scopes_changed audit entry with key before/after (including expiry), any role before/after, and pruned_scopes in the same transaction; no-op requests create no audit event. No secret is returned or changed.
+      description: "Requires a person with keys.manage. Applies add/remove and optional expires_at atomically to the latest key; overlapping deltas are invalid. Omitted expires_at preserves the current expiry, null means Never, and a timestamp must be in the future. At least one of add, remove, expires_at or full_access is required. full_access true selects a dynamic ceiling with no stored scope list; live role, creator and project access still limit requests. Nonempty scope deltas require scoped mode (full_access false). Expiry-only changes preserve the mode. Revoked or expired keys cannot be edited. An optional role_extension requires roles.manage, must name the agent's current custom workspace role, and may add only agent-grantable permissions also present in add and held by both editor and original creator. Built-in roles cannot be expanded. A shared role affects all its bindings, while other keys retain their scopes. The resulting key set must fit the live agent role, editor permissions and original creator ceiling, including expiry-only changes. Unknown stored scopes are pruned automatically. Empty scopes grant nothing. Colon notation is normalized. The same key takes effect on its next request. Records one agent_key.scopes_changed audit entry with key before/after (including expiry), any role before/after, and pruned_scopes in the same transaction; no-op requests create no audit event. No secret is returned or changed. Audit snapshots include full_access."
       security: [{session: []}]
       requestBody:
         required: true
@@ -941,7 +942,9 @@ paths:
                 - {required: [add]}
                 - {required: [remove]}
                 - {required: [expires_at]}
+                - {required: [full_access]}
               properties:
+                full_access: {type: boolean, description: "Select dynamic full access or an explicit scoped ceiling; omitted preserves the current mode."}
                 add: {type: array, maxItems: 256, items: {type: string}}
                 remove: {type: array, maxItems: 256, items: {type: string}}
                 expires_at: {type: [string, 'null'], format: date-time, description: 'Omit to preserve expiry; null means Never; a timestamp must be in the future.'}
@@ -971,6 +974,8 @@ paths:
       operationId: proposeAgentKeyTrim
       summary: Propose a scope reduction without changing the key
       description: >-
+        Full-access keys must be switched explicitly to scoped mode before trimming;
+        dynamic ceilings cannot be reduced by snapshot proposals.
         Requires approvals.request; agents may propose. The expected scope set must
         match the live set. Candidates must be a strict subset. Every dropped scope
         needs evidence and a plain-language risk. Recent use is checked under the
@@ -13047,7 +13052,7 @@ components:
     EventPosition: {description: 'The tenant event-log position this answer stands for (AEON-449), a non-negative integer. GET /api/nodes names the newest committed event before its handler: a lower bound on the events its projections include, even when newer events commit during the read. It runs once; clients apply a page covering the hint that triggered it and retain a follow-up read for newer hints. Other reads name the exact snapshot they return: no event committed while they ran, so they include every event up to that position and none after. An interrupted read outside /api/nodes is run again; one that keeps being interrupted carries no header, and the client merges it by the order it started in. An accepted write (any 2xx mutation) names the newest committed event after its transaction ended, so it is at or above the write''s own event: a floor a later read must reach to be newer than the write, never a statement about the write''s own body (which may be older than the position). A client keeps a session or a run by its own row_version and uses positions only to order the reads of one collection and to hold that floor. Fields a worker refreshes without an event (a heartbeat) are not covered: keep those by their own sequence. Additive: ignore it and merge by arrival as before.', schema: {type: integer, minimum: 0}}
     HarnessSessionContract: {description: "Harness status and heartbeat response contract; version 2 adds Gemini, OpenCode, media and terminal to the closed harness enum.", schema: {type: string, enum: ['harness-session/2.10']}}
     JourneyContract: {description: Journey read response contract, schema: {type: string, enum: ['journey/1.4']}}
-    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.3']}}
+    MeContract: {description: Acting principal response contract, schema: {type: string, enum: ['me/1.4']}}
     MutationEventIds:
       description: Exact event IDs committed by this mutation, comma separated in reverse append order for Undo. Absent for an unchanged record or when a complete bounded receipt cannot be supplied. Never resolve an absent or lost receipt by finding the newest event.
       schema: {type: string, maxLength: 22528, pattern: '^[1-9][0-9]*(,[1-9][0-9]*)*$'}
@@ -13647,6 +13652,7 @@ components:
       type: object
       required: [id, principal_id, name, prefix, scopes, created_at]
       properties:
+        full_access: {type: boolean, description: "This authenticated key dynamically holds every current and future agent-grantable permission, subject to live role, creator, tenant and project ceilings. Person-only permissions remain excluded."}
         created_by_principal_id: {type: [string, 'null'], format: uuid, description: Person owner; null for legacy creatorless keys}
         owner_workstation: {type: boolean}
         workstation_computer_id: {type: [string, 'null'], format: uuid}
@@ -17951,6 +17957,7 @@ components:
       description: Linked persons use their target's name and email for display. Authenticated principal IDs and roles and OIDC identity IDs, issuers and subjects retain their original authority.
       required: [principal, tenant, identity, dev_mode]
       properties:
+        full_access: {type: boolean, description: "This authenticated key dynamically holds every current and future agent-grantable permission, subject to live role, creator, tenant and project ceilings. Person-only permissions remain excluded."}
         owner_workstation: {type: boolean}
         workstation_computer_id: {type: string, format: uuid}
         dev_mode: {type: boolean, description: True only when AEON_ENV is explicitly dev.}

@@ -7746,6 +7746,10 @@
     ,
     {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"expiry failure retains draft; modifier Enter saves and Escape leaves a field before closing","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
+    {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"key sheet controls stay anchored at 1024px dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
+    {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"key sheet controls stay anchored at 1024px light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
+    ,
     {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"key sheet controls stay anchored at 1440px dark","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}
     ,
     {"kind":"browser","file":"tests/key-full-access.spec.ts","name":"key sheet controls stay anchored at 1440px light","config":"playwright.ui.config.ts","project":"","tier":"GATED-FULL"}

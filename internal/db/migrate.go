@@ -264,6 +264,13 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 			return fmt.Errorf("migrate %s: %w", name, err)
 		}
 	}
+	if name == "1292_agent_key_full_access.sql" {
+		// FORCE RLS applies to migration owners too. Repeat the additive
+		// backfill under each tenant, atomically with the column expansion.
+		if err := backfillFullAccessKeys(ctx, tx, stmts[len(stmts)-1]); err != nil {
+			return fmt.Errorf("backfill %s: %w", name, err)
+		}
+	}
 	if name == "1063_work_classification_model_identity.sql" {
 		if err := backfillWorkMetadata(ctx, tx); err != nil {
 			return fmt.Errorf("backfill %s: %w", name, err)
@@ -296,6 +303,34 @@ func applyFile(ctx context.Context, conn *pgxpool.Conn, name string, before func
 		return fmt.Errorf("commit %s: %w", name, err)
 	}
 	return nil
+}
+
+func backfillFullAccessKeys(ctx context.Context, tx pgx.Tx, statement string) error {
+	rows, err := tx.Query(ctx, `SELECT id::text FROM tenants ORDER BY id`)
+	if err != nil {
+		return err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return err
+	}
+	var prior string
+	if err := tx.QueryRow(ctx, `SELECT coalesce(current_setting('aeon.tenant_id',true),'')`).Scan(&prior); err != nil {
+		return err
+	}
+	for _, id := range ids {
+		if _, err := tx.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true)`, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `SELECT id FROM tenants WHERE id=$1::uuid FOR NO KEY UPDATE`, id); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, statement); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(ctx, `SELECT set_config('aeon.tenant_id',$1,true)`, prior)
+	return err
 }
 
 // Existing accounts need canonical resource IDs before a new daemon probes.

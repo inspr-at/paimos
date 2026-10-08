@@ -49,6 +49,7 @@ export const statusOf = (error: unknown) => (error as { status?: number })?.stat
 
 // ---------- Agent keys (GET /api/agent-keys, admins) ----------
 export interface AgentKey {
+  full_access?: boolean
   created_by_principal_id?: string | null
   id: string; principal_id: string; name: string; prefix: string; scopes: string[]
   created_at: string; expires_at: string | null; last_used_at: string | null; revoked_at: string | null

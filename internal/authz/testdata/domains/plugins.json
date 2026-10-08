@@ -1,0 +1,62 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "plugins.invoke",
+      "plugins.manage",
+      "plugins.read"
+    ],
+    "member": [
+      "plugins.read"
+    ],
+    "owner": [
+      "plugins.invoke",
+      "plugins.manage",
+      "plugins.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Invoke plugins",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Plugins",
+      "key": "plugins.invoke",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Manage plugins",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Plugins",
+      "key": "plugins.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read plugins",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Plugins",
+      "key": "plugins.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "routes": {
+    "GET /api/plugins": "plugins.read",
+    "PUT /api/plugins/{pluginId}/installation": "plugins.manage"
+  },
+  "words": {
+    "resources": {
+      "plugins": "plugins"
+    }
+  }
+}

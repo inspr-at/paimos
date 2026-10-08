@@ -1,0 +1,38 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "project_decided": {
+    "DELETE /api/queue-snapshots/{snapshotId}": true,
+    "GET /api/queue-snapshots/{snapshotId}": true,
+    "POST /api/queue": true,
+    "POST /api/queue-snapshots/{snapshotId}/apply": true,
+    "POST /api/queue/next": true,
+    "POST /api/queue/reset": true,
+    "POST /api/queue/{nodeId}/snapshots": true
+  },
+  "project_filtered": {
+    "GET /api/queue": true
+  },
+  "routes": {
+    "DELETE /api/queue-snapshots/{snapshotId}": "nodes.read",
+    "DELETE /api/queue/{nodeId}": "nodes.read",
+    "GET /api/queue": "nodes.read",
+    "GET /api/queue-snapshots/{snapshotId}": "nodes.read",
+    "GET /api/queue/{nodeId}/readiness": "nodes.read",
+    "GET /api/runs": "run.read",
+    "GET /api/runs/queued": "run.read",
+    "GET /api/runs/{runId}": "run.read",
+    "GET /api/runs/{runId}/handoff": "run.read",
+    "POST /api/queue": "nodes.read",
+    "POST /api/queue-snapshots/{snapshotId}/apply": "nodes.read",
+    "POST /api/queue/next": "nodes.read",
+    "POST /api/queue/reset": "nodes.read",
+    "POST /api/queue/{nodeId}/estimate": "nodes.read",
+    "POST /api/queue/{nodeId}/move": "nodes.read",
+    "POST /api/queue/{nodeId}/snapshots": "nodes.read",
+    "POST /api/queue/{nodeId}/undo": "nodes.read",
+    "POST /api/runs/{runId}/cancel": "run.create",
+    "POST /api/runs/{runId}/capacity-override": "run.create",
+    "POST /api/runs/{runId}/claim": "run.claim",
+    "POST /api/runs/{runId}/telemetry": "run.telemetry"
+  }
+}

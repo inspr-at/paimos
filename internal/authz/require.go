@@ -4,8 +4,6 @@ package authz
 
 import (
 	"context"
-	_ "embed"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"sort"
@@ -137,7 +135,7 @@ func permitEffective(p tenant.Principal, permission string, effective Effective,
 		}
 		return &denial{reason: "missing_role_permission"}
 	}
-	if p.Kind == tenant.Agent && !containsScope(p.Scopes, permission) && !CoordinatorCeiling(p.Scopes, permission) {
+	if p.Kind == tenant.Agent && !KeyAllows(p, permission) {
 		return &denial{reason: "missing_key_scope", scope: permission}
 	}
 	return nil
@@ -405,7 +403,7 @@ func ProjectsTx(ctx context.Context, tx pgx.Tx, p tenant.Principal) (ProjectChec
 		if creator != nil && !creator.allows(permission, projectID) {
 			return false
 		}
-		return p.Kind != tenant.Agent || containsScope(p.Scopes, permission) || CoordinatorCeiling(p.Scopes, permission)
+		return p.Kind != tenant.Agent || KeyGrantable(permission, OwnerWorkstation(p)) && KeyAllows(p, permission)
 	}, nil
 }
 
@@ -426,38 +424,12 @@ func ProjectGrantable(key string) bool {
 
 // Built-in agent exclusions are shared with the key dialogs and browser mocks.
 // Custom roles may explicitly grant these permissions; person grants stay intact.
-//
-//go:embed builtin_agent_exclusions.json
-var builtinAgentExclusionsJSON []byte
-
-var builtinAgentExclusions = func() []string {
-	var definition struct {
-		Permissions []string `json:"permissions"`
-	}
-	if err := json.Unmarshal(builtinAgentExclusionsJSON, &definition); err != nil {
-		panic("invalid embedded built-in agent exclusions")
-	}
-	return definition.Permissions
-}()
+var builtinAgentExclusions = assembledPermissionData.BuiltinAgentExclusions
 
 // Project self-service permissions are the workspace-only permissions a role
-// needs to use its projects: the caller's own profile and effective access,
-// and reading node kinds (tenant configuration every node view renders).
-// The key dialogs import the same definition; agent-grantability still comes
-// from the registry, so customer-portal permissions remain person-only.
-//
-//go:embed project_self_permissions.json
-var projectSelfPermissionsJSON []byte
-
-var projectSelfPermissions = func() []string {
-	var definition struct {
-		Permissions []string `json:"permissions"`
-	}
-	if err := json.Unmarshal(projectSelfPermissionsJSON, &definition); err != nil {
-		panic("invalid embedded project self-service permissions")
-	}
-	return definition.Permissions
-}()
+// needs to use its projects. The key dialogs assemble the same domain inputs;
+// customer-portal permissions remain person-only through the registry.
+var projectSelfPermissions = assembledPermissionData.ProjectSelfPermissions
 
 func selfPermission(key string) bool {
 	return contains(projectSelfPermissions, key)

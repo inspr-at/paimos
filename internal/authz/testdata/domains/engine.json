@@ -1,0 +1,69 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "engine.admission",
+    "engine.manage",
+    "engine.read"
+  ],
+  "builtin_roles": {
+    "admin": [
+      "engine.admission",
+      "engine.manage",
+      "engine.read"
+    ],
+    "member": [
+      "engine.admission",
+      "engine.read"
+    ],
+    "owner": [
+      "engine.admission",
+      "engine.manage",
+      "engine.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Admission engine",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Engine",
+      "key": "engine.admission",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Manage engine",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Engine",
+      "key": "engine.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read engine",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Engine",
+      "key": "engine.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "words": {
+    "special": {
+      "engine.admission": "Evaluate shadow start admission",
+      "engine.manage": "Manage shadow admission settings",
+      "engine.read": "Read shadow admission settings"
+    }
+  }
+}

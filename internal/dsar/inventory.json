@@ -26,6 +26,17 @@
     {
       "classification": "personal",
       "columns": {
+        "full_access": "metadata"
+      },
+      "locator": {
+        "person_column": "created_by_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "agent_keys"
+    },
+    {
+      "classification": "personal",
+      "columns": {
         "action": "metadata",
         "actor_id": "personal",
         "completed_at": "metadata",

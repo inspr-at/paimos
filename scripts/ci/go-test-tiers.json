@@ -3222,6 +3222,8 @@
     ,
     {"kind":"go","package":"internal/auth","name":"TestFromEnv","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/auth","name":"TestFullAccessLiveCatalogAndBoundaries","tier":"GATED-FULL"}
+    ,
     {"kind":"go","package":"internal/auth","name":"TestHasScopeAcceptsDotAndColon","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/auth","name":"TestImportedSignInHintRequiresVerifiedTenantEmail","tier":"GATED-FULL"}
@@ -3473,6 +3475,8 @@
     {"kind":"go","package":"internal/authz","name":"TestDeliveryRatingTargetsItsSession","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestDenialLayersAndDisclosureOrder","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/authz","name":"TestDomainPolicyComposition","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/authz","name":"TestEffectiveRouteMatrix","tier":"ESSENTIAL"}
     ,
@@ -4985,6 +4989,8 @@
     {"kind":"go","package":"internal/db","name":"TestEventReferencesFollowVisibility","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestEveryTenantTableHasForcedRLS","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/db","name":"TestFullAccessMigrationAcrossTenants","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/db","name":"TestHumanCheckMigrationUpgradesExistingStrictSchemasUnderRLS","tier":"GATED-FULL"}
     ,
@@ -9021,6 +9027,8 @@
     {"kind":"go","package":"scripts/pdf-visual-diff","name":"TestMissingBlankPageFailsRegardlessOfPixelTolerance","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/pdf-visual-diff","name":"TestShiftedRectangleExceedsThreshold","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/readmelayout","name":"TestReadmeCarriesNoFeatureProse","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestAnnotatedTagGuardFailsClosed","tier":"GATED-FULL"}
     ,

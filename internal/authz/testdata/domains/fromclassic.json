@@ -1,0 +1,9 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "project_filtered": {
+    "GET /api/from-classic": true
+  },
+  "routes": {
+    "GET /api/from-classic": "nodes.read"
+  }
+}

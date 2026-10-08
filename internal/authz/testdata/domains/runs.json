@@ -1,0 +1,80 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "runs.claim",
+      "runs.control",
+      "runs.read",
+      "runs.write"
+    ],
+    "member": [
+      "runs.claim",
+      "runs.read",
+      "runs.write"
+    ],
+    "owner": [
+      "runs.claim",
+      "runs.control",
+      "runs.read",
+      "runs.write"
+    ],
+    "viewer": [
+      "runs.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Claim runs",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Runs",
+      "key": "runs.claim",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Control runs",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Runs",
+      "key": "runs.control",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read runs",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Runs",
+      "key": "runs.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write runs",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Runs",
+      "key": "runs.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "runs": "runs"
+    }
+  }
+}

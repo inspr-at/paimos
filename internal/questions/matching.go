@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
@@ -27,15 +28,16 @@ func liveAsker(ctx context.Context, tx pgx.Tx, p tenant.Principal) (tenant.Princ
 		return p, nil
 	}
 	var creator *string
-	err := tx.QueryRow(ctx, `SELECT scopes,created_by_principal_id::text FROM agent_keys
+	err := tx.QueryRow(ctx, `SELECT scopes,created_by_principal_id::text,coalesce(full_access,false) FROM agent_keys
  WHERE tenant_id=$1 AND id=$2 AND principal_id=$3 AND revoked_at IS NULL
- AND (expires_at IS NULL OR expires_at>clock_timestamp()) FOR SHARE`, p.TenantID, p.AuthKeyID, p.ID).Scan(&p.Scopes, &creator)
+ AND (expires_at IS NULL OR expires_at>clock_timestamp()) FOR SHARE`, p.TenantID, p.AuthKeyID, p.ID).Scan(&p.Scopes, &creator, &p.FullAccess)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return p, fail(401, "unauthorized", "authenticated key is no longer active")
 	}
 	if err != nil {
 		return p, err
 	}
+	p.Scopes = authz.ResolveKeyScopes(p.Scopes, p.FullAccess)
 	p.KeyCreatorID = ""
 	if creator != nil {
 		p.KeyCreatorID = *creator

@@ -72,7 +72,10 @@
         "internal/features/**",
         "internal/hookcap/**",
         "internal/hostcapacity/**",
-        "internal/dsar/**"
+        "internal/dsar/**",
+        "internal/authz/full_access.go",
+        "internal/auth/full_access_test.go",
+        "internal/db/full_access_migration_test.go"
       ]
     },
     {

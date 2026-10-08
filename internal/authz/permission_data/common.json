@@ -1,0 +1,20 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "words": {
+    "actions": {
+      "approve": "Approve",
+      "ask": "ask",
+      "bind": "bind",
+      "create": "Create",
+      "decide": "Decide on",
+      "delete": "Delete",
+      "issue": "Issue",
+      "log": "Log",
+      "manage": "Manage",
+      "read": "See",
+      "receive": "receive",
+      "run": "Run",
+      "write": "Edit"
+    }
+  }
+}

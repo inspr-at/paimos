@@ -1,0 +1,45 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "members.manage",
+      "members.read"
+    ],
+    "member": [
+      "members.read"
+    ],
+    "owner": [
+      "members.manage",
+      "members.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": false,
+      "description": "Manage members",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Members",
+      "key": "members.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read members",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Members",
+      "key": "members.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "words": {
+    "resources": {
+      "members": "members"
+    }
+  }
+}

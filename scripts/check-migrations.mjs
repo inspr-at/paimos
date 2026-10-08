@@ -3,7 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { validCalendarVersion } from './verify-release.mjs';
 
 // Port internal/db/sqlsplit.go exactly: the runner removes comments (without
@@ -324,6 +324,29 @@ export function checkMigrations(files, published = new Map(), previousVersion = 
   return problems;
 }
 
+// The files are the only committed exception input. Assemble the same v1
+// manifest in memory, in migration order, for the existing validator and output.
+export function loadMigrationExceptions(directory = new URL('./migration-policy-exceptions/', import.meta.url)) {
+  const exceptions = [], seen = new Set();
+  for (const item of readdirSync(directory, {withFileTypes: true}).sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0)) {
+    if (!item.isFile() || !/^\d{4}_[a-z0-9_]+\.json$/.test(item.name)) {
+      throw new Error(`${item.name}: expected one migration exception file NNNN_name.json`);
+    }
+    const manifest = JSON.parse(readFileSync(resolve(directory instanceof URL ? fileURLToPath(directory) : directory, item.name), 'utf8'));
+    if (!manifest || manifest.schema !== 'aeon.migration-policy-exceptions.v1' || !Array.isArray(manifest.exceptions) || manifest.exceptions.length !== 1) {
+      throw new Error(`${item.name}: invalid migration exception manifest; expected exactly one exception`);
+    }
+    const entry = manifest.exceptions[0];
+    if (seen.has(entry?.file)) throw new Error(`${entry.file}: duplicate migration exception`);
+    if (entry?.file !== item.name.replace(/\.json$/, '.sql')) {
+      throw new Error(`${item.name}: exception must name its matching migration filename`);
+    }
+    seen.add(entry.file);
+    exceptions.push(entry);
+  }
+  return {schema: 'aeon.migration-policy-exceptions.v1', exceptions};
+}
+
 export function publishedMigrations(ref, directory = 'internal/db/migrations') {
   // Resolve the tree once, then read its immutable blobs in one bounded batch.
   // Per-file git show made historical-policy tests launch thousands of processes.
@@ -362,7 +385,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const directory = 'internal/db/migrations';
     const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).sort().map(name => [name, readFileSync(`${directory}/${name}`, 'utf8')]));
     const baseline = JSON.parse(readFileSync(new URL('./migration-policy-baseline.json', import.meta.url), 'utf8'));
-    const exceptions = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+    const exceptions = loadMigrationExceptions();
     const published = publishedMigrations(`refs/tags/${args[1]}`);
     const problems = checkMigrations(files, published, args[1].slice(1), {baseline, exceptions, previousTag: args[1]});
     if (problems.length) { console.error(problems.join('\n')); process.exitCode = 1; }

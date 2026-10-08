@@ -1,0 +1,11 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1241_autopilot_attention_events.sql",
+      "sha256": "362cbd935fb0beb4fc64631c25528f8e5baedd3a87a3490923ba062143a5833b",
+      "ticket": "AEON-697",
+      "reason": "Add only named public proposal/resolution events to the existing event visibility policy, retaining tenant isolation, visible-node and all referenced-node checks, own-event access and workspace-only domains. Replace the existing parent-status cause helper with its strict superset so attention Apply, Dismiss and Undo derive parent statuses from leaves; existing event types and bounds remain intact. ALTER POLICY and CREATE OR REPLACE FUNCTION are outside the expand-safe allowlist. Exact bytes require coordinator consolidated review and whole-chain previous-binary compatibility/backup gates before merge or release. This worker records a review artifact and grants no acceptance, push or deployment authority."
+    }
+  ]
+}
