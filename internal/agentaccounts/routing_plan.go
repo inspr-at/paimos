@@ -46,11 +46,17 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 	p := ranked{account: a, windows: windows, cap: 100, slots: a.MaxParallel - slots}
 	var short, long *time.Time
 	for _, w := range windows {
+		if w.usagePosture != "" {
+			p.posture = w.usagePosture
+		}
 		if w.capacityPresence {
 			p.presence = true
 		}
 		if !synthetic(w) {
 			end := w.EndsAt
+			if p.soonest == nil || end.Before(*p.soonest) {
+				p.soonest = &end
+			}
 			dest := &short
 			if w.capacityKind == "weekly" || w.capacityKind == "monthly" {
 				dest = &long
@@ -65,7 +71,16 @@ func routeRank(a Account, windows []Window, slots int, estimates map[string]int6
 			}
 			continue
 		}
-		available := float64(allowedUnits(w.Allowance, paceFraction(w.PaceModel, elapsedFraction(now, w.StartsAt, w.EndsAt), w.BurstRatio)) - w.Used - w.Reserved)
+		available := float64(allowedUnits(w.Allowance, windowPaceFraction(w, now)) - w.Used - w.Reserved)
+		if w.usageCeiling != nil {
+			available = math.Min(available, float64(*w.usageCeiling-w.Used-w.Reserved))
+		}
+		if w.Allowance > 0 {
+			projected, ok := addUsage(w.Used, w.Reserved, max(1, windowEstimate(w, estimates)))
+			if ok {
+				p.projected = math.Max(p.projected, float64(projected)/float64(w.Allowance))
+			}
+		}
 		if w.capacityBudget != nil {
 			available = math.Min(available, *w.capacityBudget-float64(w.Reserved))
 		}
@@ -107,9 +122,22 @@ func fingerprintPrimary(picks []ranked) map[string]int {
 	return primary
 }
 func orderPicks(picks []ranked) {
+	maxout, careful := false, false
+	for _, p := range picks {
+		maxout = maxout || p.posture == "maxout"
+		careful = careful || p.posture == "careful"
+	}
+	if maxout {
+		for i := range picks {
+			picks[i].reset = picks[i].soonest
+		}
+	}
 	sort.Slice(picks, func(i, j int) bool {
 		a, b := picks[i], picks[j]
-		if a.presence != b.presence {
+		if careful && !maxout && a.projected != b.projected {
+			return a.projected < b.projected
+		}
+		if !maxout && a.presence != b.presence {
 			return !a.presence
 		}
 		if a.reset == nil && b.reset != nil {

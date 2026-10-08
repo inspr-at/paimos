@@ -144,6 +144,11 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	if err := applyCapacityPacing(ctx, tx, a, active, now, s); err != nil {
 		return nil, nil, err
 	}
+	policy, err := loadUsagePolicy(ctx, tx, a.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	applyUsageFloor(active, policy)
 	learned, err := loadLearning(ctx, tx, a.ID)
 	if err != nil {
 		return nil, nil, err
@@ -193,7 +198,11 @@ func admission(ctx context.Context, tx pgx.Tx, a Account, all []Window, now time
 	need := boolInt(!claiming)
 	var hardUntil *time.Time
 	for _, w := range ordered {
-		if w.Allowance-w.Used-w.Reserved >= max(need, w.capacityHold*need) {
+		ceiling := w.Allowance
+		if w.usageCeiling != nil {
+			ceiling = *w.usageCeiling
+		}
+		if ceiling-w.Used-w.Reserved >= max(need, w.capacityHold*need) {
 			continue
 		}
 		end := w.EndsAt

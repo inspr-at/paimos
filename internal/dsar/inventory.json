@@ -284,6 +284,21 @@
         "effort_level": "metadata",
         "introduced_at": "metadata"
       }
+    },
+    {
+      "table": "agent_accounts",
+      "classification": "personal",
+      "locator": {
+        "tenant_column": "tenant_id",
+        "person_column": "owner_person_id"
+      },
+      "columns": {
+        "usage_posture": "personal",
+        "usage_posture_person_id": "personal",
+        "usage_posture_link_revision": "metadata",
+        "usage_floor_percent": "metadata",
+        "usage_revision": "metadata"
+      }
     }
   ]
 }

@@ -188,6 +188,19 @@ paths:
         - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}}
       responses:
         '204': {description: Pin removed}
+  /agent-accounts/posture:
+    get:
+      operationId: listAccountPostures
+      description: "Small, tenant-scoped guard projection of owner posture and floors, without windows, owner details or credentials. Requires account.read, including a live explicit key scope for agents. At most 100 accounts per keyset page, with a five-second deadline. Order follows routing advice; Max out uses the soonest active reset. Boost remains zero until its separate feature ships."
+      parameters:
+        - {name: harness, in: query, required: true, schema: {type: string, enum: [codex, claude, grok, pi, cursor, gemini, opencode]}}
+        - {name: after, in: query, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200': {description: "Postures", content: {application/json: {schema: {type: object, required: [accounts, has_more, as_of], properties: {accounts: {type: array, maxItems: 100, items: {$ref: '#/components/schemas/AccountPosture'}}, has_more: {type: boolean}, next_cursor: {type: string, format: uuid}, as_of: {type: string, format: date-time}}}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '503': {$ref: '#/components/responses/Error'}
   /agent-accounts/quota-pool:
     put:
       operationId: confirmAccountQuotaPool
@@ -337,6 +350,18 @@ paths:
         '409': {description: Binding/revision stale or conflicting idempotency key, content: {application/json: {schema: {$ref: '#/components/schemas/Error'}}}}
         '410': {description: Enrollment revoked; outstanding checks are invalidated}
         '429': {description: Minimum gap, headers: {Retry-After: {schema: {type: integer, minimum: 1}}}, content: {application/json: {schema: {$ref: '#/components/schemas/AccountCheckRetry'}}}}
+  /agent-accounts/{accountId}/floor:
+    put:
+      operationId: putAccountUsageFloor
+      description: "Person account.manage and workspace model_prefs.manage only. Sets a permanent reserve on the account’s quota; confirmed siblings use the strictest floor. Sprint, Max out and Run now cannot bypass it. Checked under the access-change fence with the current binding and policy revision."
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [floor_percent, revision, binding_revision], properties: {floor_percent: {type: integer, minimum: 0, maximum: 80}, revision: {type: integer, minimum: 0}, binding_revision: {type: integer, minimum: 0}}}}}}
+      responses:
+        '200': {description: "Saved policy", content: {application/json: {schema: {$ref: '#/components/schemas/AccountUsagePolicy'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}/label:
     put:
       operationId: renameAgentAccount
@@ -417,6 +442,18 @@ paths:
         '400': {$ref: '#/components/responses/Error'}
         '403': {$ref: '#/components/responses/Error'}
         '404': {$ref: '#/components/responses/Error'}
+  /agent-accounts/{accountId}/posture:
+    put:
+      operationId: putAccountPosture
+      description: "Person account.manage and current canonical account owner only. Null posture follows the owner’s personal setting. Authorization, ownership and binding revision are checked inside the fenced write. One revision and audit event; no paid usage or credit purchase."
+      parameters: [{name: accountId, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, additionalProperties: false, required: [posture, revision, binding_revision], properties: {posture: {type: [string, 'null'], enum: [careful, balanced, maxout, null]}, revision: {type: integer, minimum: 0}, binding_revision: {type: integer, minimum: 0}}}}}}
+      responses:
+        '200': {description: "Saved policy", content: {application/json: {schema: {$ref: '#/components/schemas/AccountUsagePolicy'}}}}
+        '400': {$ref: '#/components/responses/Error'}
+        '403': {$ref: '#/components/responses/Error'}
+        '404': {$ref: '#/components/responses/Error'}
+        '409': {$ref: '#/components/responses/Error'}
   /agent-accounts/{accountId}/probe:
     post:
       operationId: reportAgentAccountProbe
@@ -5126,7 +5163,7 @@ paths:
     put:
       operationId: putModelPreferenceProfile
       security: *auth
-      description: "Sparse personal settings follow the workspace. Templates preserve own orders unless replace_own is true. dry_run returns the same moved diff without writes or events. Residency may only tighten the workspace. Usage posture writes are deferred to AEON-880."
+      description: "Sparse personal settings follow the workspace. Templates preserve own orders unless replace_own is true. dry_run returns the same moved diff without writes or events. Residency may only tighten the workspace. Usage follows the account owner’s personal setting unless that owner sets an account override; admin floors always cap admission."
       parameters:
         - {name: for, in: query, schema: {type: string, enum: [me, default], default: me}}
         - {name: If-Prefs-Person, in: header, description: 'Required for person writes. Equality precondition against the current canonical caller; never selects a person.', schema: {type: string, format: uuid}}
@@ -12816,6 +12853,7 @@ components:
         owner_person_name: {type: string}
         state: {type: string, enum: [available, draining, unavailable]}
         billing_mode: {type: string, enum: [unknown, subscription, api]}
+        usage_policy: {$ref: '#/components/schemas/AccountUsagePolicy'}
         windows: {type: array, maxItems: 4096, items: {$ref: '#/components/schemas/AccountOverviewWindow'}}
         schedule: {$ref: '#/components/schemas/CapacitySchedule'}
         limit: {$ref: '#/components/schemas/AccountLimitRule'}
@@ -12860,6 +12898,18 @@ components:
         source: {type: string, enum: [vendor_reported, learned, manual, synthetic]}
         pacing: {$ref: '#/components/schemas/CapacityPacing'}
         learned: {$ref: '#/components/schemas/AccountOverviewLearning'}
+    AccountPosture:
+      type: object
+      required: [id, label, order, posture, floor_percent, boost_percent, boost_until, keep_for_you_percent]
+      properties:
+        id: {type: string, format: uuid}
+        label: {type: string}
+        order: {type: integer, minimum: 0, description: "Routing rank; zero means currently unavailable."}
+        posture: {type: string, enum: [careful, balanced, maxout]}
+        floor_percent: {type: integer, minimum: 0, maximum: 80}
+        boost_percent: {type: integer, enum: [0]}
+        boost_until: {type: 'null'}
+        keep_for_you_percent: {type: number, minimum: 0, maximum: 80}
     AccountProbe:
       type: object
       required: [daemon_id, daemon_generation, available]
@@ -12970,6 +13020,19 @@ components:
         harness: {type: string, enum: [codex, claude, pi, cursor, grok, gemini, opencode]}
         account_id: {type: string, format: uuid}
         group_id: {type: string, format: uuid}
+    AccountUsagePolicy:
+      type: object
+      required: [account_id, posture, source, floor_percent, own_floor_percent, revision, binding_revision, can_set_posture, can_set_floor]
+      properties:
+        account_id: {type: string, format: uuid}
+        posture: {type: string, enum: [careful, balanced, maxout]}
+        source: {type: string, enum: [account, person, workspace, schedule]}
+        floor_percent: {type: integer, minimum: 0, maximum: 80}
+        own_floor_percent: {type: integer, minimum: 0, maximum: 80}
+        revision: {type: integer, minimum: 0}
+        binding_revision: {type: integer, minimum: 0}
+        can_set_posture: {type: boolean}
+        can_set_floor: {type: boolean}
     AccountUse:
       type: object
       required: [accounts]

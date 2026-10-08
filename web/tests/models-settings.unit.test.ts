@@ -76,3 +76,18 @@ it('a canonical-person change clears proof folds and discards a held evidence pa
   expect(proof.state.folds.value).toEqual([]); expect(proof.state.evidence.value).toBeNull(); expect(read).toHaveBeenCalledTimes(1)
   expect(proof.state.owner.value).toBe('tenant/second-canonical-person'); proof.stop()
 })
+
+it('the account posture discards a held save after switching records and keeps failures honest', async () => {
+  const accountUsage = await import('../src/lib/accountUsage')
+  const first = { account_id: 'a', posture: 'balanced' as const, source: 'person' as const, floor_percent: 10, own_floor_percent: 10, revision: 3, binding_revision: 2, can_set_posture: true, can_set_floor: true }
+  const second = { ...first, account_id: 'b', posture: 'careful' as const, revision: 7 }
+  const held = deferred<any>(), write = vi.fn(() => held.promise), read = vi.fn(async () => ({ accounts: [{ account_id: 'a', usage_policy: first }, { account_id: 'b', usage_policy: second }], has_more: false }))
+  const props = reactive({ accountId: 'a', german: false }), session = { identity: { tenant: { id: 'tenant' }, principal: { id: 'owner', kind: 'person' } }, authenticationCurrent: () => true }
+  const view = setupSource('components/settings/AccountUsagePosture.vue', props, { '../../stores/session': { useSession: () => session }, '../../lib/authz': { can: () => true, onAccessChange: () => () => {} }, '../../lib/identityScope': await import('../src/lib/identityScope'), '../../lib/accountUsage': { ...accountUsage, getUsageOverview: read, putAccountUsage: write } })
+  await flush(); view.state.save({ posture: 'maxout' }); expect(write.mock.calls[0]![0]).toEqual(first)
+  props.accountId = 'b'; await flush(); held.resolve({ ...first, posture: 'maxout', revision: 4 }); await flush()
+  expect(view.state.policy.value).toEqual(second); expect(view.emitted).toEqual([])
+  write.mockRejectedValue(new Error('refused')); view.state.save({ posture: 'maxout' }); await flush()
+  expect(view.state.policy.value.posture).toBe('careful'); expect(view.state.error.value).toContain('could not be confirmed'); expect(view.emitted).toEqual([])
+  view.stop()
+})
