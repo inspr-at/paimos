@@ -66,6 +66,7 @@
     "receive": "receive"
   },
   "special": {
+    "events.subscribe": "Subscribe to authorized changes",
     "agents.plan.read": "See their agent start plan",
     "harness.watch": "View live conversations",
     "account.overview.read": "See all enrolled account capacity"

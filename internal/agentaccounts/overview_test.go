@@ -340,6 +340,47 @@ func TestVendorStopAdviceRejectsUnenrolledDaemonSquatter(t *testing.T) {
 // The same allowance still follows the owner's own schedule: pin that clock and
 // allow night work so a disabled night still explains the wait.
 func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
+	t.Run("schedule-band", func(t *testing.T) {
+		reset(t)
+		person := makePrincipal(t, "overview-routable", "person", "Owner", []string{"admin"})
+		other := addPrincipal(t, person.TenantID, "person", "Other", nil)
+		runner := addPrincipal(t, person.TenantID, "agent", "runtime", nil)
+		codexProfile(t, person)
+		now := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)
+		var own, private string
+		if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+			for _, row := range []struct{ label, owner string }{{"Own", person.ID}, {"Private", other.ID}} {
+				var id string
+				if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,owner_person_id,linked_at) VALUES($1,$2,'codex','daemon-a',$3,$2,$4,true,'g1',$5,$6,$4) RETURNING id::text`, person.TenantID, row.label, runner.ID, now, person.ID, row.owner).Scan(&id); err != nil {
+					return err
+				}
+				if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model) VALUES($1,$2,$3,$4,'requests',100,10,'unrestricted')`, person.TenantID, id, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+					return err
+				}
+				if row.label == "Own" {
+					own = id
+				} else {
+					private = id
+				}
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		var page overviewPage
+		callStatus(t, fixedClockModule{Module: accountsMod(), at: now}, &person, "", "GET", "/api/agent-accounts/overview", "", 200, &page)
+		seen := map[string]overviewAccount{}
+		for _, a := range page.Accounts {
+			seen[a.AccountID] = a
+		}
+		shared, privateRow := seen[own], seen[private]
+		if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil {
+			t.Fatalf("owned account with open slots was not routable: %+v wait=%+v", shared, shared.Wait)
+		}
+		if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
+			t.Fatalf("redacted overview disclosed headroom: %+v", privateRow)
+		}
+	})
 	for _, at := range []time.Time{
 		time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC),
 		time.Date(2026, 10, 10, 3, 0, 0, 0, time.UTC),
