@@ -193,7 +193,9 @@ func TestTicketAgentWork(t *testing.T) {
 	f.node(t, hiddenTicket, "ticket", "TW1-8", "Hidden ticket", hiddenProject)
 	f.bindGuest(t, f.project)
 
-	s1, s2, s3 := uid(), uid(), uid()
+	// s3 starts with the digits of a sibling's token count. Random ids reach
+	// that prefix now and then, so the fixture keeps it on every run.
+	s1, s2, s3 := uid(), uid(), "4242b618-e676-6050-dcac-3f40b46e3bd0"
 	s4, s5, s6, sHidden := uid(), uid(), uid(), uid()
 	past := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	f.session(t, s1, f.project, epic, "codex", "gpt-test", "high", past, past.Add(150*time.Second), past, "stopped")
@@ -498,7 +500,8 @@ func TestTicketAgentWorkSkipsRunTelemetry(t *testing.T) {
 	f.node(t, f.project, "project", "TW1-1", "Visible", "")
 	f.node(t, ticket, "ticket", "TW1-2", "Ticket", f.project)
 	f.node(t, order, "work_order", "TW1-9", "Order", f.project)
-	run, sid := uid(), uid()
+	// The session id carries the digits of the run counters on every run.
+	run, sid := uid(), "99999988-7777-4666-8666-888888666666"
 	past := time.Date(2020, 1, 3, 0, 0, 0, 0, time.UTC)
 	f.tx(t, f.person, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(t.Context(), `INSERT INTO work_orders(tenant_id,node_id,requested_by_principal_id) VALUES($1,$2,$3)`, f.person.TenantID, order, f.person.ID); err != nil {
