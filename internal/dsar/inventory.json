@@ -40,6 +40,36 @@
       "table": "attention_batches"
     },
     {
+      "classification": "personal",
+      "columns": {
+        "conversation_id": "metadata",
+        "person_id": "personal",
+        "revision": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "chat_read_state"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "bitmap": "personal",
+        "chunk_index": "metadata",
+        "conversation_id": "metadata",
+        "person_id": "personal",
+        "revision": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "person_column": "person_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "chat_seen_chunks"
+    },
+    {
       "classification": "metadata",
       "columns": {
         "allowed_families": "metadata",

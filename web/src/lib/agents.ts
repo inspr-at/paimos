@@ -69,6 +69,7 @@ export interface ModelProfile { id: string; slug: string; harness: string; famil
 export interface ModelResolution { role: string; profile: ModelProfile | null; owner_required: boolean; source: string }
 export interface MessageTarget { id: string; principal_id: string; address: string; adapter: string; target_kind: string; maximum_level: string; role: string; enabled: boolean }
 export interface ProjectMessage {
+  optimistic?: boolean; send_failed?: boolean; client_id?: string
   recipient_session_id?: string; sender_session_id?: string; sender_label?: string; from?: string
   id: string; sender_principal_id: string; recipient_principal_id: string; to: string; body: string; reply_to?: string | null
   sent_event_id: number; is_action_request: boolean; expects_reply: boolean; delivery_level: 'simple' | 'steer'

@@ -1526,6 +1526,9 @@ func (s *Supervisor) observe(entry *owned, ev AdapterEvent) {
 		entry.mu.Lock()
 		entry.harness.Activity = ev.Activity
 		entry.mu.Unlock()
+		if ev.Activity == "idle" {
+			entry.wakeHarness()
+		}
 	}
 	if len(ev.Capacity) > 0 {
 		s.observeCapacity(entry, ev.Capacity)
@@ -1895,11 +1898,34 @@ func (s *Supervisor) serviceHarnessWake(ctx context.Context, entry *owned, heart
 	}
 	if entry.inboxCapable {
 		// A drain returns at most one leased message and replays it until completed.
-		items, err := s.api.DrainHarness(ctx, entry.harness)
+		entry.mu.Lock()
+		busy := entry.harness.Activity == "busy"
+		entry.mu.Unlock()
+		var items []HarnessDelivery
+		var err error
+		if api, ok := s.api.(interface {
+			DrainHarnessInput(context.Context, HarnessSession, string) ([]HarnessDelivery, error)
+		}); ok {
+			level := ""
+			if busy {
+				level = "steer"
+			}
+			items, err = api.DrainHarnessInput(ctx, entry.harness, level)
+		} else if !busy {
+			items, err = s.api.DrainHarness(ctx, entry.harness)
+		}
 		if err != nil {
 			return err
 		}
 		for _, item := range items {
+			entry.mu.Lock()
+			busy = entry.harness.Activity == "busy"
+			entry.mu.Unlock()
+			// Keep the lease replayable until the active turn ends. Controls are
+			// serviced on every wake; waiting input never blocks that loop.
+			if busy && item.Level != "steer" {
+				continue
+			}
 			messageText := inboxMessageText(item)
 			req := ControlRequest{TenantID: s.tenantID, PrincipalID: s.principalID,
 				RunID: entry.record.RunID, Generation: s.generation, CorrelationID: item.ID,
