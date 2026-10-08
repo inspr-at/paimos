@@ -311,6 +311,8 @@
     "scripts/releaseworkflow:TestParallelWebUnitsShareRuntimeAndRunOnce"
     ,
     "scripts/releaseworkflow:TestRehearsedBuilderPins"
+    ,
+    "scripts/releaseworkflow:TestRootAptTimeoutReapsBeforeRetry"
   ]
   ,
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)"
@@ -687,6 +689,10 @@
     {"kind":"go","package":"internal/agentaccounts","name":"TestExpiredCapacityHasNoStartFence","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestExpiredReadingRestoresUnknownSlots","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestFactOnlyReportsExhaustTheDailyShare","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentaccounts","name":"TestFiveHourFirstReadingNearUTCMidnightStaysEligible","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentaccounts","name":"TestFix2KnownKeyCapKeepsTotalBalanceUnknown","tier":"GATED-FULL"}
     ,
@@ -8354,11 +8360,29 @@
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionApplyDismissUndoAndSuppression","tier":"GATED-FULL"}
     ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkAllKindsAndReleaseUndo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkBeyondSelectionCapReplayAuditAndPartialUndo","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkCapExpiryAndTenantIsolation","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkFrozenPreviewExclusionsAndOwnership","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkInterruptedCommitResumesWithoutRepeating","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkMissedReleaseSharesCapturedRevision","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkReturnsPartialResultsAndGuardsUndo","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkScopeConcurrencyAndFinalAuthorityFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkUnavailableProposalsAndAgentReleaseRights","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionBulkUndoOwnershipAndAuthenticationGuard","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionChecksRevocationUnderFinalWriteFence","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionGroupsAndKindTimePagination","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/statusautopilot","name":"TestAttentionMissedReleaseApplyUndoApplyRefreshesIdentity","tier":"ESSENTIAL"}
     ,
@@ -8859,6 +8883,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReleaseBinariesRefuseWarmOrUnverifiedGo","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReuseAlwaysPrimesMatchingMainCacheKeys","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestRootAptTimeoutReapsBeforeRetry","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestRuntimeClosurePreparedColdAndNeverCached","tier":"ESSENTIAL"}
     ,
