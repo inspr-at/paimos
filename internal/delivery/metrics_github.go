@@ -14,14 +14,15 @@ import (
 )
 
 // metricsReader runs bounded reads with the App's existing short-lived
-// installation token (actions:read, as the shipping reader requests). No new
-// credential exists for metrics.
+// installation token, the same read channel the queue quarantine uses for
+// workflow runs (Actions reads of a private repository need the App's
+// actions permission, as QueueChecks notes). No new credential exists.
 type metricsReader interface {
 	MetricsRead(context.Context, func(get func(string, any) error) error) error
 }
 
 func (g AppReader) MetricsRead(ctx context.Context, read func(func(string, any) error) error) error {
-	return g.App.ReadShippingInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
+	return g.App.ReadInstallation(ctx, func(get func(string, any) error, _ func(int64, string) (bool, string, error)) error {
 		return read(get)
 	})
 }

@@ -167,7 +167,7 @@ func TestDeliveryMetricsNeverReportMissingDataAsZero(t *testing.T) {
 			}
 		}
 		for _, p := range m.Daily {
-			if p.Value != nil || p.P50 != nil || p.N != 0 {
+			if p.Status != "no_data" || p.Value != nil || p.P50 != nil || p.N != 0 {
 				t.Fatalf("%s day %+v", m.Key, p)
 			}
 		}
@@ -181,6 +181,9 @@ func TestDeliveryMetricsNeverReportMissingDataAsZero(t *testing.T) {
 	wantWindow(t, wall, 7, "partial", 1, f64(9), f64(9), f64(9))
 	if wall.Status != "partial" || wall.Reason == nil || !strings.Contains(*wall.Reason, "2026-10-05 12:00") {
 		t.Fatalf("partial coverage reason: %+v", wall)
+	}
+	if today, before := wall.Daily[metricDays-1], wall.Daily[metricDays-2]; today.Status != "ok" || today.N != 1 || before.Status != "no_data" || before.Value != nil {
+		t.Fatalf("daily status: today %+v, yesterday %+v", today, before)
 	}
 	// Truncated reads are partial even with full coverage.
 	old := metricNow.Add(-60 * 24 * time.Hour)

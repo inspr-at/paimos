@@ -15479,9 +15479,10 @@ components:
     DeliveryMetricPoint:
       type: object
       additionalProperties: false
-      required: [date, n, value, p50, p90]
+      required: [date, status, n, value, p50, p90]
       properties:
         date: {type: string, format: date}
+        status: {type: string, enum: [ok, partial, no_data], description: 'partial when the day starts before complete coverage or the source is incomplete.'}
         n: {type: integer, minimum: 0}
         value: {type: [number, 'null']}
         p50: {type: [number, 'null']}

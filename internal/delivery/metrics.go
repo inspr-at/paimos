@@ -84,11 +84,12 @@ type MetricWindow struct {
 }
 
 type MetricPoint struct {
-	Date  string   `json:"date"`
-	N     int      `json:"n"`
-	Value *float64 `json:"value"`
-	P50   *float64 `json:"p50"`
-	P90   *float64 `json:"p90"`
+	Date   string   `json:"date"`
+	Status string   `json:"status"`
+	N      int      `json:"n"`
+	Value  *float64 `json:"value"`
+	P50    *float64 `json:"p50"`
+	P90    *float64 `json:"p90"`
 }
 
 type MetricTarget struct {
@@ -227,8 +228,13 @@ func (s metricSpec) build(now time.Time, samples []metricPoint, truncated bool) 
 				values = append(values, sample.value)
 			}
 		}
-		p := MetricPoint{Date: day.Format("2006-01-02"), N: len(values)}
+		p := MetricPoint{Date: day.Format("2006-01-02"), Status: "ok", N: len(values)}
 		p.Value, p.P50, p.P90 = s.summarize(values)
+		if len(values) == 0 {
+			p.Status = "no_data"
+		} else if partialWindow(day) {
+			p.Status = "partial"
+		}
 		out.Daily = append(out.Daily, p)
 	}
 	long := out.Windows[len(out.Windows)-1]

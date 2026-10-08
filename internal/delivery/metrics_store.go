@@ -94,7 +94,8 @@ func (m *Module) metricsEvent(ctx context.Context, name string, raw []byte) erro
 	var marks []metricMark
 	switch name {
 	case "pull_request":
-		if e.Repository.Default == "" || e.Pull.Base.Ref != e.Repository.Default {
+		// Only pulls into the default branch with an opened time are facts.
+		if e.Repository.Default == "" || e.Pull.Base.Ref != e.Repository.Default || e.Pull.Created.IsZero() {
 			return nil
 		}
 		pull, err := metricPullFrom(e.Pull, m.config.Repository)

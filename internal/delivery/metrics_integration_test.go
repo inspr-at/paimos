@@ -318,7 +318,9 @@ func TestDeliveryMetricsReadIsProjectMembersOnly(t *testing.T) {
 		return nil
 	})
 	path := "/api/projects/" + f.project + "/delivery/metrics"
-	who := func(id string) tenant.Principal { return tenant.Principal{ID: id, TenantID: f.person.TenantID, Kind: tenant.Person} }
+	who := func(id string) tenant.Principal {
+		return tenant.Principal{ID: id, TenantID: f.person.TenantID, Kind: tenant.Person}
+	}
 	var out DeliveryMetrics
 	f.call(t, who(reader), "GET", path, nil, 200, &out)
 	rel := metricByKey(t, out.Metrics, "release_queue_to_live")
