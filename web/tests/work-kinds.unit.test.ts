@@ -17,11 +17,11 @@ afterEach(() => { for (const stop of stops.splice(0)) stop(); vi.unstubAllGlobal
 function setup(overrides: Partial<typeof kinds> = {}) {
   const session = reactive({ identity: { tenant: { id: 'workspace' }, principal: { id: 'person-a', kind: 'person' } } })
   const grants = reactive({ read: true, write: true })
-  const api = { ...kinds, listWorkKinds: vi.fn(async () => ({ items: [kind(), kind('security', { system: 'security', position: 1 }), kind('other', { system: 'other', position: 2 })], truncated: false })), getSituationLimits: vi.fn(async () => ({ ...limits })), updateKind: vi.fn(async () => kind('design', words)), archiveKind: vi.fn(async () => kind('design', { archived_at: '2026-10-07T13:00:00Z' })), putSituationLimits: vi.fn(async () => ({ ...limits, small_hours: 4, revision: 8 })), ...overrides }
+  const api = { ...kinds, listWorkKinds: vi.fn(async () => ({ items: [kind(), kind('security', { system: 'security', position: 1 }), kind('other', { system: 'other', position: 2 })], truncated: false })), getSituationLimits: vi.fn(async () => ({ ...limits })), updateKind: vi.fn(async () => kind('design', words)), archiveKind: vi.fn(async () => kind('design', { archived_at: '2026-10-07T13:00:00Z' })), putSituationLimits: vi.fn(async () => ({ ...limits, small_hours: 4, revision: 8 })), orderKinds: vi.fn(async () => ({ items: [kind(), kind('security', { system: 'security', position: 1 }), kind('other', { system: 'other', position: 2 })], next_cursor: null })), ...overrides }
   const toast = vi.fn()
   const component = setupSource('components/settings/KindsOfWorkSection.vue', {}, {
     '../../lib/authz': { can: (permission: string) => permission === 'models.read' ? grants.read : grants.write },
-    '../../stores/session': { useSession: () => session }, '../../stores/profile': { useProfile: () => ({ profile: null }) },
+    '../../stores/session': { useSession: () => session },
     '../../lib/identityScope': { scopeOwner }, '../../lib/useIdentityScope': { useIdentityScope: (requires: () => boolean) => {
       const owner = computed(() => requires() ? scopeOwner(session.identity) : '')
       const scope = createScope(() => owner.value)
@@ -57,7 +57,7 @@ it('paginates with explicit bounds and reports truncation instead of a complete 
 it('drops a pending kind response and its toast when the person changes', async () => {
   const pending = deferred<kinds.WorkKind>(), update = vi.fn(() => pending.promise)
   const { state, session, toast } = setup({ updateKind: update })
-  await flush(); state.edit(state.kinds.value[0], {}); const writing = state.save(words)
+  await flush(); state.edit(state.kinds.value[0]); const writing = state.save(words)
   expect(update).toHaveBeenCalledOnce()
   session.identity.principal.id = 'person-b'; await flush()
   pending.resolve(kind('design', words)); await writing; await flush()
@@ -66,7 +66,7 @@ it('drops a pending kind response and its toast when the person changes', async 
 it('failed kind writes keep the editor and saved words; revoked permissions cannot write or archive system kinds', async () => {
   const update = vi.fn(async () => { throw new Error('storage failed') })
   const { state, grants, api, toast } = setup({ updateKind: update })
-  await flush(); state.edit(state.kinds.value[0], {}); state.save(words); await flush()
+  await flush(); state.edit(state.kinds.value[0]); state.save(words); await flush()
   expect(state.editorError.value).toContain('could not be saved'); expect(state.editor.value).not.toBeNull(); expect(state.kinds.value[0].label).toBe('design'); expect(toast).not.toHaveBeenCalled()
   state.askArchive(state.kinds.value[1], {}); expect(state.confirmation.value).toBeNull()
   grants.write = false; state.save(words); state.askArchive(state.kinds.value[0], {}); await flush()
@@ -75,7 +75,7 @@ it('failed kind writes keep the editor and saved words; revoked permissions cann
 it('Undo cannot send an inverse write after identity changes during its freshness read', async () => {
   const pending = deferred<{ items: kinds.WorkKind[]; truncated: boolean }>()
   const { state, api, session, toast } = setup()
-  await flush(); state.edit(state.kinds.value[0], {}); state.save(words); await flush()
+  await flush(); state.edit(state.kinds.value[0]); state.save(words); await flush()
   const undo = toast.mock.calls[0]![1].action.run
   api.listWorkKinds.mockImplementationOnce(() => pending.promise)
   undo(); await flush(); session.identity.principal.id = 'person-b'; await flush()
@@ -92,7 +92,7 @@ it('failed limit writes retain the last server values and stale revisions are ex
 
 it('Undo refuses to replace kind words changed elsewhere after the original save', async () => {
   const { state, api, toast } = setup()
-  await flush(); state.edit(state.kinds.value[0], {}); state.save(words); await flush()
+  await flush(); state.edit(state.kinds.value[0]); state.save(words); await flush()
   api.listWorkKinds.mockResolvedValueOnce({ items: [kind('design', { ...words, hint: 'Changed by another administrator.' })], truncated: false })
   toast.mock.calls[0]![1].action.run(); await flush()
   expect(api.updateKind).toHaveBeenCalledOnce()
@@ -103,9 +103,43 @@ it('Undo refuses to replace kind words changed elsewhere after the original save
 it('system kind wording is editable while its immutable ticket area is preserved', async () => {
   const update = vi.fn(async () => kind('security', { ...words, system: 'security' }))
   const { state } = setup({ updateKind: update })
-  await flush(); state.edit(state.kinds.value[1], {}); state.save(words); await flush()
+  await flush(); state.edit(state.kinds.value[1]); state.save(words); await flush()
   expect(update).toHaveBeenCalledWith('security', words, expect.any(AbortSignal))
   expect(state.kinds.value.find((item: kinds.WorkKind) => item.id === 'security')?.slug).toBe('security')
+})
+
+// Risk: opening another form silently drops words that are not saved yet.
+it('a second form waits while unsaved words are open, and never opens for a person who may not write', async () => {
+  const { state, grants } = setup()
+  await flush(); state.edit(state.kinds.value[0]); state.editDirty.value = true
+  state.edit(state.kinds.value[1])
+  expect(state.editor.value?.kind?.id).toBe('design'); expect(state.editorError.value).toContain('Save or cancel')
+  state.editDirty.value = false; state.edit(null)
+  expect(state.editor.value?.kind).toBeNull(); expect(state.editorError.value).toBe('')
+  state.closeEditor(); expect(state.editor.value).toBeNull()
+  grants.write = false; await flush(); state.edit(state.kinds.value[0]); expect(state.editor.value).toBeNull()
+})
+// Risk: the ⋯ menu writes for a record or a person it was not opened for.
+it('the ⋯ menu binds to the record it opened on; Archive is disabled for built-in kinds and Everything else has no Move', async () => {
+  const { state, api, grants } = setup()
+  await flush()
+  const security = state.kinds.value.find((item: kinds.WorkKind) => item.id === 'security'), other = state.kinds.value.find((item: kinds.WorkKind) => item.id === 'other')
+  await state.openMenu(security, {})
+  const items = (): { id: string; disabled?: boolean }[] => state.menuItems.value
+  expect(items().find(item => item.id === 'archive')?.disabled).toBe(true)
+  state.menuSelect('archive', state.menuContext.value); expect(state.confirmation.value).toBeNull()
+  await state.openMenu(other, {})
+  expect(items().map(item => item.id)).toEqual(['archive'])
+  const design = state.kinds.value.find((item: kinds.WorkKind) => item.id === 'design')
+  await state.openMenu(design, {})
+  expect(items().map(item => item.id)).toEqual(['up', 'down', 'archive']); expect(items().find(item => item.id === 'up')?.disabled).toBe(true)
+  state.menuSelect('archive', 'another-person/design'); expect(state.confirmation.value).toBeNull()
+  state.menuSelect('archive', state.menuContext.value); expect(state.confirmation.value?.kind.id).toBe('design')
+  // Control: the same menu choice writes while the person may write, and stops once they may not.
+  await state.openMenu(design, {}); state.menuSelect('down', state.menuContext.value); await flush()
+  expect(api.orderKinds).toHaveBeenCalledTimes(1)
+  grants.write = false; await flush(); state.menuSelect('down', state.menuContext.value)
+  expect(api.orderKinds).toHaveBeenCalledTimes(1)
 })
 
 function literalTarget(source: string): string {
