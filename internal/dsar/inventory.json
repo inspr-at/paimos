@@ -187,6 +187,88 @@
       "classification": "metadata",
       "columns": {
         "at": "metadata",
+        "head_sha": "metadata",
+        "kind": "metadata",
+        "mark_key": "metadata",
+        "outcome": "metadata",
+        "pull_request": "metadata",
+        "recorded_at": "metadata",
+        "repository": "metadata",
+        "source": "metadata",
+        "started_at": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_metric_marks"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "closed_at": "metadata",
+        "head_branch": "metadata",
+        "merged_at": "metadata",
+        "opened_at": "metadata",
+        "pull_request": "metadata",
+        "recorded_at": "metadata",
+        "repository": "metadata",
+        "source": "metadata",
+        "tenant_id": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_metric_pulls"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "attempt": "metadata",
+        "completed_at": "metadata",
+        "conclusion": "metadata",
+        "created_at": "metadata",
+        "event": "metadata",
+        "head_branch": "metadata",
+        "head_sha": "metadata",
+        "pull_request": "metadata",
+        "recorded_at": "metadata",
+        "repository": "metadata",
+        "run_id": "metadata",
+        "source": "metadata",
+        "started_at": "metadata",
+        "tenant_id": "metadata",
+        "workflow_name": "metadata",
+        "workflow_path": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_metric_runs"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "backfill_cursor": "metadata",
+        "backfill_done_at": "metadata",
+        "backfill_revision": "metadata",
+        "backfill_since": "metadata",
+        "ci_workflow": "metadata",
+        "nightly_workflow": "metadata",
+        "project_id": "metadata",
+        "repository": "metadata",
+        "tenant_id": "metadata",
+        "updated_at": "metadata"
+      },
+      "locator": {
+        "tenant_column": "tenant_id"
+      },
+      "table": "delivery_metric_sources"
+    },
+    {
+      "classification": "metadata",
+      "columns": {
+        "at": "metadata",
         "check_name": "metadata",
         "check_run_id": "metadata",
         "conclusion": "metadata",

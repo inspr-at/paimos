@@ -5156,6 +5156,18 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryManageExplicitAgentGrant","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsBackfillIsBoundedResumableAndIdempotent","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsBackfillStepsCoverEveryDayOnce","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsFromFixedFacts","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsNeverReportMissingDataAsZero","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsReadIsProjectMembersOnly","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestDeliveryMetricsWebhookRecordsEachEventKind","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryReconciliationHealsMissedWebhooksAndFanoutRetry","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestDeliveryReviewsConcurrentClaimsHaveOneOwner","tier":"ESSENTIAL"}
