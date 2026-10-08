@@ -270,6 +270,40 @@ func TestLateReadingDailyShareStillCapsObservedUsage(t *testing.T) {
 	}
 }
 
+// AEON-959: CI at 2026-10-08 01:41 Europe/Vienna (23:41 UTC) dropped an enrolled
+// account whose 5h window opened at that instant with 14% already on the counter.
+// That first sample is a baseline. The account stays routable on a 24/7 UTC day.
+func TestFiveHourFirstReadingNearUTCMidnightStaysEligible(t *testing.T) {
+	at := time.Date(2026, 10, 7, 23, 41, 39, 91263000, time.UTC)
+	f := limitWorldAt(t, "five-hour-midnight", 1, at)
+	s := capacity.DefaultSchedule()
+	s.Reserve = capacity.ReserveOff
+	for i := range s.Week {
+		s.Week[i] = capacity.Day{On: true, Start: 0, End: 24}
+	}
+	callStatus(t, f.mod, &f.admin, "", "PUT", "/api/agent-accounts/capacity/schedule", encoded(t, scheduleOverride{Scope: "account", AccountID: f.account.ID, Schedule: &s}), 204, nil)
+	readings := []capacity.Reading{
+		{WindowKind: "5h", WindowMinutes: 300, UsedPercent: 14, ResetsAt: at.Add(5 * time.Hour), ReadAt: at, Source: "harness"},
+		{WindowKind: "weekly", WindowMinutes: 10080, UsedPercent: 24, ResetsAt: at.Add(28 * time.Hour), ReadAt: at, Source: "harness"},
+	}
+	callStatus(t, f.mod, &f.runner, f.token, "POST", "/api/agent-accounts/"+f.account.ID+"/readings", encoded(t, readingsWrite{readings}), 204, nil)
+	c := f.capacity(t)
+	var paced *capacity.Pacing
+	for i := range c.Windows {
+		if c.Windows[i].Reading.WindowKind == "5h" {
+			paced = &c.Windows[i].Pacing
+		}
+	}
+	if paced == nil || paced.UsedTodayPercent != 0 || paced.AvailableNowPercent < 1 {
+		t.Fatalf("first 5h sample was charged as today's consumption: %+v", c.Windows)
+	}
+	var next CapacityNext
+	callStatus(t, f.mod, &f.admin, "", "GET", "/api/agent-accounts/capacity/next?harness=codex", "", 200, &next)
+	if len(next.Accounts) != 1 || next.Accounts[0].AccountID != f.account.ID || next.ParallelRuns < 1 || next.Wait != nil {
+		t.Fatalf("first 5h sample near UTC midnight was not routable: %+v", next)
+	}
+}
+
 // AEON-384 acceptance: the Advanced sentence round-trips, and it caps.
 func TestAdvancedSentenceRoundTripsAndCaps(t *testing.T) {
 	f := limitWorld(t, "advanced", 4)
