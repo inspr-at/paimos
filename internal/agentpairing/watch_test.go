@@ -440,3 +440,18 @@ func TestAttachRegisteredKeyStillRequiresSnapshotDigest(t *testing.T) {
 	in.Digest = in.Snapshot.Digest()
 	f.call("POST", "/api/agent-pairing/attach", in, false, key, 410)
 }
+
+func TestAttachRequestEmitsOneRedactedCommittedEvent(t *testing.T) {
+	f, key, in := watchFixture(t)
+	requestWatch(t, f, key, in)
+	requestWatch(t, f, key, in) // Registration replay must not wake a new request.
+	var count int
+	var request, owner string
+	var fields int
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT count(*),min(after->>'request_id'),min(after->>'owner_id'),min((SELECT count(*) FROM jsonb_object_keys(after))) FROM events WHERE tenant_id=$1 AND type='harness.attach_requested'`, f.tenantID).Scan(&count, &request, &owner, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 || request != in.RequestID || owner != f.person || fields != 2 {
+		t.Fatalf("attach event: count=%d request=%s owner=%s fields=%d", count, request, owner, fields)
+	}
+}

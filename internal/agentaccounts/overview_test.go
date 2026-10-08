@@ -4,6 +4,7 @@ package agentaccounts
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -336,17 +337,119 @@ func TestVendorStopAdviceRejectsUnenrolledDaemonSquatter(t *testing.T) {
 
 // Risk: a redacted overview row discloses quota headroom through routable,
 // or by omitting wait when slots remain. Private rows keep one constant shape.
-// The owned row is the control, so it has to be inside working hours. The
-// default schedule is closed after 22:00 UTC and on weekends; CI failed this
-// test at 22:18Z while the manual window still had slots. The clock is pinned
-// to that closed hour. The person's clock gate stays (AEON-478).
-// The default schedule is weekdays 08:00–22:00 UTC with nights off, so a
-// wall-clock overview after 22:00 waits on the schedule even when the manual
-// window still has slots (CI on 9f3604f8 at 2026-10-07 22:16Z). Pin the probe,
-// the window and the overview to a Wednesday noon. The assertion is unchanged.
+// Unknown usage follows the default Mon–Fri 08–22 band, so the owned account
+// is pinned inside that band. Wall-clock overview at 2026-10-07T22:18:00Z
+// reported this open manual budget as not routable.
+func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
+	now := time.Date(2026, 10, 7, 14, 0, 0, 0, time.UTC) // Wednesday, inside 08–22.
+	person, own, privateID := overviewHeadroomPair(t, "overview-routable", now)
+	shared, privateRow := overviewHeadroomRows(t, person, now, own, privateID)
+	if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil {
+		t.Fatalf("owned account with open slots was not routable: %s", overviewHeadroomText(shared))
+	}
+	if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
+		t.Fatalf("redacted overview disclosed headroom: %s", overviewHeadroomText(privateRow))
+	}
+}
+
+// Risk: the privacy assertion above follows the machine clock. CI after the
+// default band closed treated an owned manual budget with 90 requests left as
+// not routable, and a fix that dropped the assertion would hide a redacted row.
+// Outside the band the owned row waits on schedule and still shows its window.
+// The private row keeps the constant shape at both clocks.
+func TestRedactedOverviewHeadroomFollowsWorkBand(t *testing.T) {
+	outside := time.Date(2026, 10, 7, 22, 18, 0, 0, time.UTC) // The CI instant.
+	person, own, privateID := overviewHeadroomPair(t, "overview-routable-band", outside)
+	shared, privateRow := overviewHeadroomRows(t, person, outside, own, privateID)
+	wantUntil := time.Date(2026, 10, 8, 8, 0, 0, 0, time.UTC)
+	if shared.DetailsRedacted || shared.Routable || shared.Wait == nil || shared.Wait.Code != "schedule" || !shared.Wait.RunNowAllowed || shared.Wait.Timezone != "" || shared.Wait.Until == nil || !shared.Wait.Until.Equal(wantUntil) || len(shared.Windows) != 1 || shared.Windows[0].Allowance != 100 || shared.Windows[0].Used != 10 {
+		t.Fatalf("outside the work band the owned budget was not an explicit schedule wait: %s", overviewHeadroomText(shared))
+	}
+	if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
+		t.Fatalf("redacted overview disclosed headroom: %s", overviewHeadroomText(privateRow))
+	}
+	inside := time.Date(2026, 10, 7, 14, 0, 0, 0, time.UTC)
+	person, own, privateID = overviewHeadroomPair(t, "overview-routable-day", inside)
+	shared, privateRow = overviewHeadroomRows(t, person, inside, own, privateID)
+	if shared.AccountID == "" || shared.DetailsRedacted || !shared.Routable || shared.Wait != nil || shared.Routing == nil || shared.Routing.AvailableSlots < 1 {
+		t.Fatalf("owned account with open slots was not routable: %s", overviewHeadroomText(shared))
+	}
+	if privateRow.AccountID == "" || !privateRow.DetailsRedacted || privateRow.Routable || privateRow.Wait == nil || privateRow.Wait.Code != "state" || privateRow.Wait.Until != nil || len(privateRow.Windows) != 0 || privateRow.Routing != nil {
+		t.Fatalf("redacted overview disclosed headroom: %s", overviewHeadroomText(privateRow))
+	}
+}
+
+func overviewHeadroomPair(t *testing.T, slug string, now time.Time) (tenant.Principal, string, string) {
+	t.Helper()
+	reset(t)
+	person := makePrincipal(t, slug, "person", "Owner", []string{"admin"})
+	other := addPrincipal(t, person.TenantID, "person", "Other", nil)
+	runner := addPrincipal(t, person.TenantID, "agent", "runtime", nil)
+	codexProfile(t, person)
+	var own, private string
+	if err := db.InTenant(dbtest.Seed(t.Context()), appPool, person.TenantID, func(tx pgx.Tx) error {
+		for _, row := range []struct{ label, owner string }{{"Own", person.ID}, {"Private", other.ID}} {
+			var id string
+			if err := tx.QueryRow(t.Context(), `INSERT INTO agent_accounts(tenant_id,account_key,harness,daemon_id,registered_by_principal_id,label,last_probe_at,last_probe_ok,last_daemon_generation,capacity_owner,owner_person_id,linked_at) VALUES($1,$2,'codex','daemon-a',$3,$2,$4,true,'g1',$5,$6,$4) RETURNING id::text`, person.TenantID, row.label, runner.ID, now, person.ID, row.owner).Scan(&id); err != nil {
+				return err
+			}
+			if _, err := tx.Exec(t.Context(), `INSERT INTO account_allowance_windows(tenant_id,account_id,starts_at,ends_at,unit,allowance,used,pace_model) VALUES($1,$2,$3,$4,'requests',100,10,'unrestricted')`, person.TenantID, id, now.Add(-time.Hour), now.Add(time.Hour)); err != nil {
+				return err
+			}
+			if row.label == "Own" {
+				own = id
+			} else {
+				private = id
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return person, own, private
+}
+
+func overviewHeadroomRows(t *testing.T, person tenant.Principal, now time.Time, own, privateID string) (overviewAccount, overviewAccount) {
+	t.Helper()
+	var page overviewPage
+	callStatusAt(t, accountsMod(), &person, "", "GET", "/api/agent-accounts/overview", "", now, 200, &page)
+	seen := map[string]overviewAccount{}
+	for _, a := range page.Accounts {
+		seen[a.AccountID] = a
+	}
+	return seen[own], seen[privateID]
+}
+
+func overviewHeadroomText(a overviewAccount) string {
+	slots := "<nil>"
+	if a.Routing != nil {
+		slots = fmt.Sprintf("rank=%d slots=%d", a.Routing.Rank, a.Routing.AvailableSlots)
+	}
+	return fmt.Sprintf("id=%s redacted=%t routable=%t wait=%s routing={%s} windows=%d", a.AccountID, a.DetailsRedacted, a.Routable, overviewWaitText(a.Wait), slots, len(a.Windows))
+}
+
+func overviewWaitText(w *CapacityWait) string {
+	if w == nil {
+		return "<nil>"
+	}
+	until := "<nil>"
+	if w.Until != nil {
+		until = w.Until.UTC().Format(time.RFC3339)
+	}
+	return fmt.Sprintf("code=%s until=%s run_now=%t tz=%q", w.Code, until, w.RunNowAllowed, w.Timezone)
+}
+
 // A manual allowance still follows the owner's schedule; pin both clocks and
 // allow night work so this privacy guard cannot depend on the time CI runs.
-func TestRedactedOverviewHidesRoutableHeadroom(t *testing.T) {
+// Kept beside the reviewed default-band guard: main added the owner-schedule
+// day and night cases under the same name. The Wednesday-noon schedule-band
+// and the account-scoped round-the-clock case arrived with main and stay here
+// so the reviewed default-band tests keep their exact assertions.
+func TestRedactedOverviewHidesRoutableHeadroomOnOwnerSchedule(t *testing.T) {
+	// The default schedule is weekdays 08:00–22:00 UTC with nights off, so a
+	// wall-clock overview after 22:00 waits on the schedule even when the manual
+	// window still has slots (CI on 9f3604f8 at 2026-10-07 22:16Z). Pin the probe,
+	// the window and the overview to a Wednesday noon. The assertion is unchanged.
 	t.Run("account schedule outside default closed hours", func(t *testing.T) {
 		reset(t)
 		person := makePrincipal(t, "overview-routable", "person", "Owner", []string{"admin"})

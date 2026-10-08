@@ -288,6 +288,28 @@
       "table": "engine_admission_settings"
     },
     {
+      "classification": "personal",
+      "columns": {
+        "resend_of_id": "metadata"
+      },
+      "locator": {
+        "person_column": "sender_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "inbox_compat_messages"
+    },
+    {
+      "classification": "personal",
+      "columns": {
+        "cancelled_at": "metadata"
+      },
+      "locator": {
+        "person_column": "sender_principal_id",
+        "tenant_column": "tenant_id"
+      },
+      "table": "inbox_messages"
+    },
+    {
       "classification": "review",
       "columns": {
         "audit": "review",

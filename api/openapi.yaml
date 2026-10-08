@@ -8652,6 +8652,16 @@ paths:
         '400': {description: Invalid filter}
         '403': {description: 'Person with inbox.manage or exact-session harness.read required'}
         '404': {description: 'Project or session not found'}
+  /projects/{projectId}/messages/{messageId}/cancel:
+    post:
+      operationId: cancelSessionChatMessage
+      description: "P0 bridge to the chat-v1 cancel result. Authenticated person sender with current inbox.send and harness.read in the project; durable session-bound messages only. Serializes on the inbox message against hooks and daemon claims. A possible offer cannot be recalled and returns too_late. Cancellation preserves history and the accepted deadline, expires never-offered input and emits a content-free event. Native chat-v1 delivery remains reserved for R3."
+      parameters:
+        - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: messageId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200': {description: "Cancellation result", content: {application/json: {schema: {$ref: '#/components/schemas/ChatCancelResponse'}}}}
+        '404': {description: "Unknown or unauthorized message"}
   /projects/{projectId}/messages/{messageId}/resolution:
     parameters:
       - {name: projectId, in: path, required: true, schema: {type: string, format: uuid}}
@@ -16680,6 +16690,7 @@ components:
       required: [message_id, status, delivered_at, read_at, deliver_by]
       properties:
         attached: {$ref: '#/components/schemas/AttachedMessageStatus'}
+        cancelled: {type: boolean, description: "True when a never-offered session message was cancelled by its sender."}
         message_id: {type: string, format: uuid}
         status: {type: string, enum: [sent, delivered, read, not_delivered]}
         reason: {type: string, description: 'Present only for not_delivered: deadline, attempts, session_ended, no_listener or an adapter reason.'}
@@ -18877,6 +18888,7 @@ components:
       properties:
         id: {type: string, format: uuid}
         created_at: {type: string, format: date-time}
+        endpoint_hash: {type: string, pattern: '^[a-f0-9]{64}$', description: 'SHA-256 of the JSON-encoded endpoint; matches this browser without exposing the push address.'}
     PluginCapability:
       type: object
       required: [id, permission]
