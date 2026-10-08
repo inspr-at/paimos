@@ -1,0 +1,13 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "project_filtered": {
+    "GET /api/brand/logo/{variant}": true
+  },
+  "routes": {
+    "DELETE /api/settings/brand/logo/{variant}": "settings.manage",
+    "GET /api/brand/logo/{variant}": "profile.read|profile.portal_read",
+    "GET /api/settings/brand": "settings.manage",
+    "PUT /api/settings/brand": "settings.manage",
+    "PUT /api/settings/brand/logo/{variant}": "settings.manage"
+  }
+}

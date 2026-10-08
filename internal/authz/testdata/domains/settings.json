@@ -1,0 +1,42 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "settings.manage",
+      "settings.read"
+    ],
+    "owner": [
+      "settings.manage",
+      "settings.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": false,
+      "description": "Manage settings",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Settings",
+      "key": "settings.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read settings",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Settings",
+      "key": "settings.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "words": {
+    "resources": {
+      "settings": "workspace settings"
+    }
+  }
+}

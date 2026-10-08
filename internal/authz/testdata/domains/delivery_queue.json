@@ -1,0 +1,68 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "delivery_queue.claim",
+    "delivery_queue.manage"
+  ],
+  "builtin_roles": {
+    "admin": [
+      "delivery_queue.claim",
+      "delivery_queue.manage",
+      "delivery_queue.read"
+    ],
+    "member": [
+      "delivery_queue.read"
+    ],
+    "owner": [
+      "delivery_queue.claim",
+      "delivery_queue.manage",
+      "delivery_queue.read"
+    ],
+    "viewer": [
+      "delivery_queue.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Claim delivery queue",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Delivery Queue",
+      "key": "delivery_queue.claim",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Manage delivery queue",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Delivery Queue",
+      "key": "delivery_queue.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read delivery queue",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Delivery Queue",
+      "key": "delivery_queue.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    }
+  ],
+  "words": {
+    "resources": {
+      "delivery_queue": "delivery work queue"
+    }
+  }
+}

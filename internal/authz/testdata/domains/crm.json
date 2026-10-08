@@ -1,0 +1,65 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_roles": {
+    "admin": [
+      "crm.manage",
+      "crm.read",
+      "crm.write"
+    ],
+    "member": [
+      "crm.read",
+      "crm.write"
+    ],
+    "owner": [
+      "crm.manage",
+      "crm.read",
+      "crm.write"
+    ],
+    "viewer": [
+      "crm.read"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Manage crm",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "CRM",
+      "key": "crm.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read crm",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "CRM",
+      "key": "crm.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Write crm",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "CRM",
+      "key": "crm.write",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "crm": "CRM"
+    }
+  }
+}

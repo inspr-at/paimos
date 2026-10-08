@@ -1,0 +1,11 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "project_filtered": {
+    "POST /api/engine/admission": true
+  },
+  "routes": {
+    "GET /api/projects/{projectId}/admission-settings": "engine.read",
+    "POST /api/engine/admission": "engine.admission",
+    "PUT /api/projects/{projectId}/admission-settings": "engine.manage"
+  }
+}

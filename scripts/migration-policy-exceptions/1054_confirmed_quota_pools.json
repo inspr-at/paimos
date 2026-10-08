@@ -1,0 +1,12 @@
+{
+  "schema": "aeon.migration-policy-exceptions.v1",
+  "exceptions": [
+    {
+      "file": "1054_confirmed_quota_pools.sql",
+      "sha256": "af4f8f13b4122b8207ee74354fd0966e5772b73ff63ea599688003bebeaf9416",
+      "sourceCommit": "17d9dc7975cfccf77744ed69cb66c9d2e86d68fe",
+      "ticket": "AEON-397",
+      "reason": "Contract behavior change already merged before policy integration: the replacement reservation guard requires person-confirmed quota_pool_fingerprint instead of self-reported quota_fingerprint. Existing accounts start unconfirmed, so new/reactivated shared-pool holds stop until a person confirms; existing active holds may still release/settle. This is not expand-safe and previous-binary read probes do not prove quota-write compatibility. AEON-415 draft PR #71 exposes this exact-byte exception for coordinator review; owner acceptance of the rollout or a staged follow-up migration is required before release."
+    }
+  ]
+}

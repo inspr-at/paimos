@@ -1,0 +1,94 @@
+{
+  "_license": "SPDX-License-Identifier: AGPL-3.0-only",
+  "builtin_agent_exclusions": [
+    "account.overview.read"
+  ],
+  "builtin_roles": {
+    "admin": [
+      "account.manage",
+      "account.overview.read",
+      "account.probe",
+      "account.read",
+      "account.route"
+    ],
+    "member": [
+      "account.overview.read"
+    ],
+    "owner": [
+      "account.manage",
+      "account.overview.read",
+      "account.probe",
+      "account.read",
+      "account.route"
+    ]
+  },
+  "registry": [
+    {
+      "agent_grantable": true,
+      "description": "Manage account",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Account",
+      "key": "account.manage",
+      "owner_workstation_grantable": true,
+      "risk": "high"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read all enrolled account capacity values",
+      "grantable_at": [
+        "workspace"
+      ],
+      "group": "Account",
+      "key": "account.overview.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Probe account",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Account",
+      "key": "account.probe",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Read account",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Account",
+      "key": "account.read",
+      "owner_workstation_grantable": true,
+      "risk": "low"
+    },
+    {
+      "agent_grantable": true,
+      "description": "Route account",
+      "grantable_at": [
+        "workspace",
+        "project"
+      ],
+      "group": "Account",
+      "key": "account.route",
+      "owner_workstation_grantable": true,
+      "risk": "medium"
+    }
+  ],
+  "words": {
+    "resources": {
+      "account": "agent accounts"
+    },
+    "special": {
+      "account.overview.read": "See all enrolled account capacity"
+    }
+  }
+}
