@@ -211,7 +211,7 @@ func loadReadiness(ctx context.Context, tx pgx.Tx, a Account, now time.Time, slo
 	}
 	var approved, models bool
 	if err := tx.QueryRow(ctx, `SELECT NOT EXISTS(SELECT 1 FROM agent_pairing_enrollments e JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id JOIN agent_pairing_requests q ON q.tenant_id=e.tenant_id AND q.id=e.request_id WHERE e.account_id=$1 AND (e.state<>'connected' OR c.state<>'connected' OR q.state<>'redeemed' OR e.ongoing_approved_at IS NULL)),
-        EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$2 AND ($3::uuid[] IS NULL OR id=ANY($3::uuid[])))`, a.ID, a.Harness, a.AllowedProfileIDs).Scan(&approved, &models); err != nil {
+        EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$2 AND aeon_account_allows_profile($2,$3::uuid[],id))`, a.ID, a.Harness, a.AllowedProfileIDs).Scan(&approved, &models); err != nil {
 		return AccountReadiness{}, err
 	}
 	if !approved {

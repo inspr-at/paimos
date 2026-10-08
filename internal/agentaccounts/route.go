@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -261,8 +260,14 @@ func validateReservedAccount(ctx context.Context, tx pgx.Tx, run runRow, account
 	if err != nil {
 		return err
 	}
-	if run.ProfileID == nil || a.State != "available" || !probeFresh(a, now) ||
-		(a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID)) {
+	if run.ProfileID == nil || a.State != "available" || !probeFresh(a, now) {
+		return fail(http.StatusConflict, "reserved account is not eligible")
+	}
+	allowed, err := AccountAllowsProfile(ctx, tx, a, *run.ProfileID)
+	if err != nil {
+		return err
+	}
+	if !allowed {
 		return fail(http.StatusConflict, "reserved account is not eligible")
 	}
 	eligible, _, err := narrowCandidates(ctx, tx, run, a.Harness, []Account{a})
@@ -454,7 +459,7 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
           WHERE e.tenant_id=agent_accounts.tenant_id AND e.account_id=agent_accounts.id
             AND c.principal_id=$3::uuid AND c.daemon_id=$2 AND c.state='connected' AND e.state='connected'))
 		  AND id::text = ANY($4::text[]) AND state = 'available'
-          AND (allowed_model_profile_ids IS NULL OR $5::uuid = ANY(allowed_model_profile_ids))
+          AND aeon_account_allows_profile(harness,allowed_model_profile_ids,$5::uuid)
 		ORDER BY id
 		FOR UPDATE`, harness, daemonID, principalID, accountIDs, profileID)
 	if err != nil {

@@ -107,4 +107,26 @@ func TestRequestedAccountNarrowsEnrollmentWithoutFallback(t *testing.T) {
 	if restored := mustRoute(t, mod, runner, token, run, "daemon-a", []Account{other, chosen}, map[string]int64{"requests": 1}); restored.Reservations[0].ReservationID != got.Reservations[0].ReservationID {
 		t.Fatal("restored grant did not reuse the held reservation")
 	}
+	// Risk: an advisory successor choice must also survive reservation and
+	// revalidation under the same immutable pin and requested-account fence.
+	successorAccount := register("successor")
+	var successor string
+	seed(func(tx pgx.Tx) error {
+		if err := tx.QueryRow(t.Context(), `INSERT INTO model_profiles(tenant_id,slug,version,harness,family,model,effort,tier)
+ VALUES($1,'successor-luna','1','codex','openai','gpt-6.2-luna','high','fast') RETURNING id::text`, admin.TenantID).Scan(&successor); err != nil {
+			return err
+		}
+		_, err := tx.Exec(t.Context(), `UPDATE agent_accounts SET allowed_model_profile_ids=ARRAY[$2::uuid] WHERE id=$1`, successorAccount.ID, profile)
+		return err
+	})
+	successorRun := insertRun(t, admin, runner, successor)
+	seed(func(tx pgx.Tx) error {
+		_, err := tx.Exec(t.Context(), `UPDATE agent_runs SET requested_account_id=$2 WHERE id=$1`, successorRun, successorAccount.ID)
+		return err
+	})
+	first := mustRoute(t, mod, runner, token, successorRun, "daemon-a", []Account{other, successorAccount}, map[string]int64{"requests": 1})
+	replay := mustRoute(t, mod, runner, token, successorRun, "daemon-a", []Account{other, successorAccount}, map[string]int64{"requests": 1})
+	if first.AccountID != successorAccount.ID || replay.AccountID != first.AccountID || replay.Reservations[0].ReservationID != first.Reservations[0].ReservationID {
+		t.Fatal("successor lost account pin or reservation replay")
+	}
 }

@@ -486,6 +486,41 @@ func TestDemoProfileSelectsEnabledHarness(t *testing.T) {
 	}
 }
 
+// The desk grant is one profile. Successor qualification would otherwise
+// publish every newer version of the alphabetically first Grok pin.
+func TestDemoProfilePinsLeafSuccessor(t *testing.T) {
+	profiles := []modelregistry.Profile{
+		{ID: "grok-45-high", Enabled: true, Harness: "grok", Family: "xai", Model: "grok-4.5", Effort: "high"},
+		{ID: "grok-46-xhigh", Enabled: true, Harness: "grok", Family: "xai", Model: "grok-4.6", Effort: "xhigh"},
+		{ID: "build-fast", Enabled: true, Harness: "grok", Family: "xai", Model: "grok-4.7-build-fast", Effort: "high"},
+		{ID: "grok-47-xhigh", Enabled: true, Harness: "grok", Family: "xai", Model: "grok-4.7", Effort: "xhigh"},
+		{ID: "grok-47-high", Enabled: true, Harness: "grok", Family: "xai", Model: "grok-4.7", Effort: "high"},
+		{ID: "grok-48-disabled", Enabled: false, Harness: "grok", Family: "xai", Model: "grok-4.8", Effort: "high"},
+		{ID: "other-family", Enabled: true, Harness: "grok", Family: "other", Model: "grok-9", Effort: "high"},
+		{ID: "sol-6", Enabled: true, Harness: "codex", Family: "openai", Model: "gpt-6-sol", Effort: "medium"},
+		{ID: "sol-61", Enabled: true, Harness: "codex", Family: "openai", Model: "gpt-6.1-sol", Effort: "medium"},
+		{ID: "fable", Enabled: true, Harness: "claude", Family: "anthropic", Model: "fable", Effort: "high"},
+		{ID: "fable-5", Enabled: true, Harness: "claude", Family: "anthropic", Model: "claude-fable-5", Effort: "high"},
+	}
+	got, err := (&seeder{}).demoProfile(profiles, "grok")
+	if err != nil || got.ID != "grok-47-high" {
+		t.Fatalf("grok grant = %+v, %v", got, err)
+	}
+	onlyNewerEffort := append([]modelregistry.Profile{}, profiles[:4]...)
+	got, err = (&seeder{}).demoProfile(onlyNewerEffort, "grok")
+	if err != nil || got.ID != "grok-47-xhigh" {
+		t.Fatalf("leaf effort = %+v, %v", got, err)
+	}
+	got, err = (&seeder{}).demoProfile(profiles, "codex")
+	if err != nil || got.ID != "sol-61" {
+		t.Fatalf("codex grant = %+v, %v", got, err)
+	}
+	got, err = (&seeder{}).demoProfile(profiles, "claude")
+	if err != nil || got.ID != "fable" {
+		t.Fatalf("alias grant = %+v, %v", got, err)
+	}
+}
+
 func TestDemoMissingHarnessRollsBack(t *testing.T) {
 	t.Setenv("AEON_ENV", "dev")
 	database := dbtest.Open(t)

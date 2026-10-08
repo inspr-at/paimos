@@ -375,7 +375,11 @@ func waitForRun(ctx context.Context, tx pgx.Tx, run runRow) (*CapacityWait, erro
 		if run.RequestedAccountID != nil && a.ID != *run.RequestedAccountID || run.AccountID != nil && a.ID != *run.AccountID {
 			continue
 		}
-		if a.AllowedProfileIDs != nil && !slices.Contains(a.AllowedProfileIDs, *run.ProfileID) {
+		allowed, err := AccountAllowsProfile(ctx, tx, a, *run.ProfileID)
+		if err != nil {
+			return nil, err
+		}
+		if !allowed {
 			best = waitFor("models")
 			continue
 		}

@@ -22,7 +22,7 @@ import (
 // the exact enrolled account of a run. It exposes no account credentials or keys.
 func ModelsForRun(ctx context.Context, tx pgx.Tx, runID, harness string) ([]CatalogModel, error) {
 	var account Account
-	err := tx.QueryRow(ctx, `SELECT a.harness,a.allowed_model_profile_ids::text[]
+	err := tx.QueryRow(ctx, `SELECT a.harness,aeon_account_allowed_profile_ids(a.harness,a.allowed_model_profile_ids)::text[]
 		FROM agent_runs r JOIN agent_accounts a ON a.id=r.account_id AND a.tenant_id=r.tenant_id
 		WHERE r.id=$1 AND a.harness=$2 AND a.daemon_id=r.daemon_id`, runID, harness).Scan(&account.Harness, &account.AllowedProfileIDs)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -128,6 +128,10 @@ func (m *Module) catalog(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		accounts, err := listAccounts(r.Context(), tx)
+		if err != nil {
+			return err
+		}
+		accounts, err = expandCatalogAllowances(r.Context(), tx, accounts)
 		if err != nil {
 			return err
 		}

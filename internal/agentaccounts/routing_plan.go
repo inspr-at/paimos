@@ -228,7 +228,7 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 	estimates := map[string]int64{"requests": 1, "tokens": 1, "cost_micros": 1}
 	for _, a := range accounts {
 		var allowed bool
-		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$1 AND ($2='' OR id::text=$2) AND ($3::uuid[] IS NULL OR id=ANY($3::uuid[])))`, a.Harness, profile, a.AllowedProfileIDs).Scan(&allowed)
+		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE enabled AND harness=$1 AND ($2='' OR id::text=$2) AND aeon_account_allows_profile($1,$3::uuid[],id))`, a.Harness, profile, a.AllowedProfileIDs).Scan(&allowed)
 		if err != nil {
 			return nil, err
 		}
