@@ -311,6 +311,8 @@
     "scripts/releaseworkflow:TestParallelWebUnitsShareRuntimeAndRunOnce"
     ,
     "scripts/releaseworkflow:TestRehearsedBuilderPins"
+    ,
+    "scripts/releaseworkflow:TestRootAptTimeoutReapsBeforeRetry"
   ]
   ,
   "source": "AEON-678 zb-go essential allowlist (332 including two dispatch helpers)"
@@ -1613,6 +1615,10 @@
     {"kind":"go","package":"internal/agentd","name":"TestReadyAccountKeepsSixBlockedSiblings","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestReadySiblingRetainsOnlyBlockedAccountProbeDetail","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRecordSchemaForwardRecoveryAndDowngrade","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/agentd","name":"TestRecordSchemaGolden","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/agentd","name":"TestRejectDuplicateKeys","tier":"GATED-FULL"}
     ,
@@ -3926,6 +3932,8 @@
     ,
     {"kind":"go","package":"internal/cli","name":"TestAttachedAcceptanceRejectsUndeliverableHookOutput","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/cli","name":"TestAttachmentGetCLIEndToEnd","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/cli","name":"TestAuthLoginDoesNotEchoKey","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/cli","name":"TestAuthLoginRejectsKey","tier":"GATED-FULL"}
@@ -5110,6 +5118,16 @@
     ,
     {"kind":"go","package":"internal/delivery","name":"TestGitHubReaderUsesReadOnlyScopesAndFreshQueueHead","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeAuditAdminHeadChecksDoNotUseMergeCommit","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeAuditLateQueueProvenanceRetriesUnreadChecks","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeAuditObservationChecksOnPullHead","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeAuditPendingAlertsAndAtomicFailure","tier":"ESSENTIAL"}
+    ,
+    {"kind":"go","package":"internal/delivery","name":"TestMergeAuditWebhookReconciliationAndIsolation","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/delivery","name":"TestProjectionReplayAndInheritedSettings","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/delivery","name":"TestProjectionStatesOwnersAndDeadlines","tier":"ESSENTIAL"}
@@ -5806,6 +5824,8 @@
     ,
     {"kind":"go","package":"internal/hooknote","name":"TestConsentWithdrawalAfterFetchPreventsDisclosure","tier":"ESSENTIAL"}
     ,
+    {"kind":"go","package":"internal/hooknote","name":"TestDialRootDaemonPreservesPeerChecks","tier":"ESSENTIAL"}
+    ,
     {"kind":"go","package":"internal/hooknote","name":"TestExpiredOfferProducesNoOutput","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/hooknote","name":"TestFakeDaemonSocketIsNotRead","tier":"GATED-FULL"}
@@ -6251,6 +6271,8 @@
     {"kind":"go","package":"internal/localjournal","name":"TestJournalRejectsOversizedCheckpointBeforeAppending","tier":"GATED-FULL"}
     ,
     {"kind":"go","package":"internal/localjournal","name":"TestJournalRepairsOnlyIncompleteFinalWALRecord","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"internal/localjournal","name":"TestJournalSchemaMigrationAndRefusal","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"internal/localjournal","name":"TestStartupErrorsIdentifyCheckpointAndJournal","tier":"GATED-FULL"}
     ,
@@ -8919,6 +8941,8 @@
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReleaseBinariesRefuseWarmOrUnverifiedGo","tier":"ESSENTIAL"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestReuseAlwaysPrimesMatchingMainCacheKeys","tier":"GATED-FULL"}
+    ,
+    {"kind":"go","package":"scripts/releaseworkflow","name":"TestRootAptTimeoutReapsBeforeRetry","tier":"NIGHTLY"}
     ,
     {"kind":"go","package":"scripts/releaseworkflow","name":"TestRuntimeClosurePreparedColdAndNeverCached","tier":"ESSENTIAL"}
     ,
