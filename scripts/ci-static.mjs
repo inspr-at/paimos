@@ -97,9 +97,15 @@ export function validateRegistry(registry, jobs) {
     ids.add(check.id)
     if (typeof check.command !== 'string' || !check.command.trim() || !['.', 'web'].includes(check.cwd) ||
         !Array.isArray(check.needs) || check.needs.some(n => !['node', 'go', 'python3', 'npm-installed'].includes(n)) ||
-        !Number.isInteger(check.timeout_seconds) || check.timeout_seconds < 1 || check.timeout_seconds > 180 ||
+        !Number.isInteger(check.timeout_seconds) || check.timeout_seconds < 1 || check.timeout_seconds > (check.id === 'web-shard-tests' ? 600 : 180) ||
         (check.optional !== undefined && check.optional !== true) ||
         (check.optional && !check.needs.includes('npm-installed'))) throw new SetupError(`Invalid check: ${check.id}`)
+    // A small number of explicitly local guards are not hosted CI mirrors.
+    // They must never excuse an unregistered command in the workflow below.
+    if (check.local_only !== undefined) {
+      if (typeof check.local_only !== 'string' || !check.local_only.trim() || check.ci !== undefined || check.supplement) throw new SetupError(`Invalid local-only check: ${check.id}`)
+      continue
+    }
     const ci = check.ci
     const found = jobs.get(ci?.job)?.some(step => step.name === ci.step && step.cwd === ci.cwd &&
       (normalize(step.run) === ci.command || commands(step).some(c => normalize(c) === ci.command)))
@@ -107,7 +113,7 @@ export function validateRegistry(registry, jobs) {
     if (!check.supplement && (check.command !== ci.command || check.cwd !== ci.cwd)) throw new SetupError(`Mirror differs from CI: ${check.id}`)
   }
   for (const ci of staticSteps(jobs, registry)) {
-    if (!checks.some(c => !c.supplement && c.ci.job === ci.job && c.ci.step === ci.step && c.ci.cwd === ci.cwd && c.ci.command === ci.command)) {
+    if (!checks.some(c => !c.local_only && !c.supplement && c.ci.job === ci.job && c.ci.step === ci.step && c.ci.cwd === ci.cwd && c.ci.command === ci.command)) {
       throw new SetupError(`Unregistered static CI command: ${ci.job}/${ci.step ?? '(unnamed)'}: ${ci.command}`)
     }
   }
@@ -143,8 +149,29 @@ const isolatedGit = ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgSign=fal
 
 export function fixedEnvironment(source = process.env, scratch) {
   const env = {}
-  for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN']) {
+  // Nix's compiler wrapper needs its SDK search paths when Go links cgo tests.
+  // NIX_LDFLAGS alone does not locate libresolv; NIX_CC_WRAPPER_TARGET_HOST_<triple>
+  // carries that target SDK library path on Darwin and is what lets clang find it.
+  // Other wrapper roles stay limited to their declared flags (value "1"), including
+  // cross-build variants, without wrapper state, debug flags or the caller's test options.
+  const toolchain = ['NIX_CFLAGS_COMPILE', 'NIX_LDFLAGS', 'DEVELOPER_DIR', 'SDKROOT']
+    .flatMap(key => ['', '_FOR_BUILD', '_FOR_TARGET'].map(suffix => key + suffix))
+  for (const key of ['PATH', 'HOME', 'TMPDIR', 'SystemRoot', 'GOCACHE', 'GOMODCACHE', 'GOPATH', 'GOPROXY', 'GOTOOLCHAIN', ...toolchain]) {
     if (source[key] !== undefined) env[key] = source[key]
+  }
+  // Nix wrappers need their target role markers before they consume SDK flags.
+  // Preserve only qualified compiler configuration, never caller test selectors.
+  // Multi-segment compiler roles keep their defined values. A single-token
+  // wrapper role marker from main is kept only when it is exactly "1".
+  const nixTargetBuildVariable = /^NIX_(?:(?:CC|BINTOOLS)_WRAPPER_TARGET_(?:BUILD|HOST|TARGET)|CFLAGS_(?:COMPILE(?:_BEFORE)?|LINK)|LDFLAGS(?:_BEFORE)?)_[a-z0-9]+(?:_[a-z0-9]+)+$/
+  const nixWrapperRole = /^NIX_(?:CC|BINTOOLS)_WRAPPER_TARGET_(?:BUILD|HOST|TARGET)_[a-z0-9_]+$/
+  for (const key of Object.keys(source)) {
+    // Main copies every CC host SDK path, including a single-token suffix whose
+    // value is not the role marker "1". Multi-segment compiler roles keep their
+    // defined values. Any other single-token wrapper role is kept only as "1".
+    if (key.startsWith('NIX_CC_WRAPPER_TARGET_HOST_') && source[key] !== undefined) env[key] = source[key]
+    else if (nixTargetBuildVariable.test(key) && source[key] !== undefined) env[key] = source[key]
+    else if (nixWrapperRole.test(key) && source[key] === '1') env[key] = '1'
   }
   Object.assign(env, { CI: 'true', CI_LANE: 'full', AEON_TEST_TIER_MODE: 'full', GIT_CONFIG_NOSYSTEM: '1',
     GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', npm_config_audit: 'false', npm_config_fund: 'false' })
@@ -208,26 +235,62 @@ export function reuseDependencies(root, tree) {
   return true
 }
 
-export function runCommand(command, { cwd, timeout_seconds, env = process.env, signal } = {}) {
+export function runCommand(command, { cwd, timeout_seconds, env = process.env, signal, id = 'command', killProcess = process.kill } = {}) {
   return new Promise(resolveResult => {
     const begin = performance.now()
     let output = '', expired = false, interrupted = false, timer, killTimer
-    const child = spawn('/bin/sh', ['-c', command], { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] })
+    // Keep the waiting shell alive on TERM so it can reap its foreground child.
+    // A caught (rather than ignored) signal retains the child's default handler.
+    const child = spawn('/bin/sh', ['-c', `trap ':' TERM\n${command}`], { cwd, env, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] })
     const tail = data => { output = (output + data.toString()).slice(-65536) }
     child.stdout.on('data', tail); child.stderr.on('data', tail)
-    function kill(sig) {
-      try { process.platform === 'win32' ? child.kill(sig) : process.kill(-child.pid, sig) } catch (error) { if (error.code !== 'ESRCH') tail(error.message) }
+    function kill(sig, afterClose = false) {
+      try { process.platform === 'win32' ? child.kill(sig) : killProcess(-child.pid, sig) }
+      catch (error) {
+        // Darwin can report EPERM for an exited, zombie-only process group.
+        // Before close, EPERM must still be reported as a signal failure.
+        if (error.code !== 'ESRCH' && !(afterClose && process.platform !== 'win32' && error.code === 'EPERM')) tail(error.message)
+      }
     }
     function stop() { kill('SIGTERM'); killTimer ??= setTimeout(() => kill('SIGKILL'), 500) }
     const abort = () => { interrupted = true; stop() }
     signal?.addEventListener('abort', abort, { once: true })
     timer = setTimeout(() => { expired = true; stop() }, timeout_seconds * 1000)
     child.on('error', error => tail(error.message))
-    child.on('close', (code, sig) => {
-      if (expired || interrupted) kill('SIGKILL')
+    child.on('close', async (code, sig) => {
+      // afterClose suppresses Darwin's EPERM for an already-exited group.
+      // The probe below still waits until that group is gone.
+      if (expired || interrupted) kill('SIGKILL', true)
       clearTimeout(timer); clearTimeout(killTimer); signal?.removeEventListener('abort', abort)
-      resolveResult({ status: expired ? 'timeout' : interrupted ? 'interrupted' : code === 0 ? 'passed' : 'failed',
-        seconds: Math.round((performance.now() - begin) / 10) / 100, code, signal: sig,
+      let cleanupError
+      if ((expired || interrupted) && child.pid && process.platform !== 'win32') {
+        // Closing the shell's pipes does not mean its descendants have exited
+        // or been reaped. Probe only our spawned group; never signal it again
+        // after it disappears, since its numeric identity could then be reused.
+        const deadline = performance.now() + 2000
+        try {
+          for (;;) {
+            try { process.kill(-child.pid, 0) }
+            catch (error) {
+              if (error.code === 'ESRCH') break
+              // Darwin can report EPERM while a killed, reparented member is
+              // awaiting reaping. It still proves presence, never completion.
+              if (error.code !== 'EPERM') throw error
+            }
+            if (performance.now() >= deadline) throw new Error('Owned command process group survived shutdown')
+            await new Promise(done => setTimeout(done, 10))
+          }
+        } catch (error) { cleanupError = error.message }
+      }
+      const seconds = Math.round((performance.now() - begin) / 10) / 100
+      if (expired || interrupted) {
+        const cause = expired ? `exceeded timeout_seconds=${timeout_seconds}` : 'interrupted'
+        tail(`\nci-static: ${id} ${cause} after ${seconds}s (process group termination requested)`)
+      }
+      if (cleanupError) tail(`\n${cleanupError}`)
+      resolveResult({ status: cleanupError ? 'failed' : expired ? 'timeout' : interrupted ? 'interrupted' : code === 0 ? 'passed' : 'failed',
+        seconds, code, signal: sig,
+        ...(cleanupError ? { cleanup_error: cleanupError } : {}),
         output: output.trimEnd().split('\n').slice(-40).join('\n') })
     })
     if (signal?.aborted) abort()
@@ -278,7 +341,7 @@ export async function runChecks(checks, root, { jobs = 4, baseRef, signal, run =
             writeFileSync(join(typecheckDir, 'tsconfig.json'), JSON.stringify({ files: [], references: [{ path: './app.json' }, { path: './node.json' }] }))
             executed += ' ' + shellQuote(join(typecheckDir, 'tsconfig.json'))
           }
-          results[i] = { ...base, executed_command: executed, ...await run(executed, { cwd: resolve(root, check.cwd), timeout_seconds: check.timeout_seconds, env, signal }) }
+          results[i] = { ...base, executed_command: executed, ...await run(executed, { cwd: resolve(root, check.cwd), timeout_seconds: check.timeout_seconds, env, signal, id: check.id }) }
         }
       }
     }))

@@ -135,7 +135,8 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	f.SetOutput(io.Discard)
 	var root, origin, tenantID, tenantSlug, workspace, computer, account, contextLabel, nodePath, sdkPath string
 	var harnesses stringsFlag
-	var jsonOutput, startService, once, yes bool
+	var jsonOutput, startService, once, yes, installHooks bool
+	var hookExecutable string
 	f.StringVar(&root, "state-root", "", "private pairing state directory")
 	f.StringVar(&origin, "url", "", "HTTPS Aeon instance origin")
 	f.StringVar(&tenantID, "tenant-id", "", "tenant UUID")
@@ -145,11 +146,13 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	var provider, openRouterFile string
 	f.StringVar(&provider, "provider", "", "pi provider ID; openrouter prompts for the key locally")
 	f.StringVar(&openRouterFile, "openrouter-env-file", "", "owner-selected private file containing OPENROUTER_API_KEY")
-	f.Var(&harnesses, "harness", "selected harness; repeat for another harness")
+	f.Var(&harnesses, "harness", "selected harness; repeat for another harness. Several accounts per harness require separate isolated config homes and account keys")
 	f.StringVar(&contextLabel, "account-context", "", "Expected account identity (pi: configured provider ID)")
 	f.StringVar(&account, "account-id", "", "remove only this enrolled account")
 	f.StringVar(&nodePath, "node-path", "", "pinned Node executable for npm harness launchers")
 	f.StringVar(&sdkPath, "claude-sdk-path", "", "pinned Claude Agent SDK module")
+	f.BoolVar(&installHooks, "install-user-hooks", false, "opt in to qualified user hook installation; grants no messaging permission")
+	f.StringVar(&hookExecutable, "hook-executable", "", "absolute Aeon CLI artifact for authenticated hook verification")
 	f.BoolVar(&jsonOutput, "json", false, "safe progress as JSON")
 	f.BoolVar(&startService, "start-service", false, "request user service installation after authenticated Connect approval")
 	f.BoolVar(&once, "once", false, "perform one resumable step")
@@ -244,6 +247,7 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	}
 	manager := &agentsetup.ServiceManager{Platform: platform, Home: home, UID: os.Getuid(), Executable: executable, Systemctl: systemctl}
 	engine := &agentsetup.Engine{Store: store, Services: manager, Local: localPairing{root: root, readOnly: command == "status"}}
+	engine.Hooks = &agentsetup.HookInstaller{Enabled: installHooks, Executable: hookExecutable, Scope: "user"}
 	if command == "status" {
 		defer store.Close()
 		p, statusErr := engine.Status(context.Background())
@@ -403,6 +407,11 @@ func setupCommandInput(command string, args []string, in io.Reader, out io.Write
 	switch command {
 	case "setup":
 		p, err = engine.Begin(ctx, agentsetup.Options{Origin: origin, TenantID: tenantID, TenantSlug: tenantSlug, Workspace: workspace, ComputerName: computer, Platform: platform, Candidates: candidates, StartService: startService, NodePath: nodePath, ClaudeSDKPath: sdkPath})
+	case "repair":
+		if !installHooks {
+			return errors.New("repair requires --install-user-hooks; messaging remains off")
+		}
+		p, err = engine.RepairHooks(ctx, false)
 	case "status":
 		p, err = engine.Status(ctx)
 	case "disconnect":
@@ -552,6 +561,15 @@ func printSetupProgress(out io.Writer, jsonOutput bool, p agentsetup.Progress) e
 	if p.UserCode != "" {
 		_, err := fmt.Fprintf(out, "Pairing code: %s\nApprove at: %s\n", p.UserCode, p.VerificationURI)
 		if err != nil {
+			return err
+		}
+	}
+	for _, c := range p.HookCapabilities {
+		state := "verified"
+		if !c.Verified {
+			state = "watch-only: " + c.Blocker
+		}
+		if _, err := fmt.Fprintf(out, "%s user hook: %s\n", c.Harness, state); err != nil {
 			return err
 		}
 	}

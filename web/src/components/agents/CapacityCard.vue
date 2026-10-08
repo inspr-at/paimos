@@ -511,10 +511,10 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .seg button:disabled { cursor: default; }
 .seg button:disabled:not([aria-checked="true"]) { opacity: .6; }
 .divider { width: 1px; height: 22px; background: var(--line); }
-.tog { position: relative; display: inline-flex; align-items: center; flex: none; width: 38px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: var(--line-2); box-shadow: inset 0 1px 2px rgba(0, 0, 0, .12); cursor: pointer; }
-.tog::after { content: ''; position: absolute; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .28); transition: transform .18s ease; }
-.tog[aria-checked="true"] { background: linear-gradient(180deg, #1a8683, #0e6f6c); }
-.tog[aria-checked="true"]::after { transform: translateX(16px); }
+.tog { position: relative; display: inline-flex; align-items: center; flex: none; width: 38px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: var(--line-2); box-shadow: inset 0 1px 2px color-mix(in srgb, var(--shadow-black) 12%, transparent); cursor: pointer; }
+.tog::after { content: ''; position: absolute; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--switch-knob); box-shadow: 0 1px 3px color-mix(in srgb, var(--shadow-black) 28%, transparent); transition: transform .18s ease; }
+.tog[aria-checked="true"] { background: linear-gradient(180deg, var(--primary-hi), var(--primary) 60%, var(--primary-lo)); }
+.tog[aria-checked="true"]::after { background: var(--primary-on); transform: translateX(16px); }
 .tog:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .tog::before { content: ''; position: absolute; inset: -11px -4px; }
 .tog:disabled { cursor: default; opacity: .6; }
@@ -553,7 +553,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .pool + .pool { border-top: 1px solid var(--line); }
 .pool-info { min-width: 0; }
 .pool-head { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 32px; }
-.vendor { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(32, 60, 61, .06); color: var(--ink); }
+.vendor { display: grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 9px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-color) 6%, transparent); color: var(--ink); }
 /* Provider names stay one line. The plan label shrinks; free-form names wrap in .plan, .nm and .host. */
 .pool-name { flex: none; min-width: min-content; white-space: nowrap; color: var(--ink); font-size: 15px; font-weight: 650; }
 .pool-plan { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink-3); font-size: 12.5px; white-space: nowrap; }
@@ -566,7 +566,7 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 .plan { min-width: 0; margin-top: 8px; padding-left: 40px; overflow-wrap: anywhere; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; text-wrap: pretty; }
 .plan :deep(b) { color: var(--ink); font-weight: 600; }
 .plan :deep(.n) { color: var(--teal-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
-.plan.ahead :deep(.n) { color: var(--gold-ink); }
+.plan.ahead :deep(.n) { color: var(--warn-ink); }
 
 .presence { display: inline-grid; place-items: center; color: var(--ink-2); flex: none; }
 .row-learning { grid-column: 1 / -1; }
@@ -586,17 +586,17 @@ onBeforeUnmount(() => { document.removeEventListener('click', outside, true); wi
 button.left { cursor: pointer; }
 @media (hover: hover) { button.left:hover { background: var(--row-hover); } }
 button.left:focus-visible { box-shadow: var(--focus-ring); }
-.left.kept b { color: var(--gold-ink); }
+.left.kept b { color: var(--secondary-ink); }
 .left b { color: var(--ink); font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .left span { margin-left: 3px; color: var(--ink-3); font-size: 12px; }
 .today { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2); font-size: 13px; font-variant-numeric: tabular-nums; }
 .today b { color: var(--teal-ink); font-weight: 700; }
-.today.ahead b { color: var(--gold-ink); }
+.today.ahead b { color: var(--warn-ink); }
 .today.quiet, .today .quiet { color: var(--ink-3); }
 .today .btn { height: 26px; max-width: 100%; padding: 0 10px; overflow: hidden; font-size: 12px; text-overflow: ellipsis; }
 .resets { min-width: 0; overflow: hidden; color: var(--ink-2); font-size: 13px; white-space: nowrap; font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
 .gauge-cell { min-width: 0; }
-.today.kept { color: var(--gold-ink); font-weight: 600; }
+.today.kept { color: var(--secondary-ink); font-weight: 600; }
 .source { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12px; text-align: right; }
 .acct.dim .gauge, .acct.dim .left, .acct.dim .resets { opacity: .6; }
 /* Remove: a quiet trailing icon on rows a person may manage (AEON-402). */
@@ -676,7 +676,7 @@ button.left:focus-visible { box-shadow: var(--focus-ring); }
   .setting .seg button { height: 38px; min-width: 44px; }
   .tog { width: 44px; height: 26px; }
   .tog::after { width: 20px; height: 20px; }
-  .tog[aria-checked="true"]::after { transform: translateX(18px); }
+  .tog[aria-checked="true"]::after { background: var(--primary-on); transform: translateX(18px); }
   .pool { gap: 8px; padding: 14px 14px 12px; }
   .plan { padding-left: 0; }
   .pool-head .more { width: 44px; height: 44px; margin-right: -8px; }

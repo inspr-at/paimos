@@ -1,5 +1,7 @@
 {
   "resources": {
+    "reviewpolicy": "review policy",
+    "delivery_queue": "delivery work queue",
     "recurrences": "recurring work",
     "questions": "questions",
     "nodes": "work",
@@ -46,7 +48,8 @@
     "events": "history",
     "search": "search",
     "ownership": "ownership",
-    "chat": "agent conversations"
+    "chat": "agent conversations",
+    "delivery": "delivery status"
   },
   "actions": {
     "ask": "ask",
@@ -64,7 +67,9 @@
     "receive": "receive"
   },
   "special": {
+    "events.subscribe": "Subscribe to authorized changes",
     "agents.plan.read": "See their agent start plan",
-    "harness.watch": "View live conversations"
+    "harness.watch": "View live conversations",
+    "account.overview.read": "See all enrolled account capacity"
   }
 }

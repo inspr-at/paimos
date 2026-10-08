@@ -71,7 +71,7 @@ const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
   background: linear-gradient(165deg, var(--surface-raised-2), var(--glass) 60%); box-shadow: var(--shadow);
   -webkit-backdrop-filter: blur(18px) saturate(1.15); backdrop-filter: blur(18px) saturate(1.15);
 }
-@media (hover: hover) { .card:hover { box-shadow: var(--shadow), 0 16px 32px -22px rgba(16, 35, 39, .45); } }
+@media (hover: hover) { .card:hover { box-shadow: var(--shadow), 0 16px 32px -22px color-mix(in srgb, var(--shadow-color) 45%, transparent); } }
 @media (hover: hover) and (prefers-reduced-motion: no-preference) {
   .card { transition: box-shadow .18s ease, transform .18s ease; }
   .card:hover { transform: translateY(-1px); }
@@ -88,7 +88,7 @@ const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
 .card-link:focus-visible { box-shadow: none; }
 .card-top { display: flex; align-items: center; gap: 8px; min-height: 22px; padding-right: 56px; }
 .state-chip { height: 18px; padding: 0 7px; font-size: 10px; text-transform: uppercase; letter-spacing: .08em; }
-.state-chip.frozen { color: var(--gold-ink); box-shadow: inset 0 0 0 1px rgba(214, 155, 49, .45); }
+.state-chip.frozen { color: var(--warn-ink); box-shadow: inset 0 0 0 1px var(--warn-line); }
 .card-name { margin-top: 12px; font-size: 16px; font-weight: 650; letter-spacing: -.01em; line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-desc { min-height: 1.45em; margin-top: 3px; font-size: 13px; line-height: 1.45; color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-mid { display: flex; align-items: center; gap: 20px; margin-top: 18px; }
@@ -118,10 +118,10 @@ const agentState = computed(() => leadingState(agents.value.map(a => a.state)))
 <style>
 /* The lifted copy of a carried card (lives on <body>, so not scoped). */
 li.card.card-ghost { position: fixed; z-index: 80; margin: 0; list-style: none; pointer-events: none; will-change: translate; }
-li.card.card-ghost.lifted { scale: 1.025; box-shadow: 0 0 0 1px var(--chip-teal-line), 0 30px 60px -22px rgba(8, 24, 27, .46), 0 10px 22px -12px rgba(8, 24, 27, .3); }
+li.card.card-ghost.lifted { scale: 1.025; box-shadow: 0 0 0 1px var(--chip-teal-line), 0 30px 60px -22px color-mix(in srgb, var(--shadow-color) 46%, transparent), 0 10px 22px -12px color-mix(in srgb, var(--shadow-color) 30%, transparent); }
 li.card.card-ghost.dropped { opacity: 0; scale: .96; }
 .card-ghost .card-more, .card-ghost .card-grip { display: none; }
-.card-ghost-count { position: absolute; top: -9px; right: -9px; display: grid; place-items: center; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 999px; background: #0e6f6c; color: #fff; font: 700 12px/1 var(--font); box-shadow: 0 0 0 2px var(--surface-raised-2), 0 4px 10px -4px rgba(8, 24, 27, .4); }
+.card-ghost-count { position: absolute; top: -9px; right: -9px; display: grid; place-items: center; min-width: 24px; height: 24px; padding: 0 7px; border-radius: 999px; background: var(--primary); color: var(--primary-on); font: 700 12px/1 var(--font); box-shadow: 0 0 0 2px var(--surface-raised-2), 0 4px 10px -4px color-mix(in srgb, var(--shadow-color) 40%, transparent); }
 @media (prefers-reduced-motion: no-preference) {
   li.card.card-ghost { transition: scale .16s ease, box-shadow .16s ease, opacity .16s ease; }
   li.card.card-ghost.settling { transition: translate .22s cubic-bezier(.2, .75, .3, 1), scale .22s ease, box-shadow .22s ease; }

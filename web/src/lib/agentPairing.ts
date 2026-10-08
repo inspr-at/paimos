@@ -4,6 +4,7 @@
 // one enrollment. Device, runtime and lifecycle secrets never enter this module.
 // Setup, redemption and tombstone reconciliation stay on the computer.
 
+import { parseHostCapacity, type HostCapacityView } from './hostCapacity.ts'
 import { parseJson } from './json.ts'
 import { api, resilientFetch } from './api.ts'
 import { onAccessChange } from './authz.ts'
@@ -60,6 +61,7 @@ export interface RequestedAccount {
   label: string
   model_profile_id?: string
   provider?: string
+  config_home_id?: string
 }
 
 /** Server-derived. A missing entry is not a claim that verification works. */
@@ -84,6 +86,9 @@ export interface VerificationTerms {
 }
 
 export interface PairingEnrollment {
+  verified_at?: string
+  verification_expires_at?: string
+  last_used_at?: string
   account_id: string
   account_key: string
   harness: string
@@ -95,6 +100,7 @@ export interface PairingEnrollment {
   active_run_ids: string[]
   /** Actual run result. A verification_run_id alone is not success. */
   verification_state?: VerificationState
+  verification_stalled?: boolean
   verification_expired_ready?: boolean
   can_verify?: boolean
   verification_reason?: string
@@ -122,6 +128,7 @@ export interface HarnessDetail {
 
 /** Public pairing projection. Secret-bearing keys are not part of this type. */
 export interface PairingView {
+  host_capacity?: HostCapacityView
   local_auth_pinned?: boolean
   request_id: string
   tenant_id: string
@@ -466,7 +473,7 @@ export function registerAgentUrl(guide: PairingGuide): string {
 export function defaultSelectedAccountKeys(accounts: readonly RequestedAccount[]): string[] {
   const keys: string[] = []
   for (const group of groupAccounts(accounts).values()) {
-    if (group.length === 1) keys.push(group[0]!.account_key)
+    if (group.length === 1 || group.every(account => !!account.config_home_id) && new Set(group.map(account => account.config_home_id)).size === group.length) keys.push(...group.map(account => account.account_key))
   }
   return keys
 }
@@ -898,6 +905,19 @@ export function describeProgress(view: PairingView | null, now = Date.now()): Pa
   return setupProgress(view)
 }
 
+/** Fixed explanations only: telemetry never supplies vendor error text. */
+export function verificationFailureText(enrollment: Pick<PairingEnrollment, 'verification_stalled' | 'verification_error'>): string {
+  if (enrollment.verification_stalled) return 'The check has not settled after its time limit. The helper must confirm that it stopped before a new check can start.'
+  switch (enrollment.verification_error) {
+    case 'verification_timeout': case 'timed out': return 'The verification timed out. The helper must confirm that it stopped before a new check can start.'
+    case 'reporter_unavailable': return 'The helper could not report this check. Update the helper, then use Verify again. Usage may be incomplete.'
+    case 'app_server_protocol': return 'The helper could not complete the check protocol. Update the helper, then use Verify again.'
+    case 'child_exit_failed': case 'turn_failed': return 'The verification process failed. Check the vendor sign-in, then use Verify again.'
+    case 'vendor_limit': return 'The vendor limit stopped this check. Use Verify again after capacity is available.'
+    default: return 'The verification did not succeed. The account owner can use Verify again.'
+  }
+}
+
 function setupProgress(view: PairingView): PairingProgress {
   const progress = view.setup_state
   if (view.connectivity === 'offline' && progress !== 'login_required' && progress !== 'service_conflict' && progress !== 'setup_failed') {
@@ -909,6 +929,8 @@ function setupProgress(view: PairingView): PairingProgress {
   if (progress === 'service_conflict' || progress === 'setup_failed') {
     return { phase: 'setup', title: progress === 'service_conflict' ? 'Setup found a conflict' : 'Setup did not finish', detail: setupErrorText(view) || 'The computer reported that setup did not finish.', next: 'Resolve it on the computer. Approving again does not replace another service or refill a verification.', renewsAuthority: false }
   }
+  const stalled = view.enrollments.find(item => item.verification_stalled)
+  if (stalled) return { phase: 'verify', title: 'Verification stalled', detail: verificationFailureText(stalled), next: 'Use Verify again to check whether the previous run has settled. It cannot replace unconfirmed work.', renewsAuthority: false }
   const unavailable = view.enrollments.find(item => item.verification_state === 'unavailable' || item.verification_error === 'verification_unavailable')
   if (unavailable) {
     return {
@@ -920,8 +942,8 @@ function setupProgress(view: PairingView): PairingProgress {
     }
   }
   if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_FAILED.includes(item.verification_state) || (item.verification_state === 'expired' && describeEnrollmentStatus(view, item) !== 'Ready')))) {
-    const reason = view.enrollments.find(item => item.verification_error)?.verification_error
-    return { phase: 'verify', title: 'Verification did not succeed', detail: reason || 'The verification run did not succeed.', next: 'The one-time allowance was not refilled. The account owner can use Verify again for a fresh read-only check.', renewsAuthority: false }
+    const failed = view.enrollments.find(item => item.verification_error)
+    return { phase: 'verify', title: 'Verification did not succeed', detail: verificationFailureText(failed ?? {}), next: 'The one-time allowance was not refilled. The account owner can use Verify again for a fresh read-only check.', renewsAuthority: false }
   }
   if (view.enrollments.some(item => item.verification_state != null && (VERIFICATION_ACTIVE as readonly string[]).includes(item.verification_state))) {
     return { phase: 'verify', title: 'Verification is running', detail: 'One short read-only run was approved for each selected harness. A later run on the computer is not a verification.', next: 'Ongoing work follows your account approval. This page will not start another verification.', renewsAuthority: false }
@@ -1194,7 +1216,7 @@ export function describeHarnessStatus(view: HarnessView, harness: string): strin
 }
 
 /** Per-enrollment label. A complete attention list names the blocked accounts and leaves the others Ready. An account missing from a truncated list is not Ready. */
-export function describeEnrollmentStatus(view: HarnessView, enrollment: { account_id: string; harness: string; verification_state?: VerificationState; verification_expired_ready?: boolean }): string {
+export function describeEnrollmentStatus(view: HarnessView, enrollment: { account_id: string; harness: string; verification_state?: VerificationState; verification_expired_ready?: boolean; verification_stalled?: boolean }): string {
   if (view.computer_state !== 'connected') return ''
   const detail = harnessDetail(view, enrollment.harness)
   const attention = attentionReport(detail)
@@ -1205,8 +1227,9 @@ export function describeEnrollmentStatus(view: HarnessView, enrollment: { accoun
     if (detail?.state !== 'ready' || attention.truncated || attention.count !== attention.accounts.length) return freshLabel(view, 'Needs attention')
     status = freshLabel(view, 'Ready')
   }
-  if (enrollment.verification_state === 'expired' && enrollment.verification_expired_ready === false) return freshLabel(view, 'Verification failed')
   if (status && status !== 'Ready') return status
+  if (enrollment.verification_stalled) return freshLabel(view, 'Verification stalled')
+  if (enrollment.verification_state === 'expired' && enrollment.verification_expired_ready === false) return freshLabel(view, 'Verification failed')
   const verification = enrollment.verification_state
   if (verification && VERIFICATION_ACTIVE.includes(verification)) return freshLabel(view, verification === 'queued' ? 'Verification queued' : 'Verifying account')
   if (verification === 'expired' && status !== 'Ready') return freshLabel(view, 'Verification failed')
@@ -1735,6 +1758,7 @@ function parseView(data: unknown): PairingView {
     local_processes: oneOf(record.local_processes, PROCESS_STATES, 'local_processes'),
     enrollments: enrollments(record.enrollments),
   }
+  if (record.host_capacity != null) view.host_capacity = parseHostCapacity(record.host_capacity)
   if (typeof record.local_auth_pinned === 'boolean') view.local_auth_pinned = record.local_auth_pinned
   if (typeof record.revision === 'number' && Number.isSafeInteger(record.revision) && record.revision >= 0) view.revision = record.revision
   if (typeof record.interval_seconds === 'number' && record.interval_seconds > 0) view.interval_seconds = record.interval_seconds
@@ -1810,6 +1834,11 @@ function accounts(value: unknown): RequestedAccount[] {
       harness: token(record.harness, 'harness'),
       label: bounded(record.label, 'label', 128),
     }
+    if (record.config_home_id != null) {
+      const home = bounded(record.config_home_id, 'config_home_id', 64)
+      if (!/^[0-9a-f]{64}$/.test(home)) invalid('config_home_id')
+      account.config_home_id = home
+    }
     if (record.model_profile_id != null) account.model_profile_id = uuid(record.model_profile_id, 'model_profile_id')
     if (record.provider != null) {
       const provider = bounded(record.provider, 'provider', 64)
@@ -1834,10 +1863,12 @@ function enrollments(value: unknown): PairingEnrollment[] {
       local_cleanup: oneOf(record.local_cleanup, CLEANUP_STATES, 'enrollment.local_cleanup'),
       verification_run_id: optionalUuid(record.verification_run_id, 'verification_run_id'),
       ...(typeof record.can_verify === 'boolean' ? { can_verify: record.can_verify } : {}),
+      ...(typeof record.verification_stalled === 'boolean' ? { verification_stalled: record.verification_stalled } : {}),
       ...(typeof record.verification_expired_ready === 'boolean' ? { verification_expired_ready: record.verification_expired_ready } : {}),
       active_run_ids: uuidList(record.active_run_ids, 'active_run_ids'),
       ...optionalVerification(record),
     }
+    for (const name of ['verified_at', 'verification_expires_at', 'last_used_at'] as const) if (typeof record[name] === 'string' && Number.isFinite(Date.parse(record[name]))) enrollment[name] = record[name]
     const processes = readProcess(record.local_processes, 'enrollment.local_processes')
     if (processes) enrollment.local_processes = processes
     const accounting = readAccounting(record.accounting_state, 'enrollment.accounting_state')
@@ -1884,15 +1915,20 @@ function groupAccounts(accounts: readonly RequestedAccount[]): Map<string, Reque
 function orderedSelection(accounts: readonly RequestedAccount[], selected: readonly string[]): { ok: true; keys: string[] } | { ok: false; message: string; next: string } {
   const known = new Map(accounts.map(account => [account.account_key, account]))
   const keys: string[] = []
-  const harnesses = new Set<string>()
+  const harnesses = new Map<string, string | undefined>()
+  const homes = new Set<string>()
   for (const account of accounts) {
     if (!selected.includes(account.account_key) || keys.includes(account.account_key)) continue
     const match = known.get(account.account_key)
     if (!match) continue
-    if (harnesses.has(match.harness)) {
-      return { ok: false, message: `Choose one ${match.harness} account.`, next: 'A pairing approves one account for each harness you include.' }
+    if (harnesses.has(match.harness) && (!harnesses.get(match.harness) || !match.config_home_id)) {
+      return { ok: false, message: `Choose one ${match.harness} account without isolation.`, next: 'Several accounts for the same harness require a separate isolated config home for each account.' }
     }
-    harnesses.add(match.harness)
+    if (match.config_home_id && homes.has(match.config_home_id)) {
+      return { ok: false, message: 'Selected accounts share a config home.', next: 'Give each account a separate isolated config home.' }
+    }
+    harnesses.set(match.harness, match.config_home_id)
+    if (match.config_home_id) homes.add(match.config_home_id)
     keys.push(account.account_key)
   }
   if (selected.some(key => !known.has(key))) {

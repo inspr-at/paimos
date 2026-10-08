@@ -16,6 +16,80 @@ Run Aeon on your own server with the [self-hosting guide](docs/SELF-HOSTING.md)
 and [reference Docker Compose stack](deploy/compose/compose.yaml). Published
 images use explicit release versions; there is no `latest` tag.
 
+## Policies
+
+Settings → Policies (`/settings/policies`) explains existing rules and provides
+scoped editors for saved job orders and model preferences. Each tab follows its source permission: review ladders need
+`models.read`; agent key limits read the permission registry with `roles.read`
+and a person session; ownership and advisory rules are visible to signed-in
+people. Links lead only to existing screens the person may open.
+
+`GET /api/models/routes?role=review-gate` reads one of the six model roles,
+ordered by priority and profile id, with at most 50 steps and an explicit
+`truncated` flag. An unseeded registry returns `setup: false` without creating
+profiles or events. The read applies a five-second statement timeout and returns
+503 with `Retry-After` if it expires. CLI priority and qualified review dispatch
+are labelled separately; this display endpoint does not resolve a dispatch.
+Review family ordering and qualification floors are shown only for Review gate.
+Suspension expiry includes an explicit UTC time and date. A late server refusal
+clears the private rows while keeping the existing selector and detail link in
+place; a person without the source permission sees only its permission sentence.
+
+People with `models.read` and `models.manage` can edit one complete role order,
+using its quoted `If-Match` token. Truncated snapshots remain read-only.
+Add, move and remove operations renumber the draft in displayed order, including
+orders with gaps in their stored priorities. Ordinary managed reviews retain
+built-in family/tier fallback until a person deliberately saves the review order.
+The draft starts from the currently applied fallback. Save sends
+`order_mode=saved` on the conditional `review-gate` PUT; Undo restores the captured
+rows and `legacy`/`saved` mode together. Omitted mode and whole-tenant legacy PUTs
+preserve activation. The strong role token covers both rows and mode; mode-only
+changes emit `model.routes_replaced` with unchanged before/after arrays and
+`before_order_mode`/`after_order_mode` metadata. GET returns `order_mode` and
+`managed_fallback_order` from the same snapshot, and review traces capture the
+mode. Preferences may still choose another qualified reviewer. Author-family,
+effort/tier, platform, account and residency checks stay enforced; security uses
+its separate refusing path. Already queued profile/account bindings stay fixed.
+
+Model preferences use Default, You and an explicitly visible Project, with the
+source GET/write permissions. Project-only management also needs workspace
+model visibility to use this screen. Each mutation carries the GET's canonical
+`If-Prefs-Person` and the addressed level revision. Row edits preserve both
+complexity buckets and the row lock; Reset affects only that selected row.
+Row DELETE sends the captured revision in the query string, alongside project
+context where needed; Undo of a newly added row uses the same conditional DELETE.
+Provider and section-lock writes send only the three scalar fields, never
+`rows`; neither Save nor Undo issues whole-level DELETE. Archived and sibling
+work-kind settings therefore remain stored by these UI operations.
+
+Save is provisional until the source confirms its actual result. Undo is a
+conditional compensating source write with the confirmed token/revision, not an
+event deletion. Ladder Undo uses `expiry_policy=clear`; expired holds stay
+available. Newer changes, revoked permissions, linked-person changes and retired
+kinds refuse honestly without retrying the old draft. Unknown outcomes require
+reconciliation; an equal value alone never certifies success. Provider Undo does
+not lower requirements already stamped on existing runs. Navigation discards
+local drafts and Undo; it does not promise to roll back an in-flight server write.
+For preferences, a focus permission refresh keeps drafts, confirmed Undo and
+pending-write handling when authority remains unchanged. Identity and relevant
+permission changes invalidate them. Local work-kind and editor-mode changes
+discard mutations while retaining the same source document during the next
+preview read, so picker options and preference rows remain on screen.
+
+Queue routes finish buffering request bodies before opening their transaction
+or retaining tenant/tree/pairing locks. Input is capped at 1 MiB and shares a
+30-second request deadline with the transaction; interrupted input returns 408,
+and oversized input returns 413 before queue work starts.
+
+Editors reserve useful read/help space above the previews and keep long content
+inside scrolling bodies. Phone editors use full-height sheets with safe-area
+action bars. Save keycaps follow the platform; keyboard Save focuses the stable
+Save action before fields are disabled, retaining focus for subsequent keyboard
+Undo and Escape. Escape first leaves a field, then
+closes the editor. Browser geometry and request-contract coverage lives in
+`web/tests/policy-editors.spec.ts`; screenshot evidence is generated locally in
+`web/test-results/aeon-633web/` and is not committed.
+
 ## Agent conversation foundation
 
 AEON-618 R1 introduces a separate `chat-v1` identity contract in
@@ -652,6 +726,46 @@ session resets discard it. Server code uses
 `features.Service.Enabled`, which reads the database each time and returns
 false on error. **Flags never grant permissions or bypass approval gates.**
 
+## Project lead settings (backend groundwork)
+
+`aeon project lead-settings get PROJECT` reads the lead policy. Use `set
+PROJECT --revision N --from FILE` with a sparse override JSON object, or `reset
+PROJECT --revision N` to inherit again. `--workspace` selects execution defaults
+instead of a project. Pass `--session-cookie-file FILE` to use an existing
+person session through the
+CLI's bounded session transport, without bearer authentication or storing the
+session. Otherwise these commands use the configured agent caller, and the
+server refuses its edits. Edits require an active person with
+`model_prefs.manage`. A project's first edit records that
+person as owner; subsequent edits require that same canonical person. Reset
+retains the owner and advances the revision, preventing stale saves and takeover.
+
+The additive API is `/api/projects/{projectId}/lead-settings` and
+`/api/settings/lead-policy` (GET/PUT/DELETE). PUT replaces the sparse `overrides`
+object with an expected `revision`; DELETE takes the revision as a query value.
+Null/omitted selectors inherit; empty host/account arrays allow no targets.
+Project host/account filters intersect workspace filters. Selected IDs must
+belong to the editing person; filtering never supplies pairing, spending or
+execution consent. Project readers see redacted explanations; private selectors
+are visible only to the owning person (workspace selectors to their editor),
+and audit events store revisions without account/host identifiers.
+
+Model settings reference the existing work kind and normal/complex bucket;
+Default → You → Project model preferences and locks continue to resolve live,
+with their revision vector returned to the owner. Recovery limits share a finite
+attempt and agent-hour budget across build/review/fix; zero disables recovery
+by default, and a project cannot increase workspace ceilings. The existing dial
+remains `/api/agents/plan`; there is no new concurrency control.
+
+This policy does not launch work. `automatic_launch_enabled` remains false
+pending AEON-603 acceptance. The lead lifecycle/claim/start consumers must
+recheck current owner authority and policy revisions, then dial, harness,
+account room and host load under their final transaction fences. Unreadable
+mandatory gates mean wait. No model route, saved setting or queued work grants
+merge, deploy, credential rotation, force-stop or attached-session consent.
+AEON-734 owns lifecycle/ownership succession, AEON-598–600 execution, AEON-731
+recovery and AEON-741 the approved UI.
+
 ## Model preferences
 
 `aeon model resolve --ticket AEON-123` resolves the ticket's work kind,
@@ -1266,9 +1380,8 @@ coverage or omitted failures. These unsigned diagnostic records do not mint
 receipts, baseline credit, certificates or success checks. No workflow, required
 check, runner route, queue reuse, timing reuse or UI selection changes in C.
 
-Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/journey`, and
-`/p/KEY/knowledge`. A ticket uses `/p/KEY/TICKET`; `?section=journey` or
-`?section=knowledge` retains its background section. Tickets is the default,
+Project sections have their own URLs: `/p/KEY/tickets`, `/p/KEY/knowledge`, and `/p/KEY/settings`. A ticket uses
+`/p/KEY/TICKET`; `?section=knowledge` retains its background section. Tickets is the default,
 so its ticket links need no section query. Existing `?view=full` ticket links
 still open the full-page ticket at the same address.
 
@@ -1380,12 +1493,16 @@ the counter before its handler as a lower bound and runs once. A page covering
 the hint that triggered its batch updates the row immediately; newer hints
 remain queued for a follow-up read, so busy tenants do not need a quiet gap.
 
-The flow UI is hidden by default. People working on Paimos itself can enable
-**Show the flow controls (not yet tested end to end)** under **Settings →
-Developer** (`/settings/developer#flow-controls`). This per-person, per-workspace
-preference reveals the footer flow pill, Journey tab, stages and release walker;
-it does not grant action permissions. Journey bookmarks explain the opt-in while
-it is off. Turning it off removes the flow UI again.
+The INSPR Flow is retired (AEON-723). Journey stages, the Journey project view,
+the footer Flow pill, stage handoffs, and the external-stage CLI are removed.
+Old Journey bookmarks open the project's tickets. Stored Flow data is preserved;
+deprecated Journey, requirements and handoff APIs return authenticated 410 errors
+without executing stage actions. Existing reporter success schemas and contract
+headers remain pinned for PHAROS/JANUS compatibility. Ordinary release creation
+and membership use the native release APIs, independently of Flow gates.
+No table or column is dropped in this release. Contract-phase cleanup needs a
+separate follow-up, including migrating the legacy-named release ledger and
+historical provenance before removing dormant Flow tables and compatibility routes.
 
 Reserved, never-published versions are hidden in the release history by default.
 **Show reserved versions** under **Settings → Developer**
@@ -1394,19 +1511,6 @@ workspace, including comparison choices and previous/next navigation. Statistics
 and result counts always include reservations; the footer's **N new** count
 includes only visible versions. A direct link still opens a hidden reservation
 with a quiet explanation of the setting.
-
-If a standing candidate or deployment gate expires or is revoked before
-deployment finishes, Journey offers renewal on the Deploy stage. An agent
-requests a fresh release-bound approval; its person decider applies it with
-`renew_candidate` or `renew_deploy` through the journey actions API, including
-the current `release_id` and `expected_revision`. Candidate renewal precedes
-deployment renewal and preserves enterprise reviewer independence. Each renewal
-appends gate history and advances the journey revision without changing the
-release identity. Existing handoffs lose authority; terminal evidence from
-before either renewal is historical, so rerun preparation after both renewals,
-then request a new deployment. Journey contract `journey/1.2` adds the optional
-`next_action.renewal_action`; clients must use it when present. Existing action
-keys and reporter major versions remain unchanged.
 
 Native intake drafts accept an optional Aithema `extensions` map and the
 original review snapshot as `document_bytes` alongside the required native
@@ -1793,7 +1897,7 @@ The same change is available as `aeon keys scopes <key-id> --add harness.worker 
 
 `whoami` and doctor's auth check use the same `GET /api/me` client call. A valid session or agent key can read its own identity without a workspace role or extra key scope, including project-only and empty-scope keys. Doctor probes public health and version information anonymously; schema and rules checks retain their own permissions. This grants no access to other workspace data or profile routes. Issue, knowledge, search and onboard commands use the current Aeon APIs. Commands whose API resource is unavailable exit 3. `aeon mcp` exposes `whoami`, `ask`, `ask_status`, issue list/get/create/update/comment, knowledge list/get/create/update, and search over stdio. Work tools reuse the CLI application operations and scoped HTTP APIs; updates preserve revision checks and kind changes remain person-only. JSON field writes preserve exact numeric tokens. Node walks fail explicitly if a cursor repeats or remains after fifty pages. Project-scoped issue search resolves ancestor membership and continues search pages up to the requested limit within the server’s ranked window of 200 matches. An ancestor returning not-found excludes that path from the visible descendant set; other lookup errors and traversal limits still fail the search. Onboarding `--check` compares the complete rendered bundle, options and managed header, normalizing only its generation timestamp.
 
-Model catalog v3 upgrades existing tenants on server startup (or first registry access). It adds the current Codex and Grok CLI pins, retires known-invalid models from resolution, and upgrades only role ladders that still exactly match the v2 defaults. Customized routes and active availability overrides are preserved. `review-gate-security` uses Grok CLI → Cursor Grok → Codex, stays read-only and excludes the author's family; the normal review gate retains Claude.
+Model catalog v3 upgrades existing tenants on server startup (or first registry access). It adds the current Codex and Grok CLI pins, retires known-invalid models from resolution, and upgrades only role ladders that still exactly match the v2 defaults. Customized routes and active availability overrides are preserved. An explicitly saved ordinary review order remains unchanged even when it matches the old default. `review-gate-security` uses Grok CLI → Cursor Grok → Codex, stays read-only and excludes the author's family; the normal review gate retains Claude.
 
 Migration 1126 is an expansion: security-review routes live in a separate tenant-isolated table, leaving the published role table and its constraint unchanged. Current catalog reads and route replacement include both tables; previous release binaries continue using the original routes. The refresh tables use explicit forced RLS policies.
 
@@ -1949,7 +2053,7 @@ Labels are stored server-side under tenant/person/host with person-only RLS.
 saves one and a null label resets it. Both require `harness.read`; a project-only
 role with that permission suffices. Agents cannot read or write overrides.
 
-Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.8`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. 2.8 adds optional commit diff counts. 2.7 adds optional response-only `owner_principal_id` for the reviewed pause and wind-down ownership projection and optional `desk_answers` references for durable Decision Desk handovers. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
+Harness status and heartbeat return the response-only header `Aeon-Contract: harness-session/2.8`; no request header is required. Existing reporters keep working without a Pharos or Janus release. The warnings field is optional in the shared session schema and is returned as an array on heartbeats; existing response fields and request requirements are unchanged. 1.8 included `finished`, a required response boolean that is always present, false included, in every session, live and event payload (derived in SQL from a reported 100% and a recorded clean exit); readers that ignore it are unaffected, and no screen derives Done from `progress_pct` or `stop_reason`. It also adds the optional `row_version` (AEON-449): the session row's own revision, raised by the database inside every statement that changes the row, so the larger of two copies is the newer. Reporters may ignore it. 1.9 adds optional nullable `model_raw` and `model_profile_id` for auditable model identity; request requirements stay unchanged. 2.0 declares the expanded harness enum, including Gemini CLI and OpenCode (AEON-452), and adds the optional `generator` and `command` response labels and media/terminal families; existing fields remain intact. 2.1 adds optional `current_activity`, `current_activity_history` and `agent_activity_mode` for current activity reporting; request requirements stay unchanged. 2.5 adds optional `service_tier`, `service_tier_revision` and per-model `service_tier_reports`; 2.6 adds optional nullable `service_tier_request` for pending agent requests on list rows. 2.8 adds optional commit diff counts. 2.9 adds the optional response-only `agent_recovery` diagnosis (AEON-731): the reporting-loss cause and the recovery action a paired daemon can carry out; request requirements stay unchanged. 2.7 adds optional response-only `owner_principal_id` for the reviewed pause and wind-down ownership projection and optional `desk_answers` references for durable Decision Desk handovers. Existing reporters and request requirements stay unchanged. The pin checker records expansion of an existing enum as a major schema change; existing harness values still register and heartbeat unchanged.
 
 Pause levels (AEON-524 part A2) add `--level stop_now|pause_quickly|pause|wrap_up`
 and an optional `--note` to pause one or all sessions. Omitted levels use the
@@ -2253,6 +2357,20 @@ before prompting, keeping separate instances separate. Direct Go HTTP consumers
 set `Client.ConfirmStepUp` to their authenticated local-daemon callback.
 
 To remove a pairing, run `aeon-agentd disconnect` and wait for `disconnected` before uninstalling. This freezes new work, requests server revocation, waits for owned processes to drain, then stops and removes its own service. `--once` reports one resumable step; interruption or lost connectivity leaves cleanup pending, and the same command resumes it. Vendor sign-ins and project files are preserved. Homebrew users then run `brew uninstall aeon-agentd`; checksum-installer users remove the `~/.local/bin/aeon-agentd` link and downloaded versions under `~/.local/lib/aeon`. Nix users disable/remove the service and package through their owning configuration's review path. Retain private pairing state until cleanup and any accounting recovery are complete; `--state-root` selects a nondefault pairing.
+
+Attached-session user hooks (AEON-391) ship **disabled by default**. An explicit `aeon-agentd pair --install-user-hooks --hook-executable /absolute/path/to/aeon` requests installation after browser approval; existing connected computers use `aeon-agentd repair --install-user-hooks --hook-executable /absolute/path/to/aeon --json`. Add `--state-root` for an existing nondefault pairing. `aeon hook install|uninstall --paired --harness claude --setup-root /absolute/approved/pairing` uses the same repair path. Project scope is refused. These commands report `hook_capabilities` through pairing reconciliation and status; they never enable messages or upgrade watch consent.
+
+The installer authenticates the CLI, copies the exact artifact into a private digest-named executable (independent of PATH/profile upgrades and Nix garbage collection), and records its digest and file identity for the daemon's loaded-image check. Both installation and runtime identity checks require an independently authenticated release that is also in the compiled, reviewed release ceiling for that exact digest/OS/architecture. An install receipt alone cannot establish trust, and a newer artifact from the same signer cannot approve itself. The ceiling is currently empty pending native qualification. Runtime rechecks bytes and inode after verification, and refuses settings changed during the check. Darwin release jobs sign/notarize `aeon-cli` under the independently pinned Developer ID identity; the unsigned native rehearsal builds and hands off the same CLI before assets assembly. Linux requires an Ed25519-authenticated `aeon.hook-release.v1` manifest declaring the reviewed version and version scheme, plus a reviewed compiled-in public key; its public manifest/signature are retained beside the pin for independent runtime verification. No key is configured yet, so checksum-only Linux artifacts stay untrusted. No credential, network URL or API config path is written into the installed command. Runtime paired mode uses the local fresh-exchange protocol described below; unqualified production releases return a bounded, content-free no-op and cannot fall back to HTTP inbox delivery.
+
+No harness/version/OS combination is advertised as qualified until native launch-chain, effective-settings and event-output evidence is reviewed with S2-4/S2-5. Both Claude and Codex currently report `qualification_pending` on explicit installation; normal pairing reports `feature_disabled`. Filesystem fixtures exercise the installation engine with test-only qualification, not a production enable switch. Project/ancestor overrides, environment-selected config roots and uncertain configuration provenance remain blockers. Qualification must account for every effective source, including managed settings, plugins and launch flags listed in the [Claude settings reference](https://code.claude.com/docs/en/settings) and [hook locations](https://code.claude.com/docs/en/hooks#hook-locations).
+
+Settings are merged atomically with private backups, a cooperating-writer lock and concurrent-change detection. Ownership requires the complete saved hook group, including its matcher/timeout; a comment suffix alone is insufficient. Exact owned duplicates collapse to one integration. Hook reports match connected enrollment account keys and collapse to one conservative report per harness; different active versions cannot claim qualification, and reconciliation repairs duplicate reports from older snapshots. Unknown v1/v2 entries or locally changed groups are preserved with `ownership_unknown` for local repair. Selective disconnect retains a shared integration until the last enrollment finishes local cleanup, including accounts still draining. Successful uninstall confirms the settings removal before retiring the exact ownership receipt, so a newly approved computer can install; conflicts retain the receipt for repair. Other settings and project files are preserved. Processes running as your OS user are not isolated; these pins and checks do not claim full protection against unrestricted same-user tampering.
+
+AEON-391 validation (implementation `08378631`): the approved Mac runner passed `go test ./internal/... ./cmd/...`; local `scripts/...` tests and affected-package `go vet` passed. The paired installer fixtures passed on macOS (including `-race`) and a local Linux container. Four removed-check mutations—source identity, manifest signature, project scope and ownership—each made the security tests fail. Release metadata and shell syntax checks passed. This evidence validates the installer and conservative reporting; it does not qualify a real harness or provision a Linux signing trust anchor.
+
+Runtime hardening `f7165a9e` (after merging main at `38306cc5`) passed the full `go test ./...` suite on the approved Mac runner, focused Mac race tests, affected-package `go vet`, and the hook filesystem/manifest fixtures in an isolated Linux container on that runner. The unsigned-receipt regression failed before the fix. Removing runtime authentication, the release ceiling, the manifest signature check or the post-verification image check each made its targeted regression fail. Release metadata, shell syntax, release workflow coverage and 28 exact-SHA rehearsal gate tests passed. Native harness qualification, reviewed published artifact digests and the independent Linux signing key/manifest publication remain coordinator prerequisites; messaging remains disabled.
+
+Lifecycle fixes `f5578caa` passed the affected `agentsetup`, `agentpairing`, `hookcap`, `cli` and `cmd/aeon-agentd` Go suites on the approved remote runner, focused race tests including HTTP re-enrollment and actual revoked-account fence synchronization, affected-package `go vet`, and the web build and complete `npm run test:unit` command. Regression commit `ee8873c9` retains `c625f8c7` behavior with only a private fixture-home resolver added: it fails on the HTTP duplicate-report rejection, removal of hooks needed by connected or draining accounts, and retained ownership after uninstall. Concurrent receipt changes and persisted duplicate reports also go red there. The `agent-pairing.spec.ts` browser attempt was refused by the explicit OPS-247 bootstrap/launcher gate in `scripts/playwright-remote.mjs`; hosted CI remains a coordinator check under the no-push freeze. No assertions were weakened, activation gates were changed, or messaging enabled.
 
 Claude dependency pins preserve stable Node and SDK links, including Home Manager links. Each probe and start checks the full link chain, ownership, directory permissions, workspace exclusion and the SDK's declared package entry, then launches the resolved physical paths. Existing physical pins remain supported. To replace old pins after an update, run `aeon-agentd repin --harness claude --node-path /absolute/stable/bin/node --claude-sdk-path /absolute/stable/lib/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs` (add `--state-root` for a nondefault pairing). Omit the dependency flags to discover the current global installation. The command shows old and new paths and versions; `--yes` confirms without prompting, including with `--json` in Home Manager activation. Missing old versions show as unavailable.
 
@@ -3436,6 +3554,175 @@ People with `harness.recover` permission can open **Recover** in a session’s d
 
 Managed daemons report a per-launch process identity and generation. **Force stop** additionally requires human `harness.force_stop` permission, an ownership report no more than 45 seconds old, and exact session/host/process-group confirmation. Ownership recording and freshness checks use the Postgres clock, so API-host clock skew does not reject a fresh report; future-dated observations still fail closed. The daemon rejects a changed identity, restart, expired request or lost ownership; deadline and cancellation are rechecked under the final signal lock. Local transport and inbox credentials cannot authorize force stop. Expiry uses the database-derived monotonic budget above; archive cannot retract a signal that was already authorized or delivered, and always retains unknown process state. It signals only the owned process group (including children in that group), and reports root exit separately from queue acceptance; escaped descendants are outside its scope. Linux and macOS keep the group leader unreaped while signaling, preventing PID reuse. Unsupported adapters, legacy unmanaged sessions and offline ownership cannot be force stopped. Legacy normal user **Stop** sends TERM and reports timeout without escalating; the qualified Claude managed control uses native close as described above. Daemon cleanup retains its existing bounded force cleanup.
 
+### Attached owner notes (AEON-392, disabled)
+
+The server contract adds separate, single-use messaging consent to protocol-2
+attachments. Watching never grants sending. The independent helper prepares a
+snapshot/pin-bound grant; only the computer owner's same-origin browser session
+can approve it. Policy B additionally requires a fresh messaging nonce and a P-256 signature
+verified against the browser-pinned pairing key. Its signed digest includes the
+full attachment, owner, session, generation, daemon and hook tuple plus the
+canonical local prompt. Watch signatures and boolean confirmations are refused;
+activation consumes the messaging challenge atomically. Each
+re-enablement gets a fresh message generation. Turning messages off preserves
+the watch lease; message operations never renew that lease.
+
+`AEON_ATTACHED_MESSAGES=true` also requires the deployment-owner qualification
+`AEON_ATTACHED_MESSAGES_SINGLE_INSTANCE=true`. Both default off. This is an
+operator attestation, not a distributed lock or automatically verified lease:
+exactly one serving/sweeping Aeon process may use the database while enabled.
+There must be no sibling replica, overlapping rolling restart, second service,
+or separately running sweeper. Stop the old process before starting its
+replacement; disable the feature if that invariant cannot be maintained.
+The production hook-capability projection remains fail-closed until native qualification
+work lands. `internal/attachedmsg/store.go` narrows every pairing capability
+report through AEON-391's release-owned `hookcap.Project` ceiling. Tests
+inject qualified fixtures; those fixtures are not production qualification.
+
+An explicit `recipient_message_generation` always selects an attached note,
+including when messaging is disabled or its attachment has ended. Such a send
+is volatile or refused; it never falls back to durable chat. When messaging is
+fully enabled, active attachments also enforce the policy when a caller omits
+the generation or session. When disabled or unqualified, requests without a
+message generation retain ordinary inbox routing, including live watched
+attachments. The final durable write rechecks attachment status under the same
+fence as activation while messaging is enabled, closing the lookup gap.
+Session identity, project, principal, harness, host, ticket and active state are
+validated under a shared session row lock retained through commit. That lock
+is acquired before attachment and grant row locks; acceptance and broker
+validation use that same protected predicate.
+Both inbox send APIs (therefore CLI and MCP) use one attached-recipient policy.
+A person needs the exact computer ownership, live project permissions, current
+grant and `recipient_message_generation`. Agents can create only bounded
+notification metadata; their labels and sender-session fields confer no owner
+authority. Attached v1 rejects steering, action requests and reply/thread modes.
+The capability route is `/api/agent-pairing/attach/{requestId}/messages`; its
+`approve` and `revoke` subroutes are owner-only. Ordinary inbox reads, streams,
+acks, adapter claims and managed drains cannot consume these rows.
+
+Note bodies live only in the shared inbox payload service. Both message tables
+store “Attached-session note; text not retained”, with database constraints.
+Idempotency comparison uses a keyed in-memory digest; after payload loss an old
+key returns existing metadata and never recreates a note. Events are private
+metadata, and failure settlement does not copy a note to a coordinator or a
+notice. Request/SQL logging never receives the raw body. A five-minute deadline,
+a live attach lease, a 4 KiB body limit, an 8,000-character escaped frame limit,
+a session burst of three (one token per ten seconds), 30 sends/minute/computer,
+five pending notes/session, and 1 MiB/tenant plus 16 MiB/process payload ceilings
+are enforced server-side. Notifications use separate session/computer rate
+counters (the same burst/refill and 30/minute limits) and separate in-memory
+metadata limits (5/session, 1,024/tenant, 16,384/process). Their text is cleared
+before reservation. They never consume any owner-note rate or memory capacity.
+Quota failures return 429 with `Retry-After`.
+
+S2-3 must use the exported exact `Binding`/`Offer` contract, recheck
+`ValidateGrant` under the pairing fence, commit its one attempt, then use the
+single-use payload `Take`; it must never replay a body. Pass
+`Take(binding, grantID, messageID, TakeTransaction{Context: ctx, Tx: tx})` in the
+transaction that holds the pairing fence and revalidates the grant. `Take`
+locks and re-reads the exact message tuple, accepting only queued/offered rows
+before their deadline; a sibling's `content_lost` settlement denies release even
+while the old process retains RAM. Missing transaction or any SQL error fails
+closed. Existing three-argument calls still compile but return no body. Never
+expose the result before that transaction commits; a rollback loses the taken
+body rather than replaying it. Lock order follows current main: tenant → pairing
+fence → tree, then compat advisory lock, session, attachment/grant, message,
+delivery, receipt, event counter. Publication follows the metadata commit;
+rollback discards the reservation. The service epoch binds the owning process.
+Restart/disabled/expired/revoked notes settle without automatic retry. Status
+adds `attached` evidence and never treats a legacy fetch/ack as model reading.
+Negative controls run with `nix develop -c python3 scripts/check-attached-policy-mutations.py`
+and `AEON_TEST_DATABASE_URL` pointing at a disposable test database; the script
+restores exact source bytes after each owner/tuple/digest/replay mutation.
+The local credential-free hook and offer/receipt broker are separate dependent
+packages; this change does not activate delivery or managed controls.
+
+Package validation (2026-10-03): the approved remote `go test -count=1 ./...`
+run passed 123 packages; its only failure was a new unquoted OpenAPI description.
+After correction, the payload, inbox and reporter-contract packages passed.
+The final attachment run passed all 16 tests and killed all 15 security
+mutations at their intended assertions, including an actual durable-body leak
+when the disabled-note guard was removed. Exact source bytes were restored.
+The migration guard passed against `v261003065316.0.0`: 230 unique migration
+numbers, immutable published files, and expand-safe additions 1210–1212 on the original dependency branch.
+AEON-660 rebases those unpublished additions to reserved migrations 1252–1254.
+
+Fix-round validation (2026-10-03): all 18 attachment tests and the inbox package
+passed locally. Barrier tests prove session row protection through commit and
+revalidation after concurrent archive/binding changes for acceptance and
+`ValidateGrant`. Removing the fixes on `424af4e9` makes the session-lock and
+disabled-routing regressions fail at their intended assertions. Web build,
+656 Node tests, 741 Vitest tests and all 17 `session-messages.spec.ts` Chromium
+checks passed; the browser checks used one supervised worker on macOS.
+The remote test host was off limits; Linux browser qualification and the
+consolidated release review remain with the coordinator.
+
+
+### Attached-note integration slice (AEON-660, disabled)
+
+This worker delivers the brief's first coherent slice: S2-3's one-attempt
+broker and S2-4's credential-free local hook, with the corrected AEON-391/392
+trust and consent prerequisites. Forward migrations 1251–1255 add metadata
+and fences without altering published migrations or the release version.
+
+A claim commits one immutable attempt before taking the volatile body; lost
+responses, rollback, restart, revocation and expired offers cannot recreate it.
+The paired exchange binds the attachment, grant, generation, daemon epoch and
+hook epoch. `message_validate` freshly checks that exact attempt and current
+consent without returning content or renewing the watch lease. Receipts report
+shown/completed or uncertain evidence; they do not assert model reading.
+
+The hook authenticates daemon executable bytes against its own compiled exact
+release ceiling before sending request bytes. Public `hook-peer.json` only
+narrows the kernel-observed process identity and cannot approve a substitute.
+Each socket invocation exchanges a fresh challenge with the current generation
+and epoch before its single offer. After fetching, the hook revalidates remote
+consent and then rechecks local registry, kernel peer and deadline at disclosure;
+local revocation is serialized with the final write. Reply bridges cannot
+intercept explicitly attached sends before the volatile-message policy.
+
+Both production hook/daemon release ceilings are empty. Feature switches stay
+off, and ordinary pairing does not opt a computer into messaging. Native
+Darwin/Linux signing and effective-settings/launch-chain qualification, harness
+version coverage, AEON-395 UI (including F6 person-change draft clearing), and
+AEON-404 independent helper messaging approval remain for the coordinator.
+The concrete source adapter and protocol are tested; end-to-end helper consent
+wiring and production activation are not delivered by this slice. No new
+credentials are required or introduced. This disabled groundwork is not a
+user-visible release benefit.
+
+Validation on current release-123 main (2026-10-05): the approved remote runner
+refused execution because Colima was stopped. Bounded, touched-package tests
+were therefore run locally one package at a time; their results are recorded
+in this worktree's ignored `tmp/aeon-660-validation` directory. The migration
+allowlist, test-tier checks, web shard registry checks and source ownership
+audit passed (34 tier checks, 22 shard checks, 33 ownership tests). Local checks
+passed for the affected attachment/consent broker, hook, source adapter, CLI,
+daemon command, installer/runtime authentication, managed-drain fence, inbox,
+server shutdown/bootstrap, OpenAPI contract and signing workflow. Controlled
+barriers prove 12 overlapping claims release one body and consent withdrawal
+before disclosure releases none.
+
+Fix round 2 rechecks the daemon's live key, scope and `harness.worker` permission
+inside every message-operation transaction, under the existing fences,
+including the separate body-release transaction. Server acceptance and native
+hook output share one renderer: the 8000-character context and 10000-character
+complete JSON limits include escaped content, owner notice and maximum-width
+server metadata for all three supported events. Oversized output is refused
+before a message, rate charge or delivery attempt is created.
+
+The new revocation and output-boundary regressions fail against the reviewed
+`44fdf894` production files via Go's source overlay; all 21 daemon revocation
+interleavings fail on that baseline, including key/scope withdrawal between
+claim commit and release. Fix-round validation remains local and serial, as
+required by its brief; no remote test host, push or deployment is used. Fixed-tree
+checks pass for the attached-message broker and hook packages, all attached-note
+pairing cases, focused CLI/source-adapter tests and OpenAPI parsing. The updated
+registries pass 45 tier checks, 24 shard checks and 33 ownership tests.
+Full hosted CI, native qualification and consolidated release QA
+remain coordinator gates; this worker neither pushes nor deploys.
+
+
 ### Removing ghost sessions (AEON-265)
 
 People with `harness.read` access to a project can remove a session from its
@@ -3471,15 +3758,12 @@ Deploy approvals can carry optional `target` metadata: `hosts` or `environment`,
 card, Needs you, and approval history; missing targets read “Target not
 named” and keep existing approval behavior. `target_digest_sha256` identifies the
 recorded metadata and does not add an authority check (enforcement is AEON-287).
-The additive contracts are `approvals/1.1` and `journey/1.3`. Stage handoff
-responses remain byte-compatible `stage-handoffs/1.0` for strict PHAROS readers;
-targets stay in storage and audit events, and the web reads them from the journey
-deploy stage or approval, labelled “named by the agent”.
-Managed agents can pass `target` and an optional `release_node_id` to
-`aeon_request_approval`; `paimos external-stage request --operation deploy`
-accepts an optional `--target-file JSON`. Verify handoffs retain the preceding
-deploy handoff's recorded target internally when present; neither handoff body
-emits target fields.
+The approval contract is `approvals/1.1`. Targets stay in storage and audit events,
+and the web reads them from approvals, labelled “named by the agent”. Managed
+agents can pass `target` and an optional `release_node_id` to
+`aeon_request_approval`. AEON-723 retires the Journey deployment view,
+stage handoffs and the external-stage CLI; compatibility paths retain their
+reporter contract headers and return authenticated 410 errors.
 
 ### Owner workstation confirmation (AEON-580)
 
@@ -4114,6 +4398,19 @@ Vocabulary writes require a person with `settings.manage`, check the current per
 AEON-655 Outline roots load incrementally with one unified cursor. Page sizes remain fixed even when inserted or expanded work consumes retention capacity. The browser retains at most 5000 lazy work items and reports an incomplete Outline at that limit; filtered paths resolve at most 2000 ancestor reads in batches of eight, with cycle detection and explicit incomplete-result messages for unreadable ancestors, resource limits or interrupted reads. Drag nested work onto the Project root destination above the rows to return it to the project level. Reload and Save vocabulary are serialized, and person/tenant changes discard old responses. Detail-panel completion uses canonical descendant-leaf state facets, excluding cancelled leaves; failed aggregate reads show unavailable progress instead of direct-child counts. CLI/MCP type aliases resolve kinds only and never inject provenance into strict user field schemas.
 
 AEON-655 completion validation covers migrated `work` and legacy `ticket` records. Creating or moving a work item into Done, Accepted or Delivered requires both pill and benefit texts in English and German, including when hidden from release notes. Already completed history remains editable; reopening restores the next-completion requirement. The workspace offers the same benefit reading section, editor and completion prompt for work items. Outline rendering traverses explicit frames rather than the JavaScript call stack; a 3600-row path (1800 ancestors plus 1800 matches) has regression coverage.
+
+Release image publication runs two gates before attestation and release index
+publication. First, the pushed digest is walked to its platform manifest, whose
+image config digest must equal the smoked build's config digest exactly; that
+config includes `created` and history, so both exports share `SOURCE_DATE_EPOCH`
+from `git show -s --format=%ct HEAD` and use `rewrite-timestamp`. Second, the
+runtime comparison reads architecture, OS, variant, ordered rootfs diff IDs and
+runtime configuration from `docker image inspect` for the pushed image and the
+image that passed smoke. Only this runtime comparison excludes image IDs,
+`created`, history and provenance index digests; a build that differs only in
+its clock passes the runtime comparison but fails the config digest gate.
+The PDF visual diff gate returns
+exit 2 for any missing page, including blank pages, independently of pixel tolerance.
 
 ### Ticket work measurement (AEON-503)
 

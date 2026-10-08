@@ -23,6 +23,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/agentruns"
 	"github.com/inspr-at/paimos/internal/agentsetup"
+	"github.com/inspr-at/paimos/internal/attachedmsg"
 	"github.com/inspr-at/paimos/internal/auth"
 	"github.com/inspr-at/paimos/internal/config"
 	"github.com/inspr-at/paimos/internal/db"
@@ -30,6 +31,7 @@ import (
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/inbox"
 	"github.com/inspr-at/paimos/internal/modelregistry"
 	"github.com/inspr-at/paimos/internal/nodes"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -85,6 +87,7 @@ func nixGuideFixture() *config.PairingNixGuide {
 }
 
 type fixture struct {
+	messages   []*attachedmsg.Service
 	pairing    *agentpairing.Module
 	t          *testing.T
 	db         *dbtest.DB
@@ -119,19 +122,19 @@ func uuid(t *testing.T, d *dbtest.DB) string {
 	}
 	return id
 }
-func newFixture(t *testing.T) *fixture {
+func newFixture(t *testing.T, messages ...*attachedmsg.Service) *fixture {
 	t.Helper()
-	return newFixtureInTenant(t, dbtest.Open(t), "pairtest")
+	return newFixtureInTenant(t, dbtest.Open(t), "pairtest", messages...)
 }
 
-func newFixtureInTenant(t *testing.T, d *dbtest.DB, slug string) *fixture {
+func newFixtureInTenant(t *testing.T, d *dbtest.DB, slug string, messages ...*attachedmsg.Service) *fixture {
 	t.Helper()
 	id, err := tenantbootstrap.Create(t.Context(), d.App, slug, "Pairing test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	sessionKey := []byte(nonce())
-	f := &fixture{t: t, db: d, tenantID: id, tenantSlug: slug, profiles: map[string]string{}, sessionKey: sessionKey}
+	f := &fixture{t: t, db: d, tenantID: id, tenantSlug: slug, profiles: map[string]string{}, sessionKey: sessionKey, messages: messages}
 	f.rebuildHandler()
 	login := f.call("POST", "/api/auth/dev-login", map[string]string{"email": "pairing@example.test"}, false, "", 200)
 	cookies := login.Result().Cookies()
@@ -183,9 +186,17 @@ func (f *fixture) rebuildHandler() {
 	if err := pairing.ConfigureAccountLink(f.sessionKey); err != nil {
 		f.t.Fatal(err)
 	}
-	api := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, pairing, events.New(f.db.App), agentaccounts.New(f.db.App), nodes.New(f.db.App, nil), modelregistry.New(f.db.App), harness.New(f.db.App), workorders.New(f.db.App), agentruns.New(f.db.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry) error {
-		return agentaccounts.Settle(ctx, tx, p, r.ID)
+	api := &httpapi.Server{Pool: f.db.App, Modules: []httpapi.Module{am, pairing, events.New(f.db.App), agentaccounts.New(f.db.App), nodes.New(f.db.App, nil), modelregistry.New(f.db.App), harness.New(f.db.App), workorders.New(f.db.App), agentruns.New(f.db.App, func(ctx context.Context, tx pgx.Tx, p tenant.Principal, r agentruns.Run, _ agentruns.Telemetry, pending *[]events.Change) error {
+		return agentaccounts.SettleDeferred(ctx, tx, p, r.ID, pending)
 	})}, Middleware: []func(http.Handler) http.Handler{am.Middleware}}
+	if len(f.messages) > 0 {
+		pairing.SetAttachedMessages(f.messages[0])
+		messaging, err := inbox.NewMessaging(f.db.App, make([]byte, 32), inbox.WithAttachedMessages(f.messages[0]))
+		if err != nil {
+			f.t.Fatal(err)
+		}
+		api.Modules = append(api.Modules, inbox.New(f.db.App, f.messages[0]), messaging)
+	}
 	f.pairing, f.h = pairing, api.Handler()
 }
 
@@ -338,6 +349,12 @@ func TestPairingApprovalRedemptionIsolationAndOneShot(t *testing.T) {
 		t.Fatal("approval falsely reports connected or exposes runtime prefix")
 	}
 	v := f.redeem(p)
+	var creator string
+	var required bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT k.created_by_principal_id::text,k.person_owner_required FROM agent_pairing_computers c JOIN agent_keys k ON k.tenant_id=c.tenant_id AND k.id=c.key_id WHERE c.tenant_id=$1 AND c.id=$2`, f.tenantID, *v.ComputerID).Scan(&creator, &required); err != nil || creator != f.person || !required {
+		t.Fatal("pairing omitted approving person creator or ownership marker")
+	}
+
 	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
 	if v.State != "redeemed" || len(v.Enrollments) != 1 {
 		t.Fatal("missing redemption bindings")
@@ -1681,4 +1698,28 @@ func (f *fixture) addClaude(p *proposal, computerID, key string) agentpairing.Vi
 	f.submit(q)
 	f.approve(q, "connect_only")
 	return f.redeem(q)
+}
+
+func TestPairingVerificationClaimsWithNullTrace(t *testing.T) {
+	f := newFixture(t)
+	p := f.propose("claude")
+	f.submit(p)
+	f.approve(p, "one_per_harness")
+	v := f.redeem(p)
+	key := "aeon_" + v.RuntimePrefix + "_" + p.runtime
+	e := v.Enrollments[0]
+	var absent bool
+	if err := f.db.Admin.QueryRow(t.Context(), `SELECT trace IS NULL FROM agent_runs WHERE id=$1`, *e.VerificationRunID).Scan(&absent); err != nil {
+		t.Fatal(err)
+	}
+	if !absent {
+		t.Fatal("pairing fixture no longer covers NULL trace")
+	}
+	f.probe(v, e, key, 200)
+	f.claim(v, e, key, f.reserve(v, e, key, 200), 200)
+	var run agentruns.Run
+	decodeResult(t, f.call("GET", "/api/runs/"+*e.VerificationRunID, nil, false, key, 200), &run)
+	if run.Status != "starting" || run.Purpose != "pairing_verification" || run.RepositoryMutationAllowed {
+		t.Fatal("verification claim lost its read-only contract", run)
+	}
 }

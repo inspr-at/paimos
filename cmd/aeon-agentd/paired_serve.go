@@ -18,6 +18,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentd"
 	"github.com/inspr-at/paimos/internal/agentsetup"
 	"github.com/inspr-at/paimos/internal/harnesslaunch"
+	"github.com/inspr-at/paimos/internal/hooknote"
 	"github.com/inspr-at/paimos/internal/piprobe"
 )
 
@@ -128,6 +129,25 @@ func pairedAdapters(c agentsetup.RuntimeConfig) ([]agentd.EnrolledAccount, []age
 	return accounts, adapters, nil
 }
 
+// publishHookPeer writes the public daemon pin the hook dials. The pin is
+// a kernel observation of this process, including PIDVersion, independent of
+// the service's cwd. An unusable pin fails serve instead of being published.
+func publishHookPeer(store *agentsetup.Store) error {
+	self, err := hooknote.ObserveDaemonSelf()
+	if err != nil {
+		return err
+	}
+	pin := hooknote.PinFrom(self)
+	if !pin.Valid() {
+		return errors.New("daemon peer pin unavailable")
+	}
+	peer, err := json.Marshal(pin)
+	if err != nil {
+		return err
+	}
+	return store.Write("hook-peer.json", peer, false)
+}
+
 func servePaired(root string, capacityInterval time.Duration) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -210,6 +230,9 @@ func servePairedContext(ctx context.Context, root string, capacityInterval time.
 	}
 	raw, _ := json.Marshal(agentsetup.ControlReference{Socket: socket, DaemonID: c.DaemonID, Generation: s.Generation()})
 	err = store.Write("control.json", raw, false)
+	if err == nil {
+		err = publishHookPeer(store)
+	}
 	store.Close()
 	if err != nil {
 		return err

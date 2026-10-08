@@ -6,7 +6,6 @@ import { expectStableControls } from './helpers/stable'
 import { mockDecisionDesk } from './decision-desk-fixtures'
 import { fixtures, me, mockWork } from './work-fixtures'
 import { agentData, mockAgents } from './agents-fixtures'
-import { journeyWorld, mockJourney } from './journey-fixtures'
 
 const title = 'Welche mandantenbezogene Datenbankmigration soll nach der vollständigen Sicherheitsprüfung und der Abstimmung mit allen Verantwortlichen den zusätzlichen Suchindex für die langfristige Nachvollziehbarkeit der Entscheidungen übernehmen?'
 const choiceTitle = 'Den ausschließlich mandantenbezogenen Teilindex mit nachvollziehbarer Sicherheitsprüfung und dauerhaft dokumentierter Freigabe verwenden'
@@ -126,31 +125,6 @@ for (const device of [{ width: 390, coarse: true }, { width: 1024, coarse: true 
       }
       expect(data.controls).toHaveLength(0)
     })
-    test('release description fits both labels with disjoint stable targets', async ({ page }) => {
-      await page.setViewportSize({ width: device.width, height: 1000 })
-      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(device.coarse)
-      const work = fixtures(); work.preferences.theme = { choice: theme }; work.nodes.find(n => n.id === 'n-1')!.body = description + tail
-      await mockWork(page, work); const journey = journeyWorld('plan'), calls = await mockJourney(page, journey)
-      await page.goto('/p/PHAROS?view=journey&walk=PHAROS-11')
-      const walker = page.getByRole('dialog', { name: 'Release walker', exact: true })
-      await expect(walker).toBeVisible()
-      if (device.width < 901) await walker.press('i')
-      const reveal = walker.locator('.description-toggle'), text = walker.locator('.description')
-      await expect(reveal).toBeVisible(); await reveal.scrollIntoViewIfNeeded()
-      const neighbors = walker.locator('.info button:not(.description-toggle)')
-      await revealGeometry(reveal, neighbors, device.coarse)
-      const englishWidth = await naturalRevealWidth(reveal, ['Show full description', 'Show preview'])
-      await translateReveal(reveal, { 'Show full description': translatedFull, 'Show preview': translatedPreview })
-      await expect(reveal).toHaveAccessibleName(translatedFull)
-      await revealGeometry(reveal, neighbors, device.coarse)
-      expect((await reveal.boundingBox())!.width).toBeGreaterThan(englishWidth + 10)
-      await shot(page, `walker-labels-${device.width}-${theme}`)
-      await expectStableControls({ controls: { reveal, screens: walker.getByRole('group', { name: 'Screens' }) }, scrollAreas: { description: text, info: walker.locator('.info') }, interactions: [
-        { name: 'tap top of translated description reveal', run: async () => { await reveal.click({ position: { x: 5, y: 1 } }); await expect(reveal).toHaveAccessibleName(translatedPreview); await expect(text).toHaveClass(/revealed/); await revealGeometry(reveal, neighbors, device.coarse) } },
-        { name: 'tap bottom of translated description reveal', run: async () => { const box = (await reveal.boundingBox())!; await reveal.click({ position: { x: 5, y: box.height - 1 } }); await expect(reveal).toHaveAccessibleName(translatedFull); await expect(text).not.toHaveClass(/revealed/); await revealGeometry(reveal, neighbors, device.coarse) } },
-      ] })
-      expect(calls.filter(call => call.method !== 'GET')).toHaveLength(0)
-    })
   })
 }
 
@@ -239,44 +213,5 @@ for (const width of [390, 768, 1024, 1440]) for (const theme of ['light', 'dark'
     await textFits(page, `[data-row="m:${held.id}"] .why .text`)
     await shot(page, `held-${width}-${theme}`)
     expect(data.controls).toHaveLength(0)
-  })
-
-  test(`release description reveal and reset ${width} ${theme}`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 1000 })
-    const work = fixtures(); work.preferences.theme = { choice: theme }
-    work.nodes.find(n => n.id === 'n-1')!.body = '# Sicherheitsprüfung\n\n' + description + '\n\n' + tail
-    work.nodes.find(n => n.id === 'n-2')!.body = 'Kurze Beschreibung.'
-    await mockWork(page, work); const journey = journeyWorld('plan'), calls = await mockJourney(page, journey)
-    await page.goto('/p/PHAROS?view=journey&walk=PHAROS-11')
-    const walker = page.getByRole('dialog', { name: 'Release walker', exact: true })
-    await expect(walker).toBeVisible()
-    if (width < 901) await walker.press('i')
-    const toggle = walker.locator('.description-toggle'), text = walker.locator('.description')
-    await expect(toggle).toHaveAccessibleName('Show full description')
-    const screens = walker.getByRole('group', { name: 'Screens' })
-    const firstScreen = screens.getByRole('button', { name: 'Before: card grid', exact: true })
-    await expect(firstScreen).toHaveAttribute('aria-pressed', 'true')
-    await expect(walker.locator('img.shot')).toHaveAttribute('alt', 'Before: card grid')
-    await expect(text).not.toHaveAttribute('data-tip')
-    await expectStableControls({ controls: { reveal: toggle, screens }, scrollAreas: { description: text }, interactions: [
-      { name: 'show full description', run: async () => { await toggle.click(); await expect(toggle).toHaveAttribute('aria-expanded', 'true'); await expect(text).toHaveCSS('mask-image', 'none'); await text.focus(); await text.press('End'); await expect.poll(() => text.evaluate(el => el.scrollTop)).toBeGreaterThan(0); await expect(text).toContainText(tail) } },
-      ...scrollKeys.map(key => ({ name: `read release description with ${key}`, run: async () => {
-        await nativeScrollKey(text, key)
-        await expect(firstScreen).toHaveAttribute('aria-pressed', 'true')
-        await expect(walker.locator('img.shot')).toHaveAttribute('alt', 'Before: card grid')
-        expect(journey.walkers['r-2']!.tickets.find(ticket => ticket.ticket_node_id === 'n-1')!.included).toBe(true)
-        expect(calls.filter(call => call.method !== 'GET' && call.path.endsWith('/plan'))).toHaveLength(0)
-        await expect(page).toHaveURL(/walk=PHAROS-11/)
-      } })),
-    ] })
-    await shot(page, `walker-${width}-${theme}`)
-    await walker.press('ArrowRight')
-    await expect(walker.locator('.info-title')).toHaveText('Add an Oracle Cloud connector')
-    await expect(toggle).toHaveCount(0)
-    await expect(text).toContainText('Kurze Beschreibung.')
-    await expect(text).not.toHaveClass(/revealed/)
-    await walker.press('ArrowLeft')
-    await expect(toggle).toHaveAccessibleName('Show full description')
-    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
   })
 }

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: AGPL-3.0-only
-// AEON-384: Settings → Accounts as a list with an inline detail. Windows with
+// AEON-384: Settings → Accounts as a list with an inline detail (inside the
+// account panel since AEON-686). Windows with
 // source and freshness, the last readings, inline rename with "Name it", the
 // Advanced sentence, old limits as "Set by you" (Remove, Make this repeat) and
 // money for an API key. No form asks for start, end, unit, pace or burst.
@@ -10,6 +11,7 @@ import { fixtures, me, mockWork, watchErrors } from './work-fixtures'
 import { agentData, mockAgents, type AgentWorld } from './agents-fixtures'
 import { ACCOUNTS, NOW, OLD_WINDOW, TZ, capacityWorld, type CapacityOptions } from './capacity-fixtures'
 import { mockEffectivePermissions } from './authz-fixtures'
+import { controlStability } from './control-stability'
 
 test.use({ timezoneId: TZ })
 const world: AgentWorld = { me: me.id, now: NOW, projects: {}, tickets: {}, nodes: {} }
@@ -28,15 +30,28 @@ async function setup(page: Page, options: Setup = {}) {
   })
   return { data, capacity, calls }
 }
-const card = (page: Page) => page.locator('#agent-accounts')
-const row = (page: Page, id: string) => page.locator(`[data-account="${id}"]`)
+// AEON-686: Settings → Accounts and computers lists each account once; its
+// logins, the "Agents may use it" switch, limits and the shared quota live in
+// the account's docked panel under "Use and limits".
+const panel = (page: Page) => page.locator('section.pane')
+const card = (page: Page) => panel(page).locator('.use-sec')
+const row = (page: Page, id: string) => card(page).locator(`[data-account="${id}"]`)
+const listRow = (page: Page, id: string) => page.locator(`.list-row[data-accounts~="${id}"]`)
 async function open(page: Page) {
   await page.goto('/settings/accounts')
-  await expect(card(page).getByRole('heading', { name: /Codex/ })).toBeVisible()
-  await expect(row(page, ACCOUNTS.main).locator('.chip.host')).toHaveText('mbp2607')
+  await expect(listRow(page, ACCOUNTS.main)).toBeVisible()
+}
+async function show(page: Page, id: string) {
+  if (await row(page, id).count()) return
+  // A phone sheet covers the list: close the open panel before choosing another.
+  if (await panel(page).count()) await panel(page).getByRole('button', { name: 'Close details' }).click()
+  await listRow(page, id).click()
+  await expect(row(page, id)).toBeVisible()
 }
 async function details(page: Page, id: string) {
-  await row(page, id).getByRole('button', { name: /^Details for/ }).click()
+  await show(page, id)
+  const toggle = row(page, id).getByRole('button', { name: /^Details for/ })
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click()
   const detail = page.locator(`#account-detail-${id}`)
   await expect(detail).toBeVisible()
   return detail
@@ -182,14 +197,20 @@ test('accounts are a list by vendor with how each is read, and no allowance form
   const errors = watchErrors(page)
   await setup(page)
   await open(page)
-  await expect(card(page).locator('.group-head')).toHaveText(['Codex3 accounts', 'Claude1 account', 'Grok1 account', 'Cursor1 account'])
+  await show(page, ACCOUNTS.main)
+  await expect(card(page).locator('.group-head')).toHaveText(['Codex1 account'])
+  await expect(row(page, ACCOUNTS.main).locator('.chip.host')).toHaveText('mbp2607')
   await expect(row(page, ACCOUNTS.main)).toContainText('Reads every 5 min')
-  await expect(row(page, ACCOUNTS.claude)).toContainText('Reads during runs')
-  await expect(row(page, ACCOUNTS.grok)).toContainText("Doesn't show its limit")
-  // Studio's computer is offline: the row says so; a usable row carries no state word.
-  await expect(row(page, ACCOUNTS.studio).locator('.state')).toHaveText('Offline')
   await expect(row(page, ACCOUNTS.main).locator('.state')).toHaveCount(0)
   await expect(row(page, ACCOUNTS.main).getByRole('switch', { name: 'Agents may use it · Main' })).toHaveAttribute('aria-checked', 'true')
+  await show(page, ACCOUNTS.claude)
+  await expect(row(page, ACCOUNTS.claude)).toContainText('Reads during runs')
+  await show(page, ACCOUNTS.grok)
+  await expect(row(page, ACCOUNTS.grok)).toContainText("Doesn't show its limit")
+  // Studio's computer is offline: the row says so; a usable row carries no state word.
+  // The page knows the paired computers, so it uses the shared readiness wording.
+  await show(page, ACCOUNTS.studio)
+  await expect(row(page, ACCOUNTS.studio).locator('.state')).toHaveText('Paused · computer offline')
   // The form is gone: nothing asks for a start, end, unit, pace or burst.
   await expect(page.getByRole('button', { name: /allowance window/i })).toHaveCount(0)
   await expect(page.getByLabel(/^(starts?|ends?|unit|pace|burst)/i)).toHaveCount(0)
@@ -218,6 +239,7 @@ test('a row opens its detail: windows with source and freshness, and the last th
 test('the Advanced sentence round-trips and caps on top of the plan', async ({ page }) => {
   const { capacity } = await setup(page, { limits: true })
   await open(page)
+  await show(page, ACCOUNTS.main)
   await expect(row(page, ACCOUNTS.main).locator('.chip.mine')).toHaveText('Limit · 20% a day')
   const main = await details(page, ACCOUNTS.main)
   await expect(main.getByLabel('At most')).toHaveValue('20')
@@ -251,6 +273,7 @@ test('the Advanced sentence round-trips and caps on top of the plan', async ({ p
 test('old limits set by hand show as Set by you, with Make this repeat and Remove', async ({ page }) => {
   const { capacity } = await setup(page, { limits: true })
   await open(page)
+  await show(page, ACCOUNTS.spare)
   await expect(row(page, ACCOUNTS.spare).locator('.chip.mine')).toHaveText('Set by you')
   const spare = await details(page, ACCOUNTS.spare)
   const mine = spare.locator('.mine li')
@@ -281,8 +304,11 @@ test('removing an old limit asks once and keeps the rest', async ({ page }) => {
 test('names that clash ask to be named, and a rename changes only the name', async ({ page }) => {
   const { capacity } = await setup(page, { clash: true })
   await open(page)
-  await expect(card(page).getByRole('button', { name: /^Name it/ })).toHaveCount(2)
+  // Studio and Main share a name across two separate accounts: each panel asks.
+  await show(page, ACCOUNTS.main)
+  await expect(card(page).getByRole('button', { name: /^Name it/ })).toHaveCount(1)
   await details(page, ACCOUNTS.studio)
+  await expect(card(page).getByRole('button', { name: /^Name it/ })).toHaveCount(1)
   const trigger = row(page, ACCOUNTS.studio).getByRole('button', { name: /^Name it/ })
   await trigger.click()
   const input = page.locator(`#account-detail-${ACCOUNTS.studio}`).getByRole('textbox', { name: 'New name for Main' })
@@ -313,7 +339,7 @@ test('an API key shows money, and a dollar limit reads back', async ({ page }) =
   await open(page)
   const pi = await details(page, ACCOUNTS.pi)
   await expect(pi).toContainText('Spend$12.40 this month · no limit · list prices')
-  await expect(pi).toContainText("Pi doesn't show its limit to AEON. One run at a time by day, freely tonight.")
+  await expect(pi).toContainText('Usage unknown · reserve not enforceable')
   await pi.getByRole('button', { name: 'Set a limit by hand' }).click()
   await expect(pi.getByLabel('At most')).toBeFocused()
   await pi.getByLabel('Counted in').selectOption('dollars')
@@ -337,6 +363,7 @@ test('accounts without priced run usage never offer dollar limits', async ({ pag
 test('without account.manage the list is read-only', async ({ page }) => {
   await setup(page, { manage: false, limits: true })
   await open(page)
+  await show(page, ACCOUNTS.main)
   await expect(row(page, ACCOUNTS.main).getByRole('switch')).toBeDisabled()
   const main = await details(page, ACCOUNTS.main)
   await expect(main.getByRole('button', { name: /Rename/ })).toHaveCount(0)
@@ -362,10 +389,56 @@ test('phone: Name it is reachable and opens the rename', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await setup(page, { clash: true })
   await open(page)
+  await show(page, ACCOUNTS.studio)
   await row(page, ACCOUNTS.studio).getByRole('button', { name: /^Name it/ }).click()
   await expect(page.locator(`#account-detail-${ACCOUNTS.studio}`).getByRole('textbox', { name: 'New name for Main' })).toBeFocused()
   expect(await noScroll(page)).toBe(true)
 })
+
+// AEON-686: confirmations opened from the account panel are modal dialogs above
+// it. In every layout they own Tab and Escape: focus moves between their own
+// buttons, Escape cancels without a write, and the account panel stays open.
+for (const [width, mode] of [[1600, 'dock'], [1100, 'side'], [390, 'sheet']] as const) {
+  test(`${mode}: drain and pool confirmations keep Tab and Escape`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    const { capacity } = await setup(page)
+    for (const a of capacity.accounts.filter(a => a.harness === 'codex')) Object.assign(a, { quota_fingerprint: 'ab'.repeat(32), quota_pool_fingerprint: '' })
+    const writes: string[] = []
+    page.on('request', request => { if (request.method() !== 'GET' && new URL(request.url()).pathname.startsWith('/api/agent-accounts')) writes.push(`${request.method()} ${new URL(request.url()).pathname}`) })
+    await open(page)
+    const detail = await details(page, ACCOUNTS.main)
+    await expect(page.locator(`.settings-frame.mode-${mode}`)).toHaveCount(1)
+    const confirmations = [
+      { open: row(page, ACCOUNTS.main).getByRole('switch', { name: 'Agents may use it · Main' }), name: 'Drain Main?', confirm: 'Drain account' },
+      { open: detail.getByRole('button', { name: 'Pool with Spare · mbp2607', exact: true }), name: 'Same login — pool them?', confirm: 'Pool accounts' },
+    ]
+    for (const c of confirmations) {
+      await c.open.click()
+      const dialog = page.getByRole('dialog', { name: c.name })
+      const confirm = dialog.getByRole('button', { name: c.confirm, exact: true }), cancel = dialog.getByRole('button', { name: 'Cancel' })
+      await expect(confirm).toBeFocused()
+      await page.keyboard.press('Shift+Tab')
+      await expect(cancel).toBeFocused()
+      await page.keyboard.press('Tab')
+      await expect(confirm).toBeFocused()
+      await page.keyboard.press('Escape')
+      await expect(dialog).toHaveCount(0)
+      await expect(panel(page)).toBeVisible()
+      await expect(c.open).toBeFocused()
+    }
+    // Keep separate is a native modal inside the panel: Escape closes it alone.
+    const separate = row(page, ACCOUNTS.main).getByRole('button', { name: 'Keep separate…' })
+    await separate.click()
+    const form = page.getByRole('dialog', { name: 'Keep separate' })
+    await expect(form.getByRole('textbox', { name: 'Name' })).toBeFocused()
+    await page.keyboard.press('Escape')
+    await expect(form).toBeHidden()
+    await expect(panel(page)).toBeVisible()
+    await expect(separate).toBeFocused()
+    await expect(row(page, ACCOUNTS.main).getByRole('switch', { name: 'Agents may use it · Main' })).toHaveAttribute('aria-checked', 'true')
+    expect(writes).toEqual([])
+  })
+}
 
 // ---------------------------------------------------------------- screenshots
 const SHOTS = process.env.AEON384_SHOTS
@@ -376,7 +449,7 @@ const SHOT_STATES: Shot[] = [
   { name: 'detail-set-by-you', options: { limits: true }, act: async page => { await details(page, ACCOUNTS.spare) } },
   { name: 'detail-claude', act: async page => { await details(page, ACCOUNTS.claude) } },
   { name: 'detail-money', options: { apiKey: true }, act: async page => { const pi = await details(page, ACCOUNTS.pi); await pi.getByRole('button', { name: 'Set a limit by hand' }).click() } },
-  { name: 'name-it', options: { clash: true }, act: async page => { await row(page, ACCOUNTS.studio).getByRole('button', { name: /^Name it/ }).click() } },
+  { name: 'name-it', options: { clash: true }, act: async page => { await show(page, ACCOUNTS.studio); await row(page, ACCOUNTS.studio).getByRole('button', { name: /^Name it/ }).click() } },
   { name: 'read-only', options: { manage: false, limits: true }, act: async page => { await details(page, ACCOUNTS.grok) } },
 ]
 async function shoot(browser: Browser, shot: Shot, width: number, theme: 'light' | 'dark') {
@@ -402,4 +475,72 @@ test.describe('screenshots', () => {
     mkdirSync(SHOTS!, { recursive: true })
     for (const theme of ['light', 'dark'] as const) for (const width of [1600, 390]) await shoot(browser, shot, width, theme)
   })
+})
+
+// AEON-886: opt-in, honest errors and stable controls in the existing account detail.
+test('owner login usage switch stays put and failed saves preserve consent', async ({ page }) => {
+  const { capacity } = await setup(page, { apiKey: true })
+  const account = capacity.accounts.find(a => a.id === ACCOUNTS.main)!
+  Object.assign(account, { owner_person_id: me.id, link_revision: 3, usage_probe_enabled: false })
+  const pi = capacity.accounts.find(a => a.id === ACCOUNTS.pi)!
+  Object.assign(pi, { provider: 'openrouter', owner_person_id: me.id, link_revision: 3, usage_probe_enabled: false, usage_budget: {
+    currency: 'USD', source: 'agentd', read_at: new Date(NOW).toISOString(), key_usage_usd: 12.5, key_limit_usd: 50, key_remaining_usd: 37.5, balance_usd: null,
+  } })
+  let fail = false
+  const writes: unknown[] = []
+  await page.route('**/api/agent-accounts/*/usage-probe', async route => {
+    const body = route.request().postDataJSON(); writes.push(body)
+    if (fail) return route.fulfill({ status: 403, json: { error: 'owner permission revoked' } })
+    const id = new URL(route.request().url()).pathname.split('/')[3]
+    Object.assign(capacity.accounts.find(a => a.id === id)!, { usage_probe_enabled: body.enabled })
+    return route.fulfill({ status: 204 })
+  })
+  await open(page)
+  const detail = await details(page, ACCOUNTS.main)
+  const toggle = detail.getByRole('switch', { name: "Read usage with this CLI's own login" })
+  await expect(toggle).toHaveAttribute('aria-checked', 'false')
+  await expect(detail).toContainText("Uses unofficial provider endpoints; they may change or stop. You are responsible for following your provider's terms.")
+  for (const width of [390, 1024, 1440]) for (const theme of ['light', 'dark']) {
+    await page.setViewportSize({ width, height: 1000 })
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme }, theme)
+    // Wait for the frame's ResizeObserver to apply the new layout before
+    // measuring an interaction; resizing itself legitimately moves controls.
+    await expect.poll(() => page.locator('.settings-frame').evaluate(el => {
+      const width = (el.closest('.settings-page') ?? el).getBoundingClientRect().width
+      const mode = width >= 1200 ? 'dock' : width > 720 ? 'side' : 'sheet'
+      return el.classList.contains(`mode-${mode}`)
+    })).toBe(true)
+    const guard = await controlStability(page, { toggle, name: detail.getByRole('button', { name: 'Rename Main', exact: true }) })
+    await guard.check(async () => {
+      const before = await toggle.getAttribute('aria-checked')
+      await toggle.click()
+      await expect(toggle).toHaveAttribute('aria-checked', before === 'true' ? 'false' : 'true')
+    })
+    guard.done()
+    await page.screenshot({ path: test.info().outputPath(`usage-probe-${width}-${theme}.png`), fullPage: true })
+  }
+  expect(writes[0]).toEqual({ binding_revision: 3, enabled: true })
+  fail = true
+  const before = await toggle.getAttribute('aria-checked')
+  const guard = await controlStability(page, { toggle })
+  await guard.check(async () => {
+    await toggle.click()
+    await expect(page.getByText('Could not confirm the change. Reload accounts before trying again.', { exact: true })).toBeVisible()
+    await expect(toggle).toHaveAttribute('aria-checked', before!)
+  })
+  guard.done()
+  fail = false
+  const piDetail = await details(page, ACCOUNTS.pi)
+  await expect(piDetail).toContainText('Dollar budget')
+  await expect(piDetail).toContainText('$12.50 used · $50.00 key limit · $37.50 key remaining · Account balance unknown')
+  await expect(piDetail.locator('.fact.window')).toHaveCount(0)
+  const piToggle = piDetail.getByRole('switch', { name: "Read usage with this CLI's own login" })
+  const piGuard = await controlStability(page, { toggle: piToggle })
+  await piGuard.check(async () => {
+    await piToggle.click()
+    await expect(piToggle).toHaveAttribute('aria-checked', 'true')
+  })
+  piGuard.done()
+  expect(await noScroll(page)).toBe(true)
+  await page.screenshot({ path: test.info().outputPath('usage-probe-dollar-budget.png'), fullPage: true })
 })

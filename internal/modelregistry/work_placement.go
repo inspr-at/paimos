@@ -28,6 +28,11 @@ func PlacementFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuer
 			return out, err
 		}
 		f := modelprefs.PlacementFields(fields)
+		parsed, parseErr := boardTicketFields(ctx, tx, q, fields)
+		if parseErr != nil {
+			return out, parseErr
+		}
+		q = parsed
 		q.Area, q.Complexity, q.ComplexitySource, q.TicketRole, q.TicketResidency = f.Area, f.Complexity, f.ComplexitySource, f.RouteRole, f.Residency
 		if q.Role == "" {
 			q.Role = f.RouteRole
@@ -41,8 +46,7 @@ func PlacementFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuer
 		q.PersonID = modelprefs.PrefsPerson(ctx, tx, p)
 	}
 	if KnownRouteRole(q.Role) && !(strings.HasPrefix(q.Role, "review-gate") && q.AuthorFamily == "") {
-		// Fields are already read in this transaction; avoid a second lookup.
-		q.TicketID = ""
+		// Retain identity so ticket-aware routing consumes its escalation episode.
 		resolved, err := ResolveWork(ctx, tx, tenant.Principal{}, q, now)
 		if err != nil {
 			return out, err

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { execFileSync } from 'node:child_process';
+import childProcess from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,9 +12,53 @@ import { checkMigrations, contractMarker, destructive, publishedMigrations, spli
 
 const marker = '-- aeon:contract-phase AEON-415 expanded-in=v260930115354.0.0 expansion-migration=0001_tenants.sql\n';
 
+test('AEON-698 historical migration reads preserve exact bytes with two Git launches', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'aeon-698-migration-batch-'));
+  const migrations = join(directory, 'internal/db/migrations');
+  mkdirSync(migrations, {recursive: true});
+  const git = (...args) => execFileSync('git', args, {cwd: directory, encoding: 'utf8'}).trim();
+  git('init', '-q');
+  const expected = new Map(Array.from({length: 8}, (_, i) => [
+    `000${i}_fixture.sql`, i === 0 ? '' : `-- Grüße ${i}\r\nSELECT 'blob 123\\n';${i % 2 ? '\n' : ''}`,
+  ]));
+  for (const [name, sql] of expected) writeFileSync(join(migrations, name), sql);
+  writeFileSync(join(migrations, 'README.txt'), 'not SQL');
+  git('add', '.');
+  const tree = git('write-tree');
+  const cwd = process.cwd(), original = childProcess.execFileSync, calls = [];
+  try {
+    process.chdir(directory);
+    childProcess.execFileSync = (bin, args, options) => {
+      calls.push({bin, args});
+      return original(bin, args, options);
+    };
+    syncBuiltinESMExports();
+    assert.deepEqual(publishedMigrations(tree), expected, 'empty, multibyte, CRLF and unterminated SQL stay byte-exact');
+    assert.equal(calls.length, 2, 'Git launch count must not grow with the migration count');
+    assert.ok(calls.every(call => call.bin === 'git'));
+    assert.deepEqual(calls[1].args, ['cat-file', '--batch']);
+  } finally {
+    childProcess.execFileSync = original;
+    syncBuiltinESMExports();
+    process.chdir(cwd);
+  }
+});
+
 test('duplicate numbers fail even with different names and SQL', () => {
   const problems = checkMigrations(new Map([['1050_first.sql', 'SELECT 1;'], ['1050_second.sql', 'SELECT 2;']]));
   assert.match(problems.join('\n'), /duplicate migration number 1050/);
+});
+
+test('AEON-633 review ordering follows the release 123 migration boundary', () => {
+  const published = publishedMigrations('refs/tags/v261005070923.0.0');
+  const lastPublished = Math.max(...[...published.keys()].map(name => Number(name.slice(0, 4))));
+  assert.equal(lastPublished, 1240, 'fixture must retain the published release 123 boundary');
+  const names = readdirSync(new URL('../internal/db/migrations/', import.meta.url))
+    .filter(name => name.endsWith('_model_review_order.sql'));
+  assert.equal(names.length, 1, 'review ordering must have exactly one migration');
+  assert.ok(Number(names[0].slice(0, 4)) > lastPublished,
+    `${names[0]} must run after published migration ${lastPublished}`);
+  assert.equal(names[0], '1242_model_review_order.sql', 'use the coordinator reservation');
 });
 
 test('AEON-503 waiting measurement follows every release-123 migration', () => {
@@ -320,7 +366,7 @@ test('contract exceptions pin exact filenames and bytes with a ticket and reason
 test('integration exceptions pin the declared migration bytes', () => {
   const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
   assert.equal(manifest.schema, 'aeon.migration-policy-exceptions.v1');
-  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ["1054_confirmed_quota_pools.sql", "1066_run_kinds.sql", "1087_briefing_autopilot_visibility.sql", "1088_more_harnesses.sql", "1100_aithema_pending_content.sql", "1104_work_kinds.sql", "1112_session_service_tiers.sql", "1114_owner_guard_access_fence.sql", "1116_owner_workstation.sql", "1117_desk_delivery.sql", "1122_recurrence_event_visibility.sql", "1138_portal_products.sql", "1141_chat_identity.sql", "1206_themes.sql", "1207_theme_principal_links.sql", "1208_theme_selection_generation.sql", "1215_one_work_kind.sql", "1225_work_parent_status.sql", "1230_work_leaf_aggregates.sql", "1232_work_lifecycle_actions.sql", "1233_work_parent_releases.sql", "1234_recurrence_work_templates.sql", "1235_agent_appearance_themes.sql", "1237_work_release_leaf_lifecycle.sql", "1240_work_account_pins.sql"]);
+  assert.deepEqual(manifest.exceptions.map(entry => entry.file), ["1054_confirmed_quota_pools.sql", "1066_run_kinds.sql", "1087_briefing_autopilot_visibility.sql", "1088_more_harnesses.sql", "1100_aithema_pending_content.sql", "1104_work_kinds.sql", "1112_session_service_tiers.sql", "1114_owner_guard_access_fence.sql", "1116_owner_workstation.sql", "1117_desk_delivery.sql", "1122_recurrence_event_visibility.sql", "1138_portal_products.sql", "1141_chat_identity.sql", "1206_themes.sql", "1207_theme_principal_links.sql", "1208_theme_selection_generation.sql", "1215_one_work_kind.sql", "1225_work_parent_status.sql", "1230_work_leaf_aggregates.sql", "1232_work_lifecycle_actions.sql", "1233_work_parent_releases.sql", "1234_recurrence_work_templates.sql", "1235_agent_appearance_themes.sql", "1237_work_release_leaf_lifecycle.sql", "1240_work_account_pins.sql", "1241_autopilot_attention_events.sql", "1249_saved_view_mode.sql"]);
   const entry = manifest.exceptions.find(entry => entry.file === '1054_confirmed_quota_pools.sql');
   assert.ok(entry);
   assert.equal(entry.file, '1054_confirmed_quota_pools.sql');
@@ -484,6 +530,13 @@ for (const [file, ticket] of [
   assert.match(checkMigrations(new Map(), new Map(), null, {exceptions}).join('\n'), /: exception migration removed/);
 });
 
+test('AEON-724 person ownership migration is expand-only without a contract exception', () => {
+  const name = '1256_agent_key_person_owner.sql';
+  const source = readFileSync(new URL('../internal/db/migrations/' + name, import.meta.url), 'utf8');
+  assert.equal(destructive(source), false);
+  assert.deepEqual(checkMigrations(new Map([[name, source]]), new Map(), null), []);
+});
+
 test('the current tree requires all exact-byte contract exceptions', () => {
   const directory = new URL('../internal/db/migrations/', import.meta.url);
   const files = new Map(readdirSync(directory).filter(name => name.endsWith('.sql')).map(name => [name, readFileSync(new URL(name, directory), 'utf8')]));
@@ -492,7 +545,7 @@ test('the current tree requires all exact-byte contract exceptions', () => {
   const published = publishedMigrations(`refs/tags/${baseline.releasedTag}`);
   assert.deepEqual(checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline, exceptions}), []);
   const withoutException = checkMigrations(files, published, baseline.releasedTag.slice(1), {baseline});
-  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ["1054_confirmed_quota_pools.sql", "1066_run_kinds.sql", "1087_briefing_autopilot_visibility.sql", "1088_more_harnesses.sql", "1100_aithema_pending_content.sql", "1104_work_kinds.sql", "1112_session_service_tiers.sql", "1114_owner_guard_access_fence.sql", "1116_owner_workstation.sql", "1117_desk_delivery.sql", "1122_recurrence_event_visibility.sql", "1138_portal_products.sql", "1141_chat_identity.sql", "1206_themes.sql", "1207_theme_principal_links.sql", "1208_theme_selection_generation.sql", "1215_one_work_kind.sql", "1225_work_parent_status.sql", "1230_work_leaf_aggregates.sql", "1232_work_lifecycle_actions.sql", "1233_work_parent_releases.sql", "1234_recurrence_work_templates.sql", "1235_agent_appearance_themes.sql", "1237_work_release_leaf_lifecycle.sql", "1240_work_account_pins.sql"]);
+  assert.deepEqual(withoutException.map(problem => problem.split(':')[0]).sort(), ["1054_confirmed_quota_pools.sql", "1066_run_kinds.sql", "1087_briefing_autopilot_visibility.sql", "1088_more_harnesses.sql", "1100_aithema_pending_content.sql", "1104_work_kinds.sql", "1112_session_service_tiers.sql", "1114_owner_guard_access_fence.sql", "1116_owner_workstation.sql", "1117_desk_delivery.sql", "1122_recurrence_event_visibility.sql", "1138_portal_products.sql", "1141_chat_identity.sql", "1206_themes.sql", "1207_theme_principal_links.sql", "1208_theme_selection_generation.sql", "1215_one_work_kind.sql", "1225_work_parent_status.sql", "1230_work_leaf_aggregates.sql", "1232_work_lifecycle_actions.sql", "1233_work_parent_releases.sql", "1234_recurrence_work_templates.sql", "1235_agent_appearance_themes.sql", "1237_work_release_leaf_lifecycle.sql", "1240_work_account_pins.sql", "1241_autopilot_attention_events.sql", "1249_saved_view_mode.sql"]);
   for (const problem of withoutException) assert.match(problem, /: non-allowlisted/);
 });
 
@@ -560,4 +613,37 @@ test('canonical work pin expansion preserves every existing guard and pins exact
   assert.equal(entry.sha256, createHash('sha256').update(expanded).digest('hex'));
   assert.match(entry.reason, /coordinator review/);
   assert.match(checkMigrations(new Map([[name, expanded.replace("a.harness = NEW.harness", 'true')]]), new Map(), null, { exceptions }).join('\n'), /1240_work_account_pins.sql: exception migration changed/);
+});
+
+test('attention event expansion retains the released visibility and cause guards with pinned bytes', () => {
+  const name = '1241_autopilot_attention_events.sql';
+  const sql = readFileSync(new URL(`../internal/db/migrations/${name}`, import.meta.url), 'utf8');
+  const originalPolicy = readFileSync(new URL('../internal/db/migrations/1230_work_leaf_aggregates.sql', import.meta.url), 'utf8');
+  const originalCause = readFileSync(new URL('../internal/db/migrations/1225_work_parent_status.sql', import.meta.url), 'utf8');
+  const statements = splitSQL(sql);
+  assert.equal(statements.length, 3);
+  assert.equal(statements[0], "SET LOCAL lock_timeout = '5s'");
+  const policy = source => splitSQL(source).find(statement => statement.startsWith('ALTER POLICY events_project_visibility'));
+  const cause = source => splitSQL(source).find(statement => /^CREATE (OR REPLACE )?FUNCTION aeon_work_status_cause\(\)/.test(statement));
+  const policyAddition = "'status_autopilot.proposed', 'status_autopilot.attention_apply', 'status_autopilot.attention_dismiss', 'status_autopilot.attention_undone', ";
+  const causeAddition = "'status_autopilot.attention_apply','status_autopilot.attention_dismiss','status_autopilot.attention_undone',";
+  assert.equal(policy(sql).split(policyAddition).length, 2);
+  assert.equal(policy(sql).replace(policyAddition, ''), policy(originalPolicy));
+  assert.equal(cause(sql).split(causeAddition).length, 2);
+  assert.equal(cause(sql).replace(causeAddition, '').replace('CREATE OR REPLACE FUNCTION', 'CREATE FUNCTION'), cause(originalCause));
+
+  const manifest = JSON.parse(readFileSync(new URL('./migration-policy-exceptions.json', import.meta.url), 'utf8'));
+  const entry = manifest.exceptions.find(entry => entry.file === name);
+  assert.equal(entry.ticket, 'AEON-697');
+  assert.equal(entry.sha256, createHash('sha256').update(sql).digest('hex'));
+  assert.match(entry.reason, /coordinator consolidated review/);
+  assert.match(entry.reason, /previous-binary compatibility\/backup gates/);
+  const exceptions = {schema: manifest.schema, exceptions: [entry]};
+  const files = new Map([[name, sql]]);
+  assert.deepEqual(checkMigrations(files, new Map(), null, {exceptions}), []);
+  assert.deepEqual(checkMigrations(files).map(problem => problem.split(':')[0]), [name]);
+  for (const changed of [sql + '\n', sql.replace('cardinality(node_refs) = 0', 'true'), sql.replace('>=10000', '>=10001')]) {
+    assert.match(checkMigrations(new Map([[name, changed]]), new Map(), null, {exceptions}).join('\n'), /1241_autopilot_attention_events.sql: exception migration changed/);
+  }
+  assert.match(checkMigrations(files, new Map([[name, sql + '\n']]), null, {exceptions}).join('\n'), /1241_autopilot_attention_events.sql: published migration changed/);
 });

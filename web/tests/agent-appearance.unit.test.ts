@@ -24,12 +24,12 @@ it('shares viewer state preferences across surfaces and preserves independent se
   const settings = useAgentAppearance(), cards = useAgentAppearance(), sessions = useAgentAppearance()
   await settings.ready
   expect(fetch).toHaveBeenCalledTimes(1)
-  expect(cards.appearance('stopped')).toMatchObject({ '--agent-state-opacity': '0.7', '--agent-state-saturation': '0' })
+  expect(cards.appearance('stopped')).toMatchObject({ '--agent-state-opacity': 'var(--agent-idle-opacity)', '--agent-idle-opacity': '0.7', '--agent-state-saturation': '1' })
   // The pre-AEON-242 red–green choice reads as Deutan without a write.
   expect(cards.choice.value.palette).toBe('deutan')
-  expect(cards.appearance('working')['--agent-state-color']).toBe('var(--agent-deutan-working)')
+  expect(cards.appearance('working')['--agent-state-color']).toBe('var(--agent-working)')
   settings.save({ palette: 'monochrome', dimInactive: false })
-  expect(sessions.appearance('idle')['--agent-state-opacity']).toBe('1')
+  expect(sessions.appearance('idle')['--agent-idle-opacity']).toBe('1')
   expect(sessions.appearance('working')['--agent-state-saturation']).toBe('0')
   await vi.waitFor(() => expect(writes).toEqual([{ palette: 'monochrome', dimInactive: false, inactiveOpacity: 70, yellowMinutes: 5, redMinutes: 12 }]))
   settings.save({ yellowMinutes: 15 })

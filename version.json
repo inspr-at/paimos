@@ -1,12 +1,12 @@
 {
   "product": "PAIMOS AEON",
   "version_scheme": "inspr-calver-3",
-  "version": "261005070923.0.0",
+  "version": "261007063042.0.0",
   "release_channel": "stable",
-  "release_sequence": 123,
-  "codename": "Coral Cargo",
-  "reserved_at": "2026-10-05T07:09:23Z",
-  "ticket": "AEON-684",
+  "release_sequence": 125,
+  "codename": "Exotic Ejecta",
+  "reserved_at": "2026-10-07T06:30:42Z",
+  "ticket": "AEON-860",
   "unpublished_reservations": [
     "260923134337.0.0",
     "260925231350.0.0",

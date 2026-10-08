@@ -273,7 +273,7 @@ function edited() { sendKey = ''; sent.value = '' }
 </template>
 
 <style scoped>
-.new-count { color: var(--gold-ink); font-weight: 600; }
+.new-count { color: var(--secondary-ink); font-weight: 600; }
 .waiting-count { color: var(--ink-2); font-weight: 650; font-variant-numeric: tabular-nums; }
 /* A neutral dot on the gear while doctrine proposals wait (AEON-444). */
 .app-menu :deep(.hm-trigger) { position: relative; }

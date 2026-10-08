@@ -37,6 +37,7 @@ type SourceResult struct {
 }
 type RefreshResult struct {
 	At            time.Time      `json:"at"`
+	NewLines      []string       `json:"new_lines"`
 	Added         int            `json:"added"`
 	Proposed      int            `json:"proposed"`
 	Sources       []SourceResult `json:"sources"`
@@ -144,18 +145,24 @@ type discoveredSource struct {
 // Reserve before making network calls. Only short catalog transactions hold
 // the tenant lock; both workers and the scheduler obey the same interval.
 func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled bool) (RefreshResult, error) {
-	out := RefreshResult{Sources: []SourceResult{}}
+	out := RefreshResult{Sources: []SourceResult{}, NewLines: []string{}}
 	inputs := []discoveryInput{}
 	reserved := false
-	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) error {
+	err := m.in(ctx, p.TenantID, func(tx pgx.Tx) (err error) {
 		if !scheduled {
 			if err := authz.RequireTx(ctx, tx, p, "models.refresh", authz.Scope{}); err != nil {
 				return fail(403, "permission denied")
 			}
 		}
-		if err := ensureCatalog(ctx, tx, p); err != nil {
+		pending, err := prepareCatalogDeferred(ctx, tx, p)
+		if err != nil {
 			return err
 		}
+		defer func() {
+			if err == nil {
+				err = flushCatalogChanges(ctx, tx, p, pending)
+			}
+		}()
 		if err := catalogLock(ctx, tx); err != nil {
 			return err
 		}
@@ -280,8 +287,17 @@ func (m *Module) runRefresh(ctx context.Context, p tenant.Principal, scheduled b
 					}
 					pin, mapped := observedPin(o)
 					if cfg.AutoAddProfiles && mapped {
+						family, line, _ := ProfileLine(Profile{Family: pin.Family, Harness: pin.Harness, Model: pin.Model})
+						id := family + ":" + line
+						var knownLine bool
+						if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM model_profiles WHERE aeon_model_board_line(family,harness,model)=$1)`, id).Scan(&knownLine); err != nil {
+							return err
+						}
 						if _, err := insertObservedProfile(ctx, tx, p.TenantID, pin); err != nil {
 							return err
+						}
+						if !knownLine {
+							out.NewLines = append(out.NewLines, id)
 						}
 						out.Added++
 					} else {
@@ -326,10 +342,16 @@ func (m *Module) putSettings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, fail(503, "model discovery vault unavailable"))
 		return
 	}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		if err := ensureCatalog(r.Context(), tx, p); err != nil {
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) (err error) {
+		pending, err := prepareCatalogDeferred(r.Context(), tx, p)
+		if err != nil {
 			return err
 		}
+		defer func() {
+			if err == nil {
+				err = flushCatalogChanges(r.Context(), tx, p, pending)
+			}
+		}()
 		if err := catalogLock(r.Context(), tx); err != nil {
 			return err
 		}
@@ -431,10 +453,16 @@ func (m *Module) refreshStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := map[string]any{"sources": []DiscoverySource{}, "observations": []json.RawMessage{}}
-	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) error {
-		if err := ensureCatalog(r.Context(), tx, p); err != nil {
+	err := m.in(r.Context(), p.TenantID, func(tx pgx.Tx) (err error) {
+		pending, err := prepareCatalogDeferred(r.Context(), tx, p)
+		if err != nil {
 			return err
 		}
+		defer func() {
+			if err == nil {
+				err = flushCatalogChanges(r.Context(), tx, p, pending)
+			}
+		}()
 		cfg, err := settings(r.Context(), tx)
 		if err != nil {
 			return err

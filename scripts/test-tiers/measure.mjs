@@ -16,7 +16,8 @@ export function jobMinutes(job) {
   if(typeof job.started_at!=='string'||typeof job.completed_at!=='string'||!Number.isFinite(seconds)||start<=0||end<=0||seconds<0) throw new Error(`Invalid job timestamps: ${job.name}`)
   return seconds/60
 }
-export function aggregate(reports,jobs,{runId,attempt,sha,reusedFrom,lane,freshTiming=false}={}) {
+export function aggregate(reports,jobs,{runId,attempt,sha,reusedFrom,lane,layout,freshTiming=false}={}) {
+  if(layout!==undefined&&!['full','static',''].includes(layout)) throw new Error('Invalid tier layout')
   if(reusedFrom!==undefined && !/^[1-9][0-9]*$/.test(String(reusedFrom))) throw new Error("Invalid reused source run")
   if(reusedFrom!==undefined && reports.length && !(freshTiming&&reports.every(report=>report.job==='go-timing'))) throw new Error("Reused execution must not report fresh test passes")
   const names=new Set(),classes={},excludedEvidence=[]
@@ -39,8 +40,10 @@ export function aggregate(reports,jobs,{runId,attempt,sha,reusedFrom,lane,freshT
   }
   // Spec-only uses the existing native unit/exact-spec commands, not tier
   // selection. Report that untiered scope without inventing case evidence.
+  // The static layout (PR-only affected lane) schedules no Go shards, timing
+  // or browser shards; unit evidence is still required and reported.
   const expectedSkip=job=>!job.name.startsWith('nightly-')&&
-    (lane==='docs-only'||lane==='spec-only'&&/^go-/.test(job.name))
+    (lane==='docs-only'||lane==='spec-only'&&/^go-/.test(job.name)||layout==='static'&&/^(?:go-test|go-timing|web-shard)(?: \(\d+\))?$/.test(job.name))
   const required=jobs.filter(job=>
     /^(?:nightly-)?(?:go-test|web-unit|web-shard)(?: \(\d+\))?$|^nightly-web-setup$|^(?:nightly-)?go-timing$/.test(job.name)&&
     !(job.conclusion==='skipped'&&expectedSkip(job))&&
@@ -88,7 +91,7 @@ export function main(directory,env=process.env) {
     if(jobs.length>=result.total_count) break
     if(page===20) throw new Error('Job inventory exceeds measurement bound')
   }
-  const report=aggregate(readReports(directory),jobs,{runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT,sha:env.GITHUB_SHA,lane:env.CI_LANE,reusedFrom:['merge_group','pull_request'].includes(env.REUSE)?env.SOURCE_RUN:undefined,freshTiming:env.REUSE==='pull_request'})
+  const report=aggregate(readReports(directory),jobs,{runId:env.GITHUB_RUN_ID,attempt:env.GITHUB_RUN_ATTEMPT,sha:env.GITHUB_SHA,lane:env.CI_LANE,layout:env.TIER_LAYOUT,reusedFrom:['merge_group','pull_request'].includes(env.REUSE)?env.SOURCE_RUN:undefined,freshTiming:env.REUSE==='pull_request'})
   mkdirSync('tmp',{recursive:true})
   writeFileSync('tmp/test-tier-run-measurement.json',JSON.stringify(report,null,2)+'\n')
   console.log(JSON.stringify({classes:report.classes,measured:report.measured,coverage:report.coverage,coverageReason:report.coverageReason,missingEvidence:report.missingEvidence,upstreamFailures:report.upstreamFailures,skippedJobs:report.skippedJobs}))

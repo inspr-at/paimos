@@ -20,16 +20,15 @@ import (
 
 // agentKeyCommand runs the operator-only agent key commands:
 //
-//	paimos agent-key create --tenant SLUG --name AGENT --out-file PATH [--scopes a,b] [--expires 720h] [--workspace-role ROLEKEY]
-//	paimos agent-key create --tenant SLUG --principal-id UUID --out-file PATH [--name LABEL] [--scopes a,b]
+//	paimos agent-key create --tenant SLUG --name AGENT --creator-id UUID --out-file PATH [--scopes a,b] [--expires 720h] [--workspace-role ROLEKEY]
+//	paimos agent-key create --tenant SLUG --principal-id UUID --creator-id UUID --out-file PATH [--name LABEL] [--scopes a,b]
 //	paimos agent-key revoke --tenant SLUG --id KEY_ID
-//	paimos agent-key journey-gates --tenant SLUG --id KEY_ID --add requirements,build,candidate,deploy
 //
 // The token is written only to --out-file (created with mode 0600, never
 // overwritten) and is never printed.
 func agentKeyCommand(args []string, stdout io.Writer) error {
-	const usage = "usage: paimos agent-key create --tenant SLUG (--name AGENT | --principal-id UUID) --out-file PATH [--scopes a,b] [--expires DURATION] [--workspace-role ROLEKEY] [--project KEY --project-role ROLEKEY]... | paimos agent-key revoke --tenant SLUG --id KEY_ID | paimos agent-key journey-gates --tenant SLUG --id KEY_ID --add shape,requirements,build,candidate,deploy,access"
-	if len(args) == 0 || (args[0] != "create" && args[0] != "revoke" && args[0] != "journey-gates") {
+	const usage = "usage: paimos agent-key create --tenant SLUG (--name AGENT | --principal-id UUID) --creator-id UUID --out-file PATH [--scopes a,b] [--expires DURATION] [--workspace-role ROLEKEY] [--project KEY --project-role ROLEKEY]... | paimos agent-key revoke --tenant SLUG --id KEY_ID"
+	if len(args) == 0 || (args[0] != "create" && args[0] != "revoke") {
 		return errors.New(usage)
 	}
 	flags := flag.NewFlagSet("paimos agent-key "+args[0], flag.ContinueOnError)
@@ -37,35 +36,25 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 	tenantSlug := flags.String("tenant", "", "tenant slug")
 	name := flags.String("name", "", "agent or key name")
 	principalID := flags.String("principal-id", "", "existing agent principal")
+	creatorID := flags.String("creator-id", "", "person creator UUID (required for create)")
 	outFile := flags.String("out-file", "", "file to write the key to (0600, must not exist)")
 	scopes := flags.String("scopes", "", "comma-separated scopes")
 	expires := flags.Duration("expires", 0, "lifetime, e.g. 720h (default: no expiry)")
 	workspaceRole := flags.String("workspace-role", "", "workspace role key for the agent")
 	id := flags.String("id", "", "key id (revoke)")
-	add := flags.String("add", "", "comma-separated journey gates")
 	var projects, roles projectFlags
 	flags.Var(&projects, "project", "project key (repeat with --project-role, or KEY=ROLE[,KEY=ROLE])")
 	flags.Var(&roles, "project-role", "role key for paired --project")
 	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 || *tenantSlug == "" {
 		return errors.New(usage)
 	}
-	if args[0] == "create" && (*outFile == "" || (*name == "" && *principalID == "") || *add != "" || *id != "") ||
-		args[0] == "revoke" && (*id == "" || *add != "" || *name != "" || *principalID != "" || *outFile != "" || *scopes != "" || *expires != 0) ||
-		args[0] == "journey-gates" && (*id == "" || *add == "" || *name != "" || *principalID != "" || *outFile != "" || *scopes != "" || *expires != 0) {
+	if args[0] == "create" && (*creatorID == "" || *outFile == "" || (*name == "" && *principalID == "") || *id != "") ||
+		args[0] == "revoke" && (*id == "" || *name != "" || *principalID != "" || *outFile != "" || *scopes != "" || *expires != 0) {
 		return errors.New(usage)
 	}
 	pairs, err := agentProjectRoles(projects, roles)
 	if err != nil || args[0] != "create" && (len(pairs) > 0 || *workspaceRole != "") {
 		return errors.New(usage)
-	}
-	var gates []string
-	if args[0] == "journey-gates" {
-		for _, gate := range strings.Split(*add, ",") {
-			gates = append(gates, strings.TrimSpace(gate))
-		}
-		if _, err := auth.JourneyGateScopes(gates); err != nil {
-			return err
-		}
 	}
 	return withPool(func(ctx context.Context, pool *pgxpool.Pool) error {
 		tenantID, err := operatorTenantID(ctx, pool, *tenantSlug)
@@ -77,13 +66,6 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 				return err
 			}
 			return json.NewEncoder(stdout).Encode(map[string]string{"revoked": *id})
-		}
-		if args[0] == "journey-gates" {
-			added, err := auth.OperatorAddJourneyGateScopes(ctx, pool, tenantID, *id, gates)
-			if err != nil {
-				return err
-			}
-			return json.NewEncoder(stdout).Encode(map[string]any{"id": *id, "requested_scopes": added})
 		}
 		if err := authz.OperatorValidateProjectRoles(ctx, pool, tenantID, pairs); err != nil {
 			return err
@@ -112,7 +94,7 @@ func agentKeyCommand(args []string, stdout io.Writer) error {
 			os.Remove(*outFile)
 			return err
 		}
-		keyID, agentID, token, err := auth.OperatorCreateAgentKey(ctx, pool, tenantID, *name, *principalID, list, exp)
+		keyID, agentID, token, err := auth.OperatorCreateAgentKey(ctx, pool, tenantID, *name, *principalID, list, exp, *creatorID)
 		if err != nil {
 			f.Close()
 			os.Remove(*outFile)

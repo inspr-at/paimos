@@ -173,8 +173,8 @@ function click(event: MouseEvent) {
 .markdown-body :deep(td), .markdown-body :deep(th) { padding: 6px 10px; border: 1px solid var(--line); text-align: left; }
 .markdown-body :deep(th) { font: 500 10.5px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
 .markdown-body :deep(.md-ticket) { display: contents; }
-.markdown-body :deep(a:not(.ticket-link)) { color: var(--teal); text-decoration: underline; text-decoration-color: var(--gold); text-underline-offset: 3px; }
-.markdown-body :deep(.md-attachment) { display: block; max-width: 100%; margin: .4em 0 1em; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--surface-sunken, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line), 0 10px 26px -18px rgba(16, 35, 39, .5); cursor: zoom-in; }
+.markdown-body :deep(a:not(.ticket-link)) { color: var(--primary-ink); text-decoration: underline; text-decoration-color: var(--secondary-line); text-underline-offset: 3px; }
+.markdown-body :deep(.md-attachment) { display: block; max-width: 100%; margin: .4em 0 1em; padding: 0; border: 0; border-radius: 10px; overflow: hidden; background: var(--surface-sunken, var(--code-bg)); box-shadow: inset 0 0 0 1px var(--line), 0 10px 26px -18px color-mix(in srgb, var(--shadow-color) 50%, transparent); cursor: zoom-in; }
 .markdown-body :deep(.md-attachment img) { display: block; max-width: 100%; height: auto; }
 .markdown-body :deep(.md-attachment:focus-visible) { box-shadow: var(--focus-ring); }
 .markdown-body :deep(pre:focus-visible), .markdown-body :deep(table:focus-visible) { box-shadow: var(--focus-ring); }

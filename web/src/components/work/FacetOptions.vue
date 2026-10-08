@@ -87,20 +87,20 @@ function kindIcon(value: string) { return value === 'epic' ? 'epic' : value === 
 .facet-option:focus-within .count, .facet-option:focus-within .hint { color: var(--ink-2); }
 .no-icon { width: 14px; height: 2px; border-radius: 2px; background: var(--line-2); }
 .kind, .faint { flex-shrink: 0; color: var(--ink-3); }
-.kind.epic { color: var(--gold); }
+.kind.epic { color: var(--kind-parent); }
 .not-btn { display: grid; place-items: center; flex-shrink: 0; width: 26px; height: 26px; margin-right: 3px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--ink-3); opacity: 0; }
 .facet-option:hover .not-btn, .facet-option:focus-within .not-btn, .not-btn[aria-pressed="true"] { opacity: 1; }
 .not-btn:hover { background: var(--chip-bg); color: var(--ink); }
 .not-btn[aria-pressed="true"] { color: var(--danger); background: var(--danger-bg); }
 @media (hover: none) { .not-btn { opacity: 1; } }
 .tag-dot { flex-shrink: 0; width: 8px; height: 8px; margin: 0 3px; border-radius: 50%; background: var(--ink-3); }
-.tag-dot[data-color="blue"] { background: #4f86c6; }
-.tag-dot[data-color="red"] { background: #d0625b; }
-.tag-dot[data-color="green"] { background: #4f9e6f; }
-.tag-dot[data-color="yellow"], .tag-dot[data-color="orange"] { background: var(--gold); }
-.tag-dot[data-color="purple"] { background: #8a6cc2; }
-.tag-dot[data-color="teal"], .tag-dot[data-color="cyan"] { background: var(--teal); }
-.tag-dot[data-color="pink"] { background: #c7679a; }
+.tag-dot[data-color="blue"] { background: var(--label-blue); }
+.tag-dot[data-color="red"] { background: var(--label-red); }
+.tag-dot[data-color="green"] { background: var(--label-green); }
+.tag-dot[data-color="yellow"], .tag-dot[data-color="orange"] { background: var(--label-yellow); }
+.tag-dot[data-color="purple"] { background: var(--label-purple); }
+.tag-dot[data-color="teal"], .tag-dot[data-color="cyan"] { background: var(--label-teal); }
+.tag-dot[data-color="pink"] { background: var(--label-pink); }
 
 @media (max-width: 720px) {
   .facet-option { height: 52px; min-height: 52px; }

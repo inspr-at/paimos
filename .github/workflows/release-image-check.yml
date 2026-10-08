@@ -40,6 +40,14 @@ concurrency:
   group: release-image-check-${{ github.ref }}
   cancel-in-progress: true
 
+# Keep these rehearsed pins together; releaseworkflow tests enforce both workflows.
+env:
+  AEON_BUILDX_VERSION: v0.37.1
+  AEON_BUILDX_SHA256_AMD64: 9447199cdb435f25880548343c128a4b6650e8891ee598905d8d29d39a8e359b
+  AEON_BUILDX_SHA256_ARM64: e5cc9fe3bbff5cbc91230981f7860e06076110730a2db997082652199042a1f2
+  AEON_BUILDKIT_VERSION: v0.33.1
+  AEON_BUILDKIT_IMAGE: moby/buildkit:v0.33.1@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+
 jobs:
   image-dry-run:
     name: image-dry-run (${{ matrix.arch }})
@@ -54,9 +62,8 @@ jobs:
             cache: buildcache-arm64
             runner: ubuntu-24.04-arm
     runs-on: ${{ matrix.runner }}
-    # Same budget as the tag build: three cold Go compilations and a cold
-    # runtime closure preparation.
-    timeout-minutes: 30
+    # Same budget as the tag build (including its push, attestation and verification).
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -121,6 +128,84 @@ jobs:
           GOFLAGS: -mod=readonly
         run: node scripts/build-image-inputs.mjs build
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        with:
+          version: ${{ env.AEON_BUILDX_VERSION }}
+          cache-binary: false
+          driver: docker-container
+          driver-opts: image=${{ env.AEON_BUILDKIT_IMAGE }}
+      - name: Assert pinned Buildx and BuildKit versions
+        run: |
+          set -euo pipefail
+          expected="Expected Buildx ${AEON_BUILDX_VERSION} and BuildKit ${AEON_BUILDKIT_VERSION}"
+          # Resolve Docker CLI precedence without executing any plugin or printing config contents.
+          if ! plugin="$(node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          try {
+            const installed = path.resolve(process.env.HOME, '.docker/cli-plugins/docker-buildx');
+            const configDir = process.env.DOCKER_CONFIG || path.join(process.env.HOME, '.docker');
+            const configFile = path.join(configDir, 'config.json');
+            let config = {};
+            if (fs.existsSync(configFile)) {
+              if (fs.statSync(configFile).size > 1024 * 1024) throw new Error();
+              config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+            }
+            const extra = config.cliPluginsExtraDirs ?? [];
+            if (!Array.isArray(extra) || extra.some(dir => typeof dir !== 'string')) throw new Error();
+            const dirs = [...extra, path.join(configDir, 'cli-plugins'),
+              '/usr/local/lib/docker/cli-plugins', '/usr/local/libexec/docker/cli-plugins',
+              '/usr/lib/docker/cli-plugins', '/usr/libexec/docker/cli-plugins'];
+            if (!fs.lstatSync(installed).isFile() || fs.realpathSync(installed) !== installed) throw new Error();
+            let winner;
+            for (const dir of dirs) {
+              const candidate = path.resolve(dir, 'docker-buildx');
+              try { fs.lstatSync(candidate); winner = candidate; break; }
+              catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ENOTDIR') throw error; }
+            }
+            if (winner !== installed) throw new Error();
+            process.stdout.write(installed);
+          } catch {
+            console.error('::error::Buildx plugin missing, symlinked, shadowed or Docker plugin configuration invalid');
+            process.exit(1);
+          }
+          NODE
+          )" || [[ ! -x "$plugin" ]]; then
+            echo "::error::${expected}; Buildx plugin path assertion failed" >&2
+            exit 1
+          fi
+          case "$(uname -m)" in
+            x86_64) expected_sha="$AEON_BUILDX_SHA256_AMD64" ;;
+            aarch64) expected_sha="$AEON_BUILDX_SHA256_ARM64" ;;
+            *) echo "::error::${expected}; unsupported Buildx runner architecture" >&2; exit 1 ;;
+          esac
+          if [[ ! "$expected_sha" =~ ^[a-f0-9]{64}$ ]]; then
+            echo "::error::${expected}; invalid pinned Buildx SHA256" >&2
+            exit 1
+          fi
+          if ! checksum="$(sha256sum -- "$plugin")"; then
+            echo "::error::${expected}; expected SHA256 ${expected_sha}, actual unreadable" >&2
+            exit 1
+          fi
+          actual_sha="${checksum%% *}"
+          if [[ "$actual_sha" != "$expected_sha" ]]; then
+            echo "::error::${expected}; expected SHA256 ${expected_sha}, actual ${actual_sha}" >&2
+            exit 1
+          fi
+          if ! buildx="$(docker buildx version)" || [[ "$(printf '%s\n' "$buildx" | awk '$1 == "github.com/docker/buildx" {print $2}')" != "$AEON_BUILDX_VERSION" ]]; then
+            echo "::error::${expected}; Buildx version assertion failed" >&2
+            exit 1
+          fi
+          if ! builder="$(docker buildx inspect --bootstrap)"; then
+            echo "::error::${expected}; builder bootstrap failed" >&2
+            exit 1
+          fi
+          if ! printf '%s\n' "$builder" | awk -v expected="$AEON_BUILDKIT_VERSION" '
+            /^[[:space:]]*BuildKit version:/ { count++; if ($3 != expected) mismatch = 1 }
+            END { exit (count == 0 || mismatch) }
+          '; then
+            echo "::error::${expected}; BuildKit version assertion failed" >&2
+            exit 1
+          fi
       # Cold, exactly like the tag build: no registry cache, no builder layer.
       - name: Prepare pinned runtime closure
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
@@ -267,7 +352,9 @@ jobs:
           GOCACHE: ${{ runner.temp }}/go-build-agentd
           GOMODCACHE: ${{ runner.temp }}/go-mod
           GOFLAGS: -mod=readonly
-        run: bash scripts/build-release-binaries.sh darwin-agentd
+        run: |
+          bash scripts/build-release-binaries.sh darwin-agentd
+          GOCACHE="$RUNNER_TEMP/go-build-cli-darwin" bash scripts/build-release-binaries.sh cli-darwin
       - name: Native unsigned agent qualification
         env:
           AEON_DARWIN_ARCH: ${{ matrix.arch }}
@@ -275,7 +362,9 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: rehearsal-agentd-darwin-${{ matrix.arch }}
-          path: dist/paimos-agentd-darwin-${{ matrix.arch }}
+          path: |
+            dist/paimos-agentd-darwin-${{ matrix.arch }}
+            dist/aeon-cli-darwin-${{ matrix.arch }}
           if-no-files-found: error
           retention-days: 1
 

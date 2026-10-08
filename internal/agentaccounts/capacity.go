@@ -12,14 +12,23 @@ import (
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentpairing"
+	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/capacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/inspr-at/paimos/internal/openrouter"
 	"github.com/inspr-at/paimos/internal/tenant"
 	"github.com/jackc/pgx/v5"
 )
 
 type readingsWrite struct {
 	Readings []capacity.Reading `json:"readings"`
+}
+
+type usageReadingsWrite struct {
+	readingsWrite
+	Budget     *capacity.Budget `json:"budget"`
+	UsageProbe bool             `json:"usage_probe"`
+	Revision   *int64           `json:"binding_revision"`
 }
 
 func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
@@ -31,7 +40,7 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err)
 		return
 	}
-	var in readingsWrite
+	var in usageReadingsWrite
 	if err := decodeJSON(w, r, &in); err != nil {
 		writeErr(w, err)
 		return
@@ -40,8 +49,58 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 		if err := requireScope(r.Context(), tx, r, p, "account.probe"); err != nil {
 			return err
 		}
-		if err := ingestReadings(r.Context(), tx, p, r.PathValue("accountId"), in.Readings); err != nil {
-			return err
+		id := r.PathValue("accountId")
+		if !uuidRE.MatchString(id) {
+			return fail(404, "account not found")
+		}
+		if len(in.Readings) > 32 || len(in.Readings) == 0 && in.Budget == nil {
+			return fail(400, "readings or budget required")
+		}
+		if in.UsageProbe || in.Budget != nil {
+			reader := p
+			var err error
+			reader.Scopes, err = readKeyScopes(r.Context(), tx, r, p, true)
+			if err != nil {
+				return err
+			}
+			if authz.RequireTx(r.Context(), tx, reader, "account.probe", authz.Scope{}) != nil {
+				return fail(403, "account probe permission required")
+			}
+			if !in.UsageProbe {
+				return fail(400, "budget requires a usage probe")
+			}
+			if err := agentpairing.AccountFence(r.Context(), tx, id, true); err != nil {
+				return err
+			}
+			a, err := usageConsent(r.Context(), tx, id, in.Revision)
+			if err != nil {
+				return err
+			}
+			if a.RegisteredBy != p.ID {
+				return fail(403, "registering agent required")
+			}
+			now, err := dbNow(r.Context(), tx)
+			if err != nil {
+				return err
+			}
+			for _, v := range in.Readings {
+				if v.Source != "agentd" || v.RunID != "" || v.Phase != "" {
+					return fail(400, "invalid usage probe reading")
+				}
+			}
+			if in.Budget != nil {
+				if a.Harness != "pi" || a.Provider != "openrouter" || in.Budget.Validate(now) != nil {
+					return fail(400, "invalid capacity budget")
+				}
+				if err := ingestUsageBudget(tenant.WithPrincipal(r.Context(), p), tx, a, *in.Budget, now); err != nil {
+					return err
+				}
+			}
+		}
+		if len(in.Readings) > 0 {
+			if err := ingestReadings(r.Context(), tx, p, id, in.Readings); err != nil {
+				return err
+			}
 		}
 		a, err := getAccount(r.Context(), tx, r.PathValue("accountId"))
 		if err != nil {
@@ -66,6 +125,26 @@ func (m *Module) ingestReadings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// The dollar figure and the key-cap admission fact share one observation.
+// A probe that is not strictly newer than the credit snapshot changes neither.
+// The snapshot is never copied into the dollar column.
+func ingestUsageBudget(ctx context.Context, tx pgx.Tx, a Account, b capacity.Budget, now time.Time) error {
+	if a.OpenRouterCredits != nil && !b.ReadAt.After(a.OpenRouterCredits.ObservedAt) {
+		return nil
+	}
+	tag, err := tx.Exec(ctx, `UPDATE agent_accounts SET usage_budget=$2 WHERE id=$1 AND (usage_budget IS NULL OR (usage_budget->>'read_at')::timestamptz<$3)`, a.ID, b, b.ReadAt)
+	if err != nil || tag.RowsAffected() == 0 {
+		return err
+	}
+	a.OpenRouterCredits = &openrouter.Credits{ObservedAt: b.ReadAt, Usage: &b.KeyUsageUSD, Limit: b.KeyLimitUSD, Remaining: b.KeyRemainingUSD}
+	a.OpenRouterCredits.Remaining = a.OpenRouterCredits.KeyRemaining()
+	if err := storeLegacyKeyFact(ctx, tx, a, now); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `UPDATE agent_accounts SET openrouter_credits=$2 WHERE id=$1`, a.ID, a.OpenRouterCredits)
+	return err
 }
 
 func ingestReadings(ctx context.Context, tx pgx.Tx, p tenant.Principal, id string, readings []capacity.Reading) error {
@@ -266,6 +345,7 @@ type capacityWindow struct {
 	UsageTodayKnown bool             `json:"usage_today_known"`
 }
 type accountCapacity struct {
+	Budget             *capacity.Budget  `json:"budget,omitempty"`
 	Routing            *CapacityRouting  `json:"routing,omitempty"`
 	AccountID          string            `json:"account_id"`
 	OngoingUseApproved bool              `json:"ongoing_use_approved"`
@@ -436,7 +516,7 @@ func projectCapacity(ctx context.Context, tx pgx.Tx, person string, draft *previ
 		if draft != nil {
 			s = scheduleWithDraft(entries, a, previous, draft.schedule, draft.pools, now)
 		}
-		item := accountCapacity{AccountID: a.ID, Schedule: s, Windows: []capacityWindow{}}
+		item := accountCapacity{AccountID: a.ID, Schedule: s, Windows: []capacityWindow{}, Budget: a.UsageBudget}
 		item.CostLimitSupported, err = costLimitSupported(ctx, tx, a.ID)
 		if err != nil {
 			return nil, err
@@ -780,21 +860,44 @@ func (s *scheduleOverride) UnmarshalJSON(raw []byte) error {
 // The schedule period determines the day's share. When its usage baseline is
 // missing, count use since the first actual sample and keep it marked unknown.
 // Anchoring the share at that sample would starve accounts first read late in
-// the day. Never move the usage baseline forward on every route.
+// the day. Never move the usage baseline forward on every route. A window that
+// opened during this period uses the same rule: its first sample is a baseline,
+// not consumption already inside the period, and its start stays at open time.
+// Fact reports are the exception. Their percentages live in
+// account_readiness_facts, and the observation is the window start, so the
+// reported percent is use inside this period. A missing readings row must not
+// zero that use on every update and reopen the day's share.
 func readingPacing(ctx context.Context, tx pgx.Tx, id string, v capacity.Reading, now time.Time, s capacity.Schedule) (capacity.Pacing, bool, error) {
 	period, _ := s.Period(now)
-	start, used, known := v.StartsAt(), v.UsedPercent, !v.StartsAt().Before(period)
-	if !known {
+	start := v.StartsAt()
+	used, known := 0.0, false
+	if v.WindowKind == "fact" {
+		if !start.Before(period) {
+			used, known = v.UsedPercent, true
+		} else {
+			start = period
+		}
+	} else {
+		openedHere := !start.Before(period)
+		bound := period
+		if openedHere {
+			bound = start
+		}
 		var baseline float64
 		var at time.Time
-		err := tx.QueryRow(ctx, `SELECT used_percent::float8,read_at FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND resets_at=$4 AND read_at>=$5 AND read_at<=$6 AND source<>'estimate' ORDER BY read_at,CASE source WHEN 'harness' THEN 0 ELSE 1 END LIMIT 1`, id, v.WindowKind, v.Bucket, v.ResetsAt, period, v.ReadAt).Scan(&baseline, &at)
+		err := tx.QueryRow(ctx, `SELECT used_percent::float8,read_at FROM account_capacity_readings WHERE account_id=$1 AND window_kind=$2 AND bucket=$3 AND resets_at=$4 AND read_at>=$5 AND read_at<=$6 AND source<>'estimate' ORDER BY read_at,CASE source WHEN 'harness' THEN 0 ELSE 1 END LIMIT 1`, id, v.WindowKind, v.Bucket, v.ResetsAt, bound, v.ReadAt).Scan(&baseline, &at)
 		if err != nil && !isNoRows(err) {
 			return capacity.Pacing{}, false, err
 		}
 		if err == nil && baseline <= v.UsedPercent {
-			start, used, known = period, v.UsedPercent-baseline, at.Equal(period)
-		} else {
-			start, used = period, 0
+			used = v.UsedPercent - baseline
+			if openedHere {
+				known = !at.After(start)
+			} else {
+				start, known = period, at.Equal(period)
+			}
+		} else if !openedHere {
+			start = period
 		}
 	}
 	learned, err := loadLearning(ctx, tx, id)

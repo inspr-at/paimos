@@ -4,11 +4,13 @@ package agentruns
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/inspr-at/paimos/internal/agentaccounts"
+	"github.com/inspr-at/paimos/internal/escalation"
 	"github.com/inspr-at/paimos/internal/harness"
 	"github.com/inspr-at/paimos/internal/statusautopilot"
 	"github.com/inspr-at/paimos/internal/tenant"
@@ -100,6 +102,15 @@ func (m *module) queueNext(r *http.Request, tx pgx.Tx, p tenant.Principal) (any,
 		if err = queuePermission(r.Context(), tx, p, t.ProjectID, true); err != nil {
 			return nil, err
 		}
+		// A queue entry cannot mint a retry lineage or an unbounded cost hold.
+		// Re-check already routed entries too, before the idempotent pickup return.
+		if err := escalation.CheckLaunchTx(r.Context(), tx, t.ID, "", "", nil); err != nil {
+			var refusal *workorders.Error
+			if errors.As(err, &refusal) && refusal.Status == 409 {
+				continue
+			}
+			return nil, err
+		}
 		target := in
 		if e.Queued.Targeted {
 			target = queueTarget{Agent: e.Run.AgentID, Account: e.Run.RequestedAccountID}
@@ -181,6 +192,9 @@ func queueTryRoute(ctx context.Context, tx pgx.Tx, p tenant.Principal, t queueTi
 		return false, err
 	}
 	defer func() { _ = attempt.Rollback(ctx) }()
+	if err = freezeHandoff(ctx, attempt, t, v, target.Agent, lead); err != nil {
+		return false, err
+	}
 	var model string
 	err = attempt.QueryRow(ctx, `SELECT model FROM model_profiles WHERE id=$1 AND enabled`, target.Profile).Scan(&model)
 	if err != nil {

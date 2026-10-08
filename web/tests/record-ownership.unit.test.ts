@@ -208,9 +208,10 @@ it('S8-007: confirming deletion of A passes A even after selection moves to B', 
     '../../lib/work': { kindLabel: () => 'Ticket' }, '../../lib/useAttachments': { useAttachments: () => ({}) }, '../../lib/doneGate': {},
     '../../lib/workVocabulary': WorkVocabulary,
     '../../stores/workVocabulary': { useWorkVocabulary: () => ({ value: { revision: 0, leaf: { name: '', icon: '' }, levels: [] } }) },
+    '../../lib/developerSettings': { useDeveloperSettings: () => ({ showExpertStart: ref(false) }) },
     '../../lib/recurrences': {}, '../../lib/useIdentityScope': { useIdentityScope: () => ({ owner: ref(''), reset() {} }) },
     '../../lib/ticketBenefits': { benefitDraft: () => ({}) }, '../../lib/authz': { can: () => false }, '../../lib/releaseAssign': {}, '../../lib/releaseMembership': {},
-    '../../stores/journey': { useJourney: () => ({}) }, '../../stores/workQueue': { useWorkQueue: () => ({ load: async () => {} }) },
+    '../../stores/workQueue': { useWorkQueue: () => ({ load: async () => {} }) },
     '../../lib/usePolledData': { usePoller: () => ({ start() {}, stop() {} }) }, '../../stores/session': { useSession: () => ({}) },
   }).state
   const deleting = state.remove(); props.item = { ...a, id: 'B', key: 'AEON-2' }; await flush()

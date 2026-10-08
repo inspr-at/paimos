@@ -27,13 +27,13 @@
     {
       "counterpart": "agentd-rehearsal/Build darwin paimos-agentd with LocalAuthentication",
       "mode": "step",
-      "sha256": "cc449f2777d35d41d22be5c39729bec7dab18aa60018e206744284df010f0789",
+      "sha256": "7a71771e1831e359d536be9169c59e9cb341255b3e2781f5865f074e33b001e7",
       "step": "Build darwin paimos-agentd with LocalAuthentication"
     },
     {
       "counterpart": "Apple credentials and notarization stay in the tag-only signing environment; native unsigned build and signing-shell syntax run in rehearsal.",
       "mode": "disabled",
-      "sha256": "ffeb3de273e79426b33268e00432a160f159358a6ed7f168b0ec6bb8161b3576",
+      "sha256": "1b10677d1bb9571e494b495522c3aa19e0a1bdcedf2fc172cc00140214425307",
       "step": "Sign and notarize paimos-agentd"
     },
     {
@@ -45,7 +45,7 @@
     {
       "counterpart": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
       "mode": "action",
-      "sha256": "2cd9a03d5936656e31ec2449705786a1355a9b927e37b71d863d9e5164ca2b1f",
+      "sha256": "bd3fbfe9ca7e09247d39292d3f75d9ad7e44557e9ecdfad1d881f32d8a6b208f",
       "step": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
     }
   ],
@@ -77,7 +77,7 @@
     {
       "counterpart": "assets-rehearsal/Exact production assets assembly",
       "mode": "step",
-      "sha256": "05036f7d4f60b0de015ba955dddc31c7607617a29d3ef9739b02ca40a7332272",
+      "sha256": "8c90d8ea5147283e9bff25b8321cd0d597d7320342df7943be75a7b042364e1f",
       "step": "Build linux paimos-agentd and aeon-cli"
     },
     {
@@ -115,8 +115,14 @@
     {
       "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
       "mode": "action",
-      "sha256": "f1c421c866796120658fcc5886fcd38c9490f8f0c7b5c946c0fdb465fa72940e",
+      "sha256": "c057a4ddcd696718546000b53fed5781fdc051d6105c113d2967c74df25940f5",
       "step": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069"
+    },
+    {
+      "counterpart": "image-dry-run/Assert pinned Buildx and BuildKit versions",
+      "mode": "step",
+      "sha256": "d43d0ce0cb603960656ef917b15c9f9bbad7159d2a10dc5d98adbfd09d9f8934",
+      "step": "Assert pinned Buildx and BuildKit versions"
     },
     {
       "counterpart": "Registry login is tag-only; rehearsal reads the public build cache without credentials.",
@@ -255,8 +261,14 @@
     {
       "counterpart": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069",
       "mode": "action",
-      "sha256": "f1c421c866796120658fcc5886fcd38c9490f8f0c7b5c946c0fdb465fa72940e",
+      "sha256": "c057a4ddcd696718546000b53fed5781fdc051d6105c113d2967c74df25940f5",
       "step": "docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069"
+    },
+    {
+      "counterpart": "image-dry-run/Assert pinned Buildx and BuildKit versions",
+      "mode": "step",
+      "sha256": "d43d0ce0cb603960656ef917b15c9f9bbad7159d2a10dc5d98adbfd09d9f8934",
+      "step": "Assert pinned Buildx and BuildKit versions"
     },
     {
       "counterpart": "Registry login is tag-only; rehearsal reads the public build cache without credentials.",
@@ -269,6 +281,12 @@
       "mode": "test",
       "sha256": "4a347f0c1510514e647cb1fd2452fceddd57b91dd988b187ba679cccc7750c3f",
       "step": "Reject an existing image tag"
+    },
+    {
+      "counterpart": "TestExportsShareSourceEpoch",
+      "mode": "test",
+      "sha256": "17f48ae857528742726aea9e38f6717ae18b52b85b8b70b25628d37bb8bde426",
+      "step": "Pin both exports to the source epoch"
     },
     {
       "counterpart": "image-dry-run/Prepare pinned runtime closure",
@@ -335,6 +353,12 @@
       "mode": "step",
       "sha256": "a745edc42147722f2f40f7bd66f176f6bb9bd116c89eccfeb8896858f94f58a7",
       "step": "Require pushed image to equal the smoked build"
+    },
+    {
+      "counterpart": "TestPublishedRuntimeMustMatchSmokedRuntime",
+      "mode": "test",
+      "sha256": "224aa082f579b7186f761b5a97c6e65fcc9b7e5ca0d64dd2e30951682ab33a65",
+      "step": "Verify pushed runtime matches smoke"
     },
     {
       "counterpart": "No OCI or GitHub attestation is published before tagging; local BuildKit provenance export and real gh argument parsing run instead.",

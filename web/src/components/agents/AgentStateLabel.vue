@@ -12,7 +12,7 @@ const { appearance } = useAgentAppearance()
   </span>
 </template>
 <style scoped>
-.agent-state-label { display: inline-flex; align-items: center; gap: 5px; color: var(--agent-state-color); font-size: 12px; font-weight: 600; line-height: 1.3; }
+.agent-state-label { display: inline-flex; align-items: center; gap: 5px; color: var(--ink); font-size: 12px; font-weight: 600; line-height: 1.3; }
 .state-word { display: grid; gap: 2px; }
 .state-detail { font-size: 11px; font-weight: 450; color: var(--ink-2); }
 </style>

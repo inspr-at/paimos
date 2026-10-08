@@ -35,14 +35,8 @@ const offset = computed(() => C * (1 - clamped.value / 100))
 .ring { position: relative; display: inline-grid; place-items: center; flex-shrink: 0; width: var(--ring); height: var(--ring); }
 .ring svg { position: absolute; inset: 0; }
 .track { stroke: var(--track); }
-.arc { filter: drop-shadow(0 0 2.5px rgba(164, 229, 223, .75)); }
-.stop-a { stop-color: #0e6f6c; }
-.stop-b { stop-color: #5cc6bd; }
-:root[data-theme="dark"] .stop-a { stop-color: #3fa39b; }
-:root[data-theme="dark"] .stop-b { stop-color: #a4e5df; }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .stop-a { stop-color: #3fa39b; }
-  :root:not([data-theme="light"]) .stop-b { stop-color: #a4e5df; }
-}
+.arc { filter: none; }
+.stop-a { stop-color: var(--primary); }
+.stop-b { stop-color: var(--primary-hi); }
 .pct { position: relative; font-size: 11.5px; font-weight: 600; letter-spacing: -.02em; color: var(--ink); }
 </style>

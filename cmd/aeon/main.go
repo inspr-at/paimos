@@ -132,13 +132,6 @@ func main() {
 		}
 		return
 	}
-	if len(os.Args) > 1 && os.Args[1] == "journey" {
-		if err := journeyCommand(os.Args[2:], os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, "journey:", err)
-			os.Exit(1)
-		}
-		return
-	}
 	if len(os.Args) > 2 && os.Args[1] == "quote-showcase" && os.Args[2] == "apply" {
 		if err := quoteShowcaseApply(context.Background(), os.Args[3:], os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, "quote-showcase:", err)

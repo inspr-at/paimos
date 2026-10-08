@@ -110,6 +110,7 @@ func (m *Module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/me", reportercontract.WithHeader(reportercontract.Me, m.handleMe))
 	mux.HandleFunc("POST /api/agent-keys", m.handleCreateAgentKey)
 	mux.HandleFunc("GET /api/agent-keys", m.handleListAgentKeys)
+	mux.HandleFunc("POST /api/agent-keys/{id}/adopt", m.handleAdoptAgentKey)
 	mux.HandleFunc("DELETE /api/agent-keys/{id}", m.handleRevokeAgentKey)
 	mux.HandleFunc("GET /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
 	mux.HandleFunc("PATCH /api/agent-keys/{id}/scopes", m.handleAgentKeyScopes)
@@ -145,6 +146,7 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				m.clearSessionCookie(w)
 			}
 		case credSession:
+			p.BrowserSession = true
 			if !publicRequest(r) {
 				if c, cErr := r.Cookie(sessionCookieName); cErr == nil {
 					m.setSessionCookie(w, c.Value)
@@ -176,6 +178,16 @@ func (m *Module) Middleware(next http.Handler) http.Handler {
 				}
 				agentpairing.WriteError(w, err)
 				return
+			}
+			if r.Pattern == "GET /api/agents/plan" {
+				if !hasScope(p.Scopes, "agents.plan.read") {
+					httpapi.WriteError(w, http.StatusForbidden, "agents.plan.read scope missing")
+					return
+				}
+				if p.KeyCreatorID == "" {
+					httpapi.WriteError(w, http.StatusForbidden, "key has no person owner — adopt it in Settings › Keys")
+					return
+				}
 			}
 			scope, controlled := coreAgentScope(r)
 			if authz.OwnerWorkstation(p) && workstationGovernance(r) && !strings.HasSuffix(r.Pattern, "/owner-workstation") {
@@ -407,6 +419,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			break
 		}
 		switch parts[2] {
+		case "lead-settings":
+			if len(parts) == 3 && validRouteUUID(parts[1]) && read {
+				return "nodes.read", true
+			}
 		case "lead":
 			if len(parts) == 4 && parts[3] == "usage" && read {
 				return "harness.read", true
@@ -432,6 +448,17 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		case "release-memberships":
 			if len(parts) == 3 && read {
 				return "releases.read", true
+			}
+		case "review-policy":
+			// Explicit agent allowlist. Built-in roles still exclude
+			// reviewpolicy.manage; a custom role and key scope may grant it.
+			if len(parts) == 3 && validRouteUUID(parts[1]) {
+				if read {
+					return "reviewpolicy.read", true
+				}
+				if r.Method == http.MethodPut || r.Method == http.MethodDelete {
+					return "reviewpolicy.manage", true
+				}
 			}
 		case "messages", "message-targets", "message-deliveries":
 			if read {
@@ -513,6 +540,12 @@ func coreAgentScope(r *http.Request) (string, bool) {
 	case "relations":
 		return scope("relations")
 	case "events":
+		if len(parts) >= 2 && parts[1] == "subscribe" {
+			if len(parts) == 2 && read {
+				return "events.subscribe", true
+			}
+			return "", false
+		}
 		if read {
 			return "events.read", true
 		}
@@ -521,12 +554,22 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if read {
 			return "search.read", true
 		}
+	case "settings":
+		if len(parts) == 2 && parts[1] == "review-policy" {
+			if read {
+				return "reviewpolicy.read", true
+			}
+			if r.Method == http.MethodPut {
+				return "reviewpolicy.manage", true
+			}
+		}
 	case "views", "preferences", "project-groups":
 		return scope("views")
 	case "knowledge":
 		// Listing candidates is ordinary knowledge read. Accept and dismiss stay
 		// with a person: an agent key has no authority on those two routes, and
-		// the handler refuses every agent again.
+		// the handler refuses every agent again. A recommendation (PUT
+		// .../recommendation) is ordinary knowledge.write: it decides nothing.
 		if r.Method == http.MethodPost && len(parts) == 4 && parts[1] == "learnings" && (parts[3] == "accept" || parts[3] == "dismiss" || parts[3] == "draft") {
 			return "", false
 		}
@@ -595,6 +638,10 @@ func coreAgentScope(r *http.Request) (string, bool) {
 			return "", false
 		}
 		return harnessScope(parts[1:], read), true
+	case "harness-recoveries":
+		if r.Method == http.MethodPost && (len(parts) == 2 && parts[1] == "claim" || len(parts) == 3 && validRouteUUID(parts[1]) && parts[2] == "complete") {
+			return "harness.worker", true
+		}
 	case "agentd":
 		if r.Pattern == "GET /api/agentd/step-ups/{challenge_id}" {
 			return "harness.worker", true
@@ -606,7 +653,7 @@ func coreAgentScope(r *http.Request) (string, bool) {
 		if r.Method == "POST" && r.URL.Path == "/api/agent-pairing/attach" {
 			return "harness.worker", true
 		}
-		if r.Method == "GET" && r.URL.Path == "/api/agent-pairing/self" || r.Method == "POST" && r.URL.Path == "/api/agent-pairing/self/disconnect" {
+		if r.Method == "GET" && r.URL.Path == "/api/agent-pairing/self" || r.Method == "POST" && (r.URL.Path == "/api/agent-pairing/self/disconnect" || r.URL.Path == "/api/agent-pairing/self/capacity") {
 			return "run.claim", true
 		}
 	case "agent-accounts":

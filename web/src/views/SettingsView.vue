@@ -1,7 +1,7 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch, type Component } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import '../styles/settings.css'
 import { can, permissionsKnown, permissionsRevoked, refreshPermissions } from '../lib/authz'
 import AppIcon from '../components/AppIcon.vue'
@@ -18,14 +18,19 @@ import WorkspaceSection from '../components/settings/WorkspaceSection.vue'
 import AccessSection from '../components/access/AccessSection.vue'
 import AgentRulesSection from '../components/rules/AgentRulesSection.vue'
 import AccountsSection from '../components/settings/AccountsSection.vue'
+import PoliciesSection from '../components/settings/PoliciesSection.vue'
 import { SETTINGS_GROUPS, SETTINGS_SECTIONS, anyOf, sectionOf, visibleSections, type SectionId } from '../lib/settings'
 import { useSession } from '../stores/session'
 import { doctrineInbox } from '../lib/doctrineInbox'
 import { scopeOwner } from '../lib/identityScope'
+import { settingsFooter, settingsNeeds } from '../lib/footerProviders'
+import { useFooterSummary } from '../lib/footerSummary'
+import { preferenceSaves, retryFailedPreferences } from '../lib/preferences'
 
 // Settings groups share one frame; explicit grants gate Access, rules and accounts.
-// /settings/<section>#<card> deep-links to one card, which is ringed on arrival.
+// /settings/<section>#<target> deep-links to a card or field, ringed on arrival.
 const route = useRoute()
+const router = useRouter()
 const session = useSession()
 const admin = computed(() => can('settings.manage'))
 // A session that ends (401) revokes every grant; what is on screen stays as it
@@ -45,6 +50,22 @@ watch(() => scopeOwner(session.identity), now => {
   closePicker()
 }, { flush: 'sync' })
 const current = computed(() => sectionOf(route.params.section))
+
+// The footer stays empty while everything is saved and nothing needs you (AEON-785).
+// Access says its own line.
+useFooterSummary(() => {
+  if (!session.identity || current.value === 'access') return null
+  return settingsFooter({
+    saving: preferenceSaves.saving.size > 0, failed: preferenceSaves.failed.size > 0, needs: settingsNeeds.value,
+    act: {
+      retry: retryFailedPreferences,
+      needs: () => {
+        if (current.value !== 'accounts') void router.push('/settings/accounts')
+        void nextTick(() => document.querySelector('.needs-block')?.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' }))
+      },
+    },
+  })
+})
 const meta = computed(() => SETTINGS_SECTIONS.find(section => section.id === current.value)!)
 const granted = computed(() => meta.value.permission ? anyOf(meta.value.permission, permission => can(permission)) : !meta.value.admin || admin.value)
 watch([current, granted, mountedOwner], ([section, ok]) => { if (ok) shown.add(section) }, { immediate: true })
@@ -54,8 +75,8 @@ const deciding = computed(() => !!meta.value.permission && !permissionsKnown())
 // Which sections show depends on my permissions: the layout waits for them, so
 // the nav never re-flows under the pointer (usually a few milliseconds).
 void refreshPermissions()
-const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, workspace: WorkspaceSection, vocabulary: VocabularySection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
-const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', workspace: 'building', vocabulary: 'tag', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'monitor', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
+const VIEW: Record<SectionId, Component> = { personal: PersonalSection, theme: ThemeSection, developer: DeveloperSection, policies: PoliciesSection, workspace: WorkspaceSection, vocabulary: VocabularySection, access: AccessSection, agents: AgentsSection, 'agent-rules': AgentRulesSection, accounts: AccountsSection, autopilot: AutopilotSection, business: BusinessSection, portal: PortalSection }
+const ICON: Record<SectionId, BizIconName> = { personal: 'user', theme: 'sun', developer: 'gear', policies: 'shield', workspace: 'building', vocabulary: 'tag', access: 'users', agents: 'agent', 'agent-rules': 'book', accounts: 'monitor', autopilot: 'sparkle', business: 'briefcase', portal: 'globe' }
 const groups = computed(() => SETTINGS_GROUPS.map(label => ({ label, sections: sections.value.filter(section => section.group === label) })).filter(group => group.sections.length))
 const pickerOpen = ref(false)
 const picker = ref<HTMLButtonElement>()
@@ -89,7 +110,7 @@ onMounted(() => { document.addEventListener('pointerdown', outside); window.addE
 onBeforeUnmount(() => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', resize); clearTimeout(arrival); disposed = true })
 let disposed = false
 
-// A deep link scrolls to its card once the section has rendered it.
+// A deep link scrolls to its target once the section has rendered it.
 let arrival: ReturnType<typeof setTimeout> | undefined
 watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
   if (!hash) return
@@ -99,10 +120,12 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
     const target = document.getElementById(decodeURIComponent(hash.slice(1)))
     if (target) {
       target.scrollIntoView({ block: 'start', behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
-      const card = target.classList.contains('settings-card') ? target : target.querySelector<HTMLElement>('.settings-card, .setup')
-      card?.classList.add('arrived')
+      // Legacy bookmarks can now point to a field inside a consolidated card.
+      // Keep wrapper links ringing their card, and ring field links themselves.
+      const highlight = target.classList.contains('settings-card') ? target : target.querySelector<HTMLElement>('.settings-card, .setup') ?? target
+      highlight.classList.add('arrived')
       clearTimeout(arrival)
-      arrival = setTimeout(() => card?.classList.remove('arrived'), 1800)
+      arrival = setTimeout(() => highlight.classList.remove('arrived'), 1800)
       return
     }
     await new Promise(resolve => setTimeout(resolve, 50))
@@ -115,7 +138,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
     <header class="page-head">
       <p class="eyebrow">{{ session.identity?.tenant.name ?? 'Workspace' }}</p>
       <h1 id="settings-title">Settings</h1>
-      <p class="summary">{{ admin ? 'Your own preferences, and the workspace’s for admins.' : 'Your own preferences.' }}</p>
+      <p class="summary">Preferences, policies and the workspace settings available to you.</p>
     </header>
     <!-- One grid for everyone: with only Personal to show, the nav still holds its column. -->
     <div v-if="!permissionsKnown()" class="layout waiting" role="status" aria-label="Loading settings"><span class="skeleton nav-skeleton" /><span class="skeleton body-skeleton" /></div>
@@ -174,7 +197,7 @@ watch(() => [current.value, route.hash] as const, async ([section, hash]) => {
 @media (hover: hover) { .section-link:hover { background: var(--row-hover); } }
 .section-link:focus-visible { box-shadow: var(--focus-ring); }
 /* The current section: a raised card, like the active place. */
-.section-link[aria-current="page"] { background: var(--surface-raised); box-shadow: 0 0 0 1px var(--line), 0 6px 18px -12px rgba(32, 60, 61, .4); }
+.section-link[aria-current="page"] { background: var(--surface-raised); box-shadow: 0 0 0 1px var(--line), 0 6px 18px -12px color-mix(in srgb, var(--shadow-color) 40%, transparent); }
 .link-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: var(--surface-2); color: var(--ink-2); }
 .section-link[aria-current="page"] .link-icon { background: var(--chip-teal-bg); box-shadow: inset 0 0 0 1px var(--chip-teal-line); color: var(--teal-ink); }
 .link-text { display: grid; min-width: 0; }

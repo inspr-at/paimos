@@ -322,7 +322,7 @@ func TestPreferenceStoreCanonicalPeopleAndGuards(t *testing.T) {
 		if err := tx.QueryRow(t.Context(), `SELECT count(*) FROM work_kinds`).Scan(&n); err != nil {
 			return err
 		}
-		if n != 9 {
+		if n != 8 {
 			t.Fatal("seed not idempotent", n)
 		}
 		return nil

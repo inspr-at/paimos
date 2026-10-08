@@ -5,7 +5,7 @@
 import { test, expect, type Page } from '@playwright/test'
 import { fixtures, mockWork, watchErrors } from './work-fixtures'
 import { expectStableControls } from './helpers/stable'
-import { mockReleases, releaseHistory, RELEASE_HISTORY_NAME } from './releases-fixtures'
+import { mockReleases, releaseHistory, RELEASE_HISTORY_NAME, type History } from './releases-fixtures'
 
 // AEON-309: the CalVer3 renderer names a version by its canonical value and UTC
 // time; an interactive one adds its copy action.
@@ -20,8 +20,10 @@ const options = (page: Page) => page.getByRole('grid', { name: 'Releases, newest
 const pill = (page: Page) => page.getByRole('button', { name: RELEASE_HISTORY_NAME })
 const escaped = (v: string) => v.replace(/\./g, '\\.')
 
-async function setup(page: Page, options: { lastSeen?: string; running?: string; bigProject?: number } = {}) {
-  const history = releaseHistory()
+// Versions come from the clock at second precision: a test that names versions
+// passes its own history, so a second boundary cannot split test and mock.
+async function setup(page: Page, options: { history?: History; lastSeen?: string; running?: string; bigProject?: number } = {}) {
+  const history = options.history ?? releaseHistory()
   const data = fixtures({ bigProject: options.bigProject })
   // These existing history interactions exercise the complete, opted-in rail.
   data.preferences['developer-ui'] = { show_reserved_versions: true }
@@ -229,7 +231,22 @@ test('compare follows Back, Forward and an in-app release link', async ({ page }
     }, path(index))
     expect(await page.evaluate(() => (window as unknown as { __releaseNav?: number }).__releaseNav)).toBe(mark)
   }
+  // A full load returns before the lazy sheet and its history request finish.
+  // Hold that response to exercise the loading state on every run, then await
+  // it before starting the row assertion's deadline. Focus confirms that the
+  // visibility preferences and initial selection have settled too.
+  let releaseHistory!: () => void
+  const historyGate = new Promise<void>(resolve => { releaseHistory = resolve })
+  await page.route('**/api/releases', async route => { await historyGate; await route.fallback() })
+  const historyRequested = page.waitForRequest(request => new URL(request.url()).pathname === '/api/releases')
   await page.goto(path(0))
+  await sheet(page).waitFor({ state: 'visible' })
+  await historyRequested
+  await expect(sheet(page).getByRole('status', { name: 'Loading the release history' })).toBeVisible()
+  const historyReady = page.waitForResponse(response => response.ok() && new URL(response.url()).pathname === '/api/releases')
+  releaseHistory()
+  await historyReady
+  await expect(page.getByRole('grid', { name: 'Releases, newest first' })).toBeFocused()
   await selected(0)
   await openRelease(3)
   await expect(page).toHaveURL(path(3))
@@ -333,7 +350,7 @@ test('filters follow the feature and fix blocks, and still keep releases with ti
 
 test('new since the last visit: a badge on the pill, highlighted releases, and the visit is remembered', async ({ page }) => {
   const history = releaseHistory()
-  const { data } = await setup(page, { lastSeen: history.releases[4].version })
+  const { data } = await setup(page, { history, lastSeen: history.releases[4].version })
   await page.goto('/')
   await expect(page.locator('.new-badge')).toHaveText('4 new')
   await expect(pill(page)).toHaveAccessibleName(/, 4 new since your last visit$/)
@@ -409,7 +426,7 @@ test('a build without history says so', async ({ page }) => {
 
 test('a newer version on the server: a toast offers what is new and a reload', async ({ page }) => {
   const history = releaseHistory()
-  const { state } = await setup(page, { running: history.releases[1].version })
+  const { state } = await setup(page, { history, running: history.releases[1].version })
   await page.goto('/')
   await expect(page.getByRole('list', { name: 'Projects' })).toBeVisible()
   await expect(pill(page)).toHaveAccessibleName(new RegExp(`version ${escaped(history.releases[1].version)}`))
@@ -453,7 +470,7 @@ test('the palette and the account menu open the history too', async ({ page }) =
 
 test('rows show live and rollback badges, a warm new tint and a full selected ring', async ({ page }) => {
   const history = releaseHistory()
-  await setup(page, { lastSeen: history.releases[4].version })
+  await setup(page, { history, lastSeen: history.releases[4].version })
   await page.goto(`/releases/${history.releases[5].version}`)
   const look = (i: number) => options(page).nth(i).evaluate(el => {
     const c = getComputedStyle(el)
@@ -547,7 +564,12 @@ test('the cadence shows each day’s count above its bar, every bar named for sc
 // and the accessible name keeps the exact canonical version with its UTC date-time.
 test('release history renders CalVer2 history and CalVer3 versions as six-segment Pretty', async ({ page }) => {
   const { history } = await setup(page)
-  await page.goto('/')
+  // Home can still be laying out when the pill's name is already set. Calling
+  // click then wedges Chromium inside scroll-into-view for the whole timeout
+  // (CI web-shard 11). A settled project list is the same gate the other pill
+  // clicks use.
+  await page.goto('/p/PHAROS')
+  await expect(page.locator('tr.ticket-row:not(.ghost)').first()).toBeVisible()
   await pill(page).click()
   await expect(sheet(page)).toBeVisible()
   // At rest: the pointer that clicked the footer pill would otherwise hover a row.

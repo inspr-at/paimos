@@ -20,6 +20,7 @@ import HideOptions from './HideOptions.vue'
 import type { ColumnId } from '../../lib/columns'
 import { workNoun } from '../../lib/workVocabulary'
 import { useWorkVocabulary } from '../../stores/workVocabulary'
+import { ATTENTION_KINDS, type AttentionFacet, type AttentionFilters, type AttentionGrouping } from '../../lib/attention'
 
 const vocabulary = useWorkVocabulary()
 const createLabel = computed(() => `New ${workNoun(vocabulary.leaf.name)}`)
@@ -34,7 +35,7 @@ const props = defineProps<{
   loading: boolean
   density: 'comfortable' | 'compact'
   stuck: boolean
-  view: TicketView | 'journey' | 'knowledge'
+  view: TicketView | 'knowledge'
   knowledgeView?: 'entries' | 'graph'
   // The table's columns for the Display menu's picker.
   columns?: { order: ColumnId[]; visible: ColumnId[]; customised: boolean; notes?: Partial<Record<string, string>> } | null
@@ -42,6 +43,7 @@ const props = defineProps<{
   headerGraph?: boolean
   settingsTarget?: string
   projectHeader?: boolean
+  attention?: { owner: string; filters: AttentionFilters; group: AttentionGrouping; facets: { projects: AttentionFacet[]; assignees: AttentionFacet[] }; truncated: boolean; locale: string }
 }>()
 const emit = defineEmits<{
   search: [q: string]
@@ -66,6 +68,8 @@ const emit = defineEmits<{
   columns: [order: ColumnId[], visible: ColumnId[]]
   columnsReset: []
   headerGraph: [value: boolean]
+  attentionFilter: [field: keyof AttentionFilters, value: string]
+  attentionGroup: [value: AttentionGrouping]
 }>()
 
 const draft = ref(props.filters.q)
@@ -84,15 +88,31 @@ const open = ref<{ dimension: Dimension; anchor: HTMLElement } | null>(null)
 const dateAnchor = ref<HTMLElement | null>(null)
 const menuAnchor = ref<HTMLElement | null>(null)
 const displayAnchor = ref<HTMLElement | null>(null)
+const attentionMenu = ref<{ field: 'kind' | 'project_id' | 'assignee'; anchor: HTMLElement } | null>(null)
+const attentionWord = (en: string, de: string) => props.attention?.locale === 'de' ? de : en
+const attentionFacets = computed(() => [{ field: 'kind', label: attentionWord('Kind', 'Art') }, { field: 'project_id', label: attentionWord('Project', 'Projekt') }, { field: 'assignee', label: attentionWord('Assignee', 'Zuständig') }] as const)
+const attentionOptions = computed<AttentionFacet[]>(() => attentionMenu.value?.field === 'kind'
+  ? [{ id: '', label: attentionWord('Every kind', 'Alle Arten') }, ...ATTENTION_KINDS.map(kind => ({ id: kind.id, label: props.attention?.locale === 'de' ? kind.labelDe : kind.label }))]
+  : attentionMenu.value?.field === 'project_id' ? [{ id: '', label: attentionWord('All projects', 'Alle Projekte') }, ...(props.attention?.facets.projects ?? [])]
+    : [{ id: '', label: attentionWord('Every assignee', 'Alle Zuständigen') }, { id: 'none', label: attentionWord('Unassigned', 'Niemand') }, ...(props.attention?.facets.assignees ?? [])])
+function closeAttention(restore: boolean) { const anchor = attentionMenu.value?.anchor; attentionMenu.value = null; if (restore) anchor?.focus() }
+function attentionMenuKeys(event: KeyboardEvent) {
+  if (event.altKey || event.ctrlKey || event.metaKey || !['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
+  const buttons = [...(event.currentTarget as HTMLElement).querySelectorAll<HTMLButtonElement>('[role="menuitemradio"]')]
+  const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
+  const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length
+  event.preventDefault(); event.stopPropagation(); buttons[next]?.focus()
+}
 const hideAnchor = ref<HTMLElement | null>(null)
 const hideName = computed(() => hideLabel(props.filters.hideStates))
 const hideNames = computed(() => hiddenStates(props.filters.hideStates).map(state => statusMeta(state).label).join(', '))
 function closeHide(restore: boolean) { const anchor = hideAnchor.value; hideAnchor.value = null; if (restore) anchor?.focus() }
 let timer: ReturnType<typeof setTimeout> | undefined
+watch(() => props.attention?.owner, () => { clearTimeout(timer); closeAttention(false); displayAnchor.value = null; draft.value = props.filters.q })
 watch(() => props.filters.q, value => { if (value !== draft.value.trim()) draft.value = value })
 watch(draft, value => {
   clearTimeout(timer)
-  timer = setTimeout(() => { if (value.trim() !== props.filters.q) emit('search', value.trim()) }, 220)
+  timer = setTimeout(() => { if (value.trim() !== props.filters.q) emit('search', props.attention ? value.slice(0, 200) : value.trim()) }, props.attention ? 250 : 220)
 })
 onBeforeUnmount(() => { clearTimeout(timer); resize?.disconnect() })
 
@@ -173,34 +193,39 @@ function clearSearch() { draft.value = ''; emit('search', ''); input.value?.focu
 function searchKey(event: KeyboardEvent) {
   if (event.key === 'Escape') {
     event.preventDefault()
+    if (props.attention) { input.value?.blur(); return }
     if (draft.value) clearSearch()
     else input.value?.blur()
   }
 }
-defineExpose({ focusSearch, openFilterMenu, input })
+function closeOverlays() { closeAttention(false); closeDisplay(false) }
+defineExpose({ focusSearch, openFilterMenu, input, closeOverlays })
 </script>
 
 <template>
-  <div ref="root" class="toolbar" :class="{ stuck, graph, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="view === 'knowledge' ? 'Knowledge controls' : view === 'journey' ? 'Journey controls' : 'Ticket list controls'">
-    <ProjectTabs v-if="view !== 'journey'" class="view-switch"
+  <div ref="root" class="toolbar" :class="{ stuck, graph, attention: !!attention, knowledge: view === 'knowledge' }" role="toolbar" :aria-label="attention ? attentionWord('List controls', 'Listensteuerung') : view === 'knowledge' ? 'Knowledge controls' : 'Ticket list controls'">
+    <ProjectTabs v-if="!attention" class="view-switch"
       :items="view === 'knowledge' ? KNOWLEDGE_VIEWS : TICKET_VIEWS"
       :selected="view === 'knowledge' ? knowledgeView ?? 'entries' : view"
       :tips="view !== 'knowledge'"
       :label="view === 'knowledge' ? 'Knowledge views' : 'Ticket views'" @select="value => emit('view', value)" />
-    <span v-if="view !== 'knowledge' && view !== 'journey'" class="count-live">
-      <slot name="freshness" />
-      <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ plural(total, 'ticket') }}</template></span>
+    <span v-if="view !== 'knowledge'" class="count-live">
+      <span class="count mono" role="status" aria-live="polite"><span v-if="total === null && loading" class="skeleton count-skeleton" aria-label="Counting tickets" /><template v-else-if="total !== null">{{ attention ? `${total} ${attentionWord('suggestions', 'Vorschläge')}` : plural(total, 'ticket') }}</template></span>
     </span>
-    <span v-if="view !== 'knowledge' && view !== 'journey'" class="phone-break" aria-hidden="true" />
-    <template v-if="view !== 'knowledge' && view !== 'journey'">
+    <span v-if="view !== 'knowledge'" class="phone-break" aria-hidden="true" />
+    <template v-if="view !== 'knowledge'">
     <label class="search-field list-search">
       <AppIcon name="search" :size="14" />
-      <input ref="input" v-model="draft" class="field" type="search" :placeholder="narrow ? 'Search' : graph ? 'Search tickets' : 'Search this list'" aria-label="Search tickets in this project" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
+      <input ref="input" v-model="draft" class="field" type="search" :maxlength="attention ? 200 : undefined" :placeholder="attention ? attentionWord('Search this list', 'Liste durchsuchen') : narrow ? 'Search' : graph ? 'Search tickets' : 'Search this list'" :aria-label="attention ? 'Search this view' : 'Search tickets in this project'" aria-keyshortcuts="/" autocomplete="off" spellcheck="false" @keydown="searchKey" />
       <kbd v-if="!draft && !narrow" class="keycap slash" aria-hidden="true">/</kbd>
       <button v-if="draft" type="button" class="clear-q" aria-label="Clear search" @click="clearSearch"><AppIcon name="close" :size="12" /></button>
     </label>
 
-    <div class="facets" aria-label="Ticket filters">
+    <div v-if="attention" class="facets attention-facets" aria-label="Suggestion filters">
+      <button v-for="facet in attentionFacets" :key="facet.field" type="button" class="btn sm facet-button" :class="{ on: !!attention.filters[facet.field] }" :aria-label="`${facet.label} filter`" :aria-expanded="attentionMenu?.field === facet.field" @click="attentionMenu = attentionMenu?.field === facet.field ? null : { field: facet.field, anchor: $event.currentTarget as HTMLElement }">{{ facet.label }}<AppIcon name="chevron" :size="12" /></button>
+      <button type="button" class="btn sm ghost reset" :aria-disabled="!Object.values(attention.filters).some(Boolean)" @click="emit('clearAll')">{{ attentionWord('Clear filters', 'Filter löschen') }}</button>
+    </div>
+    <div v-else class="facets" aria-label="Ticket filters">
       <span v-for="dimension in primary" :key="dimension.key" class="facet-control" :data-dim="dimension.key" :class="{ on: presented[dimension.key].length }">
         <button type="button" class="btn sm facet-btn" :data-dim="dimension.key"
           :class="{ on: presented[dimension.key].length }" :aria-label="presented[dimension.key].length ? `Edit ${dimension.title} filter: ${filterText(dimension.key, true)}` : dimension.title"
@@ -232,7 +257,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
 
     <Teleport defer :to="settingsTarget ?? 'body'" :disabled="!settingsTarget">
     <div class="view-settings">
-    <div class="hide-control">
+    <div v-if="!attention" class="hide-control">
     <label class="switch closed-switch" :data-tip="hideNames">
       <input type="checkbox" :aria-label="hideName === 'Hide' ? `Hide ${hideNames}` : hideName" :checked="!filters.showClosed" @change="emit('showClosed', !($event.target as HTMLInputElement).checked)" />
       <HideLabel :states="filters.hideStates" />
@@ -244,22 +269,26 @@ defineExpose({ focusSearch, openFilterMenu, input })
     <button type="button" class="hide-gear" aria-label="Choose what Hide hides" data-tip="Choose what Hide hides" aria-haspopup="dialog" :aria-expanded="!!hideAnchor" @click="hideAnchor = hideAnchor ? null : ($event.currentTarget as HTMLElement)"><AppIcon name="gear" :size="14" /></button>
     </div>
     <button v-if="!graph" type="button" class="btn sm display-btn" :class="{ on: view === 'list' && filters.group !== 'none' }" aria-haspopup="dialog" :aria-expanded="!!displayAnchor" :aria-label="`Display: ${displayLabel}`" data-tip="Grouping, sort, row and header height, and columns" @click="displayAnchor = displayAnchor ? null : ($event.currentTarget as HTMLElement)">
-      <AppIcon name="layers" :size="13" /><span class="display-label">{{ displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
+      <AppIcon name="layers" :size="13" /><span class="display-label">{{ attention ? attention.group === 'project' ? attentionWord('By project', 'Nach Projekt') : attention.group === 'kind' ? attentionWord('By kind', 'Nach Art') : attentionWord('Display', 'Anzeige') : displayText }}</span><AppIcon name="chevron" :size="12" class="facet-chevron" />
     </button>
 
     </div>
     </Teleport>
-    <button v-if="!graph" type="button" class="btn primary new-btn" :aria-label="createLabel" aria-keyshortcuts="n" :data-tip="`${createLabel} · n`" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
-    <button type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" aria-haspopup="dialog" data-tip="Filters and display options" @click="emit('openSheet')">
+    <button v-if="!graph && !attention" type="button" class="btn primary new-btn" :aria-label="createLabel" aria-keyshortcuts="n" :data-tip="`${createLabel} · n`" @click="emit('create')"><AppIcon name="plus" :size="14" /><span class="new-label">New</span></button>
+    <button v-if="!attention" type="button" class="btn filters-btn" :class="{ on: filterCount }" aria-label="Filters" aria-haspopup="dialog" data-tip="Filters and display options" @click="emit('openSheet')">
       <AppIcon name="sliders" :size="14" /><span class="filters-label">Filters</span><span v-if="filterCount" class="facet-count mono">{{ filterCount }}</span>
     </button>
 
     </template>
     <!-- The Knowledge tab teleports its own controls here (KnowledgeTab.vue). -->
-    <div v-else-if="view === 'knowledge'" id="knowledge-controls" class="knowledge-controls" />
-    <span v-else class="spacer" />
-    <slot name="journey" />
+    <div v-else id="knowledge-controls" class="knowledge-controls" />
 
+    <FloatingPanel v-if="attention && attentionMenu" :anchor="attentionMenu.anchor" :label="`${attentionFacets.find(facet => facet.field === attentionMenu!.field)!.label} filter`" @close="closeAttention">
+      <div class="attention-menu" role="menu" :aria-label="`${attentionFacets.find(facet => facet.field === attentionMenu!.field)!.label} filter`" @keydown="attentionMenuKeys">
+        <button v-for="option in attentionOptions" :key="option.id" type="button" role="menuitemradio" :aria-checked="attention.filters[attentionMenu.field] === option.id" :data-autofocus="attention.filters[attentionMenu.field] === option.id ? '' : undefined" @click="emit('attentionFilter', attentionMenu!.field, option.id); closeAttention(true)"><span v-clip-tip>{{ option.label }}</span><AppIcon v-if="attention.filters[attentionMenu.field] === option.id" name="check" :size="13" /></button>
+      </div>
+      <p v-if="attention.truncated" class="attention-note">{{ attentionWord('Only the first 100 facet choices are shown. Search narrows the ticket list.', 'Nur die ersten 100 Filterwerte werden gezeigt. Die Suche grenzt die Ticket-Liste ein.') }}</p>
+    </FloatingPanel>
     <FacetMenu
       v-if="open" :anchor="open.anchor" :dimension="open.dimension" :title="title(open.dimension)" :options="options(open.dimension)" :selected="filters[open.dimension]" :loading="facetLoading"
       @toggle="value => emit('toggle', open!.dimension, value)" @exclude="value => emit('exclude', open!.dimension, value)" @clear="emit('clear', open!.dimension)" @close="closeMenu"
@@ -271,6 +300,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
     </FloatingPanel>
     <FloatingPanel v-if="displayAnchor" :anchor="displayAnchor" :width="320" :tallest="760" align="end" label="Display options" @close="closeDisplay">
       <DisplayPanel
+        :attention-group="attention?.group" :locale="attention?.locale" @attention-group="value => emit('attentionGroup', value)"
         :filters="filters" :view="view === 'outline' ? 'outline' : 'list'" :density="density" :columns="columns" :grouped="view === 'list' && filters.group !== 'none'"
         :header-graph="headerGraph" :project-header="projectHeader"
         @group="value => emit('group', value)" @sort="keys => emit('sort', keys)" @density="value => emit('density', value)"
@@ -301,7 +331,7 @@ defineExpose({ focusSearch, openFilterMenu, input })
 /* Chevron and count badge share one slot so buttons never change width. */
 .facet-end { display: inline-grid; place-items: center; width: 18px; }
 .facet-chevron { color: var(--ink-3); }
-.facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: linear-gradient(180deg, #1a8683, #0e6f6c); color: #fff; font-size: 10.5px; font-weight: 700; }
+.facet-count { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 5px; border-radius: 999px; background: linear-gradient(180deg, var(--primary-hi), var(--primary)); color: var(--primary-on); font-size: 10.5px; font-weight: 700; }
 .clear-all { padding: 0 8px; }
 .spacer { flex: 1; }
 /* The count keeps its width while numbers change, so the controls beside it never shift. */
@@ -409,4 +439,29 @@ defineExpose({ focusSearch, openFilterMenu, input })
   .facet-x { min-width: 44px; }
 }
 
+/* The attention host keeps its three facets and Display on every screen. */
+.toolbar.attention { flex-wrap: wrap; gap: 8px 10px; padding: 9px 0; }
+.attention .count-live { order: 0; }
+.attention .count-live .count { display: inline-block; min-width: 16ch; text-align: left; }
+.attention .phone-break { display: none; }
+.attention .list-search { flex: 0 1 240px; }
+.attention .facets { display: flex; overflow: visible; flex: none; padding: 0; }
+.attention .spacer { display: block; }
+.attention .view-settings { display: flex; order: 4; }
+.attention .display-btn { display: inline-flex; min-inline-size: 11em; }
+.attention .display-label { display: inline; }
+.attention .facet-button { min-inline-size: 7em; }
+.attention-menu { display: grid; }
+.attention-menu button { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 34px; padding: 6px 10px; border: 0; border-radius: 6px; background: transparent; color: var(--ink); text-align: left; font-size: 13px; }
+.attention-menu button:hover, .attention-menu button[aria-checked="true"] { background: var(--row-selected); }
+.attention-menu button:focus-visible { box-shadow: var(--focus-ring); }
+.attention-note { padding: 8px 10px; color: var(--ink-3); font-size: 12px; }
+@media (pointer: coarse), (max-width: 720px) { .attention .btn.sm, .attention-menu button { min-height: 44px; } }
+@media (max-width: 720px) {
+  .attention .count-live { flex-basis: 100%; }
+  .attention .list-search { flex: 1 1 100%; }
+  .attention .list-search .field { height: 44px; font-size: 16px; }
+  .attention .facets { flex: 1 1 100%; flex-wrap: wrap; }
+  .attention .spacer { display: none; }
+}
 </style>

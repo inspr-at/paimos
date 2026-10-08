@@ -106,6 +106,7 @@ function resetTip(row: BandRow) {
               <template v-else-if="account.capacity.kind === 'offline'">No reading while the computer is offline</template>
               <template v-else>{{ unreportedCapacity(account.harness) }}</template>
             </p>
+            <p v-if="account.learnedUse" class="learned-use">{{ account.learnedUse }}</p>
           </li>
         </ul>
       </li>
@@ -131,7 +132,7 @@ function resetTip(row: BandRow) {
 }
 .row + .row { border-top: 1px solid var(--line); }
 .name { grid-area: name; display: flex; align-items: center; gap: 9px; min-width: 0; }
-.vendor { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(32, 60, 61, .06); color: var(--ink); }
+.vendor { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 8px; background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-color) 6%, transparent); color: var(--ink); }
 .pool-name { color: var(--ink); font-size: 14.5px; font-weight: 650; white-space: nowrap; }
 .plan-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-3); font-size: 12.5px; }
 .bar { grid-area: bar; }
@@ -145,7 +146,7 @@ function resetTip(row: BandRow) {
 .sentence { grid-area: sentence; margin: 2px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.5; text-wrap: pretty; }
 .sentence :deep(b) { color: var(--ink); font-weight: 600; }
 .sentence :deep(.n) { color: var(--teal-ink); font-weight: 700; font-variant-numeric: tabular-nums; }
-.sentence.ahead :deep(.n) { color: var(--gold-ink); }
+.sentence.ahead :deep(.n) { color: var(--warn-ink); }
 .partial { color: var(--ink); }
 .account-list { grid-column: 1 / -1; display: grid; gap: 9px; margin: 8px 0 0 37px; padding: 0; list-style: none; min-width: 0; }
 .account-line { min-width: 0; font-size: 12.5px; line-height: 1.5; }
@@ -155,6 +156,7 @@ function resetTip(row: BandRow) {
 .account-state { margin-left: auto; color: var(--ink-2); }
 .account-state.warn { color: var(--warn-ink); }
 .account-hint, .account-fix, .account-reading { margin: 3px 0 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.learned-use { margin: 4px 0 0; color: var(--ink-2); font-size: 13px; line-height: 1.4; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .account-hint { color: var(--warn-ink); }
 .account-fix code { color: var(--ink); font-size: 12px; user-select: all; }
 .skeleton-row { display: flex; gap: 18px; }

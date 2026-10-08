@@ -26,6 +26,9 @@ func makeRegistry() []Permission {
 	groups := []struct{ group, actions string }{
 		{"nodes", "read write delete move restore configure"},
 		{"recurrences", "manage"},
+		{"delivery", "read manage"},
+		{"delivery_queue", "read manage claim"},
+		{"reviewpolicy", "read manage"},
 		{"rules", "read write publish"},
 		{"kinds", "read manage"}, {"tags", "read write manage"},
 		{"relations", "read write delete"}, {"comments", "read write delete"},
@@ -67,8 +70,11 @@ func makeRegistry() []Permission {
 			out = append(out, Permission{Key: key, Group: groupLabel(g.group), Description: fmt.Sprintf("%s %s", strings.Title(strings.ReplaceAll(action, "_", " ")), strings.ReplaceAll(g.group, "_", " ")), Risk: risk, GrantableAt: at, AgentGrantable: agentGrantable(key)})
 		}
 	}
+	out = append(out, Permission{Key: "account.overview.read", Group: "Account", Description: "Read all enrolled account capacity values", Risk: "low", GrantableAt: []string{"workspace"}, AgentGrantable: true})
 	out = append(out, Permission{Key: "ownership.transfer", Group: "Ownership", Description: "Transfer workspace ownership", Risk: "high", GrantableAt: []string{"workspace"}, AgentGrantable: false})
 	out = append(out, Permission{Key: "agents.plan.read", Group: "Agents", Description: "Read the person's agent start plan and running counts", Risk: "low", GrantableAt: []string{"workspace"}, AgentGrantable: true})
+	// Delegation is explicit: built-in agent roles exclude this permission.
+	out = append(out, Permission{Key: "events.subscribe", Group: "Events", Description: "Subscribe to authorized change hints (explicit custom agent grant)", Risk: "low", GrantableAt: []string{"workspace"}, AgentGrantable: true})
 	for i := range out {
 		out[i].OwnerWorkstationGrantable = out[i].AgentGrantable || OwnerWorkstationPermission(out[i].Key)
 	}
@@ -136,6 +142,8 @@ func builtinPermissions(key string) []string {
 			allow = p.Key != "ownership.transfer"
 		case "member":
 			switch resource {
+			case "delivery_queue":
+				allow = p.Key == "delivery_queue.read"
 			case "recurrences":
 				allow = true
 			case "rules":
@@ -153,6 +161,9 @@ func builtinPermissions(key string) []string {
 		case "customer":
 			allow = p.Key == "profile.portal_read" || p.Key == "profile.portal_write" || p.Key == "quotes.portal_read" || p.Key == "quotes.portal_accept" || p.Key == "authz.read"
 		}
+		if p.Key == "account.overview.read" && (key == "owner" || key == "admin" || key == "member") {
+			allow = true
+		}
 		if p.Key == "agents.plan.read" && key != "customer" {
 			allow = true
 		}
@@ -165,7 +176,7 @@ func builtinPermissions(key string) []string {
 
 func productReadGroup(group string) bool {
 	switch group {
-	case "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "stage_handoffs", "harness", "work_orders", "runs", "run", "approvals", "inbox", "models", "views", "events", "search", "hours", "quotes", "crm", "cost_units", "project_groups", "profile", "outcome":
+	case "delivery_queue", "delivery", "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "stage_handoffs", "harness", "work_orders", "runs", "run", "approvals", "inbox", "models", "views", "events", "search", "hours", "quotes", "crm", "cost_units", "project_groups", "profile", "outcome", "reviewpolicy":
 		return true
 	}
 	return false
@@ -173,7 +184,7 @@ func productReadGroup(group string) bool {
 
 func guestReadGroup(group string) bool {
 	switch group {
-	case "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "views", "events", "search", "profile", "outcome":
+	case "delivery", "nodes", "kinds", "tags", "relations", "comments", "attachments", "knowledge", "journey", "requirements", "releases", "intake", "views", "events", "search", "profile", "outcome":
 		return true
 	}
 	return false

@@ -13,6 +13,7 @@ import (
 	"github.com/inspr-at/paimos/internal/agentpairing"
 	"github.com/inspr-at/paimos/internal/authz"
 	"github.com/inspr-at/paimos/internal/db"
+	"github.com/inspr-at/paimos/internal/escalation"
 	"github.com/inspr-at/paimos/internal/events"
 	"github.com/inspr-at/paimos/internal/httpapi"
 	"github.com/inspr-at/paimos/internal/modelprefs"
@@ -72,7 +73,7 @@ func (e *queueError) Error() string     { return e.Message }
 func (e *queueError) HTTPStatus() int   { return e.Status }
 func (e *queueError) ErrorCode() string { return e.Code }
 
-// Same tree lock as nodes, work orders and status autopilot, after pairing and
+// Same tree lock as nodes, work orders and status autopilot, after the shared tenant/tree/pairing entry and
 // before order/run/account rows and the tenant event counter. Claim and queue edits
 // serialize; an entry cannot be removed while pickup commits.
 func queueLock(ctx context.Context, tx pgx.Tx) error {
@@ -118,8 +119,13 @@ func (m *module) mountQueue(mux *http.ServeMux) {
 				httpapi.WriteError(w, 400, "invalid node id")
 				return
 			}
-			if err := httpapi.BufferRequestBody(w, r, 1<<20); err != nil {
-				workorders.WriteError(w, workorders.Fail(400, "request body could not be read within limits"))
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			defer cancel()
+			r = r.WithContext(ctx)
+			// Decode only buffered memory inside the write, never transport
+			// input while retaining tenant/tree/pairing fences.
+			if err := workorders.BufferEndpointBody(w, r); err != nil {
+				workorders.WriteError(w, err)
 				return
 			}
 			var out any
@@ -325,6 +331,9 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	if err := queuePermission(ctx, tx, p, t.ProjectID, true); err != nil {
 		return queuePrepared{}, err
 	}
+	if err := escalation.CheckLaunchTx(ctx, tx, t.ID, "", "", nil); err != nil {
+		return queuePrepared{}, err
+	}
 	existing, err := scan(tx.QueryRow(ctx, `SELECT `+columns+` FROM agent_runs WHERE queue_node_id=$1 AND status IN ('queued','starting','running','waiting')`, t.ID))
 	if err == nil {
 		if existing.Status != "queued" {
@@ -338,9 +347,14 @@ func (m *module) queuePrepare(ctx context.Context, tx pgx.Tx, p tenant.Principal
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return queuePrepared{}, err
 	}
+	// Preserve the existing readiness refusal before writer exclusion. Both
+	// checks remain under the tenant/tree fence and precede every queue write.
 	ready := readiness(t)
 	if !ready.Ready {
 		return queuePrepared{}, &queueError{Status: 422, Message: "Not ready to queue: " + strings.Join(ready.Missing, ", "), Code: "queue_not_ready", Readiness: &ready}
+	}
+	if err = requireWriterFree(ctx, tx, t.ID, ""); err != nil {
+		return queuePrepared{}, err
 	}
 	if in.Agent != "" {
 		if err = queueValidateTarget(ctx, tx, in); err != nil {

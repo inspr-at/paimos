@@ -63,7 +63,12 @@ export interface CapacityWindow {
   freshness: 'fresh' | 'aging' | 'stale' | 'expired'; usage_today_known?: boolean; pacing: CapacityPacing
 }
 export interface CapacityRouting { rank: number; available_slots: number; resets_at?: string; cap_percent?: number; wait?: CapacityWait; same_quota_as?: string }
+export interface CapacityBudget {
+  currency: 'USD'; source: 'agentd'; read_at: string; key_usage_usd: number
+  key_limit_usd: number | null; key_remaining_usd: number | null; balance_usd: number | null
+}
 export interface AccountCapacity {
+  budget?: CapacityBudget
   learning?: CapacityLearning
   routing?: CapacityRouting
   account_id: string; ongoing_use_approved?: boolean; schedule: CapacitySchedule; windows: CapacityWindow[]
@@ -369,7 +374,7 @@ export const LOGIN_COMMAND: Record<string, string> = { codex: 'codex login', cla
 /** These harnesses expose no quota reader; a first run cannot produce one. */
 export const hidesCapacityLimit = (harness: string) => ['cursor', 'grok', 'pi'].includes(harness)
 export const unreportedCapacity = (harness: string) => hidesCapacityLimit(harness)
-  ? `${HARNESS_NAME[harness] ?? harness} doesn't show its limit · one run at a time by day`
+  ? 'Usage unknown · reserve not enforceable'
   : harness === 'codex' ? 'No reading yet — readings need a managed run' : harness === 'claude' ? 'No reading yet — captured during a managed run' : 'No reading yet'
 
 const KIND_RANK: Record<string, number> = { monthly: 0, weekly: 1, other: 2, '5h': 3 }
@@ -519,6 +524,31 @@ export function buildPools(rows: AccountRow[], now: number): PoolView[] {
     pool.parallelRuns = pool.rows.reduce((n, r) => n + (r.routing?.available_slots ?? 0), 0)
   }
   return pools
+}
+
+// ---------- Sprint, Hold and Back to the plan, per pool ----------
+// One wording for the account menus on /agents and in Settings (AEON-786).
+/** The pool an account row paces with: its door, or its group's or harness's pool. */
+export const poolOfRow = (pools: PoolView[], row: Pick<AccountRow, 'id' | 'groupId' | 'harness'>): PoolView | undefined =>
+  pools.find(p => p.rows.some(r => r.id === row.id)) ?? pools.find(p => p.id === (row.groupId ? `group:${row.groupId}` : row.harness))
+/** The pool's own override; Away comes from the person's schedule and ends in the header. */
+export const ownOverride = (pool: PoolView | undefined): Override => (!pool || pool.override === 'away' ? '' : pool.override)
+export interface HoldOption { label: string; hint: string; name: string; until: string | undefined }
+/** Hold for two hours, until the next work day starts, or until resumed. */
+export function holdOptions(schedule: CapacitySchedule, now: number): HoldOption[] {
+  const later = new Date(Math.floor((now + 2 * 3600e3) / 60_000) * 60_000).toISOString()
+  const tomorrow = new Date(workStart(schedule, now, 1)).toISOString()
+  const [day, time] = when(tomorrow, now).split(' ')
+  return [
+    { label: 'For 2 hours', hint: `until ${when(later, now)}`, name: 'Hold for 2 hours', until: later },
+    { label: `Until ${day}`, hint: time ?? '', name: `Hold until ${when(tomorrow, now)}`, until: tomorrow },
+    { label: 'Until I resume', hint: '', name: 'Hold until I resume', until: undefined },
+  ]
+}
+/** What a saved override now does, said after the write succeeded. */
+export function overrideDone(pool: Pick<PoolView, 'name'>, value: Override, until: string | undefined, now: number): string {
+  return value === 'sprint' ? `Sprint: agents may use everything left on ${pool.name} until it resets.`
+    : value === 'hold' ? `Holding ${pool.name}${until ? ` until ${when(until, now)}` : ''}. Running steps finish.` : `${pool.name} follows your work week again.`
 }
 
 // ---------- The plan per account ----------

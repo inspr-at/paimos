@@ -263,21 +263,23 @@ Keep private pairing state and runtime credentials outside the Nix store. A decl
 
 ## Agent keys and scopes
 
-An operator creates a key with `paimos agent-key create --tenant SLUG (--name AGENT | --principal-id UUID) --out-file PATH`. The token is written only to that file (mode `0600`, never overwritten) and is not printed. `paimos agent-key revoke` revokes by id.
+An operator creates a key with `paimos agent-key create --tenant SLUG (--name AGENT | --principal-id UUID) --creator-id PERSON_UUID --out-file PATH`. The token is written only to that file (mode `0600`, never overwritten) and is not printed. `paimos agent-key revoke` revokes by id. Legacy keys with no creator can be adopted by a person with `keys.manage` through **Make me the owner** in Settings, or `aeon keys adopt KEY_UUID --session-file PATH`. Adoption records an audit event and keeps the same key and secret; keys with an existing person owner cannot be taken over. Current creation paths require an active person creator in the same tenant, including pairing, demo seeds and rotation.
+
+Migration 1256 is expand-only: older binaries can still write creatorless keys during rollout. Current issuance and adoption set `person_owner_required=true`; the database constraint and ownership guard are deferred to a later contract-phase migration on AEON-724 after release 124 ships the expansion and older writers are retired.
 
 Use `--workspace-role ROLEKEY` when the agent needs workspace access. This binds the agent principal as part of key creation; its effective permissions are the intersection of the key scopes and that role. The operator cannot grant Owner or workspace Guest. For an existing principal, use `aeon access bind --tenant SLUG --principal NAME_OR_UUID --workspace-role ROLEKEY`; remove the binding with `aeon access unbind --tenant SLUG --principal NAME_OR_UUID --workspace-role`. Repeating either action is safe. These commands use the same workspace binding rules and audit event as the Members API.
 
-Scopes are an outer ceiling. An empty list grants nothing. Unknown names and permissions that are not agent-grantable are rejected. Typical scopes are registry keys such as `nodes.read`, `nodes.write`, `inbox.send`, `intake.write`, `approvals.request`, `work_orders.write`, `run.create`, `run.claim`, `run.telemetry`, `harness.write`, and `account.manage`. For HTTP key creation, the creating principal must hold every requested scope. The operator-only `paimos agent-key create` command runs on the host without a creating principal; it can create an agent principal and does not perform that creator-permission check. It still validates requested scopes against the registry.
+Scopes are an outer ceiling. An empty list grants nothing. Unknown names and permissions that are not agent-grantable are rejected. Typical scopes are registry keys such as `nodes.read`, `nodes.write`, `inbox.send`, `intake.write`, `approvals.request`, `work_orders.write`, `run.create`, `run.claim`, `run.telemetry`, `harness.write`, and `account.manage`. For HTTP key creation, the creating principal must hold every requested scope. The operator-only `paimos agent-key create` command runs on the host and requires `--creator-id` naming an active person in the same tenant. It can create an agent principal and does not perform the HTTP creator-permission check. It validates requested scopes against the registry and records that person as creator, so the key follows their live permission ceiling.
 
-The HTTP middleware applies that ceiling before module handlers run. Routes with no agent mapping answer 403. Person sessions are governed by role instead. An approval grant cannot exceed the key. Journey gate scopes such as `journey.build` are checked against this ceiling. They are not themselves keys in the permission registry, so `paimos agent-key create` will not accept them. A key that already holds a registry prefix covers dotted refinements of that prefix (`nodes.read` covers `nodes.read.fields`).
+The HTTP middleware applies that ceiling before module handlers run. Routes with no agent mapping answer 403. Person sessions are governed by role instead. An approval grant cannot exceed the key. The INSPR Flow and its gate-granting operator commands are retired (AEON-723). Historic API paths retain their authenticated error envelope and reporter contract headers, but return 410. A key that already holds a registry prefix covers dotted refinements of that prefix (`nodes.read` covers `nodes.read.fields`).
 
 ## Operator project access
 
 On the AEON host, with `AEON_DATABASE_URL` set for the tenant database, an operator can create an agent key and grant project access together:
 
 ```sh
-paimos agent-key create --tenant inspr --name pharos-worker --out-file /secure/path/pharos.key --scopes nodes:read --project PHAROS_PROJECT_KEY --project-role viewer
-paimos agent-key create --tenant inspr --name janus-worker --out-file /secure/path/janus.key --scopes nodes:read --project JANUS_PROJECT_KEY=viewer
+paimos agent-key create --tenant inspr --name pharos-worker --creator-id PERSON_UUID --out-file /secure/path/pharos.key --scopes nodes:read --project PHAROS_PROJECT_KEY --project-role viewer
+paimos agent-key create --tenant inspr --name janus-worker --creator-id PERSON_UUID --out-file /secure/path/janus.key --scopes nodes:read --project JANUS_PROJECT_KEY=viewer
 ```
 
 Repeat `--project KEY --project-role ROLEKEY` or use a comma-separated `KEY=ROLE` list for several projects. The key goes only to the specified new 0600 file. If binding fails after key creation, the command reports the key ID and file path so the operator can correct access or revoke the key.
@@ -511,9 +513,12 @@ A work order is a `work_order` node plus assignment, status, acceptance criteria
 
 Model profiles are tenant pins (harness, family, model, effort, tier). The first read of an empty registry seeds the catalog and records that with an event. `aeon model resolve` asks the server which profile a role should use. It does not execute a command.
 
-## Stage handoff launch
+## Retired stage handoffs
 
-The coordinator mounts `stagehandoff.New` (an `httpapi.Module`) with a Pharos launch-check provider and registers the compiled Pharos manifest through `plugins.Builtin`. A routed Pharos agent sends a UUID `Idempotency-Key` on each admit and consume request. Retry the same key and JSON body after a lost response: Aeon returns the original admission or consumption receipt, including `consumed_at`, without repeating the change. A changed body or principal conflicts; a new key cannot consume an already spent admission. Exact replay remains available for 24 hours after a terminal handoff. `GET /api/stage-handoffs/{id}` includes safe admission state for reconciliation.
+AEON-723 retires stage launches and the compiled PHAROS/JANUS stage plugins.
+The historic routes return authenticated 410 errors, retaining their reporter
+contract headers. Stored handoffs and evidence remain preserved for a later
+contract-phase migration. Work orders and harness sessions remain independent.
 
 ## MCP
 
@@ -854,6 +859,46 @@ unless stated otherwise):
 | Supervisor | Physical workspace; `daemon/aeon-agentd-<id>.lock`, `.journal`, `.checkpoint.json`, `.checks.json`, `.capacity.json` | No daemon installation dependency; absent journal/capacity files are valid fresh state |
 | Listener | Private socket directory, lifetime `.sock.lock`, socket, `.token`, legacy `.owner.json` and recognized `.s<hex>` residue; then writes `daemon/control.json` | Socket lifetime and inode ownership checks apply to dev builds too |
 
+The supervisor checkpoint and each WAL entry carry `version`, the persisted
+`Record` schema version (`agentd.RecordSchemaVersion`), independently of the
+product release. Releases 123 and 124 both used version 2 despite 124 adding
+rejection evidence; schema version 3 reads both forms without discarding known
+fields. Startup and fenced offline lifecycle inspection migrate them forward
+under the existing exclusive instance lock. The entire checkpoint and WAL are
+validated before an atomic current-version checkpoint is saved and the WAL is
+compacted. Unknown fields and unsupported older schemas fail closed; classic
+version 1 is never migrated implicitly. Persisted PIDs remain unowned.
+
+Before upgrading, drain and stop the installed daemon through the existing
+approved lifecycle procedure. Confirm owned processes have stopped and settle
+pending reports; a missing socket or a retained PID alone is insufficient.
+Keep a private, owner-only pre-upgrade copy of **both**
+`daemon/aeon-agentd-<id>.checkpoint.json` and
+`daemon/aeon-agentd-<id>.journal` (when present), with their original permissions
+and the exact previous binary/release pin. Record the daemon identity and copy
+time without recording file contents. Forward migration does not automatically
+retain backups. Avoid copying credentials or the whole pairing root.
+
+On a downgrade, version-aware readers refuse a newer checkpoint/WAL with its
+stored and supported versions and a remedy; both state files remain intact.
+Historical 123/124 binaries still use their old generic unsupported/corrupt
+diagnostic. To roll back, stop the newer daemon and confirm its process and
+settlement state first, retain its checkpoint/WAL separately for recovery, then
+restore the **matching pair** of pre-upgrade files and the pinned earlier binary.
+If either file was absent in that saved state, restore that absence through the
+operator's approved file-retirement procedure. A version-2 copy made by 124 may
+contain fields that 123 cannot read: rolling back to 123 requires a copy saved
+before 124 first ran. Never edit a version number, strip fields, or mix a new WAL
+with an old checkpoint. Restoring old state also omits later local evidence;
+reconcile that evidence with server state before resuming dispatch. Without a
+matching backup, keep the current state and use a compatible newer daemon.
+
+`TestRecordSchemaGolden` pins the recursive JSON field/type/tag schema of
+`Record`, including nested evidence. A schema change requires a version bump,
+an explicit migration, and an appended golden hash; prior pins stay immutable.
+`TestRecordSchemaForwardRecoveryAndDowngrade` covers 123 → 124 → current,
+retained rejection/control evidence, process uncertainty, and lossless refusal.
+
 Gemini/OpenCode adapter construction only stores their approved homes and
 executable pins. Home/config checks occur when probing or launching those
 harnesses, not as a prerequisite to constructing the daemon. `service.json`,
@@ -1165,3 +1210,13 @@ The server's daily deterministic analysis runs for the configured doctrine App t
 Outcomes, exception votes and the current learnings inbox are grouped by the server-recorded merged instruction version at the observation time, harness and ticket kind. Missing provenance is left unattributed. Fixed vocabulary classes (validation, security, scope), high fix rounds, CI failures, reverts and exception votes map to one matching indexed rule. Ambiguous or absent targets become internal notes. The proposed clarification uses the AEON-319 path, creates a GitHub draft with `aeon-proposal`, and passes the same main-file and private-quotation guards. Private-text refusals become internal notes; an unavailable private guard retains its reservation for the next daily retry. Private evidence text and workspace URLs never enter the public PR; its fixed explanation includes the recurrence count, baseline and intended direction. Ticket/event references remain in Settings → Agent rules → Proposals, available only to people with workspace `rules.read`, `outcome.read` and `knowledge.read`.
 
 After an observed merge, comparison requires a later rules version with instruction provenance matching the complete changed file hash, in the same harness and ticket kind, and at least three eligible observations. A repository pin alone never proves use. If the harness does not report those bytes, the comparison stays pending. Baseline context includes review rounds, fix rounds, CI failures, reverts, exception votes and time to done. Rates include successful observations; review and fix rounds use each ticket's highest recorded round. Exception and revert rates describe observed tickets, not silent/unobserved work. A completed comparison adds one System-authored ticket comment with sample sizes and the delta; it is descriptive, not causal. Findings persist references, aggregate numbers and hashes, never proposed rule prose. Scans are bounded at 5,000 samples and 500 projects and refuse a truncated learnings page rather than propose from an incomplete scan. Tests inject a fake forge and must never contact real GitHub.
+
+## Host usage probes (AEON-886)
+
+The account owner can turn on **Read usage with this CLI's own login** in Settings → Accounts → Use and limits → Details. It is off by default, applies only to the current ownership binding, and does not approve agent execution or share private quota data. Uses unofficial provider endpoints; they may change or stop. You are responsible for following your provider's terms. This responsibility applies to use of the host probe feature under the PAIMOS terms.
+
+The daemon reads the selected Grok, Claude or Codex login on its host, makes bounded GET requests only to the fixed provider endpoints, and reports normalized usage and reset times through the existing readings endpoint. It never refreshes or writes a login, sends a login to PAIMOS, or logs vendor responses. Claude uses its private credentials file or, for the default macOS profile, a noninteractive read of the existing CLI Keychain item; access requiring a prompt stays unavailable. A 429 retains the last known reading and its age, with a persisted five-minute minimum before another attempt, including after restart.
+
+OpenRouter behind pi reports a **USD budget**, separating key usage/cap from total account balance. If `/credits` rejects an ordinary key, account balance remains unknown; no management key is requested or created. It is not a percentage window and has no invented replenishment time. Measured key caps also update the existing readiness facts: a zero cap stops work, a later unknown cap retains that stop, and a newer positive key reading can clear it. Delayed probes do not replace a newer credit snapshot.
+
+Protocol research: [steipete/CodexBar v0.73.0, commit 1d313fe](https://github.com/steipete/CodexBar/tree/1d313fe), MIT, copyright Peter Steinberger and contributors. This is an independent Go implementation of the provider shapes; fixtures contain synthetic values only. Cursor spike: the desktop `usage-summary` endpoint requires a session cookie from Cursor.app's `state.vscdb`; no verified mapping to a headless `cursor-agent` enrollment exists. Browser credential extraction, a desktop login fallback and Cursor usage polling remain disabled. Codex app-server fallback retains its existing exact-binary qualification gate; HTTP probes never launch a CLI or bypass that gate.

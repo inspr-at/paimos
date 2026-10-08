@@ -1,11 +1,16 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import test from 'node:test'
+// This existing hosted CI entry also runs the OpenAPI lint and its regressions.
+import './openapi-sort.test.mjs'
+// AEON-837: the same entry runs the tracked-bytecode regressions.
+import './check-tracked-bytecode.test.mjs'
 import assert from 'node:assert/strict'
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, realpathSync, rmSync, chmodSync, watchFile, unwatchFile } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { parseWorkflow, staticSteps, validateRegistry, parseArgs, runCommand, runChecks, mergedTree, main, fixedEnvironment, reuseDependencies, versionWarnings } from './ci-static.mjs'
+import { colourLiterals, checkThemeColours } from './check-theme-colours.mjs'
 
 const workflow = readFileSync(new URL('../.github/workflows/ci.yml', import.meta.url), 'utf8')
 const registry = JSON.parse(readFileSync(new URL('./ci/static-checks.json', import.meta.url), 'utf8'))
@@ -31,6 +36,13 @@ test('static CI commands are registered and every origin still exists', () => {
   assert.equal(validateRegistry(registry, parseWorkflow(workflow)), registry.checks)
   assert.ok(staticSteps(parseWorkflow(workflow), registry).length >= 30)
   assert.equal(registry.checks.filter(c => c.optional).length, 6)
+  for (const [id, limit] of [['web-shard-tests', 600], ['go-vet', 180]]) {
+    const bounded = structuredClone(registry)
+    bounded.checks.find(c => c.id === id).timeout_seconds = limit
+    assert.doesNotThrow(() => validateRegistry(bounded, parseWorkflow(workflow)))
+    bounded.checks.find(c => c.id === id).timeout_seconds++
+    assert.throws(() => validateRegistry(bounded, parseWorkflow(workflow)), /Invalid check/)
+  }
 })
 
 test('drift guard catches newly added commands in each full static job', () => {
@@ -41,7 +53,7 @@ test('drift guard catches newly added commands in each full static job', () => {
 })
 
 test('every primary mirror is required even when a supplement shares its origin', () => {
-  for (const row of registry.checks.filter(c => !c.supplement)) {
+  for (const row of registry.checks.filter(c => !c.supplement && !c.local_only)) {
     const copy = { ...registry, checks: registry.checks.filter(c => c.id !== row.id) }
     assert.throws(() => validateRegistry(copy, parseWorkflow(workflow)), /Unregistered static CI command/, row.id)
   }
@@ -61,7 +73,7 @@ test('new jobs, new excluded-job steps and unknown multiline commands require cl
 
 test('drift guard rejects deleted origins, changed commands/cwd, duplicate ids and missing mirrors', () => {
   const jobs = parseWorkflow(workflow)
-  for (const row of registry.checks) {
+  for (const row of registry.checks.filter(c => !c.local_only)) {
     const copy = structuredClone(registry)
     copy.checks.find(c => c.id === row.id).ci.command += ' --changed'
     assert.throws(() => validateRegistry(copy, jobs), /Stale CI reference/, row.id)
@@ -70,6 +82,17 @@ test('drift guard rejects deleted origins, changed commands/cwd, duplicate ids a
   assert.throws(() => validateRegistry({ ...registry, checks: registry.checks.slice(1) }, jobs), /Unregistered static CI command/)
   const copy = structuredClone(registry); copy.checks[1].command = 'true'
   assert.throws(() => validateRegistry(copy, jobs), /Mirror differs/)
+  const budget = structuredClone(registry)
+  const nativeShard = budget.checks.find(c => c.id === 'web-shard-tests')
+  nativeShard.timeout_seconds = 300
+  assert.equal(validateRegistry(budget, jobs), budget.checks)
+  nativeShard.timeout_seconds = 600
+  assert.equal(validateRegistry(budget, jobs), budget.checks)
+  nativeShard.timeout_seconds = 601
+  assert.throws(() => validateRegistry(budget, jobs), /Invalid check: web-shard-tests/)
+  nativeShard.timeout_seconds = 600
+  budget.checks.find(c => c.id === 'go-vet').timeout_seconds = 181
+  assert.throws(() => validateRegistry(budget, jobs), /Invalid check: go-vet/)
   const changed = workflow.replace('        run: npm run typecheck', '        run: npm run typecheck --changed')
   assert.throws(() => validateRegistry(registry, parseWorkflow(changed)), /Stale CI reference/)
   const moved = workflow.replace('      - working-directory: web\n        run: npm run typecheck', '      - working-directory: .\n        run: npm run typecheck')
@@ -113,6 +136,7 @@ test('timeouts and cancellation terminate descendants before returning', async t
   const command = `node -e 'require("node:fs").writeFileSync(${JSON.stringify(marker)}, String(process.pid)); setInterval(()=>{},1000)'`
   const result = await runCommand(command, { cwd, timeout_seconds: 1 })
   assert.equal(result.status, 'timeout'); assert.ok(existsSync(marker))
+  assert.equal(result.output.split('\n').at(-1), `ci-static: command exceeded timeout_seconds=1 after ${result.seconds}s (process group termination requested)`)
   const pid = Number(readFileSync(marker, 'utf8'))
   assert.ok(pid > 0)
   assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
@@ -127,9 +151,113 @@ test('timeouts and cancellation terminate descendants before returning', async t
   const cancelled = await runCommand(`node -e 'require("node:fs").writeFileSync(${JSON.stringify(cancelledMarker)}, String(process.pid)); setInterval(()=>{},1000)'`, { cwd, timeout_seconds: 5, signal: controller.signal })
   unwatchFile(cancelledMarker, ready)
   assert.equal(cancelled.status, 'interrupted')
+  assert.equal(cancelled.output.split('\n').at(-1), `ci-static: command interrupted after ${cancelled.seconds}s (process group termination requested)`)
   const cancelledPid = Number(readFileSync(cancelledMarker, 'utf8'))
   assert.ok(cancelledPid > 0)
   assert.throws(() => process.kill(cancelledPid, 0), { code: 'ESRCH' })
+})
+
+async function stoppedDescendant(t, mode, { resistant = false, background = false, expectedCleanupError } = {}) {
+  const cwd = temporary(t), marker = join(cwd, 'child-started'), fixture = join(cwd, 'child.cjs')
+  writeFileSync(fixture, `${resistant ? "process.on('SIGTERM', () => {});" : ''}
+require('node:fs').writeFileSync(${JSON.stringify(marker)}, String(process.pid));
+setInterval(() => {}, 1000);
+`)
+  const controller = new AbortController()
+  let expire, readyObserved = false
+  if (mode === 'timeout') {
+    // Fire the deadline only after child readiness, independently of runner
+    // speed. Real time is reserved for a watchdog and shutdown escalation.
+    const realSetTimeout = globalThis.setTimeout
+    t.mock.method(globalThis, 'setTimeout', (callback, milliseconds, ...args) => {
+      if (milliseconds === 30_000) {
+        expire = callback
+        return realSetTimeout(callback, 10_000, ...args)
+      }
+      return realSetTimeout(callback, milliseconds, ...args)
+    })
+  }
+  // Stat polling observes an explicit child-ready barrier; no assumed sleep or
+  // elapsed-time assertion. It also works where sandboxed fs.watch is denied.
+  const ready = () => {
+    if (!existsSync(marker) || !readFileSync(marker, 'utf8')) return
+    readyObserved = true
+    unwatchFile(marker, ready)
+    if (mode === 'timeout') expire()
+    else controller.abort()
+  }
+  watchFile(marker, { interval: 10 }, ready)
+  t.after(() => unwatchFile(marker, ready))
+  const quote = value => "'" + value.replaceAll("'", "'\\''") + "'"
+  const command = `${quote(process.execPath)} ${quote(fixture)}${background ? ' >/dev/null 2>&1 & wait' : '; : '}`
+  const result = await runCommand(command, { cwd, timeout_seconds: 30, signal: controller.signal })
+  unwatchFile(marker, ready)
+  assert.ok(readyObserved, 'termination must follow the child-ready barrier')
+  assert.equal(result.status, expectedCleanupError ? 'failed' : mode === 'timeout' ? 'timeout' : 'interrupted')
+  assert.equal(result.cleanup_error, expectedCleanupError)
+  const cause = mode === 'timeout' ? 'exceeded timeout_seconds=30' : 'interrupted'
+  const named = `ci-static: command ${cause} after ${result.seconds}s (process group termination requested)`
+  if (expectedCleanupError) assert.ok(result.output.includes(named))
+  else assert.equal(result.output.split('\n').at(-1), named)
+  const pid = Number(readFileSync(marker, 'utf8'))
+  assert.ok(pid > 0)
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' })
+}
+
+test('owned descendants are gone before a timeout or cancellation returns', async t => {
+  for (const mode of ['timeout', 'cancellation']) {
+    await t.test(mode, childTest => stoppedDescendant(childTest, mode))
+  }
+})
+
+test('closed pipes and SIGTERM-resistant descendants are gone before returning', async t => {
+  for (const mode of ['timeout', 'cancellation']) {
+    await t.test(mode, childTest => stoppedDescendant(childTest, mode, { resistant: true, background: true }))
+  }
+})
+
+test('shutdown refuses completion when owned process group disappearance cannot be verified', async t => {
+  const realKill = process.kill
+  let now = 0, probes = 0
+  t.mock.method(performance, 'now', () => now)
+  t.mock.method(process, 'kill', (pid, signal) => {
+    if (pid < 0 && signal === 0) {
+      probes++
+      // Model a group surviving the full cleanup budget without waiting for
+      // real time. TERM/KILL and the fixture's PID assertion remain real.
+      now += 2100
+      throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' })
+    }
+    return realKill(pid, signal)
+  })
+  await stoppedDescendant(t, 'cancellation', { expectedCleanupError: 'Owned command process group survived shutdown' })
+  assert.equal(probes, 1)
+})
+
+test('timeout cleanup tolerates exited-group EPERM and ESRCH but preserves real signal failures', { skip: process.platform === 'win32' }, async t => {
+  for (const [code, phase, visible] of [
+    ['EPERM', 'close', false], ['ESRCH', 'close', false],
+    ['EPERM', 'stop', true], ['ESRCH', 'stop', false], ['EACCES', 'close', true]
+  ]) await t.test(`${code} during ${phase}`, async t => {
+    const cwd = temporary(t), signals = []
+    const killProcess = (pid, signal) => {
+      assert.ok(pid < 0, 'signals target the detached process group')
+      signals.push(signal)
+      if (signal === 'SIGTERM') process.kill(pid, signal)
+      if (signal === (phase === 'stop' ? 'SIGTERM' : 'SIGKILL')) throw Object.assign(new Error(`kill ${code}`), { code })
+    }
+    const [result] = await runChecks([{
+      id: 'timeout-fixture', command: `exec node -e 'for(let i=0;i<80;i++) console.log(i); setInterval(()=>{},1000)'`,
+      cwd: '.', needs: [], timeout_seconds: 1
+    }], cwd, { jobs: 1, run: (command, options) => runCommand(command, { ...options, killProcess }) })
+    assert.equal(result.status, 'timeout')
+    // SIGTERM really terminates the leader. A single subsequent SIGKILL proves
+    // cleanup runs from close, not the escalation timer as well.
+    assert.deepEqual(signals, ['SIGTERM', 'SIGKILL'])
+    assert.equal(result.output.includes(`kill ${code}`), visible)
+    assert.equal(result.output.split('\n').length, 40)
+    assert.equal(result.output.split('\n').at(-1), `ci-static: timeout-fixture exceeded timeout_seconds=1 after ${result.seconds}s (process group termination requested)`)
+  })
 })
 
 test('bounded pool overlaps independent checks and optional skips retain reasons', async t => {
@@ -174,15 +302,59 @@ test('skips report INCOMPLETE and code 3; allow-skips remains explicitly incompl
 })
 
 test('fixed check environment removes caller flags and identity but supplies CI values', async t => {
-  const cwd = temporary(t), source = { ...process.env, GOFLAGS: '-skip', AEON_TEST_TIER_MODE: 'essential', AEON_TEST_DATABASE_URL: 'fixture', RANDOM_EXTRA: 'fixture' }
+  const cwd = temporary(t), source = { ...process.env, GOFLAGS: '-skip', AEON_TEST_TIER_MODE: 'essential', AEON_TEST_DATABASE_URL: 'fixture', RANDOM_EXTRA: 'fixture',
+    NIX_CFLAGS_COMPILE: '-isystem /fixture/sdk/usr/include', NIX_LDFLAGS: '-L/fixture/sdk/usr/lib',
+    NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin: '/fixture/sdk',
+    NIX_CC_WRAPPER_TARGET_HOST_aarch64_unknown_linux_gnu: '1',
+    DEVELOPER_DIR: '/fixture/apple-sdk', SDKROOT: '/fixture/apple-sdk/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk',
+    NIX_LDFLAGS_FOR_BUILD: '-L/fixture/build-sdk/usr/lib', NIX_CFLAGS_COMPILE_FOR_TARGET: '-isystem /fixture/target-sdk/usr/include',
+    NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
+    NIX_CC_WRAPPER_TARGET_BUILD_arm64_apple_darwin: '1', NIX_BINTOOLS_WRAPPER_TARGET_TARGET_arm64_apple_darwin: '1',
+    NIX_CC_WRAPPER_FLAGS_SET_arm64_apple_darwin: '1', NIX_DEBUG: '7', NIX_CC: 'fixture-cc' }
   await runChecks([{ id: 'env', command: 'true', cwd: '.', needs: [], timeout_seconds: 5 }], cwd, { env: source, run: async (_command, { env }) => {
     assert.equal(env.GOFLAGS, undefined); assert.equal(env.AEON_TEST_DATABASE_URL, undefined)
     assert.equal(env.RANDOM_EXTRA, undefined); assert.equal(env.AEON_TEST_TIER_MODE, 'full')
     assert.equal(env.CI, 'true'); assert.equal(env.CI_LANE, 'full')
+    assert.equal(env.NIX_CFLAGS_COMPILE, source.NIX_CFLAGS_COMPILE)
+    assert.equal(env.NIX_LDFLAGS, source.NIX_LDFLAGS)
+    assert.equal(env.NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin, source.NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin)
+    assert.equal(env.NIX_CC_WRAPPER_TARGET_HOST_aarch64_unknown_linux_gnu, '1')
+    assert.equal(env.DEVELOPER_DIR, source.DEVELOPER_DIR)
+    assert.equal(env.SDKROOT, source.SDKROOT)
+    assert.equal(env.NIX_LDFLAGS_FOR_BUILD, source.NIX_LDFLAGS_FOR_BUILD)
+    assert.equal(env.NIX_CFLAGS_COMPILE_FOR_TARGET, source.NIX_CFLAGS_COMPILE_FOR_TARGET)
+    assert.equal(env.NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin, '1')
+    assert.equal(env.NIX_CC_WRAPPER_TARGET_BUILD_arm64_apple_darwin, '1')
+    assert.equal(env.NIX_BINTOOLS_WRAPPER_TARGET_TARGET_arm64_apple_darwin, '1')
+    assert.equal(env.NIX_CC_WRAPPER_FLAGS_SET_arm64_apple_darwin, undefined)
+    assert.equal(env.NIX_DEBUG, undefined)
+    assert.equal(env.NIX_CC, undefined)
     assert.ok(env.npm_config_cache.startsWith(tmpdir()))
     return { status: 'passed', seconds: 0 }
   } })
   assert.equal(fixedEnvironment({ PATH: '/bin', GIT_CONFIG_COUNT: '1' }).GIT_CONFIG_COUNT, undefined)
+})
+
+test('fixed check environment retains Nix compiler role markers and SDK flags without caller selection flags', () => {
+  const flags = {
+    NIX_CC_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
+    NIX_BINTOOLS_WRAPPER_TARGET_HOST_arm64_apple_darwin: '1',
+    NIX_CC_WRAPPER_TARGET_BUILD_x86_64_apple_darwin: '1',
+    NIX_BINTOOLS_WRAPPER_TARGET_TARGET_aarch64_unknown_linux_gnu: '1',
+    NIX_CFLAGS_COMPILE_arm64_apple_darwin: '-isystem /fixture/sdk/usr/include',
+    NIX_CFLAGS_LINK_arm64_apple_darwin: '-F/fixture/sdk/System/Library/Frameworks',
+    NIX_LDFLAGS_BEFORE_arm64_apple_darwin: '-L/fixture/sdk/usr/lib',
+    NIX_LDFLAGS_arm64_apple_darwin: '-L/fixture/sdk/usr/lib',
+    NIX_LDFLAGS_x86_64_apple_darwin: '-L/fixture/intel-sdk/usr/lib',
+    NIX_LDFLAGS_aarch64_unknown_linux_gnu: '-L/fixture/linux-sdk/lib',
+  }
+  const env = fixedEnvironment({ ...flags, GOFLAGS: '-run=^$', AEON_TEST_TIER_MODE: 'essential',
+    NIX_AUTH_TOKEN: 'fixture', NIX_LDFLAGS_SECRET: 'fixture' })
+  for (const [key, value] of Object.entries(flags)) assert.equal(env[key], value, key)
+  assert.equal(env.GOFLAGS, undefined)
+  assert.equal(env.AEON_TEST_TIER_MODE, 'full')
+  assert.equal(env.NIX_AUTH_TOKEN, undefined)
+  assert.equal(env.NIX_LDFLAGS_SECRET, undefined)
 })
 
 test('version warnings compare installed versions with workflow pins', t => {
@@ -340,4 +512,32 @@ test('merge-main selects the merged registry and workflow, including checks chan
   assert.match(report.results[0].command, /process.exit\(7\)/)
   assert.equal(repo.git(['worktree', 'list', '--porcelain']), before)
   assert.match(readFileSync(join(repo.dir, 'scripts/ci/static-checks.json'), 'utf8'), /process.exit\(0\)/)
+})
+
+test('colour guard rejects literals in CSS, inline SVG and component script colours', () => {
+  for (const value of ['#fff', '#abc4', '#123456', '#12345678', 'rgba(14,111,108,.2)', 'rgb(0 0 0 / .4)', 'hsl(30 50% 40%)', 'oklch(.8 .09 20)', 'color(display-p3 1 0 0)']) {
+    const source = `<style>\n.control { background: ${value}; }</style>`
+    assert.equal(colourLiterals(source, 'components/Test.vue')[0]?.line, 2, value)
+  }
+  assert.equal(colourLiterals('<svg fill="#a4e5df" />', 'components/Test.vue').length, 1)
+  assert.equal(colourLiterals('<script>const fill = "#a4e5df"</script>', 'components/Test.vue').length, 1)
+  assert.equal(colourLiterals('<style>.x { color: red; }</style>', 'components/Test.vue').length, 1)
+  assert.equal(colourLiterals('<style>.x { background: linear-gradient(white, rebeccapurple); box-shadow: 0 0 2px silver; }</style>', 'components/Test.vue').length, 3)
+})
+test('colour exceptions remain narrow: masks, documents, identity and artwork', () => {
+  assert.deepEqual(colourLiterals('<!-- #fff --> <style>/* #fff */ .x { background: var(--primary); mask-image: linear-gradient(#000, transparent); }</style><a href="#add-account" data-color="blue" />', 'components/Test.vue'), [])
+  assert.equal(colourLiterals('<style>.x { mask-image: linear-gradient(#000, transparent); color: #fff; }</style>', 'components/Test.vue').length, 1)
+  assert.deepEqual(colourLiterals('<style>.paper { color: #fff; }</style>', 'components/quotes/editor/QuoteDocument.vue'), [])
+  assert.equal(colourLiterals('<style>.control { color: #fff; }</style>', 'components/settings/ThemeColoursCard.vue').length, 1)
+  assert.equal(colourLiterals('<style>.glint { fill: #c9a24a; } --blush: oklch(.8 .09 20 / .55);</style>', 'components/indicators/Robot5.vue').length, 1)
+  assert.deepEqual(checkThemeColours(root).failures, [])
+})
+test('colour guard is local-only and cannot replace or weaken a CI mirror', () => {
+  const check = registry.checks.find(c => c.id === 'theme-colour-literals')
+  assert.ok(check.local_only); assert.equal(check.ci, undefined)
+  const copy = structuredClone(registry)
+  copy.checks.find(c => c.id === 'go-vet').local_only = 'pretend this mirror is local'
+  assert.throws(() => validateRegistry(copy, parseWorkflow(workflow)), /Invalid local-only/)
+  copy.checks = copy.checks.filter(c => c.id !== 'go-vet')
+  assert.throws(() => validateRegistry(copy, parseWorkflow(workflow)), /Unregistered static CI command/)
 })

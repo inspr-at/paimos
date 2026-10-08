@@ -12,12 +12,12 @@ import type { SortField } from './work.ts'
 import { PLANNING_COLUMNS } from './planning.ts'
 
 export type ColumnId = 'key' | 'title' | 'status' | 'priority' | 'assignee' | 'epic' | 'release' | 'tags' | 'cost' | 'estimate' | 'model' | 'suggested' | 'tokens' | 'list_cost' | 'paid' | 'created' | 'updated' | 'progress' | 'eta'
-export interface ColumnDef { id: ColumnId; label: string; sort: SortField | null; width: number; min: number; max: number; end?: boolean }
+export interface ColumnDef<Id extends string = string> { id: Id; label: string; sort: SortField | null; width: number; min: number; max: number; end?: boolean }
 // defaultView: the saved view this person opens the project with.
-export interface ListPrefs { order?: ColumnId[]; visible?: ColumnId[]; widths?: Partial<Record<ColumnId, number>>; defaultView?: string | null }
+export interface ListPrefs { order?: ColumnId[]; visible?: ColumnId[]; widths?: Partial<Record<string, number>>; defaultView?: string | null }
 
-export const COLUMNS: ColumnDef[] = [
-  { id: 'key', label: 'Key', sort: 'key', width: 118, min: 84, max: 220 },
+export const COLUMNS: ColumnDef<ColumnId>[] = [
+  { id: 'key', label: 'Key', sort: 'key', width: 118, min: 84, max: 480 },
   { id: 'title', label: 'Title', sort: 'title', width: 0, min: 240, max: 4000 },
   { id: 'status', label: 'Status', sort: 'state', width: 138, min: 84, max: 260 },
   { id: 'priority', label: 'Priority', sort: 'priority', width: 112, min: 72, max: 200 },
@@ -94,14 +94,14 @@ export function automaticColumns(tableWidth: number, present: Present = {}): Col
   return out
 }
 
-export function widthOf(id: ColumnId, prefs: ListPrefs | null | undefined): number {
-  const def = COLUMN_BY_ID.get(id)!
+export function widthOf(id: string, prefs: ListPrefs | null | undefined, definitions: ReadonlyMap<string, ColumnDef> = COLUMN_BY_ID): number {
+  const def = definitions.get(id)!
   const saved = prefs?.widths?.[id] ?? (id === 'list_cost' ? prefs?.widths?.paid : undefined)
   return typeof saved === 'number' && Number.isFinite(saved) ? Math.max(def.min, Math.min(def.max, Math.round(saved))) : def.width
 }
 
 // The columns to show, in order. `customised` is true when a saved choice applies.
-export function visibleColumns(tableWidth: number, options: { phone: boolean; present?: Present; prefs?: ListPrefs | null; costAllowed?: boolean }): { columns: ColumnDef[]; customised: boolean } {
+export function visibleColumns(tableWidth: number, options: { phone: boolean; present?: Present; prefs?: ListPrefs | null; costAllowed?: boolean }): { columns: ColumnDef<ColumnId>[]; customised: boolean } {
   if (options.phone && !options.prefs?.visible) {
     // Automatic phone cards keep their compact set. Saved choices below apply
     // to cards too; their optional cells grow downward instead of scrolling.
@@ -131,25 +131,34 @@ export function visibleColumns(tableWidth: number, options: { phone: boolean; pr
   return { columns: ids.map(id => COLUMN_BY_ID.get(id)!), customised }
 }
 
-const sumWidths = (widths: Partial<Record<ColumnId, number>>) => Object.values(widths).reduce((sum, w) => sum + (w ?? 0), 0)
+const sumWidths = (widths: Partial<Record<string, number>>) => Object.values(widths).reduce<number>((sum, w) => sum + (w ?? 0), 0)
+// A loaded measurement can be narrower than the column's designed width, and
+// the exact pixels move with the platform font (the model slot measured 152px
+// here and 156px in CI, both inside the 176px design, with nothing clipped).
+// Keep the design until the value is wider. Title's minimum may still shrink
+// the result later; a saved or dragged width never comes through here.
+export function loadedFitWidth(def: { width: number; min: number; max: number }, measured: number): number {
+  if (!Number.isFinite(measured)) return def.width
+  return Math.max(def.width, Math.min(def.max, Math.max(def.min, measured)))
+}
 // The column after Title first, then the rest toward the left, so Title's edge
 // resizes its neighbour before it touches a column further away.
-function besideTitle(ids: ColumnId[]): ColumnId[] {
+function besideTitle(ids: string[]): string[] {
   const at = ids.indexOf('title')
   const after = at < 0 ? [] : ids.slice(at + 1)
   const before = at < 0 ? ids : ids.slice(0, at)
   return [...after, ...before].filter(id => id !== 'title')
 }
-function sizedWidth(id: ColumnId, prefs: ListPrefs | null | undefined, live: Partial<Record<ColumnId, number>>): boolean {
-  return live[id] !== undefined || typeof prefs?.widths?.[id] === 'number'
+function sizedWidth(id: string, prefs: ListPrefs | null | undefined, live: Partial<Record<string, number>>): boolean {
+  return live[id] !== undefined || Number.isFinite(prefs?.widths?.[id])
 }
 // Move flexible columns by `amount` px, never past min or max. Sized columns stay:
 // a width the person set is not spent to satisfy Title.
-function shiftColumns(ids: ColumnId[], out: Partial<Record<ColumnId, number>>, amount: number, dir: 'grow' | 'shrink', flexible: (id: ColumnId) => boolean) {
+function shiftColumns(ids: string[], out: Partial<Record<string, number>>, amount: number, dir: 'grow' | 'shrink', flexible: (id: string) => boolean, definitions: ReadonlyMap<string, ColumnDef>) {
   let left = Math.max(0, Math.round(amount))
   for (const id of besideTitle(ids)) {
     if (left <= 0 || !flexible(id)) continue
-    const def = COLUMN_BY_ID.get(id)!
+    const def = definitions.get(id)!
     const current = out[id]!
     const next = dir === 'shrink' ? Math.max(def.min, current - left) : Math.min(def.max, current + left)
     left -= Math.abs(next - current)
@@ -159,13 +168,13 @@ function shiftColumns(ids: ColumnId[], out: Partial<Record<ColumnId, number>>, a
 
 // How wide Title can be while every other column stays inside its min and max.
 // Columns the person already sized keep that width, so they never collapse.
-export function titleRoom(ids: ColumnId[], tableWidth: number, prefs?: ListPrefs | null, live: Partial<Record<ColumnId, number>> = {}): { min: number; max: number } {
-  const def = COLUMN_BY_ID.get('title')!
+export function titleRoom(ids: string[], tableWidth: number, prefs?: ListPrefs | null, live: Partial<Record<string, number>> = {}, definitions: ReadonlyMap<string, ColumnDef> = COLUMN_BY_ID): { min: number; max: number } {
+  const def = definitions.get('title')!
   let fixed = 0, flexMin = 0, flexMax = 0
   for (const id of ids) {
     if (id === 'title') continue
-    const col = COLUMN_BY_ID.get(id)!
-    if (sizedWidth(id, prefs, live)) fixed += live[id] ?? widthOf(id, prefs)
+    const col = definitions.get(id)!
+    if (sizedWidth(id, prefs, live)) fixed += live[id] ?? widthOf(id, prefs, definitions)
     else { flexMin += col.min; flexMax += col.max }
   }
   const fitMax = Math.floor(tableWidth - fixed - flexMin)
@@ -181,29 +190,43 @@ export function titleRoom(ids: ColumnId[], tableWidth: number, prefs?: ListPrefs
 // saved title width, Title aims for TITLE_TARGET and spare width beyond that widens
 // Epic, Tags, Assignee and Release (not ones the person sized) up to their maximum,
 // in proportion to their normal width. What is still left goes back to Title.
+// A content fit that would leave Title under its minimum shrinks, nearest column
+// first, and never moves a saved or dragged width.
 // A width the person gives Title is kept: the unsized columns beside it grow or
 // shrink, the next column first, and stop at their own min and max.
-export function layoutWidths(ids: ColumnId[], tableWidth: number, prefs?: ListPrefs | null, live: Partial<Record<ColumnId, number>> = {}): Partial<Record<ColumnId, number>> {
-  const out: Partial<Record<ColumnId, number>> = {}
-  for (const id of ids) if (id !== 'title') out[id] = live[id] ?? widthOf(id, prefs)
-  const sized = (id: ColumnId) => sizedWidth(id, prefs, live)
+export function layoutWidths(ids: string[], tableWidth: number, prefs?: ListPrefs | null, live: Partial<Record<string, number>> = {}, definitions: ReadonlyMap<string, ColumnDef> = COLUMN_BY_ID, automatic: Partial<Record<string, number>> = {}): Partial<Record<string, number>> {
+  const out: Partial<Record<string, number>> = {}
+  for (const id of ids) if (id !== 'title') out[id] = live[id] ?? (Number.isFinite(prefs?.widths?.[id]) ? widthOf(id, prefs, definitions) : automatic[id] ?? widthOf(id, prefs, definitions))
+  const sized = (id: string) => sizedWidth(id, prefs, live)
   if (sized('title')) {
-    const target = live.title ?? widthOf('title', prefs)
+    const target = live.title ?? widthOf('title', prefs, definitions)
     const spare = tableWidth - sumWidths(out) - target
-    const flexible = (id: ColumnId) => !sized(id)
-    if (spare < -0.5) shiftColumns(ids, out, -spare, 'shrink', flexible)
-    else if (spare > 0.5) shiftColumns(ids, out, spare, 'grow', flexible)
-    for (const id of Object.keys(out) as ColumnId[]) out[id] = Math.floor(out[id]!)
+    const flexible = (id: string) => !sized(id)
+    if (spare < -0.5) shiftColumns(ids, out, -spare, 'shrink', flexible, definitions)
+    else if (spare > 0.5) shiftColumns(ids, out, spare, 'grow', flexible, definitions)
+    for (const id of Object.keys(out) as string[]) out[id] = Math.floor(out[id]!)
     return out
+  }
+  const titleMin = definitions.get('title')!.min
+  // A content fit replaces the default visibleColumns budgeted beside Title.
+  // On a table that stays at the card width, give an unsized Title its minimum
+  // back from those fits, nearest column first. A saved or dragged width stays,
+  // and a fit that already leaves Title at least its minimum stays steady.
+  if (tableWidth > 0) {
+    const overflow = sumWidths(out) - (tableWidth - titleMin)
+    if (overflow > 0.5) shiftColumns(ids, out, overflow, 'shrink', id => !sized(id) && automatic[id] !== undefined, definitions)
   }
   const titleTarget = TITLE_TARGET
   let spare = tableWidth - sumWidths(out) - titleTarget
-  const growing = GROWS.filter(id => ids.includes(id) && !sized(id))
+  // Loaded-content fits stay at the width just chosen, including a shrink that
+  // keeps Title at its minimum. An explicit Title resize may still move these
+  // unsaved widths, while the person's saved widths remain fixed.
+  const growing = GROWS.filter(id => ids.includes(id) && !sized(id) && automatic[id] === undefined)
   while (spare >= 1 && growing.length) {
-    const weight = growing.reduce((sum, id) => sum + COLUMN_BY_ID.get(id)!.width, 0)
+    const weight = growing.reduce((sum, id) => sum + definitions.get(id)!.width, 0)
     let used = 0
     for (const id of [...growing]) {
-      const def = COLUMN_BY_ID.get(id)!
+      const def = definitions.get(id)!
       const add = Math.min(def.max - out[id]!, spare * def.width / weight)
       out[id] = out[id]! + add
       used += add
@@ -212,7 +235,7 @@ export function layoutWidths(ids: ColumnId[], tableWidth: number, prefs?: ListPr
     spare -= used
     if (used < 0.5) break
   }
-  for (const id of Object.keys(out) as ColumnId[]) out[id] = Math.floor(out[id]!)
+  for (const id of Object.keys(out) as string[]) out[id] = Math.floor(out[id]!)
   return out
 }
 
@@ -257,4 +280,14 @@ export function moveColumn(order: ColumnId[], id: ColumnId, step: -1 | 1): Colum
   const next = [...free]
   ;[next[index], next[to]] = [next[to], next[index]]
   return [...PINNED, ...next]
+}
+
+// Host columns are additive, ordered and unique; built-in definitions always win.
+export function withHostColumns(base: readonly ColumnDef[], extra: readonly ColumnDef[] = []): ColumnDef[] {
+  const seen = new Set<string>(COLUMN_BY_ID.keys())
+  return [...base, ...extra.filter(column => {
+    if (seen.has(column.id) || !/^[a-z][a-z0-9_-]{0,63}$/.test(column.id) || Object.hasOwn(Object.prototype, column.id)) return false
+    seen.add(column.id)
+    return true
+  })]
 }

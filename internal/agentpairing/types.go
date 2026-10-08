@@ -10,7 +10,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"github.com/jackc/pgx/v5/pgconn"
 	"io"
 	"log/slog"
 	"net/http"
@@ -28,7 +27,10 @@ import (
 	"github.com/inspr-at/paimos/internal/agentverification"
 	"github.com/inspr-at/paimos/internal/attachwatch"
 	"github.com/inspr-at/paimos/internal/authz"
+	"github.com/inspr-at/paimos/internal/hookcap"
+	"github.com/inspr-at/paimos/internal/hostcapacity"
 	"github.com/inspr-at/paimos/internal/httpapi"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // CoordinatorPermissions is the CLI coordinator key ceiling (AEON-327).
@@ -47,12 +49,18 @@ var accountRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 var providerRE = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 type Choice struct {
-	AccountKey string `json:"account_key"`
-	Harness    string `json:"harness"`
-	Label      string `json:"label"`
-	ProfileID  string `json:"model_profile_id,omitempty"`
-	Provider   string `json:"provider,omitempty"`
+	// ConfigHomeID is an opaque, computer-local identifier for an isolated
+	// config home. Paths, identities and home contents stay on the computer.
+	ConfigHomeID string `json:"config_home_id,omitempty"`
+	AccountKey   string `json:"account_key"`
+	Harness      string `json:"harness"`
+	Label        string `json:"label"`
+	ProfileID    string `json:"model_profile_id,omitempty"`
+	Provider     string `json:"provider,omitempty"`
 }
+
+const maxComputerAccounts = 32
+
 type Details struct {
 	LocalAuthPublicKey string   `json:"local_auth_public_key,omitempty"`
 	ComputerName       string   `json:"computer_name"`
@@ -82,13 +90,14 @@ type SetupProgress struct {
 }
 
 type proofRequest struct {
-	Progress        *SetupProgress `json:"progress,omitempty"`
-	TenantID        string         `json:"tenant_id"`
-	RequestID       string         `json:"request_id"`
-	DeviceSecret    string         `json:"device_secret,omitempty"`
-	LifecycleSecret string         `json:"lifecycle_secret,omitempty"`
-	Cleaned         []string       `json:"cleanup_confirmed_account_ids,omitempty"`
-	ComputerCleaned bool           `json:"computer_cleanup_confirmed,omitempty"`
+	HookCapabilities []hookcap.Capability `json:"hook_capabilities,omitempty"`
+	Progress         *SetupProgress       `json:"progress,omitempty"`
+	TenantID         string               `json:"tenant_id"`
+	RequestID        string               `json:"request_id"`
+	DeviceSecret     string               `json:"device_secret,omitempty"`
+	LifecycleSecret  string               `json:"lifecycle_secret,omitempty"`
+	Cleaned          []string             `json:"cleanup_confirmed_account_ids,omitempty"`
+	ComputerCleaned  bool                 `json:"computer_cleanup_confirmed,omitempty"`
 }
 type Verification struct {
 	Policy         string    `json:"policy"`
@@ -102,24 +111,30 @@ type Verification struct {
 	Task           string    `json:"task"`
 }
 type Enrollment struct {
-	CanVerify                bool     `json:"can_verify"`
-	LocalProcesses           string   `json:"local_processes"`
-	AccountingState          string   `json:"accounting_state"`
-	VerificationExpiredReady bool     `json:"verification_expired_ready"`
-	VerificationState        string   `json:"verification_state"`
-	VerificationError        string   `json:"verification_error"`
-	VerificationReason       string   `json:"verification_reason,omitempty"`
-	AccountID                string   `json:"account_id"`
-	AccountKey               string   `json:"account_key"`
-	Harness                  string   `json:"harness"`
-	Label                    string   `json:"label"`
-	ProfileID                string   `json:"model_profile_id"`
-	State                    string   `json:"state"`
-	Cleanup                  string   `json:"local_cleanup"`
-	VerificationRunID        *string  `json:"verification_run_id"`
-	ActiveRunIDs             []string `json:"active_run_ids"`
+	VerifiedAt               *time.Time `json:"verified_at,omitempty"`
+	VerificationExpiresAt    *time.Time `json:"verification_expires_at,omitempty"`
+	LastUsedAt               *time.Time `json:"last_used_at,omitempty"`
+	VerificationStalled      bool       `json:"verification_stalled"`
+	CanVerify                bool       `json:"can_verify"`
+	LocalProcesses           string     `json:"local_processes"`
+	AccountingState          string     `json:"accounting_state"`
+	VerificationExpiredReady bool       `json:"verification_expired_ready"`
+	VerificationState        string     `json:"verification_state"`
+	VerificationError        string     `json:"verification_error"`
+	VerificationReason       string     `json:"verification_reason,omitempty"`
+	AccountID                string     `json:"account_id"`
+	AccountKey               string     `json:"account_key"`
+	Harness                  string     `json:"harness"`
+	Label                    string     `json:"label"`
+	ProfileID                string     `json:"model_profile_id"`
+	State                    string     `json:"state"`
+	Cleanup                  string     `json:"local_cleanup"`
+	VerificationRunID        *string    `json:"verification_run_id"`
+	ActiveRunIDs             []string   `json:"active_run_ids"`
 }
 type View struct {
+	HookCapabilities          []hookcap.Capability                `json:"hook_capabilities,omitempty"`
+	HostCapacity              *hostcapacity.View                  `json:"host_capacity,omitempty"`
 	LocalAuthPinned           *bool                               `json:"local_auth_pinned,omitempty"`
 	AgentRelease              agentcompat.Release                 `json:"agent_release"`
 	AgentCompatibility        agentcompat.Result                  `json:"agent_compatibility"`
@@ -226,26 +241,46 @@ func validateDevice(in deviceRequest) error {
 	if !uuidRE.MatchString(in.RequestID) || (in.TenantID == "") == (in.TenantSlug == "") || in.TenantID != "" && !uuidRE.MatchString(in.TenantID) || !hashRE.MatchString(in.DeviceHash) || !hashRE.MatchString(in.RuntimeHash) || !hashRE.MatchString(in.LifecycleHash) || in.DeviceHash == in.RuntimeHash || in.DeviceHash == in.LifecycleHash || in.RuntimeHash == in.LifecycleHash {
 		return fail(400, "invalid_request", "distinct commitments, request UUID and exactly one tenant selector required")
 	}
-	if !safeText(in.ComputerName, 128) || !safeText(in.Workspace, 1024) || !path.IsAbs(in.Workspace) || path.Clean(in.Workspace) != in.Workspace || in.Workspace == "/" || (in.Platform != "darwin" && in.Platform != "linux") || (in.Arch != "arm64" && in.Arch != "amd64") || len(in.Capabilities) != 1 || in.Capabilities[0] != "managed_runs" || len(in.Accounts) < 1 || len(in.Accounts) > len(agentverification.Harnesses()) {
+	if !safeText(in.ComputerName, 128) || !safeText(in.Workspace, 1024) || !path.IsAbs(in.Workspace) || path.Clean(in.Workspace) != in.Workspace || in.Workspace == "/" || (in.Platform != "darwin" && in.Platform != "linux") || (in.Arch != "arm64" && in.Arch != "amd64") || len(in.Capabilities) != 1 || in.Capabilities[0] != "managed_runs" || len(in.Accounts) < 1 || len(in.Accounts) > maxComputerAccounts {
 		return fail(400, "invalid_request", "invalid computer, folder, capabilities or account selection")
 	}
-	seen := map[string]bool{}
+	if err := validateAccountChoices(in.Accounts); err != nil {
+		return err
+	}
+	if in.ExistingComputerID != "" && (!uuidRE.MatchString(in.ExistingComputerID) || !hashRE.MatchString(in.ExistingProof)) || in.ExistingComputerID == "" && in.ExistingProof != "" {
+		return fail(400, "invalid_request", "existing computer proof required")
+	}
+	return nil
+}
+
+func validateAccountChoices(accounts []Choice) error {
+	if len(accounts) > maxComputerAccounts {
+		return fail(400, "invalid_request", "at most 32 accounts per computer")
+	}
+	seen := map[string]string{}
 	seenAccounts := map[string]bool{}
-	for _, a := range in.Accounts {
-		if !accountRE.MatchString(a.AccountKey) || !safeText(a.Label, 128) || a.ProfileID != "" && !uuidRE.MatchString(a.ProfileID) || seen[a.Harness] || seenAccounts[a.AccountKey] {
-			return fail(400, "invalid_request", "choose exactly one identified account per harness")
+	seenHomes := map[string]bool{}
+	for _, a := range accounts {
+		if !accountRE.MatchString(a.AccountKey) || !safeText(a.Label, 128) || a.ProfileID != "" && !uuidRE.MatchString(a.ProfileID) || seenAccounts[a.AccountKey] || a.ConfigHomeID != "" && !hashRE.MatchString(a.ConfigHomeID) {
+			return fail(400, "invalid_request", "each account needs a unique account key and a valid isolated config-home identifier")
+		}
+		if home, exists := seen[a.Harness]; exists && (home == "" || a.ConfigHomeID == "") {
+			return fail(400, "invalid_request", "several accounts for a harness require a separate isolated config home for each; without isolation choose one account")
+		}
+		if a.ConfigHomeID != "" && seenHomes[a.ConfigHomeID] {
+			return fail(400, "invalid_request", "each account needs its own isolated config home")
 		}
 		if !slices.Contains(agentverification.Harnesses(), a.Harness) {
 			return fail(400, "invalid_request", "unsupported harness")
 		}
-		seen[a.Harness] = true
+		seen[a.Harness] = a.ConfigHomeID
+		if a.ConfigHomeID != "" {
+			seenHomes[a.ConfigHomeID] = true
+		}
 		if a.Provider != "" && (a.Harness != "pi" || !providerRE.MatchString(a.Provider)) {
 			return fail(400, "invalid_request", "invalid pi provider binding")
 		}
 		seenAccounts[a.AccountKey] = true
-	}
-	if in.ExistingComputerID != "" && (!uuidRE.MatchString(in.ExistingComputerID) || !hashRE.MatchString(in.ExistingProof)) || in.ExistingComputerID == "" && in.ExistingProof != "" {
-		return fail(400, "invalid_request", "existing computer proof required")
 	}
 	return nil
 }

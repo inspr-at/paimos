@@ -186,7 +186,10 @@ func routingAdvice(ctx context.Context, tx pgx.Tx, accounts []Account, profile s
 }
 
 // NextForRun is also used by the vendor-stop handoff. It preserves the original
-// requested-account fence and the owning principal/daemon; it writes nothing.
+// requested-account fence and writes nothing. A daemon_id string is chosen by
+// the caller and is visible to other principals, so it is not authority.
+// Keep a candidate only when the daemon and harness match and this run's agent
+// registered the account or a connected enrollment binds it to that agent.
 func NextForRun(ctx context.Context, tx pgx.Tx, runID, daemonID, only, exclude string, now time.Time, residency ...string) (CapacityNext, error) {
 	run, err := loadWaitRun(ctx, tx, runID)
 	if err != nil {
@@ -207,9 +210,16 @@ func NextForRun(ctx context.Context, tx pgx.Tx, runID, daemonID, only, exclude s
 	if err != nil {
 		return CapacityNext{}, err
 	}
+	bound, err := computerAccountIDs(ctx, tx, run.AgentID)
+	if err != nil {
+		return CapacityNext{}, err
+	}
 	kept := []Account{}
 	for _, a := range accounts {
-		if a.RegisteredBy != run.AgentID || a.DaemonID != daemonID || a.Harness != harness || a.ID == exclude || only != "" && a.ID != only {
+		if a.DaemonID != daemonID || a.Harness != harness || a.ID == exclude || only != "" && a.ID != only {
+			continue
+		}
+		if a.RegisteredBy != run.AgentID && !bound[a.ID] {
 			continue
 		}
 		kept = append(kept, a)
@@ -287,8 +297,15 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		accounts := []Account{}
+		bound := map[string]bool{}
+		if ownOnly {
+			bound, err = computerAccountIDs(r.Context(), tx, p.ID)
+			if err != nil {
+				return err
+			}
+		}
 		for _, a := range all {
-			if a.Harness == harness && (daemon == "" || a.DaemonID == daemon) && (!ownOnly || a.RegisteredBy == p.ID) {
+			if a.Harness == harness && (daemon == "" || a.DaemonID == daemon) && (!ownOnly || a.RegisteredBy == p.ID || bound[a.ID]) {
 				accounts = append(accounts, a)
 			}
 		}
@@ -308,6 +325,32 @@ func (m *Module) capacityNext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpapi.WriteJSON(w, 200, out)
+}
+
+// A daemon string alone is not authority over another registrar's account.
+// Connected pairing enrollments bind all of the computer's accounts to its
+// runtime principal, including accounts enrolled by a different registrar.
+func computerAccountIDs(ctx context.Context, tx pgx.Tx, principal string) (map[string]bool, error) {
+	rows, err := tx.Query(ctx, `SELECT e.account_id::text FROM agent_pairing_enrollments e
+ JOIN agent_pairing_computers c ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
+ JOIN agent_accounts a ON a.tenant_id=e.tenant_id AND a.id=e.account_id
+ WHERE c.principal_id=$1 AND c.state='connected' AND e.state='connected' AND a.daemon_id=c.daemon_id LIMIT 1025`, principal)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out[id] = true
+		if len(out) > 1024 {
+			return nil, fail(503, "too many enrolled computer accounts")
+		}
+	}
+	return out, rows.Err()
 }
 
 // VendorRetryAt returns vendor truth when a stop includes a reset, otherwise a

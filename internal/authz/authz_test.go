@@ -67,9 +67,21 @@ func TestRegistryAndBuiltins(t *testing.T) {
 	}
 }
 
+func TestViewerReadsStoredReviewPolicy(t *testing.T) {
+	// Risk: Policies is open to viewers, and an unread rule looks like the stored default.
+	viewer, ok := BuiltinPermissions("viewer")
+	if !ok || !contains(viewer, "reviewpolicy.read") || contains(viewer, "reviewpolicy.manage") {
+		t.Fatal("viewers load the stored review rule and cannot manage it")
+	}
+	guest, ok := BuiltinPermissions("guest")
+	if !ok || contains(guest, "reviewpolicy.read") || contains(guest, "reviewpolicy.manage") {
+		t.Fatal("guests do not receive the review rule")
+	}
+}
+
 func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
-	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage"}) {
-		t.Fatal("built-in agent exclusions drifted from the explicit recurrence policy")
+	if !slices.Equal(builtinAgentExclusions, []string{"recurrences.manage", "delivery.manage", "delivery_queue.manage", "delivery_queue.claim", "reviewpolicy.manage", "account.overview.read", "events.subscribe"}) {
+		t.Fatal("built-in agent exclusions drifted from the explicit recurrence, delivery, review, overview and subscription policies")
 	}
 	for _, key := range builtinAgentExclusions {
 		permission, ok := Lookup(key)
@@ -77,6 +89,12 @@ func TestBuiltinAgentExclusionsDefinition(t *testing.T) {
 			t.Fatal("an explicit custom-role permission must remain agent-grantable")
 		}
 		for _, role := range []string{"owner", "admin", "member"} {
+			if (key == "delivery.manage" || key == "delivery_queue.manage" || key == "delivery_queue.claim" || key == "reviewpolicy.manage") && role == "member" {
+				if contains(builtinPermissions(role), key) {
+					t.Fatal("delivery and review-policy management should require an explicit member grant")
+				}
+				continue
+			}
 			if !contains(builtinPermissions(role), key) {
 				t.Fatalf("agent exclusions must leave person %s grants intact", role)
 			}
@@ -181,6 +199,13 @@ func TestStatusHelpAgentReadRequiresAuthentication(t *testing.T) {
 		if err := RequirePattern(ctx, route, Scope{}); !errors.Is(err, ErrForbidden) {
 			t.Errorf("unexpected status route authority: %s: %v", route, err)
 		}
+	}
+}
+
+func TestUsageProbeRouteRequiresAccountManage(t *testing.T) {
+	const route = "PUT /api/agent-accounts/{accountId}/usage-probe"
+	if got, ok := PermissionForPattern(route); !ok || got != "account.manage" {
+		t.Fatalf("usage probe route permission %q, declared=%v; want account.manage", got, ok)
 	}
 }
 
@@ -347,7 +372,7 @@ func TestLinkedAliasAndLegacyAgentMigration(t *testing.T) {
 		if err := tx.QueryRow(ctx, `INSERT INTO principals(tenant_id,kind,name) VALUES($1::uuid,'agent','aeon-coordinator') RETURNING id::text`, tid).Scan(&agentID); err != nil {
 			return err
 		}
-		if _, err := tx.Exec(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes) VALUES($1::uuid,$2::uuid,'legacy','az1-migration','unused',$3)`, tid, agentID, scopes); err != nil {
+		if _, err := tx.Exec(ctx, `INSERT INTO agent_keys(tenant_id,principal_id,name,prefix,hash,scopes,created_by_principal_id) VALUES($1::uuid,$2::uuid,'legacy','az1-migration','unused',$3,(SELECT id FROM principals WHERE tenant_id=$1::uuid AND kind='person' ORDER BY created_at,id LIMIT 1))`, tid, agentID, scopes); err != nil {
 			return err
 		}
 		if _, err := tx.Exec(ctx, `SELECT aeon_bind_legacy_principal($1::uuid,$2::uuid)`, tid, aliasID); err != nil {

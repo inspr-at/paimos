@@ -345,7 +345,7 @@ func TestTicketGraphAgentKeyScope(t *testing.T) {
 	handler := (&httpapi.Server{Pool: appPool, Modules: []httpapi.Module{mod, New(appPool, nil)}, Middleware: []func(http.Handler) http.Handler{mod.Middleware}}).Handler()
 	key := func(name string, scopes []string) string {
 		t.Helper()
-		_, _, token, err := auth.OperatorCreateAgentKey(t.Context(), appPool, p.TenantID, name, "", scopes, nil)
+		_, _, token, err := auth.OperatorCreateAgentKey(t.Context(), appPool, p.TenantID, name, "", scopes, nil, p.ID)
 		if err != nil {
 			t.Fatal(err)
 		}

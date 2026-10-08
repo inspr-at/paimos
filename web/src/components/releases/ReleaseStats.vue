@@ -22,10 +22,10 @@ const stats = computed(() => releaseStats(props.releases, props.now))
 </template>
 
 <style scoped>
-.overview { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 14px; align-items: stretch; --card-glow: rgba(14, 111, 108, .35); }
+.overview { display: grid; grid-template-columns: minmax(320px, 400px) minmax(0, 1fr); gap: 14px; align-items: stretch; --card-glow: color-mix(in srgb, var(--primary-line) 35%, transparent); }
 .overview > :only-child { grid-column: 1 / -1; }
-:root[data-theme="dark"] .overview { --card-glow: rgba(0, 0, 0, .55); }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .overview { --card-glow: rgba(0, 0, 0, .55); } }
+:root[data-theme="dark"] .overview { --card-glow: color-mix(in srgb, var(--shadow-black) 55%, transparent); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .overview { --card-glow: color-mix(in srgb, var(--shadow-black) 55%, transparent); } }
 @media (max-width: 900px) { .overview { grid-template-columns: minmax(0, 1fr); } }
 .overview.compact { grid-template-columns: minmax(0, 1fr); gap: 12px; }
 </style>

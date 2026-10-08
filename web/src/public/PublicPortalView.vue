@@ -515,7 +515,7 @@ h2 { margin: 0 0 8px; font: 650 22px/1.2 var(--serif); letter-spacing: -0.02em; 
   min-width: 0;
   border-radius: 16px;
   background: var(--surface-raised);
-  box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(20, 40, 40, 0.04);
+  box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-color) 4%, transparent);
 }
 .figure { flex: 1 1 160px; padding: 16px 18px; }
 .figure strong { display: block; font: 650 28px/1.1 var(--serif); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
@@ -544,7 +544,7 @@ h2 { margin: 0 0 8px; font: 650 22px/1.2 var(--serif); letter-spacing: -0.02em; 
   min-width: 0;
   border-radius: 16px;
   background: var(--surface-raised);
-  box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px rgba(20, 40, 40, 0.04);
+  box-shadow: inset 0 0 0 1px var(--line), 0 1px 2px color-mix(in srgb, var(--shadow-color) 4%, transparent);
 }
 .card { padding: 18px; }
 .card-top, .wish { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px 16px; }

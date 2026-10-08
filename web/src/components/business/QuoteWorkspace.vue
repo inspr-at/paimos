@@ -644,7 +644,7 @@ defineExpose({ focus: () => root.value?.focus({ preventScroll: true }), issue, r
 .notice svg { flex-shrink: 0; color: var(--ink-3); }
 .notice span { flex: 1; min-width: 12em; text-wrap: pretty; }
 .notice.warn { background: var(--gold-wash); }
-.notice.warn svg { color: var(--gold-ink); }
+.notice.warn svg { color: var(--warn-ink); }
 .notice.bad { background: var(--danger-bg); box-shadow: inset 0 0 0 1px var(--danger-line); }
 .notice.bad svg { color: var(--danger); }
 /* A refused save: what to fix, each with the way to it. */

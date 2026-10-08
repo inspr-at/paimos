@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { estimates, hostTick, normalizeScope, prediction, predictWindDown, selectedAgent, toggleScope } from '../src/lib/agentPause.ts'
+import { estimates, hostTick, normalizeScope, prediction, predictWindDown, selectedAgent, toggleScope, windDownResult } from '../src/lib/agentPause.ts'
 import { assessAgentState } from '../src/lib/agentSignals.ts'
 import type { HarnessSessionRow } from '../src/lib/agentRows.ts'
 const now = Date.parse('2026-10-02T09:30:00Z'), minute = 60_000
@@ -52,10 +52,39 @@ test('planning counts down from its report and stale or cleared snapshots never 
   assert.match(prediction(row({ pause_progress: progress({ interrupt: false }) }), 'pause_quickly', now, 10).detail, /No estimate/)
   assert.equal(estimates(s, now, null).fresh, false)
 })
+test('AEON-783: a saved handover, a confirmed stop and lost contact are different wind-down results', () => {
+  const stopped = { phase: 'stopped' as const, stopped_at: new Date(now).toISOString() }
+  assert.equal(windDownResult(row({ pause: { state: 'requested' } })), 'running')
+  assert.equal(windDownResult(row({ pause: { state: 'cancelled', stop_requested: true, level: 'stop_now' } })), 'running')
+  assert.equal(windDownResult(row({ ...stopped, stop_reason: 'paused', pause: { state: 'paused', handover: { state: 'saved', next_steps: ['Continue'], open_questions: [], worktree_state: 'committed' } } })), 'handover')
+  assert.equal(windDownResult(row({ ...stopped, stop_reason: 'stopped', finished: true, pause: { state: 'cancelled', level: 'stop_now', stop_requested: true } })), 'terminal')
+  assert.equal(windDownResult(row({ ...stopped, stop_reason: 'stopped', pause: { state: 'cancelled' } })), 'terminal')
+  assert.equal(windDownResult(row({ ...stopped, stop_reason: 'heartbeat_lost', pause: { state: 'requested' } })), 'lost')
+  assert.equal(windDownResult(row({ ...stopped, stop_reason: 'heartbeat_lost', pause: { state: 'requested', handover: { state: 'partial', next_steps: [], open_questions: [], worktree_state: 'clean' } } })), 'lost')
+})
 test('paused is resumable evidence, scheduled pauses stay working and stop requests do not claim exit', () => {
   assert.equal(assessAgentState({ ...row(), pause: { state: 'requested', deliver: false } }, now).state, 'working')
   assert.equal(assessAgentState({ ...row(), pause: { state: 'planned', deliver: true } }, now).state, 'pausing')
   assert.equal(assessAgentState({ ...row({ heartbeat_at: new Date(now - 21 * minute).toISOString() }), pause: { state: 'requested', deliver: true } }, now).state, 'unresponsive')
-  assert.equal(assessAgentState({ ...row(), pause: { state: 'cancelled', stop_requested: true } }, now).state, 'working')
+  assert.equal(assessAgentState({ ...row(), pause: { state: 'cancelled', stop_requested: true } }, now).state, 'pausing')
   assert.equal(assessAgentState({ ...row({ phase: 'stopped' }), pause: { state: 'paused' } }, now).state, 'paused')
+})
+
+test('stop requests remain visible through stale heartbeats until a worker stop report', () => {
+  for (const activity of ['busy', 'idle', 'throttled']) for (const heartbeat_at of [new Date(now).toISOString(), new Date(now - 21 * minute).toISOString()]) {
+    const requested = { ...row({ activity, heartbeat_at }), pause: { state: 'cancelled', stop_requested: true } }
+    const pending = assessAgentState(requested, now)
+    assert.equal(pending.state, 'pausing')
+    assert.equal(pending.label, 'Stop requested')
+    assert.match(pending.reasons[0]!.detail, /not confirmed/)
+    const confirmed = assessAgentState({ ...requested, phase: 'stopped', stopped_at: new Date(now).toISOString(), stop_reason: 'stopped' }, now)
+    assert.equal(confirmed.state, 'stopped')
+    assert.equal(confirmed.label, 'Stopped')
+  }
+  // The reporter's default reason is not a person stop. This fails while every
+  // stop_reason "stopped" is labelled Stopped (ad3f6605).
+  const plain = assessAgentState({ ...row({ phase: 'stopped', stopped_at: new Date(now).toISOString(), stop_reason: 'stopped', progress_pct: 100, finished: false }) }, now)
+  assert.equal(plain.state, 'stopped')
+  assert.equal(plain.label, 'Ended')
+  assert.equal(assessAgentState({ ...row(), pause: { state: 'cancelled', stop_requested: false } }, now).label, 'Working')
 })

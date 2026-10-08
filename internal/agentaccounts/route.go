@@ -372,6 +372,10 @@ func authorizeRoute(ctx context.Context, tx pgx.Tx, r *http.Request, p tenant.Pr
 }
 
 func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemonID string, enrolled map[string]bool) (RouteResult, bool, error) {
+	bound, err := computerAccountIDs(ctx, tx, principalID)
+	if err != nil {
+		return RouteResult{}, false, err
+	}
 	rows, err := tx.Query(ctx, `
 		SELECT r.id::text, r.window_id::text, w.unit, a.id::text, a.account_key, a.daemon_id,
 		       a.registered_by_principal_id::text, a.label, a.billing_mode, a.plan, w.pairing_verification, w.ends_at, w.allowance
@@ -393,7 +397,7 @@ func activeRoute(ctx context.Context, tx pgx.Tx, run runRow, principalID, daemon
 		if err := rows.Scan(&item.ReservationID, &item.WindowID, &item.Unit, &accountID, &key, &ownerDaemonID, &ownerID, &label, &billing, &plan, &window.pairingVerification, &window.EndsAt, &window.Allowance); err != nil {
 			return RouteResult{}, false, err
 		}
-		if ownerDaemonID != daemonID || ownerID != principalID || !enrolled[accountID] {
+		if ownerDaemonID != daemonID || ownerID != principalID && !bound[accountID] || !enrolled[accountID] {
 			return RouteResult{}, false, fail(http.StatusConflict, "run is routed outside daemon enrollment")
 		}
 		window.AccountID, window.Unit = accountID, item.Unit
@@ -441,7 +445,11 @@ func selectAccount(ctx context.Context, tx pgx.Tx, run runRow, principalID, harn
 		       registered_by_principal_id::text, state, last_probe_at, last_probe_ok,
 		       last_daemon_generation, created_at, plan, host_label, allowed_model_profile_ids::text[], reading_support, quota_fingerprint, statusline_enabled, provider, model, model_status, model_data_note, openrouter_credits, COALESCE(group_id::text,''), quota_pool_fingerprint, billing_mode
 		FROM agent_accounts
-		WHERE harness = $1 AND daemon_id = $2 AND registered_by_principal_id = $3::uuid
+		WHERE harness = $1 AND daemon_id = $2 AND (registered_by_principal_id = $3::uuid OR EXISTS (
+          SELECT 1 FROM agent_pairing_enrollments e JOIN agent_pairing_computers c
+          ON c.tenant_id=e.tenant_id AND c.id=e.computer_id
+          WHERE e.tenant_id=agent_accounts.tenant_id AND e.account_id=agent_accounts.id
+            AND c.principal_id=$3::uuid AND c.daemon_id=$2 AND c.state='connected' AND e.state='connected'))
 		  AND id::text = ANY($4::text[]) AND state = 'available'
           AND (allowed_model_profile_ids IS NULL OR $5::uuid = ANY(allowed_model_profile_ids))
 		ORDER BY id

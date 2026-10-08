@@ -48,6 +48,7 @@ func (m *module) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/accept", m.handleAcceptLearning)
 	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/dismiss", m.handleDismissLearning)
 	mux.HandleFunc("POST /api/knowledge/learnings/{learningId}/draft", m.handleDraftLearning)
+	mux.HandleFunc("PUT /api/knowledge/learnings/{learningId}/recommendation", m.handleRecommendLearning)
 	mux.HandleFunc("GET /api/knowledge/{id}", m.handleGet)
 	mux.HandleFunc("PATCH /api/knowledge/{id}", m.handleUpdate)
 	mux.HandleFunc("DELETE /api/knowledge/{id}", m.handleDelete)

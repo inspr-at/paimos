@@ -35,8 +35,8 @@ it('theme appearance overrides legacy preferences everywhere while keeping heart
   await restoreAgentTheme('tenant/alice')
   expect(indicator.choice.value).toEqual({ style: 'sprite', hovering: true })
   expect(states.choice.value).toMatchObject({ palette: 'tritan', dimInactive: false, inactiveOpacity: 72, yellowMinutes: 8, redMinutes: 21 })
-  expect(states.appearance('waiting')['--agent-state-color']).toBe('var(--agent-tritan-waiting)')
-  expect(states.appearance('idle')['--agent-state-opacity']).toBe('1')
+  expect(states.appearance('waiting')['--agent-state-color']).toBe('var(--agent-waiting)')
+  expect(states.appearance('idle')['--agent-state-opacity']).toBe('var(--agent-idle-opacity)')
 })
 
 it('late theme reads cannot overwrite a newer confirmed theme or a different person', async () => {

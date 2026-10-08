@@ -40,6 +40,7 @@ import RelationPicker from './RelationPicker.vue'
 import TicketAgentWork from './TicketAgentWork.vue'
 import TicketOutcomes from './TicketOutcomes.vue'
 import TicketReviews from './TicketReviews.vue'
+import TicketDelivery from './TicketDelivery.vue'
 import TicketHeaderBar from './TicketHeaderBar.vue'
 import TicketProperties from './TicketProperties.vue'
 import TicketBenefits from './TicketBenefits.vue'
@@ -50,8 +51,10 @@ import { can } from '../../lib/authz'
 import { AssignCancelled, assignToRelease, type ReleaseTarget } from '../../lib/releaseAssign'
 import { openedMembershipMessage, releaseViewIsParent, type NativeReleaseView } from '../../lib/releaseMembership'
 import ReleasePicker from './ReleasePicker.vue'
-import { useJourney } from '../../stores/journey'
 import QueueAction from './QueueAction.vue'
+import ParentQueueAction from './ParentQueueAction.vue'
+import TicketLeadLine from './TicketLeadLine.vue'
+import { useDeveloperSettings } from '../../lib/developerSettings'
 import WorkLifecycleSheet from './WorkLifecycleSheet.vue'
 import QueueDetails from './QueueDetails.vue'
 import QueueView from './QueueView.vue'
@@ -73,6 +76,7 @@ const props = defineProps<{
   project: { id: string; routeKey: string }; names: Map<string, string>
   me: { id: string; name: string } | null; canWrite: boolean; canDelete: boolean; canMove: boolean; canLink: boolean; canUnlink: boolean
   canComment: boolean; canDeleteComment: boolean; canAttach: boolean; people: { id: string; name: string }[]
+  ensurePeople?: () => Promise<void>
   nativeReleases?: Map<string, NativeReleaseView>
   // Tickets followed to get here, oldest first (the panel's back trail).
   trail?: string[]
@@ -190,9 +194,13 @@ watch(() => props.project.id, id => { void queue.load(id) }, { immediate: true }
 onMounted(() => queuePoller.start())
 onBeforeUnmount(() => queuePoller.stop())
 const canQueue = computed(() => props.item?.is_leaf !== false && !ticket.readOnly.value && !ticket.gone.value && can('run.create', props.project.id))
+// AEON-741: a parent queues its open leaves; Start now on… is an expert control.
+const parentQueue = ref<InstanceType<typeof ParentQueueAction>>()
+const openLeaves = ref<number | null>(null)
+const canQueueParent = computed(() => props.item?.is_leaf === false && !ticket.readOnly.value && !ticket.gone.value && can('run.create', props.project.id))
+const { showExpertStart } = useDeveloperSettings()
 const canRelease = computed(() => editable.value && !!props.item && can('releases.write', props.project.id))
 const releaseView = computed(() => props.nativeReleases?.get(props.item?.id ?? ''))
-const journeys = useJourney()
 
 // ---------- Following links: a modified click opens a new tab ----------
 let modifiedClick = false
@@ -355,14 +363,24 @@ async function cancelEdit() {
 // digits, a filter for people), styled as form fields; a choice only edits the draft.
 const uid = useId()
 const editMenu = ref<{ kind: 'status' | 'priority' | 'assignee'; anchor: HTMLElement } | null>(null)
-function openEditMenu(kind: 'status' | 'priority' | 'assignee', event: Event) {
+let menuGeneration = 0
+onBeforeUnmount(() => { menuGeneration++ })
+async function preparePeople(anchor: HTMLElement, request: number) {
+  const id = item.value?.id, revision = item.value?.updated_at, project = props.project.id
+  await props.ensurePeople?.()
+  return request === menuGeneration && anchor.isConnected && item.value?.id === id && item.value?.updated_at === revision && props.project.id === project
+}
+async function openEditMenu(kind: 'status' | 'priority' | 'assignee', event: Event) {
+  const request = ++menuGeneration
   const anchor = event.currentTarget as HTMLElement
-  editMenu.value = editMenu.value?.kind === kind ? null : { kind, anchor }
+  if (editMenu.value?.kind === kind) { closeEditMenu(false); return }
+  if (kind === 'assignee' && (!(await preparePeople(anchor, request)) || !editing.value || !editable.value)) return
+  editMenu.value = { kind, anchor }
 }
 function editMenuKeys(kind: 'status' | 'priority' | 'assignee', event: KeyboardEvent) {
   if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); if (editMenu.value?.kind !== kind) openEditMenu(kind, event) }
 }
-function closeEditMenu(restore: boolean) { const anchor = editMenu.value?.anchor; editMenu.value = null; if (restore) anchor?.focus() }
+function closeEditMenu(restore: boolean) { menuGeneration++; const anchor = editMenu.value?.anchor; editMenu.value = null; if (restore) anchor?.focus() }
 function chooseEdit(kind: 'status' | 'priority' | 'assignee', value: string) {
   if (kind === 'status') draft.state = value
   else if (kind === 'priority') draft.priority = value
@@ -462,9 +480,13 @@ function copy(text: string, label: string) {
 function anchorFor(shortcut: string) {
   return [...(root.value?.querySelectorAll<HTMLElement>(`[aria-keyshortcuts="${shortcut}"]`) ?? [])].find(el => el.getClientRects().length) ?? null
 }
-function openMenu(kind: 'priority' | 'assignee' | 'epic' | 'release', anchor: HTMLElement | null) {
+async function openMenu(kind: 'priority' | 'assignee' | 'epic' | 'release', anchor: HTMLElement | null) {
+  const request = ++menuGeneration
   if (!anchor) return
-  if (kind === 'release' ? canRelease.value : kind === 'epic' ? movable.value : kind === 'assignee' ? editable.value || canQueue.value : editable.value) menu.value = { kind, anchor }
+  if (kind === 'release' ? canRelease.value : kind === 'epic' ? movable.value : kind === 'assignee' ? editable.value || canQueue.value : editable.value) {
+    if (kind === 'assignee' && (!(await preparePeople(anchor, request)) || (!editable.value && !canQueue.value))) return
+    menu.value = { kind, anchor }
+  }
 }
 async function chooseRelease(target: ReleaseTarget) {
   const it = item.value
@@ -474,7 +496,6 @@ async function chooseRelease(target: ReleaseTarget) {
   menu.value = null
   try {
     const outcome = await assignToRelease(projectId, [ticket], target)
-    if (outcome.journey) journeys.set(projectId, outcome.journey)
     if (!releaseChoiceAlive || props.project.id !== projectId || props.item?.id !== ticket.id) return
     const changed = outcome.opened ? openedMembershipMessage(outcome.opened) : null
     if (changed) {
@@ -509,7 +530,7 @@ async function undoRelease(eventId: number, key: string) {
     toast(error instanceof APIError && error.status === 409 ? 'The release changed since, so nothing was undone.' : `Undo did not work: ${error instanceof Error ? error.message : 'unknown error'}`, { tone: 'error' })
   }
 }
-function closeMenu(restore: boolean) { const anchor = menu.value?.anchor; menu.value = null; if (restore) anchor?.focus() }
+function closeMenu(restore: boolean) { menuGeneration++; const anchor = menu.value?.anchor; menu.value = null; if (restore) anchor?.focus() }
 async function choosePriority(value: string) { const anchor = menu.value?.anchor; menu.value = null; anchor?.focus(); await ticket.setPriority(value || null) }
 async function chooseAssignee(value: string) {
   const anchor = menu.value?.anchor; menu.value = null; anchor?.focus()
@@ -575,10 +596,11 @@ function focus() { root.value?.focus({ preventScroll: true }) }
 function queueKey(event: KeyboardEvent) {
   const repeatTarget = event.target as HTMLElement | null
   if (event.key.toUpperCase() === 'R' && event.shiftKey && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.altKey && !editing.value && !repeatTarget?.isContentEditable && !repeatTarget?.closest('input, textarea, select') && !document.querySelector('dialog[open], .floating') && mayRepeat.value) { event.preventDefault(); event.stopPropagation(); repeat(); return }
-  if (event.key !== 'q' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || editing.value || !queueAction.value || document.querySelector('.floating')) return
+  const action = queueAction.value ?? parentQueue.value
+  if (event.key !== 'q' || event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || editing.value || !action || document.querySelector('.floating')) return
   const target = event.target as HTMLElement | null
   if (target?.isContentEditable || target?.closest('input, textarea, select')) return
-  event.preventDefault(); event.stopPropagation(); void queueAction.value.toggle()
+  event.preventDefault(); event.stopPropagation(); void action.toggle()
 }
 defineExpose({
   el: root, focus, isDirty, discard,
@@ -588,7 +610,7 @@ defineExpose({
   startEdit, editing,
   openStatus: () => { const anchor = anchorFor('s'); if (anchor && editable.value) emit('status', anchor) },
   openPriority: () => openMenu('priority', anchorFor('p')),
-  toggleQueue: () => queueAction.value?.toggle(),
+  toggleQueue: () => (queueAction.value ?? parentQueue.value)?.toggle(),
   openAssignee: () => openMenu('assignee', anchorFor('a')),
   openRelease: () => openMenu('release', anchorFor('g')),
   openLink: () => openLink(anchorFor('r')),
@@ -615,7 +637,7 @@ defineExpose({
       @edit-recurrence="editRecurrence"
       @work-actions="workActionsOpen = true"
     >
-      <template #queue><QueueAction v-if="item && canQueue" ref="queueAction" :row="item" :project-id="project.id" label /></template>
+      <template #queue><QueueAction v-if="item && canQueue" ref="queueAction" :row="item" :project-id="project.id" label /><ParentQueueAction v-else-if="item && canQueueParent" ref="parentQueue" :row="item" :project-id="project.id" @preview="count => openLeaves = count" /></template>
       <template v-if="item?.recurrence" #marker><RecurringPill :recurrence="item.recurrence" /></template>
     </TicketHeaderBar>
     <p class="sr-only" role="status" aria-live="polite">{{ ticket.liveMessage.value }}</p>
@@ -688,6 +710,7 @@ defineExpose({
         <div class="ws-main">
           <p v-if="!editable" class="read-only" role="note"><AppIcon name="alert" :size="13" />You can read this {{ workNoun(workLabel(item, vocabulary.value)) }} but not change it.</p>
           <InlineTitle :record-id="item.id" ref="title" :class="{ 'live-tint': liveTint.title }" :value="item.title" :editable="editable" :large="mode === 'full'" :save="record.setTitle" />
+          <TicketLeadLine :item="item" :project-id="project.id" :project-key="project.routeKey" :open-leaves="item.is_leaf === false ? openLeaves : null" />
           <TicketProperties
             class="ws-props" :class="{ 'only-narrow': mode === 'full', 'live-tint': liveTint.props }" :item="item" :editable="editable" layout="row" :now="now"
             :release-view="releaseView" :release-editable="canRelease" :save-estimate="ticket.setEstimate" :save-placement="fields => ticket.patch({ fields })" :queue-editable="canQueue" :queue-entry="queueEntry"
@@ -698,7 +721,7 @@ defineExpose({
             <QueueDetails :entry="queueEntry" :manual="queue.snapshots[project.id]?.manual_order" />
             <div class="q-card-acts">
               <button v-if="!queueEntry.target_agent_id" type="button" class="btn sm" :disabled="!canQueue || queue.busy || queue.firstShared(project.id)?.ticket_id === item.id" @click="queue.move(project.id, item.id, 'top').catch(e => toast(e.message, { tone: 'error' }))"><AppIcon name="to-top" :size="13" />Move to top</button>
-              <button v-if="item.is_leaf !== false" type="button" class="btn sm" :disabled="!canQueue" @click="openMenu('assignee', $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="12" />Start now on…</button>
+              <button v-if="item.is_leaf !== false && showExpertStart" type="button" class="btn sm" :disabled="!canQueue" @click="openMenu('assignee', $event.currentTarget as HTMLElement)"><AppIcon name="play" :size="12" />Start now on…</button>
               <button type="button" class="btn sm ghost" :disabled="!canQueue || queue.busy" @click="queue.remove(project.id, item.id).catch(e => toast(e.message, { tone: 'error' }))"><AppIcon name="close" :size="13" />Remove</button>
               <button type="button" class="btn sm ghost" @click="queueAnchor = $event.currentTarget as HTMLElement"><AppIcon name="queue" :size="13" />Open the queue</button>
             </div>
@@ -739,6 +762,7 @@ defineExpose({
           <TicketAgentWork v-if="['work','ticket','epic','task'].includes(item.kind_slug)" class="ws-block" :node-id="item.id" :kind="item.kind_slug" :level-name="workLabel(item, vocabulary.value)" />
           <TicketOutcomes v-if="['work', 'ticket'].includes(item.kind_slug)" class="ws-block" :node-id="item.id" />
           <TicketReviews v-if="['work', 'ticket', 'task'].includes(item.kind_slug)" :key="item.id" class="ws-block" :node-id="item.id" :project-id="project.id" />
+          <TicketDelivery v-if="['work', 'ticket', 'task'].includes(item.kind_slug)" :key="`delivery-${item.id}`" class="ws-block" :node-id="item.id" :project-id="project.id" :ticket-key="item.key" />
           <ChildList
             v-if="hasChildren" class="ws-block" :children="ticket.children.value" :loading="ticket.childrenLoading.value" :editable="editable"
             :child-label="item.kind_slug === 'work' ? workNoun(vocabulary.leaf.name) : item.kind_slug === 'epic' ? 'ticket' : 'task'" :parent-label="workNoun(workLabel(item, vocabulary.value))" :progress="ticket.childProgress()" :progress-error="ticket.progressError.value" :add="title => ticket.addChild(title, project.routeKey)"
@@ -895,7 +919,7 @@ defineExpose({
 .ticket-ws.full.editing { max-width: 1480px; }
 .full .edit-form { padding: 26px 0 40px; }
 /* Dropping files anywhere on the ticket. */
-.drop-overlay { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; border-radius: inherit; background: rgba(14, 111, 108, .12); box-shadow: inset 0 0 0 2px var(--teal); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); pointer-events: none; }
+.drop-overlay { position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 24px; border-radius: inherit; background: color-mix(in srgb, var(--primary-line) 12%, transparent); box-shadow: inset 0 0 0 2px var(--teal); -webkit-backdrop-filter: blur(3px); backdrop-filter: blur(3px); pointer-events: none; }
 .full .drop-overlay { position: fixed; inset: calc(var(--header-h) + 8px) 8px calc(var(--footer-h) + 8px); border-radius: var(--radius); }
 .drop-card { display: grid; justify-items: center; gap: 6px; padding: 22px 28px; border-radius: 16px; background: var(--surface-raised); box-shadow: var(--shadow-pop); color: var(--ink); text-align: center; }
 .drop-card svg { color: var(--teal); }

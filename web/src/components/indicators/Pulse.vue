@@ -56,7 +56,7 @@ onBeforeUnmount(() => clearTimeout(clear))
 }
 .clock { fill: var(--surface-raised); stroke: var(--signal); stroke-width: 1.4; stroke-linecap: round; stroke-linejoin: round; }
 .clock path { fill: none; }
-.glint { fill: #c9a24a; stroke: var(--surface-raised); stroke-width: .65; transform-origin: 26px 6px; animation: event-opacity .6s ease-out both; }
+.glint { fill: var(--secondary-line); stroke: var(--surface-raised); stroke-width: .65; transform-origin: 26px 6px; animation: event-opacity .6s ease-out both; }
 @keyframes event-opacity { 0%, 100% { opacity: 0; } 25%, 50% { opacity: 1; } }
 @keyframes event-glint { 0% { opacity: 0; transform: scale(.65); } 25% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(.85); } }
 @media (prefers-reduced-motion: no-preference) { .glint { animation-name: event-glint; } }

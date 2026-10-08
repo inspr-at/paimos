@@ -31,9 +31,9 @@ const countLabel = (n: number) => n > 99 ? '99+' : String(n)
 .session-tabs { display: flex; gap: 2px; margin-top: 10px; padding: 3px; border-radius: 10px; background: var(--seg-bg); width: max-content; max-width: 100%; }
 button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 0; min-height: 30px; padding: 0 14px; border: 0; border-radius: 7px; background: transparent; color: var(--ink-2); font-size: 13px; font-weight: 600; white-space: nowrap; }
 @media (hover: hover) { button:hover { color: var(--ink); background: var(--row-hover); } }
-button[aria-selected="true"] { background: var(--seg-on); color: var(--ink); box-shadow: 0 1px 2px rgba(32, 60, 61, .12), inset 0 0 0 1px var(--glass-edge); }
+button[aria-selected="true"] { background: var(--seg-on); color: var(--ink); box-shadow: 0 1px 2px color-mix(in srgb, var(--shadow-color) 12%, transparent), inset 0 0 0 1px var(--glass-edge); }
 button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--teal); color: var(--canvas); font: 650 11px/1 var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
+.count { display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--primary); color: var(--primary-on); font: 650 11px/1 var(--mono); font-variant-numeric: tabular-nums; font-variant-ligatures: none; }
 @media (max-width: 720px) {
   .session-tabs { width: auto; margin-right: 8px; }
   button { flex: 1 1 0; min-height: 38px; }

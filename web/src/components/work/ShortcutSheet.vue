@@ -1,11 +1,9 @@
 <!-- SPDX-License-Identifier: AGPL-3.0-only -->
 <script setup lang="ts">
 import { nextTick, ref } from 'vue'
-import { useDeveloperSettings } from '../../lib/developerSettings'
 import AppIcon, { type IconName } from '../AppIcon.vue'
 
 type Key = string | { icon: IconName; label: string }
-const { showFlowControls } = useDeveloperSettings()
 const mac = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 // Symbol keys are drawn, never typed: Command and Option on a Mac, words elsewhere.
 const MOD: Key = mac ? { icon: 'command', label: 'Command' } : 'Ctrl'
@@ -50,19 +48,22 @@ const sections: { title: string; rows: { keys: Key[][]; label: string; joiner?: 
     { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Log the entry' },
     { keys: [['Esc']], label: 'Close the review' },
   ] },
-  { title: 'Journey', rows: [
-    { keys: [['['], [']']], label: 'Previous and next stage' },
-    { keys: [['w']], label: 'Walk through the release' },
-    { keys: [[{ icon: 'arrow-left', label: 'Left arrow' }], [{ icon: 'arrow', label: 'Right arrow' }]], label: 'In the walker: previous and next ticket; with Shift, feature' },
-    { keys: [['Space']], label: 'In the walker: include in the release or defer' },
-    { keys: [['c'], ['z'], ['i']], joiner: '·', label: 'In the walker: compare, 100 %, details' },
-  ] },
   { title: 'Release history', rows: [
     { keys: [['j'], ['k']], label: 'Next and previous release' },
     { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Open the release' },
     { keys: [['c']], label: 'Compare two releases' },
     { keys: [['e']], label: 'Show or hide the evidence' },
     { keys: [['/']], label: 'Search names, changes and ticket keys' },
+  ] },
+  { title: 'Needs attention', rows: [
+    { keys: [['j'], [{ icon: 'arrow-down', label: 'Down arrow' }], ['k'], [{ icon: 'arrow-up', label: 'Up arrow' }]], label: 'Next or previous row or group' },
+    { keys: [['Space'], ['x']], label: 'Select the row; Shift-click selects a range' },
+    { keys: [[MOD, 'A']], label: 'In the grid: select up to 100 loaded editable rows' },
+    { keys: [['a'], ['d']], label: 'Apply or dismiss the row or selection' },
+    { keys: [[{ icon: 'arrow-left', label: 'Left arrow' }], [{ icon: 'arrow', label: 'Right arrow' }]], label: 'On a group: collapse or expand' },
+    { keys: [[{ icon: 'enter', label: 'Enter' }]], label: 'Open the ticket; toggle a group' },
+    { keys: [['/']], label: 'Search this list' },
+    { keys: [['Esc']], label: 'Leave a field, then clear the selection or close the menu' },
   ] },
   { title: 'Ticket list', rows: [
     { keys: [['j'], [{ icon: 'arrow-down', label: 'Down arrow' }]], label: 'Next ticket' },
@@ -139,7 +140,7 @@ defineExpose({ open, close })
         <h2 id="shortcuts-title">Keyboard shortcuts</h2>
         <button ref="closeButton" type="button" class="icon-btn sm" aria-label="Close shortcuts" @click="close"><AppIcon name="close" :size="14" /></button>
       </header>
-      <section v-for="section in sections.filter(section => section.title !== 'Journey' || showFlowControls)" :key="section.title">
+      <section v-for="section in sections" :key="section.title">
         <p class="eyebrow">{{ section.title }}</p>
         <dl>
           <div v-for="row in section.rows" :key="row.label" class="row">

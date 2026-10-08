@@ -62,13 +62,17 @@
         "internal/agentverification/**",
         "internal/attachments/**",
         "internal/db/**",
+        "internal/dsar/**",
         "internal/dbtest/**",
         "internal/config/**",
         "internal/httpapi/**",
         "cmd/**",
         "embed.go",
         "internal/phoneapprovals/**",
-        "internal/features/**"
+        "internal/features/**",
+        "internal/hookcap/**",
+        "internal/hostcapacity/**",
+        "internal/dsar/**"
       ]
     },
     {
@@ -86,6 +90,7 @@
         "internal/piprobe/**",
         "internal/grokprobe/**",
         "internal/capacity/**",
+        "internal/usageprobe/**",
         "internal/agentplan/**",
         "internal/sessionusage/**",
         "internal/agentruns/**",
@@ -102,7 +107,9 @@
         "internal/modelprefs/**",
         "internal/crossreview/**",
         "internal/reviewgate/**",
-        "internal/agents/**"
+        "internal/agents/**",
+        "internal/hooknote/**",
+        "internal/delivery/**"
       ]
     },
     {
@@ -115,7 +122,8 @@
         "internal/chat/**",
         "internal/client/**",
         "internal/plugins/**",
-        "internal/events/**"
+        "internal/events/**",
+        "internal/attachedmsg/**"
       ]
     },
     {
@@ -164,6 +172,7 @@
         "internal/decisiondesk/**",
         "internal/deskdelivery/**",
         "internal/outcomes/**",
+        "internal/escalation/**",
         "internal/relations/**",
         "internal/projectgroups/**",
         "internal/views/**",
@@ -187,6 +196,7 @@
         "internal/localjournal/**",
         "internal/releasehistory/**",
         "internal/releases/**",
+        "internal/releasesettlement/**",
         "internal/reportercontract/**",
         "internal/ciproof/**",
         "internal/ciexecutor/**",
@@ -220,7 +230,9 @@
       "title": "Web UI: views and components",
       "paths": [
         "web/src/views/**",
-        "web/src/components/**"
+        "web/src/components/**",
+        "web/src/components/work/AttentionGroupMenu.vue",
+        "web/src/components/work/AttentionBulkPreview.vue"
       ]
     },
     {

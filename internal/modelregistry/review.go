@@ -3,7 +3,7 @@ package modelregistry
 
 import (
 	"context"
-	"sort"
+	"maps"
 	"strings"
 	"time"
 
@@ -25,6 +25,12 @@ type ReviewRoute struct {
 	Trace         PreferenceTrace
 }
 
+var reviewFamilyRank = map[string]int{"openai": 0, "xai": 1, "anthropic": 2, "cursor": 3, "google": 4, "local": 5}
+
+// ReviewFamilyRank exposes a copy of the built-in dispatch order. The Policies
+// read shares this source without allowing callers to change routing rules.
+func ReviewFamilyRank() map[string]int { return maps.Clone(reviewFamilyRank) }
+
 // ResolveReview uses registry pins and the flywheel's family fallback order.
 // Profiles remain tenant policy; no model names or shell snippets are invented.
 func ResolveReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, author, projectID string, now time.Time) (ReviewRoute, error) {
@@ -34,6 +40,10 @@ func ResolveReview(ctx context.Context, tx pgx.Tx, p tenant.Principal, author, p
 // ResolveReviewFor forms the qualified set before applying preferences.
 // Preferences never introduce a profile or an unqualified account.
 func ResolveReviewFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time) (ReviewRoute, error) {
+	return resolveReviewWithCatalog(ctx, tx, p, q, now, nil)
+}
+
+func resolveReviewWithCatalog(ctx context.Context, tx pgx.Tx, p tenant.Principal, q WorkQuery, now time.Time, catalog *preferencePreviewCatalog) (ReviewRoute, error) {
 	out := ReviewRoute{Ladder: []Candidate{}, Role: "review-gate"}
 	if strings.TrimSpace(q.Area) == "security" || q.Role == "review-gate-security" {
 		out.Role = "review-gate-security"
@@ -44,6 +54,20 @@ func ResolveReviewFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	}
 	if author == "" {
 		return out, fail(400, "known author family required")
+	}
+	if err := requireCatalog(ctx, tx); err != nil {
+		return out, err
+	}
+	q.Role = out.Role
+	q.AuthorFamily = author
+	if board, err := resolveBoardWork(ctx, tx, p, q, now, nil); err != nil {
+		return out, err
+	} else if board != nil {
+		out.Profile, out.Ladder, out.OwnerRequired, out.Trace, out.Residency = board.Profile, board.Ladder, board.OwnerRequired, board.Trace, board.Residency
+		if out.Profile != nil {
+			out.Account, err = agentaccounts.ReviewAccount(ctx, tx, out.Profile.ID, out.Profile.Harness, q.ProjectID, now, out.Residency)
+		}
+		return out, err
 	}
 	chain, trace, requirement, err := placementTrace(ctx, tx, q)
 	if err != nil {
@@ -57,26 +81,17 @@ func ResolveReviewFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		out.Trace.Hard = []string{"security_review"}
 		return out, nil
 	}
-	if err := ensureCatalog(ctx, tx, p); err != nil {
-		return out, err
-	}
-	steps, err := loadLadder(ctx, tx, out.Role)
+	steps, mode, err := catalog.ladderSnapshot(ctx, tx, out.Role)
 	if err != nil {
 		return out, err
 	}
-	rank := map[string]int{"openai": 0, "xai": 1, "anthropic": 2, "cursor": 3, "google": 4, "local": 5}
 	if out.Role == "review-gate" {
-		sort.SliceStable(steps, func(i, j int) bool {
-			a, b := steps[i].Profile, steps[j].Profile
-			if rank[a.Family] != rank[b.Family] {
-				return rank[a.Family] < rank[b.Family]
-			}
-			if a.Tier != b.Tier {
-				return a.Tier == "frontier"
-			}
-			return false
-		})
+		out.Trace.OrderMode = mode
+		if mode == reviewOrderLegacy {
+			sortLegacyReview(steps, func(s ladderStep) Profile { return s.Profile })
+		}
 	}
+
 	role, _ := roleByName(out.Role)
 	qualified := map[string]*agentaccounts.Account{}
 	for _, step := range steps {
@@ -135,7 +150,7 @@ func ResolveReviewFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 		result := modelprefs.ResolveCell(chain, "review", out.Trace.Bucket)
 		traceCell(&out.Trace, result)
 		if result.Cell != nil && result.Cell.Mode != "auto" {
-			profiles, err := listProfiles(ctx, tx)
+			profiles, err := catalog.profiles(ctx, tx)
 			if err != nil {
 				return out, err
 			}
@@ -174,6 +189,9 @@ func ResolveReviewFor(ctx context.Context, tx pgx.Tx, p tenant.Principal, q Work
 	}
 	if out.Profile == nil {
 		out.OwnerRequired = true
+		if out.Role == "review-gate-security" {
+			out.Trace.Blocked = "no qualified security review profile/account"
+		}
 		if requirement != "any" {
 			out.Trace.Blocked = "no " + requirement + " model route"
 		}

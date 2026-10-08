@@ -34,6 +34,11 @@ type Remote struct {
 	mu                   sync.RWMutex
 	daemonID, generation string
 	accountLinkProof     string
+	// Host capacity is negotiated from the server's own computer view; see
+	// hostCapacitySupported. now is injectable for tests.
+	hostCapacitySupport   int8
+	hostCapacityCheckedAt time.Time
+	now                   func() time.Time
 }
 
 func NewRemote(baseURL, token string) *Remote {
@@ -204,6 +209,9 @@ func (r *Remote) RegisterHarness(ctx context.Context, s HarnessSession, agentID,
 		"account_label":           s.AccountLabel,
 		"advertised_capabilities": caps, "harness_session_ref": s.ID, "worker_lease": s.Lease,
 	}
+	if s.DisplayLabel != nil {
+		body["display_label"] = *s.DisplayLabel
+	}
 	if s.Model != "" {
 		body["model"] = s.Model
 		if modelreport.ValidTuple(s.Model, s.ReasoningEffort) {
@@ -255,6 +263,9 @@ func (r *Remote) HeartbeatHarnessPause(ctx context.Context, s HarnessSession, ph
 	body := map[string]any{
 		"max_session_file_bytes": rules.SessionFileLimit(s.Harness), "rules_client_version": version.Version,
 		"phase": phase, "activity": activity, "activity_sequence": sequence, "process_ownership": s.Ownership,
+	}
+	if s.AttachedHook {
+		body["attached_hook"] = true
 	}
 	if s.Model != "" {
 		body["model"] = s.Model
@@ -369,20 +380,34 @@ func (r *Remote) Route(ctx context.Context, runID, daemonID string, accountIDs [
 }
 
 func (r *Remote) Claim(ctx context.Context, runID, daemonID, generation string, reservations []string) error {
+	return r.claim(ctx, runID, daemonID, generation, reservations, nil)
+}
+
+func (r *Remote) ClaimHandoff(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup WorkerPickup) error {
+	return r.claim(ctx, runID, daemonID, generation, reservations, &pickup)
+}
+
+func (r *Remote) claim(ctx context.Context, runID, daemonID, generation string, reservations []string, pickup *WorkerPickup) error {
 	// Retain the attempted binding even if the HTTP response is lost. It is
 	// only a header hint; the server remains the authority for claim ownership.
 	r.mu.Lock()
 	r.daemonID, r.generation = daemonID, generation
 	r.mu.Unlock()
-	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", map[string]any{
-		"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations,
-	}, nil, map[string]string{reviewgate.PolicyHeader: reviewgate.Policy})
+	body := map[string]any{"daemon_id": daemonID, "daemon_generation": generation, "reservation_ids": reservations}
+	if pickup != nil {
+		body["handoff"] = pickup
+	}
+	err := r.Client.DoWithHeaders(ctx, "POST", "/api/runs/"+url.PathEscape(runID)+"/claim", body, nil, map[string]string{reviewgate.PolicyHeader: reviewgate.Policy})
 	return err
 }
 
 // ErrTelemetryProtocol means the server rejected the telemetry itself. It does
 // not include authentication, enrollment fences, or uncertain delivery errors.
 var ErrTelemetryProtocol = errors.New("telemetry protocol violation")
+
+// ErrTelemetryAuthority fences dispatch without stopping a live owned child.
+// After proven exit, retrying the same claim cannot repair this refusal.
+var ErrTelemetryAuthority = errors.New("telemetry authority rejected")
 
 func (r *Remote) Report(ctx context.Context, runID string, t Telemetry) error {
 	r.mu.RLock()
@@ -406,13 +431,17 @@ func (r *Remote) ReportForClaim(ctx context.Context, runID, daemon, generation s
 			// Other conflicts include generation changes and enrollment drain.
 			// Only the telemetry endpoint's explicit protocol errors are fatal.
 			switch status.Message {
-			case "divergent telemetry replay", "telemetry sequence is not monotonic", "run cannot return to starting":
+			case "divergent telemetry replay", "telemetry sequence is not monotonic", "run cannot return to starting", "run is not live":
 				protocol = true
 			}
 		}
 		if protocol {
 			// Do not propagate arbitrary server response text as diagnostics.
 			return fmt.Errorf("%w (HTTP %d)", ErrTelemetryProtocol, status.Status)
+		}
+		if status.Status == http.StatusUnauthorized || status.Status == http.StatusForbidden || status.Status == http.StatusNotFound || status.Status == http.StatusGone ||
+			status.Status == http.StatusConflict && status.Message == "daemon generation conflict" {
+			return fmt.Errorf("%w (HTTP %d)", ErrTelemetryAuthority, status.Status)
 		}
 	}
 	return err

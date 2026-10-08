@@ -4,6 +4,8 @@
 // palette); grouping and multi-sort; view column sets; the persisted row height.
 import { test, expect, type Page } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
+import { controlStability } from './control-stability'
+import { mockTicketGraph, ticketGraphWorld } from './ticket-graph-fixtures'
 import { fixtures, me, mockView, mockWork, watchErrors, type Call, type Fixtures } from './work-fixtures'
 
 test.beforeEach(async ({ page }) => { await page.clock.setSystemTime(new Date('2026-09-23T12:00:00Z')) })
@@ -153,7 +155,8 @@ test('saving a view: named from its filters, shared, then the bar shows it and c
   await panel.getByRole('button', { name: 'Save view' }).click()
   await expect(page.getByText('Saved the view “Urgent”, shared with the project')).toBeVisible()
   const created = calls.find(call => call.path === '/api/views' && call.method === 'POST')!
-  expect(created.body).toMatchObject({ name: 'Urgent', project_id: 'p-pharos', shared: true, filters: { priority: 'high' }, group_by: 'status', sort_keys: [], columns: [] })
+  expect(created.body).toMatchObject({ name: 'Urgent', project_id: 'p-pharos', shared: true, filters: { priority: 'high' }, group_by: 'status', sort_keys: [], mode: 'list' })
+  expect((created.body as { columns: string[] }).columns.length).toBeGreaterThan(1)
   const id = data.views[0].id
   await expect(page).toHaveURL(new RegExp(`v=${id}`))
   const tab = bar(page).getByRole('link', { name: /Urgent/ })
@@ -190,6 +193,9 @@ test('view menu: rename, duplicate, default on the next visit, share, copy link 
   const calls = await mockWork(page, data)
   await page.goto(`/p/PHAROS?priority=high&v=${MINE}`)
   await expect(rows(page)).toHaveCount(2)
+  // Normal saved views include their column snapshot, so opening one without
+  // edits must stay clean (empty columns describe a removed legacy view).
+  await expect(bar(page).getByRole('img', { name: 'changed since saved' })).toHaveCount(0)
   const options = (name: string) => bar(page).getByRole('button', { name: `Options for view ${name}`, exact: true })
   await options('Mine').click()
   let menu = page.getByRole('menu', { name: 'View Mine' })
@@ -220,6 +226,7 @@ test('view menu: rename, duplicate, default on the next visit, share, copy link 
   // for Team to be current before resolving its options, rather than capturing
   // the old view's button while the router is still changing the selection.
   await expect(bar(page).getByRole('link', { name: 'Team', exact: true })).toHaveAttribute('aria-current', 'page')
+  await expect(bar(page).getByRole('img', { name: 'changed since saved' })).toHaveCount(0)
   await expect(rows(page)).toHaveCount(2)
   await options('Team').click()
   menu = page.getByRole('menu', { name: 'View Team' })
@@ -227,6 +234,8 @@ test('view menu: rename, duplicate, default on the next visit, share, copy link 
   await expect(menu.getByRole('menuitem', { name: 'Delete view' })).toHaveCount(0)
   await menu.getByRole('menuitem', { name: 'Copy to my views' }).click()
   await expect(bar(page).getByRole('link', { name: 'Team copy' })).toHaveAttribute('aria-current', 'page')
+  await expect(bar(page).getByRole('img', { name: 'changed since saved' })).toHaveCount(0)
+  expect(data.views.find(view => view.name === 'Team copy')).toMatchObject({ columns: data.views.find(view => view.id === SHARED)!.columns, mode: 'list' })
   // Delete, then Undo brings the view back with its id.
   await options('Team copy').click()
   await page.getByRole('menu', { name: 'View Team copy' }).getByRole('menuitem', { name: 'Delete view' }).click()
@@ -328,7 +337,7 @@ test('in a view the column set belongs to the view; row height is the person’s
   await expect.poll(() => (data.preferences['list:display'] as { density?: string } | undefined)?.density).toBe('compact')
   await page.keyboard.press('Escape')
   await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()
-  await expect.poll(() => calls.filter(call => call.method === 'PATCH').at(-1)?.body).toMatchObject({ columns: ['status', 'updated', 'cost'] })
+  await expect.poll(() => calls.filter(call => call.method === 'PATCH').at(-1)?.body).toMatchObject({ columns: ['key', 'title', 'status', 'updated', 'cost'], mode: 'list' })
   await page.reload()
   await expect(rows(page).first()).toHaveCSS('height', '30px')
 })
@@ -412,3 +421,186 @@ for (const width of [1920, 1440, 1280, 1024, 390]) {
     }
   })
 }
+
+// AEON-718 behavioural regressions: use the existing column picker and view bar.
+for (const mode of ['list', 'outline'] as const) {
+  test(`AEON-718 plain columns save and reopen in ${mode} despite personal changes`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const table = mode === 'outline' ? page.getByRole('treegrid', { name: 'Ticket outline' }) : grid(page)
+    const data = world()
+    data.preferences['list:p-pharos'] = { order: ['key', 'title', 'updated', 'status'], visible: ['status', 'updated'] }
+    const calls = await mockWork(page, data)
+    await page.goto(`/p/PHAROS/tickets?view=${mode}`)
+    await expect(table.locator('thead th')).toHaveText(['Key', 'Title', 'Updated', 'Status'])
+    await page.getByRole('button', { name: /^Display/ }).click()
+    const display = page.getByRole('dialog', { name: 'Display options' })
+    const column = display.getByRole('checkbox', { name: 'Cost unit' })
+    const guard = await controlStability(page, { column, display: page.getByRole('button', { name: /^Display/ }), modes: toolbar(page).getByRole('tablist', { name: 'Ticket views' }) })
+    await guard.check(() => column.check()); guard.done()
+    await page.keyboard.press('Escape')
+    await expect(bar(page).getByRole('button', { name: 'Save view', exact: true })).toBeVisible()
+    await bar(page).getByRole('button', { name: 'Save view', exact: true }).click()
+    const panel = page.getByRole('dialog', { name: 'Save view' })
+    await panel.getByLabel('View name').fill('Gespeicherte Spalten und Darstellungsart')
+    await panel.getByRole('button', { name: 'Save view', exact: true }).click()
+    const id = data.views[0].id
+    await expect(page).toHaveURL(new RegExp(`v=${id}`))
+    expect(calls.find(c => c.method === 'POST' && c.path === '/api/views')!.body).toMatchObject({ columns: ['key', 'title', 'updated', 'status', 'cost'], mode })
+    await expect(bar(page).locator('.dirty')).toBeHidden()
+    await bar(page).getByRole('link', { name: 'All tickets' }).click()
+    await expect(page).not.toHaveURL(/v=/)
+    await page.getByRole('button', { name: /^Display/ }).click()
+    await display.getByRole('checkbox', { name: 'Cost unit' }).uncheck()
+    await display.getByRole('checkbox', { name: 'Priority', exact: true }).check()
+    await page.keyboard.press('Escape')
+    await toolbar(page).getByRole('tab', { name: mode === 'list' ? 'Outline' : 'List', exact: true }).click()
+    await bar(page).getByRole('link', { name: 'Gespeicherte Spalten und Darstellungsart' }).click()
+    await expect(toolbar(page).getByRole('tab', { name: mode === 'list' ? 'List' : 'Outline', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(table.locator('thead th')).toHaveText(['Key', 'Title', 'Updated', 'Status', 'Cost unit'])
+    await expect(bar(page).locator('.dirty')).toBeHidden()
+    await page.getByRole('button', { name: /^Display/ }).click()
+    await display.getByRole('checkbox', { name: 'Priority', exact: true }).check()
+    await page.keyboard.press('Escape')
+    await expect(bar(page).locator('.dirty')).toBeVisible()
+    await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()
+    await expect(bar(page).locator('.dirty')).toBeHidden()
+    expect(calls.filter(c => c.method === 'PATCH' && c.path === `/api/views/${id}`).at(-1)!.body).toMatchObject({ columns: ['key', 'title', 'updated', 'status', 'cost', 'priority'], mode })
+    await page.reload()
+    await expect(table.locator('thead th')).toHaveText(['Key', 'Title', 'Updated', 'Status', 'Cost unit', 'Priority'])
+    for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+      await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme })
+      await page.screenshot({ path: `test-results/aeon-718/${mode}-${width}-${colorScheme}.png`, fullPage: true })
+    }
+  })
+}
+
+test('AEON-718 Graph offers saved views, persists mode and applies their filters', async ({ page }) => {
+  const data = ticketGraphWorld()
+  data.work.preferences['list:p-pharos'] = { visible: ['status', 'updated'] }
+  await mockTicketGraph(page, data)
+  await page.goto('/p/PHAROS/tickets?view=graph&priority=high')
+  const canvas = page.locator('.ticket-graph-canvas')
+  await expect(canvas).toHaveAttribute('data-ready', 'true')
+  const before = await canvas.getAttribute('aria-label')
+  await expect(bar(page)).toBeVisible()
+  await bar(page).getByRole('button', { name: 'Save view', exact: true }).click()
+  const panel = page.getByRole('dialog', { name: 'Save view' })
+  await panel.getByLabel('View name').fill('Graph mit hoher Priorität')
+  await panel.getByRole('button', { name: 'Save view', exact: true }).click()
+  await expect(bar(page).getByRole('link', { name: 'Graph mit hoher Priorität' })).toHaveAttribute('aria-current', 'page')
+  expect(data.work.views[0]).toMatchObject({ mode: 'graph', columns: ['key', 'title', 'status', 'updated'], filters: { priority: 'high' } })
+  await expect(bar(page).locator('.dirty')).toBeHidden()
+  const guard = await controlStability(page, { modes: toolbar(page).getByRole('tablist', { name: 'Ticket views' }), graph: toolbar(page).getByRole('tab', { name: 'Graph', exact: true }) })
+  await guard.check(async () => {
+    await toolbar(page).getByRole('tab', { name: 'List', exact: true }).click()
+    await expect(toolbar(page).getByRole('tab', { name: 'List', exact: true })).toHaveAttribute('aria-selected', 'true')
+  }); guard.done()
+  await expect(bar(page).locator('.dirty')).toBeVisible()
+  await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()
+  await expect(bar(page).locator('.dirty')).toBeHidden()
+  expect(data.work.views[0].mode).toBe('list')
+  await toolbar(page).getByRole('tab', { name: 'Graph', exact: true }).click()
+  await expect(bar(page).locator('.dirty')).toBeVisible()
+  await bar(page).getByRole('button', { name: 'Reset', exact: true }).click()
+  await expect(toolbar(page).getByRole('tab', { name: 'List', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await toolbar(page).getByRole('tab', { name: 'Graph', exact: true }).click()
+  await bar(page).getByRole('button', { name: 'Save changes to the view' }).click()
+  await expect(bar(page).locator('.dirty')).toBeHidden()
+  expect(data.work.views[0].mode).toBe('graph')
+  await bar(page).getByRole('link', { name: 'All tickets' }).click()
+  await toolbar(page).getByRole('tab', { name: 'Graph', exact: true }).click()
+  await expect(canvas).toHaveAttribute('data-ready', 'true')
+  const all = await canvas.getAttribute('aria-label')
+  expect(all).not.toBe(before)
+  await bar(page).getByRole('link', { name: 'Graph mit hoher Priorität' }).click()
+  await expect(canvas).toHaveAttribute('aria-label', before!)
+  await expect(toolbar(page).getByRole('tab', { name: 'Graph', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await page.reload()
+  await expect(canvas).toHaveAttribute('aria-label', before!)
+  for (const colorScheme of ['light', 'dark'] as const) for (const width of [390, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 }); await page.emulateMedia({ colorScheme })
+    // Wait for the renderer's resize before fitting/capturing the projection.
+    await expect.poll(() => canvas.evaluate(el => Math.abs(el.clientWidth - el.querySelector('canvas')!.getBoundingClientRect().width))).toBeLessThan(2)
+    await page.getByRole('button', { name: 'Fit graph to view' }).click()
+    await page.evaluate(() => new Promise<void>(done => {
+      let frames = 8
+      const tick = () => --frames ? requestAnimationFrame(tick) : done()
+      requestAnimationFrame(tick)
+    }))
+    await page.screenshot({ path: `test-results/aeon-718/graph-${width}-${colorScheme}.png`, fullPage: true })
+  }
+})
+
+for (const width of [390, 1024, 1440]) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`project attention navigation fits and stays still at ${width}px in ${colorScheme}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 844 })
+      await page.emulateMedia({ colorScheme })
+      const data = world()
+      data.views.push(
+        mockView({ id: MINE, name: 'Meine offenen Aufgaben vor der nächsten Veröffentlichung', filters: { assignee: me.id } }),
+        mockView({ id: SHARED, name: 'Gemeinsame Aufgaben für die nächste Veröffentlichung', owner_principal_id: mira, shared: true }),
+        mockView({ id: '11111111-aaaa-4aaa-8aaa-000000000003', name: 'Veröffentlichung v4.8.0', shared: true }),
+      )
+      await mockWork(page, data)
+      await page.goto(`/p/PHAROS?assignee=${me.id}&status=!done&v=${MINE}`)
+      await expect(rows(page).first()).toBeVisible()
+      await page.evaluate(() => document.fonts.ready)
+      expect(await page.locator('#main').evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+      const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
+      await expect(attention).toHaveAttribute('href', '/tickets?view=needs-attention&project_id=p-pharos')
+      const bounds = await attention.boundingBox()
+      expect(bounds!.height).toBeGreaterThanOrEqual(width === 390 ? 44 : 20)
+      expect(bounds!.x).toBeGreaterThanOrEqual(0)
+      expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width)
+      const options = bar(page).getByRole('button', { name: /^Options for view/ })
+      const guard = await controlStability(page, {
+        attention,
+        sections: page.getByRole('tablist', { name: 'Project sections' }),
+        tickets: page.getByRole('tab', { name: 'Tickets', exact: true }),
+        views: bar(page),
+        options,
+      })
+      await guard.check(async () => { await attention.focus(); await attention.hover() })
+      await guard.check(async () => { await options.click(); await expect(page.getByRole('menuitem', { name: 'Rename' })).toBeVisible() })
+      await guard.check(async () => { await page.keyboard.press('Escape'); await expect(options).toBeFocused() })
+      guard.done()
+      await page.screenshot({ path: testInfo.outputPath(`project-attention-${width}-${colorScheme}.png`), fullPage: true })
+    })
+  }
+}
+
+test.describe('coarse-pointer project attention link', () => {
+  test.use({ hasTouch: true })
+  for (const width of [390, 1024, 1440]) for (const colorScheme of ['light', 'dark'] as const) {
+    test(`expanded project attention target activates without moving controls at ${width}px in ${colorScheme}`, async ({ page }, testInfo) => {
+      await page.setViewportSize({ width, height: 900 })
+      const data = world()
+      data.preferences.theme = { choice: colorScheme }
+      data.projects.find(project => project.id === 'p-pharos')!.title = 'Betriebsübersicht für sämtliche angeschlossenen Arbeitsbereiche'
+      await mockWork(page, data)
+      await page.goto('/p/PHAROS')
+      await expect(rows(page).first()).toBeVisible()
+      await page.evaluate(() => document.fonts.ready)
+      expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true)
+      const attention = page.getByRole('link', { name: 'Needs attention', exact: true })
+      const bounds = await attention.evaluate(el => {
+        const rect = el.getBoundingClientRect(), hit = getComputedStyle(el, '::before')
+        const width = parseFloat(hit.width) || rect.width, height = parseFloat(hit.height) || rect.height
+        const x = rect.x + (rect.width - width) / 2, y = rect.y + (rect.height - height) / 2
+        return { x, y, width, height, visualHeight: rect.height,
+          edgesHit: [[x + 1, y + height / 2], [x + width - 1, y + height / 2], [x + width / 2, y + 1], [x + width / 2, y + height - 1]].every(([px, py]) => el.contains(document.elementFromPoint(px!, py!))) }
+      })
+      expect(bounds.height, 'attention hit height').toBeGreaterThanOrEqual(44)
+      expect(bounds.width, 'attention hit width').toBeGreaterThanOrEqual(44)
+      expect(bounds.visualHeight, 'visible link retains its size').toBe(width === 390 ? 44 : 36)
+      expect(bounds.edgesHit, 'all target edges activate the link').toBe(true)
+      const guard = await controlStability(page, { attention, sections: page.getByRole('tablist', { name: 'Project sections' }), tickets: page.getByRole('tab', { name: 'Tickets', exact: true }), views: bar(page) })
+      await guard.check(async () => { await attention.focus(); await attention.hover() })
+      guard.done()
+      await page.screenshot({ path: testInfo.outputPath(`project-attention-touch-${width}-${colorScheme}.png`), fullPage: true })
+      await page.touchscreen.tap(bounds.x + bounds.width / 2, bounds.y + 1)
+      await expect(page).toHaveURL('/tickets?view=needs-attention&project_id=p-pharos')
+    })
+  }
+})

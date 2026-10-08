@@ -18,6 +18,73 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+// The client reads this fixture too. Delivery joined the registry and the
+// built-in agent exclusion list together; the shared fixture has to carry
+// both or the client ceiling drifts from the server.
+func TestDeliveryBuiltinAdminCeilingFixture(t *testing.T) {
+	var fixture struct {
+		Registry []authz.Permission `json:"registry"`
+		Cases    []struct {
+			BuiltinRole         string     `json:"builtin_role"`
+			Workspace           []string   `json:"workspace"`
+			Projects            [][]string `json:"projects"`
+			ProjectBuiltinRoles []string   `json:"project_builtin_roles"`
+			Want                []string   `json:"want"`
+		} `json:"cases"`
+	}
+	data, err := os.ReadFile("testdata/key_scope_ceiling.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixture.Registry) != len(authz.Registry) {
+		t.Fatalf("client/server parity registry size drift: fixture=%d server=%d", len(fixture.Registry), len(authz.Registry))
+	}
+	for _, permission := range fixture.Registry {
+		actual, ok := authz.Lookup(permission.Key)
+		if !ok || actual.AgentGrantable != permission.AgentGrantable || !slices.Equal(actual.GrantableAt, permission.GrantableAt) {
+			t.Fatalf("client/server parity registry drift: %s", permission.Key)
+		}
+	}
+	read, readOK := authz.Lookup("delivery.read")
+	manage, manageOK := authz.Lookup("delivery.manage")
+	if !readOK || !manageOK || !read.AgentGrantable || !manage.AgentGrantable || !slices.Equal(read.GrantableAt, []string{"workspace", "project"}) || !slices.Equal(manage.GrantableAt, []string{"workspace", "project"}) {
+		t.Fatal("delivery permissions drifted from the agent-grantable catalog")
+	}
+	var sawRead, sawManage bool
+	for _, permission := range fixture.Registry {
+		if permission.Key == "delivery.read" && permission.AgentGrantable && slices.Equal(permission.GrantableAt, read.GrantableAt) {
+			sawRead = true
+		}
+		if permission.Key == "delivery.manage" && permission.AgentGrantable && slices.Equal(permission.GrantableAt, manage.GrantableAt) {
+			sawManage = true
+		}
+	}
+	if !sawRead || !sawManage {
+		t.Fatal("shared ceiling fixture omitted delivery.read or delivery.manage")
+	}
+	for _, tc := range fixture.Cases {
+		if tc.BuiltinRole != "" {
+			permissions, ok := authz.BuiltinPermissions(tc.BuiltinRole)
+			if !ok || !slices.Equal(permissions, tc.Workspace) {
+				t.Fatalf("client/server built-in role permissions drift: %s", tc.BuiltinRole)
+			}
+		}
+		for i, role := range tc.ProjectBuiltinRoles {
+			permissions, ok := authz.BuiltinPermissions(role)
+			if !ok || i >= len(tc.Projects) || !slices.Equal(permissions, tc.Projects[i]) {
+				t.Fatalf("client/server built-in project role permissions drift: %s", role)
+			}
+		}
+		builtin := tc.BuiltinRole != "" || len(tc.ProjectBuiltinRoles) > 0
+		if builtin && (!slices.Contains(tc.Want, "delivery.read") || slices.Contains(tc.Want, "delivery.manage")) {
+			t.Fatalf("built-in agent ceiling must keep delivery.read and exclude delivery.manage: %s", tc.BuiltinRole+strings.Join(tc.ProjectBuiltinRoles, ","))
+		}
+	}
+}
+
 // The client reads this fixture too. Verify its catalog against the real
 // registry, then exercise the ceiling through live bindings and key writes.
 func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
@@ -225,5 +292,71 @@ func TestKeyScopeCeilingParityCreateEditRotate(t *testing.T) {
 				t.Fatal("rotation did not revoke the old bearer")
 			}
 		})
+	}
+}
+
+// Builtin role lists in the shared fixture must match the live catalog before
+// any database ceiling is built. reviewpolicy.manage stays on the person role
+// and out of the agent want; reviewpolicy.read stays in both.
+func TestKeyScopeCeilingFixtureMatchesBuiltinRoles(t *testing.T) {
+	var fixture struct {
+		Registry []authz.Permission `json:"registry"`
+		Cases    []struct {
+			Name                string     `json:"name"`
+			Workspace           []string   `json:"workspace"`
+			Projects            [][]string `json:"projects"`
+			Want                []string   `json:"want"`
+			BuiltinRole         string     `json:"builtin_role"`
+			ProjectBuiltinRoles []string   `json:"project_builtin_roles"`
+		} `json:"cases"`
+	}
+	data, err := os.ReadFile("testdata/key_scope_ceiling.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if json.Unmarshal(data, &fixture) != nil || len(fixture.Registry) != len(authz.Registry) {
+		t.Fatal("ceiling fixture registry drifted from the live catalog")
+	}
+	for _, permission := range fixture.Registry {
+		actual, ok := authz.Lookup(permission.Key)
+		if !ok || actual.AgentGrantable != permission.AgentGrantable || !slices.Equal(actual.GrantableAt, permission.GrantableAt) {
+			t.Fatalf("ceiling fixture registry drift: %s", permission.Key)
+		}
+	}
+	sawRead, sawManage := false, false
+	for _, tc := range fixture.Cases {
+		if tc.BuiltinRole != "" {
+			permissions, ok := authz.BuiltinPermissions(tc.BuiltinRole)
+			if !ok || !slices.Equal(permissions, tc.Workspace) {
+				t.Fatalf("%s workspace drifted from built-in %s", tc.Name, tc.BuiltinRole)
+			}
+		}
+		for i, role := range tc.ProjectBuiltinRoles {
+			permissions, ok := authz.BuiltinPermissions(role)
+			if !ok || !slices.Equal(permissions, tc.Projects[i]) {
+				t.Fatalf("%s project drifted from built-in %s", tc.Name, role)
+			}
+		}
+		if tc.BuiltinRole == "" && len(tc.ProjectBuiltinRoles) == 0 {
+			continue
+		}
+		if !slices.Contains(tc.Want, "reviewpolicy.read") || slices.Contains(tc.Want, "reviewpolicy.manage") {
+			t.Fatalf("%s agent ceiling must read review policy without managing it", tc.Name)
+		}
+		sawRead = true
+		person := tc.Workspace
+		if len(tc.ProjectBuiltinRoles) > 0 {
+			person = tc.Projects[0]
+		}
+		if slices.Contains(person, "reviewpolicy.manage") {
+			sawManage = true
+		}
+	}
+	if !sawRead || !sawManage {
+		t.Fatal("fixture lost the built-in review-policy split")
+	}
+	manage, ok := authz.Lookup("reviewpolicy.manage")
+	if !ok || !manage.AgentGrantable {
+		t.Fatal("reviewpolicy.manage must stay agent-grantable for a custom role")
 	}
 }

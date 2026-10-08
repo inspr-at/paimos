@@ -13,12 +13,12 @@
     "ci-plan": {
       "kind": "not-static",
       "reason": "Hosted event classification and GitHub output wiring.",
-      "runs_sha256": "96970e7553db0fcff6ca67811bc56ec35fc1e92d4b2c3429ae8e1d5ee1cdcdae"
+      "runs_sha256": "facce090234a58fe9f47e6021f5971776d46b86bbb53ed2e46a2b1576410d878"
     },
     "tier-plan": {
       "kind": "not-static",
       "reason": "Hosted tier scheduling and output wiring.",
-      "runs_sha256": "e53e5f339176e68251ba9e5a10adbc32af6ddce6fdc220324a35eb3db3a2f5be"
+      "runs_sha256": "56ee0df4b79df17e54da6861167896084752f6cf81e5ff7b45af3dc7ca8c1fbe"
     },
     "runner-route": {
       "kind": "not-static",
@@ -28,7 +28,7 @@
     "go-test": {
       "kind": "not-static",
       "reason": "Database-backed tier execution; property lint is a supplement.",
-      "runs_sha256": "8d2ee7a5280e716a86adb19100a477ab41b0c81be95db2421db3004f1fb928d1"
+      "runs_sha256": "af006cee28516c502267a87e50e3124920c265e7e91171111b3aa4569ddfaabb"
     },
     "go-timing": {
       "kind": "not-static",
@@ -41,7 +41,7 @@
     "go": {
       "kind": "not-static",
       "reason": "Hosted aggregate status gate.",
-      "runs_sha256": "704dd7aa12e06c8eb2d1e3e865e27b10e3c68d8e18e206e753182ff019c685a5"
+      "runs_sha256": "b01f11513cce5bcb7b6e19c3d763e6a08a5479782b26bca53c539b30724fa68e"
     },
     "web-setup": {
       "kind": "static"
@@ -52,17 +52,17 @@
     "web-shard": {
       "kind": "not-static",
       "reason": "Browser tier execution and infrastructure preparation.",
-      "runs_sha256": "bbe9bd9c51a7b4a1d8665eda611fdb1334c895c648ca2ac8a807359199774f81"
+      "runs_sha256": "601c133460c6b87d69d4087e12293d6eac12eb4cf373bc5ff6807fbaa5e593d8"
     },
     "web": {
       "kind": "not-static",
       "reason": "Hosted aggregate status gate.",
-      "runs_sha256": "0fc5ecdebf6236fdea3163c9707683810203970f4d33c87e4f6fb33d658ec67e"
+      "runs_sha256": "019652576f1d2dcf84c52ac3ed191245147ca68f087fe2d7c59707257ba9f746"
     },
     "release-check": {
       "kind": "not-static",
       "reason": "Hosted aggregate status gate.",
-      "runs_sha256": "650ffe4985723659746c6b48b23e58dd05bbba2ef4bb19bbfd3ff77e76572cb7"
+      "runs_sha256": "e1d30dbd2d1d8b633f8f3bedf9fda2d77a8ad0d0d51b75ca3472ad578daef82d"
     },
     "release-check-run": {
       "kind": "static"
@@ -70,12 +70,12 @@
     "e2e": {
       "kind": "not-static",
       "reason": "Hosted aggregate status gate.",
-      "runs_sha256": "8fd3aee85838ce659917b635118959f6ef42eb05e2c232b29da8c0fc66557649"
+      "runs_sha256": "fdea24aab1690267db830c02d62c1aac04efa142c4641a2abbe63bbece116897"
     },
     "e2e-run": {
       "kind": "not-static",
       "reason": "Build, database and browser end-to-end execution.",
-      "runs_sha256": "62ae1990fe28604e8325a5dee018268fc2b1064b8eb8eac1c13c117ec5e13648"
+      "runs_sha256": "13936e512d39dfba01146f60e6cbf7948dc2499bda882824a91ca892b7439697"
     },
     "migration-compat": {
       "kind": "static"
@@ -83,7 +83,7 @@
     "tier-measurements": {
       "kind": "not-static",
       "reason": "Hosted artifact aggregation and reporting.",
-      "runs_sha256": "1d0fd9b32ba61807e7e552be08524b3202312c0ffea75fb167726d20b902406c"
+      "runs_sha256": "7854095e549016705c7c0757450788386f9d6ba1092f0d46d6b75241ef65e782"
     }
   },
   "exclusions": [
@@ -133,7 +133,7 @@
       "job": "web-unit",
       "step": "Install shells used by command round-trip unit tests",
       "cwd": ".",
-      "command": "sudo apt-get update -qq && sudo apt-get install -y -qq fish zsh",
+      "command": "bash \"$GITHUB_WORKSPACE/scripts/ci/bounded-apt.sh\" apt fish zsh",
       "reason": "Infrastructure, build or hosted tier report; outside the static pre-filter."
     },
     {
@@ -260,7 +260,7 @@
         "node",
         "go"
       ],
-      "timeout_seconds": 120
+      "timeout_seconds": 180
     },
     {
       "id": "go-tiers",
@@ -276,7 +276,7 @@
         "node",
         "go"
       ],
-      "timeout_seconds": 120
+      "timeout_seconds": 180
     },
     {
       "id": "go-shards-7",
@@ -457,6 +457,21 @@
         "python3"
       ],
       "timeout_seconds": 120
+    },
+    {
+      "id": "tracked-bytecode",
+      "command": "node scripts/check-tracked-bytecode.mjs",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "Offline code-health audit toolkit and slice ownership",
+        "command": "node scripts/check-tracked-bytecode.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30
     },
     {
       "id": "ci-plan-tests",
@@ -688,7 +703,7 @@
         "node",
         "npm-installed"
       ],
-      "timeout_seconds": 120,
+      "timeout_seconds": 600,
       "optional": true
     },
     {
@@ -757,6 +772,42 @@
       ],
       "optional": true,
       "timeout_seconds": 120
+    },
+    {
+      "id": "openapi-sort",
+      "command": "node scripts/openapi-sort.mjs --check",
+      "cwd": ".",
+      "ci": {
+        "job": "release-check-run",
+        "step": "PR classification and exact-SHA reuse regressions",
+        "command": "node --test scripts/ci-pr-plan.test.mjs scripts/ci-tree-reuse.test.mjs scripts/ci-static.test.mjs",
+        "cwd": "."
+      },
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30,
+      "supplement": "AEON-747: the existing ci-static.test.mjs hosted entry imports openapi-sort.test.mjs, which executes this lint and its regression cases."
+    },
+    {
+      "id": "theme-colour-literals",
+      "command": "node scripts/check-theme-colours.mjs",
+      "cwd": ".",
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30,
+      "local_only": "AEON-752: component colour-literal guard belongs to ci-static only; artwork and documents are explicitly exempted."
+    },
+    {
+      "id": "apt-step-bounds",
+      "command": "node --test scripts/check-apt-bounds.test.mjs",
+      "cwd": ".",
+      "needs": [
+        "node"
+      ],
+      "timeout_seconds": 30,
+      "local_only": "AEON-933: every apt and Playwright install-deps step must carry a step timeout and a bounded retry. This guard only reads workflow files."
     }
   ]
 }

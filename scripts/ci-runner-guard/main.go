@@ -16,8 +16,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-const routedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
-const routedGoShards = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
+const mainRoutedRunner = `${{ fromJSON(contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main' && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
+
+const routedRunner = `${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runs_on || '["ubuntu-latest"]') }}`
+const routedGoShards = `${{ fromJSON(((contains(fromJSON('["push","workflow_dispatch"]'), github.event_name) && github.ref == 'refs/heads/main') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) || github.event_name == 'merge_group') && needs.runner-route.outputs.run_attempt == github.run_attempt && needs.runner-route.outputs.runner_class == 'mbp2606' && '[1, 2, 3, 4]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7]') }}`
 
 const ciConcurrencyGroup = `ci-${{ github.event_name }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && github.ref || github.event.pull_request.number || github.run_id }}`
 
@@ -199,7 +201,38 @@ func checkWorkflowPolicy(name string, workflow map[string]any) []string {
 			reject("pull_request outside ci.yml requires nonempty paths or paths-ignore")
 		}
 	}
+	if name == "test-runner-route.yml" {
+		if err := checkRunnerRoute(workflow); err != nil {
+			reject(err.Error())
+		}
+	}
 	return problems
+}
+
+func checkRunnerRoute(workflow map[string]any) error {
+	steps, _ := mapping(mapping(workflow["jobs"])["route"])["steps"].([]any)
+	for _, value := range steps {
+		step := mapping(value)
+		if step["id"] != "route" {
+			continue
+		}
+		env := mapping(step["env"])
+		for name, source := range map[string]string{
+			"AEON_POOL_EVENTS":           "${{ vars.AEON_POOL_EVENTS }}",
+			"AEON_PR_HEAD_REPOSITORY":    "${{ github.event.pull_request.head.repo.full_name }}",
+			"AEON_MBP2606_AVAILABILITY":  "${{ vars.AEON_MBP2606_AVAILABILITY }}",
+			"AEON_REQUIRED_IDLE_RUNNERS": "${{ inputs.required-idle-runners }}",
+		} {
+			if env[name] != source {
+				return fmt.Errorf("pool router must bind %s to %s", name, source)
+			}
+		}
+		if step["run"] != "node scripts/ci-runner-route.mjs" {
+			return fmt.Errorf("pool router must execute the event and capacity policy")
+		}
+		return nil
+	}
+	return fmt.Errorf("pool router policy step is missing")
 }
 
 // Full QA is an explicit label opt-in across all changed paths. This exception
@@ -293,9 +326,12 @@ func checkRunnerJobs(name string, workflow map[string]any) []string {
 	if name == "test-runner-smoke.yml" {
 		routeID = "smoke-route"
 	}
-	// The smoke caller has a distinct identity but identical event/ref/attempt
-	// guards. No other caller can rename the reviewed router dependency.
-	runnerExpression := strings.ReplaceAll(routedRunner, "needs.runner-route.", "needs."+routeID+".")
+	// The manual smoke caller retains its main-only event/ref/attempt guards.
+	// CI also admits opted-in same-repo PRs and merge groups through the router.
+	runnerExpression := routedRunner
+	if name == "test-runner-smoke.yml" {
+		runnerExpression = strings.ReplaceAll(mainRoutedRunner, "needs.runner-route.", "needs."+routeID+".")
+	}
 	for id, value := range jobs {
 		job := mapping(value)
 		reject := func(reason string) { problems = append(problems, name+"/"+id+": "+reason) }
@@ -347,7 +383,7 @@ func checkRunnerJobs(name string, workflow map[string]any) []string {
 			}
 		}
 		if !allHosted(job["runs-on"]) {
-			reject("runner selection is not proven hosted or event-guarded; mbp2606 is forbidden on PRs")
+			reject("runner selection is not proven hosted or event-guarded through the pool router")
 		}
 	}
 	return problems
@@ -454,7 +490,7 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			receipt = mapping(step)
 		}
 	}
-	if receipt == nil || receipt["if"] != "github.event_name == 'pull_request' && vars.CI_MG_REUSE == 'on' && needs.ci-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode == 'full' && needs.go.result == 'success' && needs.web.result == 'success' && needs.release-check.result == 'success' && needs.e2e.result == 'success' && needs.migration-compat.result == 'success'" || receipt["continue-on-error"] != nil || !hasNeed(measurement["needs"], "tier-plan") {
+	if receipt == nil || receipt["if"] != "github.event_name == 'pull_request' && vars.CI_MG_REUSE == 'on' && needs.tier-plan.result == 'success' && needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.layout == 'full' && needs.tier-plan.outputs.mode == 'full' && needs.go.result == 'success' && needs.web.result == 'success' && needs.release-check.result == 'success' && needs.e2e.result == 'success' && needs.migration-compat.result == 'success'" || receipt["continue-on-error"] != nil || !hasNeed(measurement["needs"], "tier-plan") {
 		return fmt.Errorf("PR tree proof must be emitted only by the full successful aggregate")
 	}
 	for _, id := range []string{"runner-route", "ci-plan", "migration-compat"} {
@@ -471,22 +507,39 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			}
 		}
 	}
+	tiers := mapping(jobs["tier-plan"])
+	if !hasNeed(tiers["needs"], "ci-plan") || mapping(tiers["outputs"])["lane"] != "${{ steps.tiers.outputs.lane }}" {
+		return fmt.Errorf("tier-plan must publish the effective lane after ci-plan")
+	}
+	for id, value := range jobs {
+		encoded := fmt.Sprint(value)
+		if id != "tier-plan" && strings.Contains(encoded, "needs.ci-plan.outputs.lane") {
+			return fmt.Errorf("CI job %q must consume the effective tier-plan lane", id)
+		}
+		if strings.Contains(encoded, "needs.tier-plan.outputs.lane") && !hasNeed(mapping(value)["needs"], "tier-plan") {
+			return fmt.Errorf("CI job %q must depend on the effective lane publisher", id)
+		}
+	}
 	for _, id := range []string{"go-test", "go-static", "go-timing", "web-setup", "web-unit", "web-shard", "release-check-run", "e2e-run"} {
 		job := mapping(jobs[id])
 		if job == nil {
 			return fmt.Errorf("required CI job %q is missing", id)
 		}
-		condition := "needs.ci-plan.outputs.lane == 'full'"
+		condition := "needs.tier-plan.outputs.lane == 'full'"
 		switch id {
 		case "web-setup", "web-unit", "web-shard":
-			condition = "needs.ci-plan.outputs.lane != 'docs-only'"
+			condition = "needs.tier-plan.outputs.lane != 'docs-only'"
 		}
-		tierGuard := ""
-		if id == "go-test" || id == "web-setup" || id == "web-unit" || id == "web-shard" {
-			tierGuard = "needs.tier-plan.result == 'success' && "
-			if !hasNeed(job["needs"], "tier-plan") {
-				return fmt.Errorf("required CI job %q must gate tier planning", id)
-			}
+		// OPS-257 L4: the static layout (PR-only affected lane) skips exactly
+		// the Go shards, timing, browser shards and the server smoke. Static
+		// checks, web setup/units, release checks and migrations always run.
+		switch id {
+		case "go-test", "go-timing", "web-shard", "e2e-run":
+			condition += " && (github.event_name != 'pull_request' || needs.tier-plan.outputs.layout != 'static')"
+		}
+		tierGuard := "needs.tier-plan.result == 'success' && "
+		if !hasNeed(job["needs"], "tier-plan") {
+			return fmt.Errorf("required CI job %q must gate tier planning", id)
 		}
 		condition = "always() && needs.ci-plan.result == 'success' && " + tierGuard + "(" + condition + ") && needs.tree-reuse.outputs.reuse != 'merge_group'"
 		if id != "go-static" && id != "go-timing" {
@@ -503,12 +556,33 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 		}
 	}
 	webMatrix := mapping(mapping(mapping(jobs["web-shard"])["strategy"])["matrix"])["shard"]
-	if webMatrix != `${{ fromJSON(needs.ci-plan.outputs.lane == 'spec-only' && '[1]' || contains(fromJSON('["pull_request","merge_group"]'), github.event_name) && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}` {
+	if webMatrix != `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || github.event_name == 'pull_request' && needs.tier-plan.outputs.mode == 'essential' && '[1, 2]' || '[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]') }}` {
 		return fmt.Errorf("web shard matrix must retain 12 full rows and one changed-spec row")
 	}
 	unit := mapping(jobs["web-unit"])
-	if mapping(mapping(unit["strategy"])["matrix"])["shard"] != `${{ fromJSON(needs.ci-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4]') }}` || mapping(unit["strategy"])["fail-fast"] != false || unit["continue-on-error"] != nil {
+	if mapping(mapping(unit["strategy"])["matrix"])["shard"] != `${{ fromJSON(github.event_name == 'pull_request' && needs.tier-plan.outputs.lane == 'spec-only' && '[1]' || '[1, 2, 3, 4]') }}` || mapping(unit["strategy"])["fail-fast"] != false || unit["continue-on-error"] != nil {
 		return fmt.Errorf("web units must retain four blocking shards and one spec-only row")
+	}
+	for _, id := range []string{"go-test", "web-unit", "web-shard"} {
+		condition := "github.event_name != 'pull_request' || (needs.tier-plan.outputs.lane == 'full' && needs.tier-plan.outputs.mode != 'essential')"
+		if id == "go-test" {
+			condition = "github.event_name != 'pull_request' || needs.tier-plan.outputs.mode != 'essential'"
+		}
+		var proofs int
+		steps, _ := mapping(jobs[id])["steps"].([]any)
+		for _, value := range steps {
+			step := mapping(value)
+			if step["name"] != "Confirm full tier execution" {
+				continue
+			}
+			proofs++
+			if step["if"] != condition || step["run"] != "node scripts/test-tiers/check-full.mjs" || mapping(step["env"])["TIER_REPORT"] != "tmp/test-tiers/"+id+"-${{ matrix.shard }}-measurement.json" {
+				return fmt.Errorf("%s must prove full tier execution on every merge-group shard", id)
+			}
+		}
+		if proofs != 1 {
+			return fmt.Errorf("%s must prove full tier execution on every merge-group shard", id)
+		}
 	}
 	for _, context := range []string{"go", "web", "release-check", "e2e"} {
 		job := mapping(jobs[context])
@@ -550,8 +624,12 @@ func checkCITriggersAndRequiredChecks(workflow map[string]any) error {
 			if !reflect.DeepEqual(job["needs"], []any{"ci-plan", "web-setup", "web-unit", "web-shard", "tree-reuse", "cache-prime", "tier-plan"}) {
 				return fmt.Errorf("web must gate setup, every unit shard and every UI shard: %v", job["needs"])
 			}
-		} else if job["if"] != "always()" || !reflect.DeepEqual(job["needs"], []any{"ci-plan", context + "-run", "tree-reuse", "cache-prime"}) {
-			return fmt.Errorf("required check %q must aggregate classified validation for every CI event", context)
+		} else {
+			needs := []any{"ci-plan", context + "-run", "tree-reuse", "cache-prime"}
+			needs = append(needs, "tier-plan") // all aggregates consume the effective lane
+			if job["if"] != "always()" || !reflect.DeepEqual(job["needs"], needs) {
+				return fmt.Errorf("required check %q must aggregate classified validation for every CI event", context)
+			}
 		}
 	}
 	return nil
