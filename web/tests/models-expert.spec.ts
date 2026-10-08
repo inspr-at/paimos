@@ -71,7 +71,7 @@ test('Expert full screen and German light-dark evidence preserve controls across
     const guard = await controlStability(page, controls(page))
     for (const name of ['Knapp', 'Standard', 'Gründlich', 'Maximal', 'Auto, vom Regler']) await guard.check(async () => { await chooseThinking(page, name) })
     await guard.check(async () => { await situation(page, 'Festgefahren'); await expect(thinking(page)).toContainText('Gründlich') }); guard.done()
-    while (await page.getByRole('button', { name: 'Dismiss', exact: true }).count()) await page.getByRole('button', { name: 'Dismiss', exact: true }).first().click(); await expect(page.locator('.toast')).toHaveCount(0)
+    while (await page.locator('.toast').count()) { const count = await page.locator('.toast').count(); await page.getByRole('button', { name: 'Dismiss', exact: true }).last().click(); await expect(page.locator('.toast')).toHaveCount(count - 1) }
     await page.screenshot({ path: testInfo.outputPath(`expert-${width}-${theme}-de.png`), fullPage: false })
     await page.locator('[data-models-fullscreen]').click(); await expect(page.locator('.fullboard [data-board-ready="true"]')).toBeVisible()
     const full = await controlStability(page, { done: page.locator('[data-board-done]'), situation: page.locator('[data-board-situation]'), thinking: thinking(page) })

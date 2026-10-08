@@ -16,7 +16,7 @@ import { useProjects } from '../../../stores/projects'
 import { useModelsBoard } from '../../../lib/useModelsBoard'
 import { rememberBoardPosition } from '../../../lib/modelsBoardNavigation'
 import { boardText, canMove, lineName, localizeColumn, stepTarget, zonesFor, type BoardCard, type BoardColumn as Column, type BoardContext, type BoardZone, type ModelBoardDocument } from '../../../lib/modelsBoard'
-const props = withDefaults(defineProps<{ full?: boolean; expert?: boolean; german?: boolean; context?: BoardContext; projects?: { id: string; name: string }[]; controller?: ReturnType<typeof useModelsBoard> }>(), { full: false, german: false })
+const props = withDefaults(defineProps<{ full?: boolean; expert?: boolean; german?: boolean; context?: BoardContext; projects?: { id: string; name: string }[]; controller?: ReturnType<typeof useModelsBoard> }>(), { full: false, german: false, expert: undefined })
 const emit = defineEmits<{ change: [board: ModelBoardDocument]; context: [context: BoardContext] }>()
 const router = useRouter(), route = useRoute(), session = useSession(), projectStore = useProjects()
 const root = ref<HTMLElement>(), german = computed(() => props.german)
